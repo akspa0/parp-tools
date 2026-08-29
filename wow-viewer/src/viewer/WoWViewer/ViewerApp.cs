@@ -9202,45 +9202,43 @@ void main() {
             _texResolver.SetDataSource(_dataSource);
             _catalogView?.SetDataSource(_dataSource, _texResolver);
             var mpqDs = _dataSource as MpqDataSource;
-            if (mpqDs != null)
+            _dbcProvider = mpqDs != null
+                ? new MpqDBCProvider(mpqDs.ArchiveReader, _dataSource)
+                : new MpqDBCProvider(_dataSource);
+            var dbcProvider = _dbcProvider;
+
+            InitializeMinimapSupport();
+
+            string? dbdDir = ResolveDbdDefinitionsDir();
+            if (dbdDir != null)
             {
-                _dbcProvider = new MpqDBCProvider(mpqDs.ArchiveReader);
-                var dbcProvider = _dbcProvider;
+                _dbdDir = dbdDir;
 
-                InitializeMinimapSupport();
-
-                string? dbdDir = ResolveDbdDefinitionsDir();
-
-                if (dbdDir != null)
+                string buildAlias = explicitBuildVersion ?? InferBuildFromPath(gamePath, dbdDir);
+                ViewerLog.Trace(explicitBuildVersion == null
+                    ? $"[WoWViewer] Inferred build: '{buildAlias}' from path: {gamePath}"
+                    : $"[WoWViewer] Using explicitly selected build: '{buildAlias}' for path: {gamePath}");
+                
+                if (!string.IsNullOrEmpty(buildAlias))
                 {
-                    _dbdDir = dbdDir;
+                    _dbcBuild = buildAlias;
+                    ViewerLog.Trace($"[WoWViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
+                    _texResolver.LoadFromDBC(dbcProvider, dbdDir, buildAlias);
 
-                    string buildAlias = explicitBuildVersion ?? InferBuildFromPath(gamePath, dbdDir);
-                    ViewerLog.Trace(explicitBuildVersion == null
-                        ? $"[WoWViewer] Inferred build: '{buildAlias}' from path: {gamePath}"
-                        : $"[WoWViewer] Using explicitly selected build: '{buildAlias}' for path: {gamePath}");
-                    
-                    if (!string.IsNullOrEmpty(buildAlias))
-                    {
-                        _dbcBuild = buildAlias;
-                        ViewerLog.Trace($"[WoWViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
-                        _texResolver.LoadFromDBC(dbcProvider, dbdDir, buildAlias);
-
-                        // Load AreaTable for area name display
-                        _areaTableService = new AreaTableService();
-                        _areaTableService.Load(dbcProvider, dbdDir, buildAlias);
-                    }
-                    else
-                    {
-                        _dbcBuild = null;
-                        ViewerLog.Trace("[WoWViewer] Could not determine build version. DBC texture resolution unavailable.");
-                    }
+                    // Load AreaTable for area name display
+                    _areaTableService = new AreaTableService();
+                    _areaTableService.Load(dbcProvider, dbdDir, buildAlias);
                 }
                 else
                 {
                     _dbcBuild = null;
-                    ViewerLog.Trace("[WoWViewer] WoWDBDefs definitions not found. DBC texture resolution unavailable.");
+                    ViewerLog.Trace("[WoWViewer] Could not determine build version. DBC texture resolution unavailable.");
                 }
+            }
+            else
+            {
+                _dbcBuild = null;
+                ViewerLog.Trace("[WoWViewer] WoWDBDefs definitions not found. DBC texture resolution unavailable.");
             }
 
             RefreshDiscoveredMaps();
@@ -9936,6 +9934,7 @@ void main() {
     _loggedStandaloneMissingSkinPaths.Clear();
         ResetWdlPreviewSupport();
         InitializeWdlPreviewSupport();
+        InitializeMinimapSupport();
         RefreshDiscoveredMaps();
         RefreshFileList();
         if (_worldScene != null && (_worldScene.ShowPm4Overlay || _worldScene.Pm4LoadAttempted))
@@ -10100,8 +10099,12 @@ void main() {
 
         if (_dataSource is MpqDataSource mpqDataSource)
         {
+            var searchPaths = new List<string> { mpqDataSource.GamePath };
+            searchPaths.AddRange(mpqDataSource.OverlayRoots);
+            searchPaths.AddRange(mpqDataSource.LooseRoots);
+
             if (Md5TranslateResolver.TryLoad(
-                new[] { mpqDataSource.GamePath },
+                searchPaths,
                 mpqDataSource.ArchiveReader.FileExists,
                 mpqDataSource.ArchiveReader.ReadFile,
                 out var md5Idx))

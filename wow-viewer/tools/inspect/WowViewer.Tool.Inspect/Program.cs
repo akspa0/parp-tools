@@ -4,6 +4,7 @@ using System.Buffers.Binary;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using SixLabors.ImageSharp;
 using WowViewer.Core.Audio;
 using WowViewer.Core.Blp;
 using WowViewer.Core.Chunks;
@@ -86,6 +87,9 @@ switch (area)
 		break;
 	case "wmo":
 		RunWmo(tail);
+		break;
+	case "rosetta":
+		RunRosettaArea(tail);
 		break;
 	case "rosetta-generate":
 		RunRosettaGenerate(tail);
@@ -7468,6 +7472,59 @@ static void RunPm4ObjectLibrary(string[] args)
 	Console.WriteLine("   the same input must reproduce every one of them)");
 }
 
+static void RunRosettaArea(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string subCommand = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (subCommand)
+	{
+		case "generate":
+			RunRosettaGenerate(tail);
+			break;
+		case "build-library":
+		case "library":
+			RunRosettaBuildLibrary(tail);
+			break;
+		case "library-selftest":
+		case "selftest":
+			RunRosettaLibrarySelfTest(tail);
+			break;
+		case "datastore-info":
+		case "info":
+			RunRosettaDatastoreInfo(tail);
+			break;
+		case "datastore-query":
+		case "query":
+			RunRosettaDatastoreQuery(tail);
+			break;
+		case "datastore-diff":
+		case "diff":
+			RunRosettaDatastoreDiff(tail);
+			break;
+		case "pm4-match":
+		case "lookup":
+			RunRosettaPm4Match(tail);
+			break;
+		case "synthesize-companions":
+		case "companions":
+			RunRosettaSynthesizeCompanions(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown rosetta subcommand '{subCommand}'.");
+			ShowUsage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
 static void RunRosettaGenerate(string[] args)
 {
 	string? clientRoot = GetOption(args, "--client-root");
@@ -7522,6 +7579,11 @@ static void RunRosettaGenerate(string[] args)
 	string? requestedInkTexture = GetOption(args, "--ink-texture");
 	float pedestalHeight = float.TryParse(GetOption(args, "--pedestal-height"), out float ph) ? ph : 0f;
 	float pedestalBevel = float.TryParse(GetOption(args, "--pedestal-bevel"), out float pb) ? pb : 12.5f;
+	float m2Scale = float.TryParse(GetOption(args, "--m2-scale"), out float parsedM2Scale) ? parsedM2Scale : 2.5f;
+	string theme = GetOption(args, "--theme") ?? "garden";
+	string density = GetOption(args, "--density") ?? "balanced";
+	float terrainRoughness = float.TryParse(GetOption(args, "--noise-roughness", "--roughness"), out float tr) ? tr : 0.3f;
+	float maxSlope = float.TryParse(GetOption(args, "--max-slope"), out float msl) ? msl : 25.0f;
 	string? datastorePath = GetOption(args, "--datastore");
 	bool emitZarr = args.Contains("--emit-zarr", StringComparer.OrdinalIgnoreCase);
 	if (string.IsNullOrWhiteSpace(datastorePath) && emitZarr && !string.IsNullOrWhiteSpace(output))
@@ -7791,7 +7853,12 @@ static void RunRosettaGenerate(string[] args)
 		PedestalHeightMeters: pedestalHeight,
 		PedestalBevelMeters: pedestalBevel,
 		SplitAssetKinds: splitKinds,
-		ObjectZOffsetMeters: objectZOffset);
+		ObjectZOffsetMeters: objectZOffset,
+		M2Scale: m2Scale,
+		Theme: theme,
+		Density: density,
+		TerrainRoughness: terrainRoughness,
+		MaxSlopeDegrees: maxSlope);
 
 	RosettaGenerationResult result;
 	try
@@ -7929,33 +7996,41 @@ static void RunRosettaGenerate(string[] args)
 			File.WriteAllBytes(wdlPath, wdlBytes);
 		}
 
-		// Render and write 256x256 minimap BLP files for every generated tile.
-		string[] minimapDirs =
-		[
-			Path.Combine(outputRoot, "Textures", "Minimap", map.MapName),
-			Path.Combine(outputRoot, "Textures", "Minimap", map.MapName.ToLowerInvariant()),
-			Path.Combine(outputRoot, "World", "Minimaps", map.MapName),
-			Path.Combine(outputRoot, "World", "Minimaps", map.MapName.ToLowerInvariant())
-		];
-		foreach (string dir in minimapDirs)
-			Directory.CreateDirectory(dir);
+		// Canonical client minimap directory:
+		// - Alpha 0.5.3: Textures\Minimap\{map.MapName}\map{tileY:D2}_{tileX:D2}.blp (with minimap.trs)
+		// - Post-Alpha: World\Minimaps\{map.MapName}\map{tileY:D2}_{tileX:D2}.blp
+		string minimapDir = alphaOutput
+			? Path.Combine(outputRoot, "Textures", "Minimap", map.MapName)
+			: Path.Combine(outputRoot, "World", "Minimaps", map.MapName);
+
+		Directory.CreateDirectory(minimapDir);
+
+		// Standalone PNG tile directory for image viewers
+		string imageDir = Path.Combine(outputRoot, "Images", "Minimap", map.MapName);
+		Directory.CreateDirectory(imageDir);
 
 		foreach (RosettaTilePlan tile in map.Tiles)
 		{
-			// Emit under both canonical naming conventions:
-			// 1. map{tileY:D2}_{tileX:D2}.blp (standard client / viewer row-major query)
-			// 2. map{tileX:D2}_{tileY:D2}.blp (X-Y column-major query)
-			string nameYX = $"map{tile.TileY:D2}_{tile.TileX:D2}.blp";
-			string nameXY = $"map{tile.TileX:D2}_{tile.TileY:D2}.blp";
+			using var image = RosettaMinimapPainter.RenderTileImage(tile, tile.Pedestals, tile.AlphaCanvas);
+			using var pngMs = new MemoryStream();
+			image.SaveAsPng(pngMs);
+			byte[] pngBytes = pngMs.ToArray();
 
-			byte[] blpBytes = RosettaMinimapPainter.RenderTileBlp(tile, tile.Pedestals, tile.AlphaCanvas);
-			foreach (string dir in minimapDirs)
-			{
-				File.WriteAllBytes(Path.Combine(dir, nameYX), blpBytes);
-				if (nameXY != nameYX)
-					File.WriteAllBytes(Path.Combine(dir, nameXY), blpBytes);
-			}
+			// Save standalone PNG tile for image viewers
+			string pngTileName = $"map{tile.TileY:D2}_{tile.TileX:D2}.png";
+			File.WriteAllBytes(Path.Combine(imageDir, pngTileName), pngBytes);
+
+			// Encode BLP
+			byte[] blpBytes = Blp2Writer.EncodeDxt1(image);
+
+			// Standard canonical minimap BLP file: map{tileY:D2}_{tileX:D2}.blp
+			string blpFileName = $"map{tile.TileY:D2}_{tile.TileX:D2}.blp";
+			File.WriteAllBytes(Path.Combine(minimapDir, blpFileName), blpBytes);
 		}
+
+		// 2. Stitch a full-map visual overview PNG containing all exhibits
+		string overviewPath = Path.Combine(outputRoot, "Images", $"{map.MapName}_minimap_overview.png");
+		RosettaMinimapPainter.RenderAndSaveMapOverview(map, overviewPath);
 
 		// Copy PM4 guides alongside so the PM4 pipeline can consume the same output folder.
 		if (!string.IsNullOrWhiteSpace(pm4Dir) && Directory.Exists(pm4Dir))
@@ -8096,33 +8171,90 @@ static void RunRosettaGenerate(string[] args)
 	{
 		RosettaMapPlan map = result.Maps[mapIdx];
 		uint mapId = options.BaseMapId + (uint)mapIdx;
+		uint baseAreaForMap = areaIdCounter;
 		string mapDisplayName = $"Rosetta Exhibit ({map.MapName})";
-		mapDbcEntries.Add(new RosettaMapDbcEntry(mapId, map.MapName, InstanceType: 0, Pvp: 0, MapName: mapDisplayName));
 
 		foreach (RosettaDesignkitPlan kit in map.Designkits)
 		{
 			string areaName = $"Rosetta: {kit.Kit}";
 			areaDbcEntries.Add(new RosettaAreaTableDbcEntry(areaIdCounter++, mapId, ParentAreaId: 0, AreaBit: 0, Flags: 0, AreaName: areaName));
 		}
+
+		mapDbcEntries.Add(new RosettaMapDbcEntry(mapId, map.MapName, InstanceType: 0, Pvp: 0, MapName: mapDisplayName, AreaTableId: baseAreaForMap));
 	}
 
+	string clientBuild = RosettaDbcGenerator.InferClientBuild(clientRoot, format);
 	string mapDbcPath = Path.Combine(outputRoot, "DBFilesClient", "Map.dbc");
 	string areaTableDbcPath = Path.Combine(outputRoot, "DBFilesClient", "AreaTable.dbc");
-	RosettaDbcGenerator.WriteMapDbc(mapDbcPath, mapDbcEntries);
-	RosettaDbcGenerator.WriteAreaTableDbc(areaTableDbcPath, areaDbcEntries);
+	bool patchedWithDbcd = false;
+	int totalMapsInDbc = mapDbcEntries.Count;
+	int totalAreasInDbc = areaDbcEntries.Count;
+
+	try
+	{
+		var dbcProvider = new ArchiveReaderDbcProvider(catalog);
+		var (mapsCount, areasCount) = RosettaDbcGenerator.PatchAndSaveClientDbcs(
+			dbcProvider,
+			clientBuild,
+			mapDbcEntries,
+			areaDbcEntries,
+			outputRoot);
+		patchedWithDbcd = true;
+		totalMapsInDbc = mapsCount;
+		totalAreasInDbc = areasCount;
+	}
+	catch (Exception ex)
+	{
+		Console.WriteLine($"[Rosetta DBC] DBCD patch fallback ({ex.Message}). Writing standalone DBC files.");
+		RosettaDbcGenerator.WriteMapDbc(mapDbcPath, mapDbcEntries);
+		RosettaDbcGenerator.WriteAreaTableDbc(areaTableDbcPath, areaDbcEntries);
+	}
 
 	// Generate minimap.trs / md5translate.trs for Alpha client minimap lookups
 	RosettaMinimapPainter.WriteMinimapTrs(outputRoot, result.Maps, extraAliases: ["Azeroth", "azeroth"]);
 
 	Console.WriteLine($"Output root:   {outputRoot}");
-	Console.WriteLine($"Format:        {format}");
-	Console.WriteLine($"DBC generated: DBFilesClient\\Map.dbc ({mapDbcEntries.Count} maps), AreaTable.dbc ({areaDbcEntries.Count} zones)");
+	Console.WriteLine($"Format:        {format} (build: {clientBuild})");
+	if (patchedWithDbcd)
+	{
+		Console.WriteLine($"DBC patched:   DBFilesClient\\Map.dbc ({totalMapsInDbc} total maps, +{mapDbcEntries.Count} added), AreaTable.dbc ({totalAreasInDbc} total areas, +{areaDbcEntries.Count} added)");
+	}
+	else
+	{
+		Console.WriteLine($"DBC generated: DBFilesClient\\Map.dbc ({mapDbcEntries.Count} maps), AreaTable.dbc ({areaDbcEntries.Count} zones)");
+	}
 	Console.WriteLine($"Minimap TRS:   Textures\\Minimap\\minimap.trs, md5translate.trs");
 	Console.WriteLine($"Maps:          {result.Maps.Count}");
-	foreach (RosettaMapPlan map in result.Maps)
+	for (int mapIdx = 0; mapIdx < result.Maps.Count; mapIdx++)
 	{
-		Console.WriteLine($"  {map.MapName}: {map.Tiles.Count} tiles, block {map.BlockSide}x{map.BlockSide} at ({map.BlockOriginX},{map.BlockOriginY}), "
-			+ $"{map.Placements.Count} placements, {map.Designkits.Count} designkits");
+		RosettaMapPlan map = result.Maps[mapIdx];
+		uint mapId = options.BaseMapId + (uint)mapIdx;
+		string mapDisplayName = $"Rosetta Exhibit ({map.MapName})";
+
+		float spawnX = 0f;
+		float spawnY = 0f;
+		float spawnZ = 25.0f;
+
+		if (map.Placements.Count > 0)
+		{
+			spawnX = map.Placements[0].RendererPosition.X;
+			spawnY = map.Placements[0].RendererPosition.Y;
+			spawnZ = map.Placements[0].RendererPosition.Z + 5.0f;
+		}
+		else
+		{
+			spawnX = (32 - map.BlockOriginX) * RosettaGeneratorOptions.TileSize - RosettaGeneratorOptions.TileSize * 0.5f;
+			spawnY = (32 - map.BlockOriginY) * RosettaGeneratorOptions.TileSize - RosettaGeneratorOptions.TileSize * 0.5f;
+		}
+
+		Console.WriteLine($"  [Map {mapId}] {map.MapName} (\"{mapDisplayName}\")");
+		Console.WriteLine($"    Tiles:        {map.Tiles.Count} tiles ({map.BlockSide}x{map.BlockSide} block at tile {map.BlockOriginX},{map.BlockOriginY})");
+		Console.WriteLine($"    Placements:   {map.Placements.Count} exhibits across {map.Designkits.Count} designkits");
+		Console.WriteLine($"    Spawn Coords: X={spawnX:F1}, Y={spawnY:F1}, Z={spawnZ:F1}");
+		Console.WriteLine($"    Port Command: .worldport {mapId} {spawnX:F1} {spawnY:F1} {spawnZ:F1}");
+		Console.WriteLine($"                  .go xyz {spawnX:F1} {spawnY:F1} {spawnZ:F1} {mapId}");
+		Console.WriteLine($"    Overview:     Images\\{map.MapName}_minimap_overview.png");
+		Console.WriteLine($"    First Kit:    {(map.Designkits.Count > 0 ? map.Designkits[0].Kit : "N/A")}");
 	}
 
 	Console.WriteLine($"Designkits:    {result.Designkits.Count}");

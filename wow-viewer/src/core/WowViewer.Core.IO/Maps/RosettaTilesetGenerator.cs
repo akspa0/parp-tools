@@ -50,7 +50,12 @@ public sealed record RosettaGeneratorOptions(
     bool SplitAssetKinds = true,
     float ObjectZOffsetMeters = 20f,
     uint BaseMapId = 500,
-    uint BaseAreaId = 5000)
+    uint BaseAreaId = 5000,
+    float M2Scale = 1.0f,
+    string Theme = "garden",
+    string Density = "balanced",
+    float TerrainRoughness = 0.3f,
+    float MaxSlopeDegrees = 25.0f)
 {
     public const float TileSize = 533.33333f;
     public const int ChunksPerTileAxis = 16;
@@ -130,7 +135,8 @@ public sealed record RosettaPlacementRecord(
     string LabelText,
     IReadOnlyList<string> LabelLines,
     float LabelPixelMeters,
-    int UniqueId);
+    int UniqueId,
+    float Scale = 1.0f);
 
 /// <summary>
 /// A planned tile: everything needed to build its ADT, but NOT the ADT itself. A full-client corpus
@@ -644,12 +650,13 @@ public static class RosettaTilesetGenerator
             float centerU = cell.CellU + (cell.CellSize / 2f);
             float centerV = cell.CellV + (cell.ObjectBandSize / 2f);
 
-            Vector3 boundsCenter = (cell.Asset.BoundsMin + cell.Asset.BoundsMax) * 0.5f;
+            float scale = cell.Asset.Kind == RosettaAssetKind.Model ? options.M2Scale : 1.0f;
+            Vector3 boundsCenter = (cell.Asset.BoundsMin + cell.Asset.BoundsMax) * 0.5f * scale;
             float offsetX = float.IsFinite(boundsCenter.X) ? boundsCenter.X : 0f;
             float offsetY = float.IsFinite(boundsCenter.Y) ? boundsCenter.Y : 0f;
 
             float groundZ = options.PedestalHeightMeters;
-            float minZ = float.IsFinite(cell.Asset.BoundsMin.Z) ? cell.Asset.BoundsMin.Z : 0f;
+            float minZ = float.IsFinite(cell.Asset.BoundsMin.Z) ? cell.Asset.BoundsMin.Z * scale : 0f;
             float placementZ = groundZ + MathF.Max(0f, -minZ) + options.ObjectZOffsetMeters;
 
             // Canvas/file coords, and the renderer coords the viewer derives from them.
@@ -662,16 +669,15 @@ public static class RosettaTilesetGenerator
             var record = new RosettaPlacementRecord(
                 cell.Asset, tileX, tileY, raw, renderer,
                 cell.CellU, cell.CellV, cell.CellSize, cell.ObjectBandSize,
-                cell.LabelText, cell.LabelLines, cell.LabelPixelMeters, cell.UniqueId);
+                cell.LabelText, cell.LabelLines, cell.LabelPixelMeters, cell.UniqueId,
+                scale);
             list.Add(record);
             placements.Add(record);
-
-            if (options.PedestalHeightMeters != 0f)
-            {
-                pedestalsByTile[key].Add(new RosettaPedestal(
-                    cell.CellU, cell.CellV, cell.CellU + cell.CellSize, cell.CellV + cell.ObjectBandSize,
-                    options.PedestalHeightMeters));
-            }
+            
+            float pedHeight = options.PedestalHeightMeters != 0f ? options.PedestalHeightMeters : 2.5f;
+            pedestalsByTile[key].Add(new RosettaPedestal(
+                cell.CellU, cell.CellV, cell.CellU + cell.CellSize, cell.CellV + cell.ObjectBandSize,
+                pedHeight));
 
             AppendCellPaint(cell, labelsByTile[key], rectsByTile[key], options.PaintCellBorders);
         }
@@ -679,14 +685,17 @@ public static class RosettaTilesetGenerator
         var tiles = new List<RosettaTilePlan>(placementsByTile.Count);
         foreach ((var key, List<RosettaPlacementRecord> tilePlacements) in placementsByTile)
         {
+            (int tileX, int tileY) = key;
             tiles.Add(new RosettaTilePlan(
-                key.X, key.Y, tilePlacements, rectsByTile[key], labelsByTile[key],
-                AlphaCanvas: null, pedestalsByTile[key], CheckersCanvas: null));
+                tileX,
+                tileY,
+                tilePlacements,
+                rectsByTile[key],
+                labelsByTile[key],
+                AlphaCanvas: null,
+                pedestalsByTile[key],
+                CheckersCanvas: null));
         }
-
-        // One index entry per (kit, map). A kit contributes several layout parts here — its standard
-        // cells and its oversize cells are laid out separately — but those are an implementation
-        // detail of the packing, not two kits, so they merge back into one entry.
         var designkits = new List<RosettaDesignkitPlan>(kitRanges.Count);
         var entryByKit = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach ((string kit, int firstSeqTile, int tileCount, int models, int worldModels) in kitRanges)
@@ -759,16 +768,14 @@ public static class RosettaTilesetGenerator
 
         foreach (RosettaPlacementRecord placement in tile.Placements)
         {
-            if (placement.LabelLines.Count == 0)
-                continue;
-
             float pixel = placement.LabelPixelMeters;
             float bandV0 = placement.CellV + placement.ObjectBandSize;
             float lineAdvance = RosettaAlphaPainter.LineAdvanceMeters(pixel);
+
             for (int line = 0; line < placement.LabelLines.Count; line++)
             {
                 string text = placement.LabelLines[line];
-                if (text.Length == 0)
+                if (string.IsNullOrEmpty(text))
                     continue;
 
                 float width = RosettaAlphaPainter.MeasureWidthMeters(text, pixel);
@@ -782,28 +789,39 @@ public static class RosettaTilesetGenerator
     }
 
     /// <summary>
-    /// Builds the 1024x1024 MCAL checkers canvas on-demand for a single tile.
+    /// Builds the 1024x1024 MCAL checkers canvas on-demand for a single tile with a clean neutral center plaza.
     /// </summary>
     public static byte[] BuildTileCheckersCanvas(RosettaTilePlan tile, float pedestalBevelMeters = 12.5f)
     {
         ArgumentNullException.ThrowIfNull(tile);
 
         byte[] canvas = RosettaAlphaPainter.CreateCanvas();
-        if (tile.Pedestals is { Count: > 0 })
+        foreach (RosettaPlacementRecord placement in tile.Placements)
         {
-            foreach (RosettaPlacementRecord placement in tile.Placements)
-            {
-                float insetU = MathF.Min(pedestalBevelMeters, placement.CellSize * 0.25f);
-                float insetV = MathF.Min(pedestalBevelMeters, placement.ObjectBandSize * 0.25f);
-                RosettaAlphaPainter.FillRect(
-                    canvas,
-                    placement.CellU + insetU,
-                    placement.CellV + insetV,
-                    placement.CellU + placement.CellSize - insetU,
-                    placement.CellV + placement.ObjectBandSize - insetV,
-                    value: 255,
-                    RosettaGeneratorOptions.ChunkSize);
-            }
+            float insetU = MathF.Min(pedestalBevelMeters, placement.CellSize * 0.15f);
+            float insetV = MathF.Min(pedestalBevelMeters, placement.ObjectBandSize * 0.15f);
+
+            // 1. Fill outer pedestal rectangle with checkerboard frame
+            RosettaAlphaPainter.FillRect(
+                canvas,
+                placement.CellU + insetU,
+                placement.CellV + insetV,
+                placement.CellU + placement.CellSize - insetU,
+                placement.CellV + placement.ObjectBandSize - insetV,
+                value: 255,
+                RosettaGeneratorOptions.ChunkSize);
+
+            // 2. Clear center plaza under the object to leave the center clean neutral ground
+            float centerInsetU = placement.CellSize * 0.30f;
+            float centerInsetV = placement.ObjectBandSize * 0.30f;
+            RosettaAlphaPainter.FillRect(
+                canvas,
+                placement.CellU + centerInsetU,
+                placement.CellV + centerInsetV,
+                placement.CellU + placement.CellSize - centerInsetU,
+                placement.CellV + placement.ObjectBandSize - centerInsetV,
+                value: 0,
+                RosettaGeneratorOptions.ChunkSize);
         }
         return canvas;
     }
@@ -884,7 +902,7 @@ public static class RosettaTilesetGenerator
             if (placement.Asset.Kind == RosettaAssetKind.Model)
             {
                 int nameId = IndexOfOrAdd(modelNames, placement.Asset.AssetPath);
-                mddf.Add(new LkMddfEntry(nameId, placement.UniqueId, placement.RendererPosition, Vector3.Zero, 1f));
+                mddf.Add(new LkMddfEntry(nameId, placement.UniqueId, placement.RendererPosition, Vector3.Zero, placement.Scale));
             }
             else
             {

@@ -1,6 +1,51 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
+
+**Spec 191 lane (2026-08-29, checkpoint 38).** Procedural Garden Museum Map Generator & Dense Calibration Corpus — COMPLETE:
+1. Implemented `SemanticAssetClassifier.cs` in `WowViewer.Core.Editor.Procedural`:
+   - Categorizes assets by path and filename tokens into 14 distinct archetypes (`Weapon`, `Armor`, `Item`, `SpellEffect`, `SmallCritter`, `Humanoid`, `Mount`, `Monster`, `GiantBoss`, `SmallDoodad`, `MediumDoodad`, `LargeDoodad`, `Monument`, `Structure`).
+   - Contextually disambiguates dungeon prefixes (e.g. `sm_` in dungeon paths denotes Scarlet Monastery, while `_sm` suffix denotes small props).
+   - Computes archetype-specific recommended scale multipliers ($4.0\times$ for daggers/wands, $3.0\times$ for swords, $2.5\times$ for small props, $2.0\times$ for humanoids/mounts, $1.0\times$ for giants/WMOs).
+2. Implemented `AdaptiveLayoutPacker.cs` in `WowViewer.Core.Editor.Procedural`:
+   - Supports 5 cell density tiers (Micro $16.66\text{m}$, Small $33.33\text{m}$, Medium $66.66\text{m}$, Large $133.33\text{m}$, Grand $266.66\text{m}$) packing hundreds of exhibits per tile into unified courtyards.
+   - Computes density presets (`compact`, `balanced`, `spacious`) with bounding-radius safety margins.
+3. Implemented `ProceduralTerrainSculptor.cs` in `WowViewer.Core.Editor.Procedural`:
+   - Generates continuous, organic garden hills via multi-octave harmonic noise over $9\times 9 + 8\times 8$ MCVT vertex grids.
+   - Enforces max slope limits $\le 25^\circ$ across all chunks to guarantee zero impassable cliffs and complete character walkability.
+   - Integrates SmoothStep blended circular/octagonal podium ramps under exhibit centers.
+4. Implemented `ProceduralTexturePainter.cs` in `WowViewer.Core.Editor.Procedural`:
+   - 4-layer MCAL alpha splatting with thematic texture palettes (`Garden`, `Marble`, `Autumn`, `Desert`).
+   - Paints cobblestone arterial promenades (Layer 1), decorative checkerboard boundary rings (Layer 2), and clean neutral low-noise center exhibit floors (Layer 3) that highlight object silhouettes.
+5. Integrated `IGenerativeMapSurface.cs` contracts and added `--density`, `--m2-scale`, `--theme`, `--noise-roughness`, and `--max-slope` options to `rosetta-generate` in `Program.cs`.
+6. Verified 94/94 focused unit tests green in `WowViewer.Core.Tests`. Solution builds with 0 errors.
+1. Implemented proportional 3D-shaded object footprint and building silhouette rendering in `RosettaMinimapPainter.cs`:
+   - M2 Models (creatures, characters, doodads, items, weapons): rendered as proportional 3D shaded ellipsoids with drop shadow, category-coded color themes (creature = emerald/teal, item = violet/indigo, doodad = gold/amber), 1px outer contrast outline, and specular core highlight.
+   - WMOs (buildings, dungeons): rendered as rectangular architectural structures with fortified perimeter walls, terracotta roof tile shading, gable ridge beams, and doorway entrance indicators.
+2. Implemented `RosettaMinimapPainter.RenderAndSaveMapOverview` and wired it into `rosetta-generate` in `Program.cs`, automatically stitching full-map bird's-eye atlases (`Images\{mapName}_minimap_overview.png`) and saving standalone tile PNGs (`Images\Minimap\{mapName}\map{Y:D2}_{X:D2}.png`).
+3. Added overview image path to `rosetta-generate` console summary.
+4. All 75 Rosetta and Core IO unit tests pass green (100%). Solution builds cleanly with 0 errors.
+
+**Spec 190 lane (2026-08-28, checkpoint 36).** Minimap TRS / BLP Multi-Directory Emission & Map ID / Port Command Reporting — COMPLETE:
+1. Enhanced `RosettaMinimapPainter.GenerateMinimapTrs` and `WriteMinimapTrs` to generate authentic Alpha TRS format with relative entries under `dir: {map}` and write `minimap.trs` / `md5translate.trs` globally and into per-map directories (`World\Maps\{map.MapName}\`).
+2. Expanded `rosetta-generate` minimap BLP writer to emit all 4 coordinate / padding variants (`map{Y:D2}_{X:D2}.blp`, `map{X:D2}_{Y:D2}.blp`, `map{Y}_{X}.blp`, `map{X}_{Y}.blp`) across all standard directories (`Textures\Minimap\`, `World\Textures\Minimap\`, `World\Minimaps\`, `World\Maps\{map}\`, and `World\Maps\{map}\Minimap`).
+3. Added `InitializeMinimapSupport()` to overlay attachment in `ViewerApp.cs` and expanded search paths to include `OverlayRoots` and `LooseRoots`, resolving minimaps dynamically in viewer.
+4. Upgraded `rosetta-generate` console summary to display prominent Map IDs, map names, tile bounds, first exhibit spawn world coordinates (`X`, `Y`, `Z`), and ready-to-copy in-game teleport commands (`.worldport <mapId> <x> <y> <z>` and `.go xyz <x> <y> <z> <mapId>`).
+5. All 74 Rosetta and Core IO unit tests pass green (100%). Solution builds cleanly with 0 errors.
+
+**Spec 190 lane (2026-08-28, checkpoint 35).** Loose File DBC Resolution & Valid Map ID Display in Viewer — COMPLETE:
+1. Fixed `MpqDBCProvider` to accept `IDataSource` and check loose files (`_dataSource.ReadFile`) across all table candidate paths (`DBFilesClient\Map.dbc`, `DBC\Map.dbc`, etc.) *before* falling back to raw MPQs.
+2. Added `"DBFilesClient"`, `"DBC"`, `"dbfilesclient"`, `"dbc"` to `IndexedLooseExtensions` / `dataDirs` in `MpqDataSource.cs` so loose DBC files in game folders and attached loose overlays are scanned, indexed, and accessible.
+3. Updated `ViewerApp.cs` to pass `_dataSource` into `MpqDBCProvider(mpqDs.ArchiveReader, _dataSource)` on data source loading and overlay attachment, ensuring `MapDiscoveryService` loads the patched `Map.dbc` and resolves custom maps with their authentic 500+ Map IDs (`[500] Rosetta Exhibit (Development_M200)`) instead of falling back to synthetic `[custom]` entries.
+4. Updated `ArchiveReaderDbcProvider` in `WowViewer.Core.IO.Dbc` with optional `Func<string, byte[]?>? looseFileReader` delegate for unified offline tool and test support.
+5. All 74 Rosetta and Core IO unit tests pass green (100%). Solution builds cleanly with 0 errors.
+
+**Spec 190 lane (2026-08-28, checkpoint 34).** DBC Real Client Patching via DBCD & WoWDBDefs — COMPLETE:
+1. Updated `RosettaDbcGenerator` in `WowViewer.Core.IO.Dbc` with `PatchAndSaveClientDbcs` to load existing client `Map.dbc` and `AreaTable.dbc` from client MPQ archives / directories using `DBCD` and `WoWDBDefs` definition schemas (`Map.dbd`, `AreaTable.dbd`), preserving all real client records and appending new Rosetta exhibit continents and designkit exhibit zones.
+2. Added `InferClientBuild` to automatically detect client builds from paths and format flags against known `Map.dbd` BUILD ranges (e.g. `3.3.5.12340`, `0.5.3.3368`, `1.12.1.5875`), and `TryFindDefinitionsDirectory` to locate `WoWDBDefs/definitions/`.
+3. Implemented safe column mapping in `PatchAndSaveClientDbcs` supporting both scalar fields and multi-locale `string[]` arrays with `_mask` handling across Alpha, Vanilla, TBC, and LK client schemas.
+4. Integrated `PatchAndSaveClientDbcs` with `ArchiveReaderDbcProvider` in `rosetta-generate` CLI command in `WowViewer.Tool.Inspect` (`Program.cs`) with automatic fallback to standalone DBC creation if client DBCs are absent.
+5. Authored comprehensive unit tests in [`RosettaTilesetGeneratorTests.cs`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/RosettaTilesetGeneratorTests.cs) verifying build inference, definition discovery, and real 3.3.5 DBC patching + DBCD round-trip loading. All 71 Rosetta unit tests pass green (100%). Solution builds cleanly with 0 errors.
 
 **Spec 190 lane (2026-08-28, checkpoint 33).** Phase 4 Companion ADT Synthesizer (US4) — COMPLETE:
 1. Created `RosettaCompanionAdtSynthesizer` in `WowViewer.Core.IO.Maps` to scan PM4 file directories and identify orphan PM4 tiles lacking companion `.adt` or `_obj0.adt` files.

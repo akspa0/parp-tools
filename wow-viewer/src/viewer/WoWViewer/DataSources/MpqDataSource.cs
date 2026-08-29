@@ -90,6 +90,7 @@ public class MpqDataSource : IDataSource
 
     // Loose file roots to check (game folder structure)
     private readonly List<string> _looseRoots = new();
+    public IReadOnlyList<string> LooseRoots => _looseRoots;
 
     // Alpha-era nested wrappers: virtual path or model alias → disk path for listfile-less .ext.MPQ files.
     private readonly Dictionary<string, string> _alphaMpqCache = new(StringComparer.OrdinalIgnoreCase);
@@ -470,7 +471,8 @@ public class MpqDataSource : IDataSource
 
             // Look for common WoW data subdirectories
             string[] dataDirs = { "World", "Creature", "Character", "Item", "Textures",
-                                  "Interface", "Spells", "Environments", "Dungeons" };
+                                  "Interface", "Spells", "Environments", "Dungeons",
+                                  "DBFilesClient", "DBC", "dbfilesclient", "dbc" };
 
             // Also scan for WMO files in World/wmo subdirectories
             string[] wmoScanDirs = { @"World\wmo", @"World\WMO" };

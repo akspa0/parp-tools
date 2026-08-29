@@ -53,6 +53,27 @@ public sealed class DbClientFileReaderTests
             archiveReader.RequestedPaths);
     }
 
+    [Fact]
+    public void ArchiveReaderDbcProvider_PrioritizesLooseFilesOverArchive()
+    {
+        FakeArchiveReader archive = new(new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["DBFilesClient\\Map.dbc"] = [10, 20, 30]
+        });
+
+        byte[] looseBytes = [40, 50, 60];
+        var provider = new WowViewer.Core.IO.Dbc.ArchiveReaderDbcProvider(
+            archive,
+            path => path.EndsWith("Map.dbc", StringComparison.OrdinalIgnoreCase) ? looseBytes : null);
+
+        using Stream s = provider.StreamForTableName("Map", "3.3.5.12340");
+        byte[] readBack = new byte[3];
+        int bytesRead = s.Read(readBack, 0, 3);
+
+        Assert.Equal(3, bytesRead);
+        Assert.Equal(looseBytes, readBack);
+    }
+
     private sealed class FakeArchiveReader : IArchiveReader
     {
         private readonly Dictionary<string, byte[]> _files;
@@ -76,4 +97,4 @@ public sealed class DbClientFileReaderTests
             return _files.TryGetValue(virtualPath, out byte[]? data) ? data : null;
         }
     }
-}
+}

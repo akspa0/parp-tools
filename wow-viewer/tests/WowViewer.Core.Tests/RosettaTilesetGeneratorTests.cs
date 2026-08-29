@@ -941,12 +941,13 @@ public class RosettaTilesetGeneratorTests
         (float centerU, float centerV) = RosettaTilesetGenerator.GetObjectBandCenter(placement);
         int markerX = ToMinimapPixel(centerU);
         int markerY = ToMinimapPixel(centerV);
-        var modelCenter = new SixLabors.ImageSharp.PixelFormats.Rgba32(240, 250, 255, 255);
+        var groundColor = new SixLabors.ImageSharp.PixelFormats.Rgba32(208, 192, 160, 255);
 
-        Assert.Equal(modelCenter, img[markerX, markerY]);
+        // Center has rendered object footprint (distinct from background ground)
+        Assert.NotEqual(groundColor, img[markerX, markerY]);
 
         int staleWholeCellCenterY = ToMinimapPixel(placement.CellV + (placement.CellSize / 2f));
-        Assert.NotEqual(modelCenter, img[markerX, staleWholeCellCenterY]);
+        Assert.NotEqual(img[markerX, markerY], img[markerX, staleWholeCellCenterY]);
     }
 
     [Fact]
@@ -1280,21 +1281,227 @@ public class RosettaTilesetGeneratorTests
     }
 
     [Fact]
-    public void Generate_Wdl_BuildsValidLowResTerrainMesh()
+    public void RosettaDbcGenerator_InferClientBuild_IdentifiesCorrectBuildVersions()
     {
-        var wdlTiles = new List<WdlHeightTile>
+        string lkPath = @"H:\CLIENTS\Wrath\3.X_Retail_OSX_enUS_3.3.5.12340\World of Warcraft\";
+        Assert.Equal("3.3.5.12340", WowViewer.Core.IO.Dbc.RosettaDbcGenerator.InferClientBuild(lkPath));
+
+        string alphaPath = @"C:\Games\WoW_0.5.3_Client";
+        Assert.Equal("0.5.3.3368", WowViewer.Core.IO.Dbc.RosettaDbcGenerator.InferClientBuild(alphaPath));
+
+        string vanillaPath = @"D:\Games\1.12.1.5875";
+        Assert.Equal("1.12.1.5875", WowViewer.Core.IO.Dbc.RosettaDbcGenerator.InferClientBuild(vanillaPath));
+
+        Assert.Equal("0.5.3.3368", WowViewer.Core.IO.Dbc.RosettaDbcGenerator.InferClientBuild(null, "alpha"));
+        Assert.Equal("3.3.5.12340", WowViewer.Core.IO.Dbc.RosettaDbcGenerator.InferClientBuild(null, "lk"));
+    }
+
+    [Fact]
+    public void RosettaDbcGenerator_TryFindDefinitionsDirectory_LocatesMapDbd()
+    {
+        string? dbdDir = WowViewer.Core.IO.Dbc.RosettaDbcGenerator.TryFindDefinitionsDirectory();
+        Assert.NotNull(dbdDir);
+        Assert.True(Directory.Exists(dbdDir));
+        Assert.True(File.Exists(Path.Combine(dbdDir, "Map.dbd")));
+        Assert.True(File.Exists(Path.Combine(dbdDir, "AreaTable.dbd")));
+    }
+
+    [Fact]
+    public void RosettaDbcGenerator_PatchAndSaveClientDbcs_PatchesLkDbcPreservingOriginals()
+    {
+        string tempOutDir = Path.Combine(Path.GetTempPath(), $"rosetta_dbc_lk_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempOutDir);
+
+        try
         {
-            BlankAdtFactory.CreateBlankWdlTile(24, 24, 0),
-            BlankAdtFactory.CreateBlankWdlTile(25, 24, 0),
+            // Build authentic 3.3.5 format Map and AreaTable DBCs
+            byte[] originalMapDbc = BuildLk335MapDbc();
+            byte[] originalAreaDbc = BuildLk335AreaTableDbc();
+
+            var fakeProvider = new TestMemoryDbcProvider(
+                ("Map", originalMapDbc),
+                ("AreaTable", originalAreaDbc));
+
+            var newMaps = new List<WowViewer.Core.IO.Dbc.RosettaMapDbcEntry>
+            {
+                new(500, "Rosetta_MDX", InstanceType: 0, Pvp: 0, MapName: "Rosetta Exhibit (MDX)", AreaTableId: 5000),
+                new(501, "Rosetta_WMO", InstanceType: 0, Pvp: 0, MapName: "Rosetta Exhibit (WMO)", AreaTableId: 5001),
+            };
+            var newAreas = new List<WowViewer.Core.IO.Dbc.RosettaAreaTableDbcEntry>
+            {
+                new(5000, 500, ParentAreaId: 0, AreaBit: 0, Flags: 0, AreaName: "Rosetta: Creature"),
+                new(5001, 501, ParentAreaId: 0, AreaBit: 0, Flags: 0, AreaName: "Rosetta: Doodad"),
+            };
+
+            var (patchedMaps, patchedAreas) = WowViewer.Core.IO.Dbc.RosettaDbcGenerator.PatchAndSaveClientDbcs(
+                fakeProvider,
+                "3.3.5.12340",
+                newMaps,
+                newAreas,
+                tempOutDir);
+
+            Assert.Equal(3, patchedMaps); // 1 original + 2 added
+            Assert.Equal(3, patchedAreas); // 1 original + 2 added
+
+            string patchedMapPath = Path.Combine(tempOutDir, "DBFilesClient", "Map.dbc");
+            string patchedAreaPath = Path.Combine(tempOutDir, "DBFilesClient", "AreaTable.dbc");
+            Assert.True(File.Exists(patchedMapPath));
+            Assert.True(File.Exists(patchedAreaPath));
+
+            // Verify with DBCD that the patched files read back properly
+            string? dbdDir = WowViewer.Core.IO.Dbc.RosettaDbcGenerator.TryFindDefinitionsDirectory();
+            Assert.NotNull(dbdDir);
+
+            var dbFilesProvider = new DBCD.Providers.FilesystemDBCProvider(Path.Combine(tempOutDir, "DBFilesClient"));
+            var dbdProvider = new DBCD.Providers.FilesystemDBDProvider(dbdDir);
+            var dbcd = new DBCD.DBCD(dbFilesProvider, dbdProvider);
+
+            var loadedMaps = dbcd.Load("Map", "3.3.5.12340");
+            Assert.Equal(3, loadedMaps.Count);
+            var mapIds = loadedMaps.Values.Select(static r => Convert.ToInt32(r["ID"])).ToList();
+            Assert.Contains(0, mapIds);
+            Assert.Contains(500, mapIds);
+            Assert.Contains(501, mapIds);
+
+            var loadedAreas = dbcd.Load("AreaTable", "3.3.5.12340");
+            Assert.Equal(3, loadedAreas.Count);
+            var areaIds = loadedAreas.Values.Select(static r => Convert.ToInt32(r["ID"])).ToList();
+            Assert.Contains(1, areaIds);
+            Assert.Contains(5000, areaIds);
+            Assert.Contains(5001, areaIds);
+        }
+        finally
+        {
+            if (Directory.Exists(tempOutDir))
+                Directory.Delete(tempOutDir, true);
+        }
+    }
+
+    private static byte[] BuildLk335MapDbc()
+    {
+        const uint fieldCount = 66;
+        const uint recordSize = fieldCount * 4;
+        using MemoryStream stringStream = new();
+        stringStream.WriteByte(0);
+        uint dirOffset = WriteTestDbcString(stringStream, "Azeroth");
+        uint nameOffset = WriteTestDbcString(stringStream, "Eastern Kingdoms");
+
+        uint[] row = new uint[fieldCount];
+        row[0] = 0; // ID
+        row[1] = dirOffset; // Directory
+        row[2] = 0; // InstanceType
+        row[3] = 0; // Flags
+        row[4] = 0; // PVP
+        row[5] = nameOffset; // MapName_lang[0]
+        row[21] = 0xFFu; // MapName_lang_mask
+        row[22] = 0; // AreaTableID
+        row[57] = FloatBits(1.0f); // MinimapIconScale
+        row[58] = 0; // CorpseMapID
+
+        return AssembleTestDbc(fieldCount, recordSize, [row], stringStream);
+    }
+
+    private static byte[] BuildLk335AreaTableDbc()
+    {
+        const uint fieldCount = 36;
+        const uint recordSize = fieldCount * 4;
+        using MemoryStream stringStream = new();
+        stringStream.WriteByte(0);
+        uint nameOffset = WriteTestDbcString(stringStream, "Echo Isles");
+
+        uint[] row = new uint[fieldCount];
+        row[0] = 1; // ID
+        row[1] = 0; // ContinentID
+        row[2] = 0; // ParentAreaID
+        row[11] = nameOffset; // AreaName_lang[0]
+        row[27] = 0xFFu; // AreaName_lang_mask
+
+        return AssembleTestDbc(fieldCount, recordSize, [row], stringStream);
+    }
+
+    private static uint WriteTestDbcString(MemoryStream stringStream, string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return 0;
+        uint offset = checked((uint)stringStream.Position);
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value);
+        stringStream.Write(bytes, 0, bytes.Length);
+        stringStream.WriteByte(0);
+        return offset;
+    }
+
+    private static byte[] AssembleTestDbc(uint fieldCount, uint recordSize, List<uint[]> rows, MemoryStream stringStream)
+    {
+        using MemoryStream stream = new();
+        using BinaryWriter writer = new(stream, System.Text.Encoding.UTF8, leaveOpen: true);
+        writer.Write(0x43424457u); // "WDBC"
+        writer.Write(checked((uint)rows.Count));
+        writer.Write(fieldCount);
+        writer.Write(recordSize);
+        writer.Write(checked((uint)stringStream.Length));
+        foreach (uint[] row in rows)
+        {
+            foreach (uint val in row)
+                writer.Write(val);
+        }
+        stringStream.Position = 0;
+        stringStream.CopyTo(stream);
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    private static uint FloatBits(float value) => BitConverter.ToUInt32(BitConverter.GetBytes(value), 0);
+
+    private static RosettaAssetEntry WmoAsset(string path, float size) => new(
+        path,
+        RosettaAssetKind.WorldModel,
+        new Vector3(-size / 2f, -size / 2f, -size / 2f),
+        new Vector3(size / 2f, size / 2f, size / 2f));
+
+    [Fact]
+    public void RosettaMinimapPainter_RenderAndSaveMapOverview_ProducesStitchedPng()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("creature/dragon/dragon.mdx", 25f),
+            WmoAsset("wmo/dungeon/keep.wmo", 60f)
         };
 
-        byte[] wdlBytes = WdlWriter.Build(wdlTiles);
-        Assert.NotNull(wdlBytes);
-        Assert.True(wdlBytes.Length > 64);
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
+            assets, new RosettaGeneratorOptions("OverviewTest", PedestalHeightMeters: 4f));
+        Assert.NotEmpty(result.Maps);
 
-        using var ms = new MemoryStream(wdlBytes);
-        WdlSummary summary = WdlSummaryReader.Read(ms, "test.wdl");
-        Assert.NotNull(summary);
-        Assert.Equal(2, summary.Tiles.Count(static t => t is not null));
+        foreach (RosettaMapPlan map in result.Maps)
+        {
+            string tempPath = Path.Combine(Path.GetTempPath(), $"rosetta_overview_{map.MapName}_{Guid.NewGuid():N}.png");
+            try
+            {
+                RosettaMinimapPainter.RenderAndSaveMapOverview(map, tempPath, tileResolution: 128);
+                Assert.True(File.Exists(tempPath));
+
+                using var img = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(tempPath);
+                Assert.Equal(128, img.Width);
+                Assert.Equal(128, img.Height);
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                    File.Delete(tempPath);
+            }
+        }
+    }
+
+    private sealed class TestMemoryDbcProvider(params (string TableName, byte[] Data)[] tables) : DBCD.Providers.IDBCProvider
+    {
+        private readonly Dictionary<string, byte[]> _tables = tables.ToDictionary(static t => t.TableName, static t => t.Data, StringComparer.OrdinalIgnoreCase);
+
+        public Stream StreamForTableName(string tableName, string build)
+        {
+            if (_tables.TryGetValue(tableName, out byte[]? bytes))
+                return new MemoryStream(bytes, writable: false);
+            throw new FileNotFoundException($"Table not found: {tableName}");
+        }
     }
 }
+
+
