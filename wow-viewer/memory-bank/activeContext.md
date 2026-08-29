@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-28
 
+**Spec 190 lane (2026-08-28, checkpoint 31).** Alpha 0.5.3 Native Client Ergonomics, First-Class DBCs, WDL Mesh, Map Splitting & +20Z Exhibits:
+1. Created `RosettaDbcGenerator` in `WowViewer.Core.IO.Dbc` to generate authentic binary `Map.dbc` (5 fields) and `AreaTable.dbc` (14 fields) for Alpha 0.5.3, registering Rosetta maps as first-class outdoor continents (Map ID 500+) and named designkit exhibit zones (Area ID 5000+).
+2. Added automatic `.wdl` distant low-resolution terrain mesh generation (`WdlWriter.Build`) alongside `.wdt` files.
+3. Added `GenerateMinimapTrs` and `WriteMinimapTrs` to `RosettaMinimapPainter` for `minimap.trs` / `md5translate.trs` mapping with `Azeroth` aliases.
+4. Added kind-based map splitting (`SplitAssetKinds`), partitioning models (`.mdx`/`.m2`) into `{map}_MDX` and world models (`.wmo`) into `{map}_WMO`, with an 800-tile map budget ceiling to prevent client engine memory exhaustion.
+5. Implemented bounding-box centering offset (`(X, Y) -= boundsCenter`) and $+20\text{Z}$ elevation ($Z = \text{groundZ} + \max(0, -\text{bounds.Min.Z}) + 20\text{m}$), placing models comfortably floating in the air above flat walkable terrain ($Z = 0$) with zero ground clipping or saw-tooth ridge trapping.
+6. All 56 Rosetta unit tests pass green (100%).
+
 **Spec 190 lane (2026-08-28, checkpoint 30).** Phase 2 Reference Library Builder (US2):
 1. Created `RosettaReferenceLibrary` and `RosettaReferenceAsset` data model with full bounding, span, volume, footprint, aspect ratio, subpart bounds, and signal dictionary properties, with 100% interoperability with `Pm4AssetMatchScorer` via `ToAssetReferenceSignalRecord()`.
 2. Created `RosettaCorpusReader` to decode synthetic Rosetta placements and geometry from `rosetta-manifest.json`, in-memory `RosettaGenerationResult`, and Zarr datastores (`RosettaObjectLibrary`).

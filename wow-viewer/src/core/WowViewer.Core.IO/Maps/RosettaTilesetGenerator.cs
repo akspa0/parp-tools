@@ -39,14 +39,18 @@ public sealed record RosettaGeneratorOptions(
     bool PaintCellBorders = true,
     bool GroupByDesignkit = true,
     int KitDepth = 0,
-    int MaxTilesPerMap = 4096,
+    int MaxTilesPerMap = 800,
     string GroundTexture = @"tileset\westfall\westfallsand.blp",
     string InkTexture = @"tileset\generic\black.blp",
     string CheckersTexture = @"tileset\generic\checkers.blp",
-    float PedestalHeightMeters = -10f,
+    float PedestalHeightMeters = 0f,
     float PedestalBevelMeters = 12.5f,
     int LabelFontTexels = 6,
-    bool PaintCheckersOnPedestals = true)
+    bool PaintCheckersOnPedestals = true,
+    bool SplitAssetKinds = true,
+    float ObjectZOffsetMeters = 20f,
+    uint BaseMapId = 500,
+    uint BaseAreaId = 5000)
 {
     public const float TileSize = 533.33333f;
     public const int ChunksPerTileAxis = 16;
@@ -100,6 +104,7 @@ public sealed record RosettaGeneratorOptions(
         ArgumentOutOfRangeException.ThrowIfLessThan(LabelFontTexels, 1);
         ArgumentOutOfRangeException.ThrowIfNegative(KitDepth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxTilesPerMap);
+        ArgumentOutOfRangeException.ThrowIfNegative(ObjectZOffsetMeters);
         if (MaxTilesPerMap > TilesPerAxis * TilesPerAxis)
             throw new ArgumentOutOfRangeException(nameof(MaxTilesPerMap),
                 $"A map holds at most {TilesPerAxis * TilesPerAxis} tiles, got {MaxTilesPerMap}.");
@@ -287,6 +292,64 @@ public static class RosettaTilesetGenerator
             .DistinctBy(static a => a.AssetPath.Replace('/', '\\'), StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        if (options.SplitAssetKinds)
+        {
+            var modelAssets = assets.Where(static a => a.Kind == RosettaAssetKind.Model).ToList();
+            var wmoAssets = assets.Where(static a => a.Kind == RosettaAssetKind.WorldModel).ToList();
+
+            if (modelAssets.Count > 0 && wmoAssets.Count > 0)
+            {
+                string modelSuffix = modelAssets.Any(static a => a.AssetPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) || a.AssetPath.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+                    ? "_MDX"
+                    : "_M2";
+
+                var modelResult = GenerateCore(
+                    modelAssets,
+                    options with { MapName = $"{options.MapName}{modelSuffix}" },
+                    occupiedTiles,
+                    initialUniqueId: 0);
+
+                var wmoResult = GenerateCore(
+                    wmoAssets,
+                    options with { MapName = $"{options.MapName}_WMO" },
+                    occupiedTiles,
+                    initialUniqueId: modelResult.NextUniqueId);
+
+                var combinedMaps = new List<RosettaMapPlan>(modelResult.Maps.Count + wmoResult.Maps.Count);
+                combinedMaps.AddRange(modelResult.Maps);
+                combinedMaps.AddRange(wmoResult.Maps);
+
+                var combinedPlacements = new List<RosettaPlacementRecord>(modelResult.Placements.Count + wmoResult.Placements.Count);
+                combinedPlacements.AddRange(modelResult.Placements);
+                combinedPlacements.AddRange(wmoResult.Placements);
+
+                var combinedKits = new List<RosettaDesignkitPlan>(modelResult.Designkits.Count + wmoResult.Designkits.Count);
+                combinedKits.AddRange(modelResult.Designkits);
+                combinedKits.AddRange(wmoResult.Designkits);
+
+                var combinedExclusions = new List<RosettaExcludedAsset>(modelResult.Exclusions.Count + wmoResult.Exclusions.Count);
+                combinedExclusions.AddRange(modelResult.Exclusions);
+                combinedExclusions.AddRange(wmoResult.Exclusions);
+
+                return new RosettaGenerationResult(
+                    options.MapName,
+                    combinedMaps,
+                    combinedPlacements,
+                    combinedKits,
+                    combinedExclusions,
+                    wmoResult.NextUniqueId);
+            }
+        }
+
+        return GenerateCore(assets, options, occupiedTiles, initialUniqueId: 0);
+    }
+
+    private static RosettaGenerationResult GenerateCore(
+        IReadOnlyList<RosettaAssetEntry> assets,
+        RosettaGeneratorOptions options,
+        IReadOnlySet<(int X, int Y)>? occupiedTiles,
+        int initialUniqueId)
+    {
         var exclusions = new List<RosettaExcludedAsset>();
 
         // Pass 1: split into designkits (the source folder IS the kit - Blizzard shipped them that
@@ -302,7 +365,7 @@ public static class RosettaTilesetGenerator
         var maps = new List<RosettaMapPlan>(mapGroups.Count);
         var allPlacements = new List<RosettaPlacementRecord>();
         var allKits = new List<RosettaDesignkitPlan>(kits.Count);
-        int uniqueId = 0;
+        int uniqueId = initialUniqueId;
 
         for (int mapIndex = 0; mapIndex < mapGroups.Count; mapIndex++)
         {
@@ -580,12 +643,19 @@ public static class RosettaTilesetGenerator
 
             float centerU = cell.CellU + (cell.CellSize / 2f);
             float centerV = cell.CellV + (cell.ObjectBandSize / 2f);
-            float placementZ = options.PedestalHeightMeters;
+
+            Vector3 boundsCenter = (cell.Asset.BoundsMin + cell.Asset.BoundsMax) * 0.5f;
+            float offsetX = float.IsFinite(boundsCenter.X) ? boundsCenter.X : 0f;
+            float offsetY = float.IsFinite(boundsCenter.Y) ? boundsCenter.Y : 0f;
+
+            float groundZ = options.PedestalHeightMeters;
+            float minZ = float.IsFinite(cell.Asset.BoundsMin.Z) ? cell.Asset.BoundsMin.Z : 0f;
+            float placementZ = groundZ + MathF.Max(0f, -minZ) + options.ObjectZOffsetMeters;
 
             // Canvas/file coords, and the renderer coords the viewer derives from them.
             var raw = new Vector3(
-                (tileY * RosettaGeneratorOptions.TileSize) + centerU,
-                (tileX * RosettaGeneratorOptions.TileSize) + centerV,
+                (tileY * RosettaGeneratorOptions.TileSize) + centerU - offsetX,
+                (tileX * RosettaGeneratorOptions.TileSize) + centerV - offsetY,
                 placementZ);
             var renderer = new Vector3(MapOrigin - raw.Y, MapOrigin - raw.X, placementZ);
 

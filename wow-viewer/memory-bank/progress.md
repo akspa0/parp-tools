@@ -2,6 +2,17 @@
 
 Last updated: 2026-08-28
 
+## 2026-08-28 — Spec 190 Phase 2.5: Alpha 0.5.3 Native Client Ergonomics, First-Class DBC Generation, WDL Mesh & +20Z Exhibits
+
+- **Landed:**
+  - **Native Alpha `Map.dbc` & `AreaTable.dbc` Generation (`RosettaDbcGenerator`):** Emits authentic 0.5.3 binary WDBC files allocating dedicated Map IDs (starting at 500) and Area IDs (starting at 5000) for designkit zones, registering Rosetta maps as first-class outdoor continents under `DBFilesClient\`.
+  - **Alpha WDL Low-Resolution Distant Terrain Mesh:** Automatically generates and saves `{mapName}.wdl` alongside `{mapName}.wdt` using `WdlWriter.Build`.
+  - **Minimap Translation (`minimap.trs` / `md5translate.trs`):** Added `RosettaMinimapPainter.GenerateMinimapTrs` and `WriteMinimapTrs` generating TRS mapping blocks for each map directory (`dir: {mapName}`) and aliases (`dir: Azeroth`).
+  - **Model (`.mdx`/`.m2`) and World Model (`.wmo`) Map Splitting:** Added `SplitAssetKinds` separating assets into `{map}_MDX` and `{map}_WMO` maps with an 800-tile budget ceiling to prevent engine memory exhaustion.
+  - **Bounding-Box Centering Offset & $+20\text{Z}$ Elevation:** Centers geometry inside cell footprints by offset `(X, Y) -= boundsCenter`, and elevates by $Z = \text{groundZ} + \max(0, -\text{bounds.Min.Z}) + 20\text{m}$, ensuring models float comfortably in the air with zero ground clipping.
+  - **Walkable Baseline Terrain:** Smooths heightfield calculation to eliminate saw-tooth `/\` knife-edge ridges and deep pits, providing flat walkable ground ($Z = 0$).
+  - **Unit Tests:** Added 6 new unit tests in [`RosettaTilesetGeneratorTests.cs`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/RosettaTilesetGeneratorTests.cs). All 56 Rosetta unit tests pass green.
+
 ## 2026-08-28 — Spec 190 Phase 2: Rosetta Reference Library Builder (US2) & Verification Suite
 
 - **Landed:**

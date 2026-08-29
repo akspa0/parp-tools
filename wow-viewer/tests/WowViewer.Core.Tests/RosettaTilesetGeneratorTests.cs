@@ -139,7 +139,7 @@ public class RosettaTilesetGeneratorTests
         };
 
         RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
-            assets, new RosettaGeneratorOptions("Development", GroupByDesignkit: false));
+            assets, new RosettaGeneratorOptions("Development", GroupByDesignkit: false, SplitAssetKinds: false, ObjectZOffsetMeters: 0f));
         RosettaMapPlan map = SingleMap(result);
         RosettaTilePlan tile = Assert.Single(map.Tiles);
 
@@ -196,7 +196,7 @@ public class RosettaTilesetGeneratorTests
         }
 
         RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
-            assets, new RosettaGeneratorOptions("Development", StartTileX: 31, StartTileY: 17, GroupByDesignkit: false));
+            assets, new RosettaGeneratorOptions("Development", StartTileX: 31, StartTileY: 17, GroupByDesignkit: false, SplitAssetKinds: false));
 
         int checkedEntries = 0;
         RosettaMapPlan map = SingleMap(result);
@@ -643,7 +643,7 @@ public class RosettaTilesetGeneratorTests
         };
 
         RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
-            assets, new RosettaGeneratorOptions("Development", StartTileX: 12, StartTileY: 34));
+            assets, new RosettaGeneratorOptions("Development", StartTileX: 12, StartTileY: 34, SplitAssetKinds: false, ObjectZOffsetMeters: 0f));
         RosettaMapPlan map = SingleMap(result);
         RosettaTilePlan tile = Assert.Single(map.Tiles);
 
@@ -688,7 +688,8 @@ public class RosettaTilesetGeneratorTests
         var options = new RosettaGeneratorOptions(
             "PedestalTest",
             PedestalHeightMeters: 4f,
-            PedestalBevelMeters: 12.5f);
+            PedestalBevelMeters: 12.5f,
+            ObjectZOffsetMeters: 0f);
 
         RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
         RosettaMapPlan map = SingleMap(result);
@@ -698,8 +699,8 @@ public class RosettaTilesetGeneratorTests
         Assert.Equal(4f, tile.Pedestals[0].Height);
 
         RosettaPlacementRecord placement = Assert.Single(tile.Placements);
-        Assert.Equal(4f, placement.RendererPosition.Z);
-        Assert.Equal(4f, placement.RawPosition.Z);
+        Assert.Equal(14f, placement.RendererPosition.Z);
+        Assert.Equal(14f, placement.RawPosition.Z);
 
         LkAdtData adt = RosettaTilesetGenerator.BuildTileAdt(
             map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters);
@@ -728,7 +729,8 @@ public class RosettaTilesetGeneratorTests
         var options = new RosettaGeneratorOptions(
             "SunkenTest",
             PedestalHeightMeters: -10f,
-            PedestalBevelMeters: 12.5f);
+            PedestalBevelMeters: 12.5f,
+            ObjectZOffsetMeters: 0f);
 
         RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
         RosettaMapPlan map = SingleMap(result);
@@ -738,8 +740,8 @@ public class RosettaTilesetGeneratorTests
         Assert.Equal(-10f, tile.Pedestals[0].Height);
 
         RosettaPlacementRecord placement = Assert.Single(tile.Placements);
-        Assert.Equal(-10f, placement.RendererPosition.Z);
-        Assert.Equal(-10f, placement.RawPosition.Z);
+        Assert.Equal(0f, placement.RendererPosition.Z);
+        Assert.Equal(0f, placement.RawPosition.Z);
 
         LkAdtData adt = RosettaTilesetGenerator.BuildTileAdt(
             map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters);
@@ -765,7 +767,7 @@ public class RosettaTilesetGeneratorTests
         {
             Model("world/alpha_mcal_test.mdx", 15f),
         };
-        var options = new RosettaGeneratorOptions("McalTest");
+        var options = new RosettaGeneratorOptions("McalTest", PedestalHeightMeters: -10f);
 
         RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
         RosettaMapPlan map = SingleMap(result);
@@ -798,7 +800,7 @@ public class RosettaTilesetGeneratorTests
         {
             Model("world/alpha_wdt_mcal_model.mdx", 20f),
         };
-        var options = new RosettaGeneratorOptions("AlphaWdtMcalTest");
+        var options = new RosettaGeneratorOptions("AlphaWdtMcalTest", PedestalHeightMeters: -10f);
 
         RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
         RosettaMapPlan map = SingleMap(result);
@@ -895,7 +897,7 @@ public class RosettaTilesetGeneratorTests
             new("world/minimap_test_wmo.wmo", RosettaAssetKind.WorldModel,
                 new Vector3(-25f, -25f, 0f), new Vector3(25f, 25f, 15f)),
         };
-        var options = new RosettaGeneratorOptions("MinimapTest", PedestalHeightMeters: 4f);
+        var options = new RosettaGeneratorOptions("MinimapTest", PedestalHeightMeters: 4f, SplitAssetKinds: false);
 
         RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
         RosettaMapPlan map = SingleMap(result);
@@ -1160,5 +1162,139 @@ public class RosettaTilesetGeneratorTests
 
         // Transposed tile (39, 41) must NOT exist
         Assert.False(AlphaWdtReader.TryReadTile(wdtBytes, 39, 41, out _));
+    }
+
+    [Fact]
+    public void RosettaDbcGenerator_BuildAlphaMapDbc_ProducesValidWDBC()
+    {
+        var entries = new List<WowViewer.Core.IO.Dbc.RosettaMapDbcEntry>
+        {
+            new(500, "Rosetta053_MDX", InstanceType: 0, Pvp: 0, MapName: "Rosetta Exhibit (MDX)"),
+            new(501, "Rosetta053_WMO", InstanceType: 0, Pvp: 0, MapName: "Rosetta Exhibit (WMO)"),
+        };
+
+        byte[] dbcBytes = WowViewer.Core.IO.Dbc.RosettaDbcGenerator.BuildAlphaMapDbc(entries);
+        Assert.NotNull(dbcBytes);
+        Assert.True(dbcBytes.Length > 20);
+
+        using var ms = new MemoryStream(dbcBytes);
+        using var reader = new BinaryReader(ms);
+
+        uint magic = reader.ReadUInt32();
+        uint records = reader.ReadUInt32();
+        uint fields = reader.ReadUInt32();
+        uint recordSize = reader.ReadUInt32();
+        uint stringBlockSize = reader.ReadUInt32();
+
+        Assert.Equal(0x43424457u, magic); // "WDBC"
+        Assert.Equal(2u, records);
+        Assert.Equal(5u, fields);
+        Assert.Equal(20u, recordSize);
+        Assert.True(stringBlockSize > 0);
+
+        uint firstId = reader.ReadUInt32();
+        Assert.Equal(500u, firstId);
+    }
+
+    [Fact]
+    public void RosettaDbcGenerator_BuildAlphaAreaTableDbc_ProducesValidWDBC()
+    {
+        var entries = new List<WowViewer.Core.IO.Dbc.RosettaAreaTableDbcEntry>
+        {
+            new(5000, 500, ParentAreaId: 0, AreaBit: 0, Flags: 0, AreaName: "Rosetta: Creature"),
+            new(5001, 500, ParentAreaId: 0, AreaBit: 0, Flags: 0, AreaName: "Rosetta: Doodads"),
+        };
+
+        byte[] dbcBytes = WowViewer.Core.IO.Dbc.RosettaDbcGenerator.BuildAlphaAreaTableDbc(entries);
+        Assert.NotNull(dbcBytes);
+
+        using var ms = new MemoryStream(dbcBytes);
+        using var reader = new BinaryReader(ms);
+
+        uint magic = reader.ReadUInt32();
+        uint records = reader.ReadUInt32();
+        uint fields = reader.ReadUInt32();
+        uint recordSize = reader.ReadUInt32();
+
+        Assert.Equal(0x43424457u, magic);
+        Assert.Equal(2u, records);
+        Assert.Equal(14u, fields);
+        Assert.Equal(56u, recordSize);
+    }
+
+    [Fact]
+    public void RosettaMinimapPainter_GenerateMinimapTrs_ProducesValidBlocks()
+    {
+        var assets = new List<RosettaAssetEntry> { Model("world/test.mdx", 10f) };
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
+            assets, new RosettaGeneratorOptions("Rosetta053_MDX", StartTileX: 20, StartTileY: 25));
+
+        string trs = RosettaMinimapPainter.GenerateMinimapTrs(result.Maps, extraAliases: ["Azeroth"]);
+        Assert.NotNull(trs);
+        Assert.Contains("dir: Rosetta053_MDX", trs);
+        Assert.Contains("dir: Azeroth", trs);
+        Assert.Contains(@"Rosetta053_MDX\map20_25.blp", trs);
+        Assert.Contains(@"Azeroth\map20_25.blp", trs);
+    }
+
+    [Fact]
+    public void Generate_SplitAssetKinds_ProducesSeparateMdxAndWmoMaps()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("creature/murloc.mdx", 10f),
+            new("building/inn.wmo", RosettaAssetKind.WorldModel, new Vector3(-20f, -20f, 0f), new Vector3(20f, 20f, 15f)),
+        };
+
+        var options = new RosettaGeneratorOptions("Rosetta053", SplitAssetKinds: true);
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(assets, options);
+
+        Assert.Equal(2, result.Maps.Count);
+        Assert.Equal("Rosetta053_MDX", result.Maps[0].MapName);
+        Assert.Equal("Rosetta053_WMO", result.Maps[1].MapName);
+
+        Assert.All(result.Maps[0].Placements, static p => Assert.Equal(RosettaAssetKind.Model, p.Asset.Kind));
+        Assert.All(result.Maps[1].Placements, static p => Assert.Equal(RosettaAssetKind.WorldModel, p.Asset.Kind));
+    }
+
+    [Fact]
+    public void Generate_ObjectZOffset_ElevatesPlacementAboveTerrain()
+    {
+        var asset = new RosettaAssetEntry(
+            "creature/giant.mdx",
+            RosettaAssetKind.Model,
+            new Vector3(-10f, -10f, -15f), // Lowest point is -15m underground
+            new Vector3(10f, 10f, 25f));
+
+        var options = new RosettaGeneratorOptions(
+            "ZOffsetTest",
+            PedestalHeightMeters: 0f,
+            ObjectZOffsetMeters: 20f);
+
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate([asset], options);
+        RosettaPlacementRecord placement = Assert.Single(result.Placements);
+
+        // RawPosition.Z must be groundZ (0) + (-minZ: 15) + ObjectZOffset (20) = 35m
+        Assert.Equal(35f, placement.RawPosition.Z);
+        Assert.Equal(35f, placement.RendererPosition.Z);
+    }
+
+    [Fact]
+    public void Generate_Wdl_BuildsValidLowResTerrainMesh()
+    {
+        var wdlTiles = new List<WdlHeightTile>
+        {
+            BlankAdtFactory.CreateBlankWdlTile(24, 24, 0),
+            BlankAdtFactory.CreateBlankWdlTile(25, 24, 0),
+        };
+
+        byte[] wdlBytes = WdlWriter.Build(wdlTiles);
+        Assert.NotNull(wdlBytes);
+        Assert.True(wdlBytes.Length > 64);
+
+        using var ms = new MemoryStream(wdlBytes);
+        WdlSummary summary = WdlSummaryReader.Read(ms, "test.wdl");
+        Assert.NotNull(summary);
+        Assert.Equal(2, summary.Tiles.Count(static t => t is not null));
     }
 }

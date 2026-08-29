@@ -31,6 +31,15 @@
 - [x] **T012**: Build and serialize `ReferenceLibrary` with versioning and manifest metadata.
 - [x] **T013**: Implement library self-test suite verifying $\ge 99\%$ top-1 identification accuracy.
 
+## Phase 2.5: In-Game Alpha 0.5.3 Native Client Ergonomics & DBC Generation (Completed)
+
+- [x] **T025**: Implement `RosettaDbcGenerator` building authentic `Map.dbc` and `AreaTable.dbc` binary files for Alpha 0.5.3.
+- [x] **T026**: Implement automatic low-resolution terrain `.wdl` generation via `WdlWriter`.
+- [x] **T027**: Implement `minimap.trs` / `md5translate.trs` translation generator in `RosettaMinimapPainter`.
+- [x] **T028**: Implement model (`.mdx`) and world model (`.wmo`) map splitting with an 800-tile map budget.
+- [x] **T029**: Implement bounding-box centering offset and $+20\text{Z}$ elevation ($Z = \text{groundZ} - \text{BoundsMin.Z} + 20\text{m}$).
+- [x] **T030**: Author comprehensive unit tests covering DBCs, TRS, WDL, map splitting, and $+20\text{Z}$ elevation (56/56 passing green).
+
 ## Phase 3: Deterministic PM4 Lookup Engine (US3)
 
 - [ ] **T014**: Implement candidate lookup against `ReferenceLibrary` for real PM4 geometry segments.

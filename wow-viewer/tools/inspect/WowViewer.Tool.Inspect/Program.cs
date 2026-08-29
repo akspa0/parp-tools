@@ -7490,10 +7490,13 @@ static void RunRosettaGenerate(string[] args)
 	// single-layer tiles), then serialises the whole WDT to one byte[]. The LK lane streams tile by
 	// tile and has no such ceiling, so only the alpha lane gets a conservative default.
 	bool maxTilesGiven = int.TryParse(GetOption(args, "--max-tiles-per-map"), out int mtpm);
-	int maxTilesPerMap = maxTilesGiven ? mtpm : 4096;
+	int maxTilesPerMap = maxTilesGiven ? mtpm : 800;
+	bool noSplitKinds = args.Contains("--no-split-kinds", StringComparer.OrdinalIgnoreCase);
+	bool splitKinds = !noSplitKinds;
+	float objectZOffset = float.TryParse(GetOption(args, "--object-z-offset"), out float ozo) ? ozo : 20f;
 	// One run = one era = one container. There is no "both": an alpha WDT that names .m2 models and
 	// v17 world models describes assets the alpha client does not have, and an LK map that names v14
-	// world models describes assets the LK client does not have. The output format therefore decides
+	// world models describes assets the LK client does not have. The output format decides
 	// which assets are admitted at all. It is OPTIONAL: the client root already says which era it is,
 	// so it is detected below and only has to be passed to override that.
 	string? requestedFormat = GetOption(args, "--format")?.ToLowerInvariant();
@@ -7508,7 +7511,7 @@ static void RunRosettaGenerate(string[] args)
 	// default is exactly how the corpus ended up naming a texture the client does not ship.
 	string? requestedGroundTexture = GetOption(args, "--ground-texture");
 	string? requestedInkTexture = GetOption(args, "--ink-texture");
-	float pedestalHeight = float.TryParse(GetOption(args, "--pedestal-height"), out float ph) ? ph : -10f;
+	float pedestalHeight = float.TryParse(GetOption(args, "--pedestal-height"), out float ph) ? ph : 0f;
 	float pedestalBevel = float.TryParse(GetOption(args, "--pedestal-bevel"), out float pb) ? pb : 12.5f;
 	string? datastorePath = GetOption(args, "--datastore");
 	bool emitZarr = args.Contains("--emit-zarr", StringComparer.OrdinalIgnoreCase);
@@ -7777,7 +7780,9 @@ static void RunRosettaGenerate(string[] args)
 		InkTexture: inkTexture,
 		CheckersTexture: checkersTexture,
 		PedestalHeightMeters: pedestalHeight,
-		PedestalBevelMeters: pedestalBevel);
+		PedestalBevelMeters: pedestalBevel,
+		SplitAssetKinds: splitKinds,
+		ObjectZOffsetMeters: objectZOffset);
 
 	RosettaGenerationResult result;
 	try
@@ -7903,6 +7908,16 @@ static void RunRosettaGenerate(string[] args)
 				},
 				allMdxNames,
 				allWmoNames);
+
+			// Automatically generate low-resolution distant terrain WDL
+			var wdlTiles = new List<WdlHeightTile>(map.Tiles.Count);
+			foreach (RosettaTilePlan tile in map.Tiles)
+			{
+				wdlTiles.Add(BlankAdtFactory.CreateBlankWdlTile(tile.TileX, tile.TileY, 0));
+			}
+			byte[] wdlBytes = WdlWriter.Build(wdlTiles);
+			string wdlPath = Path.Combine(thisMapRoot, $"{map.MapName}.wdl");
+			File.WriteAllBytes(wdlPath, wdlBytes);
 		}
 
 		// Render and write 256x256 minimap BLP files for every generated tile.
@@ -8063,8 +8078,37 @@ static void RunRosettaGenerate(string[] args)
 	string indexPath = Path.Combine(outputRoot, "rosetta-index.json");
 	File.WriteAllText(indexPath, JsonSerializer.Serialize(index, new JsonSerializerOptions { WriteIndented = true }));
 
+	// Generate DBC files (Map.dbc & AreaTable.dbc) for client integration
+	var mapDbcEntries = new List<RosettaMapDbcEntry>(result.Maps.Count);
+	var areaDbcEntries = new List<RosettaAreaTableDbcEntry>();
+	uint areaIdCounter = options.BaseAreaId;
+
+	for (int mapIdx = 0; mapIdx < result.Maps.Count; mapIdx++)
+	{
+		RosettaMapPlan map = result.Maps[mapIdx];
+		uint mapId = options.BaseMapId + (uint)mapIdx;
+		string mapDisplayName = $"Rosetta Exhibit ({map.MapName})";
+		mapDbcEntries.Add(new RosettaMapDbcEntry(mapId, map.MapName, InstanceType: 0, Pvp: 0, MapName: mapDisplayName));
+
+		foreach (RosettaDesignkitPlan kit in map.Designkits)
+		{
+			string areaName = $"Rosetta: {kit.Kit}";
+			areaDbcEntries.Add(new RosettaAreaTableDbcEntry(areaIdCounter++, mapId, ParentAreaId: 0, AreaBit: 0, Flags: 0, AreaName: areaName));
+		}
+	}
+
+	string mapDbcPath = Path.Combine(outputRoot, "DBFilesClient", "Map.dbc");
+	string areaTableDbcPath = Path.Combine(outputRoot, "DBFilesClient", "AreaTable.dbc");
+	RosettaDbcGenerator.WriteMapDbc(mapDbcPath, mapDbcEntries);
+	RosettaDbcGenerator.WriteAreaTableDbc(areaTableDbcPath, areaDbcEntries);
+
+	// Generate minimap.trs / md5translate.trs for Alpha client minimap lookups
+	RosettaMinimapPainter.WriteMinimapTrs(outputRoot, result.Maps, extraAliases: ["Azeroth", "azeroth"]);
+
 	Console.WriteLine($"Output root:   {outputRoot}");
 	Console.WriteLine($"Format:        {format}");
+	Console.WriteLine($"DBC generated: DBFilesClient\\Map.dbc ({mapDbcEntries.Count} maps), AreaTable.dbc ({areaDbcEntries.Count} zones)");
+	Console.WriteLine($"Minimap TRS:   Textures\\Minimap\\minimap.trs, md5translate.trs");
 	Console.WriteLine($"Maps:          {result.Maps.Count}");
 	foreach (RosettaMapPlan map in result.Maps)
 	{

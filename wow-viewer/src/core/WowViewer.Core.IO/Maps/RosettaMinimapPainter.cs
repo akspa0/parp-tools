@@ -375,4 +375,78 @@ public static class RosettaMinimapPainter
         using Image<Rgba32> image = RenderTileImage(tile, pedestals, alphaCanvas);
         return Blp2Writer.EncodeDxt1(image);
     }
+
+    /// <summary>
+    /// Generates the contents of a <c>minimap.trs</c> / <c>md5translate.trs</c> file mapping
+    /// map directory tile requests to the corresponding generated minimap BLP files.
+    /// </summary>
+    public static string GenerateMinimapTrs(
+        IReadOnlyList<RosettaMapPlan> maps,
+        IReadOnlyList<string>? extraAliases = null)
+    {
+        ArgumentNullException.ThrowIfNull(maps);
+
+        var sb = new System.Text.StringBuilder();
+
+        foreach (RosettaMapPlan map in maps)
+        {
+            var directories = new List<string> { map.MapName };
+            if (extraAliases is not null)
+            {
+                foreach (string alias in extraAliases)
+                {
+                    if (!directories.Contains(alias, StringComparer.OrdinalIgnoreCase))
+                        directories.Add(alias);
+                }
+            }
+
+            foreach (string dir in directories)
+            {
+                sb.AppendLine($"dir: {dir}");
+                foreach (RosettaTilePlan tile in map.Tiles)
+                {
+                    string plainRequest = $@"{dir}\map{tile.TileX}_{tile.TileY}.blp";
+                    string actualFile = $@"{map.MapName}\map{tile.TileX:D2}_{tile.TileY:D2}.blp";
+                    sb.AppendLine($"{plainRequest}\t{actualFile}");
+
+                    if (tile.TileX < 10 || tile.TileY < 10)
+                    {
+                        string paddedRequest = $@"{dir}\map{tile.TileX:D2}_{tile.TileY:D2}.blp";
+                        if (!string.Equals(plainRequest, paddedRequest, StringComparison.OrdinalIgnoreCase))
+                            sb.AppendLine($"{paddedRequest}\t{actualFile}");
+                    }
+                }
+                sb.AppendLine();
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Writes <c>minimap.trs</c> and <c>md5translate.trs</c> to all standard minimap directories.
+    /// </summary>
+    public static void WriteMinimapTrs(
+        string outputRoot,
+        IReadOnlyList<RosettaMapPlan> maps,
+        IReadOnlyList<string>? extraAliases = null)
+    {
+        string trsContent = GenerateMinimapTrs(maps, extraAliases);
+
+        string[] targets = [
+            Path.Combine(outputRoot, "Textures", "Minimap", "minimap.trs"),
+            Path.Combine(outputRoot, "Textures", "Minimap", "md5translate.trs"),
+            Path.Combine(outputRoot, "World", "Textures", "Minimap", "minimap.trs"),
+            Path.Combine(outputRoot, "World", "Textures", "Minimap", "md5translate.trs"),
+        ];
+
+        foreach (string target in targets)
+        {
+            string? dir = Path.GetDirectoryName(target);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+
+            File.WriteAllText(target, trsContent, System.Text.Encoding.UTF8);
+        }
+    }
 }

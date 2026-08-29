@@ -88,6 +88,15 @@ This plan details the implementation across 4 phases:
 - [x] `RosettaReferenceLibrary` model, JSON serializer with custom vector converters, and CLI integration (`rosetta-build-library`).
 - [x] Automated self-test runner asserting $\ge 99\%$ top-1 identification accuracy (`RosettaReferenceLibrarySelfTest`, CLI `rosetta-library-selftest`, and unit tests in `RosettaReferenceLibraryTests.cs`).
 
+### Phase 2.5: In-Game Alpha 0.5.3 Native Client Ergonomics & First-Class DBC Generation (Completed)
+- [x] Native binary `Map.dbc` and `AreaTable.dbc` generation for Alpha 0.5.3 client (`RosettaDbcGenerator`).
+- [x] Alpha `.wdl` distant terrain mesh generation (`WdlWriter.Build`).
+- [x] Minimap translation text block generator (`RosettaMinimapPainter.GenerateMinimapTrs` / `WriteMinimapTrs`).
+- [x] Separate sub-map emission for models (`.mdx`/`.m2`) and world models (`.wmo`) (`{map}_MDX`, `{map}_WMO`).
+- [x] Bounding-box centering offset and $+20\text{Z}$ elevation ($Z = \text{groundZ} - \text{BoundsMin.Z} + 20\text{m}$).
+- [x] Smooth walkable baseline ($Z = 0$) eliminating saw-tooth `/\` knife-edge ridges and pits.
+- [x] 56 unit tests passing green.
+
 ### Phase 3: Deterministic PM4 Lookup Engine (US3)
 - [ ] Lookup engine querying `ReferenceLibrary` for real decoded PM4 segments.
 - [ ] Tri-state result classification: `Identified`, `Ambiguous`, `NoReference`.

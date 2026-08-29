@@ -37,7 +37,7 @@ public sealed class RosettaDatastoreTests
                 Model("doodads/chest.mdx", 5f),
                 WorldModel("buildings/house.wmo", 20f),
             };
-            var options053 = new RosettaGeneratorOptions("RosettaAlpha");
+            var options053 = new RosettaGeneratorOptions("RosettaAlpha", SplitAssetKinds: false);
             RosettaGenerationResult result053 = RosettaTilesetGenerator.Generate(assets053, options053);
             RosettaMapPlan map053 = result053.Maps[0];
 
@@ -69,7 +69,7 @@ public sealed class RosettaDatastoreTests
                 WorldModel("buildings/house.wmo", 20f), // Reused
                 Model("creature/murloc/murloc.m2", 8f), // New asset
             };
-            var options112 = new RosettaGeneratorOptions("RosettaLk");
+            var options112 = new RosettaGeneratorOptions("RosettaLk", SplitAssetKinds: false);
             RosettaGenerationResult result112 = RosettaTilesetGenerator.Generate(assets112, options112);
             RosettaMapPlan map112 = result112.Maps[0];
 

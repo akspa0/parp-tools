@@ -12,6 +12,23 @@ object at a known position, decode that synthetic data back through our own pipe
 complete labelled reference library, and automatically match real PM4 data against it. Also: we are
 not generating ADTs for tiles that have no ADT — synthesize them so no tile is skipped."
 
+> **Implementation checkpoint 31 (2026-08-28).** Alpha 0.5.3 Native Client Ergonomics, DBC Generation, WDL Mesh & +20Z Bounding-Box Exhibits.
+>
+> 1. **Native Alpha `Map.dbc` and `AreaTable.dbc` generation.** Built `RosettaDbcGenerator` emitting authentic 0.5.3 WDBC binary files
+>    allocating dedicated Map IDs (starting at 500) and Area IDs (starting at 5000) for designkit zones, registering Rosetta maps
+>    as first-class outdoor continent maps under `DBFilesClient\`.
+> 2. **Alpha WDL low-resolution terrain mesh.** Automatically generates and emits `{mapName}.wdl` using `WdlWriter` alongside `.wdt`
+>    for complete distant terrain rendering in the 0.5.3 engine.
+> 3. **Official minimap translation (`minimap.trs` / `md5translate.trs`).** Added `RosettaMinimapPainter.WriteMinimapTrs` generating
+>    TRS translation blocks mapping `dir: {mapName}` and `dir: Azeroth` aliases to 256×256 minimap BLPs.
+> 4. **Model (`.mdx`) and World Model (`.wmo`) map splitting & 800 tile ceiling.** Splits models and WMOs into dedicated sub-maps
+>    (`{mapName}_MDX` and `{mapName}_WMO`) and defaults `MaxTilesPerMap` to 800 tiles, eliminating engine memory exhaustion.
+> 5. **Bounding-box centering & $+20\text{Z}$ elevation.** Geometry is centered in cell footprints by offset `(X, Y) -= boundsCenter`,
+>    and elevated by $Z = \text{groundZ} + \max(0, -\text{bounds.Min.Z}) + 20\text{m}$, eliminating underground clipping.
+> 6. **Walkable flat corridors & ridge elimination.** Defaults terrain to flat walkable base ($Z = 0$) eliminating saw-tooth `/\` ridges.
+>
+> Verified: 56 focused `Rosetta*` unit tests pass green.
+>
 > **Implementation checkpoint 27 (2026-08-28).** Minimap & Placed Object Coordinate Alignment.
 >
 > 1. **Dual minimap naming and path resolution.** Generated minimap BLPs under both standard query conventions
