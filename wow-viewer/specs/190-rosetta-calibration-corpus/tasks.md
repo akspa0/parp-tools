@@ -48,5 +48,5 @@
 
 ## Phase 4: Companion ADT Synthesizer (US4)
 
-- [ ] **T017**: Implement scan for orphan PM4 tiles lacking companion `_obj0.adt`.
-- [ ] **T018**: Synthesize minimal compliant companion ADT files with provenance sidecars.
+- [x] **T017**: Implement scan for orphan PM4 tiles lacking companion `.adt` or `_obj0.adt` via `RosettaCompanionAdtSynthesizer.ScanPm4Tiles`.
+- [x] **T018**: Synthesize minimal compliant companion ADT files with cryptographic SHA256 provenance tracking, safe overwrite protection, and `rosetta-synthesize-companions` CLI.

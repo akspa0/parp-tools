@@ -109,6 +109,10 @@ switch (area)
 	case "rosetta-lookup":
 		RunRosettaPm4Match(tail);
 		break;
+	case "rosetta-synthesize-companions":
+	case "rosetta-companions":
+		RunRosettaSynthesizeCompanions(tail);
+		break;
 	default:
 		Console.Error.WriteLine($"Unknown inspect area '{area}'.");
 		ShowUsage();
@@ -8581,6 +8585,63 @@ static void RunRosettaPm4Match(string[] args)
 	}
 }
 
+static void RunRosettaSynthesizeCompanions(string[] args)
+{
+	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+	{
+		Console.WriteLine("Usage: dotnet run -- rosetta-synthesize-companions <pm4Dir> --output <adtDir> [--map <mapName>] [--texture <tex>] [--report <provenance.json>] [--split-obj0] [--overwrite]");
+		Console.WriteLine("Scans orphan PM4 files lacking companion ADTs and synthesizes minimal compliant companion ADTs with SHA256 provenance tracking (Spec 190 US4 / FR-009 / FR-010).");
+		return;
+	}
+
+	string pm4Dir = args[0];
+	if (!Directory.Exists(pm4Dir))
+	{
+		Console.Error.WriteLine($"Error: PM4 directory not found: '{pm4Dir}'");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string? outputDir = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(outputDir))
+	{
+		Console.Error.WriteLine("Error: Output directory (--output <dir>) is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string? mapName = GetOption(args, "--map", "-m");
+	string? texture = GetOption(args, "--texture", "-t") ?? "tileset\\ocean\\westfallseafloor.blp";
+	string? reportPath = GetOption(args, "--report", "-r");
+	bool splitObj0 = args.Contains("--split-obj0");
+	bool overwrite = args.Contains("--overwrite");
+
+	var options = new RosettaCompanionSynthesisOptions(
+		GroundTexture: texture,
+		EmitSplitObj0: splitObj0,
+		Overwrite: overwrite,
+		DefaultMapName: mapName);
+
+	Console.WriteLine($"Scanning '{pm4Dir}' for PM4 tiles...");
+	var report = RosettaCompanionAdtSynthesizer.SynthesizeAllCompanions(
+		pm4Dir,
+		outputDir,
+		adtDirectory: outputDir,
+		options: options,
+		provenanceReportPath: reportPath);
+
+	Console.WriteLine($"=== Rosetta Companion ADT Synthesizer ===");
+	Console.WriteLine($"Total PM4 Tiles Scanned: {report.TotalPm4FilesScanned}");
+	Console.WriteLine($"Orphan Tiles (No ADT):   {report.OrphanCount}");
+	Console.WriteLine($"Companions Synthesized:  {report.SynthesizedCount}");
+	Console.WriteLine($"Companions Skipped:      {report.SkippedCount}");
+	Console.WriteLine($"Failed:                  {report.FailedCount}");
+	if (!string.IsNullOrWhiteSpace(reportPath))
+	{
+		Console.WriteLine($"Provenance Report:       {reportPath}");
+	}
+}
+
 /// <summary>
 /// Picks the layer-0 terrain texture from the client itself. An explicit request wins but must
 /// exist; otherwise the era-neutral default is used when the client ships it, and failing that one
@@ -9997,6 +10058,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect rosetta-datastore-query <datastorePath> [--asset <pathOrId>] [--build <buildId>] [--map <mapName>]");
 	Console.WriteLine("  wowviewer-inspect rosetta-datastore-diff <datastorePath> --base <buildId> --target <buildId> [--output <diff.json>]");
 	Console.WriteLine("  wowviewer-inspect rosetta-pm4-match <pm4Path> --library <libraryJsonPath> [--legacy-adt <adtPath>] [--output <report.json>] [--tolerance <float>] [--top-k <int>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-synthesize-companions <pm4Dir> --output <adtDir> [--map <mapName>] [--texture <tex>] [--report <provenance.json>] [--split-obj0] [--overwrite]");
 }
 
 static Pm4SegmentExportFile AssertSinglePm4ExportFile(Pm4SegmentExportRun exportRun, string input)

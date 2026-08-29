@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-28
 
+**Spec 190 lane (2026-08-28, checkpoint 33).** Phase 4 Companion ADT Synthesizer (US4) — COMPLETE:
+1. Created `RosettaCompanionAdtSynthesizer` in `WowViewer.Core.IO.Maps` to scan PM4 file directories and identify orphan PM4 tiles lacking companion `.adt` or `_obj0.adt` files.
+2. Implemented minimal compliant companion ADT synthesis (`BlankAdtFactory` / `LkAdtWriter`) generating standard valid ADTs with flat terrain and authentic headers (`MVER`, `MHDR`, `MCIN`, `MTEX`, `MMDX`, `MMID`, `MWMO`, `MWID`, `MDDF`, `MODF`, `MCNK`).
+3. Added SHA256 cryptographic provenance reporting (`RosettaCompanionProvenanceReport`) recording source PM4 files, output paths, timestamps, options, and content hashes to distinguish synthetic data from authentic game data (FR-009, FR-010, SC-003).
+4. Implemented safe overwrite protection skipping existing companions by default and `--overwrite` flag.
+5. Added CLI command `rosetta-synthesize-companions` in `WowViewer.Tool.Inspect` (`Program.cs`).
+6. Authored 6 comprehensive unit tests in [`RosettaCompanionAdtSynthesizerTests.cs`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/RosettaCompanionAdtSynthesizerTests.cs). All 69 Rosetta tests pass green (100%).
+
 **Spec 190 lane (2026-08-28, checkpoint 32).** Phase 3 Deterministic PM4 Lookup Engine (US3):
 1. Created `RosettaPm4LookupEngine` in `WowViewer.Core.PM4.Matching` for pure deterministic PM4 object identification against `RosettaReferenceLibrary` without ML/LLMs.
 2. Implemented tri-state classification (`Identified`, `Ambiguous`, `NoReference`, `Ineligible`) with score floor ($0.45$), ambiguity window ($0.03$), and bounding tolerance pruning (`FindCandidatesByBounds`).

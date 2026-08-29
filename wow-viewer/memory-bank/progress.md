@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-28
 
+## 2026-08-28 — Spec 190 Phase 4: Companion ADT Synthesizer (US4)
+- **Landed:**
+  - **Companion ADT Scanner & Synthesizer (`RosettaCompanionAdtSynthesizer`):** Scans directories for orphan `.pm4` files lacking companion ADTs and synthesizes minimal compliant companion ADTs with authentic headers (`MVER`, `MHDR`, `MCIN`, `MTEX`, `MMDX`, `MMID`, `MWMO`, `MWID`, `MDDF`, `MODF`, `MCNK`) via `BlankAdtFactory` and `LkAdtWriter`.
+  - **Cryptographic Provenance Manifest (`RosettaCompanionProvenanceReport`):** Emits machine-readable provenance reports with SHA256 hashes, source PM4 references, generation options, and timestamps distinguishing synthetic files from authentic game assets (FR-010).
+  - **Safe Overwrite Protection:** Skips existing companion files by default, with `--overwrite` option for explicit regeneration.
+  - **CLI Companion Tool (`rosetta-synthesize-companions`):** Added CLI command with structured summary reporting and provenance export.
+  - **Unit Tests:** Added 6 new tests in [`RosettaCompanionAdtSynthesizerTests.cs`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/RosettaCompanionAdtSynthesizerTests.cs). All 69 Rosetta unit tests pass green.
+
 ## 2026-08-28 — Spec 190 Phase 3: Deterministic PM4 Lookup Engine (US3)
 - **Landed:**
   - **Deterministic PM4 Lookup Engine (`RosettaPm4LookupEngine`):** Pure non-LLM geometric identification engine matching real PM4 geometry segments against `RosettaReferenceLibrary` using multi-signal scoring, bounding candidate pruning, and tri-state classification (`Identified`, `Ambiguous`, `NoReference`, `Ineligible`).

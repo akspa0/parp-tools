@@ -97,11 +97,17 @@ This plan details the implementation across 4 phases:
 - [x] Smooth walkable baseline ($Z = 0$) eliminating saw-tooth `/\` knife-edge ridges and pits.
 - [x] 56 unit tests passing green.
 
-### Phase 3: Deterministic PM4 Lookup Engine (US3)
-- [ ] Lookup engine querying `ReferenceLibrary` for real decoded PM4 segments.
-- [ ] Tri-state result classification: `Identified`, `Ambiguous`, `NoReference`.
-- [ ] Integration with Spec 176 Reconciliation workbench.
+### Phase 3: Deterministic PM4 Lookup Engine (US3) (Completed)
+- [x] Lookup engine querying `ReferenceLibrary` for real decoded PM4 segments (`RosettaPm4LookupEngine`).
+- [x] Tri-state result classification: `Identified`, `Ambiguous`, `NoReference`, `Ineligible`.
+- [x] Granular signal evidence evaluation (`AspectRatio`, `MajorSpan`, `Volume`, `Footprint`, `TypeFlags`).
+- [x] Integration with Spec 176 Reconciliation pipeline (`Pm4ReconciliationInputAdapter.BuildRosettaCorpusReferences`).
+- [x] CLI command `rosetta-pm4-match` with JSON reporting.
+- [x] 63 unit tests passing green.
 
-### Phase 4: Companion ADT Synthesizer (US4)
-- [ ] Scan PM4 tiles lacking companion `_obj0.adt`.
-- [ ] Synthesize minimal valid companion ADTs with provenance tracking.
+### Phase 4: Companion ADT Synthesizer (US4) (Completed)
+- [x] Scan PM4 tiles lacking companion `.adt` or `_obj0.adt` (`RosettaCompanionAdtSynthesizer.ScanPm4Tiles`).
+- [x] Synthesize minimal valid compliant companion ADTs (`BlankAdtFactory` / `LkAdtWriter`).
+- [x] Cryptographic SHA256 provenance tracking (`RosettaCompanionProvenanceReport`).
+- [x] CLI command `rosetta-synthesize-companions`.
+- [x] 69 unit tests passing green.
