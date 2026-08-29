@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace WowViewer.Core.Editor.Procedural;
+namespace WowViewer.Core.IO.Procedural;
 
 /// <summary>
 /// Configuration parameters for the procedural garden terrain sculptor.
@@ -98,7 +98,7 @@ public static class ProceduralTerrainSculptor
     public static float SampleBlendedHeight(
         float u,
         float v,
-        IReadOnlyList<AdaptiveExhibitPlacement> tilePlacements,
+        IReadOnlyList<AdaptiveExhibitPlacement>? tilePlacements,
         TerrainSculptorOptions options)
     {
         // 1. Base Garden Landscape Height
@@ -149,54 +149,62 @@ public static class ProceduralTerrainSculptor
         // Smooth pass across outer 9x9 grid
         for (int pass = 0; pass < 2; pass++)
         {
-            for (int row = 0; row < 9; row++)
+            for (int r = 0; r < 9; r++)
             {
-                for (int col = 0; col < 8; col++)
+                for (int c = 0; c < 9; c++)
                 {
-                    int i0 = (row * 9) + col;
-                    int i1 = i0 + 1;
-                    float diff = heights[i1] - heights[i0];
-                    if (MathF.Abs(diff) > maxStepOuter)
+                    int curr = (r * 9) + c;
+                    if (c < 8)
                     {
-                        float sign = MathF.Sign(diff);
-                        heights[i1] = heights[i0] + (sign * maxStepOuter);
+                        int right = curr + 1;
+                        float diff = heights[right] - heights[curr];
+                        if (MathF.Abs(diff) > maxStepOuter)
+                        {
+                            float sign = MathF.Sign(diff);
+                            heights[right] = heights[curr] + (sign * maxStepOuter);
+                        }
                     }
-                }
-            }
-
-            for (int col = 0; col < 9; col++)
-            {
-                for (int row = 0; row < 8; row++)
-                {
-                    int i0 = (row * 9) + col;
-                    int i1 = ((row + 1) * 9) + col;
-                    float diff = heights[i1] - heights[i0];
-                    if (MathF.Abs(diff) > maxStepOuter)
+                    if (r < 8)
                     {
-                        float sign = MathF.Sign(diff);
-                        heights[i1] = heights[i0] + (sign * maxStepOuter);
+                        int down = curr + 9;
+                        float diff = heights[down] - heights[curr];
+                        if (MathF.Abs(diff) > maxStepOuter)
+                        {
+                            float sign = MathF.Sign(diff);
+                            heights[down] = heights[curr] + (sign * maxStepOuter);
+                        }
                     }
                 }
             }
         }
 
-        // Keep inner vertices smoothly bounded by their 4 surrounding outer corners
-        for (int row = 0; row < 8; row++)
+        // Keep inner 8x8 vertices bounded by surrounding outer 4 vertices
+        for (int r = 0; r < 8; r++)
         {
-            for (int col = 0; col < 8; col++)
+            for (int c = 0; c < 8; c++)
             {
-                int innerIdx = 81 + (row * 8) + col;
-                int oTL = (row * 9) + col;
-                int oTR = oTL + 1;
-                int oBL = ((row + 1) * 9) + col;
-                int oBR = oBL + 1;
+                int innerIdx = 81 + (r * 8) + c;
+                int o00 = (r * 9) + c;
+                int o01 = o00 + 1;
+                int o10 = ((r + 1) * 9) + c;
+                int o11 = o10 + 1;
 
-                float cornerAvg = (heights[oTL] + heights[oTR] + heights[oBL] + heights[oBR]) * 0.25f;
-                float clampedInner = Math.Clamp(heights[innerIdx], cornerAvg - maxStepOuter, cornerAvg + maxStepOuter);
-                heights[innerIdx] = (heights[innerIdx] * 0.4f) + (clampedInner * 0.6f);
+                float avgOuter = (heights[o00] + heights[o01] + heights[o10] + heights[o11]) * 0.25f;
+                float maxO = MathF.Max(MathF.Max(heights[o00], heights[o01]), MathF.Max(heights[o10], heights[o11]));
+                float minO = MathF.Min(MathF.Min(heights[o00], heights[o01]), MathF.Min(heights[o10], heights[o11]));
+
+                heights[innerIdx] = Math.Clamp(heights[innerIdx], minO - 0.5f, maxO + 0.5f);
             }
         }
     }
+
+    private static float SmoothStep(float edge0, float edge1, float x)
+    {
+        float t = Math.Clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - (2.0f * t));
+    }
+
+    private static float Lerp(float a, float b, float t) => a + ((b - a) * t);
 
     private static float SmoothNoise(float x, float y, int seed)
     {
@@ -205,39 +213,24 @@ public static class ProceduralTerrainSculptor
         int x1 = x0 + 1;
         int y1 = y0 + 1;
 
-        float fx = x - x0;
-        float fy = y - y0;
-
-        float sx = SmoothStep(0f, 1f, fx);
-        float sy = SmoothStep(0f, 1f, fy);
+        float sx = x - x0;
+        float sy = y - y0;
 
         float n00 = Hash2D(x0, y0, seed);
         float n10 = Hash2D(x1, y0, seed);
         float n01 = Hash2D(x0, y1, seed);
         float n11 = Hash2D(x1, y1, seed);
 
-        float ix0 = Lerp(n00, n10, sx);
-        float ix1 = Lerp(n01, n11, sx);
+        float ix0 = Lerp(n00, n10, SmoothStep(0f, 1f, sx));
+        float ix1 = Lerp(n01, n11, SmoothStep(0f, 1f, sx));
 
-        return Lerp(ix0, ix1, sy);
+        return Lerp(ix0, ix1, SmoothStep(0f, 1f, sy));
     }
 
     private static float Hash2D(int x, int y, int seed)
     {
-        int h = seed + (x * 374761393) + (y * 668265263);
-        h = (h ^ (h >> 13)) * 1274126177;
-        return ((h & 0x7fffffff) / (float)0x7fffffff);
+        int n = x + (y * 57) + (seed * 131);
+        n = (n << 13) ^ n;
+        return (1.0f - (((n * ((n * n * 15731) + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0f) + 1.0f) * 0.5f;
     }
-
-    private static float SmoothStep(float edge0, float edge1, float x)
-    {
-        float diff = edge1 - edge0;
-        if (MathF.Abs(diff) < 0.0001f)
-            return x >= edge1 ? 1f : 0f;
-
-        float t = Math.Clamp((x - edge0) / diff, 0f, 1f);
-        return t * t * (3f - (2f * t));
-    }
-
-    private static float Lerp(float a, float b, float t) => a + ((b - a) * t);
 }

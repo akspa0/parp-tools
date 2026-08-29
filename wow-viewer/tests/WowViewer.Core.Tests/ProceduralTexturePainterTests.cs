@@ -1,6 +1,6 @@
 using System.Numerics;
-using WowViewer.Core.Editor.Procedural;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.IO.Procedural;
 using WowViewer.Core.Maps;
 using Xunit;
 

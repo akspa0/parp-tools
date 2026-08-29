@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.IO.Procedural;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -823,6 +824,7 @@ public static class RosettaTilesetGenerator
                 value: 0,
                 RosettaGeneratorOptions.ChunkSize);
         }
+
         return canvas;
     }
 
@@ -862,7 +864,7 @@ public static class RosettaTilesetGenerator
         IReadOnlyList<LkMcnkData> paintedChunks = RosettaTextPainter.PaintTile(
             blank.Chunks, rects, labels, RosettaGeneratorOptions.ChunkSize);
 
-        byte[]? alphaCanvas = tile.AlphaCanvas ?? BuildTileAlphaCanvas(tile, paintCellBorders);
+        byte[]? alphaCanvas = tile.AlphaCanvas ?? (paintCellBorders ? BuildTileAlphaCanvas(tile, paintCellBorders) : null);
         byte[]? checkersCanvas = tile.CheckersCanvas ?? (tile.Pedestals is { Count: > 0 } ? BuildTileCheckersCanvas(tile, pedestalBevelMeters) : null);
 
         byte[][]? chunkLabelMaps = alphaCanvas is not null
@@ -898,7 +900,6 @@ public static class RosettaTilesetGenerator
 
         foreach (RosettaPlacementRecord placement in tilePlacements)
         {
-            // LkAdtWriter takes RENDERER coordinates and applies the MapOrigin flip itself.
             if (placement.Asset.Kind == RosettaAssetKind.Model)
             {
                 int nameId = IndexOfOrAdd(modelNames, placement.Asset.AssetPath);
@@ -907,8 +908,6 @@ public static class RosettaTilesetGenerator
             else
             {
                 int nameId = IndexOfOrAdd(wmoNames, placement.Asset.AssetPath);
-                // Rotation is zero, so a square half-extent from the larger horizontal axis is a
-                // conservative world-space AABB no matter which model axis maps to which.
                 float extentU = MathF.Abs(placement.Asset.BoundsMax.X - placement.Asset.BoundsMin.X);
                 float extentV = MathF.Abs(placement.Asset.BoundsMax.Y - placement.Asset.BoundsMin.Y);
                 float half = MathF.Max(extentU, extentV) / 2f;
@@ -923,8 +922,6 @@ public static class RosettaTilesetGenerator
             }
         }
 
-        // Per-chunk MCRF references (placement indices, matching BlankAdtFactory's convention)
-        // so chunk-admitted render pipelines see every object.
         var mddfRefsByChunk = AssignRefsToChunks(paintedChunks.Count, tilePlacements
             .Select(p => (Index: mddf.IndexOfByUniqueId(p.UniqueId), U: p.RawPosition.X - (p.TileY * RosettaGeneratorOptions.TileSize), V: p.RawPosition.Y - (p.TileX * RosettaGeneratorOptions.TileSize)))
             .Where(static t => t.Index >= 0));

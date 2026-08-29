@@ -2,7 +2,7 @@ using System.Numerics;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
-namespace WowViewer.Core.Editor.Procedural;
+namespace WowViewer.Core.IO.Procedural;
 
 /// <summary>
 /// Thematic aesthetic style for procedurally generated museum landscapes.

@@ -1,6 +1,15 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
+
+## 2026-08-29 — Spec 191: Procedural Garden Museum Map Generator & Dense Calibration Corpus
+- **Landed:**
+  - **Procedural 3D Mesh Terrain Sculpting:** Continuous organic harmonic garden terrain with $\le 25^\circ$ slope constraints and raised podium pedestals (`ProceduralTerrainSculptor`), synthesized directly into 145-vertex MCVT chunk height arrays in `RosettaTilesetGenerator`.
+  - **4-Layer Alpha Texture Splatting & Clean Center Plaza Floor:** Multi-layer alpha splats (`ProceduralTexturePainter`) generating base turf, cobblestone walkways, decorative checkerboard perimeter frames, and explicitly cleared neutral center exhibit plazas ($R \le 0.30 \times \text{CellSize}$) so 3D model silhouettes are distinct and uncluttered.
+  - **Semantic Asset Classification (`SemanticAssetClassifier`):** 14 archetypes, dungeon prefix context disambiguation, scaling multipliers.
+  - **Adaptive Layout Packing (`AdaptiveLayoutPacker`):** Multi-tier cell density packing (Micro to Grand), courtyard generation.
+  - **Minimap Directory & Output Cleanup:** Minimap BLPs and TRS files restricted to canonical client locations (`Textures\Minimap\` for Alpha 0.5.3, `World\Minimaps\` for Post-Alpha).
+  - **Verification:** All 72 Rosetta unit tests pass green (100%). Solution builds cleanly with 0 errors.
 
 ## 2026-08-28 — Spec 190 Phase 4: Companion ADT Synthesizer (US4)
 - **Landed:**

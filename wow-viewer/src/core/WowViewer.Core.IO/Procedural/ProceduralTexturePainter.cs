@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace WowViewer.Core.Editor.Procedural;
+namespace WowViewer.Core.IO.Procedural;
 
 /// <summary>
 /// A 4-layer texture palette for procedural map rendering.
@@ -124,7 +124,7 @@ public static class ProceduralTexturePainter
                     }
                 }
 
-                // 2. Evaluate Exhibit Pedestal Decor (Checkers Ring & Clean Center Plaza)
+                // 2. Evaluate Exhibit Podiums (Checker Border Ring + Clean Center Plaza)
                 if (tilePlacements != null)
                 {
                     for (int i = 0; i < tilePlacements.Count; i++)
@@ -137,34 +137,35 @@ public static class ProceduralTexturePainter
                         float dy = localV - centerV;
                         float dist = MathF.Sqrt((dx * dx) + (dy * dy));
 
-                        float rInner = p.CellSize * 0.32f;
-                        float rOuter = p.CellSize * 0.46f;
+                        float rCenter = p.CellSize * 0.28f;
+                        float rCheckerInner = p.CellSize * 0.30f;
+                        float rCheckerOuter = p.CellSize * 0.46f;
 
                         // Clean neutral center plaza (Layer 3)
-                        if (dist < rInner)
+                        if (dist <= rCheckerInner)
                         {
-                            float plazaAlpha = SmoothStep(rInner, rInner * 0.85f, dist);
-                            byte pVal = (byte)Math.Clamp((int)(plazaAlpha * 255f), 0, 255);
-                            if (pVal > 0)
+                            float plazaAlpha = SmoothStep(rCheckerInner, rCenter, dist);
+                            byte val = (byte)Math.Clamp((int)(plazaAlpha * 255f), 0, 255);
+                            if (val > 0)
                             {
-                                alphaPlaza[pixelIndex] = Math.Max(alphaPlaza[pixelIndex], pVal);
+                                alphaPlaza[pixelIndex] = Math.Max(alphaPlaza[pixelIndex], val);
                                 hasPlaza = true;
                             }
                         }
 
-                        // Decorative Checkerboard Border Ring (Layer 2)
-                        if (dist >= rInner * 0.8f && dist < rOuter)
+                        // Checkerboard perimeter ring (Layer 2)
+                        if (dist >= rCenter && dist <= rCheckerOuter)
                         {
-                            float ringAlpha = 1.0f;
-                            if (dist < rInner)
-                                ringAlpha = SmoothStep(rInner * 0.8f, rInner, dist);
-                            else
-                                ringAlpha = SmoothStep(rOuter, rOuter * 0.9f, dist);
+                            float ringFade = 1.0f;
+                            if (dist < rCheckerInner)
+                                ringFade = SmoothStep(rCenter, rCheckerInner, dist);
+                            else if (dist > rCheckerInner)
+                                ringFade = SmoothStep(rCheckerOuter, rCheckerInner, dist);
 
-                            byte cVal = (byte)Math.Clamp((int)(ringAlpha * 255f), 0, 255);
-                            if (cVal > 0)
+                            byte val = (byte)Math.Clamp((int)(ringFade * 255f), 0, 255);
+                            if (val > 0)
                             {
-                                alphaCheckers[pixelIndex] = Math.Max(alphaCheckers[pixelIndex], cVal);
+                                alphaCheckers[pixelIndex] = Math.Max(alphaCheckers[pixelIndex], val);
                                 hasCheckers = true;
                             }
                         }
@@ -173,38 +174,33 @@ public static class ProceduralTexturePainter
             }
         }
 
-        // Build active layer stack (Layer 0 is always Base)
-        var textureList = new List<string>(4) { palette.BaseTexture };
-        var layerList = new List<byte[]>(3);
+        var textures = new List<string> { palette.BaseTexture };
+        var alphaLayers = new List<byte[]>();
 
         if (hasWalkway)
         {
-            textureList.Add(palette.WalkwayTexture);
-            layerList.Add(alphaWalkway);
+            textures.Add(palette.WalkwayTexture);
+            alphaLayers.Add(alphaWalkway);
         }
 
-        if (hasCheckers && textureList.Count < 4)
+        if (hasCheckers)
         {
-            textureList.Add(palette.CheckerBorderTexture);
-            layerList.Add(alphaCheckers);
+            textures.Add(palette.CheckerBorderTexture);
+            alphaLayers.Add(alphaCheckers);
         }
 
-        if (hasPlaza && textureList.Count < 4)
+        if (hasPlaza)
         {
-            textureList.Add(palette.CenterPlazaTexture);
-            layerList.Add(alphaPlaza);
+            textures.Add(palette.CenterPlazaTexture);
+            alphaLayers.Add(alphaPlaza);
         }
 
-        return new ChunkAlphaData(textureList, layerList);
+        return new ChunkAlphaData(textures, alphaLayers);
     }
 
     private static float SmoothStep(float edge0, float edge1, float x)
     {
-        float diff = edge1 - edge0;
-        if (MathF.Abs(diff) < 0.0001f)
-            return x >= edge1 ? 1f : 0f;
-
-        float t = Math.Clamp((x - edge0) / diff, 0f, 1f);
-        return t * t * (3f - (2f * t));
+        float t = Math.Clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - (2.0f * t));
     }
 }

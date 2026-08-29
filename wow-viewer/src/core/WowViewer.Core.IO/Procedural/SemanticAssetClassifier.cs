@@ -2,7 +2,7 @@ using System.Numerics;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
 
-namespace WowViewer.Core.Editor.Procedural;
+namespace WowViewer.Core.IO.Procedural;
 
 /// <summary>
 /// High-level semantic archetype derived from asset folder hierarchy and filename tokens.
