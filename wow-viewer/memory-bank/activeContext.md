@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-28
 
+**Spec 190 lane (2026-08-28, checkpoint 32).** Phase 3 Deterministic PM4 Lookup Engine (US3):
+1. Created `RosettaPm4LookupEngine` in `WowViewer.Core.PM4.Matching` for pure deterministic PM4 object identification against `RosettaReferenceLibrary` without ML/LLMs.
+2. Implemented tri-state classification (`Identified`, `Ambiguous`, `NoReference`, `Ineligible`) with score floor ($0.45$), ambiguity window ($0.03$), and bounding tolerance pruning (`FindCandidatesByBounds`).
+3. Added granular signal evidence evaluation (`AspectRatio`, `MajorSpan`, `Volume`, `Footprint`, `TypeFlags`) surfacing exact reasons for match agreement and discrepancy.
+4. Added `CompareWithLegacyScorer` and `Pm4ReconciliationInputAdapter.BuildRosettaCorpusReferences` connecting the global Rosetta reference library directly into the Spec 176 reconciliation pipeline.
+5. Added `rosetta-pm4-match` CLI command in `WowViewer.Tool.Inspect` (`Program.cs`) producing detailed console diagnostics and structured JSON match reports.
+6. Authored 7 comprehensive unit tests in [`RosettaPm4LookupEngineTests.cs`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/RosettaPm4LookupEngineTests.cs). All 63 Rosetta unit tests and all 82 Editor tests pass green (100%).
+
 **Spec 190 lane (2026-08-28, checkpoint 31).** Alpha 0.5.3 Native Client Ergonomics, First-Class DBCs, WDL Mesh, Map Splitting & +20Z Exhibits:
 1. Created `RosettaDbcGenerator` in `WowViewer.Core.IO.Dbc` to generate authentic binary `Map.dbc` (5 fields) and `AreaTable.dbc` (14 fields) for Alpha 0.5.3, registering Rosetta maps as first-class outdoor continents (Map ID 500+) and named designkit exhibit zones (Area ID 5000+).
 2. Added automatic `.wdl` distant low-resolution terrain mesh generation (`WdlWriter.Build`) alongside `.wdt` files.

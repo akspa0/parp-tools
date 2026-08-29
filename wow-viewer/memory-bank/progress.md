@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-28
 
+## 2026-08-28 — Spec 190 Phase 3: Deterministic PM4 Lookup Engine (US3)
+- **Landed:**
+  - **Deterministic PM4 Lookup Engine (`RosettaPm4LookupEngine`):** Pure non-LLM geometric identification engine matching real PM4 geometry segments against `RosettaReferenceLibrary` using multi-signal scoring, bounding candidate pruning, and tri-state classification (`Identified`, `Ambiguous`, `NoReference`, `Ineligible`).
+  - **Granular Signal Agreement & Disagreement Engine:** Compares aspect ratios, major spans, bounding volume, footprint area, and TypeFlags surface profiles to surface transparent reasons for candidate scoring.
+  - **Legacy Reconciliation Integration:** Added `CompareWithLegacyScorer` and `Pm4ReconciliationInputAdapter.BuildRosettaCorpusReferences` connecting the full reference library to Spec 176 reconciliation.
+  - **CLI Match Tool (`rosetta-pm4-match`):** Added CLI command with structured JSON output and console candidate breakdown tables.
+  - **Unit Tests:** Added 7 new tests in [`RosettaPm4LookupEngineTests.cs`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/RosettaPm4LookupEngineTests.cs). All 63 Rosetta unit tests pass green.
+
 ## 2026-08-28 — Spec 190 Phase 2.5: Alpha 0.5.3 Native Client Ergonomics, First-Class DBC Generation, WDL Mesh & +20Z Exhibits
 
 - **Landed:**

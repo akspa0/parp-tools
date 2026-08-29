@@ -26,6 +26,7 @@ using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
 using WowViewer.Core.PM4.Matching;
 using WowViewer.Core.PM4.Models;
+using WowViewer.Core.PM4.Reconciliation;
 using WowViewer.Core.PM4.Research;
 using WowViewer.Core.PM4.Services;
 using WowViewer.Core.Runtime;
@@ -103,6 +104,10 @@ switch (area)
 		break;
 	case "rosetta-library-selftest":
 		RunRosettaLibrarySelfTest(tail);
+		break;
+	case "rosetta-pm4-match":
+	case "rosetta-lookup":
+		RunRosettaPm4Match(tail);
 		break;
 	default:
 		Console.Error.WriteLine($"Unknown inspect area '{area}'.");
@@ -8434,6 +8439,148 @@ static void RunRosettaLibrarySelfTest(string[] args)
 		Environment.ExitCode = 1;
 }
 
+static void RunRosettaPm4Match(string[] args)
+{
+	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+	{
+		Console.WriteLine("Usage: dotnet run -- rosetta-pm4-match <pm4Path> --library <libraryJsonPath> [--legacy-adt <adtPath>] [--output <report.json>] [--tolerance <float>] [--top-k <int>]");
+		Console.WriteLine("Scores real PM4 segments deterministically against the global Rosetta Reference Library (Spec 190 US3).");
+		return;
+	}
+
+	string pm4Path = args[0];
+	if (!File.Exists(pm4Path))
+	{
+		Console.Error.WriteLine($"Error: PM4 file not found: '{pm4Path}'");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string? libraryPath = GetOption(args, "--library", "-l");
+	if (string.IsNullOrWhiteSpace(libraryPath) || !File.Exists(libraryPath))
+	{
+		Console.Error.WriteLine($"Error: Reference library file not found or unspecified (--library <path>)");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string? legacyAdtPath = GetOption(args, "--legacy-adt", "-a");
+	string? outputPath = GetOption(args, "--output", "-o");
+	float tolerance = float.TryParse(GetOption(args, "--tolerance"), out float tol) ? tol : 0.5f;
+	int topK = int.TryParse(GetOption(args, "--top-k"), out int tk) ? tk : 10;
+
+	var library = RosettaReferenceLibrary.LoadFromJson(libraryPath);
+	var segments = Pm4ObjectSegmentBuilder.Build(pm4Path);
+
+	if (segments.Count == 0)
+	{
+		Console.WriteLine($"No object segments extracted from '{pm4Path}'.");
+		return;
+	}
+
+	var options = new RosettaLookupOptions(ToleranceFactor: tolerance, MaxCandidates: topK);
+	IReadOnlyList<Pm4AssetReferenceSignalRecord>? legacyCorpus = null;
+	if (!string.IsNullOrWhiteSpace(legacyAdtPath) && File.Exists(legacyAdtPath))
+	{
+		AdtPlacementCatalog catalog = AdtPlacementReader.Read(legacyAdtPath);
+		legacyCorpus = Pm4ReconciliationInputAdapter.BuildSelfCorpusReferences(catalog, "legacy", "legacy");
+	}
+
+	var results = new List<RosettaPm4LookupResult>(segments.Count);
+	foreach (var segment in segments)
+	{
+		var res = legacyCorpus != null
+			? RosettaPm4LookupEngine.CompareWithLegacyScorer(segment, legacyCorpus, library, options)
+			: RosettaPm4LookupEngine.LookupSegment(segment, library, options);
+		results.Add(res);
+	}
+
+	int matched = results.Count(r => r.IsIdentified);
+	int ambiguous = results.Count(r => r.IsAmbiguous);
+	int noRef = results.Count(r => r.IsNoReference);
+	int ineligible = results.Count(r => r.IsIneligible);
+
+	Console.WriteLine($"=== Rosetta PM4 Deterministic Object Identification ===");
+	Console.WriteLine($"PM4 File:          {pm4Path}");
+	Console.WriteLine($"Reference Library: {library.LibraryId} ({library.TotalAssets} assets)");
+	Console.WriteLine($"Total Segments:    {segments.Count}");
+	Console.WriteLine($"  Identified:      {matched} ({matched * 100.0 / segments.Count:F1}%)");
+	Console.WriteLine($"  Ambiguous:       {ambiguous} ({ambiguous * 100.0 / segments.Count:F1}%)");
+	Console.WriteLine($"  No Reference:    {noRef} ({noRef * 100.0 / segments.Count:F1}%)");
+	Console.WriteLine($"  Ineligible:      {ineligible}");
+
+	if (legacyCorpus != null)
+	{
+		int compared = results.Count(r => r.AgreesWithLegacy.HasValue);
+		int agreed = results.Count(r => r.AgreesWithLegacy == true);
+		int disagreed = results.Count(r => r.AgreesWithLegacy == false);
+		Console.WriteLine($"Legacy Agreement:  {agreed}/{compared} ({agreed * 100.0 / Math.Max(1, compared):F1}%), Disagreements: {disagreed}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("Segment Identification Details:");
+	foreach (var r in results.Take(25))
+	{
+		string topAsset = r.TopCandidate?.AssetPath ?? "(none)";
+		double score = r.TopCandidate?.OverallScore ?? 0.0;
+		Console.WriteLine($"  [{r.Status}] Seg {r.Segment.Segment.SegmentId} ({r.ExpectedAssetKind ?? "unknown"}): {topAsset} (Score: {score:F3})");
+		if (r.SignalAgreements.Count > 0)
+		{
+			Console.WriteLine($"    + Agreements: {string.Join(", ", r.SignalAgreements.Values.Take(2))}");
+		}
+		if (r.SignalDisagreements.Count > 0)
+		{
+			Console.WriteLine($"    - Disagreements: {string.Join(", ", r.SignalDisagreements.Values.Take(2))}");
+		}
+	}
+	if (results.Count > 25)
+	{
+		Console.WriteLine($"  ... and {results.Count - 25} more segments.");
+	}
+
+	if (!string.IsNullOrWhiteSpace(outputPath))
+	{
+		var report = new
+		{
+			pm4File = pm4Path,
+			libraryId = library.LibraryId,
+			totalSegments = segments.Count,
+			matched,
+			ambiguous,
+			noReference = noRef,
+			ineligible,
+			results = results.Select(r => new
+			{
+				segmentId = r.Segment.Segment.SegmentId,
+				ck24 = r.Segment.Segment.Ck24,
+				ck24Type = r.Segment.Segment.Ck24Type,
+				expectedKind = r.ExpectedAssetKind,
+				status = r.Status.ToString(),
+				topCandidate = r.TopCandidate != null ? new
+				{
+					assetId = r.TopCandidate.AssetId,
+					assetPath = r.TopCandidate.AssetPath,
+					score = r.TopCandidate.OverallScore,
+					scoreBreakdown = r.TopCandidate.ScoreBreakdown
+				} : null,
+				candidates = r.Candidates.Select(c => new
+				{
+					assetId = c.AssetId,
+					assetPath = c.AssetPath,
+					score = c.OverallScore
+				}),
+				signalAgreements = r.SignalAgreements,
+				signalDisagreements = r.SignalDisagreements,
+				agreesWithLegacy = r.AgreesWithLegacy
+			})
+		};
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine();
+		Console.WriteLine($"Match report saved to: {outputPath}");
+	}
+}
+
 /// <summary>
 /// Picks the layer-0 terrain texture from the client itself. An explicit request wins but must
 /// exist; otherwise the era-neutral default is used when the client ships it, and failing that one
@@ -9849,6 +9996,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect rosetta-datastore-info <datastorePath>");
 	Console.WriteLine("  wowviewer-inspect rosetta-datastore-query <datastorePath> [--asset <pathOrId>] [--build <buildId>] [--map <mapName>]");
 	Console.WriteLine("  wowviewer-inspect rosetta-datastore-diff <datastorePath> --base <buildId> --target <buildId> [--output <diff.json>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-pm4-match <pm4Path> --library <libraryJsonPath> [--legacy-adt <adtPath>] [--output <report.json>] [--tolerance <float>] [--top-k <int>]");
 }
 
 static Pm4SegmentExportFile AssertSinglePm4ExportFile(Pm4SegmentExportRun exportRun, string input)

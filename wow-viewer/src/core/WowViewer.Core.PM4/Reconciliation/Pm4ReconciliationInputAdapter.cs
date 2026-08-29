@@ -305,6 +305,19 @@ public static class Pm4ReconciliationInputAdapter
         return assets;
     }
 
+    /// <summary>
+    /// Builds reference signal records from a complete <see cref="RosettaReferenceLibrary"/>
+    /// for consumption by the reconciliation proposal engine (Spec 190 Phase 3).
+    /// </summary>
+    public static IReadOnlyList<Pm4AssetReferenceSignalRecord> BuildRosettaCorpusReferences(
+        RosettaReferenceLibrary library)
+    {
+        ArgumentNullException.ThrowIfNull(library);
+        return library.Assets
+            .Select(static asset => asset.ToAssetReferenceSignalRecord())
+            .ToList();
+    }
+
     private static double? TryResolveHeightSignal(Pm4BuiltObjectSegment segment, float worldMinZ, float worldMaxZ)
     {
         // MSUR _0x1C is a float bit pattern (Spec 185: equal to the producing placement's

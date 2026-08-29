@@ -42,9 +42,9 @@
 
 ## Phase 3: Deterministic PM4 Lookup Engine (US3)
 
-- [ ] **T014**: Implement candidate lookup against `ReferenceLibrary` for real PM4 geometry segments.
-- [ ] **T015**: Surface structured results (`Identified`, `Ambiguous`, `NoReference`) with comparison evidence.
-- [ ] **T016**: Connect lookup engine to Spec 176 Reconciliation UI in the viewer.
+- [x] **T014**: Implement candidate lookup against `ReferenceLibrary` for real PM4 geometry segments via `RosettaPm4LookupEngine`.
+- [x] **T015**: Surface structured results (`Identified`, `Ambiguous`, `NoReference`, `Ineligible`) with granular signal evidence (`AspectRatio`, `MajorSpan`, `Volume`, `Footprint`, `TypeFlags`).
+- [x] **T016**: Connect lookup engine to Spec 176 Reconciliation pipeline via `Pm4ReconciliationInputAdapter.BuildRosettaCorpusReferences` and `rosetta-pm4-match` CLI.
 
 ## Phase 4: Companion ADT Synthesizer (US4)
 
