@@ -10,12 +10,16 @@ public class FrustumCuller
 {
     private readonly Plane[] _planes = new Plane[6];
 
+    private Vector3? _cameraPos;
+
     /// <summary>
     /// Extract and normalize the 6 frustum planes from a combined view-projection matrix.
     /// Plane order: Left, Right, Top, Bottom, Near, Far.
     /// </summary>
-    public void Update(Matrix4x4 vp)
+    public void Update(Matrix4x4 vp, Vector3? cameraPos = null)
     {
+        _cameraPos = cameraPos;
+
         // Left: row4 + row1
         _planes[0] = NormalizePlane(new Plane(
             vp.M14 + vp.M11, vp.M24 + vp.M21, vp.M34 + vp.M31, vp.M44 + vp.M41));
@@ -70,9 +74,21 @@ public class FrustumCuller
     /// <summary>
     /// Test whether an axis-aligned bounding box intersects or is inside the frustum.
     /// Uses the "test all 8 corners against each plane" approach from the original client.
+    /// If camera is inside or near the bounding box, it is unconditionally visible.
     /// </summary>
     public bool TestAABB(Vector3 min, Vector3 max)
     {
+        if (_cameraPos.HasValue)
+        {
+            Vector3 cam = _cameraPos.Value;
+            if (cam.X >= min.X - 5.0f && cam.X <= max.X + 5.0f &&
+                cam.Y >= min.Y - 5.0f && cam.Y <= max.Y + 5.0f &&
+                cam.Z >= min.Z - 5.0f && cam.Z <= max.Z + 5.0f)
+            {
+                return true;
+            }
+        }
+
         Span<Vector3> corners = stackalloc Vector3[8];
         corners[0] = new Vector3(min.X, min.Y, min.Z);
         corners[1] = new Vector3(max.X, min.Y, min.Z);

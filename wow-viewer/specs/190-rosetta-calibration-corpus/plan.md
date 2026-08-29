@@ -74,11 +74,19 @@ This plan details the implementation across 4 phases:
 - [x] Synthetic minimap model/WMO pins render at the object band center used by the generated placements.
 - [x] Complete focused test coverage in `RosettaTilesetGeneratorTests.cs`.
 
-### Phase 2: Reference Library Builder (US2)
-- [ ] Pipeline adapter decoding synthetic Rosetta tiles back into standard `AdtPlacementCatalog`.
-- [ ] Signature extraction for 100% of placed objects.
-- [ ] `ReferenceLibrary` model and serializer.
-- [ ] Automated self-test runner asserting $\ge 99\%$ top-1 identification accuracy.
+### Phase 1.5: Multi-Version Zarr Datastore, Cross-Era Extension Shifting & Viewer Integration (Completed)
+- [x] Cross-era model extension shifting (`.mdx` $\leftrightarrow$ `.mdl` $\leftrightarrow$ `.m2`) in `WorldAssetManager`, `WmoRenderer`, and `ViewerApp`.
+- [x] Build metadata records (`RosettaBuildMetadata`) and cross-build diff engine (`RosettaBuildDiff`, `ComputeBuildDiff`) in `RosettaObjectLibrary`.
+- [x] CLI `rosetta-datastore-diff` command in `WowViewer.Tool.Inspect`.
+- [x] Viewer UI menu item "Load from Rosetta Datastore..." with Data Version, Map Name, Base Game Version dropdowns, and diff statistics.
+- [x] End-user documentation for Phased Maps and Rosetta Datastore in `USERGUIDE.md` and `README.md`.
+- [x] Unit tests for cross-build diffing and multi-version queries in `RosettaDatastoreTests.cs`.
+
+### Phase 2: Reference Library Builder (US2) (Completed)
+- [x] Pipeline adapter decoding synthetic Rosetta tiles back into standard `AdtPlacementCatalog`.
+- [x] Signature extraction for 100% of placed objects (`RosettaReferenceAsset`).
+- [x] `RosettaReferenceLibrary` model, JSON serializer with custom vector converters, and CLI integration (`rosetta-build-library`).
+- [x] Automated self-test runner asserting $\ge 99\%$ top-1 identification accuracy (`RosettaReferenceLibrarySelfTest`, CLI `rosetta-library-selftest`, and unit tests in `RosettaReferenceLibraryTests.cs`).
 
 ### Phase 3: Deterministic PM4 Lookup Engine (US3)
 - [ ] Lookup engine querying `ReferenceLibrary` for real decoded PM4 segments.

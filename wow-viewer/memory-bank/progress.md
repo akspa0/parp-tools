@@ -1,6 +1,36 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
+
+## 2026-08-28 — Spec 190 Phase 2: Rosetta Reference Library Builder (US2) & Verification Suite
+
+- **Landed:**
+  - **Rosetta Reference Library Data Model (`RosettaReferenceLibrary` & `RosettaReferenceAsset`):** Complete model representation containing asset path, normalized path, kind (`"m2"`/`"wmo"`), client build, tile coordinates, bounding boxes (`Pm4Bounds3`), center, span, diagonal, volume, footprint hull/area, aspect ratios, sub-part bounds, signal feature dictionary, and `ToAssetReferenceSignalRecord()` for 100% interoperability with `Pm4AssetMatchScorer` and reconciliation services.
+  - **Synthetic Corpus Reader (`RosettaCorpusReader`):** Decodes synthetic Rosetta placements and geometry directly from `rosetta-manifest.json`, in-memory `RosettaGenerationResult`, and Zarr datastores (`RosettaObjectLibrary`), creating standardized reference libraries with deterministic SHA256 library IDs.
+  - **Automated Self-Test Verification Suite (`RosettaReferenceLibrarySelfTest`):** Runs systematic verification queries with exact and perturbed (jittered) bounding boxes to evaluate candidate match rankings against reference assets, enforcing the $\ge 99.0\%$ Top-1 accuracy requirement.
+  - **CLI Integration (`Program.cs`):**
+    - `wowviewer-inspect rosetta-build-library <input> [--output <path>] [--build <label>]`: Builds and saves reference libraries from directories, manifests, or datastores.
+    - `wowviewer-inspect rosetta-library-selftest <libraryJsonPath> [--tolerance <f>] [--top-k <n>] [--perturb]`: Executes the self-test suite and reports Top-1/Top-3 accuracy and any candidate defects.
+    - `rosetta-generate --emit-library [--library-output <path>]`: Automatically builds and saves the reference library alongside the generated map.
+  - **JSON Serialization:** Added custom `Vector3JsonConverter` and `Vector2JsonConverter` for clean, high-fidelity JSON serialization.
+  - **Unit Tests:** Authored 7 comprehensive unit tests in [`RosettaReferenceLibraryTests.cs`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/RosettaReferenceLibraryTests.cs). All 50 Rosetta unit tests pass green.
+
+## 2026-08-28 — Alpha WDT Row-Major Tile Indexing Fix & Visual Calibration Tools
+
+- **Landed:**
+  - **Fixed Alpha WDT Transposed Tile Loading:** In [`AlphaTerrainAdapter.cs`](file:///I:/parp/parp-tools/wow-viewer/src/viewer/WoWViewer/Terrain/AlphaTerrainAdapter.cs), corrected `TileExists` and `LoadTileWithPlacements` from column-major `tileX * 64 + tileY` to row-major `tileY * 64 + tileX`. Previously, every non-diagonal tile ($tileX \ne tileY$) loaded the terrain, heights, and MCAL alpha canvas of its transposed counterpart $(tileY, tileX)$, causing objects to float over mismatched terrain and labels.
+  - **Visual Calibration & Bullseye Diagnostics:** Added `DrawCircleOutline` and `DrawBullseyePattern` to [`RosettaAlphaPainter.cs`](file:///I:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.IO/Maps/RosettaAlphaPainter.cs) and [`RosettaTilesetGenerator.cs`](file:///I:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.IO/Maps/RosettaTilesetGenerator.cs). Calibration tiles and empty tiles now feature concentric range rings (30m to 240m), full-tile crosshair axes, and cardinal direction indicators (`NORTH (-Y)`, `SOUTH (+Y)`, `WEST (-X)`, `EAST (+X)`).
+  - **Unit Tests:** Added `AlphaPainter_DrawBullseyePattern_FillsExpectedRegions` and `AlphaWdt_AsymmetricTileCoordinates_MaintainRowMajorIntegrity` in [`RosettaTilesetGeneratorTests.cs`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/RosettaTilesetGeneratorTests.cs). All 43 tests pass green.
+
+## 2026-08-28 — Spec 190 Phase 1.5: Cross-Era Model Resolution, Rosetta Zarr Multi-Build Diffing & UI Load Dialog
+
+- **Landed:**
+  - **Cross-Era Model Extension Shifting (`.mdx` $\leftrightarrow$ `.mdl` $\leftrightarrow$ `.m2`):** Enabled seamless format shifting in `WorldAssetManager.cs`, `WmoRenderer.cs`, and `ViewerApp.cs`. Maps from any era (e.g. Rosetta 0.5.3 or Alpha WMOs with `.mdx` doodad references) automatically resolve and render with modern `.m2` models when running against newer clients (1.12.1 or 3.3.5), and vice-versa.
+  - **Rosetta Datastore Build Metadata & Diff Engine:** Added `RosettaBuildMetadata` writing in `RosettaDatastoreWriter.cs` and `RosettaBuildDiff` / `ComputeBuildDiff` in `RosettaObjectLibrary.cs` for fast comparison of asset additions, removals, format migrations, and geometry changes across builds without re-processing.
+  - **CLI Diff Command:** Added `rosetta-datastore-diff` in `WowViewer.Tool.Inspect` (`Program.cs`).
+  - **Viewer UI Integration:** Added **File > Load from Rosetta Datastore...** menu item and interactive modal in `ViewerApp` (`ViewerApp_ClientDialogs.cs`), enabling interactive selection of Data Version (build), Map Name, and Base Game Version (client MPQ / asset source) with live cross-build diff statistics.
+  - **End-User Documentation:** Updated `docs/WoWViewer/USERGUIDE.md` and `wow-viewer/README.md` with dedicated guides for Phased Terrain Dual-Map Overlays (Spec 135/137) and Rosetta Multi-Version Zarr Datastores (Spec 190).
+  - **Validation:** All 41 focused Rosetta unit tests pass green. Full solution builds with 0 errors.
 
 ## 2026-08-27 — Spec 190 Checkpoint 17 correction: minimap-only fix
 

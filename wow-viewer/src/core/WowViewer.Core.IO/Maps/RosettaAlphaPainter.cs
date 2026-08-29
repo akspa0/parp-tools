@@ -110,6 +110,68 @@ public static class RosettaAlphaPainter
         FillRect(canvas, u1 - half, v0 - half, u1 + half, v1 + half, ink, chunkSizeMeters);
     }
 
+    /// <summary>Draws the outline of a circle with the given radius and line width in meters.</summary>
+    public static void DrawCircleOutline(
+        byte[] canvas, float centerU, float centerV, float radiusMeters, float lineWidthMeters, byte ink, float chunkSizeMeters)
+    {
+        ArgumentNullException.ThrowIfNull(canvas);
+        if (radiusMeters <= 0f || lineWidthMeters <= 0f)
+            return;
+
+        float texel = TexelSize(chunkSizeMeters);
+        float half = lineWidthMeters / 2f;
+        float rInner = MathF.Max(0f, radiusMeters - half);
+        float rOuter = radiusMeters + half;
+        float rInnerSq = rInner * rInner;
+        float rOuterSq = rOuter * rOuter;
+
+        int minX = Math.Clamp((int)MathF.Floor((centerU - rOuter) / texel), 0, TexelsPerTile - 1);
+        int maxX = Math.Clamp((int)MathF.Ceiling((centerU + rOuter) / texel) - 1, 0, TexelsPerTile - 1);
+        int minY = Math.Clamp((int)MathF.Floor((centerV - rOuter) / texel), 0, TexelsPerTile - 1);
+        int maxY = Math.Clamp((int)MathF.Ceiling((centerV + rOuter) / texel) - 1, 0, TexelsPerTile - 1);
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            float v = ((y + 0.5f) * texel) - centerV;
+            float vSq = v * v;
+            int row = y * TexelsPerTile;
+
+            for (int x = minX; x <= maxX; x++)
+            {
+                float u = ((x + 0.5f) * texel) - centerU;
+                float distSq = (u * u) + vSq;
+                if (distSq >= rInnerSq && distSq <= rOuterSq)
+                {
+                    canvas[row + x] = Math.Max(canvas[row + x], ink);
+                }
+            }
+        }
+    }
+
+    /// <summary>Draws a calibration bullseye pattern with concentric range rings, cardinal axes, and direction text.</summary>
+    public static void DrawBullseyePattern(
+        byte[] canvas, float centerU, float centerV, float chunkSizeMeters, byte ink = 255)
+    {
+        // Concentric range rings
+        float[] radii = [30f, 60f, 120f, 180f, 240f];
+        foreach (float r in radii)
+        {
+            DrawCircleOutline(canvas, centerU, centerV, r, lineWidthMeters: 1.5f, ink, chunkSizeMeters);
+        }
+
+        // Crosshair lines along U and V spanning the entire 533m tile
+        float tileTotal = chunkSizeMeters * ChunksPerSide;
+        DrawLine(canvas, 0f, centerV, tileTotal, centerV, lineWidthMeters: 1.5f, ink, chunkSizeMeters);
+        DrawLine(canvas, centerU, 0f, centerU, tileTotal, lineWidthMeters: 1.5f, ink, chunkSizeMeters);
+
+        // Cardinal direction labels
+        float pixel = TexelSize(chunkSizeMeters) * 2f;
+        DrawText(canvas, "NORTH (-Y)", centerU - 40f, 15f, pixel, ink, chunkSizeMeters);
+        DrawText(canvas, "SOUTH (+Y)", centerU - 40f, tileTotal - 30f, pixel, ink, chunkSizeMeters);
+        DrawText(canvas, "WEST (-X)", 15f, centerV - 10f, pixel, ink, chunkSizeMeters);
+        DrawText(canvas, "EAST (+X)", tileTotal - 80f, centerV - 10f, pixel, ink, chunkSizeMeters);
+    }
+
     /// <summary>
     /// Draws one text run, blending from whatever the canvas already holds to <paramref name="ink"/>
     /// by the glyph's exact coverage of each texel, so edges are antialiased rather than stepped.

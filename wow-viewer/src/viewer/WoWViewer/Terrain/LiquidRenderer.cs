@@ -138,7 +138,7 @@ public class LiquidRenderer : IDisposable
         }
 
         _time += deltaTime;
-        _frustumCuller.Update(view * proj);
+        _frustumCuller.Update(view * proj, cameraPos);
         float maxRenderDistance = MathF.Max(256f, lighting.FogEnd + LiquidDistanceSlack);
         float maxRenderDistanceSq = maxRenderDistance * maxRenderDistance;
 

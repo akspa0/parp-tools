@@ -15,12 +15,21 @@
 - [x] **T008b**: Align Alpha WDT tile dictionary coordinate transforms in `Program.cs` with `LkWdtWriter` and `RosettaMinimapPainter`.
 - [x] **T009**: Add minimap object-band marker regression without changing renderer, terrain-loading, protected writer code, or generated map placement bytes.
 
+## Phase 1.5: Multi-Version Zarr Datastore, Cross-Era Extension Shifting & Viewer Integration
+
+- [x] **T019**: Implement cross-era model extension shifting (`.mdx` $\leftrightarrow$ `.mdl` $\leftrightarrow$ `.m2`) in `WorldAssetManager`, `WmoRenderer`, and `ViewerApp`.
+- [x] **T020**: Add `RosettaBuildMetadata`, `RosettaBuildDiff`, and `ComputeBuildDiff` to `RosettaObjectLibrary` and `RosettaDatastoreWriter`.
+- [x] **T021**: Add `rosetta-datastore-diff` command in `WowViewer.Tool.Inspect` (`Program.cs`).
+- [x] **T022**: Add "Load from Rosetta Datastore..." menu item and modal in `ViewerApp` with Data Version, Map Name, Base Game Version dropdowns, and live cross-build diff statistics.
+- [x] **T023**: Update `docs/WoWViewer/USERGUIDE.md` and `README.md` to document Phased Maps and Rosetta Datastore loading / cross-build inspection.
+- [x] **T024**: Unit tests in `RosettaDatastoreTests.cs` and `RosettaTilesetGeneratorTests.cs`.
+
 ## Phase 2: Reference Library Builder (US2)
 
-- [ ] **T010**: Implement synthetic tile reader and placement loader from generated Rosetta maps.
-- [ ] **T011**: Extract PM4/geometry signatures across all placed Rosetta objects.
-- [ ] **T012**: Build and serialize `ReferenceLibrary` with versioning and manifest metadata.
-- [ ] **T013**: Implement library self-test suite verifying $\ge 99\%$ top-1 identification accuracy.
+- [x] **T010**: Implement synthetic tile reader and placement loader from generated Rosetta maps.
+- [x] **T011**: Extract PM4/geometry signatures across all placed Rosetta objects.
+- [x] **T012**: Build and serialize `ReferenceLibrary` with versioning and manifest metadata.
+- [x] **T013**: Implement library self-test suite verifying $\ge 99\%$ top-1 identification accuracy.
 
 ## Phase 3: Deterministic PM4 Lookup Engine (US3)
 

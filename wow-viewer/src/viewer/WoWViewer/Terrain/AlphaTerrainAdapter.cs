@@ -173,8 +173,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// </summary>
     public bool TileExists(int tileX, int tileY)
     {
-        // Alpha WDT MAIN is column-major: index = x*64+y
-        int idx = tileX * 64 + tileY;
+        // Alpha WDT MAIN is row-major: index = y*64+x
+        int idx = tileY * 64 + tileX;
         return idx >= 0 && idx < _adtOffsets.Count && _adtOffsets[idx] != 0;
     }
 
@@ -207,8 +207,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// </summary>
     public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
     {
-        // Alpha WDT MAIN is column-major: index = x*64+y
-        int tileIdx = tileX * 64 + tileY;
+        // Alpha WDT MAIN is row-major: index = y*64+x
+        int tileIdx = tileY * 64 + tileX;
         if (tileIdx < 0 || tileIdx >= _adtOffsets.Count || _adtOffsets[tileIdx] == 0)
             return new TileLoadResult();
 

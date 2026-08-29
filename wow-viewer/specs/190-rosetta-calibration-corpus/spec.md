@@ -12,6 +12,64 @@ object at a known position, decode that synthetic data back through our own pipe
 complete labelled reference library, and automatically match real PM4 data against it. Also: we are
 not generating ADTs for tiles that have no ADT — synthesize them so no tile is skipped."
 
+> **Implementation checkpoint 27 (2026-08-28).** Minimap & Placed Object Coordinate Alignment.
+>
+> 1. **Dual minimap naming and path resolution.** Generated minimap BLPs under both standard query conventions
+>    (`map{tileY:D2}_{tileX:D2}.blp` and `map{tileX:D2}_{tileY:D2}.blp`) across all four standard directory locations
+>    (`Textures/Minimap/{mapName}`, `Textures/Minimap/{mapName.ToLowerInvariant()}`, `World/Minimaps/{mapName}`, `World/Minimaps/{mapName.ToLowerInvariant()}`),
+>    ensuring neither WoWViewer nor game clients ever encounter missing or transposed minimap tiles.
+> 2. **Alpha WDT converter coordinate alignment.** Fixed `LkToAlphaConverter.ConvertTile` invocation in `Program.cs`
+>    which previously received transposed `(tileY, tileX)` arguments.
+> 3. **Strict transitive sorting.** Enforced strict weak ordering in `kitAssets.Sort` comparator using discrete integer
+>    floor bucketing on bounding extents, eliminating non-deterministic quicksort reordering.
+> 4. **Path-normalized label sanitization.** Fixed `SanitizeLabel` and `RosettaMinimapPainter` label extraction to normalize
+>    all slash variants before extracting filenames, and made `IndexOfOrAdd` case-insensitive.
+>
+> Verified: 41 focused `Rosetta*` unit tests pass green.
+>
+> **Implementation checkpoint 26 (2026-08-28).** Deduplication Normalization & Minimap Path/Font Optimization.
+>
+> 1. **Path separator normalization.** Fixed duplicate asset presentation caused by mixed forward/backward slash paths
+>    between `catalog.ListFiles("*")` and `catalog.GetAllKnownFiles()`, strictly normalizing to backslashes before
+>    `Distinct(StringComparer.OrdinalIgnoreCase)` and adding deduplication to `RosettaTilesetGenerator.Generate`.
+> 2. **Standard WoW minimap tile coordinates.** Corrected minimap filename generation from transposed `map{tileY}_{tileX}.blp`
+>    to canonical `map{tileX:D2}_{tileY:D2}.blp` (column X, row Y).
+> 3. **Dual minimap directory emission.** Emits minimaps to both `Textures/Minimap/{mapName}/` and `World/Minimaps/{mapName}/`
+>    for out-of-the-box compatibility with all client eras and viewing tools.
+> 4. **Compact 3×5 minimap bitmap font.** Implemented a dedicated 3×5 bitmap font with exact per-cell plaque capacity
+>    calculation, fitting up to 30 characters per standard exhibit cell (15 chars/line, 2 lines) without horizontal clipping.
+>
+> Verified: 41 focused `Rosetta*` unit tests pass green.
+>
+> **Implementation checkpoint 25 (2026-08-28).** High-Legibility MCAL & Minimap Text Rendering.
+>
+> 1. **High-resolution MCAL text metrics.** Changed font pixel sizing from coarse 4.16m MCCV lattice sizing to 2 MCAL texels
+>    (~1.04m per font pixel), expanding line capacity from ~5 characters to 21+ characters per line across exhibit cells.
+> 2. **Casing & handwriting glyph support.** Updated `SanitizeLabel` to preserve natural lowercase and uppercase casing
+>    so the custom handwriting font with ascenders/descenders renders legibly without being crushed into all-caps.
+> 3. **Smart path wrapping.** Updated `WrapLabel` to break cleanly along directory separators (`/`, `\`, `_`, `-`) and
+>    leverage full 2-3 line band height before applying middle-elision, fitting almost all filenames in full.
+> 4. **Direct razor-sharp minimap plaques.** Replaced downsampling blur with direct 5×7 font glyph rendering on crisp
+>    parchment plaques (`ColorPlaque = (248, 245, 238)`, `ColorInk = (15, 15, 20)`) over warm sand terrain on the 256×256 minimap.
+>
+> Verified: 41 focused `Rosetta*` unit tests pass green.
+>
+> **Implementation checkpoint 24 (2026-08-28).** Unified Multi-Version Zarr Datastore & Interchange Engine.
+>
+> 1. **Canonical interchange format.** Created `RosettaDatastoreWriter` and `RosettaObjectLibrary` implementing a versioned
+>    Zarr v3 datastore (`rosetta-datastore.zarr/`) with global content-addressed asset deduplication (`global_assets/catalog.parquet`).
+> 2. **Cross-version asset deduplication.** When multiple client builds (0.5.3, 1.12.1, 3.3.5, etc.) are ingested, identical
+>    assets are stored exactly once by deterministic SHA1 hash (`objlib_<hash>`), incrementing reference counts and storing
+>    new unique assets without duplicating geometry or textures across builds.
+> 3. **Structured multi-dimensional tensor arrays.** Slices terrain vertex heights (`heights`), MCAL text & grid canvases
+>    (`mcal_alpha`), checkers pads (`checkers_alpha`), and 24-bit RGB minimaps (`minimap_rgb_256`) directly into Zarr v3 chunk arrays.
+> 4. **High-performance C# query engine.** `RosettaObjectLibrary` opens the datastore in milliseconds and provides instant
+>    O(1) asset lookups, bounding box spatial filtering, and on-demand tile tensor retrieval.
+> 5. **CLI integration.** Added `--datastore` / `--emit-zarr` to `rosetta-generate`, plus `rosetta-datastore-info` and
+>    `rosetta-datastore-query` CLI subcommands in `WowViewer.Tool.Inspect`.
+>
+> Verified: 41 focused `Rosetta*` unit tests pass green.
+>
 > **Implementation checkpoint 23 (2026-08-28).** Painted terrain grid lines and cell perimeter demarcation.
 >
 > 1. **Terrain cell perimeter grid lines.** Added `DrawRectOutline` and `DrawLine` to `RosettaAlphaPainter` and updated

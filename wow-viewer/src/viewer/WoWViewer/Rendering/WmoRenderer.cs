@@ -1712,7 +1712,7 @@ void main() {
         }
 
         Vector3 localCameraPos = Vector3.Transform(cameraPos, inverseModel);
-        _groupFrustumCuller.Update(view * proj);
+        _groupFrustumCuller.Update(view * proj, cameraPos);
 
         for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
         {
@@ -2922,7 +2922,10 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
         }
 
         if (normalizedPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+        {
             yield return normalizedPath[..^3] + ".mdx";
+            yield return normalizedPath[..^3] + ".mdl";
+        }
     }
 
     private void InitLiquidShader()

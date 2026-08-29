@@ -235,7 +235,42 @@ Located under **Experimental > PM4**:
 
 ---
 
-## 10. Troubleshooting and FAQ
+## 10. Phased Terrain Dual-Map Overlay (Spec 135 & 137)
+
+In Cataclysm (4.x) and later expansions, game zones feature dynamic phases where sparse ADT tiles modify specific regions of a continent (e.g. `Gilneas`, `Gilneas2`, `GilneasPhase1` over `Azeroth`).
+
+### Using Phased Map Overlays:
+1. **Load Base Map**: Open the primary continent map (e.g. `Azeroth`) from the **World Maps** panel.
+2. **Select Secondary Phase Map**:
+   - In the **World Maps** sidebar, scroll to **Phased Terrain Secondary Overlay**.
+   - Pick the phase overlay map from the **Select 2nd Map** dropdown (or type its folder name in the input box).
+   - Click **Apply Overlay**.
+3. **Seamless Tile Merging**: The viewer dynamically substitutes terrain geometry, MCNK chunk textures, and placed doodads from the phase map for all affected tiles while keeping unaffected continent tiles loaded.
+4. **Minimap Synchronization**: The minimap automatically displays the secondary map's BLP tiles where available.
+5. **Clear Overlay**: Click **Clear Overlay** to return instantly to the unmodified base continent terrain.
+
+---
+
+## 11. Rosetta Multi-Version Zarr Datastore & Cross-Era Loading (Spec 190)
+
+The Rosetta Datastore is a unified, version-agnostic interchange format stored in Zarr v3 with globally content-addressed deduplicated assets in Parquet (`global_assets/catalog.parquet`).
+
+### Cross-Era Asset Interoperability:
+- **Transparent Format Shifting**: The viewer automatically shifts model extensions (`.mdx` $\leftrightarrow$ `.mdl` $\leftrightarrow$ `.m2`) across client eras.
+  - When viewing an Alpha 0.5.3 map (`.mdx` doodad references) against a WotLK 3.3.5 client, models resolve seamlessly to `.m2`.
+  - When viewing modern maps against older clients, `.m2` models resolve to `.mdx`/`.mdl` when available.
+
+### Loading from Datastore:
+1. Click **File > Load from Rosetta Datastore...**
+2. **Data Version**: Select the client build version whose map layout and object placements you wish to inspect (e.g. `0_5_3_3368`, `1_0_0_3980`, `3_3_5_12340`).
+3. **Map**: Select the target calibration map (e.g. `Rosetta053`, `Rosetta100`).
+4. **Base Game Version**: Select the asset/client source (Current Active Client or any saved known-good client base).
+5. **Cross-Build Diff Analysis**: Click **Compute Build Diff** to view real-time statistics comparing asset additions, removals, format migrations, and bounding box shifts across any two builds.
+6. Click **Load Map in 3D Viewer**.
+
+---
+
+## 12. Troubleshooting and FAQ
 
 ### Q: Why is terrain black or missing textures?
 **A**: Ensure your client root points to the folder containing the `Data` directory (or loose `World\` folders). If the client uses MPQ archives, verify `ArchiveCatalog` has enumerated the listfiles.

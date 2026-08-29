@@ -115,6 +115,8 @@ See the **[Desktop Viewer User Guide](docs/WoWViewer/USERGUIDE.md)** for a full 
 | `m2 inspect` | `WowViewer.Tool.Inspect` | Inspect M2/MDX bones, sequences, attachments, and bounding boxes |
 | `pm4 inspect` | `WowViewer.Tool.Inspect` | Dump and audit PM4 MSCN/MSPV/MSUR geometry and linkages |
 | `rosetta-generate` | `WowViewer.Tool.Inspect` | Generate synthetic museum calibration maps with MCAL text and pedestals |
+| `rosetta-datastore-info` | `WowViewer.Tool.Inspect` | Inspect registered builds, maps, and deduplication statistics in Zarr datastore |
+| `rosetta-datastore-diff` | `WowViewer.Tool.Inspect` | Compute cross-build asset additions, removals, format migrations, and geometry changes |
 | `map inspect` | `WowViewer.Tool.Inspect` | Analyze ADT/WDT terrain chunks, layers, and bounding boxes |
 | `convert-alpha-to-lk` | `WowViewer.Tool.Converter` | Convert 0.5.3 monolithic WDT maps into modern LK ADT/WDT files |
 | `convert-lk-to-alpha` | `WowViewer.Tool.Converter` | Convert modern LK ADT maps into 0.5.3 monolithic WDT containers |

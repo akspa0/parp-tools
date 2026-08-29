@@ -159,14 +159,15 @@ public static class WorldObjectVisibilityCollector
 
             float boundsDistSq = DistanceSquaredPointToAabb(context.CameraPosition, inst.BoundsMin, inst.BoundsMax);
             float centerDistanceSq = Vector3.DistanceSquared(context.CameraPosition, inst.Transform.Translation);
-            float coneFactor = ComputeVisionConeFactor(context.CameraPosition, context.CameraForward, inst.Transform.Translation, centerDistanceSq);
+            float loadConeFactor = ComputeVisionConeFactor(context.CameraPosition, context.CameraForward, inst.Transform.Translation, centerDistanceSq);
+            float visibilityConeFactor = context.IgnoreVisionConeCulling ? 1.0f : loadConeFactor;
             float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
             bool frustumVisible = context.IgnoreFrustumCulling || isBoundsVisible(inst.BoundsMin, inst.BoundsMax);
             if (!context.IgnoreFrustumCulling
                 && !context.IgnoreVisionConeCulling
                 && boundsDistSq > noCullDistanceSq
                 && !frustumVisible
-                && coneFactor < MinOffFrustumConeFactor)
+                && loadConeFactor < MinOffFrustumConeFactor)
             {
                 culledCount++;
                 continue;
@@ -174,7 +175,7 @@ public static class WorldObjectVisibilityCollector
 
             float diag = (inst.BoundsMax - inst.BoundsMin).Length();
             float mdxCullDistance = ComputeMdxCullDistance(context.FogEnd, diag, context.CountAsTaxiActor, context.ObjectStreamingRangeMultiplier);
-            float coneCullDistance = ComputeConeCullDistance(mdxCullDistance, coneFactor);
+            float coneCullDistance = ComputeConeCullDistance(mdxCullDistance, visibilityConeFactor);
             float coneCullDistanceSq = coneCullDistance * coneCullDistance;
             if (!context.IgnoreDistanceCulling && boundsDistSq > coneCullDistanceSq)
             {
@@ -215,12 +216,12 @@ public static class WorldObjectVisibilityCollector
                 if (ShouldQueuePendingAsset(
                     context,
                     frustumVisible,
-                    coneFactor,
+                    loadConeFactor,
                     projectedFraction,
                     centerDistanceSq,
                     isWmo: false,
                     allowUnresolvedBounds: !inst.BoundsResolved))
-                    queuePendingAsset(inst.ModelKey, ComputeLoadPriorityScore(centerDistanceSq, coneFactor));
+                    queuePendingAsset(inst.ModelKey, ComputeLoadPriorityScore(centerDistanceSq, loadConeFactor));
 
                 continue;
             }
@@ -242,7 +243,7 @@ public static class WorldObjectVisibilityCollector
                 transparentFade = MathF.Max(0f, 1.0f - (centerDistance - mdxFadeStart) / mdxFadeRange);
             }
 
-            float coneFade = ComputeConeFade(coneFactor, centerDistanceSq);
+            float coneFade = ComputeConeFade(visibilityConeFactor, centerDistanceSq);
             opaqueFade *= coneFade;
             transparentFade *= coneFade;
 

@@ -33,7 +33,7 @@ using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Wmo;
 using WowViewer.Tools.Shared.Pm4Matching;
 
-if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+if (args.Length == 0 || (args.Length == 1 && (args[0] == "--help" || args[0] == "-h")))
 {
 	ShowUsage();
 	return;
@@ -88,6 +88,21 @@ switch (area)
 		break;
 	case "rosetta-generate":
 		RunRosettaGenerate(tail);
+		break;
+	case "rosetta-datastore-info":
+		RunRosettaDatastoreInfo(tail);
+		break;
+	case "rosetta-datastore-query":
+		RunRosettaDatastoreQuery(tail);
+		break;
+	case "rosetta-datastore-diff":
+		RunRosettaDatastoreDiff(tail);
+		break;
+	case "rosetta-build-library":
+		RunRosettaBuildLibrary(tail);
+		break;
+	case "rosetta-library-selftest":
+		RunRosettaLibrarySelfTest(tail);
 		break;
 	default:
 		Console.Error.WriteLine($"Unknown inspect area '{area}'.");
@@ -7495,6 +7510,19 @@ static void RunRosettaGenerate(string[] args)
 	string? requestedInkTexture = GetOption(args, "--ink-texture");
 	float pedestalHeight = float.TryParse(GetOption(args, "--pedestal-height"), out float ph) ? ph : -10f;
 	float pedestalBevel = float.TryParse(GetOption(args, "--pedestal-bevel"), out float pb) ? pb : 12.5f;
+	string? datastorePath = GetOption(args, "--datastore");
+	bool emitZarr = args.Contains("--emit-zarr", StringComparer.OrdinalIgnoreCase);
+	if (string.IsNullOrWhiteSpace(datastorePath) && emitZarr && !string.IsNullOrWhiteSpace(output))
+	{
+		datastorePath = Path.Combine(output, "rosetta-datastore.zarr");
+	}
+
+	bool emitLibrary = args.Contains("--emit-library", StringComparer.OrdinalIgnoreCase);
+	string? libraryOutput = GetOption(args, "--library-output");
+	if (string.IsNullOrWhiteSpace(libraryOutput) && emitLibrary && !string.IsNullOrWhiteSpace(output))
+	{
+		libraryOutput = Path.Combine(output, "rosetta-reference-library.json");
+	}
 
 	if (string.IsNullOrWhiteSpace(clientRoot) || string.IsNullOrWhiteSpace(output))
 	{
@@ -7580,6 +7608,7 @@ static void RunRosettaGenerate(string[] args)
 
 	IReadOnlyList<string> known = catalog.ListFiles("*")
 		.Concat(catalog.GetAllKnownFiles())
+		.Select(static p => p.Replace('/', '\\').Trim())
 		.Where(catalog.FileExists)
 		.Distinct(StringComparer.OrdinalIgnoreCase)
 		.ToList();
@@ -7870,22 +7899,38 @@ static void RunRosettaGenerate(string[] args)
 					RosettaTilePlan tile = tilePlansByCoord[(tileX, tileY)];
 					LkAdtData lkAdt = RosettaTilesetGenerator.BuildTileAdt(
 						map.MapName, tile, map.GroundTexture, map.InkTexture, options.PedestalBevelMeters, map.CheckersTexture, options.PaintCellBorders);
-					return LkToAlphaConverter.ConvertTile(lkAdt, tile.TileY, tile.TileX);
+					return LkToAlphaConverter.ConvertTile(lkAdt, tile.TileX, tile.TileY);
 				},
 				allMdxNames,
 				allWmoNames);
 		}
 
 		// Render and write 256x256 minimap BLP files for every generated tile.
-		string minimapDir = Path.Combine(outputRoot, "Textures", "Minimap", map.MapName);
-		Directory.CreateDirectory(minimapDir);
+		string[] minimapDirs =
+		[
+			Path.Combine(outputRoot, "Textures", "Minimap", map.MapName),
+			Path.Combine(outputRoot, "Textures", "Minimap", map.MapName.ToLowerInvariant()),
+			Path.Combine(outputRoot, "World", "Minimaps", map.MapName),
+			Path.Combine(outputRoot, "World", "Minimaps", map.MapName.ToLowerInvariant())
+		];
+		foreach (string dir in minimapDirs)
+			Directory.CreateDirectory(dir);
+
 		foreach (RosettaTilePlan tile in map.Tiles)
 		{
-			string minimapPath = Path.Combine(minimapDir, $"map{tile.TileY:D2}_{tile.TileX:D2}.blp");
-			if (File.Exists(minimapPath) && overwrite)
-				File.Delete(minimapPath);
+			// Emit under both canonical naming conventions:
+			// 1. map{tileY:D2}_{tileX:D2}.blp (standard client / viewer row-major query)
+			// 2. map{tileX:D2}_{tileY:D2}.blp (X-Y column-major query)
+			string nameYX = $"map{tile.TileY:D2}_{tile.TileX:D2}.blp";
+			string nameXY = $"map{tile.TileX:D2}_{tile.TileY:D2}.blp";
+
 			byte[] blpBytes = RosettaMinimapPainter.RenderTileBlp(tile, tile.Pedestals, tile.AlphaCanvas);
-			File.WriteAllBytes(minimapPath, blpBytes);
+			foreach (string dir in minimapDirs)
+			{
+				File.WriteAllBytes(Path.Combine(dir, nameYX), blpBytes);
+				if (nameXY != nameYX)
+					File.WriteAllBytes(Path.Combine(dir, nameXY), blpBytes);
+			}
 		}
 
 		// Copy PM4 guides alongside so the PM4 pipeline can consume the same output folder.
@@ -8034,6 +8079,315 @@ static void RunRosettaGenerate(string[] args)
 	Console.WriteLine($"Exclusions:    {exclusions.Count + result.Exclusions.Count}");
 	Console.WriteLine($"PM4 copied:    {pm4Copied}");
 	Console.WriteLine($"Index:         {indexPath}");
+
+	if (!string.IsNullOrWhiteSpace(datastorePath))
+	{
+		string buildId = DetectBuildId(clientRoot);
+		foreach (RosettaMapPlan map in result.Maps)
+		{
+			var tilePlansByCoord = map.Tiles.ToDictionary(static t => (t.TileX, t.TileY));
+			var ingestResult = RosettaDatastoreWriter.IngestMap(
+				datastorePath,
+				buildId,
+				clientRoot,
+				map,
+				(tileX, tileY) =>
+				{
+					RosettaTilePlan tile = tilePlansByCoord[(tileX, tileY)];
+					byte[] alpha = RosettaTilesetGenerator.BuildTileAlphaCanvas(tile, options.PaintCellBorders);
+					byte[] checkers = RosettaTilesetGenerator.BuildTileCheckersCanvas(tile, options.PedestalBevelMeters);
+					float[] heights = new float[145];
+					byte[] minimapRgb = RosettaMinimapPainter.RenderTileRgb24(tile, tile.Pedestals, alpha);
+					return (heights, alpha, checkers, minimapRgb);
+				},
+				overwriteMap: overwrite);
+
+			Console.WriteLine($"Zarr datastore: {ingestResult.DatastorePath}");
+			Console.WriteLine($"  Build: {ingestResult.BuildId}, Map: {ingestResult.MapName}");
+			Console.WriteLine($"  Placements: {ingestResult.TotalPlacements} ({ingestResult.TotalUniqueAssetsInMap} unique assets in map)");
+			Console.WriteLine($"  Deduplication: {ingestResult.NewAssetsAdded} new assets stored, {ingestResult.DeduplicatedAssetsReused} deduplicated from other builds");
+		}
+	}
+
+	if (!string.IsNullOrWhiteSpace(libraryOutput) || emitLibrary)
+	{
+		string libPath = libraryOutput ?? Path.Combine(outputRoot, "rosetta-reference-library.json");
+		string buildId = DetectBuildId(clientRoot);
+		RosettaCorpusData corpus = RosettaCorpusReader.ReadFromGenerationResult(result);
+		RosettaReferenceLibrary library = RosettaCorpusReader.BuildReferenceLibrary(corpus, buildId);
+		library.SaveToJson(libPath);
+		Console.WriteLine($"Reference library: {libPath} ({library.TotalAssets} assets, {library.ModelCount} models, {library.WorldModelCount} world models)");
+	}
+}
+
+static void RunRosettaDatastoreInfo(string[] args)
+{
+	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+	{
+		Console.WriteLine("Usage: dotnet run -- rosetta-datastore-info <datastorePath>");
+		Console.WriteLine("Displays metadata, build list, and deduplication statistics for a multi-version Zarr datastore.");
+		return;
+	}
+
+	string datastorePath = args[0];
+	if (!Directory.Exists(datastorePath))
+	{
+		Console.Error.WriteLine($"Error: Datastore directory not found at '{datastorePath}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	var library = RosettaObjectLibrary.Open(datastorePath);
+	Console.WriteLine($"Rosetta Multi-Version Zarr Datastore: {library.DatastorePath}");
+	Console.WriteLine($"Total Unique Assets (Deduplicated): {library.TotalUniqueAssets}");
+	Console.WriteLine($"Registered Builds ({library.Builds.Count}):");
+	foreach (string build in library.Builds)
+	{
+		var maps = library.GetMaps(build);
+		Console.WriteLine($"  Build: {build}");
+		foreach (string map in maps)
+		{
+			var placements = library.GetPlacements(build, map);
+			Console.WriteLine($"    Map '{map}': {placements.Count} placements");
+		}
+	}
+}
+
+static void RunRosettaDatastoreQuery(string[] args)
+{
+	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+	{
+		Console.WriteLine("Usage: dotnet run -- rosetta-datastore-query <datastorePath> [--asset <pathOrId>] [--build <buildId>] [--map <mapName>]");
+		Console.WriteLine("Queries an asset or placement records directly from the multi-version Zarr datastore.");
+		return;
+	}
+
+	string datastorePath = args[0];
+	string? assetQuery = GetOption(args, "--asset", "-a");
+	string? buildQuery = GetOption(args, "--build", "-b");
+	string? mapQuery = GetOption(args, "--map", "-m");
+
+	if (!Directory.Exists(datastorePath))
+	{
+		Console.Error.WriteLine($"Error: Datastore directory not found at '{datastorePath}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	var library = RosettaObjectLibrary.Open(datastorePath);
+
+	if (!string.IsNullOrWhiteSpace(assetQuery))
+	{
+		var asset = library.LookupAsset(assetQuery);
+		if (asset == null)
+		{
+			Console.WriteLine($"Asset '{assetQuery}' not found in datastore.");
+		}
+		else
+		{
+			Console.WriteLine($"Asset ID:          {asset.AssetId}");
+			Console.WriteLine($"Normalized Path:   {asset.NormalizedPath}");
+			Console.WriteLine($"Original Path:     {asset.OriginalPath}");
+			Console.WriteLine($"Kind:              {asset.Kind}");
+			Console.WriteLine($"Bounding Box Min:  ({asset.BoundsMinX:F2}, {asset.BoundsMinY:F2}, {asset.BoundsMinZ:F2})");
+			Console.WriteLine($"Bounding Box Max:  ({asset.BoundsMaxX:F2}, {asset.BoundsMaxY:F2}, {asset.BoundsMaxZ:F2})");
+			Console.WriteLine($"First Seen Build:  {asset.FirstSeenBuild}");
+			Console.WriteLine($"Reference Count:   {asset.RefCount}");
+		}
+	}
+
+	if (!string.IsNullOrWhiteSpace(buildQuery) && !string.IsNullOrWhiteSpace(mapQuery))
+	{
+		var placements = library.GetPlacements(buildQuery, mapQuery);
+		if (!string.IsNullOrWhiteSpace(assetQuery))
+		{
+			placements = placements.Where(p => p.Asset.AssetPath.Contains(assetQuery, StringComparison.OrdinalIgnoreCase)).ToList();
+		}
+
+		Console.WriteLine($"Placements in {buildQuery}/{mapQuery} matching query: {placements.Count}");
+		foreach (var p in placements.Take(10))
+		{
+			Console.WriteLine($"  Tile ({p.TileX},{p.TileY}) Cell ({p.CellU:F1},{p.CellV:F1}): {p.Asset.AssetPath} @ Render({p.RendererPosition.X:F1},{p.RendererPosition.Y:F1},{p.RendererPosition.Z:F1})");
+		}
+		if (placements.Count > 10)
+			Console.WriteLine($"  ... and {placements.Count - 10} more.");
+	}
+}
+
+static void RunRosettaDatastoreDiff(string[] args)
+{
+	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+	{
+		Console.WriteLine("Usage: dotnet run -- rosetta-datastore-diff <datastorePath> --base <buildA> --target <buildB> [--output <jsonFile>]");
+		Console.WriteLine("Computes and displays cross-build asset additions, removals, format migrations (.mdx <-> .m2), and geometry changes.");
+		return;
+	}
+
+	string datastorePath = args[0];
+	string? baseBuild = GetOption(args, "--base", "-b");
+	string? targetBuild = GetOption(args, "--target", "-t");
+	string? outputFile = GetOption(args, "--output", "-o");
+
+	if (!Directory.Exists(datastorePath))
+	{
+		Console.Error.WriteLine($"Error: Datastore directory not found at '{datastorePath}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(baseBuild) || string.IsNullOrWhiteSpace(targetBuild))
+	{
+		Console.Error.WriteLine("Error: Both --base and --target build IDs must be specified.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	var library = RosettaObjectLibrary.Open(datastorePath);
+	var diff = library.ComputeBuildDiff(baseBuild, targetBuild);
+
+	Console.WriteLine($"=== Rosetta Cross-Build Diff: {baseBuild} -> {targetBuild} ===");
+	Console.WriteLine($"Base Assets:       {diff.TotalBaseAssets}");
+	Console.WriteLine($"Target Assets:     {diff.TotalTargetAssets}");
+	Console.WriteLine($"Added Assets:      {diff.AddedCount}");
+	Console.WriteLine($"Removed Assets:    {diff.RemovedCount}");
+	Console.WriteLine($"Format Migrations: {diff.FormatMigratedCount} (.mdx <-> .m2 / .mdl)");
+	Console.WriteLine($"Geometry Modified: {diff.GeometryModifiedCount}");
+	Console.WriteLine($"Identical Assets:  {diff.IdenticalCount}");
+	Console.WriteLine();
+
+	if (diff.FormatMigratedCount > 0)
+	{
+		Console.WriteLine("Sample Format Migrations:");
+		foreach (var r in diff.Records.Where(r => r.Classification == RosettaDiffClassification.FormatMigrated).Take(10))
+		{
+			Console.WriteLine($"  [MIGRATED] {r.BaseAssetPath} -> {r.TargetAssetPath}");
+		}
+		if (diff.FormatMigratedCount > 10)
+			Console.WriteLine($"  ... and {diff.FormatMigratedCount - 10} more");
+		Console.WriteLine();
+	}
+
+	if (diff.GeometryModifiedCount > 0)
+	{
+		Console.WriteLine("Sample Geometry Modifications:");
+		foreach (var r in diff.Records.Where(r => r.Classification == RosettaDiffClassification.GeometryModified).Take(10))
+		{
+			Console.WriteLine($"  [MODIFIED] {r.AssetPathOrStem} (Base: {r.BaseBoundsSize:F1}, Target: {r.TargetBoundsSize:F1})");
+		}
+		if (diff.GeometryModifiedCount > 10)
+			Console.WriteLine($"  ... and {diff.GeometryModifiedCount - 10} more");
+		Console.WriteLine();
+	}
+
+	if (!string.IsNullOrWhiteSpace(outputFile))
+	{
+		string json = JsonSerializer.Serialize(diff, new JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(outputFile, json);
+		Console.WriteLine($"Exported full diff report to '{outputFile}'.");
+	}
+}
+
+static string DetectBuildId(string clientRoot)
+{
+	string[] parts = clientRoot.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+	foreach (string part in parts.Reverse())
+	{
+		if (System.Text.RegularExpressions.Regex.IsMatch(part, @"\d+_\d+_\d+"))
+			return part;
+		if (System.Text.RegularExpressions.Regex.IsMatch(part, @"\d+\.\d+\.\d+"))
+			return part.Replace('.', '_');
+	}
+	return parts.LastOrDefault() ?? "unknown_build";
+}
+
+static void RunRosettaBuildLibrary(string[] args)
+{
+	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+	{
+		Console.WriteLine("Usage: dotnet run -- rosetta-build-library <rosettaDirOrManifestOrDatastore> [--output <libraryJsonPath>] [--build <buildLabel>]");
+		Console.WriteLine("Builds a ground-truth Rosetta Reference Library (JSON) from a Rosetta map directory, manifest, or Zarr datastore.");
+		return;
+	}
+
+	string inputPath = args[0];
+	string? outputPath = GetOption(args, "--output", "-o");
+	string? buildLabel = GetOption(args, "--build", "-b");
+
+	RosettaCorpusData corpus = File.Exists(inputPath)
+		? RosettaCorpusReader.ReadFromManifestFile(inputPath)
+		: RosettaCorpusReader.ReadFromDirectory(inputPath);
+
+	if (string.IsNullOrWhiteSpace(outputPath))
+	{
+		string dir = File.Exists(inputPath) ? Path.GetDirectoryName(inputPath)! : inputPath;
+		outputPath = Path.Combine(dir, "rosetta-reference-library.json");
+	}
+
+	RosettaReferenceLibrary library = RosettaCorpusReader.BuildReferenceLibrary(corpus, buildLabel);
+	library.SaveToJson(outputPath);
+
+	Console.WriteLine($"=== Built Rosetta Reference Library ===");
+	Console.WriteLine($"Library ID:   {library.LibraryId}");
+	Console.WriteLine($"Version:      {library.Version}");
+	Console.WriteLine($"Build Label:  {library.BuildLabel ?? "unknown"}");
+	Console.WriteLine($"Total Assets: {library.TotalAssets}");
+	Console.WriteLine($"  Models:     {library.ModelCount}");
+	Console.WriteLine($"  WMOs:       {library.WorldModelCount}");
+	Console.WriteLine($"Output File:  {outputPath}");
+}
+
+static void RunRosettaLibrarySelfTest(string[] args)
+{
+	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+	{
+		Console.WriteLine("Usage: dotnet run -- rosetta-library-selftest <libraryJsonPath> [--tolerance <float>] [--top-k <int>] [--perturb] [--max-items <int>]");
+		Console.WriteLine("Runs the Spec 190 US2 self-test verification suite over a reference library, verifying >= 99% accuracy.");
+		return;
+	}
+
+	string libraryPath = args[0];
+	if (!File.Exists(libraryPath))
+	{
+		Console.Error.WriteLine($"Error: Reference library file not found: '{libraryPath}'");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	float tolerance = float.TryParse(GetOption(args, "--tolerance"), out float tol) ? tol : 0.35f;
+	int topK = int.TryParse(GetOption(args, "--top-k"), out int tk) ? tk : 10;
+	bool perturb = args.Contains("--perturb", StringComparer.OrdinalIgnoreCase);
+	int? maxItems = int.TryParse(GetOption(args, "--max-items"), out int mi) ? mi : null;
+
+	var library = RosettaReferenceLibrary.LoadFromJson(libraryPath);
+	var options = new RosettaSelfTestOptions(
+		Tolerance: tolerance,
+		TopK: topK,
+		IncludePerturbations: perturb,
+		MaxItemsToTest: maxItems);
+
+	Console.WriteLine($"Running self-test over library '{library.LibraryId}' ({library.TotalAssets} assets)...");
+	var result = RosettaReferenceLibrarySelfTest.Run(library, options);
+
+	Console.WriteLine();
+	Console.WriteLine(result.Summary);
+	Console.WriteLine($"Top-1 Accuracy: {result.Top1AccuracyPercent:F2}% (Threshold: >= {RosettaReferenceLibrarySelfTest.TargetAccuracyPercent}%)");
+	Console.WriteLine($"Top-3 Accuracy: {result.Top3AccuracyPercent:F2}%");
+	Console.WriteLine($"Status:         {(result.Passed ? "PASSED" : "FAILED")}");
+
+	if (result.Defects.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine($"Defects ({result.Defects.Count}):");
+		foreach (var d in result.Defects.Take(15))
+		{
+			Console.WriteLine($"  [DEFECT] {d.AssetPath} -> {d.Reason}");
+		}
+		if (result.Defects.Count > 15)
+			Console.WriteLine($"  ... and {result.Defects.Count - 15} more defects");
+	}
+
+	if (!result.Passed)
+		Environment.ExitCode = 1;
 }
 
 /// <summary>
@@ -9445,8 +9799,12 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 mshd --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
-	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
-	Console.WriteLine("  wowviewer-inspect rosetta-generate --client-root <game dir> --output <dir> [--map-name <name>] [--format lk|alpha (default: detected from client)] [--ground-texture <path.blp>] [--ink-texture <path.blp>] [--pedestal-height <meters>] [--pedestal-bevel <meters>] [--start-x <n>] [--start-y <n>] [--cell-chunks 1|2|4|8|16] [--label-band-chunks <n>] [--no-cell-borders] [--overwrite] [--no-designkit-grouping] [--kit-depth <n>] [--max-tiles-per-map <n>] [--max-assets <n>] [--existing-map-dir <dir>] [--pm4-dir <dir>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-generate --client-root <game dir> --output <dir> [--map-name <name>] [--format lk|alpha (default: detected from client)] [--ground-texture <path.blp>] [--ink-texture <path.blp>] [--pedestal-height <meters>] [--pedestal-bevel <meters>] [--start-x <n>] [--start-y <n>] [--cell-chunks 1|2|4|8|16] [--label-band-chunks <n>] [--no-cell-borders] [--overwrite] [--no-designkit-grouping] [--kit-depth <n>] [--max-tiles-per-map <n>] [--max-assets <n>] [--existing-map-dir <dir>] [--pm4-dir <dir>] [--emit-zarr] [--datastore <path>] [--emit-library] [--library-output <path>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-build-library <rosettaDirOrManifestOrDatastore> [--output <libraryJsonPath>] [--build <buildLabel>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-library-selftest <libraryJsonPath> [--tolerance <float>] [--top-k <int>] [--perturb] [--max-items <int>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-datastore-info <datastorePath>");
+	Console.WriteLine("  wowviewer-inspect rosetta-datastore-query <datastorePath> [--asset <pathOrId>] [--build <buildId>] [--map <mapName>]");
+	Console.WriteLine("  wowviewer-inspect rosetta-datastore-diff <datastorePath> --base <buildId> --target <buildId> [--output <diff.json>]");
 }
 
 static Pm4SegmentExportFile AssertSinglePm4ExportFile(Pm4SegmentExportRun exportRun, string input)

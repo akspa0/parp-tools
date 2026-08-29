@@ -1,6 +1,57 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
+
+**Spec 190 lane (2026-08-28, checkpoint 30).** Phase 2 Reference Library Builder (US2):
+1. Created `RosettaReferenceLibrary` and `RosettaReferenceAsset` data model with full bounding, span, volume, footprint, aspect ratio, subpart bounds, and signal dictionary properties, with 100% interoperability with `Pm4AssetMatchScorer` via `ToAssetReferenceSignalRecord()`.
+2. Created `RosettaCorpusReader` to decode synthetic Rosetta placements and geometry from `rosetta-manifest.json`, in-memory `RosettaGenerationResult`, and Zarr datastores (`RosettaObjectLibrary`).
+3. Created `RosettaReferenceLibrarySelfTest` enforcing the $\ge 99.0\%$ Top-1 identification accuracy requirement with exact and perturbed (jittered) bounding box tests.
+4. Added CLI commands `rosetta-build-library` and `rosetta-library-selftest`, plus `--emit-library` and `--library-output` flags in `rosetta-generate`.
+5. Created custom `Vector3JsonConverter` and `Vector2JsonConverter` for clean JSON serialization and round-tripping.
+6. Added 7 unit tests in `RosettaReferenceLibraryTests.cs`. All 50 Rosetta unit tests pass green.
+
+**Spec 190 lane (2026-08-28, checkpoint 29).** Alpha WDT Row-Major Indexing & Visual Calibration:
+1. Fixed transposed tile indexing bug in [`AlphaTerrainAdapter.cs`](file:///I:/parp/parp-tools/wow-viewer/src/viewer/WoWViewer/Terrain/AlphaTerrainAdapter.cs): `TileExists` and `LoadTileWithPlacements` now index `_adtOffsets` as row-major `tileY * 64 + tileX` instead of column-major `tileX * 64 + tileY`. This was the root cause of objects being placed over mismatched terrain tiles/labels in Alpha WDT maps when $tileX \ne tileY$.
+2. Added visual calibration tools in [`RosettaAlphaPainter.cs`](file:///I:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.IO/Maps/RosettaAlphaPainter.cs) with `DrawCircleOutline` and `DrawBullseyePattern` (concentric rings from 30m to 240m, full crosshair axes, and cardinal direction indicators: `NORTH (-Y)`, `SOUTH (+Y)`, `WEST (-X)`, `EAST (+X)`).
+3. Connected calibration bullseye generation to [`RosettaTilesetGenerator.cs`](file:///I:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.IO/Maps/RosettaTilesetGenerator.cs) for empty tiles and test patterns.
+4. All 43 focused Rosetta unit tests pass green. Full solution builds with 0 errors.
+
+**Spec 190 lane (2026-08-28, checkpoint 28).** Cross-Era Extension Resolution, Datastore Diff Engine & UI Integration:
+1. Implemented seamless 3-way cross-era model extension shifting (`.mdx` $\leftrightarrow$ `.mdl` $\leftrightarrow$ `.m2`) in `WorldAssetManager`, `WmoRenderer`, and `ViewerApp`, allowing maps from any era (such as Rosetta 0.5.3 or Alpha WMOs) to resolve models when loaded over newer clients (1.12.1 / 3.3.5) and vice-versa.
+2. Built `RosettaBuildMetadata` and `RosettaBuildDiff` with `ComputeBuildDiff` in `RosettaObjectLibrary` to compare any two client builds directly from the Zarr datastore without re-processing.
+3. Added `rosetta-datastore-diff` CLI command in `WowViewer.Tool.Inspect` (`Program.cs`).
+4. Added "Load from Rosetta Datastore..." menu item and interactive modal in `ViewerApp` with Data Version, Map Name, Base Game Version dropdowns, and live cross-build diff statistics.
+5. Documented Phased Maps and Rosetta Datastore in `USERGUIDE.md` and `README.md`.
+6. All 41 focused Rosetta unit tests pass green.
+
+**Spec 190 lane (2026-08-28, checkpoint 27).** Minimap & Placed Object Coordinate Alignment:
+1. Resolved minimap tile loading mismatch by generating dual-convention minimaps (`map{tileY:D2}_{tileX:D2}.blp` for standard viewer queries and `map{tileX:D2}_{tileY:D2}.blp`) across all four standard directories (`Textures/Minimap/{mapName}`, `Textures/Minimap/{mapName.ToLowerInvariant()}`, `World/Minimaps/{mapName}`, `World/Minimaps/{mapName.ToLowerInvariant()}`).
+2. Fixed Alpha WDT streaming converter invocation in `Program.cs` which previously inverted `(tileX, tileY)` coordinate arguments.
+3. Enforced strict transitive weak ordering in `kitAssets.Sort` comparator using floor bucketing.
+4. Added path separator normalization to `SanitizeLabel` and `RosettaMinimapPainter` label formatting, and made `IndexOfOrAdd` case-insensitive.
+5. All 41 focused Rosetta unit tests pass green.
+
+**Spec 190 lane (2026-08-28, checkpoint 26).** Deduplication Normalization & Minimap Path/Font Optimization:
+1. Fixed duplicate asset enumeration by normalizing all paths to backslashes before `Distinct(StringComparer.OrdinalIgnoreCase)` and adding deduplication to `RosettaTilesetGenerator.Generate`.
+2. Corrected minimap tile naming from `map{tileY}_{tileX}.blp` to canonical `map{tileX:D2}_{tileY:D2}.blp`.
+3. Emitted minimap BLPs to both `Textures/Minimap/{mapName}/` and `World/Minimaps/{mapName}/` for cross-era client and viewer compatibility.
+4. Built a 3×5 bitmap font for minimap plaques with dynamic capacity calculation to fit 30 characters per cell without clipping.
+5. 41 focused Rosetta unit tests pass green.
+
+**Spec 190 lane (2026-08-28, checkpoint 25).** High-Legibility MCAL & Minimap Text Rendering:
+1. Switched font pixel metrics in `AppendClass` from coarse 4.16m MCCV lattice sizing to 2 MCAL texels (~1.04m), boosting capacity from 5 to 21+ characters per line across 2-3 line label bands.
+2. Updated `SanitizeLabel` to preserve natural lowercase and uppercase casing so handwriting glyphs render with proper ascenders and descenders.
+3. Updated `WrapLabel` with smart path separator wrapping and middle-elision with `...`.
+4. Replaced blurry minimap downsampling with direct 5×7 glyph rendering on high-contrast parchment plaques (`ColorPlaque = (248, 245, 238)`, `ColorInk = (15, 15, 20)`) over warm sand terrain.
+5. 41 focused Rosetta unit tests pass green.
+
+**Spec 190 lane (2026-08-28, checkpoint 24).** Unified Multi-Version Zarr Datastore & Interchange Engine:
+1. Created `RosettaDatastoreWriter` implementing a versioned Zarr v3 datastore with global content-addressed asset deduplication (`global_assets/catalog.parquet`).
+2. Deduplicates assets across client builds by deterministic SHA1 hash (`objlib_<hash>`), storing shared assets once with incremented reference counts.
+3. Slices heights, MCAL alpha, checkers alpha, and raw 24-bit RGB minimaps into chunked Zarr v3 arrays.
+4. Built `RosettaObjectLibrary` for high-performance C# O(1) asset lookups, spatial bounding queries, and on-demand chunk loading.
+5. Integrated `--datastore` / `--emit-zarr` CLI flags in `rosetta-generate`, plus `rosetta-datastore-info` and `rosetta-datastore-query` commands.
+6. 41 focused Rosetta unit tests pass green.
 
 **Spec 190 lane (2026-08-28, checkpoint 23).** Painted terrain grid lines and cell perimeter demarcation:
 1. Added `DrawRectOutline` and `DrawLine` to `RosettaAlphaPainter` and updated `BuildTileAlphaCanvas` to paint 1.2m perimeter borders and 1.0m object/label divider lines onto the 1024×1024 MCAL canvas.

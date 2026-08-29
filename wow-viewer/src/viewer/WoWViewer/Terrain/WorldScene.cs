@@ -9177,22 +9177,19 @@ public class WorldScene : ISceneRenderer
         bool frustumVisible = _frustumCuller.TestAABB(bucketMin, bucketMax);
         Vector3 bucketCenter = (bucketMin + bucketMax) * 0.5f;
         float centerDistanceSq = Vector3.DistanceSquared(cameraPos, bucketCenter);
-        // Active-tile admission already bounds WMO residency. Do not shrink a
-        // resident building's bucket by the camera cone; heading remains an
+        // Active-tile admission already bounds object residency. Do not shrink
+        // resident object buckets by the camera cone; heading remains an
         // asset-load priority signal, not a second visibility gate.
-        float coneFactor = isWmo
-            ? 1.0f
-            : ComputeVisionConeFactor(cameraPos, cameraForward, bucketCenter, centerDistanceSq);
+        float loadConeFactor = ComputeVisionConeFactor(cameraPos, cameraForward, bucketCenter, centerDistanceSq);
 
-        if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
+        if (boundsDistSq > noCullDistanceSq && !frustumVisible && loadConeFactor < MinOffFrustumConeFactor)
             return false;
 
         float bucketDiagonal = (bucketMax - bucketMin).Length();
         float baseCullDistance = isWmo
             ? ComputeWmoCullDistance(fogEnd, _objectStreamingRangeMultiplier)
             : ComputeMdxCullDistance(fogEnd, bucketDiagonal, countAsTaxiActor, _objectStreamingRangeMultiplier);
-        float coneCullDistance = ComputeConeCullDistance(baseCullDistance, coneFactor);
-        if (boundsDistSq > coneCullDistance * coneCullDistance)
+        if (boundsDistSq > baseCullDistance * baseCullDistance)
             return false;
 
         return centerDistanceSq <= MaxWorldObjectViewDistanceSq;
@@ -10128,7 +10125,8 @@ public class WorldScene : ISceneRenderer
         // object bounds tests below decide what is submitted. Restricting
         // objects to the directional list made buildings disappear as soon as
         // the camera turned, even though their tile was still resident.
-        if (WorldObjectTileAdmission.IsResident(
+        if (_terrainManager.IsTileLoaded(tile.tileX, tile.tileY)
+            || WorldObjectTileAdmission.IsResident(
                 _terrainManager.LastSelectedTiles,
                 _terrainManager.LastRetainedTiles,
                 tile))
@@ -10271,7 +10269,8 @@ public class WorldScene : ISceneRenderer
                 cullSmallDoodadsOnly,
                 countAsTaxiActor,
                 verticalFieldOfViewRadians,
-                _objectVisibilityProfile),
+                _objectVisibilityProfile,
+                IgnoreVisionConeCulling: true),
             inst => ShouldHideVisibleMdxInstance(inst),
             (min, max) => _frustumCuller.TestAABB(min, max),
             modelKey => ResolveVisibleMdxRenderer(frame, modelKey) != null,
@@ -10800,7 +10799,7 @@ public class WorldScene : ISceneRenderer
 
                     // Update frustum planes for culling
                     var vp = view * proj;
-                    _frustumCuller.Update(vp);
+                    _frustumCuller.Update(vp, cameraPos);
 
                     // ── PASS 1: OPAQUE ──────────────────────────────────────────────
                     // Render all opaque geometry first with depth write ON.

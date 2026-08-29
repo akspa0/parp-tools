@@ -839,16 +839,25 @@ public class WorldAssetManager : IDisposable
 
     private static IEnumerable<string> GetAlternateModelPaths(string path)
     {
-        string? swapped = SwapMdlMdxExtension(path);
-        if (!string.IsNullOrWhiteSpace(swapped))
-            yield return swapped;
-
         if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+        {
             yield return path[..^4] + ".m2";
-        else if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+            yield return path[..^4] + ".mdl";
+            yield break;
+        }
+
+        if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return path[..^4] + ".mdx";
             yield return path[..^4] + ".m2";
-        else if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+            yield break;
+        }
+
+        if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return path[..^3] + ".mdx";
             yield return path[..^3] + ".mdl";
+        }
     }
 
     private static bool IsClassicModelRequest(string path)
@@ -870,11 +879,10 @@ public class WorldAssetManager : IDisposable
     {
         yield return normalizedPath;
 
-        string? swapped = SwapMdlMdxExtension(normalizedPath);
-        if (!string.IsNullOrWhiteSpace(swapped)
-            && !swapped.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+        foreach (string alt in GetAlternateModelPaths(normalizedPath))
         {
-            yield return swapped;
+            if (!alt.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+                yield return alt;
         }
     }
 
@@ -1487,10 +1495,9 @@ private int _mdxLoadFailCount = 0;
         if (!string.IsNullOrWhiteSpace(resolved))
             return NormalizeKey(resolved);
 
-        string? swapped = SwapMdlMdxExtension(normalizedKey);
-        if (!string.IsNullOrWhiteSpace(swapped))
+        foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
         {
-            resolved = TryResolveFromFileSet(swapped);
+            resolved = TryResolveFromFileSet(alternatePath);
             if (!string.IsNullOrWhiteSpace(resolved))
                 return NormalizeKey(resolved);
         }

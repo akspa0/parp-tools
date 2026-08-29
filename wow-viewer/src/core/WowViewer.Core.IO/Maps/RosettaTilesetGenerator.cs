@@ -282,6 +282,11 @@ public static class RosettaTilesetGenerator
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
 
+        // Safety barrier: ensure incoming assets are strictly deduplicated by normalized path
+        assets = assets
+            .DistinctBy(static a => a.AssetPath.Replace('/', '\\'), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         var exclusions = new List<RosettaExcludedAsset>();
 
         // Pass 1: split into designkits (the source folder IS the kit - Blizzard shipped them that
@@ -360,8 +365,10 @@ public static class RosettaTilesetGenerator
                 float extentA = MathF.Max(MathF.Abs(a.BoundsMax.X - a.BoundsMin.X), MathF.Abs(a.BoundsMax.Y - a.BoundsMin.Y));
                 float extentB = MathF.Max(MathF.Abs(b.BoundsMax.X - b.BoundsMin.X), MathF.Abs(b.BoundsMax.Y - b.BoundsMin.Y));
 
-                if (MathF.Abs(extentA - extentB) > 2.0f)
-                    return extentA.CompareTo(extentB);
+                int bucketA = (int)MathF.Floor(extentA / 2.0f);
+                int bucketB = (int)MathF.Floor(extentB / 2.0f);
+                if (bucketA != bucketB)
+                    return bucketA.CompareTo(bucketB);
 
                 return string.Compare(a.AssetPath, b.AssetPath, StringComparison.OrdinalIgnoreCase);
             });
@@ -643,12 +650,22 @@ public static class RosettaTilesetGenerator
 
     /// <summary>
     /// Builds the 1024x1024 MCAL Layer 1 text and grid canvas on-demand for a single tile.
+    /// If the tile is empty or <paramref name="paintBullseye"/> is true, a calibration bullseye pattern is drawn.
     /// </summary>
-    public static byte[] BuildTileAlphaCanvas(RosettaTilePlan tile, bool paintCellBorders = true)
+    public static byte[] BuildTileAlphaCanvas(RosettaTilePlan tile, bool paintCellBorders = true, bool paintBullseye = false)
     {
         ArgumentNullException.ThrowIfNull(tile);
 
         byte[] canvas = RosettaAlphaPainter.CreateCanvas();
+
+        if (paintBullseye || tile.Placements.Count == 0)
+        {
+            RosettaAlphaPainter.DrawBullseyePattern(
+                canvas,
+                RosettaGeneratorOptions.TileSize / 2f,
+                RosettaGeneratorOptions.TileSize / 2f,
+                RosettaGeneratorOptions.ChunkSize);
+        }
 
         if (paintCellBorders)
         {
@@ -757,7 +774,7 @@ public static class RosettaTilesetGenerator
         IReadOnlyList<LkMcnkData> paintedChunks = RosettaTextPainter.PaintTile(
             blank.Chunks, rects, labels, RosettaGeneratorOptions.ChunkSize);
 
-        byte[]? alphaCanvas = tile.AlphaCanvas ?? (tilePlacements.Count > 0 ? BuildTileAlphaCanvas(tile, paintCellBorders) : null);
+        byte[]? alphaCanvas = tile.AlphaCanvas ?? BuildTileAlphaCanvas(tile, paintCellBorders);
         byte[]? checkersCanvas = tile.CheckersCanvas ?? (tile.Pedestals is { Count: > 0 } ? BuildTileCheckersCanvas(tile, pedestalBevelMeters) : null);
 
         byte[][]? chunkLabelMaps = alphaCanvas is not null
@@ -1002,8 +1019,14 @@ public static class RosettaTilesetGenerator
     /// </summary>
     private static void AppendClass(GridClass cls, ref int tileBase, ref int uniqueId, List<LayoutCell> cells)
     {
-        float pixelMeters = RosettaTextPainter.SubCellFor(RosettaGeneratorOptions.ChunkSize);
+        // 2 MCAL texels per font pixel (~1.04m per font pixel):
+        // Glyph width = 5.2m, height = 7.3m, advance = 6.25m, line advance = 8.33m.
+        // Standard 133m cell fits 21 characters/line; 33m label band fits 3 lines (63 chars total).
+        float texelMeters = RosettaAlphaPainter.TexelSize(RosettaGeneratorOptions.ChunkSize);
+        float pixelMeters = texelMeters * 2f;
         int charsPerLine = RosettaTextPainter.CharsPerLine(cls.CellSize, pixelMeters);
+        float lineAdvance = RosettaTextPainter.LineAdvanceRows * pixelMeters;
+        int maxLines = Math.Max(1, (int)(cls.LabelBandChunks * RosettaGeneratorOptions.ChunkSize / lineAdvance));
 
         for (int index = 0; index < cls.Assets.Count; index++)
         {
@@ -1015,10 +1038,8 @@ public static class RosettaTilesetGenerator
 
             // Keep the extension. It is the asset TYPE, which is the one thing a painted label has
             // to carry that the name alone does not - .MDX vs .WMO changes what the cell even is.
-            // Middle-elision puts it at the surviving tail, so it shows even on a clipped name; the
-            // plate tint is a redundant cue, not a replacement.
             string labelText = SanitizeLabel(asset.AssetPath);
-            IReadOnlyList<string> lines = WrapLabel(labelText, charsPerLine, cls.LabelBandChunks);
+            IReadOnlyList<string> lines = WrapLabel(labelText, charsPerLine, maxLines);
 
             uniqueId++;
             cells.Add(new LayoutCell(
@@ -1090,16 +1111,15 @@ public static class RosettaTilesetGenerator
     };
 
     /// <summary>
-    /// Hard-wraps a label (asset names carry no spaces) to at most <paramref name="maxLines"/> lines.
-    /// A name too long for the band is elided in the MIDDLE, not cut at the end: WoW asset names put
-    /// the family up front and the discriminator at the back
-    /// (<c>ICECROWN_WALL_SEMICIRCLE_PIECE_02_LONG_HOLLOW</c>), so a tail cut throws away exactly the
-    /// part that tells two cells apart.
+    /// Intelligently wraps a label across at most <paramref name="maxLines"/> lines, breaking along
+    /// path separators ('/', '\\', '_', '-') whenever possible so words and directory paths remain
+    /// visually natural. If the full path exceeds total multi-line capacity, it performs middle-elision
+    /// marked with "..." while preserving both the family prefix and the discriminator tail.
     /// </summary>
     public static IReadOnlyList<string> WrapLabel(string text, int charsPerLine, int maxLines)
     {
         ArgumentNullException.ThrowIfNull(text);
-        if (charsPerLine <= 0 || maxLines <= 0)
+        if (charsPerLine <= 0 || maxLines <= 0 || text.Length == 0)
             return [];
 
         int capacity = charsPerLine * maxLines;
@@ -1185,18 +1205,18 @@ public static class RosettaTilesetGenerator
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(assetPath);
 
+        string normalized = assetPath.Replace('/', '\\');
         string name = stripExtension
-            ? Path.GetFileNameWithoutExtension(assetPath)
-            : Path.GetFileName(assetPath);
+            ? Path.GetFileNameWithoutExtension(normalized)
+            : Path.GetFileName(normalized);
         if (name.Length == 0)
-            name = Path.GetFileName(assetPath);
+            name = Path.GetFileName(normalized);
         char[] chars = new char[name.Length];
         int count = 0;
         foreach (char c in name)
         {
-            char upper = char.ToUpperInvariant(c);
-            bool supported = char.IsAsciiLetterOrDigit(upper) || upper is '_' or '-' or '.';
-            chars[count++] = supported ? upper : '_';
+            bool supported = char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' or '/' or '\\';
+            chars[count++] = supported ? c : '_';
         }
 
         return new string(chars, 0, count);
@@ -1254,7 +1274,7 @@ public static class RosettaTilesetGenerator
         // MMDX/MWMO entries use backslash-separated paths (real ADT convention); listfiles and
         // archive enumeration use forward slashes.
         string normalized = name.Replace('/', '\\');
-        int index = names.IndexOf(normalized);
+        int index = names.FindIndex(s => string.Equals(s, normalized, StringComparison.OrdinalIgnoreCase));
         if (index >= 0)
             return index;
         names.Add(normalized);

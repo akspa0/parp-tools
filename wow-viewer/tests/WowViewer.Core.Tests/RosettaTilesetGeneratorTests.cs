@@ -221,14 +221,13 @@ public class RosettaTilesetGeneratorTests
             assets, new RosettaGeneratorOptions("Development", GroupByDesignkit: false));
 
         Assert.NotEmpty(result.Placements);
-        float subCell = RosettaTextPainter.SubCellFor(ChunkSize);
+        float texel = RosettaAlphaPainter.TexelSize(ChunkSize);
         foreach (RosettaPlacementRecord p in result.Placements)
         {
-            // A font pixel smaller than one sub-cell falls between terrain vertices and scrambles
-            // the glyph; the size must be an exact multiple of it.
-            float pixels = p.LabelPixelMeters / subCell;
+            // A font pixel measured in MCAL texels (64 texels per chunk, 0.52m texel pitch)
+            float pixels = p.LabelPixelMeters / texel;
             Assert.True(pixels >= 1f && MathF.Abs(pixels - MathF.Round(pixels)) < 1e-3f,
-                $"Label pixel {p.LabelPixelMeters:F3}m is {pixels:F3} sub-cells; must be a whole multiple >= 1.");
+                $"Label pixel {p.LabelPixelMeters:F3}m is {pixels:F3} MCAL texels; must be a whole multiple >= 1.");
 
             Assert.NotEmpty(p.LabelLines);
             foreach (string line in p.LabelLines)
@@ -676,7 +675,7 @@ public class RosettaTilesetGeneratorTests
     public void SanitizeLabel_MapsUnsupportedCharacters()
     {
         string label = RosettaTilesetGenerator.SanitizeLabel(@"world\kalimdor/azshara (orgrimmar).mdx");
-        Assert.Matches("^[A-Z0-9_.\\-]+$", label);
+        Assert.Matches("^[a-zA-Z0-9_.\\-]+$", label);
     }
 
     [Fact]
@@ -1102,5 +1101,64 @@ public class RosettaTilesetGeneratorTests
         }
 
         return -1;
+    }
+
+    [Fact]
+    public void AlphaPainter_DrawBullseyePattern_FillsExpectedRegions()
+    {
+        byte[] canvas = RosettaAlphaPainter.CreateCanvas();
+        RosettaAlphaPainter.DrawBullseyePattern(
+            canvas,
+            RosettaGeneratorOptions.TileSize / 2f,
+            RosettaGeneratorOptions.TileSize / 2f,
+            RosettaGeneratorOptions.ChunkSize,
+            ink: 255);
+
+        int nonZero = 0;
+        for (int i = 0; i < canvas.Length; i++)
+        {
+            if (canvas[i] > 0) nonZero++;
+        }
+
+        Assert.True(nonZero > 1000, $"Expected bullseye canvas to have substantial painted pixels, got {nonZero}.");
+
+        byte[][] chunks = RosettaAlphaPainter.SliceToChunks(canvas);
+        Assert.Equal(256, chunks.Length);
+        int activeChunks = chunks.Count(static c => c.Length > 0);
+        Assert.True(activeChunks > 0, "Bullseye should slice into active MCAL chunks.");
+    }
+
+    [Fact]
+    public void AlphaWdt_AsymmetricTileCoordinates_MaintainRowMajorIntegrity()
+    {
+        var assets = new List<RosettaAssetEntry>
+        {
+            Model("world/kit/portal.m2", 10f),
+        };
+
+        // Asymmetric coordinates: TileX = 41, TileY = 39 (not equal)
+        RosettaGenerationResult result = RosettaTilesetGenerator.Generate(
+            assets, new RosettaGeneratorOptions("Development", StartTileX: 41, StartTileY: 39));
+        RosettaMapPlan map = SingleMap(result);
+        RosettaTilePlan tile = Assert.Single(map.Tiles);
+
+        Assert.Equal(41, tile.TileX);
+        Assert.Equal(39, tile.TileY);
+
+        var alphaTiles = new Dictionary<(int tileX, int tileY), AlphaTileData>
+        {
+            [(tile.TileX, tile.TileY)] = LkToAlphaConverter.ConvertTile(
+                RosettaTilesetGenerator.BuildTileAdt(map.MapName, tile), tile.TileX, tile.TileY),
+        };
+
+        byte[] wdtBytes = AlphaWdtWriter.Build(map.MapName, alphaTiles);
+
+        // Tile (41, 39) must exist
+        Assert.True(AlphaWdtReader.TryReadTile(wdtBytes, 41, 39, out AlphaTileData? readBack));
+        Assert.NotNull(readBack);
+        Assert.Single(readBack!.ModelPlacements);
+
+        // Transposed tile (39, 41) must NOT exist
+        Assert.False(AlphaWdtReader.TryReadTile(wdtBytes, 39, 41, out _));
     }
 }

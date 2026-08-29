@@ -813,6 +813,7 @@ public partial class ViewerApp : IDisposable
     private string _buildSelectionFilter = "";
     private string? _buildSelectionHint;
     private bool _showListfileInput = false;
+    private bool _showRosettaDatastoreDialog = false;
     private string _lastGameFolderPath = "";
     private string _lastLooseOverlayPath = "";
     private List<KnownGoodClientPath> _knownGoodClientPaths = new();
@@ -1831,6 +1832,8 @@ void main() {
             DrawWmoConverterDialog();
         if (_showSynthesizedMinimapExportDialog)
             DrawSynthesizedMinimapExportDialog();
+        if (_showRosettaDatastoreDialog)
+            DrawRosettaDatastoreDialog();
 
         DrawSceneHoverAssetOverlay();
         DrawClickSelectionOverlay();
@@ -1852,6 +1855,9 @@ void main() {
 
                 if (ImGui.MenuItem("Open Loose PM4 / PD4 File..."))
                     _wantOpenPm4File = true;
+
+                if (ImGui.MenuItem("Load from Rosetta Datastore..."))
+                    _showRosettaDatastoreDialog = true;
 
                 if (ImGui.MenuItem("Open Game Folder (MPQ)..."))
                 {
@@ -12309,6 +12315,100 @@ void main() {
             ViewerLog.Trace($"[ViewerApp] WDT load failed: {ex}");
             _statusMessage = $"Load failed: {ex.Message}";
             _modelInfo = $"WDT load error:\n{ex.Message}\n\nFile: {wdtPath}\nSize: {(File.Exists(wdtPath) ? new FileInfo(wdtPath).Length : 0)} bytes";
+            _worldScene?.Dispose();
+            _worldScene = null;
+            _terrainManager = null;
+            InvalidatePm4DerivedReports();
+            _loadingScreen?.Disable();
+        }
+    }
+
+    private void LoadRosettaDatastoreTerrain(WowViewer.Core.IO.Maps.RosettaObjectLibrary library, string buildId, string mapName)
+    {
+        _statusMessage = $"Loading Rosetta world '{mapName}' [{buildId}] from Zarr datastore...";
+
+        ResetTerrainWeakSignalRestoreSessionState(preserveToggle: true);
+        InvalidatePm4DerivedReports();
+        _worldScene?.Dispose();
+        _worldScene = null;
+        _terrainManager?.Dispose();
+        _terrainManager = null;
+        _vlmTerrainManager?.Dispose();
+        _vlmTerrainManager = null;
+        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+
+        // Show loading screen
+        _loadingScreen?.Enable(_dataSource);
+        PresentLoadingFrame();
+
+        try
+        {
+            int loadStep = 0;
+            void OnLoadStatus(string status)
+            {
+                _statusMessage = status;
+                loadStep++;
+                _loadingScreen?.UpdateProgress(loadStep, 20);
+                PresentLoadingFrame();
+            }
+
+            var adapter = new Terrain.RosettaDatastoreTerrainAdapter(library, buildId, mapName, _dataSource);
+            var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
+            _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver, _dbcBuild, _minimapRenderer,
+                onStatus: OnLoadStatus);
+
+            _terrainManager = _worldScene.Terrain;
+            _terrainManager.DetailedTileCountOverride = _savedDetailedAdtTileCountOverride;
+            ApplyGlobalFogDefaults(_terrainManager.Lighting);
+            RefreshTerrainWeakSignalRestoreHooks();
+            RefreshTerrainWeakSignalRestoreForLoadedTiles();
+            _renderer = _worldScene;
+            ApplyLayoutObjectPreviewModeToScene();
+            ApplySavedPm4AlignmentToScene();
+            ApplySavedObjectPathFiltersForCurrentMap();
+
+            _worldScene.EnableLitFallback(
+                "Rosetta Zarr map loaded directly; LIT/analytical lighting enabled.");
+
+            // Full-load mode: load all tiles synchronously during loading screen
+            if (FullLoadMode && !_terrainManager.Adapter.IsWmoBased)
+            {
+                int total = _terrainManager.Adapter.ExistingTiles.Count;
+                _terrainManager.LoadAllTiles((loaded, tot, tileName) =>
+                {
+                    _statusMessage = $"Loading tiles... {loaded}/{tot} ({tileName})";
+                    _loadingScreen?.UpdateProgress(loaded, tot);
+                    PresentLoadingFrame();
+                });
+            }
+
+            // Position camera at initial tile center
+            var startPos = _pendingWorldSpawnOverride ?? _worldScene.WmoCameraOverride ?? _terrainManager.GetInitialCameraPosition();
+            _camera.Position = startPos;
+            _pendingWorldSpawnOverride = null;
+            _camera.Yaw = 180f;
+            _camera.Pitch = -20f;
+            if (!_terrainManager.Adapter.IsWmoBased)
+                _terrainManager.UpdateAOI(startPos, _camera.Forward);
+
+            _modelInfo = $"Type: Rosetta Zarr Datastore World\n" +
+                         $"Build: {buildId}\n" +
+                         $"Map: {mapName}\n\n" +
+                         $"Tiles: {adapter.ExistingTiles.Count}\n" +
+                         $"WMO instances: {_worldScene.WmoInstanceCount} ({_worldScene.UniqueWmoModels} unique)\n" +
+                         $"MDX instances: {_worldScene.MdxInstanceCount} ({_worldScene.UniqueMdxModels} unique)\n" +
+                         $"\nCamera: ({startPos.X:F0}, {startPos.Y:F0}, {startPos.Z:F0})\n";
+
+            _statusMessage = $"Loaded Rosetta Zarr World: {mapName} [{buildId}] ({adapter.ExistingTiles.Count} tiles, {_worldScene.WmoInstanceCount} WMOs, {_worldScene.MdxInstanceCount} doodads)";
+
+            _loadingScreen?.SetWorldLoaded();
+            PresentLoadingFrame();
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[ViewerApp] Rosetta Datastore load failed: {ex}");
+            _statusMessage = $"Load failed: {ex.Message}";
+            _modelInfo = $"Rosetta Datastore load error:\n{ex.Message}\n\nBuild: {buildId}\nMap: {mapName}";
             _worldScene?.Dispose();
             _worldScene = null;
             _terrainManager = null;

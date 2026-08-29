@@ -503,8 +503,8 @@ public class TerrainManager : ISceneRenderer
         _lastCameraPos = cameraPos;
 
         // Convert camera world position to tile coordinates
-        int tileX = (int)((WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize);
-        int tileY = (int)((WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize);
+        int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize);
+        int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize);
 
         tileX = Math.Clamp(tileX, 0, 63);
         tileY = Math.Clamp(tileY, 0, 63);
@@ -893,7 +893,7 @@ public class TerrainManager : ISceneRenderer
         if (!TerrainVisible)
             return;
 
-        _terrainRenderer.Render(view, proj, _cameraPos, visibleTileKeys: _lastSelectedTiles);
+        _terrainRenderer.Render(view, proj, _cameraPos, visibleTileKeys: null);
         TraceDirectionalFrameDiagnostics();
         // Liquid is rendered separately AFTER all opaque geometry (WMOs, MDX)
         // so objects below the water surface are visible through the transparent water.
@@ -909,7 +909,7 @@ public class TerrainManager : ISceneRenderer
         if (!TerrainVisible)
             return;
 
-        _terrainRenderer.Render(view, proj, cameraPos, frustum, _lastSelectedTiles);
+        _terrainRenderer.Render(view, proj, cameraPos, frustum, visibleTileKeys: null);
         TraceDirectionalFrameDiagnostics();
     }
 
@@ -919,7 +919,7 @@ public class TerrainManager : ISceneRenderer
     /// </summary>
     public void RenderLiquid(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, float deltaTime = 0.016f)
     {
-        _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, deltaTime, _lastSelectedTiles);
+        _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, deltaTime, visibleTileKeys: null);
     }
 
     public bool IsWireframe => _terrainRenderer.IsWireframe;
