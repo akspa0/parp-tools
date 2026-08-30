@@ -2,19 +2,20 @@
 
 Last updated: 2026-08-29
 
-**Spec 191 lane (2026-08-29, checkpoint 40).** Procedural Garden Museum Map Generator & Dense Calibration Corpus — COMPLETE:
-1. **Procedural 3D Mesh Terrain & Pedestal Sculpting Hooked Up**:
-   - `ProceduralTerrainSculptor`, `ProceduralTexturePainter`, `AdaptiveLayoutPacker`, `SemanticAssetClassifier`, `IGenerativeMapSurface` integrated cleanly in `WowViewer.Core.IO.Procedural`.
-   - `RosettaTilesetGenerator.BuildTileAdt` generates authentic continuous MCVT heightmaps and raised podium pedestals (`CreateChunkHeights`), with smooth bevel transitions and gradient slope constraints.
-   - `RosettaTilesetGenerator.BuildMap` samples terrain height (`groundZ = options.PedestalHeightMeters`) so 3D exhibit models sit flush on the pedestal platforms.
-2. **4-Layer Alpha Texture Splatting & Clean Center Plaza Floor**:
-   - `BuildTileCheckersCanvas` renders an outer decorative checkerboard border frame (Layer 2) and explicitly clears the center exhibit plaza ($R \le 0.30 \times \text{CellSize}$) with value `0`, ensuring the 3D model silhouette stands out against clean neutral ground.
-   - `BuildTileAlphaCanvas` generates anti-aliased grid cell boundary lines (Layer 1).
-   - Minimap rendering in `RosettaMinimapPainter` upgraded with shaded pedestals, checker perimeter rings, and clean floor plaques.
-3. **Minimap Directory & File Output Cleanup**:
-   - Streamlined output paths so Alpha 0.5.3 minimap BLPs and TRS files write exclusively to canonical `Textures\Minimap\{map}\` and post-Alpha to `World\Minimaps\{map}\`, eliminating redundant directory dumping.
-4. **Validation & Verification**:
-   - All 72 Rosetta unit tests pass green (100%). Solution builds cleanly with 0 errors.
+**Spec 191 lane (2026-08-30, checkpoint 42).** Procedural Garden Museum Map Generator — DEFECT DIAGNOSIS & REWRITE PLAN:
+1. **Current Generation Reality & User Verification Failure**:
+   - In-game screenshot and user testing confirmed that `rosetta-generate` produces **zero garden features**:
+     - **Hardcoded Sand Defaults**: `RosettaGeneratorOptions.DefaultGroundTexture` is hardcoded to `wcsand.blp` (Wailing Caverns sand) and `DefaultInkTexture`/`DefaultCheckersTexture` to `checkers.blp`, causing all generated maps to be sandy wastelands with giant checkerboard lines.
+     - **Impassable Triangle Quads**: `CreateChunkHeights` generates arbitrary linear bevel ramps across 4.16m MCVT vertex spacing, creating steep 45-degree collision-blocking triangles between exhibits that trap the player.
+     - **Cluttered Signage**: Grid line outline drawing (`DrawRectOutlineMeters`) intersects and draws directly over the text label bands, rendering signage unreadable.
+     - **Single-Layer Alpha Abuse**: No multi-tileset blending or garden path networks are active in the live generator.
+2. **Actionable Remediation Architecture**:
+   - **A. Authentic Garden Palette**: Default Layer 0 to lush Elwynn garden grass (`tileset\elwynn\elwynngrass.blp`), Layer 1 to Stormwind cobblestone promenades (`tileset\city\stormwindcobble.blp`), and Layer 2 to clean polished white marble exhibit pads (`tileset\city\whitemarble.blp`).
+   - **B. 100% Flat Walkable Terrain**: Eliminate the jagged bevel MCVT calculation entirely. Keep all paths and exhibit courtyards completely flat ($Z = 0$), guaranteeing unobstructed player navigation.
+   - **C. Clean Uncluttered Signage**: Remove grid line overlays from the text label band. Place signage on clean, dedicated stone plaque areas with clear contrast.
+   - **D. True Multi-Layer Alpha Splatting**: Generate continuous 64x64 MCAL alpha splats per chunk for arterial cobblestone walkways and exhibit plazas.
+3. **Current State**:
+   - Spec 191 is in active development and NOT complete until verified in-game. Client root `H:\CLIENTS` is strictly read-only; all outputs routed to isolated staging directories.
 
 **Spec 190 lane (2026-08-28, checkpoint 36).** Minimap TRS / BLP Multi-Directory Emission & Map ID / Port Command Reporting — COMPLETE:
 1. Enhanced `RosettaMinimapPainter.GenerateMinimapTrs` and `WriteMinimapTrs` to generate authentic Alpha TRS format with relative entries under `dir: {map}` and write `minimap.trs` / `md5translate.trs` globally and into per-map directories (`World\Maps\{map.MapName}\`).

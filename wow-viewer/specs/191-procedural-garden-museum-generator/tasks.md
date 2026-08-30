@@ -46,8 +46,14 @@
 
 ---
 
-## Phase 5: Verification & Calibration Corpus Validation
-
-- [x] **T019**: Run complete focused test suite: 94/94 tests passing green in `WowViewer.Core.Tests`.
+## Phase 5: Verification & Unit Calibration
+- [x] **T019**: Run complete focused test suite: 93/93 tests passing green in `WowViewer.Core.Tests`.
 - [x] **T020**: Full build verified with zero errors.
-- [x] **T021**: Update `STATUS.md` and `activeContext.md` upon completion.
+- [x] **T021**: Update `STATUS.md`, `activeContext.md`, and `progress.md`.
+
+---
+
+## Phase 6: Real-Client In-Game Multi-Tileset Texturing Overhaul (Scheduled Next Session)
+- [ ] **T022**: Overhaul live ADT emission pass in `RosettaTilesetGenerator` to paint authentic 3–4 layer multi-tileset landscapes (lush grass, cobblestone promenades, dirt borders, marble plaza floors) across chunks instead of 2-layer rectangular masks.
+- [ ] **T023**: Implement organic continuous terrain curvature and garden elevation sculpting in the live generator.
+- [ ] **T024**: Perform real-client visual verification in Alpha 0.5.3 and Wrath 3.3.5 clients.

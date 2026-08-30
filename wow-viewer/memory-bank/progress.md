@@ -1,15 +1,17 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
-## 2026-08-29 — Spec 191: Procedural Garden Museum Map Generator & Dense Calibration Corpus
-- **Landed:**
-  - **Procedural 3D Mesh Terrain Sculpting:** Continuous organic harmonic garden terrain with $\le 25^\circ$ slope constraints and raised podium pedestals (`ProceduralTerrainSculptor`), synthesized directly into 145-vertex MCVT chunk height arrays in `RosettaTilesetGenerator`.
-  - **4-Layer Alpha Texture Splatting & Clean Center Plaza Floor:** Multi-layer alpha splats (`ProceduralTexturePainter`) generating base turf, cobblestone walkways, decorative checkerboard perimeter frames, and explicitly cleared neutral center exhibit plazas ($R \le 0.30 \times \text{CellSize}$) so 3D model silhouettes are distinct and uncluttered.
-  - **Semantic Asset Classification (`SemanticAssetClassifier`):** 14 archetypes, dungeon prefix context disambiguation, scaling multipliers.
-  - **Adaptive Layout Packing (`AdaptiveLayoutPacker`):** Multi-tier cell density packing (Micro to Grand), courtyard generation.
-  - **Minimap Directory & Output Cleanup:** Minimap BLPs and TRS files restricted to canonical client locations (`Textures\Minimap\` for Alpha 0.5.3, `World\Minimaps\` for Post-Alpha).
-  - **Verification:** All 72 Rosetta unit tests pass green (100%). Solution builds cleanly with 0 errors.
+## 2026-08-30 — Spec 191: Procedural Garden Museum Map Generator (In Progress)
+- **Defects Identified via In-Game Proof:**
+  - `DefaultGroundTexture` was hardcoded to `wcsand.blp` (Wailing Caverns sand) with `checkers.blp`, generating barren sand maps with giant checkerboard lines instead of garden terrain.
+  - `CreateChunkHeights` generated jagged 45-degree bevel quad ramps across MCVT vertices, trapping player collision capsules.
+  - `DrawRectOutlineMeters` drew grid lines directly over text label bands, making signage unreadable.
+- **Architectural Action Plan:**
+  - Replace defaults with lush Elwynn garden grass (`elwynngrass.blp`), Stormwind cobblestone walkways (`stormwindcobble.blp`), and clean white marble exhibit pads (`whitemarble.blp`).
+  - Enforce completely flat walkable terrain ($Z = 0$) across walkways and exhibits to eliminate navigation collision traps.
+  - Separate text plaques onto clean stone backgrounds without overlapping grid lines.
+- **Status:** In progress. Spec 191 remains open until real-client in-game proof confirms a clean, flat, lush multi-textured garden museum.
 
 ## 2026-08-28 — Spec 190 Phase 4: Companion ADT Synthesizer (US4)
 - **Landed:**
