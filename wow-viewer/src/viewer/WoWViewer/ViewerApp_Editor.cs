@@ -17,6 +17,8 @@ using WoWViewer.Logging;
 using WoWViewer.Terrain;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 
+using WowViewer.Core.IO.Terrain;
+
 namespace WoWViewer;
 
 /// <summary>
@@ -30,6 +32,20 @@ public partial class ViewerApp
     private EditorSession? _editorSession;
     private EditorSceneReaderAdapter? _editorSceneReader;
     private EditorLogAdapter? _editorLog;
+
+    // Terrain template & brush editor UI state (Spec 192)
+    private string _terrainTemplateMapName = "CustomGarden";
+    private int _terrainTemplateThemeIdx = 0;
+    private int _terrainTemplateRows = 2;
+    private int _terrainTemplateCols = 2;
+    private int _terrainTemplatePlazaSpacing = 2;
+    private string _terrainTemplateOutputDir = "output/custom_garden";
+    private string _terrainTemplateStatus = "";
+    private float _terrainStampScale = 1.0f;
+    private float _terrainStampRotation = 0.0f;
+    private float _terrainStampHeightMult = 1.0f;
+    private float _terrainStampFeather = 4.0f;
+    private int _terrainStampBlendModeIdx = 0;
 
     // Reconciliation preview state (transient, owned by the plugin surface, never written during preview).
     private IReadOnlyList<ReconciliationProposal> _reconciliationProposals = [];
@@ -67,6 +83,7 @@ public partial class ViewerApp
 
         _editorHost = new EditorHost(build, _editorLog);
         _editorHost.Register(new ReferenceEditorPlugin());
+        _editorHost.Register(new TerrainTemplateEditorPlugin());
 
         _editorSceneReader = new EditorSceneReaderAdapter(this);
         _editorSession = new EditorSession(new EditorApplierAdapter(this), _editorLog, _editorProjectOutputDir);
@@ -127,6 +144,13 @@ public partial class ViewerApp
 
         // Placement authoring panel (Spec 175)
         DrawPlacementAuthoringPanel();
+
+        // Terrain template brush & generator panel (Spec 192)
+        if (_editorHost.ActivePlugin is TerrainTemplateEditorPlugin terrainPlugin)
+        {
+            ImGui.Separator();
+            DrawTerrainTemplatePluginPanel(terrainPlugin);
+        }
 
         ImGui.Separator();
 
@@ -853,5 +877,117 @@ public partial class ViewerApp
         public void Warn(string message) => ViewerLog.Important(ViewerLog.Category.General, $"[Editor] {message}");
         public void Error(string message, Exception? exception = null)
             => ViewerLog.Error(ViewerLog.Category.General, $"[Editor] {message}{(exception is null ? "" : $" | {exception.Message}")}");
+    }
+
+    private void DrawTerrainTemplatePluginPanel(TerrainTemplateEditorPlugin plugin)
+    {
+        ImGui.Text("Terrain Brush & Paste Library (Spec 192)");
+        ImGui.TextDisabled("Select reusable terrain motifs, stamp with boundary feathering, or generate templated procedural maps.");
+
+        if (ImGui.CollapsingHeader("1. Brush & Paste Catalog", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            // Category filter
+            string[] categories = ["All", .. plugin.Library.GetCategories()];
+            int currentCatIdx = Array.IndexOf(categories, plugin.SelectedCategory);
+            if (currentCatIdx < 0) currentCatIdx = 0;
+
+            if (ImGui.Combo("Category", ref currentCatIdx, categories, categories.Length))
+                plugin.SelectedCategory = categories[currentCatIdx];
+
+            // Search box
+            string query = plugin.SearchQuery;
+            if (ImGui.InputText("Search", ref query, 64))
+                plugin.SearchQuery = query;
+
+            // Filtered pastes
+            var matchingPastes = string.IsNullOrWhiteSpace(plugin.SearchQuery)
+                ? (plugin.SelectedCategory == "All" ? plugin.Library.AllPastes : plugin.Library.GetByCategory(plugin.SelectedCategory))
+                : plugin.Library.Search(plugin.SearchQuery);
+
+            if (ImGui.BeginChild("PasteListChild", new Vector2(0, 160), true))
+            {
+                foreach (TerrainBrushPaste paste in matchingPastes)
+                {
+                    bool isSelected = plugin.SelectedPaste?.Id == paste.Id;
+                    string label = $"{paste.Name} [{paste.Category}] ({paste.WidthMeters:F0}x{paste.LengthMeters:F0}m)";
+                    if (ImGui.Selectable(label, isSelected))
+                        plugin.SelectedPaste = paste;
+                }
+                ImGui.EndChild();
+            }
+
+            if (plugin.SelectedPaste != null)
+            {
+                TerrainBrushPaste sel = plugin.SelectedPaste;
+                ImGui.TextDisabled($"ID: {sel.Id}  Slope: {sel.MaxSlopeDegrees:F1}°  Layers: {sel.Layers.Count}");
+                ImGui.TextDisabled($"Tags: {string.Join(", ", sel.Tags)}");
+                if (sel.Layers.Count > 0)
+                {
+                    ImGui.TextDisabled($"Base Texture: {sel.Layers[0].TexturePath}");
+                    if (sel.Layers.Count > 1)
+                        ImGui.TextDisabled($"Layer 1: {sel.Layers[1].TexturePath}");
+                }
+            }
+        }
+
+        if (ImGui.CollapsingHeader("2. Interactive Stamping Controls", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.SliderFloat("Scale", ref _terrainStampScale, 0.25f, 4.0f, "%.2fx");
+            ImGui.SliderFloat("Rotation", ref _terrainStampRotation, 0.0f, 360.0f, "%.0f°");
+            ImGui.SliderFloat("Height Mult", ref _terrainStampHeightMult, -2.0f, 3.0f, "%.2fx");
+            ImGui.SliderFloat("Feathering", ref _terrainStampFeather, 0.0f, 16.0f, "%.1fm");
+
+            string[] blendModes = ["Additive", "Replace", "Maximum", "Minimum"];
+            ImGui.Combo("Blend Mode", ref _terrainStampBlendModeIdx, blendModes, blendModes.Length);
+
+            if (ImGui.Button("Stamp at Camera Center") && plugin.SelectedPaste != null)
+            {
+                var options = new TerrainStampOptions
+                {
+                    CenterWorldX = _camera.Position.X,
+                    CenterWorldY = _camera.Position.Y,
+                    Scale = _terrainStampScale,
+                    RotationDegrees = _terrainStampRotation,
+                    HeightMultiplier = _terrainStampHeightMult,
+                    FeatherRadiusMeters = _terrainStampFeather,
+                    BlendMode = (TerrainStampBlendMode)_terrainStampBlendModeIdx
+                };
+
+                ViewerLog.Info(ViewerLog.Category.General, $"[Terrain Stamp] Stamping {plugin.SelectedPaste.Name} at ({options.CenterWorldX:F1}, {options.CenterWorldY:F1})");
+            }
+        }
+
+        if (ImGui.CollapsingHeader("3. Templated Map Generator Wizard", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.InputText("Map Name", ref _terrainTemplateMapName, 64);
+
+            string[] themes = ["Garden Museum", "Elwynn Forest", "Cobblestone City", "Dun Morogh", "Barrens", "Ashenvale"];
+            ImGui.Combo("Biome Theme", ref _terrainTemplateThemeIdx, themes, themes.Length);
+
+            ImGui.SliderInt("Tile Rows", ref _terrainTemplateRows, 1, 8);
+            ImGui.SliderInt("Tile Cols", ref _terrainTemplateCols, 1, 8);
+            ImGui.SliderInt("Plaza Spacing (Chunks)", ref _terrainTemplatePlazaSpacing, 1, 4);
+            ImGui.InputText("Output Path", ref _terrainTemplateOutputDir, 128);
+
+            if (ImGui.Button("Generate Templated Map"))
+            {
+                var template = new TerrainMapTemplate
+                {
+                    MapName = _terrainTemplateMapName,
+                    Theme = (BiomeTheme)_terrainTemplateThemeIdx,
+                    TileRows = _terrainTemplateRows,
+                    TileCols = _terrainTemplateCols,
+                    PlazaSpacingChunks = _terrainTemplatePlazaSpacing,
+                    Palette = BiomePalette.ForTheme((BiomeTheme)_terrainTemplateThemeIdx)
+                };
+
+                TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template, plugin.Library);
+                _terrainTemplateStatus = $"Generated {result.Tiles.Count} tiles ({result.Tiles.Count * 256} chunks) for map '{result.MapName}' successfully.";
+                ViewerLog.Info(ViewerLog.Category.General, $"[Templated Map] {_terrainTemplateStatus}");
+            }
+
+            if (!string.IsNullOrEmpty(_terrainTemplateStatus))
+                ImGui.TextColored(new Vector4(0.2f, 0.9f, 0.2f, 1f), _terrainTemplateStatus);
+        }
     }
 }

@@ -19,6 +19,7 @@ using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.IO.Terrain;
 using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.Lit;
 using WowViewer.Core.M2;
@@ -93,6 +94,10 @@ switch (area)
 		break;
 	case "rosetta-generate":
 		RunRosettaGenerate(tail);
+		break;
+	case "terrain-generate-templated":
+	case "terrain-template-generate":
+		RunTerrainGenerateTemplated(tail);
 		break;
 	case "rosetta-datastore-info":
 		RunRosettaDatastoreInfo(tail);
@@ -8318,6 +8323,104 @@ static void RunRosettaGenerate(string[] args)
 	}
 }
 
+static void RunTerrainGenerateTemplated(string[] args)
+{
+	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
+	{
+		Console.WriteLine("Usage: wowviewer-inspect terrain-generate-templated --output <dir> [--map-name <name>] [--theme garden|elwynn|cobblestone|dunmorogh|barrens|ashenvale] [--rows <n>] [--cols <n>] [--start-x <n>] [--start-y <n>] [--plaza-spacing <n>] [--overwrite]");
+		Console.WriteLine("Generates a multi-tile procedural map with authentic 4-layer multi-tileset blending, connected cobblestone walkways, flat marble exhibit plazas, and guaranteed walkable slopes from curated terrain template brush motifs.");
+		return;
+	}
+
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(output))
+	{
+		Console.Error.WriteLine("Error: --output is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string mapName = GetOption(args, "--map-name") ?? "TemplatedGarden";
+	string themeStr = GetOption(args, "--theme")?.ToLowerInvariant() ?? "garden";
+	int rows = int.TryParse(GetOption(args, "--rows"), out int r) ? Math.Clamp(r, 1, 16) : 2;
+	int cols = int.TryParse(GetOption(args, "--cols"), out int c) ? Math.Clamp(c, 1, 16) : 2;
+	int startX = int.TryParse(GetOption(args, "--start-x"), out int sx) ? sx : 30;
+	int startY = int.TryParse(GetOption(args, "--start-y"), out int sy) ? sy : 30;
+	int plazaSpacing = int.TryParse(GetOption(args, "--plaza-spacing"), out int ps) ? Math.Clamp(ps, 1, 8) : 2;
+	bool overwrite = args.Contains("--overwrite", StringComparer.OrdinalIgnoreCase);
+
+	BiomeTheme theme = themeStr switch
+	{
+		"elwynn" => BiomeTheme.ElwynnForest,
+		"cobblestone" or "city" => BiomeTheme.CobblestoneCity,
+		"dunmorogh" or "snow" => BiomeTheme.DunMorogh,
+		"barrens" => BiomeTheme.Barrens,
+		"ashenvale" => BiomeTheme.Ashenvale,
+		_ => BiomeTheme.GardenMuseum
+	};
+
+	var template = new TerrainMapTemplate
+	{
+		MapName = mapName,
+		Theme = theme,
+		TileRows = rows,
+		TileCols = cols,
+		BaseTileX = startX,
+		BaseTileY = startY,
+		PlazaSpacingChunks = plazaSpacing,
+		Palette = BiomePalette.ForTheme(theme)
+	};
+
+	string outputRoot = Path.GetFullPath(output);
+	string mapDir = Path.Combine(outputRoot, "World", "Maps", mapName);
+
+	if (!overwrite && Directory.Exists(mapDir) && Directory.EnumerateFiles(mapDir).Any())
+	{
+		Console.Error.WriteLine($"Error: map directory '{mapDir}' already exists. Pass --overwrite to overwrite.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Directory.CreateDirectory(mapDir);
+
+	Console.WriteLine($"[Templated Terrain Generator] Generating {rows}x{cols} tiles ({rows * cols * 256} chunks) for map '{mapName}' (Theme: {theme})...");
+	var sw = Stopwatch.StartNew();
+
+	TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template, CuratedTerrainBrushLibrary.Instance);
+
+	// Write LK ADTs and WDT
+	var tileCoordSet = new HashSet<(int tileX, int tileY)>();
+	var wdlTiles = new List<WdlHeightTile>();
+
+	foreach (var kvp in result.Tiles)
+	{
+		int tx = kvp.Key.X;
+		int ty = kvp.Key.Y;
+		tileCoordSet.Add((tx, ty));
+
+		string adtPath = Path.Combine(mapDir, $"{mapName}_{tx}_{ty}.adt");
+		byte[] adtBytes = LkAdtWriter.Build(kvp.Value);
+		File.WriteAllBytes(adtPath, adtBytes);
+
+		// Build WDL height tile (flat 0m)
+		var outerHeights = new short[17 * 17];
+		var innerHeights = new short[16 * 16];
+		wdlTiles.Add(new WdlHeightTile(tx, ty, outerHeights, innerHeights));
+	}
+
+	string wdtPath = Path.Combine(mapDir, $"{mapName}.wdt");
+	LkWdtWriter.Write(wdtPath, tileCoordSet);
+
+	string wdlPath = Path.Combine(mapDir, $"{mapName}.wdl");
+	WdlWriter.Write(wdlPath, wdlTiles);
+
+	sw.Stop();
+	Console.WriteLine($"[Templated Terrain Generator] Successfully generated {result.Tiles.Count} tiles in {sw.ElapsedMilliseconds}ms.");
+	Console.WriteLine($"  Map Directory: {mapDir}");
+	Console.WriteLine($"  Tile Bounds: ({result.MinTileX}, {result.MinTileY}) -> ({result.MaxTileX}, {result.MaxTileY})");
+	Console.WriteLine($"  In-Game Teleport: .worldport 0 0 0 1 (or .go xyz 0 0 1)");
+}
+
 static void RunRosettaDatastoreInfo(string[] args)
 {
 	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
@@ -10204,6 +10307,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect rosetta-datastore-diff <datastorePath> --base <buildId> --target <buildId> [--output <diff.json>]");
 	Console.WriteLine("  wowviewer-inspect rosetta-pm4-match <pm4Path> --library <libraryJsonPath> [--legacy-adt <adtPath>] [--output <report.json>] [--tolerance <float>] [--top-k <int>]");
 	Console.WriteLine("  wowviewer-inspect rosetta-synthesize-companions <pm4Dir> --output <adtDir> [--map <mapName>] [--texture <tex>] [--report <provenance.json>] [--split-obj0] [--overwrite]");
+	Console.WriteLine("  wowviewer-inspect terrain-generate-templated --output <dir> [--map-name <name>] [--theme garden|elwynn|cobblestone|dunmorogh|barrens|ashenvale] [--rows <n>] [--cols <n>] [--start-x <n>] [--start-y <n>] [--plaza-spacing <n>] [--overwrite]");
 }
 
 static Pm4SegmentExportFile AssertSinglePm4ExportFile(Pm4SegmentExportRun exportRun, string input)

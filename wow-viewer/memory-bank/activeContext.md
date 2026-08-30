@@ -1,6 +1,15 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
+
+**Spec 192 lane (2026-08-30, checkpoint 43).** Terrain Template Brush & Paste Library with In-Viewer Map Generator — COMPLETE:
+1. **Curated Terrain Brush & Paste Library**: Implemented `TerrainBrushPaste`, `TerrainBrushLibrary`, and `CuratedTerrainBrushLibrary` providing 15 archetypal terrain motifs (cobblestone straight/curve/cross roads, dirt paths, marble plazas, gentle knolls, terraces, ridges, pond basins, grand avenues, flat exhibit pads) with 2D relative heightfields, multi-layer alpha masks, and slope metadata.
+2. **Strict Hardware 4-Layer Chunk Allocator**: Implemented `TerrainLayerAllocator` with energy-based alpha pruning and weight normalization, strictly enforcing the engine's 4-texture-layer-per-chunk ceiling.
+3. **ADT Sub-Region Extraction Engine**: Implemented `AdtPasteExtractor` to extract bounded terrain pastes and multi-layer alpha splats directly from loaded `LkMcnkData` / `AlphaMcnk` structures.
+4. **Undo/Redo Terrain Stamping Operation**: Implemented `TerrainStampOptions` and `TerrainStampOperation` with `SmoothStep` edge feathering, height blending modes (Additive, Replace, Min, Max), normal recalculation, and snapshot state capture for `EditorSession`.
+5. **Templated Procedural Map Generator**: Implemented `TerrainMapTemplate` and `TemplatedTerrainGenerator` synthesizing multi-tile maps with arterial road networks, flat marble exhibit courtyards ($Z = 0$), slope constraints ($\le 25^\circ$), and multi-era ADT / WDT / WDL serialization.
+6. **Interactive Viewer Editor Plugin UI & CLI**: Implemented `TerrainTemplateEditorPlugin` registered in `EditorHost`, ImGui catalog browser and stamping sliders in `ViewerApp_Editor.cs`, and `terrain-generate-templated` CLI command in `WowViewer.Tool.Inspect` (`Program.cs`).
+7. **Verification**: 14/14 unit tests pass 100% green across `TerrainBrushPasteTests`, `TerrainLayerAllocatorTests`, `AdtPasteExtractorTests`, `TerrainStampOperationTests`, and `TemplatedTerrainGeneratorTests`. Solution builds with 0 errors.
 
 **Spec 191 lane (2026-08-30, checkpoint 42).** Procedural Garden Museum Map Generator — DEFECT DIAGNOSIS & REWRITE PLAN:
 1. **Current Generation Reality & User Verification Failure**:

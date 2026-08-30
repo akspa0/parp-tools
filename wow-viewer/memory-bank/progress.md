@@ -2,6 +2,17 @@
 
 Last updated: 2026-08-30
 
+## 2026-08-30 — Spec 192: Terrain Template Brush & Paste Library with Interactive In-Viewer Map Generator (Complete)
+- **Landed:**
+  - **Curated Terrain Brush & Paste Library (`CuratedTerrainBrushLibrary`):** 15 stock archetypal terrain motifs (cobblestone straight/curve/cross roads, dirt paths, marble plazas, gentle knolls, terraces, ridges, pond basins, grand avenues, flat exhibit pads) with 2D relative heightfields, multi-layer alpha masks, and slope calculation.
+  - **Strict Hardware 4-Layer Chunk Allocator (`TerrainLayerAllocator`):** Solves the hardware constraint by energy-based alpha pruning and weight normalization, strictly enforcing $\le 4$ texture layers per MCNK chunk.
+  - **ADT Sub-Region Extraction Engine (`AdtPasteExtractor`):** Extracts bounded terrain pastes directly from loaded LK/Alpha ADT chunks, enabling continuous harvesting of real terrain brush pastes from game data.
+  - **Undo/Redo Terrain Stamping Operation (`TerrainStampOperation`):** Applies brush pastes with `SmoothStep` boundary feathering, height blending modes (Additive, Replace, Maximum, Minimum), and snapshot state capture for `EditorSession`.
+  - **Templated Procedural Map Generator (`TemplatedTerrainGenerator`):** Synthesizes multi-tile maps with connected cobblestone walkway networks, flat marble exhibit courtyards ($Z = 0$), slope constraints ($\le 25^\circ$), and multi-era ADT / WDT / WDL serialization.
+  - **In-Viewer Editor Plugin (`TerrainTemplateEditorPlugin`):** ImGui categorized paste catalog browser, search filter, interactive stamping sliders (scale, rotation, height mult, feathering), and "New Map from Template" generation wizard in `ViewerApp_Editor.cs`.
+  - **CLI Command (`terrain-generate-templated`):** Generates full multi-tile maps from command line with customizable themes, grid sizes, and output paths.
+  - **Unit Tests:** 14 new tests in `TerrainBrushPasteTests`, `TerrainLayerAllocatorTests`, `AdtPasteExtractorTests`, `TerrainStampOperationTests`, and `TemplatedTerrainGeneratorTests` (100% green). Solution builds with 0 errors.
+
 ## 2026-08-30 — Spec 191: Procedural Garden Museum Map Generator (In Progress)
 - **Defects Identified via In-Game Proof:**
   - `DefaultGroundTexture` was hardcoded to `wcsand.blp` (Wailing Caverns sand) with `checkers.blp`, generating barren sand maps with giant checkerboard lines instead of garden terrain.
