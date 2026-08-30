@@ -3,11 +3,18 @@ using ImGuiNET;
 
 namespace WoWViewer;
 
+public enum ImGuiPathPickerMode
+{
+    OpenFolder,
+    OpenFile,
+    SaveFile
+}
+
 /// <summary>
 /// In-app ImGui file/folder picker built exclusively on BCL filesystem APIs, so browsing behaves
 /// identically on every platform — no WinForms or native dialogs anywhere in cross-platform builds.
-/// One modal at a time; call <see cref="Open"/> from any UI surface and <see cref="Draw"/> once per
-/// frame while that surface is visible.
+/// Supports drive shortcuts, editable path bar, multi-extension filters, search filter, new folder creation,
+/// and both Open and Save modes.
 /// </summary>
 internal sealed class ImGuiPathPicker
 {
@@ -16,45 +23,72 @@ internal sealed class ImGuiPathPicker
     private bool _openRequested;
     private bool _popupVisible;
     private string _title = "Select path";
-    private bool _pickFolder;
-    private string _filterExtension = string.Empty;
+    private ImGuiPathPickerMode _mode = ImGuiPathPickerMode.OpenFolder;
+    private string[] _filterExtensions = [];
     private Action<string>? _onPicked;
     private string _currentDirectory = Directory.GetCurrentDirectory();
+    private string _pathInputBuffer = string.Empty;
     private string _fileName = string.Empty;
+    private string _searchFilter = string.Empty;
     private string _error = string.Empty;
+    private bool _showNewFolderInput = false;
+    private string _newFolderBuffer = string.Empty;
 
     private ImGuiPathPicker()
     {
     }
 
-    /// <summary>Opens the picker modal. <paramref name="filterExtension"/> like ".pm4" (file mode only).</summary>
+    /// <summary>Opens the picker in Folder or File Open mode.</summary>
     public void Open(string title, bool pickFolder, string? initialPath, string? filterExtension, Action<string> onPicked)
+    {
+        Open(title, pickFolder ? ImGuiPathPickerMode.OpenFolder : ImGuiPathPickerMode.OpenFile, initialPath, filterExtension, onPicked);
+    }
+
+    /// <summary>Opens the picker in a specified mode (OpenFolder, OpenFile, SaveFile).</summary>
+    public void Open(string title, ImGuiPathPickerMode mode, string? initialPath, string? filterExtension, Action<string> onPicked, string? defaultFileName = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(onPicked);
 
         _title = title;
-        _pickFolder = pickFolder;
-        _filterExtension = string.IsNullOrWhiteSpace(filterExtension) ? string.Empty : filterExtension.TrimStart('.');
+        _mode = mode;
         _onPicked = onPicked;
         _error = string.Empty;
+        _searchFilter = string.Empty;
+        _showNewFolderInput = false;
+        _newFolderBuffer = string.Empty;
+
+        // Parse filter extensions (e.g. ".pm4;.pd4" or ".wdt|.mpq" or "*.json")
+        if (string.IsNullOrWhiteSpace(filterExtension) || filterExtension.Contains("*.*"))
+        {
+            _filterExtensions = [];
+        }
+        else
+        {
+            _filterExtensions = filterExtension
+                .Split(['|', ';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(ext => ext.TrimStart('*').TrimStart('.'))
+                .Where(ext => !string.IsNullOrEmpty(ext))
+                .ToArray();
+        }
 
         if (!string.IsNullOrWhiteSpace(initialPath) && Directory.Exists(initialPath))
         {
-            _currentDirectory = initialPath;
-            _fileName = string.Empty;
+            _currentDirectory = Path.GetFullPath(initialPath);
+            _fileName = defaultFileName ?? string.Empty;
         }
         else if (!string.IsNullOrWhiteSpace(initialPath) && File.Exists(initialPath))
         {
-            _currentDirectory = Path.GetDirectoryName(initialPath) ?? Directory.GetCurrentDirectory();
+            _currentDirectory = Path.GetDirectoryName(Path.GetFullPath(initialPath)) ?? Directory.GetCurrentDirectory();
             _fileName = Path.GetFileName(initialPath);
         }
         else
         {
             _currentDirectory = Directory.GetCurrentDirectory();
-            _fileName = string.Empty;
+            _fileName = defaultFileName ?? string.Empty;
         }
 
+        _pathInputBuffer = _currentDirectory;
         _openRequested = true;
     }
 
@@ -70,19 +104,77 @@ internal sealed class ImGuiPathPicker
         if (!_popupVisible)
             return;
 
-        ImGui.SetNextWindowSize(new Vector2(680, 480), ImGuiCond.Appearing);
+        ImGui.SetNextWindowSize(new Vector2(740, 520), ImGuiCond.Appearing);
         if (!ImGui.BeginPopupModal(_title, ref _popupVisible, ImGuiWindowFlags.NoSavedSettings))
             return;
 
-        if (ImGui.Button("Up"))
+        // 1. Drive & Shortcut Bar
+        DrawDriveShortcuts();
+
+        // 2. Navigation bar: Up button, Path Input, and Go
+        if (ImGui.Button("Up (..)") || ImGui.IsKeyPressed(ImGuiKey.Backspace) && !ImGui.IsAnyItemActive())
         {
             DirectoryInfo? parent = Directory.GetParent(_currentDirectory);
-            if (parent is not null)
+            if (parent is not null && Directory.Exists(parent.FullName))
+            {
                 _currentDirectory = parent.FullName;
+                _pathInputBuffer = _currentDirectory;
+                _error = string.Empty;
+            }
         }
 
         ImGui.SameLine();
-        ImGui.TextWrapped(_currentDirectory);
+        ImGui.SetNextItemWidth(-80f);
+        if (ImGui.InputText("##PathBar", ref _pathInputBuffer, 512, ImGuiInputTextFlags.EnterReturnsTrue))
+        {
+            NavigateToInputPath();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Go", new Vector2(70f, 0)))
+        {
+            NavigateToInputPath();
+        }
+
+        // Search in directory & New Folder button
+        ImGui.SetNextItemWidth(240f);
+        ImGui.InputTextWithHint("##SearchFilter", "Filter current directory...", ref _searchFilter, 64);
+
+        if (_mode == ImGuiPathPickerMode.OpenFolder || _mode == ImGuiPathPickerMode.SaveFile)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("+ New Folder"))
+            {
+                _showNewFolderInput = !_showNewFolderInput;
+                _newFolderBuffer = "NewFolder";
+            }
+        }
+
+        if (_showNewFolderInput)
+        {
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(160f);
+            ImGui.InputText("##NewFolderName", ref _newFolderBuffer, 64);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Create"))
+            {
+                try
+                {
+                    string targetNew = Path.Combine(_currentDirectory, _newFolderBuffer.Trim());
+                    if (!Directory.Exists(targetNew))
+                    {
+                        Directory.CreateDirectory(targetNew);
+                        _currentDirectory = targetNew;
+                        _pathInputBuffer = targetNew;
+                    }
+                    _showNewFolderInput = false;
+                }
+                catch (Exception ex)
+                {
+                    _error = $"Cannot create folder: {ex.Message}";
+                }
+            }
+        }
 
         if (!string.IsNullOrEmpty(_error))
         {
@@ -91,30 +183,53 @@ internal sealed class ImGuiPathPicker
 
         ImGui.Separator();
 
-        ImGui.BeginChild("##PathPickerEntries", new Vector2(0, -GetFooterHeight()), border: false);
+        // 3. Entries List
+        ImGui.BeginChild("##PathPickerEntries", new Vector2(0, -GetFooterHeight()), border: true);
 
         try
         {
-            foreach (string directory in Directory.EnumerateDirectories(_currentDirectory).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            if (Directory.Exists(_currentDirectory))
             {
-                if (ImGui.Selectable($"[dir]  {Path.GetFileName(directory)}"))
+                // Directories
+                foreach (string directory in Directory.EnumerateDirectories(_currentDirectory).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
                 {
-                    _currentDirectory = directory;
-                    _error = string.Empty;
-                }
-            }
-
-            if (!_pickFolder)
-            {
-                foreach (string file in Directory.EnumerateFiles(_currentDirectory).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
-                {
-                    if (_filterExtension.Length > 0 && !Path.GetExtension(file).Equals("." + _filterExtension, StringComparison.OrdinalIgnoreCase))
+                    string dirName = Path.GetFileName(directory);
+                    if (!string.IsNullOrWhiteSpace(_searchFilter) && !dirName.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
                         continue;
 
-                    bool isSelected = string.Equals(Path.GetFileName(file), _fileName, StringComparison.OrdinalIgnoreCase);
-                    if (ImGui.Selectable($"        {Path.GetFileName(file)}", isSelected))
-                        _fileName = Path.GetFileName(file);
+                    if (ImGui.Selectable($"[dir]  {dirName}"))
+                    {
+                        _currentDirectory = directory;
+                        _pathInputBuffer = directory;
+                        _error = string.Empty;
+                    }
                 }
+
+                // Files (when not picking folders)
+                if (_mode != ImGuiPathPickerMode.OpenFolder)
+                {
+                    foreach (string file in Directory.EnumerateFiles(_currentDirectory).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        string fileName = Path.GetFileName(file);
+                        if (!string.IsNullOrWhiteSpace(_searchFilter) && !fileName.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        if (_filterExtensions.Length > 0)
+                        {
+                            string fileExt = Path.GetExtension(file).TrimStart('.');
+                            if (!_filterExtensions.Any(ext => ext.Equals(fileExt, StringComparison.OrdinalIgnoreCase)))
+                                continue;
+                        }
+
+                        bool isSelected = string.Equals(fileName, _fileName, StringComparison.OrdinalIgnoreCase);
+                        if (ImGui.Selectable($"       {fileName}", isSelected))
+                            _fileName = fileName;
+                    }
+                }
+            }
+            else
+            {
+                ImGui.TextDisabled("Directory does not exist.");
             }
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
@@ -124,13 +239,16 @@ internal sealed class ImGuiPathPicker
 
         ImGui.EndChild();
 
-        if (!_pickFolder)
+        // 4. Footer File Name Input & Action Buttons
+        if (_mode != ImGuiPathPickerMode.OpenFolder)
         {
-            ImGui.SetNextItemWidth(-1f);
+            ImGui.Text("File name:");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(-180f);
             ImGui.InputText("##PathPickerFileName", ref _fileName, 512);
         }
 
-        float buttonsWidth = 160f;
+        float buttonsWidth = 180f;
         ImGui.SameLine(ImGui.GetWindowWidth() - buttonsWidth - ImGui.GetStyle().FramePadding.X);
         if (ImGui.Button("Cancel", new Vector2(buttonsWidth * 0.48f, 0)))
         {
@@ -139,8 +257,14 @@ internal sealed class ImGuiPathPicker
         }
 
         ImGui.SameLine();
-        string confirmLabel = _pickFolder ? "Use folder" : "Open";
-        if (ImGui.Button(confirmLabel, new Vector2(buttonsWidth * 0.52f, 0)))
+        string confirmLabel = _mode switch
+        {
+            ImGuiPathPickerMode.OpenFolder => "Use Folder",
+            ImGuiPathPickerMode.SaveFile => "Save",
+            _ => "Open"
+        };
+
+        if (ImGui.Button(confirmLabel, new Vector2(buttonsWidth * 0.50f, 0)))
         {
             string? picked = ResolveSelection();
             if (picked is not null)
@@ -156,12 +280,85 @@ internal sealed class ImGuiPathPicker
         ImGui.EndPopup();
     }
 
+    private void DrawDriveShortcuts()
+    {
+        ImGui.TextDisabled("Drives & Shortcuts:");
+        ImGui.SameLine();
+
+        try
+        {
+            DriveInfo[] drives = DriveInfo.GetDrives();
+            foreach (DriveInfo drive in drives)
+            {
+                if (drive.IsReady)
+                {
+                    string driveLabel = drive.Name.TrimEnd('\\');
+                    if (ImGui.SmallButton(driveLabel))
+                    {
+                        _currentDirectory = drive.RootDirectory.FullName;
+                        _pathInputBuffer = _currentDirectory;
+                        _error = string.Empty;
+                    }
+                    ImGui.SameLine();
+                }
+            }
+        }
+        catch
+        {
+            // Ignore drive enumeration failures on restricted environments
+        }
+
+        // Common shortcuts if available
+        if (Directory.Exists(@"H:\CLIENTS"))
+        {
+            if (ImGui.SmallButton("CLIENTS (H:)"))
+            {
+                _currentDirectory = @"H:\CLIENTS";
+                _pathInputBuffer = _currentDirectory;
+                _error = string.Empty;
+            }
+            ImGui.SameLine();
+        }
+
+        string appBase = AppContext.BaseDirectory;
+        if (ImGui.SmallButton("App Directory"))
+        {
+            _currentDirectory = appBase;
+            _pathInputBuffer = _currentDirectory;
+            _error = string.Empty;
+        }
+
+        ImGui.NewLine();
+    }
+
+    private void NavigateToInputPath()
+    {
+        string target = _pathInputBuffer.Trim();
+        if (Directory.Exists(target))
+        {
+            _currentDirectory = Path.GetFullPath(target);
+            _pathInputBuffer = _currentDirectory;
+            _error = string.Empty;
+        }
+        else if (File.Exists(target))
+        {
+            _currentDirectory = Path.GetDirectoryName(Path.GetFullPath(target)) ?? _currentDirectory;
+            _fileName = Path.GetFileName(target);
+            _pathInputBuffer = _currentDirectory;
+            _error = string.Empty;
+        }
+        else
+        {
+            _error = $"Path '{target}' does not exist.";
+        }
+    }
+
     private float GetFooterHeight()
-        => _pickFolder ? ImGui.GetFrameHeightWithSpacing() : ImGui.GetFrameHeightWithSpacing() * 2f;
+        => _mode == ImGuiPathPickerMode.OpenFolder ? ImGui.GetFrameHeightWithSpacing() * 1.5f : ImGui.GetFrameHeightWithSpacing() * 2.5f;
 
     private string? ResolveSelection()
     {
-        if (_pickFolder)
+        if (_mode == ImGuiPathPickerMode.OpenFolder)
         {
             if (!Directory.Exists(_currentDirectory))
             {
@@ -178,17 +375,33 @@ internal sealed class ImGuiPathPicker
             return null;
         }
 
-        string candidate = Path.Combine(_currentDirectory, _fileName);
-        if (!File.Exists(candidate))
-        {
-            _error = "File does not exist.";
-            return null;
-        }
+        string candidate = Path.Combine(_currentDirectory, _fileName.Trim());
 
-        if (_filterExtension.Length > 0 && !Path.GetExtension(candidate).Equals("." + _filterExtension, StringComparison.OrdinalIgnoreCase))
+        if (_mode == ImGuiPathPickerMode.OpenFile)
         {
-            _error = $"Expected a .{_filterExtension} file.";
-            return null;
+            if (!File.Exists(candidate))
+            {
+                _error = "File does not exist.";
+                return null;
+            }
+
+            if (_filterExtensions.Length > 0)
+            {
+                string fileExt = Path.GetExtension(candidate).TrimStart('.');
+                if (!_filterExtensions.Any(ext => ext.Equals(fileExt, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _error = $"Expected a file with extension: {string.Join(", ", _filterExtensions.Select(e => "." + e))}";
+                    return null;
+                }
+            }
+        }
+        else if (_mode == ImGuiPathPickerMode.SaveFile)
+        {
+            // If saving and no extension was entered, append first filter extension
+            if (string.IsNullOrEmpty(Path.GetExtension(candidate)) && _filterExtensions.Length > 0)
+            {
+                candidate += "." + _filterExtensions[0];
+            }
         }
 
         return candidate;

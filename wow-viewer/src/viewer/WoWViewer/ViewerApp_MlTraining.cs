@@ -453,9 +453,16 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Browse##mlTrainingScript"))
         {
-            string? result = ShowFileDialogSTA("Select train_v7.py", "Python Files (*.py)|*.py|All Files (*.*)|*.*", Path.GetDirectoryName(_mlTrainingScriptPath));
-            if (!string.IsNullOrWhiteSpace(result))
-                _mlTrainingScriptPath = result;
+            ImGuiPathPicker.Instance.Open(
+                "Select train_v7.py",
+                pickFolder: false,
+                initialPath: _mlTrainingScriptPath,
+                filterExtension: ".py",
+                result =>
+                {
+                    if (!string.IsNullOrWhiteSpace(result))
+                        _mlTrainingScriptPath = result;
+                });
         }
 
         string[] profiles = ["development-map", "manual"];
@@ -509,9 +516,16 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Browse##mlTrainingOutput"))
         {
-            string? result = ShowFolderDialogSTA("Select V7 training output directory", _mlTrainingOutputDir, showNewFolderButton: true);
-            if (!string.IsNullOrWhiteSpace(result))
-                _mlTrainingOutputDir = result;
+            ImGuiPathPicker.Instance.Open(
+                "Select V7 training output directory",
+                pickFolder: true,
+                initialPath: _mlTrainingOutputDir,
+                filterExtension: null,
+                result =>
+                {
+                    if (!string.IsNullOrWhiteSpace(result))
+                        _mlTrainingOutputDir = result;
+                });
         }
 
         ImGui.Text("Resume Checkpoint (optional):");
@@ -520,9 +534,16 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Browse##mlTrainingResume"))
         {
-            string? result = ShowFileDialogSTA("Select V7 checkpoint", "Checkpoint (*.pt)|*.pt|All Files (*.*)|*.*", Path.GetDirectoryName(_mlTrainingResumeCheckpointPath));
-            if (!string.IsNullOrWhiteSpace(result))
-                _mlTrainingResumeCheckpointPath = result;
+            ImGuiPathPicker.Instance.Open(
+                "Select V7 checkpoint",
+                pickFolder: false,
+                initialPath: _mlTrainingResumeCheckpointPath,
+                filterExtension: ".pt",
+                result =>
+                {
+                    if (!string.IsNullOrWhiteSpace(result))
+                        _mlTrainingResumeCheckpointPath = result;
+                });
         }
 
         ImGui.Separator();

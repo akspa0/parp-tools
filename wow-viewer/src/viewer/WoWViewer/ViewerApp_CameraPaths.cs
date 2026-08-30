@@ -885,20 +885,28 @@ public partial class ViewerApp
         }
 
         BindCameraPathToCurrentMap();
-        string? path = ShowSaveFileDialogSTA("Save WoWViewer camera path", "Camera Path (*.m2cam.json)|*.m2cam.json|JSON Files (*.json)|*.json", Path.GetDirectoryName(_cameraPathFilePath), $"{_cameraPath.Name}.m2cam.json");
-        if (string.IsNullOrWhiteSpace(path))
-            return;
-        try
-        {
-            M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
-            File.WriteAllText(path, JsonSerializer.Serialize(_cameraPath, M2CameraPathJson.CreateOptions(writeIndented: true)));
-            _cameraPathFilePath = path;
-            _statusMessage = $"Saved camera path: {path}";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"Failed to save camera path: {ex.Message}";
-        }
+        ImGuiPathPicker.Instance.Open(
+            "Save WoWViewer camera path",
+            ImGuiPathPickerMode.SaveFile,
+            Path.GetDirectoryName(_cameraPathFilePath),
+            ".m2cam.json;.json",
+            path =>
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                    return;
+                try
+                {
+                    M2CameraPathEvaluator.NormalizeAndValidate(_cameraPath);
+                    File.WriteAllText(path, JsonSerializer.Serialize(_cameraPath, M2CameraPathJson.CreateOptions(writeIndented: true)));
+                    _cameraPathFilePath = path;
+                    _statusMessage = $"Saved camera path: {path}";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"Failed to save camera path: {ex.Message}";
+                }
+            },
+            $"{_cameraPath.Name}.m2cam.json");
     }
 
     private void SaveCameraPathM2()
@@ -910,61 +918,76 @@ public partial class ViewerApp
         }
 
         BindCameraPathToCurrentMap();
-        string? path = ShowSaveFileDialogSTA("Save native M2 camera path", "M2 Files (*.m2)|*.m2", Path.GetDirectoryName(_cameraPathFilePath), $"{_cameraPath.Name}.m2");
-        if (string.IsNullOrWhiteSpace(path))
-            return;
-        try
-        {
-            M2CameraPathWriter.Write(path, _cameraPath);
-            string sidecar = path + ".json";
-            File.WriteAllText(sidecar, JsonSerializer.Serialize(_cameraPath, M2CameraPathJson.CreateOptions(writeIndented: true)));
-            _cameraPathFilePath = path;
-            _statusMessage = $"Saved native M2 camera path and metadata sidecar: {path}";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"Failed to export camera path M2: {ex.Message}";
-        }
+        ImGuiPathPicker.Instance.Open(
+            "Save native M2 camera path",
+            ImGuiPathPickerMode.SaveFile,
+            Path.GetDirectoryName(_cameraPathFilePath),
+            ".m2",
+            path =>
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                    return;
+                try
+                {
+                    M2CameraPathWriter.Write(path, _cameraPath);
+                    string sidecar = path + ".json";
+                    File.WriteAllText(sidecar, JsonSerializer.Serialize(_cameraPath, M2CameraPathJson.CreateOptions(writeIndented: true)));
+                    _cameraPathFilePath = path;
+                    _statusMessage = $"Saved native M2 camera path and metadata sidecar: {path}";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"Failed to export camera path M2: {ex.Message}";
+                }
+            },
+            $"{_cameraPath.Name}.m2");
     }
 
     private void LoadCameraPathJson()
     {
-        string? path = ShowFileDialogSTA("Load WoWViewer camera path", "Camera Path (*.m2cam.json;*.json)|*.m2cam.json;*.json|JSON Files (*.json)|*.json", Path.GetDirectoryName(_cameraPathFilePath));
-        if (string.IsNullOrWhiteSpace(path))
-            return;
-        try
-        {
-            M2CameraPathDocument? loaded = JsonSerializer.Deserialize<M2CameraPathDocument>(File.ReadAllText(path), M2CameraPathJson.CreateOptions());
-            if (loaded == null)
-                throw new InvalidDataException("The camera path document was empty.");
-            M2CameraPathEvaluator.NormalizeAndValidate(loaded);
-            _cameraPath.Format = loaded.Format;
-            _cameraPath.Name = loaded.Name;
-            _cameraPath.MapName = loaded.MapName;
-            _cameraPath.BuildVersion = loaded.BuildVersion;
-            _cameraPath.Interpolation = loaded.Interpolation;
-            _cameraPath.TerrainCollisionEnabled = loaded.TerrainCollisionEnabled;
-            _cameraPath.WmoCollisionEnabled = loaded.WmoCollisionEnabled;
-            _cameraPath.CollisionClearance = loaded.CollisionClearance;
-            _cameraPath.CoordinatesAreWorldSpace = loaded.CoordinatesAreWorldSpace;
-            _cameraPath.HasCinematicCameraOrigin = loaded.HasCinematicCameraOrigin;
-            _cameraPath.CinematicCameraId = loaded.CinematicCameraId;
-            _cameraPath.CinematicCameraModel = loaded.CinematicCameraModel;
-            _cameraPath.CinematicCameraOrigin = loaded.CinematicCameraOrigin;
-            _cameraPath.CinematicCameraOriginFacingRadians = loaded.CinematicCameraOriginFacingRadians;
-            _cameraPath.CinematicCameraOriginTileX = loaded.CinematicCameraOriginTileX;
-            _cameraPath.CinematicCameraOriginTileY = loaded.CinematicCameraOriginTileY;
-            _cameraPath.CinematicCameraOriginSource = loaded.CinematicCameraOriginSource;
-            _cameraPath.Keyframes = loaded.Keyframes;
-            _cameraPathName = loaded.Name;
-            _cameraPathFilePath = path;
-            _selectedCameraPathKey = -1;
-            _statusMessage = $"Loaded camera path '{loaded.Name}' ({loaded.Keyframes.Count} keys).";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"Failed to load camera path: {ex.Message}";
-        }
+        ImGuiPathPicker.Instance.Open(
+            "Load WoWViewer camera path",
+            pickFolder: false,
+            initialPath: Path.GetDirectoryName(_cameraPathFilePath),
+            filterExtension: ".m2cam.json;.json",
+            path =>
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                    return;
+                try
+                {
+                    M2CameraPathDocument? loaded = JsonSerializer.Deserialize<M2CameraPathDocument>(File.ReadAllText(path), M2CameraPathJson.CreateOptions());
+                    if (loaded == null)
+                        throw new InvalidDataException("The camera path document was empty.");
+                    M2CameraPathEvaluator.NormalizeAndValidate(loaded);
+                    _cameraPath.Format = loaded.Format;
+                    _cameraPath.Name = loaded.Name;
+                    _cameraPath.MapName = loaded.MapName;
+                    _cameraPath.BuildVersion = loaded.BuildVersion;
+                    _cameraPath.Interpolation = loaded.Interpolation;
+                    _cameraPath.TerrainCollisionEnabled = loaded.TerrainCollisionEnabled;
+                    _cameraPath.WmoCollisionEnabled = loaded.WmoCollisionEnabled;
+                    _cameraPath.CollisionClearance = loaded.CollisionClearance;
+                    _cameraPath.CoordinatesAreWorldSpace = loaded.CoordinatesAreWorldSpace;
+                    _cameraPath.HasCinematicCameraOrigin = loaded.HasCinematicCameraOrigin;
+                    _cameraPath.CinematicCameraId = loaded.CinematicCameraId;
+                    _cameraPath.CinematicCameraModel = loaded.CinematicCameraModel;
+                    _cameraPath.CinematicCameraOrigin = loaded.CinematicCameraOrigin;
+                    _cameraPath.CinematicCameraOriginFacingRadians = loaded.CinematicCameraOriginFacingRadians;
+                    _cameraPath.CinematicCameraOriginTileX = loaded.CinematicCameraOriginTileX;
+                    _cameraPath.CinematicCameraOriginTileY = loaded.CinematicCameraOriginTileY;
+                    _cameraPath.CinematicCameraOriginSource = loaded.CinematicCameraOriginSource;
+                    _cameraPath.Keyframes = loaded.Keyframes;
+                    _cameraPathName = loaded.Name;
+                    _cameraPathFilePath = path;
+                    _selectedCameraPathKey = -1;
+                    _statusMessage = $"Loaded camera path '{loaded.Name}' ({loaded.Keyframes.Count} keys).";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"Failed to load camera path: {ex.Message}";
+                }
+            });
     }
 
     private void ImportCameraPathM2()
@@ -972,10 +995,27 @@ public partial class ViewerApp
         string path = _cameraPathImportPath.Trim();
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
-            path = ShowFileDialogSTA("Import M2 camera path", "M2 Files (*.m2)|*.m2", Path.GetDirectoryName(_cameraPathImportPath)) ?? string.Empty;
-        }
-        if (string.IsNullOrWhiteSpace(path))
+            ImGuiPathPicker.Instance.Open(
+                "Import M2 camera path",
+                pickFolder: false,
+                initialPath: Path.GetDirectoryName(_cameraPathImportPath),
+                filterExtension: ".m2",
+                picked =>
+                {
+                    if (!string.IsNullOrWhiteSpace(picked))
+                    {
+                        _cameraPathImportPath = picked;
+                        ExecuteImportCameraPathM2(picked);
+                    }
+                });
             return;
+        }
+
+        ExecuteImportCameraPathM2(path);
+    }
+
+    private void ExecuteImportCameraPathM2(string path)
+    {
         try
         {
             using FileStream stream = File.OpenRead(path);

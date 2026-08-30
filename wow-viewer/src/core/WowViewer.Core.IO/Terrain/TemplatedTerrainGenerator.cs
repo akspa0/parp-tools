@@ -123,12 +123,84 @@ public static class TemplatedTerrainGenerator
             }
         }
 
+        var modelNames = new List<string>();
+        var modelPlacements = new List<LkMddfEntry>();
+        var worldModelNames = new List<string>();
+        var worldModelPlacements = new List<LkModfEntry>();
+
+        if (template.Theme == BiomeTheme.GardenMuseum)
+        {
+            modelNames.Add(@"Doodads\Terrain\Fountain\HumanFountain.mdx");
+            modelNames.Add(@"Doodads\City\StreetLight\StormwindStreetLight.mdx");
+            modelNames.Add(@"Doodads\Terrain\Benches\ParkBench.mdx");
+            modelNames.Add(@"Doodads\Trees\Elwynn\ElwynnBush01.mdx");
+
+            uint uniqueId = (uint)((tileX * 1000 + tileY) * 10000);
+            for (int cy = 0; cy < ChunksPerTileAxis; cy++)
+            {
+                for (int cx = 0; cx < ChunksPerTileAxis; cx++)
+                {
+                    int globalChunkX = (tileX - template.BaseTileX) * ChunksPerTileAxis + cx;
+                    int globalChunkY = (tileY - template.BaseTileY) * ChunksPerTileAxis + cy;
+                    int spacing = Math.Max(1, template.PlazaSpacingChunks);
+                    bool isPlazaNode = (globalChunkX % spacing == 0) && (globalChunkY % spacing == 0);
+
+                    if (isPlazaNode)
+                    {
+                        float chunkCenterX = 17066.666f - (tileX * TileSizeMeters + cx * ChunkSizeMeters + ChunkSizeMeters * 0.5f);
+                        float chunkCenterY = 17066.666f - (tileY * TileSizeMeters + cy * ChunkSizeMeters + ChunkSizeMeters * 0.5f);
+                        float groundZ = 0f;
+
+                        // Fountain in center
+                        modelPlacements.Add(new LkMddfEntry(
+                            NameId: 0,
+                            UniqueId: (int)++uniqueId,
+                            Position: new System.Numerics.Vector3(chunkCenterX, chunkCenterY, groundZ),
+                            Rotation: new System.Numerics.Vector3(0, 0, 0),
+                            Scale: 1.0f));
+
+                        // Benches
+                        modelPlacements.Add(new LkMddfEntry(
+                            NameId: 2,
+                            UniqueId: (int)++uniqueId,
+                            Position: new System.Numerics.Vector3(chunkCenterX, chunkCenterY + 8.0f, groundZ),
+                            Rotation: new System.Numerics.Vector3(0, 0, 0),
+                            Scale: 1.0f));
+                        modelPlacements.Add(new LkMddfEntry(
+                            NameId: 2,
+                            UniqueId: (int)++uniqueId,
+                            Position: new System.Numerics.Vector3(chunkCenterX, chunkCenterY - 8.0f, groundZ),
+                            Rotation: new System.Numerics.Vector3(0, 0, 180),
+                            Scale: 1.0f));
+
+                        // Street lights
+                        modelPlacements.Add(new LkMddfEntry(
+                            NameId: 1,
+                            UniqueId: (int)++uniqueId,
+                            Position: new System.Numerics.Vector3(chunkCenterX + 12.0f, chunkCenterY + 12.0f, groundZ),
+                            Rotation: new System.Numerics.Vector3(0, 0, 45),
+                            Scale: 1.0f));
+                        modelPlacements.Add(new LkMddfEntry(
+                            NameId: 1,
+                            UniqueId: (int)++uniqueId,
+                            Position: new System.Numerics.Vector3(chunkCenterX - 12.0f, chunkCenterY - 12.0f, groundZ),
+                            Rotation: new System.Numerics.Vector3(0, 0, 225),
+                            Scale: 1.0f));
+                    }
+                }
+            }
+        }
+
         return new LkAdtData
         {
             MapName = template.MapName,
             TileX = tileX,
             TileY = tileY,
             TextureNames = globalTextures,
+            ModelNames = modelNames,
+            ModelPlacements = modelPlacements,
+            WorldModelNames = worldModelNames,
+            WorldModelPlacements = worldModelPlacements,
             Chunks = chunks
         };
     }

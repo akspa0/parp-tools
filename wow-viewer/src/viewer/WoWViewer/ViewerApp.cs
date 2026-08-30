@@ -2386,81 +2386,96 @@ void main() {
         if (_wantOpenVlmProject)
         {
             _wantOpenVlmProject = false;
-
-            string? vlmPath = ShowFolderDialogSTA(
+            ImGuiPathPicker.Instance.Open(
                 "Select ML Dataset folder (containing dataset/ with JSON files)",
-                initialDir: null,
-                showNewFolderButton: false);
-
-            if (!string.IsNullOrEmpty(vlmPath) && Directory.Exists(vlmPath))
-                LoadVlmProject(vlmPath);
+                pickFolder: true,
+                initialPath: null,
+                filterExtension: null,
+                vlmPath =>
+                {
+                    if (!string.IsNullOrEmpty(vlmPath) && Directory.Exists(vlmPath))
+                        LoadVlmProject(vlmPath);
+                });
         }
 
         if (_wantOpenZarrDataset)
         {
             _wantOpenZarrDataset = false;
-
-            string? zarrPath = ShowFolderDialogSTA(
+            ImGuiPathPicker.Instance.Open(
                 "Select Zarr tile dataset folder (parent of <build>.zarr/ or the store root itself)",
-                initialDir: null,
-                showNewFolderButton: false);
-
-            if (!string.IsNullOrEmpty(zarrPath) && Directory.Exists(zarrPath))
-                LoadZarrDataset(zarrPath);
+                pickFolder: true,
+                initialPath: null,
+                filterExtension: null,
+                zarrPath =>
+                {
+                    if (!string.IsNullOrEmpty(zarrPath) && Directory.Exists(zarrPath))
+                        LoadZarrDataset(zarrPath);
+                });
         }
 
         if (_wantSelectDatasetCatalogRoot)
         {
             _wantSelectDatasetCatalogRoot = false;
-            string? catalogRoot = ShowFolderDialogSTA(
+            ImGuiPathPicker.Instance.Open(
                 "Select dataset catalog root",
-                initialDir: _datasetCatalogRoot,
-                showNewFolderButton: false);
-
-            if (!string.IsNullOrWhiteSpace(catalogRoot) && Directory.Exists(catalogRoot))
-            {
-                _datasetCatalogRoot = catalogRoot;
-                RefreshDatasetCatalog();
-                SaveViewerSettings();
-            }
+                pickFolder: true,
+                initialPath: _datasetCatalogRoot,
+                filterExtension: null,
+                catalogRoot =>
+                {
+                    if (!string.IsNullOrWhiteSpace(catalogRoot) && Directory.Exists(catalogRoot))
+                    {
+                        _datasetCatalogRoot = catalogRoot;
+                        RefreshDatasetCatalog();
+                        SaveViewerSettings();
+                    }
+                });
         }
 
         if (_wantOpenWdtFile)
         {
             _wantOpenWdtFile = false;
-            string? wdtPath = ShowFileDialogSTA(
+            ImGuiPathPicker.Instance.Open(
                 "Select Alpha WDT file (loose map)",
-                "WoW map files (*.wdt;*.wdt.MPQ)|*.wdt;*.wdt.MPQ|All files (*.*)|*.*",
-                _lastLooseOverlayPath);
-            if (!string.IsNullOrEmpty(wdtPath) && File.Exists(wdtPath))
-            {
-                LoadFileFromDisk(wdtPath);
-                _statusMessage = $"Loaded alpha WDT: {wdtPath}";
-            }
+                pickFolder: false,
+                initialPath: _lastLooseOverlayPath,
+                filterExtension: ".wdt;.mpq",
+                wdtPath =>
+                {
+                    if (!string.IsNullOrEmpty(wdtPath) && File.Exists(wdtPath))
+                    {
+                        LoadFileFromDisk(wdtPath);
+                        _statusMessage = $"Loaded alpha WDT: {wdtPath}";
+                    }
+                });
         }
 
         if (_wantOpenPm4File)
         {
             _wantOpenPm4File = false;
-            string? pm4Path = ShowFileDialogSTA(
+            ImGuiPathPicker.Instance.Open(
                 "Select Loose PM4 / PD4 File",
-                "PM4/PD4 files (*.pm4;*.pd4)|*.pm4;*.pd4|All files (*.*)|*.*",
-                _lastLooseOverlayPath);
-            if (!string.IsNullOrEmpty(pm4Path) && File.Exists(pm4Path))
-            {
-                _lastLooseOverlayPath = Path.GetDirectoryName(pm4Path);
-                if (_worldScene != null)
+                pickFolder: false,
+                initialPath: _lastLooseOverlayPath,
+                filterExtension: ".pm4;.pd4",
+                pm4Path =>
                 {
-                    if (_worldScene.LoadLoosePm4File(pm4Path))
-                        _statusMessage = _worldScene.Pm4Status;
-                    else
-                        _statusMessage = $"Failed to decode loose PM4/PD4 file: {pm4Path}";
-                }
-                else
-                {
-                    _statusMessage = $"Load a world scene or map first before displaying loose PM4/PD4 overlays: {pm4Path}";
-                }
-            }
+                    if (!string.IsNullOrEmpty(pm4Path) && File.Exists(pm4Path))
+                    {
+                        _lastLooseOverlayPath = Path.GetDirectoryName(pm4Path);
+                        if (_worldScene != null)
+                        {
+                            if (_worldScene.LoadLoosePm4File(pm4Path))
+                                _statusMessage = _worldScene.Pm4Status;
+                            else
+                                _statusMessage = $"Failed to decode loose PM4/PD4 file: {pm4Path}";
+                        }
+                        else
+                        {
+                            _statusMessage = $"Load a world scene or map first before displaying loose PM4/PD4 overlays: {pm4Path}";
+                        }
+                    }
+                });
         }
 
         if (_wantAttachLooseMapFolder)
@@ -2469,13 +2484,16 @@ void main() {
 
             if (_dataSource is MpqDataSource)
             {
-                string? overlayPath = ShowFolderDialogSTA(
+                ImGuiPathPicker.Instance.Open(
                     "Select loose map overlay folder (contains World\\Maps or a map directory under World\\Maps)",
-                    initialDir: string.IsNullOrWhiteSpace(_lastLooseOverlayPath) ? null : _lastLooseOverlayPath,
-                    showNewFolderButton: false);
-
-                if (!string.IsNullOrEmpty(overlayPath) && Directory.Exists(overlayPath))
-                    AttachLooseMapOverlay(overlayPath);
+                    pickFolder: true,
+                    initialPath: string.IsNullOrWhiteSpace(_lastLooseOverlayPath) ? null : _lastLooseOverlayPath,
+                    filterExtension: null,
+                    overlayPath =>
+                    {
+                        if (!string.IsNullOrEmpty(overlayPath) && Directory.Exists(overlayPath))
+                            AttachLooseMapOverlay(overlayPath);
+                    });
             }
         }
 
@@ -2494,17 +2512,20 @@ void main() {
             }
             else if (attachLooseFolder)
             {
-                string? overlayPath = ShowFolderDialogSTA(
+                ImGuiPathPicker.Instance.Open(
                     "Select loose map folder to load against the saved base client",
-                    initialDir: string.IsNullOrWhiteSpace(_lastLooseOverlayPath) ? null : _lastLooseOverlayPath,
-                    showNewFolderButton: false);
-
-                if (!string.IsNullOrWhiteSpace(overlayPath) && Directory.Exists(overlayPath))
-                {
-                    LoadMpqDataSource(savedBasePath, null, savedBuildVersion, deferWorldReload: true);
-                    AttachLooseMapOverlay(overlayPath);
-                    RestoreWorldAfterDataSourceReload();
-                }
+                    pickFolder: true,
+                    initialPath: string.IsNullOrWhiteSpace(_lastLooseOverlayPath) ? null : _lastLooseOverlayPath,
+                    filterExtension: null,
+                    overlayPath =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(overlayPath) && Directory.Exists(overlayPath))
+                        {
+                            LoadMpqDataSource(savedBasePath, null, savedBuildVersion, deferWorldReload: true);
+                            AttachLooseMapOverlay(overlayPath);
+                            RestoreWorldAfterDataSourceReload();
+                        }
+                    });
             }
             else
             {
@@ -2960,18 +2981,22 @@ void main() {
 
         Directory.CreateDirectory(ExportDir);
         string defaultName = $"tile_{tx}_{ty}_alpha.png";
-        var picked = ShowSaveFileDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Save Alpha Mask Atlas",
-            "PNG Files (*.png)|*.png|All Files (*.*)|*.*",
+            ImGuiPathPickerMode.SaveFile,
             ExportDir,
-            defaultName);
-        if (string.IsNullOrEmpty(picked))
-            return;
+            ".png",
+            picked =>
+            {
+                if (string.IsNullOrEmpty(picked))
+                    return;
 
-        using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
-        using (var fs = File.Create(picked))
-            atlas.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-        _statusMessage = $"Exported: {picked}";
+                using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+                using (var fs = File.Create(picked))
+                    atlas.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                _statusMessage = $"Exported: {picked}";
+            },
+            defaultName);
     }
 
     private void ExportAlphaCurrentTileChunksFolder()
@@ -2984,65 +3009,77 @@ void main() {
             return;
         }
 
-        string? folder = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Select output folder for chunk alpha masks",
-            ExportDir,
-            showNewFolderButton: true);
-        if (string.IsNullOrEmpty(folder))
-            return;
+            pickFolder: true,
+            initialPath: ExportDir,
+            filterExtension: null,
+            folder =>
+            {
+                if (string.IsNullOrEmpty(folder))
+                    return;
 
-        using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
-        var chunkImages = TerrainImageIo.BuildAlphaChunkImagesFromAtlas(atlas);
-        foreach (var kvp in chunkImages)
-        {
-            var (cx, cy) = kvp.Key;
-            string path = Path.Combine(folder, $"tile_{tx}_{ty}_chunk_{cx}_{cy}_alpha.png");
-            using (var fs = File.Create(path))
-                kvp.Value.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-            kvp.Value.Dispose();
-        }
+                using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+                var chunkImages = TerrainImageIo.BuildAlphaChunkImagesFromAtlas(atlas);
+                foreach (var kvp in chunkImages)
+                {
+                    var (cx, cy) = kvp.Key;
+                    string path = Path.Combine(folder, $"tile_{tx}_{ty}_chunk_{cx}_{cy}_alpha.png");
+                    using (var fs = File.Create(path))
+                        kvp.Value.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                    kvp.Value.Dispose();
+                }
 
-        _statusMessage = $"Exported chunks: {folder}";
+                _statusMessage = $"Exported chunks: {folder}";
+            });
     }
 
     private void ExportAlphaTilesFolder(TerrainTileScope scope)
     {
-        string? folder = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Select output folder for tile alpha atlases",
-            ExportDir,
-            showNewFolderButton: true);
-        if (string.IsNullOrEmpty(folder))
-            return;
+            pickFolder: true,
+            initialPath: ExportDir,
+            filterExtension: null,
+            folder =>
+            {
+                if (string.IsNullOrEmpty(folder))
+                    return;
 
-        var tiles = GetTileScopeList(scope);
+                var tiles = GetTileScopeList(scope);
 
-        int written = 0;
-        foreach (var (tx, ty) in tiles)
-        {
-            var chunks = LoadTileChunksForExport(tx, ty);
-            if (chunks == null) continue;
+                int written = 0;
+                foreach (var (tx, ty) in tiles)
+                {
+                    var chunks = LoadTileChunksForExport(tx, ty);
+                    if (chunks == null) continue;
 
-            using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
-            string path = Path.Combine(folder, $"tile_{tx}_{ty}_alpha.png");
-            using (var fs = File.Create(path))
-                atlas.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-            written++;
-        }
+                    using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+                    string path = Path.Combine(folder, $"tile_{tx}_{ty}_alpha.png");
+                    using (var fs = File.Create(path))
+                        atlas.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                    written++;
+                }
 
-        _statusMessage = $"Exported {written} tiles: {folder}";
+                _statusMessage = $"Exported {written} tiles: {folder}";
+            });
     }
 
     private void BeginAlphaFolderImport()
     {
-        string? folder = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Select folder containing tile alpha atlases",
-            initialDir: null,
-            showNewFolderButton: false);
-        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
-            return;
+            pickFolder: true,
+            initialPath: null,
+            filterExtension: null,
+            folder =>
+            {
+                if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+                    return;
 
-        _terrainImportFolder = folder;
-        _showAlphaFolderImportScope = true;
+                _terrainImportFolder = folder;
+                _showAlphaFolderImportScope = true;
+            });
     }
 
     private void DrawAlphaFolderImportScopeDialog()
@@ -3132,60 +3169,72 @@ void main() {
 
         Directory.CreateDirectory(ExportDir);
         string defaultName = $"tile_{tx}_{ty}_mccv.png";
-        var picked = ShowSaveFileDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Save MCCV Tile PNG",
-            "PNG Files (*.png)|*.png|All Files (*.*)|*.*",
+            ImGuiPathPickerMode.SaveFile,
             ExportDir,
+            ".png",
+            picked =>
+            {
+                if (string.IsNullOrEmpty(picked))
+                    return;
+
+                using var image = TerrainMccvIo.BuildTileImage(chunks);
+                using (var fs = File.Create(picked))
+                    image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+
+                _statusMessage = $"Exported: {picked}";
+            },
             defaultName);
-        if (string.IsNullOrEmpty(picked))
-            return;
-
-        using var image = TerrainMccvIo.BuildTileImage(chunks);
-        using (var fs = File.Create(picked))
-            image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-
-        _statusMessage = $"Exported: {picked}";
     }
 
     private void ExportMccvTilesFolder(TerrainTileScope scope)
     {
-        string? folder = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Select output folder for tile MCCV PNGs",
-            ExportDir,
-            showNewFolderButton: true);
-        if (string.IsNullOrEmpty(folder))
-            return;
+            pickFolder: true,
+            initialPath: ExportDir,
+            filterExtension: null,
+            folder =>
+            {
+                if (string.IsNullOrEmpty(folder))
+                    return;
 
-        var tiles = GetTileScopeList(scope);
+                var tiles = GetTileScopeList(scope);
 
-        int written = 0;
-        foreach (var (tx, ty) in tiles)
-        {
-            var chunks = LoadTileChunksForExport(tx, ty);
-            if (chunks == null)
-                continue;
+                int written = 0;
+                foreach (var (tx, ty) in tiles)
+                {
+                    var chunks = LoadTileChunksForExport(tx, ty);
+                    if (chunks == null)
+                        continue;
 
-            using var image = TerrainMccvIo.BuildTileImage(chunks);
-            string path = Path.Combine(folder, $"tile_{tx}_{ty}_mccv.png");
-            using (var fs = File.Create(path))
-                image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-            written++;
-        }
+                    using var image = TerrainMccvIo.BuildTileImage(chunks);
+                    string path = Path.Combine(folder, $"tile_{tx}_{ty}_mccv.png");
+                    using (var fs = File.Create(path))
+                        image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                    written++;
+                }
 
-        _statusMessage = $"Exported {written} MCCV tiles: {folder}";
+                _statusMessage = $"Exported {written} MCCV tiles: {folder}";
+            });
     }
 
     private void BeginMccvFolderImport()
     {
-        string? folder = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Select folder containing tile MCCV PNGs",
-            initialDir: null,
-            showNewFolderButton: false);
-        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
-            return;
+            pickFolder: true,
+            initialPath: null,
+            filterExtension: null,
+            folder =>
+            {
+                if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+                    return;
 
-        _terrainImportFolder = folder;
-        _showMccvFolderImportScope = true;
+                _terrainImportFolder = folder;
+                _showMccvFolderImportScope = true;
+            });
     }
 
     private void DrawMccvFolderImportScopeDialog()
@@ -3271,137 +3320,153 @@ void main() {
 
         Directory.CreateDirectory(ExportDir);
         string defaultName = $"tile_{tx}_{ty}_height_257.png";
-        var picked = ShowSaveFileDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Save Heightmap (257x257 L16)",
-            "PNG Files (*.png)|*.png|All Files (*.*)|*.*",
+            ImGuiPathPickerMode.SaveFile,
             ExportDir,
+            ".png",
+            picked =>
+            {
+                if (string.IsNullOrEmpty(picked))
+                    return;
+
+                var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+                using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, tile.MinHeight, tile.MaxHeight);
+                using (var fs = File.Create(picked))
+                    img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+
+                var meta = new HeightmapMetadata
+                {
+                    MinHeight = tile.MinHeight,
+                    MaxHeight = tile.MaxHeight,
+                    Normalization = "per_tile",
+                };
+                string jsonPath = Path.ChangeExtension(picked, ".json");
+                File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+
+                _statusMessage = $"Exported: {picked}";
+            },
             defaultName);
-        if (string.IsNullOrEmpty(picked))
-            return;
-
-        var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
-        using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, tile.MinHeight, tile.MaxHeight);
-        using (var fs = File.Create(picked))
-            img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-
-        var meta = new HeightmapMetadata
-        {
-            MinHeight = tile.MinHeight,
-            MaxHeight = tile.MaxHeight,
-            Normalization = "per_tile",
-        };
-        string jsonPath = Path.ChangeExtension(picked, ".json");
-        File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
-
-        _statusMessage = $"Exported: {picked}";
     }
 
     private void ExportHeightmap257TilesFolderPerTile(TerrainTileScope scope)
     {
-        string? folder = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Select output folder for tile heightmaps",
-            ExportDir,
-            showNewFolderButton: true);
-        if (string.IsNullOrEmpty(folder))
-            return;
-
-        var tiles = GetTileScopeList(scope);
-
-        int written = 0;
-        foreach (var (tx, ty) in tiles)
-        {
-            var chunks = LoadTileChunksForExport(tx, ty);
-            if (chunks == null) continue;
-
-            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
-            using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, tile.MinHeight, tile.MaxHeight);
-            string pngPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.png");
-            using (var fs = File.Create(pngPath))
-                img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-
-            var meta = new HeightmapMetadata
+            pickFolder: true,
+            initialPath: ExportDir,
+            filterExtension: null,
+            folder =>
             {
-                MinHeight = tile.MinHeight,
-                MaxHeight = tile.MaxHeight,
-                Normalization = "per_tile",
-            };
-            string jsonPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.json");
-            File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
-            written++;
-        }
+                if (string.IsNullOrEmpty(folder))
+                    return;
 
-        _statusMessage = $"Exported {written} tiles: {folder}";
+                var tiles = GetTileScopeList(scope);
+
+                int written = 0;
+                foreach (var (tx, ty) in tiles)
+                {
+                    var chunks = LoadTileChunksForExport(tx, ty);
+                    if (chunks == null) continue;
+
+                    var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+                    using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, tile.MinHeight, tile.MaxHeight);
+                    string pngPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.png");
+                    using (var fs = File.Create(pngPath))
+                        img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+
+                    var meta = new HeightmapMetadata
+                    {
+                        MinHeight = tile.MinHeight,
+                        MaxHeight = tile.MaxHeight,
+                        Normalization = "per_tile",
+                    };
+                    string jsonPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.json");
+                    File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+                    written++;
+                }
+
+                _statusMessage = $"Exported {written} tiles: {folder}";
+            });
     }
 
     private void ExportHeightmap257TilesFolderPerMap()
     {
-        string? folder = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Select output folder for map-normalized tile heightmaps",
-            ExportDir,
-            showNewFolderButton: true);
-        if (string.IsNullOrEmpty(folder))
-            return;
+            pickFolder: true,
+            initialPath: ExportDir,
+            filterExtension: null,
+            folder =>
+            {
+                if (string.IsNullOrEmpty(folder))
+                    return;
 
-        var tiles = GetTileScopeList(TerrainTileScope.WholeMap);
-        if (tiles.Count == 0)
-        {
-            _statusMessage = "No tiles available.";
-            return;
-        }
+                var tiles = GetTileScopeList(TerrainTileScope.WholeMap);
+                if (tiles.Count == 0)
+                {
+                    _statusMessage = "No tiles available.";
+                    return;
+                }
 
-        float gMin = float.MaxValue;
-        float gMax = float.MinValue;
-        foreach (var (tx, ty) in tiles)
-        {
-            var chunks = LoadTileChunksForExport(tx, ty);
-            if (chunks == null) continue;
-            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
-            if (tile.MinHeight < gMin) gMin = tile.MinHeight;
-            if (tile.MaxHeight > gMax) gMax = tile.MaxHeight;
-        }
-        if (gMin == float.MaxValue || gMax == float.MinValue)
-        {
-            gMin = 0f;
-            gMax = 0f;
-        }
+                float gMin = float.MaxValue;
+                float gMax = float.MinValue;
+                foreach (var (tx, ty) in tiles)
+                {
+                    var chunks = LoadTileChunksForExport(tx, ty);
+                    if (chunks == null) continue;
+                    var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+                    if (tile.MinHeight < gMin) gMin = tile.MinHeight;
+                    if (tile.MaxHeight > gMax) gMax = tile.MaxHeight;
+                }
+                if (gMin == float.MaxValue || gMax == float.MinValue)
+                {
+                    gMin = 0f;
+                    gMax = 0f;
+                }
 
-        var mapMeta = new HeightmapMetadata
-        {
-            MinHeight = gMin,
-            MaxHeight = gMax,
-            Normalization = "per_map",
-        };
-        string mapJson = Path.Combine(folder, "heightmap_257_map.json");
-        File.WriteAllText(mapJson, JsonSerializer.Serialize(mapMeta, new JsonSerializerOptions { WriteIndented = true }));
+                var mapMeta = new HeightmapMetadata
+                {
+                    MinHeight = gMin,
+                    MaxHeight = gMax,
+                    Normalization = "per_map",
+                };
+                string mapJson = Path.Combine(folder, "heightmap_257_map.json");
+                File.WriteAllText(mapJson, JsonSerializer.Serialize(mapMeta, new JsonSerializerOptions { WriteIndented = true }));
 
-        int written = 0;
-        foreach (var (tx, ty) in tiles)
-        {
-            var chunks = LoadTileChunksForExport(tx, ty);
-            if (chunks == null) continue;
+                int written = 0;
+                foreach (var (tx, ty) in tiles)
+                {
+                    var chunks = LoadTileChunksForExport(tx, ty);
+                    if (chunks == null) continue;
 
-            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
-            using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, gMin, gMax);
-            string pngPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.png");
-            using (var fs = File.Create(pngPath))
-                img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-            written++;
-        }
+                    var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+                    using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, gMin, gMax);
+                    string pngPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.png");
+                    using (var fs = File.Create(pngPath))
+                        img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                    written++;
+                }
 
-        _statusMessage = $"Exported {written} tiles (per-map): {folder}";
+                _statusMessage = $"Exported {written} tiles (per-map): {folder}";
+            });
     }
 
     private void BeginHeightmapFolderImport()
     {
-        string? folder = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Select folder containing tile heightmaps",
-            initialDir: null,
-            showNewFolderButton: false);
-        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
-            return;
+            pickFolder: true,
+            initialPath: null,
+            filterExtension: null,
+            folder =>
+            {
+                if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+                    return;
 
-        _terrainImportFolder = folder;
-        _showHeightmapFolderImportScope = true;
+                _terrainImportFolder = folder;
+                _showHeightmapFolderImportScope = true;
+            });
     }
 
     private void DrawHeightmapFolderImportScopeDialog()
@@ -6459,12 +6524,19 @@ void main() {
                 if (ImGui.Button("Browse##a2l_src"))
                 {
                     string? initDir = !string.IsNullOrEmpty(_mapConvertSourcePath) ? Path.GetDirectoryName(_mapConvertSourcePath) : null;
-                    var picked = ShowFileDialogSTA("Select Alpha WDT file", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
-                    if (picked != null)
-                    {
-                        _mapConvertSourcePath = picked;
-                        EnsureMapConverterProjectOutputDirectory(forceNew: false);
-                    }
+                    ImGuiPathPicker.Instance.Open(
+                        "Select Alpha WDT file",
+                        pickFolder: false,
+                        initialPath: initDir,
+                        filterExtension: ".wdt;.mpq",
+                        picked =>
+                        {
+                            if (!string.IsNullOrWhiteSpace(picked))
+                            {
+                                _mapConvertSourcePath = picked;
+                                EnsureMapConverterProjectOutputDirectory(forceNew: false);
+                            }
+                        });
                 }
 
                 ImGui.Checkbox("Copy source Alpha WDT into project", ref _mapConvertCopyAlphaSourceWdt);
@@ -6480,12 +6552,19 @@ void main() {
                 if (ImGui.Button("Browse##l2a_src"))
                 {
                     string? initDir = !string.IsNullOrEmpty(_mapConvertSourcePath) ? Path.GetDirectoryName(_mapConvertSourcePath) : null;
-                    var picked = ShowFileDialogSTA("Select split-ADT WDT file", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
-                    if (picked != null)
-                    {
-                        _mapConvertSourcePath = picked;
-                        EnsureMapConverterProjectOutputDirectory(forceNew: false);
-                    }
+                    ImGuiPathPicker.Instance.Open(
+                        "Select split-ADT WDT file",
+                        pickFolder: false,
+                        initialPath: initDir,
+                        filterExtension: ".wdt",
+                        picked =>
+                        {
+                            if (!string.IsNullOrWhiteSpace(picked))
+                            {
+                                _mapConvertSourcePath = picked;
+                                EnsureMapConverterProjectOutputDirectory(forceNew: false);
+                            }
+                        });
                 }
 
                 ImGui.Text("Split ADT Directory (containing MapName_X_Y.adt roots):");
@@ -6494,8 +6573,16 @@ void main() {
                 ImGui.SameLine();
                 if (ImGui.Button("Browse##l2a_dir"))
                 {
-                    var picked = ShowFolderDialogSTA("Select directory containing split ADT files");
-                    if (picked != null) _mapConvertLkMapDir = picked;
+                    ImGuiPathPicker.Instance.Open(
+                        "Select directory containing split ADT files",
+                        pickFolder: true,
+                        initialPath: _mapConvertLkMapDir,
+                        filterExtension: null,
+                        picked =>
+                        {
+                            if (!string.IsNullOrWhiteSpace(picked))
+                                _mapConvertLkMapDir = picked;
+                        });
                 }
             }
 
@@ -6507,12 +6594,19 @@ void main() {
             ImGui.SameLine();
             if (ImGui.Button("Browse##mapconv_project_root"))
             {
-                string? picked = ShowFolderDialogSTA("Select project output root", GetProjectOutputRootDirectory(), showNewFolderButton: true);
-                if (!string.IsNullOrWhiteSpace(picked))
-                {
-                    _projectOutputRootDir = picked;
-                    HandleProjectOutputRootChanged();
-                }
+                ImGuiPathPicker.Instance.Open(
+                    "Select project output root",
+                    pickFolder: true,
+                    initialPath: GetProjectOutputRootDirectory(),
+                    filterExtension: null,
+                    picked =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(picked))
+                        {
+                            _projectOutputRootDir = picked;
+                            HandleProjectOutputRootChanged();
+                        }
+                    });
             }
 
             ImGui.TextWrapped($"Project Folder: {DescribeMapConverterProjectOutputDirectory()}");
@@ -6531,8 +6625,16 @@ void main() {
                 ImGui.SameLine();
                 if (ImGui.Button("Browse##area_crosswalk"))
                 {
-                    var picked = ShowFileDialogSTA("Select area crosswalk CSV", "CSV Files (*.csv)|*.csv|All Files (*.*)|*.*", null);
-                    if (picked != null) _areaCrosswalkPath = picked;
+                    ImGuiPathPicker.Instance.Open(
+                        "Select area crosswalk CSV",
+                        pickFolder: false,
+                        initialPath: null,
+                        filterExtension: ".csv",
+                        picked =>
+                        {
+                            if (!string.IsNullOrWhiteSpace(picked))
+                                _areaCrosswalkPath = picked;
+                        });
                 }
                 ImGui.SameLine();
                 ImGui.TextDisabled("Maps area IDs for Alpha→LK conversion");
@@ -6787,13 +6889,20 @@ void main() {
             if (ImGui.Button("Browse##wmo_src"))
             {
                 string? initDir = !string.IsNullOrEmpty(_wmoConvertSourcePath) ? Path.GetDirectoryName(_wmoConvertSourcePath) : null;
-                var picked = ShowFileDialogSTA("Select WMO file", "WMO Files (*.wmo)|*.wmo|All Files (*.*)|*.*", initDir);
-                if (picked != null)
-                {
-                    _wmoConvertSourcePath = picked;
-                    if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
-                        _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
-                }
+                ImGuiPathPicker.Instance.Open(
+                    "Select WMO file",
+                    pickFolder: false,
+                    initialPath: initDir,
+                    filterExtension: ".wmo",
+                    picked =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(picked))
+                        {
+                            _wmoConvertSourcePath = picked;
+                            if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+                                _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
+                        }
+                    });
             }
 
             if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
@@ -6805,12 +6914,16 @@ void main() {
             ImGui.SameLine();
             if (ImGui.Button("Browse##wmo_out_dir"))
             {
-                string? picked = ShowFolderDialogSTA(
+                ImGuiPathPicker.Instance.Open(
                     "Select output directory for converted WMO files",
-                    GetDefaultWmoConverterOutputDirectory(),
-                    showNewFolderButton: true);
-                if (picked != null)
-                    _wmoConvertOutputPath = picked;
+                    pickFolder: true,
+                    initialPath: GetDefaultWmoConverterOutputDirectory(),
+                    filterExtension: null,
+                    picked =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(picked))
+                            _wmoConvertOutputPath = picked;
+                    });
             }
 
             string outputRootPath = "";
@@ -7058,8 +7171,16 @@ void main() {
             ImGui.SameLine();
             if (ImGui.Button("Browse##client"))
             {
-                string? result = ShowFolderDialogSTA("Select WoW Client Data Folder");
-                if (result != null) _vlmClientPath = result;
+                ImGuiPathPicker.Instance.Open(
+                    "Select WoW Client Data Folder",
+                    pickFolder: true,
+                    initialPath: _vlmClientPath,
+                    filterExtension: null,
+                    result =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(result))
+                            _vlmClientPath = result;
+                    });
             }
 
             // Map Name
@@ -7085,8 +7206,16 @@ void main() {
             ImGui.SameLine();
             if (ImGui.Button("Browse##output"))
             {
-                string? result = ShowFolderDialogSTA("Select Output Directory");
-                if (result != null) _vlmOutputDir = result;
+                ImGuiPathPicker.Instance.Open(
+                    "Select Output Directory",
+                    pickFolder: true,
+                    initialPath: _vlmOutputDir,
+                    filterExtension: null,
+                    result =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(result))
+                            _vlmOutputDir = result;
+                    });
             }
 
             if (!string.Equals(prevOutputDir, _vlmOutputDir, StringComparison.OrdinalIgnoreCase)
@@ -7241,9 +7370,16 @@ void main() {
             ImGui.SameLine();
             if (ImGui.Button("Browse##ttt_source"))
             {
-                string? picked = ShowFolderDialogSTA("Select source map directory", _terrainTransferSourceDir);
-                if (!string.IsNullOrWhiteSpace(picked))
-                    _terrainTransferSourceDir = picked;
+                ImGuiPathPicker.Instance.Open(
+                    "Select source map directory",
+                    pickFolder: true,
+                    initialPath: _terrainTransferSourceDir,
+                    filterExtension: null,
+                    picked =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(picked))
+                            _terrainTransferSourceDir = picked;
+                    });
             }
 
             ImGui.Text("Target Map Directory:");
@@ -7252,9 +7388,16 @@ void main() {
             ImGui.SameLine();
             if (ImGui.Button("Browse##ttt_target"))
             {
-                string? picked = ShowFolderDialogSTA("Select target map directory", _terrainTransferTargetDir);
-                if (!string.IsNullOrWhiteSpace(picked))
-                    _terrainTransferTargetDir = picked;
+                ImGuiPathPicker.Instance.Open(
+                    "Select target map directory",
+                    pickFolder: true,
+                    initialPath: _terrainTransferTargetDir,
+                    filterExtension: null,
+                    picked =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(picked))
+                            _terrainTransferTargetDir = picked;
+                    });
             }
 
             ImGui.Text("Output Directory:");
@@ -7263,9 +7406,16 @@ void main() {
             ImGui.SameLine();
             if (ImGui.Button("Browse##ttt_output"))
             {
-                string? picked = ShowFolderDialogSTA("Select output directory", _terrainTransferOutputDir);
-                if (!string.IsNullOrWhiteSpace(picked))
-                    _terrainTransferOutputDir = picked;
+                ImGuiPathPicker.Instance.Open(
+                    "Select output directory",
+                    pickFolder: true,
+                    initialPath: _terrainTransferOutputDir,
+                    filterExtension: null,
+                    picked =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(picked))
+                            _terrainTransferOutputDir = picked;
+                    });
             }
 
             ImGui.Text("Mode:");
@@ -7847,95 +7997,6 @@ void main() {
     {
         string mapName = Path.GetFileNameWithoutExtension(sourceWdtPath);
         return Path.Combine(projectOutputDir, "alpha-output", "World", "Maps", mapName, $"{mapName}.wdt");
-    }
-
-    /// <summary>
-    /// Show a native folder picker on an STA thread to avoid deadlocking the GLFW render thread.
-    /// </summary>
-    private static string? ShowFolderDialogSTA(string description, string? initialDir = null, bool showNewFolderButton = false)
-    {
-#if WINDOWS
-        string? result = null;
-        var thread = new Thread(() =>
-        {
-            using var dialog = new System.Windows.Forms.FolderBrowserDialog
-            {
-                Description = description,
-                UseDescriptionForTitle = true,
-                ShowNewFolderButton = showNewFolderButton
-            };
-            if (!string.IsNullOrEmpty(initialDir) && Directory.Exists(initialDir))
-                dialog.InitialDirectory = initialDir;
-            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-                result = dialog.SelectedPath;
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        return result;
-#else
-        return null;
-#endif
-    }
-
-    /// <summary>
-    /// Show a native file-open picker on an STA thread to avoid deadlocking the GLFW render thread.
-    /// </summary>
-    private static string? ShowFileDialogSTA(string title, string filter, string? initialDir = null)
-    {
-#if WINDOWS
-        string? result = null;
-        var thread = new Thread(() =>
-        {
-            using var dialog = new System.Windows.Forms.OpenFileDialog
-            {
-                Title = title,
-                Filter = filter,
-                RestoreDirectory = true
-            };
-            if (initialDir != null && Directory.Exists(initialDir))
-                dialog.InitialDirectory = initialDir;
-            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-                result = dialog.FileName;
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        return result;
-#else
-        return null;
-#endif
-    }
-
-    /// <summary>
-    /// Show a native save-file picker on an STA thread.
-    /// </summary>
-    private static string? ShowSaveFileDialogSTA(string title, string filter, string? initialDir = null, string? defaultFileName = null)
-    {
-#if WINDOWS
-        string? result = null;
-        var thread = new Thread(() =>
-        {
-            using var dialog = new System.Windows.Forms.SaveFileDialog
-            {
-                Title = title,
-                Filter = filter,
-                RestoreDirectory = true
-            };
-            if (initialDir != null && Directory.Exists(initialDir))
-                dialog.InitialDirectory = initialDir;
-            if (defaultFileName != null)
-                dialog.FileName = defaultFileName;
-            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-                result = dialog.FileName;
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        thread.Join();
-        return result;
-#else
-        return null;
-#endif
     }
 
     private void StartVlmExport()
@@ -13034,20 +13095,24 @@ void main() {
             defaultFileName = Path.GetFileName(writablePath);
         }
 
-        string? picked = ShowSaveFileDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Save moved ADT placement as",
-            "ADT Files (*.adt)|*.adt|All Files (*.*)|*.*",
+            ImGuiPathPickerMode.SaveFile,
             initialDir,
-            defaultFileName);
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
+            ".adt",
+            picked =>
+            {
+                if (string.IsNullOrWhiteSpace(picked))
+                    return;
 
-        _selectedPlacementSaveTargetPath = picked;
-        _placementSaveTargetsBySourcePath[sourcePath] = picked;
-        int pendingForSource = GetPendingPlacementCountForSource(sourcePath);
-        _selectedPlacementSaveStatus = pendingForSource > 0
-            ? $"Ready to save {pendingForSource} staged placement move(s) from {Path.GetFileName(sourcePath)} to {picked}."
-            : $"Default save target for {Path.GetFileName(sourcePath)} set to {picked}.";
+                _selectedPlacementSaveTargetPath = picked;
+                _placementSaveTargetsBySourcePath[sourcePath] = picked;
+                int pendingForSource = GetPendingPlacementCountForSource(sourcePath);
+                _selectedPlacementSaveStatus = pendingForSource > 0
+                    ? $"Ready to save {pendingForSource} staged placement move(s) from {Path.GetFileName(sourcePath)} to {picked}."
+                    : $"Default save target for {Path.GetFileName(sourcePath)} set to {picked}.";
+            },
+            defaultFileName);
     }
 
     private void SaveSelectedPlacementEdit()

@@ -58,9 +58,16 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Browse##synthmin_client"))
         {
-            string? selected = ShowFolderDialogSTA("Select WoW client root", _synthesizedMinimapClientRoot);
-            if (!string.IsNullOrWhiteSpace(selected))
-                _synthesizedMinimapClientRoot = selected;
+            ImGuiPathPicker.Instance.Open(
+                "Select WoW client root",
+                pickFolder: true,
+                initialPath: _synthesizedMinimapClientRoot,
+                filterExtension: null,
+                selected =>
+                {
+                    if (!string.IsNullOrWhiteSpace(selected))
+                        _synthesizedMinimapClientRoot = selected;
+                });
         }
 
         ImGui.Text("Map name:");
@@ -116,12 +123,16 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Browse##synthmin_output"))
         {
-            string? selected = ShowFolderDialogSTA(
+            ImGuiPathPicker.Instance.Open(
                 "Select synthesized minimap output directory",
-                _synthesizedMinimapOutputDirectory,
-                showNewFolderButton: true);
-            if (!string.IsNullOrWhiteSpace(selected))
-                _synthesizedMinimapOutputDirectory = selected;
+                pickFolder: true,
+                initialPath: _synthesizedMinimapOutputDirectory,
+                filterExtension: null,
+                selected =>
+                {
+                    if (!string.IsNullOrWhiteSpace(selected))
+                        _synthesizedMinimapOutputDirectory = selected;
+                });
         }
 
         bool canStart = !_synthesizedMinimapRunning

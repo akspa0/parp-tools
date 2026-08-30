@@ -8327,8 +8327,9 @@ static void RunTerrainGenerateTemplated(string[] args)
 {
 	if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
 	{
-		Console.WriteLine("Usage: wowviewer-inspect terrain-generate-templated --output <dir> [--map-name <name>] [--theme garden|elwynn|cobblestone|dunmorogh|barrens|ashenvale] [--rows <n>] [--cols <n>] [--start-x <n>] [--start-y <n>] [--plaza-spacing <n>] [--overwrite]");
+		Console.WriteLine("Usage: wowviewer-inspect terrain-generate-templated --output <dir> [--map-name <name>] [--theme garden|elwynn|cobblestone|dunmorogh|barrens|ashenvale] [--rows <n>] [--cols <n>] [--start-x <n>] [--start-y <n>] [--plaza-spacing <n>] [--format both|lk|alpha] [--overwrite]");
 		Console.WriteLine("Generates a multi-tile procedural map with authentic 4-layer multi-tileset blending, connected cobblestone walkways, flat marble exhibit plazas, and guaranteed walkable slopes from curated terrain template brush motifs.");
+		Console.WriteLine("Outputs both 3.3.5 WotLK multi-ADT + WDT and 0.5.3 Alpha monolithic WDT formats by default.");
 		return;
 	}
 
@@ -8342,12 +8343,16 @@ static void RunTerrainGenerateTemplated(string[] args)
 
 	string mapName = GetOption(args, "--map-name") ?? "TemplatedGarden";
 	string themeStr = GetOption(args, "--theme")?.ToLowerInvariant() ?? "garden";
+	string formatStr = GetOption(args, "--format")?.ToLowerInvariant() ?? "both";
 	int rows = int.TryParse(GetOption(args, "--rows"), out int r) ? Math.Clamp(r, 1, 16) : 2;
 	int cols = int.TryParse(GetOption(args, "--cols"), out int c) ? Math.Clamp(c, 1, 16) : 2;
 	int startX = int.TryParse(GetOption(args, "--start-x"), out int sx) ? sx : 30;
 	int startY = int.TryParse(GetOption(args, "--start-y"), out int sy) ? sy : 30;
 	int plazaSpacing = int.TryParse(GetOption(args, "--plaza-spacing"), out int ps) ? Math.Clamp(ps, 1, 8) : 2;
 	bool overwrite = args.Contains("--overwrite", StringComparer.OrdinalIgnoreCase);
+
+	bool emitLk = formatStr is "both" or "lk" or "all";
+	bool emitAlpha = formatStr is "both" or "alpha" or "all";
 
 	BiomeTheme theme = themeStr switch
 	{
@@ -8372,53 +8377,112 @@ static void RunTerrainGenerateTemplated(string[] args)
 	};
 
 	string outputRoot = Path.GetFullPath(output);
-	string mapDir = Path.Combine(outputRoot, "World", "Maps", mapName);
+	string lkMapDir = Path.Combine(outputRoot, "World", "Maps", mapName);
 
-	if (!overwrite && Directory.Exists(mapDir) && Directory.EnumerateFiles(mapDir).Any())
+	if (!overwrite && emitLk && Directory.Exists(lkMapDir) && Directory.EnumerateFiles(lkMapDir).Any())
 	{
-		Console.Error.WriteLine($"Error: map directory '{mapDir}' already exists. Pass --overwrite to overwrite.");
+		Console.Error.WriteLine($"Error: map directory '{lkMapDir}' already exists. Pass --overwrite to overwrite.");
 		Environment.ExitCode = 1;
 		return;
 	}
 
-	Directory.CreateDirectory(mapDir);
-
-	Console.WriteLine($"[Templated Terrain Generator] Generating {rows}x{cols} tiles ({rows * cols * 256} chunks) for map '{mapName}' (Theme: {theme})...");
+	Console.WriteLine($"[Templated Terrain Generator] Generating {rows}x{cols} tiles ({rows * cols * 256} chunks) for map '{mapName}' (Theme: {theme}, Format: {formatStr})...");
 	var sw = Stopwatch.StartNew();
 
 	TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template, CuratedTerrainBrushLibrary.Instance);
 
-	// Write LK ADTs and WDT
 	var tileCoordSet = new HashSet<(int tileX, int tileY)>();
 	var wdlTiles = new List<WdlHeightTile>();
 
-	foreach (var kvp in result.Tiles)
+	// 1. Emit LK Multi-ADT + WDT + WDL format
+	if (emitLk)
 	{
-		int tx = kvp.Key.X;
-		int ty = kvp.Key.Y;
-		tileCoordSet.Add((tx, ty));
+		Directory.CreateDirectory(lkMapDir);
 
-		string adtPath = Path.Combine(mapDir, $"{mapName}_{tx}_{ty}.adt");
-		byte[] adtBytes = LkAdtWriter.Build(kvp.Value);
-		File.WriteAllBytes(adtPath, adtBytes);
+		foreach (var kvp in result.Tiles)
+		{
+			int tx = kvp.Key.X;
+			int ty = kvp.Key.Y;
+			tileCoordSet.Add((tx, ty));
 
-		// Build WDL height tile (flat 0m)
-		var outerHeights = new short[17 * 17];
-		var innerHeights = new short[16 * 16];
-		wdlTiles.Add(new WdlHeightTile(tx, ty, outerHeights, innerHeights));
+			string adtPath = Path.Combine(lkMapDir, $"{mapName}_{tx}_{ty}.adt");
+			byte[] adtBytes = LkAdtWriter.Build(kvp.Value);
+			File.WriteAllBytes(adtPath, adtBytes);
+
+			var outerHeights = new short[17 * 17];
+			var innerHeights = new short[16 * 16];
+			wdlTiles.Add(new WdlHeightTile(tx, ty, outerHeights, innerHeights));
+		}
+
+		string wdtPath = Path.Combine(lkMapDir, $"{mapName}.wdt");
+		LkWdtWriter.Write(wdtPath, tileCoordSet);
+
+		string wdlPath = Path.Combine(lkMapDir, $"{mapName}.wdl");
+		WdlWriter.Write(wdlPath, wdlTiles);
+
+		Console.WriteLine($"  [LK 3.3.5 Output] Wrote {result.Tiles.Count} ADT files + WDT + WDL -> {lkMapDir}");
 	}
 
-	string wdtPath = Path.Combine(mapDir, $"{mapName}.wdt");
-	LkWdtWriter.Write(wdtPath, tileCoordSet);
+	// 2. Emit Alpha 0.5.3 Monolithic WDT + DBCs + TRS format
+	if (emitAlpha)
+	{
+		string alphaMapName = (emitLk && formatStr is "both" or "all") ? $"{mapName}_Alpha" : mapName;
+		string alphaMapDir = Path.Combine(outputRoot, "World", "Maps", alphaMapName);
+		Directory.CreateDirectory(alphaMapDir);
 
-	string wdlPath = Path.Combine(mapDir, $"{mapName}.wdl");
-	WdlWriter.Write(wdlPath, wdlTiles);
+		var alphaTiles = new Dictionary<(int tileX, int tileY), AlphaTileData>();
+		foreach (var kvp in result.Tiles)
+		{
+			int tx = kvp.Key.X;
+			int ty = kvp.Key.Y;
+			AlphaTileData alphaTile = LkToAlphaConverter.ConvertTile(kvp.Value, tx, ty);
+			alphaTiles[(tx, ty)] = alphaTile;
+		}
+
+		byte[] alphaWdtBytes = AlphaWdtWriter.Build(alphaMapName, alphaTiles);
+		string alphaWdtPath = Path.Combine(alphaMapDir, $"{alphaMapName}.wdt");
+		File.WriteAllBytes(alphaWdtPath, alphaWdtBytes);
+
+		string alphaWdlPath = Path.Combine(alphaMapDir, $"{alphaMapName}.wdl");
+		WdlWriter.Write(alphaWdlPath, wdlTiles);
+
+		// Emit Alpha DBCs under DBFilesClient\ and DBC\
+		var mapEntries = new List<RosettaMapDbcEntry>
+		{
+			new(Id: 500, Directory: alphaMapName, InstanceType: 0, Pvp: 0, MapName: "Templated Garden", AreaTableId: 5000)
+		};
+		var areaEntries = new List<RosettaAreaTableDbcEntry>
+		{
+			new(Id: 5000, ContinentId: 500, ParentAreaId: 0, AreaBit: 0, Flags: 0, SoundAmbience: 0, ZoneMusic: 0, ZoneIntroMusic: 0, Level: 0, AreaName: "Garden Courtyard")
+		};
+
+		byte[] mapDbcBytes = RosettaDbcGenerator.BuildAlphaMapDbc(mapEntries);
+		byte[] areaDbcBytes = RosettaDbcGenerator.BuildAlphaAreaTableDbc(areaEntries);
+
+		string dbFilesDir = Path.Combine(outputRoot, "DBFilesClient");
+		string dbcDir = Path.Combine(outputRoot, "DBC");
+		Directory.CreateDirectory(dbFilesDir);
+		Directory.CreateDirectory(dbcDir);
+
+		File.WriteAllBytes(Path.Combine(dbFilesDir, "Map.dbc"), mapDbcBytes);
+		File.WriteAllBytes(Path.Combine(dbFilesDir, "AreaTable.dbc"), areaDbcBytes);
+		File.WriteAllBytes(Path.Combine(dbcDir, "Map.dbc"), mapDbcBytes);
+		File.WriteAllBytes(Path.Combine(dbcDir, "AreaTable.dbc"), areaDbcBytes);
+
+		// Emit Alpha Minimap TRS files
+		string trsContent = $"dir: {alphaMapName}\n";
+		File.WriteAllText(Path.Combine(outputRoot, "minimap.trs"), trsContent);
+		File.WriteAllText(Path.Combine(outputRoot, "md5translate.trs"), trsContent);
+		File.WriteAllText(Path.Combine(alphaMapDir, "minimap.trs"), trsContent);
+
+		Console.WriteLine($"  [Alpha 0.5.3 Output] Wrote monolithic WDT ({alphaWdtBytes.Length:N0} bytes) + WDL + Map.dbc + AreaTable.dbc -> {alphaMapDir}");
+	}
 
 	sw.Stop();
 	Console.WriteLine($"[Templated Terrain Generator] Successfully generated {result.Tiles.Count} tiles in {sw.ElapsedMilliseconds}ms.");
-	Console.WriteLine($"  Map Directory: {mapDir}");
 	Console.WriteLine($"  Tile Bounds: ({result.MinTileX}, {result.MinTileY}) -> ({result.MaxTileX}, {result.MaxTileY})");
-	Console.WriteLine($"  In-Game Teleport: .worldport 0 0 0 1 (or .go xyz 0 0 1)");
+	Console.WriteLine($"  In-Game Teleport (LK): .worldport 0 0 0 1 (or .go xyz 0 0 1)");
+	Console.WriteLine($"  In-Game Teleport (Alpha): .worldport 500 0 0 1");
 }
 
 static void RunRosettaDatastoreInfo(string[] args)

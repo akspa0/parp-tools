@@ -2059,26 +2059,29 @@ public partial class ViewerApp
             return;
 
         string defaultName = $"pm4_objects_{DateTime.Now:yyyyMMdd_HHmmss}.json";
-        string? picked = ShowSaveFileDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Save PM4 Objects JSON",
-            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            ImGuiPathPickerMode.SaveFile,
             ExportDir,
+            ".json",
+            picked =>
+            {
+                if (string.IsNullOrWhiteSpace(picked))
+                    return;
+
+                try
+                {
+                    string json = _worldScene.BuildPm4OverlayInterchangeJson(includeGeometry: true);
+                    File.WriteAllText(picked, json, Encoding.UTF8);
+                    _statusMessage = $"Exported PM4 objects JSON: {picked}";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"PM4 JSON export failed: {ex.Message}";
+                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] JSON export failed: {ex}");
+                }
+            },
             defaultName);
-
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
-
-        try
-        {
-            string json = _worldScene.BuildPm4OverlayInterchangeJson(includeGeometry: true);
-            File.WriteAllText(picked, json, Encoding.UTF8);
-            _statusMessage = $"Exported PM4 objects JSON: {picked}";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"PM4 JSON export failed: {ex.Message}";
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] JSON export failed: {ex}");
-        }
     }
 
     private void ExportPm4ObjectsObjSet()
@@ -2087,25 +2090,28 @@ public partial class ViewerApp
             return;
 
         Directory.CreateDirectory(ExportDir);
-        string? picked = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Choose a folder for PM4 OBJ export",
-            ExportDir,
-            showNewFolderButton: true);
+            pickFolder: true,
+            initialPath: ExportDir,
+            filterExtension: null,
+            picked =>
+            {
+                if (string.IsNullOrWhiteSpace(picked))
+                    return;
 
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
-
-        try
-        {
-            Pm4OfflineObjExportSummary summary = _worldScene.ExportPm4ObjectsAsObjDirectory(picked);
-            _statusMessage =
-                $"Exported PM4 OBJ set: {summary.ExportedObjectCount} objects across {summary.ExportedTileCount} tiles to {summary.OutputDirectory} (manifest: {summary.ManifestPath}).";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"PM4 OBJ export failed: {ex.Message}";
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] OBJ export failed: {ex}");
-        }
+                try
+                {
+                    Pm4OfflineObjExportSummary summary = _worldScene.ExportPm4ObjectsAsObjDirectory(picked);
+                    _statusMessage =
+                        $"Exported PM4 OBJ set: {summary.ExportedObjectCount} objects across {summary.ExportedTileCount} tiles to {summary.OutputDirectory} (manifest: {summary.ManifestPath}).";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"PM4 OBJ export failed: {ex.Message}";
+                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] OBJ export failed: {ex}");
+                }
+            });
     }
 
     private void ExportPm4WmoCorrelationJson()
@@ -2114,26 +2120,29 @@ public partial class ViewerApp
             return;
 
         string defaultName = $"pm4_wmo_correlation_{DateTime.Now:yyyyMMdd_HHmmss}.json";
-        string? picked = ShowSaveFileDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Save PM4/WMO Correlation JSON",
-            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            ImGuiPathPickerMode.SaveFile,
             ExportDir,
+            ".json",
+            picked =>
+            {
+                if (string.IsNullOrWhiteSpace(picked))
+                    return;
+
+                try
+                {
+                    string json = _worldScene.BuildPm4WmoPlacementCorrelationJson();
+                    File.WriteAllText(picked, json, Encoding.UTF8);
+                    _statusMessage = $"Exported PM4/WMO correlation JSON: {picked}";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"PM4/WMO correlation export failed: {ex.Message}";
+                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] Correlation export failed: {ex}");
+                }
+            },
             defaultName);
-
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
-
-        try
-        {
-            string json = _worldScene.BuildPm4WmoPlacementCorrelationJson();
-            File.WriteAllText(picked, json, Encoding.UTF8);
-            _statusMessage = $"Exported PM4/WMO correlation JSON: {picked}";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"PM4/WMO correlation export failed: {ex.Message}";
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Correlation] JSON export failed: {ex}");
-        }
     }
 
     private void InvalidatePm4DerivedReports()
@@ -2768,54 +2777,57 @@ public partial class ViewerApp
             return;
 
         Directory.CreateDirectory(ExportDir);
-        string? picked = ShowFolderDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Choose a folder for the PM4 LLM evidence bundle",
-            ExportDir,
-            showNewFolderButton: true);
+            pickFolder: true,
+            initialPath: ExportDir,
+            filterExtension: null,
+            picked =>
+            {
+                if (string.IsNullOrWhiteSpace(picked))
+                    return;
 
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
+                try
+                {
+                    string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? "map";
+                    string bundleDirectory = Path.Combine(
+                        picked,
+                        $"pm4_llm_{SanitizeProjectPathSegment(mapName)}_{DateTime.Now:yyyyMMdd_HHmmss}");
+                    Directory.CreateDirectory(bundleDirectory);
 
-        try
-        {
-            string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? "map";
-            string bundleDirectory = Path.Combine(
-                picked,
-                $"pm4_llm_{SanitizeProjectPathSegment(mapName)}_{DateTime.Now:yyyyMMdd_HHmmss}");
-            Directory.CreateDirectory(bundleDirectory);
+                    Pm4VisibleOverlaySummaryInfo visibleSummary = _worldScene.GetPm4VisibleOverlaySummary();
+                    Pm4ObjectDebugInfo selectedDebugInfo = default;
+                    bool hasSelectedObject = _worldScene.SelectedPm4ObjectKey.HasValue
+                        && _worldScene.TryGetSelectedPm4ObjectDebugInfo(out selectedDebugInfo);
+                    bool hasSelectedRegion = _worldScene.TryGetSelectedPm4RegionInfo(out Pm4SelectedObjectRegionInfo selectedRegionInfo);
 
-            Pm4VisibleOverlaySummaryInfo visibleSummary = _worldScene.GetPm4VisibleOverlaySummary();
-            Pm4ObjectDebugInfo selectedDebugInfo = default;
-            bool hasSelectedObject = _worldScene.SelectedPm4ObjectKey.HasValue
-                && _worldScene.TryGetSelectedPm4ObjectDebugInfo(out selectedDebugInfo);
-            bool hasSelectedRegion = _worldScene.TryGetSelectedPm4RegionInfo(out Pm4SelectedObjectRegionInfo selectedRegionInfo);
+                    string jsonPath = Path.Combine(bundleDirectory, "pm4_llm_bundle.json");
+                    string markdownPath = Path.Combine(bundleDirectory, "pm4_llm_bundle.md");
+                    string visibleRegionsSvgPath = Path.Combine(bundleDirectory, "pm4_visible_regions.svg");
+                    string selectedRegionSvgPath = Path.Combine(bundleDirectory, "pm4_selected_region.svg");
 
-            string jsonPath = Path.Combine(bundleDirectory, "pm4_llm_bundle.json");
-            string markdownPath = Path.Combine(bundleDirectory, "pm4_llm_bundle.md");
-            string visibleRegionsSvgPath = Path.Combine(bundleDirectory, "pm4_visible_regions.svg");
-            string selectedRegionSvgPath = Path.Combine(bundleDirectory, "pm4_selected_region.svg");
+                    string json = JsonSerializer.Serialize(
+                        BuildJsonSafePm4LlmBundle(
+                            visibleSummary,
+                            hasSelectedObject ? selectedDebugInfo : null,
+                            hasSelectedRegion ? selectedRegionInfo : null),
+                        new JsonSerializerOptions { WriteIndented = true });
+                    File.WriteAllText(jsonPath, json, Encoding.UTF8);
+                    File.WriteAllText(markdownPath, BuildPm4LlmBundleMarkdown(visibleSummary, hasSelectedObject ? selectedDebugInfo : null, hasSelectedRegion ? selectedRegionInfo : null), Encoding.UTF8);
+                    File.WriteAllText(visibleRegionsSvgPath, BuildPm4VisibleRegionsSvg(visibleSummary), Encoding.UTF8);
+                    if (hasSelectedRegion)
+                        File.WriteAllText(selectedRegionSvgPath, BuildPm4SelectedRegionSvg(selectedRegionInfo), Encoding.UTF8);
 
-            string json = JsonSerializer.Serialize(
-                BuildJsonSafePm4LlmBundle(
-                    visibleSummary,
-                    hasSelectedObject ? selectedDebugInfo : null,
-                    hasSelectedRegion ? selectedRegionInfo : null),
-                new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(jsonPath, json, Encoding.UTF8);
-            File.WriteAllText(markdownPath, BuildPm4LlmBundleMarkdown(visibleSummary, hasSelectedObject ? selectedDebugInfo : null, hasSelectedRegion ? selectedRegionInfo : null), Encoding.UTF8);
-            File.WriteAllText(visibleRegionsSvgPath, BuildPm4VisibleRegionsSvg(visibleSummary), Encoding.UTF8);
-            if (hasSelectedRegion)
-                File.WriteAllText(selectedRegionSvgPath, BuildPm4SelectedRegionSvg(selectedRegionInfo), Encoding.UTF8);
-
-            _statusMessage = hasSelectedRegion
-                ? $"Exported PM4 LLM bundle to {bundleDirectory} (JSON, Markdown, visible-regions SVG, selected-region SVG)."
-                : $"Exported PM4 LLM bundle to {bundleDirectory} (JSON, Markdown, visible-regions SVG).";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"PM4 LLM bundle export failed: {ex.Message}";
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 LLM Bundle] Export failed: {ex}");
-        }
+                    _statusMessage = hasSelectedRegion
+                        ? $"Exported PM4 LLM bundle to {bundleDirectory} (JSON, Markdown, visible-regions SVG, selected-region SVG)."
+                        : $"Exported PM4 LLM bundle to {bundleDirectory} (JSON, Markdown, visible-regions SVG).";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"PM4 LLM bundle export failed: {ex.Message}";
+                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 LLM Bundle] Export failed: {ex}");
+                }
+            });
     }
 
     private object BuildJsonSafePm4LlmBundle(
@@ -3276,29 +3288,32 @@ public partial class ViewerApp
     private void ExportSelectedPm4GraphJson(Pm4SelectedObjectGraphInfo graph)
     {
         string defaultName = $"pm4_graph_ck24_{graph.Ck24:X6}_part_{graph.SelectedObjectPartId:D4}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
-        string? picked = ShowSaveFileDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Save Selected PM4 Graph JSON",
-            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            ImGuiPathPickerMode.SaveFile,
             ExportDir,
-            defaultName);
-
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
-
-        try
-        {
-            string json = JsonSerializer.Serialize(BuildJsonSafePm4Graph(graph), new JsonSerializerOptions
+            ".json",
+            picked =>
             {
-                WriteIndented = true
-            });
-            File.WriteAllText(picked, json, Encoding.UTF8);
-            _statusMessage = $"Exported selected PM4 graph JSON: {picked}";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"PM4 graph export failed: {ex.Message}";
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Graph] JSON export failed: {ex}");
-        }
+                if (string.IsNullOrWhiteSpace(picked))
+                    return;
+
+                try
+                {
+                    string json = JsonSerializer.Serialize(BuildJsonSafePm4Graph(graph), new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    });
+                    File.WriteAllText(picked, json, Encoding.UTF8);
+                    _statusMessage = $"Exported selected PM4 graph JSON: {picked}";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"PM4 graph export failed: {ex.Message}";
+                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Graph] JSON export failed: {ex}");
+                }
+            },
+            defaultName);
     }
 
     private void AddSelectedPm4ObjectToCollection()
@@ -3498,29 +3513,32 @@ public partial class ViewerApp
 
         string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? "map";
         string defaultName = $"pm4_collection_{mapName}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
-        string? picked = ShowSaveFileDialogSTA(
+        ImGuiPathPicker.Instance.Open(
             "Save PM4 Collection JSON",
-            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            ImGuiPathPickerMode.SaveFile,
             ExportDir,
-            defaultName);
-
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
-
-        try
-        {
-            string json = JsonSerializer.Serialize(BuildJsonSafePm4Collection(), new JsonSerializerOptions
+            ".json",
+            picked =>
             {
-                WriteIndented = true
-            });
-            File.WriteAllText(picked, json, Encoding.UTF8);
-            _statusMessage = $"Exported PM4 collection JSON: {picked}";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"PM4 collection export failed: {ex.Message}";
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Collection] JSON export failed: {ex}");
-        }
+                if (string.IsNullOrWhiteSpace(picked))
+                    return;
+
+                try
+                {
+                    string json = JsonSerializer.Serialize(BuildJsonSafePm4Collection(), new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    });
+                    File.WriteAllText(picked, json, Encoding.UTF8);
+                    _statusMessage = $"Exported PM4 collection JSON: {picked}";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"PM4 collection export failed: {ex.Message}";
+                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Collection] JSON export failed: {ex}");
+                }
+            },
+            defaultName);
     }
 
     private object BuildJsonSafePm4Collection()

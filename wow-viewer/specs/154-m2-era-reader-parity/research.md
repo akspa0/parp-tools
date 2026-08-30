@@ -91,6 +91,12 @@ Reading B would explain the whole contradiction without either observation being
 the reference route's health has never actually been tested by the tool used to measure it. Resolving
 this is SC-002. **Do not adopt either reading without evidence.**
 
+## 6. Modern Clean-Room Reference: Benilla 1.12.1 Client (2026-08-30)
+
+- **External Resource**: [Benilla (`samwhosung/benilla`)](https://github.com/samwhosung/benilla) — Modern Rust-based World of Warcraft 1.12.1 client implementation.
+- **Owning Spec**: [Spec 193: Benilla 1.12.1 Client Reference & 1.x M2 Parity](../193-benilla-112-client-reference/spec.md)
+- **Application to Spec 154**: Use Benilla as an independent 1.12.1 (`MD20 0x100`) reading oracle to cross-verify bone array offsets, sequence lookups, and embedded skin submesh decoding against our C# `M2ModelReader100.cs` implementation.
+
 ## Open Research Boundaries
 
 - Nothing at or beyond 4.0.1 is read, surveyed, or referenced (SC-008). Later formats are not a

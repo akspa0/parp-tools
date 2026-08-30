@@ -14,20 +14,25 @@ public partial class ViewerApp
     private void DrawFolderInputDialog()
     {
         if (!_showFolderInput) return;
-
-        // Use WinForms folder browser for native experience
         _showFolderInput = false;
 
-        string? selectedPath = ShowFolderDialogSTA(
-            "Select WoW game folder (containing Data/ with MPQs)",
-            initialDir: string.IsNullOrEmpty(_folderInputBuf) ? null : _folderInputBuf,
-            showNewFolderButton: false);
+        string initial = string.IsNullOrEmpty(_folderInputBuf)
+            ? (Directory.Exists(@"H:\CLIENTS") ? @"H:\CLIENTS" : Directory.GetCurrentDirectory())
+            : _folderInputBuf;
 
-        if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
-        {
-            _folderInputBuf = selectedPath;
-            PrepareBuildSelectionDialog(selectedPath);
-        }
+        ImGuiPathPicker.Instance.Open(
+            "Select WoW game folder (containing Data/ with MPQs)",
+            pickFolder: true,
+            initialPath: initial,
+            filterExtension: null,
+            selectedPath =>
+            {
+                if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
+                {
+                    _folderInputBuf = selectedPath;
+                    PrepareBuildSelectionDialog(selectedPath);
+                }
+            });
     }
 
     private void DrawBuildSelectionDialog()
@@ -340,9 +345,16 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Browse..."))
         {
-            string? picked = ShowFolderDialogSTA("Select Rosetta Datastore Directory", initialDir: _rosettaDatastorePathInput, showNewFolderButton: false);
-            if (!string.IsNullOrWhiteSpace(picked))
-                _rosettaDatastorePathInput = picked;
+            ImGuiPathPicker.Instance.Open(
+                "Select Rosetta Datastore Directory",
+                pickFolder: true,
+                initialPath: _rosettaDatastorePathInput,
+                filterExtension: null,
+                picked =>
+                {
+                    if (!string.IsNullOrWhiteSpace(picked))
+                        _rosettaDatastorePathInput = picked;
+                });
         }
 
         string fullDatastorePath = Path.IsPathRooted(_rosettaDatastorePathInput)

@@ -110,7 +110,15 @@ installed" rationale is obsolete.
 - **U5 (all)**: Vertex struct stability across eras (bone weight/index packing). Out of scope for the
   empty-box fix, but flag if geometry renders *deformed* (distinct failure) so it's tracked separately.
 
+## Decision 6 — Modern Clean-Room Reference: Benilla 1.12.1 Client (2026-08-30)
+
+**Reference Resource**: [Benilla (`samwhosung/benilla`)](https://github.com/samwhosung/benilla) — Modern Rust-based World of Warcraft 1.12.1 client implementation.  
+**Owning Spec**: [Spec 193: Benilla 1.12.1 Client Reference & 1.x M2 Parity](../193-benilla-112-client-reference/spec.md)
+
+**Role & Utilization**:
+- **Oracle for 1.12.1 M2 Parsing**: Benilla implements an actively maintained, clean-room Rust parser for 1.x `MD20 0x100` M2 models with embedded skin views (`ofsViews`), submesh partitions, and texture unit combiners.
+- **C# Parity**: We cross-reference Benilla's layout structs against our C# reader `M2ModelReader100.cs` and `ModelRenderer.cs` to resolve edge cases in material transparency flags, submesh indices, and animated UV coordinate transformations while maintaining 100% native C# tooling.
+
 ## Non-goals (reaffirmed from spec)
 
-Animation, particles, ribbons, attachments, and bone-driven deformation correctness are out of scope.
-The target is static mesh + material rendering. WotLK+ (≥ 264) must not regress.
+Animation, particles, ribbons, attachments, and bone-driven deformation correctness are out of scope for initial mesh proof. The target is static mesh + material rendering. WotLK+ (≥ 264) must not regress.

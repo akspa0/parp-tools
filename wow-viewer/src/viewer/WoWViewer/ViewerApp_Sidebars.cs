@@ -2512,47 +2512,59 @@ public partial class ViewerApp
             sourceName = "animation";
 
         string defaultFileName = $"{sourceName}_animation_state.json";
-        string? picked = ShowSaveFileDialogSTA(
+        string initialDir = !string.IsNullOrWhiteSpace(_loadedFilePath) ? Path.GetDirectoryName(_loadedFilePath) ?? Environment.CurrentDirectory : Environment.CurrentDirectory;
+
+        ImGuiPathPicker.Instance.Open(
             "Export Animation State JSON",
-            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
-            !string.IsNullOrWhiteSpace(_loadedFilePath) ? Path.GetDirectoryName(_loadedFilePath) : Environment.CurrentDirectory,
+            ImGuiPathPickerMode.SaveFile,
+            initialDir,
+            ".json",
+            picked =>
+            {
+                if (string.IsNullOrWhiteSpace(picked))
+                    return;
+
+                var payload = new
+                {
+                    exportedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+                    source = new
+                    {
+                        loadedFilePath = _loadedFilePath,
+                        rendererType = _renderer?.GetType().Name,
+                    },
+                    playback = new
+                    {
+                        currentSequence = currentSeq,
+                        currentSequenceName = currentSeqName,
+                        currentFrame = animator.CurrentFrame,
+                        sequenceStart = seqStart,
+                        sequenceEnd = seqEnd,
+                        isPlaying = animator.IsPlaying,
+                        playbackSpeed = animator.PlaybackSpeed,
+                        loop = animator.Loop,
+                    },
+                    sequences = animator.Sequences.Select(seq => new
+                    {
+                        index = seq.Index,
+                        name = seq.Name,
+                        start = seq.Time.Start,
+                        end = seq.Time.End,
+                        duration = seq.Time.End - seq.Time.Start,
+                    }).ToArray(),
+                    debug = animator.GetTrackDebugStatsForCurrentSequence(),
+                };
+
+                try
+                {
+                    File.WriteAllText(picked, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
+                    _statusMessage = $"Exported animation state JSON: {picked}";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"Animation state export failed: {ex.Message}";
+                }
+            },
             defaultFileName);
-
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
-
-        var payload = new
-        {
-            exportedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
-            source = new
-            {
-                loadedFilePath = _loadedFilePath,
-                rendererType = _renderer?.GetType().Name,
-            },
-            playback = new
-            {
-                currentSequence = currentSeq,
-                currentSequenceName = currentSeqName,
-                currentFrame = animator.CurrentFrame,
-                sequenceStart = seqStart,
-                sequenceEnd = seqEnd,
-                isPlaying = animator.IsPlaying,
-                playbackSpeed = animator.PlaybackSpeed,
-                loop = animator.Loop,
-            },
-            sequences = animator.Sequences.Select(seq => new
-            {
-                index = seq.Index,
-                name = seq.Name,
-                start = seq.Time.Start,
-                end = seq.Time.End,
-                duration = seq.Time.End - seq.Time.Start,
-            }).ToArray(),
-            debug = animator.GetTrackDebugStatsForCurrentSequence(),
-        };
-
-        File.WriteAllText(picked, JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true }));
-        _statusMessage = $"Exported animation state JSON: {picked}";
     }
 
     private void DrawStandaloneCharacterVariationControls(MdxRenderer renderer)

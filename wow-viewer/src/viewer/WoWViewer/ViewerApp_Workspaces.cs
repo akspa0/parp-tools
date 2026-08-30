@@ -298,12 +298,19 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Browse##projectOutputRoot"))
         {
-            string? picked = ShowFolderDialogSTA("Select project output root", GetProjectOutputRootDirectory(), showNewFolderButton: true);
-            if (!string.IsNullOrWhiteSpace(picked))
-            {
-                _projectOutputRootDir = picked;
-                HandleProjectOutputRootChanged();
-            }
+            ImGuiPathPicker.Instance.Open(
+                "Select project output root",
+                pickFolder: true,
+                initialPath: GetProjectOutputRootDirectory(),
+                filterExtension: null,
+                picked =>
+                {
+                    if (!string.IsNullOrWhiteSpace(picked))
+                    {
+                        _projectOutputRootDir = picked;
+                        HandleProjectOutputRootChanged();
+                    }
+                });
         }
 
         ImGui.TextWrapped($"Current project folder: {DescribeEditorProjectOutputDirectory()}");
