@@ -13,4 +13,5 @@ public enum WorkbenchTab
     Utilities = 3,
     Experimental = 4,
     Editor = 5,
+    Archaeology = 6,
 }

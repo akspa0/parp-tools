@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
+using WoWViewer.Workbench;
 
 namespace WoWViewer;
 
@@ -12,7 +13,12 @@ public partial class ViewerApp
 {
     private static string GetWorkspaceModeLabel(WorkspaceMode mode)
     {
-        return mode == WorkspaceMode.Viewer ? "Viewer" : "Editor";
+        return mode switch
+        {
+            WorkspaceMode.Editor => "Editor",
+            WorkspaceMode.Archaeology => "Archaeology",
+            _ => "Viewer",
+        };
     }
 
     private static string GetEditorWorkspaceTaskLabel(EditorWorkspaceTask task)
@@ -33,9 +39,29 @@ public partial class ViewerApp
         _workspaceMode = mode;
         _showLeftSidebar = true;
         _showRightSidebar = true;
+        _workbenchOpen = true;
 
-        if (mode == WorkspaceMode.Editor && !HasWorldEditingContext())
+        if (_useTabUi)
+        {
+            switch (mode)
+            {
+                case WorkspaceMode.Editor:
+                    OpenWorkbenchTab(WorkbenchTab.Editor);
+                    EnsureEditorHost();
+                    break;
+                case WorkspaceMode.Archaeology:
+                    OpenWorkbenchTab(WorkbenchTab.Archaeology);
+                    break;
+                case WorkspaceMode.Viewer:
+                default:
+                    OpenWorkbenchTab(WorkbenchTab.Quick);
+                    break;
+            }
+        }
+        else if (mode == WorkspaceMode.Editor && !HasWorldEditingContext())
+        {
             _editorWorkspaceTask = EditorWorkspaceTask.Inspect;
+        }
     }
 
     private void SetEditorWorkspaceTask(EditorWorkspaceTask task)

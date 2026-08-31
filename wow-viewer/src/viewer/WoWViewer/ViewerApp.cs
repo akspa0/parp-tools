@@ -61,6 +61,7 @@ public partial class ViewerApp : IDisposable
     {
         Viewer,
         Editor,
+        Archaeology,
     }
 
     [Obsolete("Shell panel system deprecated in 069. Use tab system (View > Tab System). Will be removed in 070.")]
@@ -2077,26 +2078,17 @@ void main() {
 
                     ImGui.Separator();
 
-                    if (ImGui.MenuItem("UniqueId Archeology", hasWorld))
-                    {
-                        if (_useTabUi)
-                            OpenWorkbenchTab(ToolsBottomTab.Archeology);
-                        else
-                            _showUniqueIdArchaeologyWindow = true;
-                    }
+                    if (ImGui.MenuItem("Weak Signal & Stratigraphy", hasTerrain))
+                        OpenWorkbenchTab(WorkbenchTab.Archaeology, 0);
+                    if (ImGui.MenuItem("UniqueId Archaeology", hasWorld))
+                        OpenWorkbenchTab(WorkbenchTab.Archaeology, 1);
+                    if (ImGui.MenuItem("PM4 Analysis", hasWorld))
+                        OpenWorkbenchTab(WorkbenchTab.Archaeology, 4);
 
                     ImGui.Separator();
 
-                    if (ImGui.MenuItem("Chunk Clipboard", hasTerrain))
-                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
-                    if (ImGui.MenuItem("Terrain Analysis", hasTerrain))
-                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
-                    if (ImGui.MenuItem("MCNK Explorer", hasTerrain))
-                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
-                    if (ImGui.MenuItem("Weak Signal", hasTerrain))
-                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
-                    if (ImGui.MenuItem("Terrain Tools", hasTerrain))
-                        OpenWorkbenchTab(ToolsBottomTab.Terrain);
+                    if (ImGui.MenuItem("Editor Workbench", hasTerrain || hasWorld))
+                        OpenWorkbenchTab(WorkbenchTab.Editor);
 
                     ImGui.EndMenu();
                 }
@@ -2288,6 +2280,46 @@ void main() {
                 }
                 ImGui.EndMenu();
             }
+
+            // Top-Level Mode & Workspace Profile Switcher (centered on the main menu bar)
+            float modeBtnWidthViewer = 90f;
+            float modeBtnWidthEditor = 90f;
+            float modeBtnWidthArch = 115f;
+            float itemSpacing = ImGui.GetStyle().ItemSpacing.X;
+            float totalWidth = modeBtnWidthViewer + modeBtnWidthEditor + modeBtnWidthArch + (itemSpacing * 2);
+            float windowWidth = ImGui.GetWindowWidth();
+            float targetCenterX = (windowWidth - totalWidth) * 0.5f;
+            if (targetCenterX > ImGui.GetCursorPosX())
+            {
+                ImGui.SetCursorPosX(targetCenterX);
+            }
+
+            bool isViewer = _workspaceMode == WorkspaceMode.Viewer;
+            bool isEditor = _workspaceMode == WorkspaceMode.Editor;
+            bool isArchaeology = _workspaceMode == WorkspaceMode.Archaeology;
+
+            if (isViewer)
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.18f, 0.42f, 0.75f, 1f));
+            if (ImGui.Button("Viewer##top_mode_viewer", new Vector2(modeBtnWidthViewer, 0)))
+                SetWorkspaceMode(WorkspaceMode.Viewer);
+            if (isViewer)
+                ImGui.PopStyleColor();
+
+            ImGui.SameLine();
+            if (isEditor)
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.75f, 0.42f, 0.15f, 1f));
+            if (ImGui.Button("Editor##top_mode_editor", new Vector2(modeBtnWidthEditor, 0)))
+                SetWorkspaceMode(WorkspaceMode.Editor);
+            if (isEditor)
+                ImGui.PopStyleColor();
+
+            ImGui.SameLine();
+            if (isArchaeology)
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.55f, 0.25f, 0.75f, 1f));
+            if (ImGui.Button("Archaeology##top_mode_archaeology", new Vector2(modeBtnWidthArch, 0)))
+                SetWorkspaceMode(WorkspaceMode.Archaeology);
+            if (isArchaeology)
+                ImGui.PopStyleColor();
 
             ImGui.EndMainMenuBar();
         }

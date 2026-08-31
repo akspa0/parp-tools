@@ -12,6 +12,8 @@ internal enum ViewerKeyContext
     Audio,
     Experimental,
     Capture,
+    Archaeology,
+    Editor,
 }
 
 internal sealed record ViewerKeyBinding(
@@ -70,6 +72,8 @@ public partial class ViewerApp
             Workbench.WorkbenchTab.Utilities when (Workbench.UtilitiesBottomTab)_activeUtilitiesTabIndex == Workbench.UtilitiesBottomTab.Capture => ViewerKeyContext.Capture,
             Workbench.WorkbenchTab.Utilities => ViewerKeyContext.Utilities,
             Workbench.WorkbenchTab.Experimental => ViewerKeyContext.Experimental,
+            Workbench.WorkbenchTab.Archaeology => ViewerKeyContext.Archaeology,
+            Workbench.WorkbenchTab.Editor => ViewerKeyContext.Editor,
             _ => ViewerKeyContext.Global,
         };
     }

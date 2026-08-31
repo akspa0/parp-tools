@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-30
 
+**Spec 197 lane (2026-08-30, checkpoint 51).** UI Workspace Profiles, Editor Mode Integration, PM4 Mouse Inspection, Multi-Client Map Staging & MoP 5.0.1 ADT Pipeline — ACTIVE:
+1. **Workspace Mode / Profile Switcher**: Add top-bar mode switcher (`[Viewer]`, `[Editor]`, `[Archaeology]`) and expose the missing Editor button in the right sidebar. Filter sidebar tool tabs and top menus dynamically based on the active mode.
+2. **Menu Audit & Legacy "MK Dataset" Purge**: Remove all defunct "MK Dataset" / `MkDatasetHarvester` references from menus and loaders.
+3. **PM4 Mouse Raycasting & Viewport Selection**: Add bounding-box and triangle raycast pick candidates for PM4 objects/surfaces directly from viewport mouse clicks.
+4. **Multi-Client Restoration Staging**: Architecture for mounting multiple client archives simultaneously and copying terrain/placements into an active restoration library map.
+5. **4.3.4 through 5.1 MoP ADT & Blending Engine**: Support multi-split ADT chunks (`_obj0`/`_obj1`, `_tex0`/`_tex1`), height texture blending (`MHID`, `MDID`, `MCXH`), and WMO terrain seam blending via Ghidra analysis of `WoW.exe` 5.0.1.15464.
+6. **Verification**: Unit tests for Mop ADT parser, multi-client staging, and full build validation.
+
 **Spec 196 lane (2026-08-30, checkpoint 50).** WDL Lattice Magnetization, Polarity Inversion, Neighbor Auto-Fit & 0-Hitch Async Stratigraphy Restoration Engine — COMPLETE:
 1. **Polarity Inversion & Multi-Anchor Datum Geometry**: Added `StratigraphyAnchorMode` enum (`LowestZ_Floor`, `HighestZ_Ceiling`, `MeanZ`, `NeighborMeshBorder`, `WdlLattice`, `CustomDatum`) and polarity inversion (`PolarityInverted`) to `TemporalStratigraphyOptions` and `TemporalMeshRestorer`. Resolves developmental terrain inverted compression (e.g. Dragon Isles) by inverting scale direction from an upper ceiling datum without vertical wall spikes.
 2. **Neighboring Mesh Height & Scale Auto-Fit Solver**: Implemented `NeighborMeshHeightSolver` with 1–3 chunk spatial radius adjacency search and boundary vertex extraction along shared chunk seams (9 outer lattice vertices per edge). Computes closed-form vertical offsets $\Delta Z = \text{mean}(Z_{\text{active}} - Z_{\text{candidate}})$ and selects the $(S, P, \text{Anchor})$ tuple minimizing boundary RMSE.

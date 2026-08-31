@@ -119,6 +119,7 @@ public static class WorkbenchNavigator
         WorkbenchTab.Utilities => GetUtilitiesBottomTabLabels(),
         WorkbenchTab.Experimental => ["Terrain Lab", "PM4", "Converters", "Population"],
         WorkbenchTab.Editor => [],
+        WorkbenchTab.Archaeology => GetArchaeologyWorkbenchLabels(),
         _ => [],
     };
 
@@ -133,6 +134,10 @@ public static class WorkbenchNavigator
 
     /// <summary>Labels for <see cref="ArcheologyBottomTab"/>; order must match the enum.</summary>
     public static string[] GetArcheologyBottomTabLabels() => ["Range", "Layers", "Playback", "Capture", "Stratigraphy"];
+
+    /// <summary>Labels for <see cref="WorkbenchTab.Archaeology"/> destination.</summary>
+    public static string[] GetArchaeologyWorkbenchLabels() =>
+        ["Weak Signal & Stratigraphy", "UniqueId Timeline", "Layers & Provenance", "Playback & Capture", "PM4 Analysis"];
 
     /// <summary>Labels for <see cref="UtilitiesBottomTab"/>; order must match the enum.</summary>
     public static string[] GetUtilitiesBottomTabLabels() =>

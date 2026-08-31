@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 
-
 namespace WowViewer.Core.IO.Lk
 {
     /// <summary>
@@ -56,7 +55,7 @@ namespace WowViewer.Core.IO.Lk
 
         private void Parse(byte[] data)
         {
-            if (_parseOptions.SkipHeader)
+            if (_parseOptions.SkipHeader || IsHeaderlessSubchunkStream(data))
             {
                 Header = default;
                 ScanSubchunks(data, startOffset: 0);
@@ -64,11 +63,37 @@ namespace WowViewer.Core.IO.Lk
             else
             {
                 if (data.Length < 128)
+                {
+                    if (IsHeaderlessSubchunkStream(data))
+                    {
+                        Header = default;
+                        ScanSubchunks(data, startOffset: 0);
+                        return;
+                    }
                     throw new InvalidDataException("MCNK data too short for header");
+                }
 
                 Header = ReadHeader(data);
                 ScanSubchunks(data, startOffset: 0x80);
             }
+        }
+
+        private static bool IsHeaderlessSubchunkStream(byte[] data)
+        {
+            if (data == null || data.Length < 8)
+                return false;
+
+            uint fourcc = BitConverter.ToUInt32(data, 0);
+            return fourcc is 0x4D434C59 or 0x594C434D   // MCLY
+                        or 0x4D43414C or 0x4C41434D   // MCAL
+                        or 0x4D435348 or 0x4853434D   // MCSH
+                        or 0x4D435654 or 0x5456434D   // MCVT
+                        or 0x4D434E52 or 0x524E434D   // MCNR
+                        or 0x4D434356 or 0x5643434D   // MCCV
+                        or 0x4D434C51 or 0x514C434D   // MCLQ
+                        or 0x4D435345 or 0x4553434D   // MCSE
+                        or 0x4D434D53 or 0x534D434D   // MCMS
+                        or 0x4D435848 or 0x4858434D;  // MCXH
         }
 
         /// <summary>
@@ -112,10 +137,12 @@ namespace WowViewer.Core.IO.Lk
                 switch (fourcc)
                 {
                     case 0x4D435654: // MCVT
+                    case 0x5456434D:
                         Heightmap = ReadFloats(data, dataStart, size);
                         break;
 
                     case 0x4D434E52: // MCNR
+                    case 0x524E434D:
                     {
                         // Ghidra-verified: client always consumes 0x1C0 bytes for MCNR
                         // regardless of declared size. The declared size is often smaller
@@ -135,6 +162,7 @@ namespace WowViewer.Core.IO.Lk
                     }
 
                     case 0x4D434C59: // MCLY
+                    case 0x594C434D:
                         TextureLayers = ReadMclyData(data, dataStart, size);
                         // Also keep raw bytes for Alpha-style decode path
                         if (size > 0 && dataStart + size <= data.Length)
@@ -145,6 +173,7 @@ namespace WowViewer.Core.IO.Lk
                         break;
 
                     case 0x4D43414C: // MCAL
+                    case 0x4C41434D:
                     {
                         uint sizeFromHeader = _parseOptions.UseHeaderAlphaSize && Header.SizeMcal >= 8
                             ? Header.SizeMcal - 8
@@ -163,6 +192,7 @@ namespace WowViewer.Core.IO.Lk
                     }
 
                     case 0x4D435348: // MCSH
+                    case 0x4853434D:
                     {
                         uint sizeFromHeader = _parseOptions.UseHeaderShadowSize && Header.SizeMcsh >= 8
                             ? Header.SizeMcsh - 8
@@ -179,6 +209,7 @@ namespace WowViewer.Core.IO.Lk
                     }
 
                     case 0x4D434C51: // MCLQ
+                    case 0x514C434D:
                         if (size > 0 && dataStart + size <= data.Length)
                         {
                             MclqData = new byte[size];
@@ -187,6 +218,7 @@ namespace WowViewer.Core.IO.Lk
                         break;
 
                     case 0x4D435345: // MCSE
+                    case 0x4553434D:
                         if (size > 0 && dataStart + size <= data.Length)
                         {
                             McseData = new byte[size];
@@ -195,6 +227,7 @@ namespace WowViewer.Core.IO.Lk
                         break;
 
                     case 0x4D434356: // MCCV vertex color
+                    case 0x5643434D:
                         if (size > 0 && dataStart + size <= data.Length)
                         {
                             MccvData = new byte[size];

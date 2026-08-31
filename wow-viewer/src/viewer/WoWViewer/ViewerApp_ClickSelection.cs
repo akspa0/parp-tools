@@ -352,7 +352,7 @@ public partial class ViewerApp
             new ClickSelectionCandidate(
                 $"pm4:{objectKey.tileX}:{objectKey.tileY}:{objectKey.ck24}:{objectKey.objectPart}",
                 $"PM4 0x{objectKey.ck24:X6} part {objectKey.objectPart}",
-                $"Tile: ({objectKey.tileX}, {objectKey.tileY})",
+                $"Tile: ({objectKey.tileY}, {objectKey.tileX})",
                 source,
                 distance,
                 () =>

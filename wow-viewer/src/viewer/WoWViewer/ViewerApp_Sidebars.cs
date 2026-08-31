@@ -229,6 +229,15 @@ public partial class ViewerApp
                     bool showPm4 = _worldScene.ShowPm4Overlay;
                     if (ImGui.Checkbox("PM4", ref showPm4))
                         _worldScene.ShowPm4Overlay = showPm4;
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Inspect##inspect_pm4_btn"))
+                    {
+                        _worldScene.ShowPm4Overlay = true;
+                        OpenPm4Workbench(Pm4WorkbenchTab.Selection);
+                    }
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Enable PM4 overlay and focus PM4 selection & collision inspector");
+
                     if (_worldScene.IsPm4Loading)
                     {
                         ImGui.SameLine();
@@ -4252,6 +4261,53 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Video recording: {(_archeologyApplyToVideoRecording ? $"playback @ {_archeologyPlaybackSpeed:F0}/s" : "no playback")}");
     }
 
+    private void DrawArchaeologyWorkbenchSubTabContent()
+    {
+        switch (_activeBottomTabIndex)
+        {
+            case 0:
+                // New Weak Signal & Temporal Stratigraphy Tooling
+                DrawTerrainControlsAdjustmentWeakSignalContent();
+                break;
+            case 1:
+                // UniqueId Timeline Range
+                if (_worldScene == null)
+                {
+                    ImGui.TextDisabled("Load a world to filter UniqueId range.");
+                    return;
+                }
+                DrawArcheologyRangeSubTab();
+                break;
+            case 2:
+                // Layers & Provenance
+                if (_worldScene == null)
+                {
+                    ImGui.TextDisabled("Load a world to inspect archaeology layers.");
+                    return;
+                }
+                DrawArcheologyLayersSubTab();
+                break;
+            case 3:
+                // Playback & Capture
+                if (_worldScene == null)
+                {
+                    ImGui.TextDisabled("Load a world to use playback & capture.");
+                    return;
+                }
+                DrawArcheologyPlaybackSubTab();
+                ImGui.Separator();
+                DrawArcheologyCaptureSubTab();
+                break;
+            case 4:
+                // PM4 Archaeological Analysis
+                DrawPm4SubTabContent();
+                break;
+            default:
+                DrawTerrainControlsAdjustmentWeakSignalContent();
+                break;
+        }
+    }
+
     private void DrawTerrainControlsAdjustmentWeakSignalContent()
     {
         DrawTemporalStratigraphySubTab();
@@ -4518,7 +4574,14 @@ public partial class ViewerApp
 
     private void DrawWorkbenchContent()
     {
-        ImGui.TextDisabled("Viewer workspace");
+        string modeLabel = _workspaceMode switch
+        {
+            WorkspaceMode.Editor => "Editor workspace",
+            WorkspaceMode.Archaeology => "Archaeology workspace",
+            _ => "Viewer workspace",
+        };
+        ImGui.TextDisabled(modeLabel);
+
         if (!ImGui.GetIO().WantTextInput)
         {
             if (ImGui.IsKeyPressed(ImGuiKey.F1))
@@ -4530,18 +4593,43 @@ public partial class ViewerApp
             else if (ImGui.IsKeyPressed(ImGuiKey.F4))
                 OpenWorkbenchTab(WorkbenchTab.Utilities);
             else if (ImGui.IsKeyPressed(ImGuiKey.F5))
-                OpenWorkbenchTab(WorkbenchTab.Experimental);
+                OpenWorkbenchTab(WorkbenchTab.Archaeology);
+            else if (ImGui.IsKeyPressed(ImGuiKey.F6))
+                OpenWorkbenchTab(WorkbenchTab.Editor);
         }
 
-        DrawTopTabButton(WorkbenchTab.Quick, "Quick");
-        ImGui.SameLine();
-        DrawTopTabButton(WorkbenchTab.Inspect, "Inspect");
-        ImGui.SameLine();
-        DrawTopTabButton(WorkbenchTab.Scene, "Scene");
-        ImGui.SameLine();
-        DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
-        ImGui.SameLine();
-        DrawTopTabButton(WorkbenchTab.Experimental, "Experimental");
+        if (_workspaceMode == WorkspaceMode.Editor)
+        {
+            DrawTopTabButton(WorkbenchTab.Editor, "Editor");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Scene, "Scene");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Inspect, "Inspect");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
+        }
+        else if (_workspaceMode == WorkspaceMode.Archaeology)
+        {
+            DrawTopTabButton(WorkbenchTab.Archaeology, "Archaeology");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Inspect, "Inspect");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
+        }
+        else
+        {
+            DrawTopTabButton(WorkbenchTab.Quick, "Quick");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Inspect, "Inspect");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Scene, "Scene");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Archaeology, "Archaeology");
+            ImGui.SameLine();
+            DrawTopTabButton(WorkbenchTab.Editor, "Editor");
+        }
         ImGui.Separator();
 
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(_activeTopTab);
@@ -4586,6 +4674,9 @@ public partial class ViewerApp
                     break;
                 case WorkbenchTab.Utilities:
                     DrawUtilitiesSubTabContent();
+                    break;
+                case WorkbenchTab.Archaeology:
+                    DrawArchaeologyWorkbenchSubTabContent();
                     break;
                 case WorkbenchTab.Experimental:
                     DrawExperimentalSubTabContent();
@@ -4693,10 +4784,10 @@ public partial class ViewerApp
                 OpenWorkbenchTab(WorkbenchTab.Quick);
                 break;
             case ToolsBottomTab.Pm4:
-                OpenWorkbenchTab(WorkbenchTab.Experimental, 1);
+                OpenWorkbenchTab(WorkbenchTab.Archaeology, 4);
                 break;
             case ToolsBottomTab.Archeology:
-                OpenWorkbenchTab(WorkbenchTab.Inspect, (int)InspectBottomTab.Archeology);
+                OpenWorkbenchTab(WorkbenchTab.Archaeology, 1);
                 break;
             case ToolsBottomTab.Utilities:
                 OpenWorkbenchTab((UtilitiesBottomTab)Math.Clamp(
@@ -4709,7 +4800,7 @@ public partial class ViewerApp
                 break;
             case ToolsBottomTab.Terrain:
             default:
-                OpenWorkbenchTab(WorkbenchTab.Experimental, 0);
+                OpenWorkbenchTab(WorkbenchTab.Archaeology, 0);
                 break;
         }
     }

@@ -228,8 +228,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
         string mapDir = $"World\\Maps\\{mapName}";
         string basePath = $"{mapDir}\\{mapName}_{tileY}_{tileX}";
         string rootPath = $"{basePath}.adt";
-        string? texPath = _adtProfile.PreferTex0ForTextureData ? $"{basePath}_tex0.adt" : null;
-        string? objPath = _adtProfile.PreferObj0ForPlacementData ? $"{basePath}_obj0.adt" : null;
+        string texCandidate = $"{basePath}_tex0.adt";
+        string objCandidate = $"{basePath}_obj0.adt";
+
+        string? texPath = (_adtProfile.PreferTex0ForTextureData || _dataSource.FileExists(texCandidate)) ? texCandidate : null;
+        string? objPath = (_adtProfile.PreferObj0ForPlacementData || _dataSource.FileExists(objCandidate)) ? objCandidate : null;
 
         byte[]? texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
         byte[]? objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
@@ -238,13 +241,16 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (adtBytes == null || adtBytes.Length == 0)
         {
             bool rootIsEmptyPlaceholder = adtBytes != null && adtBytes.Length == 0;
-            if (objBytes != null && objBytes.Length >= 16 && TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr))
+            if (objBytes != null && objBytes.Length >= 16)
             {
                 ViewerLog.Important(ViewerLog.Category.Terrain,
                     rootIsEmptyPlaceholder
                         ? $"[StandardADT] Root ADT is a zero-byte placeholder for tile ({tileX},{tileY}); loading placements from {objPath} only."
                         : $"[StandardADT] Root ADT missing for tile ({tileX},{tileY}); loading placements from {objPath} only.");
-                CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
+                if (TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr) && objMhdr != null)
+                    CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
+                else
+                    CollectPlacementsFlat(objBytes, tileX, tileY, result);
             }
             else
             {
@@ -479,7 +485,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         Dictionary<(int x, int y), Mcnk>? texMcnkByIndex = null;
         GillijimProject.WowFiles.Mhdr? texMhdr = null;
         int texMhdrStart = 0;
-        if (_adtProfile.PreferTex0ForTextureData && texBytes != null && texBytes.Length >= 16)
+        if (texBytes != null && texBytes.Length >= 16)
         {
             if (TryBuildMcnkIndexMap(texBytes, _mcnkParseOptions, out texMcnkByIndex, out texMhdrStart, out texMhdr))
             {
@@ -492,58 +498,80 @@ public class StandardTerrainAdapter : ITerrainAdapter
             }
         }
 
-        // Find MHDR — all other chunks located via MHDR offsets (Ghidra-verified)
-        int mhdrOffset = FindChunk(adtBytes, "MHDR");
-        if (mhdrOffset < 0)
+        // Parse MTEX texture names (preferring _tex0.adt when present)
+        if (texBytes != null && texBytes.Length >= 16)
         {
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"MHDR not found in ADT ({tileX},{tileY})");
-            return textures;
+            int texMtexOff = FindChunk(texBytes, "MTEX");
+            if (texMtexOff >= 0 && texMtexOff + 8 <= texBytes.Length)
+            {
+                int mtexSize = BitConverter.ToInt32(texBytes, texMtexOff + 4);
+                if (mtexSize > 0 && texMtexOff + 8 + mtexSize <= texBytes.Length)
+                    textures.AddRange(ParseNullStrings(texBytes, texMtexOff + 8, mtexSize));
+            }
+            else if (texMhdr != null && texMhdrStart > 0)
+            {
+                textures.AddRange(ParseMtexViaMhdr(texBytes, texMhdrStart, texMhdr));
+            }
+
+            if (textures.Count == 0)
+            {
+                int texMdidOff = FindChunk(texBytes, "MDID");
+                if (texMdidOff >= 0 && texMdidOff + 8 <= texBytes.Length)
+                {
+                    int mdidSize = BitConverter.ToInt32(texBytes, texMdidOff + 4);
+                    if (mdidSize > 0 && texMdidOff + 8 + mdidSize <= texBytes.Length)
+                    {
+                        var fileDataIds = MopAdtChunkParser.ParseMdidChunk(new ReadOnlySpan<byte>(texBytes, texMdidOff + 8, mdidSize));
+                        foreach (uint fdid in fileDataIds)
+                            textures.Add($"FileDataID:{fdid}");
+                    }
+                }
+            }
         }
 
-        var mhdr = new GillijimProject.WowFiles.Mhdr(adtBytes, mhdrOffset);
-        int mhdrStart = mhdrOffset + 8;
+        // Find MHDR in root ADT — all other chunks located via MHDR offsets (or flat scan fallback)
+        int mhdrOffset = FindChunk(adtBytes, "MHDR");
+        GillijimProject.WowFiles.Mhdr? mhdr = null;
+        int mhdrStart = 0;
+        if (mhdrOffset >= 0 && mhdrOffset + 8 <= adtBytes.Length)
+        {
+            mhdr = new GillijimProject.WowFiles.Mhdr(adtBytes, mhdrOffset);
+            mhdrStart = mhdrOffset + 8;
+        }
 
-        if (_adtProfile.UseMhdrOffsetsOnly)
+        if (textures.Count == 0 && mhdr != null && _adtProfile.UseMhdrOffsetsOnly)
         {
             textures.AddRange(ParseMtexViaMhdr(adtBytes, mhdrStart, mhdr));
         }
-        else
+        else if (textures.Count == 0)
         {
-            Build335Diagnostics.Increment("UnsupportedProfileFallbackCount");
-            // Legacy best-effort MTEX scan.
-            for (int i = 0; i + 8 <= adtBytes.Length;)
+            int mtexOff = FindChunk(adtBytes, "MTEX");
+            if (mtexOff >= 0 && mtexOff + 8 <= adtBytes.Length)
             {
-                string fcc = Encoding.ASCII.GetString(adtBytes, i, 4);
-                int sz = BitConverter.ToInt32(adtBytes, i + 4);
-                if (sz < 0) break;
-                int dataStart = i + 8;
-                int next = dataStart + sz + ((sz & 1) == 1 ? 1 : 0);
-                if (dataStart + sz > adtBytes.Length) break;
+                int mtexSize = BitConverter.ToInt32(adtBytes, mtexOff + 4);
+                if (mtexSize > 0 && mtexOff + 8 + mtexSize <= adtBytes.Length)
+                    textures.AddRange(ParseNullStrings(adtBytes, mtexOff + 8, mtexSize));
+            }
 
-                if (fcc == "XETM") // MTEX reversed
+            if (textures.Count == 0)
+            {
+                int rootMdidOff = FindChunk(adtBytes, "MDID");
+                if (rootMdidOff >= 0 && rootMdidOff + 8 <= adtBytes.Length)
                 {
-                    textures.AddRange(ParseNullStrings(adtBytes, dataStart, sz));
-                    break; // Only need MTEX
+                    int mdidSize = BitConverter.ToInt32(adtBytes, rootMdidOff + 4);
+                    if (mdidSize > 0 && rootMdidOff + 8 + mdidSize <= adtBytes.Length)
+                    {
+                        var fileDataIds = MopAdtChunkParser.ParseMdidChunk(new ReadOnlySpan<byte>(adtBytes, rootMdidOff + 8, mdidSize));
+                        foreach (uint fdid in fileDataIds)
+                            textures.Add($"FileDataID:{fdid}");
+                    }
                 }
-
-                if (next <= i) break;
-                i = next;
             }
         }
 
-        if (_adtProfile.PreferTex0ForTextureData && texBytes != null && texMhdr != null && texMhdrStart > 0)
-        {
-            var tex0Textures = ParseMtexViaMhdr(texBytes, texMhdrStart, texMhdr);
-            if (tex0Textures.Count > 0)
-            {
-                textures.Clear();
-                textures.AddRange(tex0Textures);
-            }
-        }
-
-        // Use MHDR to find MCIN; later 4.x roots can omit it and still contain top-level MCNK chunks.
+        // Locate MCIN / MCNK chunks
         List<int> mcnkOffsets;
-        int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
+        int mcinOff = mhdr?.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset) ?? 0;
         if (mcinOff == 0)
         {
             mcnkOffsets = ReadMcnkOffsetsByChunkScan(adtBytes);
@@ -658,8 +686,17 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 var mcnk = new Mcnk(mcnkData, _mcnkParseOptions);
 
-                int chunkX = (int)mcnk.Header.IndexX;
-                int chunkY = (int)mcnk.Header.IndexY;
+                int mcinChunkX = ci % 16;
+                int mcinChunkY = ci / 16;
+
+                int chunkX = (mcnk.Header.IndexX is >= 0 and < 16) ? (int)mcnk.Header.IndexX : mcinChunkX;
+                int chunkY = (mcnk.Header.IndexY is >= 0 and < 16) ? (int)mcnk.Header.IndexY : mcinChunkY;
+
+                if (mcinOff == 0 || (mcnk.Header.IndexX == 0 && mcnk.Header.IndexY == 0 && ci != 0))
+                {
+                    chunkX = mcinChunkX;
+                    chunkY = mcinChunkY;
+                }
                 AdtMcseData mcse = AdtMcseReader.Read(
                     mcnk.McseData ?? Array.Empty<byte>(),
                     mcnk.Header.NSndEmitters > int.MaxValue ? 0 : (int)mcnk.Header.NSndEmitters);
@@ -712,8 +749,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 // Normals (interleaved in LK)
                 var normals = ExtractNormals(mcnk.McnrData);
 
-                int mcinChunkX = ci % 16;
-                int mcinChunkY = ci / 16;
                 var layerSource = mcnk;
                 if (texMcnkByIndex != null)
                 {
@@ -728,7 +763,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 var layers = ExtractLayers(layerSource.TextureLayers);
 
                 // Alpha maps
-                uint alphaSourceFlagsRaw = (uint)layerSource.Header.Flags;
+                uint alphaSourceFlagsRaw = (uint)layerSource.Header.Flags != 0
+                    ? (uint)layerSource.Header.Flags
+                    : (uint)mcnk.Header.Flags;
                 bool doNotFixAlphaMap = (alphaSourceFlagsRaw & 0x8000u) != 0;
                 var alphaMaps = ExtractAlphaMaps(layerSource, _adtProfile.AlphaDecodeMode, _useBigAlpha, doNotFixAlphaMap);
 
@@ -839,15 +876,25 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Ghidra-verified (FUN_007d6ef0): MH2O located via MHDR offset +0x28.
         // For WotLK+, MH2O is the primary liquid system and should always be parsed.
         // MH2O supplements MCLQ; chunks that already have MCLQ liquid are not overwritten.
-        if (_adtProfile.EnableMh2oFallbackWhenNoMclq)
+        if (_adtProfile.EnableMh2oFallbackWhenNoMclq && mhdr != null)
             ParseMh2o(adtBytes, mhdrStart, mhdr, tileX, tileY, chunkSmall, result);
 
-        // Ghidra-verified (FUN_007d6ef0): MDDF/MODF are located via MHDR offsets,
-        // NOT by linear scan. Name resolution: MDDF.nameId → MMID[nameId] → byte offset into MMDX.
-        if (objBytes != null && objBytes.Length >= 16 && TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr))
-            CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
-        else
+        // Placement parsing: check objBytes first, then adtBytes (supporting both MHDR offsets and flat chunk scan)
+        if (objBytes != null && objBytes.Length >= 16)
+        {
+            if (TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr) && objMhdr != null)
+                CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
+            else
+                CollectPlacementsFlat(objBytes, tileX, tileY, result);
+        }
+        else if (mhdr != null)
+        {
             CollectPlacementsViaMhdr(adtBytes, mhdrStart, mhdr, tileX, tileY, result);
+        }
+        else
+        {
+            CollectPlacementsFlat(adtBytes, tileX, tileY, result);
+        }
 
         return textures;
     }
@@ -872,10 +919,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return TerrainCoordinateTransform.FromChunkLocal(position, chunkWorldPosition);
     }
 
-    private static bool TryGetMhdr(byte[] adtBytes, out int mhdrStart, out GillijimProject.WowFiles.Mhdr mhdr)
+    private static bool TryGetMhdr(byte[] adtBytes, out int mhdrStart, out GillijimProject.WowFiles.Mhdr? mhdr)
     {
         mhdrStart = 0;
-        mhdr = default!;
+        mhdr = null;
 
         int mhdrOffset = FindChunk(adtBytes, "MHDR");
         if (mhdrOffset < 0 || mhdrOffset + 8 > adtBytes.Length)
@@ -891,42 +938,52 @@ public class StandardTerrainAdapter : ITerrainAdapter
         Mcnk.ParseOptions parseOptions,
         out Dictionary<(int x, int y), Mcnk> mcnkByIndex,
         out int mhdrStart,
-        out GillijimProject.WowFiles.Mhdr mhdr)
+        out GillijimProject.WowFiles.Mhdr? mhdr)
     {
         mcnkByIndex = new Dictionary<(int x, int y), Mcnk>();
         mhdrStart = 0;
-        mhdr = default!;
-
-        if (!TryGetMhdr(adtBytes, out mhdrStart, out mhdr))
-            return false;
+        mhdr = null;
 
         List<int> offsets;
-        int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
-        if (mcinOff == 0)
+        if (TryGetMhdr(adtBytes, out mhdrStart, out var foundMhdr) && foundMhdr != null)
         {
-            offsets = ReadMcnkOffsetsByChunkScan(adtBytes);
-            if (offsets.Count == 0)
-                return false;
+            mhdr = foundMhdr;
+            int mcinOff = foundMhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
+            if (mcinOff == 0)
+            {
+                offsets = ReadMcnkOffsetsByChunkScan(adtBytes);
+            }
+            else
+            {
+                int mcinAbsPos = mhdrStart + mcinOff;
+                if (mcinAbsPos + 8 <= adtBytes.Length &&
+                    Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4) == "NICM")
+                {
+                    var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
+                    offsets = mcin.GetMcnkOffsets();
+                }
+                else
+                {
+                    offsets = ReadMcnkOffsetsByChunkScan(adtBytes);
+                }
+            }
         }
         else
         {
-            int mcinAbsPos = mhdrStart + mcinOff;
-            if (mcinAbsPos + 8 > adtBytes.Length)
-                return false;
-
-            string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
-            if (mcinSig != "NICM")
-                return false;
-
-            int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
-            if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
-                return false;
-
-            var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
-            offsets = mcin.GetMcnkOffsets();
+            // Flat chunk stream (e.g. Cataclysm / MoP split _tex0.adt and _obj0.adt)
+            offsets = ReadMcnkOffsetsByChunkScan(adtBytes);
         }
 
+        if (offsets.Count == 0)
+            return false;
+
         int entryCount = Math.Min(256, offsets.Count);
+        var texParseOptions = new Mcnk.ParseOptions
+        {
+            UseHeaderAlphaSize = parseOptions.UseHeaderAlphaSize,
+            UseHeaderShadowSize = parseOptions.UseHeaderShadowSize,
+            SkipHeader = true
+        };
 
         for (int ci = 0; ci < entryCount; ci++)
         {
@@ -939,13 +996,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 continue;
 
             int mcnkSize = BitConverter.ToInt32(adtBytes, off + 4);
-            if (mcnkSize <= 0 || off + 8 + mcnkSize > adtBytes.Length || mcnkSize < 128)
+            if (mcnkSize <= 0 || off + 8 + mcnkSize > adtBytes.Length || mcnkSize < 4)
                 continue;
 
             var mcnkData = new byte[mcnkSize];
             Array.Copy(adtBytes, off + 8, mcnkData, 0, mcnkSize);
 
-            var mcnk = new Mcnk(mcnkData, parseOptions);
+            var mcnk = new Mcnk(mcnkData, texParseOptions);
             mcnkByIndex[(ci % 16, ci / 16)] = mcnk;
         }
 
@@ -2146,6 +2203,75 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         if (ViewerLog.Verbose)
             ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) MHDR placements: mddf={mddfOff != 0}, modf={modfOff != 0}, mmid={mmidEntries?.Count ?? 0}, mwid={mwidEntries?.Count ?? 0}");
+    }
+
+    private void CollectPlacementsFlat(byte[] objBytes, int tileX, int tileY, TileLoadResult result)
+    {
+        int mmdxOff = FindChunk(objBytes, "MMDX");
+        int mmidOff = FindChunk(objBytes, "MMID");
+        int mwmoOff = FindChunk(objBytes, "MWMO");
+        int mwidOff = FindChunk(objBytes, "MWID");
+        int mddfOff = FindChunk(objBytes, "MDDF");
+        int modfOff = FindChunk(objBytes, "MODF");
+
+        byte[]? mmdxData = null;
+        if (mmdxOff >= 0 && mmdxOff + 8 <= objBytes.Length)
+        {
+            int sz = BitConverter.ToInt32(objBytes, mmdxOff + 4);
+            if (sz > 0 && mmdxOff + 8 + sz <= objBytes.Length)
+                mmdxData = new ReadOnlySpan<byte>(objBytes, mmdxOff + 8, sz).ToArray();
+        }
+
+        List<uint>? mmidEntries = null;
+        if (mmidOff >= 0 && mmidOff + 8 <= objBytes.Length)
+        {
+            int sz = BitConverter.ToInt32(objBytes, mmidOff + 4);
+            if (sz > 0 && mmidOff + 8 + sz <= objBytes.Length)
+            {
+                int count = sz / 4;
+                mmidEntries = new List<uint>(count);
+                for (int i = 0; i < count; i++)
+                    mmidEntries.Add(BitConverter.ToUInt32(objBytes, mmidOff + 8 + i * 4));
+            }
+        }
+
+        byte[]? mwmoData = null;
+        if (mwmoOff >= 0 && mwmoOff + 8 <= objBytes.Length)
+        {
+            int sz = BitConverter.ToInt32(objBytes, mwmoOff + 4);
+            if (sz > 0 && mwmoOff + 8 + sz <= objBytes.Length)
+                mwmoData = new ReadOnlySpan<byte>(objBytes, mwmoOff + 8, sz).ToArray();
+        }
+
+        List<uint>? mwidEntries = null;
+        if (mwidOff >= 0 && mwidOff + 8 <= objBytes.Length)
+        {
+            int sz = BitConverter.ToInt32(objBytes, mwidOff + 4);
+            if (sz > 0 && mwidOff + 8 + sz <= objBytes.Length)
+            {
+                int count = sz / 4;
+                mwidEntries = new List<uint>(count);
+                for (int i = 0; i < count; i++)
+                    mwidEntries.Add(BitConverter.ToUInt32(objBytes, mwidOff + 8 + i * 4));
+            }
+        }
+
+        if (mddfOff >= 0 && mddfOff + 8 <= objBytes.Length)
+        {
+            int sz = BitConverter.ToInt32(objBytes, mddfOff + 4);
+            if (sz >= _adtProfile.MddfRecordSize && mddfOff + 8 + sz <= objBytes.Length)
+                ParseMddfViaMmid(objBytes, mddfOff + 8, sz, mmdxData, mmidEntries, result, _adtProfile.MddfRecordSize);
+        }
+
+        if (modfOff >= 0 && modfOff + 8 <= objBytes.Length)
+        {
+            int sz = BitConverter.ToInt32(objBytes, modfOff + 4);
+            if (sz >= _adtProfile.ModfRecordSize && modfOff + 8 + sz <= objBytes.Length)
+                ParseModfViaMwid(objBytes, modfOff + 8, sz, mwmoData, mwidEntries, result, _adtProfile.ModfRecordSize);
+        }
+
+        if (ViewerLog.Verbose)
+            ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) flat placements: mddf={mddfOff >= 0}, modf={modfOff >= 0}, mmid={mmidEntries?.Count ?? 0}, mwid={mwidEntries?.Count ?? 0}");
     }
 
     /// <summary>
