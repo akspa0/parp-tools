@@ -238,19 +238,26 @@ internal sealed class ImGuiPathPicker
         }
 
         ImGui.EndChild();
+        ImGui.Spacing();
 
         // 4. Footer File Name Input & Action Buttons
         if (_mode != ImGuiPathPickerMode.OpenFolder)
         {
             ImGui.Text("File name:");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(-180f);
+            ImGui.SetNextItemWidth(MathF.Max(200f, ImGui.GetContentRegionAvail().X - 230f));
             ImGui.InputText("##PathPickerFileName", ref _fileName, 512);
+            ImGui.Spacing();
         }
 
-        float buttonsWidth = 180f;
-        ImGui.SameLine(ImGui.GetWindowWidth() - buttonsWidth - ImGui.GetStyle().FramePadding.X);
-        if (ImGui.Button("Cancel", new Vector2(buttonsWidth * 0.48f, 0)))
+        float buttonsWidth = 220f;
+        float availWidth = ImGui.GetContentRegionAvail().X;
+        if (availWidth > buttonsWidth)
+        {
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availWidth - buttonsWidth);
+        }
+
+        if (ImGui.Button("Cancel", new Vector2(105f, 26f)))
         {
             _popupVisible = false;
             ImGui.CloseCurrentPopup();
@@ -264,7 +271,7 @@ internal sealed class ImGuiPathPicker
             _ => "Open"
         };
 
-        if (ImGui.Button(confirmLabel, new Vector2(buttonsWidth * 0.50f, 0)))
+        if (ImGui.Button(confirmLabel, new Vector2(105f, 26f)))
         {
             string? picked = ResolveSelection();
             if (picked is not null)
@@ -354,7 +361,7 @@ internal sealed class ImGuiPathPicker
     }
 
     private float GetFooterHeight()
-        => _mode == ImGuiPathPickerMode.OpenFolder ? ImGui.GetFrameHeightWithSpacing() * 1.5f : ImGui.GetFrameHeightWithSpacing() * 2.5f;
+        => _mode == ImGuiPathPickerMode.OpenFolder ? 45f : 80f;
 
     private string? ResolveSelection()
     {

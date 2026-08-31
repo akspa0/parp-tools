@@ -316,7 +316,7 @@ public partial class ViewerApp
         }
 
         ImGui.TextDisabled(usingHoveredChunk ? "Target: hovered chunk" : "Target: camera chunk");
-        ImGui.Text($"Tile ({chunkInfo.TileX}, {chunkInfo.TileY})  Chunk ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
+        ImGui.Text($"Tile ({chunkInfo.TileY}, {chunkInfo.TileX})  Chunk ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
         ImGui.TextDisabled($"AreaId: {chunkData.AreaId}  Layers: {chunkData.Layers.Length}  Holes: 0x{chunkData.HoleMask:X4}");
         ImGui.TextDisabled($"MCNK Flags: 0x{(uint)chunkData.McnkFlags:X8}  {DescribeMcnkFlags(chunkData.McnkFlags)}");
         ImGui.TextDisabled($"Alpha maps: {chunkData.AlphaMaps.Count}  Shadow: {(chunkData.ShadowMap != null ? "yes" : "no")}  MCCV: {(chunkData.MccvColors != null ? "yes" : "no")}");
@@ -930,7 +930,7 @@ public partial class ViewerApp
         IReadOnlyList<string>? tileTextures)
     {
         var builder = new System.Text.StringBuilder();
-        builder.AppendLine($"Tile ({chunkInfo.TileX}, {chunkInfo.TileY}) Chunk ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
+        builder.AppendLine($"Tile ({chunkInfo.TileY}, {chunkInfo.TileX}) Chunk ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
         builder.AppendLine($"AreaId={chunkData.AreaId} Layers={chunkData.Layers.Length} Holes=0x{chunkData.HoleMask:X4} AlphaMaps={chunkData.AlphaMaps.Count}");
         builder.AppendLine($"McnkFlags=0x{(uint)chunkData.McnkFlags:X8} ({DescribeMcnkFlags(chunkData.McnkFlags)})");
 

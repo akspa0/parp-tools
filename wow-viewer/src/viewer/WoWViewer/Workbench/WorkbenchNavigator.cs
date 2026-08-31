@@ -74,7 +74,7 @@ public enum TerrainBottomTab
     Clipboard = 0,
     Analysis = 1,
     Mcnk = 2,
-    WeakSignal = 3,
+    Stratigraphy = 3,
     Export = 4,
     Tools = 5,
 }
@@ -102,6 +102,7 @@ public enum ArcheologyBottomTab
     Layers = 1,
     Playback = 2,
     Capture = 3,
+    Stratigraphy = 4,
 }
 
 /// <summary>
@@ -125,13 +126,13 @@ public static class WorkbenchNavigator
     public static string[] GetInspectBottomTabLabels() =>
         ["Context", "Scene Investigation", "MCNK / ADT", "World Context", "Archeology", "Animations", "Actions"];
 
-    public static string[] GetTerrainBottomTabLabels() => ["Clipboard", "Analysis", "MCNK", "Weak Signal", "Export", "Tools"];
+    public static string[] GetTerrainBottomTabLabels() => ["Clipboard", "Analysis", "MCNK", "Stratigraphy", "Export", "Tools"];
 
     /// <summary>Labels for <see cref="Pm4BottomTab"/>; order must match the enum.</summary>
     public static string[] GetPm4BottomTabLabels() => ["Overlay", "Selection", "Correlation", "Info", "Reconcile", "Alignment", "Outliner"];
 
     /// <summary>Labels for <see cref="ArcheologyBottomTab"/>; order must match the enum.</summary>
-    public static string[] GetArcheologyBottomTabLabels() => ["Range", "Layers", "Playback", "Capture"];
+    public static string[] GetArcheologyBottomTabLabels() => ["Range", "Layers", "Playback", "Capture", "Stratigraphy"];
 
     /// <summary>Labels for <see cref="UtilitiesBottomTab"/>; order must match the enum.</summary>
     public static string[] GetUtilitiesBottomTabLabels() =>

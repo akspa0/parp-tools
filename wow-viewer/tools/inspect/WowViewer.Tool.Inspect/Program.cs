@@ -99,6 +99,9 @@ switch (area)
 	case "terrain-template-generate":
 		RunTerrainGenerateTemplated(tail);
 		break;
+	case "terrain-stratigraphy-scan":
+		WowViewer.Tool.Inspect.TerrainStratigraphyScanCommand.Run(tail);
+		break;
 	case "rosetta-datastore-info":
 		RunRosettaDatastoreInfo(tail);
 		break;

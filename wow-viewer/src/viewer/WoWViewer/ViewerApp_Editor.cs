@@ -84,6 +84,7 @@ public partial class ViewerApp
         _editorHost = new EditorHost(build, _editorLog);
         _editorHost.Register(new ReferenceEditorPlugin());
         _editorHost.Register(new TerrainTemplateEditorPlugin());
+        _editorHost.Register(new ChunkManipulatorEditorPlugin());
 
         _editorSceneReader = new EditorSceneReaderAdapter(this);
         _editorSession = new EditorSession(new EditorApplierAdapter(this), _editorLog, _editorProjectOutputDir);
@@ -150,6 +151,13 @@ public partial class ViewerApp
         {
             ImGui.Separator();
             DrawTerrainTemplatePluginPanel(terrainPlugin);
+        }
+
+        // Chunk manipulator & multi-tile transposition panel (Spec 195)
+        if (_editorHost.ActivePlugin is ChunkManipulatorEditorPlugin chunkPlugin)
+        {
+            ImGui.Separator();
+            DrawChunkManipulatorPluginPanel(chunkPlugin);
         }
 
         ImGui.Separator();
@@ -989,5 +997,296 @@ public partial class ViewerApp
             if (!string.IsNullOrEmpty(_terrainTemplateStatus))
                 ImGui.TextColored(new Vector4(0.2f, 0.9f, 0.2f, 1f), _terrainTemplateStatus);
         }
+    }
+
+    private float _chunkManipulatorOverheadZoom = 8f;
+    private Vector2 _chunkManipulatorPanOffset = Vector2.Zero;
+    private float _chunkManipulatorHeightOffset = 0f;
+    private int _chunkManipulatorRotationIdx = 0;
+    private bool _chunkManipulatorIncludeHeights = true;
+    private bool _chunkManipulatorIncludeTextures = true;
+    private bool _chunkManipulatorIncludeHoles = true;
+    private bool _chunkManipulatorIncludePlacements = true;
+
+    private void DrawChunkManipulatorPluginPanel(ChunkManipulatorEditorPlugin plugin)
+    {
+        ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Chunk Manipulator (Multi-Tile & Sub-Cell Transposition)");
+        ImGui.TextDisabled("Select arbitrary regions of chunks across map tiles in overhead view and transpose them with sub-cell precision.");
+        ImGui.Spacing();
+
+        if (ImGui.CollapsingHeader("1. Overhead Multi-Tile & Chunk Selection Canvas", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.Text($"Selected: {plugin.Selection.Count} chunks");
+            if (plugin.Selection.TryGetBoundingBox(out var minBbox, out var maxBbox))
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled($"| Bounding: ({minBbox.TileX},{minBbox.TileY}) c({minBbox.ChunkX},{minBbox.ChunkY}) .. ({maxBbox.TileX},{maxBbox.TileY}) c({maxBbox.ChunkX},{maxBbox.ChunkY}) [{maxBbox.Gx - minBbox.Gx + 1}x{maxBbox.Gy - minBbox.Gy + 1}]");
+            }
+
+            if (ImGui.SmallButton("Clear Selection"))
+                plugin.Selection.Clear();
+
+            ImGui.SameLine();
+            var camTile = GetCameraTile();
+            if (ImGui.SmallButton("Select Camera Tile"))
+                plugin.Selection.AddTile(camTile.tileX, camTile.tileY);
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Select Camera 3x3"))
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                        plugin.Selection.AddTile(camTile.tileX + dx, camTile.tileY + dy);
+            }
+
+            // Interactive 2D canvas
+            float canvasWidth = ImGui.GetContentRegionAvail().X;
+            float canvasHeight = 280f;
+            var canvasPos = ImGui.GetCursorScreenPos();
+            var drawList = ImGui.GetWindowDrawList();
+
+            // Background
+            drawList.AddRectFilled(canvasPos, canvasPos + new Vector2(canvasWidth, canvasHeight), ImGui.ColorConvertFloat4ToU32(new Vector4(0.08f, 0.08f, 0.10f, 1f)));
+            drawList.AddRect(canvasPos, canvasPos + new Vector2(canvasWidth, canvasHeight), ImGui.ColorConvertFloat4ToU32(new Vector4(0.3f, 0.3f, 0.35f, 1f)));
+
+            // Compute visible tile coordinate bounds based on camera and zoom
+            float viewTiles = Math.Clamp(_chunkManipulatorOverheadZoom, 2f, 32f);
+            float tilePixelSize = Math.Min(canvasWidth, canvasHeight) / viewTiles;
+            float chunkPixelSize = tilePixelSize / 16f;
+
+            float centerTileX = camTile.tileX + _chunkManipulatorPanOffset.X;
+            float centerTileY = camTile.tileY + _chunkManipulatorPanOffset.Y;
+
+            float canvasCenterX = canvasPos.X + canvasWidth * 0.5f;
+            float canvasCenterY = canvasPos.Y + canvasHeight * 0.5f;
+
+            int minVisTileX = Math.Max(0, (int)MathF.Floor(centerTileX - viewTiles * 0.5f));
+            int maxVisTileX = Math.Min(63, (int)MathF.Ceiling(centerTileX + viewTiles * 0.5f));
+            int minVisTileY = Math.Max(0, (int)MathF.Floor(centerTileY - viewTiles * 0.5f));
+            int maxVisTileY = Math.Min(63, (int)MathF.Ceiling(centerTileY + viewTiles * 0.5f));
+
+            for (int ty = minVisTileY; ty <= maxVisTileY; ty++)
+            {
+                for (int tx = minVisTileX; tx <= maxVisTileX; tx++)
+                {
+                    float screenTileX = canvasCenterX + (tx - centerTileX) * tilePixelSize;
+                    float screenTileY = canvasCenterY + (ty - centerTileY) * tilePixelSize;
+
+                    // Tile border
+                    drawList.AddRect(
+                        new Vector2(screenTileX, screenTileY),
+                        new Vector2(screenTileX + tilePixelSize, screenTileY + tilePixelSize),
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.5f, 0.6f)));
+
+                    // If zoom allows, draw chunks
+                    if (tilePixelSize > 35f)
+                    {
+                        for (int cy = 0; cy < 16; cy++)
+                        {
+                            for (int cx = 0; cx < 16; cx++)
+                            {
+                                float scX = screenTileX + cx * chunkPixelSize;
+                                float scY = screenTileY + cy * chunkPixelSize;
+
+                                if (plugin.Selection.Contains(tx, ty, cx, cy))
+                                {
+                                    drawList.AddRectFilled(
+                                        new Vector2(scX, scY),
+                                        new Vector2(scX + chunkPixelSize, scY + chunkPixelSize),
+                                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.2f, 0.6f, 1f, 0.55f)));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Invisible button for interaction
+            ImGui.InvisibleButton("##ChunkManipulatorCanvas", new Vector2(canvasWidth, canvasHeight));
+            if (ImGui.IsItemHovered())
+            {
+                var io = ImGui.GetIO();
+                if (io.MouseWheel != 0)
+                    _chunkManipulatorOverheadZoom = Math.Clamp(_chunkManipulatorOverheadZoom - io.MouseWheel * 0.5f, 1f, 32f);
+
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                {
+                    float mouseRelX = (io.MousePos.X - canvasCenterX) / tilePixelSize + centerTileX;
+                    float mouseRelY = (io.MousePos.Y - canvasCenterY) / tilePixelSize + centerTileY;
+
+                    int hitTileX = (int)MathF.Floor(mouseRelX);
+                    int hitTileY = (int)MathF.Floor(mouseRelY);
+                    int hitChunkX = (int)MathF.Floor((mouseRelX - hitTileX) * 16f);
+                    int hitChunkY = (int)MathF.Floor((mouseRelY - hitTileY) * 16f);
+
+                    if (hitTileX >= 0 && hitTileX < 64 && hitTileY >= 0 && hitTileY < 64 && hitChunkX >= 0 && hitChunkX < 16 && hitChunkY >= 0 && hitChunkY < 16)
+                    {
+                        if (io.KeyShift || io.KeyCtrl)
+                            plugin.Selection.Toggle(hitTileX, hitTileY, hitChunkX, hitChunkY);
+                        else
+                        {
+                            plugin.Selection.Clear();
+                            plugin.Selection.Add(hitTileX, hitTileY, hitChunkX, hitChunkY);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (ImGui.CollapsingHeader("2. Transposition & Transformation Controls", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.Checkbox("Include Heights", ref _chunkManipulatorIncludeHeights);
+            ImGui.SameLine();
+            ImGui.Checkbox("Include Textures & Alpha", ref _chunkManipulatorIncludeTextures);
+            ImGui.SameLine();
+            ImGui.Checkbox("Include Holes", ref _chunkManipulatorIncludeHoles);
+
+            ImGui.Checkbox("Include Doodads & WMOs", ref _chunkManipulatorIncludePlacements);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(120f);
+            string[] rotLabels = ["0°", "90°", "180°", "270°"];
+            ImGui.Combo("Rotation", ref _chunkManipulatorRotationIdx, rotLabels, rotLabels.Length);
+
+            ImGui.InputFloat("Elevation Offset (Z)", ref _chunkManipulatorHeightOffset, 1f, 10f, "%.1fm");
+
+            ImGui.Spacing();
+            if (ImGui.Button("Copy Selection to Buffer") && plugin.Selection.Count > 0)
+            {
+                ExecuteChunkCopy(plugin);
+            }
+
+            ImGui.SameLine();
+            bool canPaste = plugin.Clipboard != null && plugin.Clipboard.Chunks.Count > 0;
+            if (!canPaste) ImGui.BeginDisabled();
+            if (ImGui.Button("Paste Buffer at Target Chunk"))
+            {
+                ExecuteChunkPaste(plugin);
+            }
+            if (!canPaste) ImGui.EndDisabled();
+
+            if (!string.IsNullOrEmpty(plugin.Status))
+            {
+                ImGui.Spacing();
+                ImGui.TextDisabled($"Status: {plugin.Status}");
+            }
+        }
+    }
+
+    private void ExecuteChunkCopy(ChunkManipulatorEditorPlugin plugin)
+    {
+        if (plugin.Selection.Count == 0) return;
+
+        plugin.Clipboard = ChunkTranspositionService.ExtractPayload(plugin.Selection.Chunks, coord =>
+        {
+            Terrain.TerrainChunkData? sourceChunk = null;
+            if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(coord.TileX, coord.TileY, out var result))
+            {
+                sourceChunk = result.Chunks.FirstOrDefault(c => c.ChunkX == coord.ChunkX && c.ChunkY == coord.ChunkY);
+            }
+            else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(coord.TileX, coord.TileY, out var vlmResult))
+            {
+                sourceChunk = vlmResult.Chunks.FirstOrDefault(c => c.ChunkX == coord.ChunkX && c.ChunkY == coord.ChunkY);
+            }
+
+            if (sourceChunk == null) return null;
+
+            var rec = new TransposedChunkRecord
+            {
+                Heights = sourceChunk.Heights != null ? (float[])sourceChunk.Heights.Clone() : null,
+                Normals = sourceChunk.Normals != null ? (Vector3[])sourceChunk.Normals.Clone() : null,
+                HoleMask = sourceChunk.HoleMask,
+                AreaId = sourceChunk.AreaId,
+                McnkFlags = sourceChunk.McnkFlags,
+                ShadowMap = sourceChunk.ShadowMap != null ? (byte[])sourceChunk.ShadowMap.Clone() : null,
+                MccvColors = sourceChunk.MccvColors != null ? (byte[])sourceChunk.MccvColors.Clone() : null,
+            };
+
+            if (sourceChunk.Layers != null)
+            {
+                for (int layerIdx = 0; layerIdx < sourceChunk.Layers.Length; layerIdx++)
+                {
+                    var l = sourceChunk.Layers[layerIdx];
+                    byte[]? alpha = null;
+                    if (sourceChunk.AlphaMaps != null && sourceChunk.AlphaMaps.TryGetValue(layerIdx, out var rawAlpha))
+                        alpha = (byte[])rawAlpha.Clone();
+
+                    rec.Layers.Add(new TransposedLayerRecord
+                    {
+                        TextureIndex = l.TextureIndex,
+                        AlphaMap = alpha,
+                        Flags = (int)l.Flags,
+                        EffectId = (int)l.EffectId,
+                    });
+                }
+            }
+
+            return rec;
+        });
+
+        plugin.Status = $"Copied {plugin.Clipboard.Chunks.Count} chunk(s) into clipboard buffer.";
+        ViewerLog.Info(ViewerLog.Category.General, $"[Chunk Manipulator] {plugin.Status}");
+    }
+
+    private void ExecuteChunkPaste(ChunkManipulatorEditorPlugin plugin)
+    {
+        if (plugin.Clipboard == null || plugin.Clipboard.Chunks.Count == 0) return;
+
+        var camTile = GetCameraTile();
+        var targetOrigin = new GlobalChunkCoordinate(camTile.tileX * 16, camTile.tileY * 16);
+
+        var options = new ChunkTranspositionOptions
+        {
+            IncludeHeights = _chunkManipulatorIncludeHeights,
+            IncludeTextures = _chunkManipulatorIncludeTextures,
+            IncludeHoles = _chunkManipulatorIncludeHoles,
+            IncludeM2Placements = _chunkManipulatorIncludePlacements,
+            HeightOffset = _chunkManipulatorHeightOffset,
+            RotationDegrees = _chunkManipulatorRotationIdx * 90,
+        };
+
+        var transformed = ChunkTranspositionService.TransformPayload(plugin.Clipboard, options);
+
+        var destChunksByTile = new Dictionary<(int tileX, int tileY), List<Terrain.TerrainChunkData>>();
+
+        foreach (var rec in transformed.Chunks)
+        {
+            var destCoord = targetOrigin.Offset(rec.RelativeGx, rec.RelativeGy);
+            if (!destCoord.IsValid) continue;
+
+            var key = (destCoord.TileX, destCoord.TileY);
+            if (!destChunksByTile.TryGetValue(key, out var list))
+            {
+                IReadOnlyList<Terrain.TerrainChunkData>? existing = null;
+                if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(key.TileX, key.TileY, out var res))
+                    existing = res.Chunks;
+                else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(key.TileX, key.TileY, out var vlmRes))
+                    existing = vlmRes.Chunks;
+
+                list = existing != null ? CloneTerrainChunkList(existing) : new List<Terrain.TerrainChunkData>();
+                destChunksByTile[key] = list;
+            }
+
+            var chunk = list.FirstOrDefault(c => c.ChunkX == destCoord.ChunkX && c.ChunkY == destCoord.ChunkY);
+            if (chunk != null)
+            {
+                int idx = list.IndexOf(chunk);
+                list[idx] = CloneTerrainChunk(
+                    chunk,
+                    heights: options.IncludeHeights ? rec.Heights : null,
+                    normals: options.IncludeHeights ? rec.Normals : null,
+                    holeMask: options.IncludeHoles ? rec.HoleMask : null);
+            }
+        }
+
+        foreach (var (tileKey, newChunks) in destChunksByTile)
+        {
+            if (_terrainManager != null)
+                _terrainManager.ReplaceTileChunksAndRebuild(tileKey.tileX, tileKey.tileY, newChunks);
+            else if (_vlmTerrainManager != null)
+                _vlmTerrainManager.ReplaceTileChunksAndRebuild(tileKey.tileX, tileKey.tileY, newChunks);
+        }
+
+        plugin.Status = $"Pasted {transformed.Chunks.Count} chunk(s) across {destChunksByTile.Count} tile(s).";
+        ViewerLog.Info(ViewerLog.Category.General, $"[Chunk Manipulator] {plugin.Status}");
     }
 }

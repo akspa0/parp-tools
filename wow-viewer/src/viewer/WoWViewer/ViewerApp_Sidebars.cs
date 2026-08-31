@@ -659,7 +659,7 @@ public partial class ViewerApp
         {
             int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
             int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
-            ImGui.TextDisabled($"Camera tile: ({tileX}, {tileY})");
+            ImGui.TextDisabled($"Camera tile: ({tileY}, {tileX})");
         }
 
         if (!string.IsNullOrWhiteSpace(_currentAreaName))
@@ -1234,12 +1234,12 @@ public partial class ViewerApp
         if (!TryResolveTerrainChunkInspectionData(chunkInfo, out TerrainChunkData? chunkData, out _)
             || chunkData == null)
         {
-            ImGui.TextDisabled($"ADT ({chunkInfo.TileX}, {chunkInfo.TileY})  MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})  data unavailable");
+            ImGui.TextDisabled($"ADT ({chunkInfo.TileY}, {chunkInfo.TileX})  MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})  data unavailable");
             return true;
         }
 
         ImGui.Separator();
-        ImGui.Text($"ADT ({chunkInfo.TileX}, {chunkInfo.TileY})  MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
+        ImGui.Text($"ADT ({chunkInfo.TileY}, {chunkInfo.TileX})  MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
         ImGui.TextDisabled(usingHoveredChunk ? "Target: hovered chunk" : "Target: camera chunk");
         ImGui.TextDisabled($"Area {chunkData.AreaId}  Flags 0x{(uint)chunkData.McnkFlags:X8}  {DescribeMcnkFlags(chunkData.McnkFlags)}");
         ImGui.TextDisabled($"Layers {chunkData.Layers.Length}  Holes 0x{chunkData.HoleMask:X4}  Alpha {chunkData.AlphaMaps.Count}  Shadow {(chunkData.ShadowMap != null ? "yes" : "no")}  MCCV {(chunkData.MccvColors != null ? "yes" : "no")}");
@@ -1999,7 +1999,7 @@ public partial class ViewerApp
         if (_terrainWorkbenchFocusedTile is not { } focusedTile)
             return;
 
-        ImGui.Text($"Focused ADT: ({focusedTile.tileX}, {focusedTile.tileY})");
+        ImGui.Text($"Focused ADT: ({focusedTile.tileY}, {focusedTile.tileX})");
         ImGui.SameLine();
         if (ImGui.SmallButton("Use Camera Tile"))
         {
@@ -3282,15 +3282,7 @@ public partial class ViewerApp
 
             if (!_terrainWeakSignalRestoreUseAutoFactor)
             {
-                float manualRestoreScale = _terrainWeakSignalRestoreManualFactor;
-                if (ImGui.InputFloat("Restore Scale", ref manualRestoreScale, 0.25f, 1f, "%.2fx"))
-                {
-                    _terrainWeakSignalRestoreManualFactor = Math.Clamp(manualRestoreScale, 1f, TerrainWeakSignalRestoreMaxFactor);
-                    MarkTerrainWeakSignalRestoreDirty();
-                    SaveViewerSettings();
-                }
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Manual viewer-only terrain relief multiplier. Type the exact factor you want; the value is clamped to the supported restore range and reapplied from the original tile data so you can A/B without compounding.");
+                DrawStratigraphyFactorControl();
             }
 
             string restoreScopeSummary = GetTerrainWeakSignalRestoreScopeSummary();
@@ -4262,46 +4254,233 @@ public partial class ViewerApp
 
     private void DrawTerrainControlsAdjustmentWeakSignalContent()
     {
-        // Extracted from DrawTerrainControlsAdjustmentContent (this file ~line 2576)
-        if (_terrainManager == null && _vlmTerrainManager == null)
-            return;
+        DrawTemporalStratigraphySubTab();
+    }
 
-        ImGui.Text("Weak Signal Amplifier");
+    private void DrawTemporalStratigraphySubTab()
+    {
+        if (_terrainManager == null && _vlmTerrainManager == null && _worldScene == null)
+        {
+            ImGui.TextDisabled("Load a terrain-backed world or map to inspect temporal stratigraphy.");
+            return;
+        }
+
+        ImGui.Text("Temporal Stratigraphy & Dev Mesh Restoration");
+        ImGui.TextDisabled("Recover compressed historical development terrain (1/0.03 = 33.334x) & hidden HoleMask dev geometry.");
         ImGui.Spacing();
 
-        bool weakSignalEnabled = _terrainWeakSignalRestoreEnabled;
-        if (ImGui.Checkbox("Restore Weak-Signal Terrain", ref weakSignalEnabled))
-            SetTerrainWeakSignalRestoreEnabled(weakSignalEnabled);
+        // 1. Live Camera Tile & Analysis Summary
+        var cameraTile = GetCameraTile();
+        if (_stratigraphyTileAnalyses.TryGetValue((cameraTile.tileX, cameraTile.tileY), out var analysis))
+        {
+            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), $"Tile ({cameraTile.tileY}, {cameraTile.tileX}) Dominant Stratum: {analysis.DominantStratum}");
+            ImGui.TextDisabled($"Surviving Levels: {analysis.TotalSurvivingLevels:N0} | Z: {analysis.MinHeight:F2}m .. {analysis.MaxHeight:F2}m ({analysis.HeightRange:F3}m range)");
+            ImGui.TextDisabled($"Chunks: {analysis.ActiveChunkCount} Active, {analysis.SqueezedChunkCount} Squeezed, {analysis.HoledChunkCount} Holed, {analysis.FlatChunkCount} Flat");
+            if (analysis.SeamProfile != null)
+            {
+                ImGui.TextDisabled($"Seam Profile: {analysis.SeamProfile.InferredMergeOrigin}");
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled($"Tile ({cameraTile.tileY}, {cameraTile.tileX}) — Click 'Analyze Active Tile' for full stratigraphic breakdown.");
+        }
+
+        ImGui.Separator();
+
+        // 2. Master Restoration Toggle
+        bool restoreEnabled = _terrainWeakSignalRestoreEnabled;
+        if (ImGui.Checkbox("Enable Temporal Stratigraphy Restoration", ref restoreEnabled))
+        {
+            SetTerrainWeakSignalRestoreEnabled(restoreEnabled);
+            SaveViewerSettings();
+        }
 
         if (_terrainWeakSignalRestoreEnabled)
         {
-            ImGui.InputFloat("Restore Range Min Z", ref _terrainWeakSignalRestoreCandidateMinHeight, 1f, 10f);
-            ImGui.InputFloat("Restore Range Max Z", ref _terrainWeakSignalRestoreCandidateMaxHeight, 1f, 10f);
             ImGui.Spacing();
+            DrawStratigraphyFactorControl();
 
-            if (ImGui.Button("Packed +/-2.778")) { _terrainWeakSignalRestoreCandidateMinHeight = -2.778f; _terrainWeakSignalRestoreCandidateMaxHeight = 2.778f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
-            ImGui.SameLine();
-            if (ImGui.Button("Packed +/-3")) { _terrainWeakSignalRestoreCandidateMinHeight = -3f; _terrainWeakSignalRestoreCandidateMaxHeight = 3f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
-            ImGui.SameLine();
-            if (ImGui.Button("Early +/-5")) { _terrainWeakSignalRestoreCandidateMinHeight = -5f; _terrainWeakSignalRestoreCandidateMaxHeight = 5f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
-            ImGui.SameLine();
-            if (ImGui.Button("Early +/-10")) { _terrainWeakSignalRestoreCandidateMinHeight = -10f; _terrainWeakSignalRestoreCandidateMaxHeight = 10f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
-            ImGui.SameLine();
-            if (ImGui.Button("Late -5000..10")) { _terrainWeakSignalRestoreCandidateMinHeight = -5000f; _terrainWeakSignalRestoreCandidateMaxHeight = 10f; RefreshTerrainWeakSignalRestoreForLoadedTiles(); }
             ImGui.Spacing();
-
-            bool autoFactor = _terrainWeakSignalRestoreUseAutoFactor;
-            if (ImGui.Checkbox("Auto Restore Scale", ref autoFactor))
-                _terrainWeakSignalRestoreUseAutoFactor = autoFactor;
-
-            if (!autoFactor)
+            bool unhideHoles = _stratigraphyUnhideDevMeshes;
+            if (ImGui.Checkbox("Unhide Dev Meshes (Bypass HoleMask)", ref unhideHoles))
             {
-                ImGui.InputFloat("Restore Scale", ref _terrainWeakSignalRestoreManualFactor, 0.5f, 8f);
+                _stratigraphyUnhideDevMeshes = unhideHoles;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Renders intact full-scale geometry hidden behind MCNK HoleMask flags (dev caves, subterranean paths, Outland blockouts).");
+
+            ImGui.SameLine();
+            bool stitch = _stratigraphyStitchBoundaries;
+            if (ImGui.Checkbox("Stitch Active Boundaries", ref stitch))
+            {
+                _stratigraphyStitchBoundaries = stitch;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Smoothly feathers height deltas at borders adjoining full-scale active terrain to prevent cliff edge artifacts.");
+
+            bool preserveFloor = _stratigraphyPreserveNegativeFloor;
+            if (ImGui.Checkbox("Preserve Negative Elevation Floor", ref preserveFloor))
+            {
+                _stratigraphyPreserveNegativeFloor = preserveFloor;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("When minimum Z is negative, anchors scaling to the negative floor so sunken basins and deep valleys scale downward naturally.");
+
+            ImGui.Spacing();
+            bool invertPolarity = _stratigraphyPolarityInverted;
+            if (ImGui.Checkbox("Invert Polarity (Negative Scaling / Dragon Isles Fix)", ref invertPolarity))
+            {
+                _stratigraphyPolarityInverted = invertPolarity;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Inverts scale factor (-1x) so developmental terrain compressed against a ceiling reconstructs downward without massive vertical wall spikes.");
+
+            int anchorModeIndex = (int)_stratigraphyAnchorMode;
+            string[] anchorModeLabels = ["Lowest Z (Floor)", "Highest Z (Ceiling / Inverted)", "Mean Z", "Neighbor Edge", "WDL Lattice", "Custom Datum"];
+            if (anchorModeIndex >= anchorModeLabels.Length) anchorModeIndex = 0;
+            ImGui.SetNextItemWidth(220f);
+            if (ImGui.Combo("Anchor Datum", ref anchorModeIndex, anchorModeLabels, anchorModeLabels.Length))
+            {
+                _stratigraphyAnchorMode = (WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode)anchorModeIndex;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
             }
 
-            if (!string.IsNullOrWhiteSpace(_terrainWeakSignalRestoreStatus))
-                ImGui.TextDisabled(_terrainWeakSignalRestoreStatus);
+            bool useAutoFit = _stratigraphyUseNeighborAutoFit;
+            if (ImGui.Checkbox("Auto-Fit to Neighbor Mesh Heights (1-3 Chunk Radius)", ref useAutoFit))
+            {
+                _stratigraphyUseNeighborAutoFit = useAutoFit;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Samples boundary vertices from adjacent active terrain within 1-3 chunks and calculates the optimal scale factor, polarity, and Z offset minimizing seam error.");
+
+            bool useWdl = _stratigraphyUseWdlMagnetization;
+            if (ImGui.Checkbox("Magnetize to WDL Macro-Lattice", ref useWdl))
+            {
+                _stratigraphyUseWdlMagnetization = useWdl;
+                MarkTerrainWeakSignalRestoreDirty();
+                SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Uses low-frequency 17x17 WDL heights as macro topographical guides, adding high-frequency ADT weak signals as micro-relief.");
+
+            if (_stratigraphyUseWdlMagnetization)
+            {
+                float strength = _stratigraphyWdlMagnetizationStrength;
+                ImGui.SetNextItemWidth(180f);
+                if (ImGui.SliderFloat("WDL Magnet Strength", ref strength, 0f, 1f, "%.2f"))
+                {
+                    _stratigraphyWdlMagnetizationStrength = strength;
+                    MarkTerrainWeakSignalRestoreDirty();
+                    SaveViewerSettings();
+                }
+            }
         }
+
+        ImGui.Separator();
+
+        // 3. Actions: Analyze, Revert, Save
+        if (ImGui.Button("Analyze Active Tile"))
+        {
+            AnalyzeActiveCameraTileStratigraphy();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Analyze All Loaded Tiles"))
+        {
+            AnalyzeAllLoadedTilesStratigraphy();
+        }
+
+        ImGui.Spacing();
+        if (ImGui.Button("Save Restored ADT / WDT Tiles..."))
+        {
+            OpenStratigraphySaveDialog();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Exports pre-computed loose LK ADT files and monolithic Alpha WDT maps to disk with current stratigraphy restorations applied.");
+
+        if (!string.IsNullOrWhiteSpace(_terrainWeakSignalRestoreStatus))
+        {
+            ImGui.Spacing();
+            ImGui.TextWrapped(_terrainWeakSignalRestoreStatus);
+        }
+    }
+
+    private void DrawStratigraphyFactorControl()
+    {
+        ImGui.Text("Restoration Gradient Factor:");
+
+        // 1. Direct High-Precision Numeric Input
+        float factor = _terrainWeakSignalRestoreManualFactor;
+        ImGui.SetNextItemWidth(140f);
+        if (ImGui.InputFloat("##StratigraphyFactorInput", ref factor, 0.1f, 1.0f, "%.4fx"))
+        {
+            SetStratigraphyFactor(factor);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Type an exact amplification multiplier (e.g. 33.334, 80, 10, 16, 64). Press Enter to apply.");
+
+        // Quick Steppers
+        ImGui.SameLine();
+        if (ImGui.SmallButton("-10x")) SetStratigraphyFactor(_terrainWeakSignalRestoreManualFactor - 10f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("-1x")) SetStratigraphyFactor(_terrainWeakSignalRestoreManualFactor - 1f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("-0.1x")) SetStratigraphyFactor(_terrainWeakSignalRestoreManualFactor - 0.1f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+0.1x")) SetStratigraphyFactor(_terrainWeakSignalRestoreManualFactor + 0.1f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+1x")) SetStratigraphyFactor(_terrainWeakSignalRestoreManualFactor + 1f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+10x")) SetStratigraphyFactor(_terrainWeakSignalRestoreManualFactor + 10f);
+
+        // 2. Wide Logarithmic Slider (1x to 512x)
+        factor = _terrainWeakSignalRestoreManualFactor;
+        ImGui.SetNextItemWidth(-1f);
+        if (ImGui.SliderFloat("##StratigraphyFactorSlider", ref factor, 1f, 512f, "Slider: %.3fx", ImGuiSliderFlags.Logarithmic))
+        {
+            SetStratigraphyFactor(factor);
+        }
+
+        // 3. Historical Era Preset Buttons
+        ImGui.TextDisabled("Historical Era Presets:");
+        if (ImGui.SmallButton("1x (Reset)")) SetStratigraphyFactor(1f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("3.33x (Late Alpha)")) SetStratigraphyFactor(3.333f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("10x (Pre-Release)")) SetStratigraphyFactor(10f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("16x (Blockout)")) SetStratigraphyFactor(16f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("33.334x (Classic 1/0.03)")) SetStratigraphyFactor(WowViewer.Core.Runtime.World.Terrain.Stratigraphy.TemporalStratigraphyOptions.DefaultClassicFactor);
+
+        if (ImGui.SmallButton("64x (Early Proto)")) SetStratigraphyFactor(64f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("80x (Deep Erasure)")) SetStratigraphyFactor(80f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("128x (Sub-Grid)")) SetStratigraphyFactor(128f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("256x (Deep Lattice)")) SetStratigraphyFactor(256f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("512x (Max)")) SetStratigraphyFactor(512f);
+    }
+
+    private void SetStratigraphyFactor(float factor)
+    {
+        _terrainWeakSignalRestoreManualFactor = Math.Clamp(factor, 1f, 512f);
+        _terrainWeakSignalRestoreUseAutoFactor = false;
+        MarkTerrainWeakSignalRestoreDirty();
+        SaveViewerSettings();
     }
 
     private void DrawRightSidebar()
@@ -5059,6 +5238,9 @@ public partial class ViewerApp
                 break;
             case ArcheologyBottomTab.Capture:
                 DrawArcheologyCaptureSubTab();
+                break;
+            case ArcheologyBottomTab.Stratigraphy:
+                DrawTemporalStratigraphySubTab();
                 break;
         }
     }

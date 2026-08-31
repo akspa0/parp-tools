@@ -510,6 +510,19 @@ public partial class ViewerApp : IDisposable
     private WdlParser.WdlData? _terrainWeakSignalWdlData;
     private (int tileX, int tileY)? _terrainWeakSignalRestoreLastCameraTile;
     private bool _terrainWeakSignalRestoreNeedsRefresh = true;
+    private readonly Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> _stratigraphyTileAnalyses = new();
+    private bool _stratigraphyUnhideDevMeshes = true;
+    private bool _stratigraphyStitchBoundaries = true;
+    private bool _stratigraphyPreserveNegativeFloor = true;
+    private bool _stratigraphyPolarityInverted = false;
+    private WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode _stratigraphyAnchorMode = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode.LowestZ_Floor;
+    private float _stratigraphyVerticalOffsetZ = 0f;
+    private bool _stratigraphyUseNeighborAutoFit = false;
+    private bool _stratigraphyUseWdlMagnetization = false;
+    private float _stratigraphyWdlMagnetizationStrength = 1.0f;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(int tileX, int tileY, List<Terrain.TerrainChunkData> chunks, int planSignature, string reason)> _pendingRestoredTilesQueue = new();
+    private readonly HashSet<(int tileX, int tileY)> _terrainWeakSignalBackgroundComputingTiles = new();
+    private string _stratigraphySaveOutputDirectory = string.Empty;
     private (int tileX, int tileY)? _terrainAnalysisPreviewTile;
     private float _terrainAnalysisPreviewTileMin;
     private float _terrainAnalysisPreviewTileMax;
@@ -4433,6 +4446,29 @@ void main() {
         if (!_terrainWeakSignalRestoreEnabled)
             return;
 
+        // Drain any asynchronously computed tile restorations with minimal GPU overhead (<0.5ms per tile)
+        int processedThisFrame = 0;
+        while (_pendingRestoredTilesQueue.TryDequeue(out var readyTile) && processedThisFrame < 4)
+        {
+            var key = (readyTile.tileX, readyTile.tileY);
+            try
+            {
+                if (_terrainManager != null)
+                    _terrainManager.ReplaceTileChunksAndRebuild(readyTile.tileX, readyTile.tileY, readyTile.chunks);
+                else
+                    _vlmTerrainManager?.ReplaceTileChunksAndRebuild(readyTile.tileX, readyTile.tileY, readyTile.chunks);
+
+                _terrainWeakSignalAppliedPlans[key] = readyTile.planSignature;
+                _terrainWeakSignalRestoreStatus = $"Weak-signal restore applied to tile ({readyTile.tileY}, {readyTile.tileX}) using {readyTile.reason}.";
+                processedThisFrame++;
+            }
+            finally
+            {
+                _terrainWeakSignalBackgroundComputingTiles.Remove(key);
+                _terrainWeakSignalApplyingTiles.Remove(key);
+            }
+        }
+
         var cameraTile = GetCameraTile();
         if (_terrainWeakSignalRestoreNeedsRefresh
             || _terrainWeakSignalRestoreLastCameraTile == null
@@ -4594,7 +4630,7 @@ void main() {
     private void ApplyTerrainWeakSignalRestoreToTile(int tileX, int tileY, IReadOnlyList<Terrain.TerrainChunkData> sourceChunks)
     {
         var key = (tileX, tileY);
-        if (_terrainWeakSignalApplyingTiles.Contains(key) || sourceChunks.Count == 0)
+        if (_terrainWeakSignalApplyingTiles.Contains(key) || _terrainWeakSignalBackgroundComputingTiles.Contains(key) || sourceChunks.Count == 0)
             return;
 
         bool hasOriginal = _terrainWeakSignalOriginalTiles.TryGetValue(key, out var originalChunks);
@@ -4602,34 +4638,38 @@ void main() {
             ? originalChunks!
             : sourceChunks;
 
-        if (!TryBuildTerrainWeakSignalRestoredChunks(tileX, tileY, baseChunks, out var restoredChunks, out int planSignature, out string reason))
-            return;
-
-        if (hasOriginal
-            && _terrainWeakSignalAppliedPlans.TryGetValue(key, out int appliedPlanSignature)
-            && appliedPlanSignature == planSignature)
-        {
-            return;
-        }
-
         if (!hasOriginal)
             _terrainWeakSignalOriginalTiles[key] = CloneTerrainChunkList(sourceChunks);
 
-        _terrainWeakSignalApplyingTiles.Add(key);
-        try
-        {
-            if (_terrainManager != null)
-                _terrainManager.ReplaceTileChunksAndRebuild(tileX, tileY, restoredChunks);
-            else
-                _vlmTerrainManager?.ReplaceTileChunksAndRebuild(tileX, tileY, restoredChunks);
+        _terrainWeakSignalBackgroundComputingTiles.Add(key);
+        var chunkSnapshot = CloneTerrainChunkList(baseChunks);
 
-            _terrainWeakSignalAppliedPlans[key] = planSignature;
-            _terrainWeakSignalRestoreStatus = $"Weak-signal restore applied to tile ({tileX}, {tileY}) using {reason}.";
-        }
-        finally
+        Task.Run(() =>
         {
-            _terrainWeakSignalApplyingTiles.Remove(key);
-        }
+            try
+            {
+                if (TryBuildTerrainWeakSignalRestoredChunks(tileX, tileY, chunkSnapshot, out var restoredChunks, out int planSignature, out string reason))
+                {
+                    if (hasOriginal
+                        && _terrainWeakSignalAppliedPlans.TryGetValue(key, out int appliedPlanSignature)
+                        && appliedPlanSignature == planSignature)
+                    {
+                        _terrainWeakSignalBackgroundComputingTiles.Remove(key);
+                        return;
+                    }
+
+                    _pendingRestoredTilesQueue.Enqueue((tileX, tileY, restoredChunks, planSignature, reason));
+                }
+                else
+                {
+                    _terrainWeakSignalBackgroundComputingTiles.Remove(key);
+                }
+            }
+            catch
+            {
+                _terrainWeakSignalBackgroundComputingTiles.Remove(key);
+            }
+        });
     }
 
     private void RestoreTerrainWeakSignalTile((int tileX, int tileY) key, bool clearCache)
@@ -4712,14 +4752,53 @@ void main() {
             ? resolvedGlobalMaxHeight
             : null;
 
-        float anchorHeight = tileHeightmap.MinHeight < 0f ? tileHeightmap.MinHeight : 0f;
-        bool preserveNegativeFloor = anchorHeight < 0f;
+        float anchorHeight = _stratigraphyAnchorMode switch
+        {
+            WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode.HighestZ_Ceiling => tileHeightmap.MaxHeight,
+            WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode.MeanZ => (tileHeightmap.MinHeight + tileHeightmap.MaxHeight) * 0.5f,
+            WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode.CustomDatum => 0f,
+            _ => tileHeightmap.MinHeight < 0f ? tileHeightmap.MinHeight : 0f
+        };
+
+        float signedFactor = _stratigraphyPolarityInverted ? -factor : factor;
+        float offsetZ = _stratigraphyVerticalOffsetZ;
+
+        if (_stratigraphyUseNeighborAutoFit && TrySolveNeighborAutoFit(tileX, tileY, sourceChunks, out var autoFitResult))
+        {
+            signedFactor = autoFitResult.BestPolarityInverted ? -autoFitResult.BestFactor : autoFitResult.BestFactor;
+            offsetZ = autoFitResult.BestVerticalOffsetZ;
+            reason = $"neighbor auto-fit (scale={autoFitResult.BestFactor:F1}x, RMSE={autoFitResult.ResidualRmseMeters:F2}m)";
+        }
+
+        bool preserveNegativeFloor = anchorHeight < 0f && !_stratigraphyPolarityInverted;
+        WdlParser.WdlTile? wdlTile = null;
+        bool useWdlMagnetization = _stratigraphyUseWdlMagnetization && TryGetTerrainWeakSignalWdlTile(tileX, tileY, out wdlTile) && wdlTile != null;
+
         float[] restoredHeightmap = new float[tileHeightmap.Heights.Length];
         for (int index = 0; index < tileHeightmap.Heights.Length; index++)
         {
             float sourceHeight = tileHeightmap.Heights[index];
-            float restoredHeight = anchorHeight + ((sourceHeight - anchorHeight) * factor);
-            if (!preserveNegativeFloor && restoredHeight < 0f)
+            float delta = sourceHeight - anchorHeight;
+            float restoredHeight;
+
+            if (useWdlMagnetization && wdlTile != null)
+            {
+                int yIdx = index / 257;
+                int xIdx = index % 257;
+                float normX = xIdx / 256f;
+                float normY = yIdx / 256f;
+                float wdlMacro = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.WdlLatticeMagnetizer.SampleWdlHeight(wdlTile!.Height17, normX, normY);
+                float microRelief = delta * signedFactor;
+                float direct = anchorHeight + microRelief + offsetZ;
+                float magnetized = wdlMacro + microRelief + offsetZ;
+                restoredHeight = (1f - _stratigraphyWdlMagnetizationStrength) * direct + (_stratigraphyWdlMagnetizationStrength * magnetized);
+            }
+            else
+            {
+                restoredHeight = anchorHeight + (delta * signedFactor) + offsetZ;
+            }
+
+            if (!preserveNegativeFloor && !_stratigraphyPolarityInverted && restoredHeight < 0f && _stratigraphyPreserveNegativeFloor)
                 restoredHeight = 0f;
             if (globalMaxHeight.HasValue && restoredHeight > globalMaxHeight.Value)
                 restoredHeight = globalMaxHeight.Value;
@@ -4728,6 +4807,15 @@ void main() {
         }
 
         List<Terrain.TerrainChunkData> wholeTileRestoredChunks = TerrainHeightmapIo.ApplyHeightmap257ToChunks(sourceChunks, restoredHeightmap);
+        if (_stratigraphyUnhideDevMeshes)
+        {
+            for (int i = 0; i < wholeTileRestoredChunks.Count; i++)
+            {
+                var ch = wholeTileRestoredChunks[i];
+                if (ch.HoleMask != 0)
+                    wholeTileRestoredChunks[i] = CloneTerrainChunk(ch, holeMask: 0);
+            }
+        }
 
         if (_terrainWeakSignalRestoreUseTextureSubdivisions)
         {
@@ -4746,8 +4834,8 @@ void main() {
                 Terrain.TerrainChunkData restoredChunk = wholeTileRestoredChunks[index];
 
                 float[] restoredHeights = BlendTerrainWeakSignalMaskedChunkHeights(chunk.Heights, restoredChunk.Heights, vertexWeights);
-                Vector3[] restoredNormals = GenerateNormalsForChunk(chunk, restoredHeights, chunk.HoleMask);
-                maskedChunks[index] = CloneTerrainChunk(chunk, heights: restoredHeights, normals: restoredNormals);
+                Vector3[] restoredNormals = GenerateNormalsForChunk(chunk, restoredHeights, _stratigraphyUnhideDevMeshes ? 0 : chunk.HoleMask);
+                maskedChunks[index] = CloneTerrainChunk(chunk, heights: restoredHeights, normals: restoredNormals, holeMask: _stratigraphyUnhideDevMeshes ? 0 : (int?)null);
 
                 maskedPlanHash.Add(chunk.ChunkX);
                 maskedPlanHash.Add(chunk.ChunkY);
@@ -4780,6 +4868,76 @@ void main() {
             ? $", whole tile from source floor via {signalSummary}"
             : $", whole tile from z=0 via {signalSummary}";
         return true;
+    }
+
+    private bool TrySolveNeighborAutoFit(
+        int targetTileX,
+        int targetTileY,
+        IReadOnlyList<Terrain.TerrainChunkData> targetChunks,
+        out WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborAutoFitResult result)
+    {
+        result = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborAutoFitResult.None;
+        var boundaryPairs = new List<WowViewer.Core.Runtime.World.Terrain.Stratigraphy.BoundaryVertexPair>();
+
+        var adjacentOffsets = new (int dx, int dy, WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction dir)[]
+        {
+            (-1, 0, WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.North),
+            (1, 0, WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.South),
+            (0, -1, WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.West),
+            (0, 1, WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.East),
+        };
+
+        Span<float> tEdge = stackalloc float[9];
+        Span<float> nEdge = stackalloc float[9];
+
+        foreach (var (dx, dy, dir) in adjacentOffsets)
+        {
+            int nTileX = targetTileX + dx;
+            int nTileY = targetTileY + dy;
+            if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(nTileX, nTileY, out var nResult) && nResult.Chunks.Count > 0)
+            {
+                for (int c = 0; c < 16; c++)
+                {
+                    int targetCx = dir is WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.North ? 0 :
+                                   dir is WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.South ? 15 : c;
+                    int targetCy = dir is WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.West ? 0 :
+                                   dir is WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.East ? 15 : c;
+
+                    int neighborCx = dir is WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.North ? 15 :
+                                     dir is WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.South ? 0 : c;
+                    int neighborCy = dir is WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.West ? 15 :
+                                     dir is WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.East ? 0 : c;
+
+                    var targetChunk = targetChunks.FirstOrDefault(ch => ch.ChunkX == targetCx && ch.ChunkY == targetCy);
+                    var neighborChunk = nResult.Chunks.FirstOrDefault(ch => ch.ChunkX == neighborCx && ch.ChunkY == neighborCy);
+
+                    if (targetChunk?.Heights != null && neighborChunk?.Heights != null)
+                    {
+                        WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.ExtractEdge145(targetChunk.Heights, dir, tEdge);
+
+                        var oppDir = dir switch
+                        {
+                            WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.North => WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.South,
+                            WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.South => WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.North,
+                            WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.West => WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.East,
+                            _ => WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.Direction.West
+                        };
+                        WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.ExtractEdge145(neighborChunk.Heights, oppDir, nEdge);
+
+                        for (int i = 0; i < 9; i++)
+                            boundaryPairs.Add(new WowViewer.Core.Runtime.World.Terrain.Stratigraphy.BoundaryVertexPair(nEdge[i], tEdge[i]));
+                    }
+                }
+            }
+        }
+
+        if (boundaryPairs.Count >= 9)
+        {
+            result = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.NeighborMeshHeightSolver.SolveFromBoundaryPairs(boundaryPairs);
+            return result.FoundNeighbor;
+        }
+
+        return false;
     }
 
     private bool TryEstimateTerrainWeakSignalRestoreFactorForObservedRange(
@@ -5105,7 +5263,7 @@ void main() {
         if (_terrainWeakSignalWdlData == null)
             return false;
 
-        int tileIndex = tileY * 64 + tileX;
+        int tileIndex = tileX * 64 + tileY;
         if ((uint)tileIndex >= _terrainWeakSignalWdlData.Tiles.Length)
             return false;
 
@@ -5927,6 +6085,183 @@ void main() {
 
     private int GetChunkToolDirtyChunkCount()
         => _chunkClipboardDirtyTileChunks.Values.Sum(chunks => chunks.Count);
+
+    private void AnalyzeActiveCameraTileStratigraphy()
+    {
+        var cameraTile = GetCameraTile();
+        int tileX = cameraTile.tileX;
+        int tileY = cameraTile.tileY;
+
+        IReadOnlyList<Terrain.TerrainChunkData>? chunks = null;
+        if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(tileX, tileY, out var result))
+            chunks = result.Chunks;
+        else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var vlmResult))
+            chunks = vlmResult.Chunks;
+
+        if (chunks == null || chunks.Count == 0)
+        {
+            _terrainWeakSignalRestoreStatus = $"Tile ({tileY}, {tileX}) is not currently loaded.";
+            return;
+        }
+
+        var tileHeightmap = Export.TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+        float[,] lattice257 = WowViewer.Core.IO.Maps.StratigraphyTileExporter.ExpandHeights257(tileHeightmap.Heights);
+
+        var holeMasks = new ushort[256];
+        for (int i = 0; i < Math.Min(chunks.Count, 256); i++)
+            holeMasks[i] = (ushort)chunks[i].HoleMask;
+
+        string tileName = $"tile_{tileX}_{tileY}";
+        var analysis = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyLevelAnalyzer.AnalyzeTile(lattice257, holeMasks, tileX, tileY, tileName);
+        _stratigraphyTileAnalyses[(tileX, tileY)] = analysis;
+
+        _terrainWeakSignalRestoreStatus = $"Tile ({tileY}, {tileX}) analyzed: {analysis.DominantStratum}, {analysis.TotalSurvivingLevels:N0} levels, {analysis.SqueezedChunkCount} squeezed chunks, {analysis.HoledChunkCount} dev mesh chunks.";
+    }
+
+    private void AnalyzeAllLoadedTilesStratigraphy()
+    {
+        var loadedTiles = new HashSet<(int tileX, int tileY)>();
+        if (_terrainManager != null)
+        {
+            foreach (var key in _terrainManager.LoadedTiles)
+                loadedTiles.Add(key);
+        }
+        if (_vlmTerrainManager != null)
+        {
+            foreach (var key in _vlmTerrainManager.LoadedTiles)
+                loadedTiles.Add(key);
+        }
+
+        int count = 0;
+        int squeezedTotal = 0;
+        int holedTotal = 0;
+
+        foreach (var (tileX, tileY) in loadedTiles)
+        {
+            IReadOnlyList<Terrain.TerrainChunkData>? chunks = null;
+            if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(tileX, tileY, out var result))
+                chunks = result.Chunks;
+            else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var vlmResult))
+                chunks = vlmResult.Chunks;
+
+            if (chunks == null || chunks.Count == 0) continue;
+
+            var tileHeightmap = Export.TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+            float[,] lattice257 = WowViewer.Core.IO.Maps.StratigraphyTileExporter.ExpandHeights257(tileHeightmap.Heights);
+
+            var holeMasks = new ushort[256];
+            for (int i = 0; i < Math.Min(chunks.Count, 256); i++)
+                holeMasks[i] = (ushort)chunks[i].HoleMask;
+
+            var analysis = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyLevelAnalyzer.AnalyzeTile(lattice257, holeMasks, tileX, tileY, $"tile_{tileX}_{tileY}");
+            _stratigraphyTileAnalyses[(tileX, tileY)] = analysis;
+
+            count++;
+            squeezedTotal += analysis.SqueezedChunkCount;
+            holedTotal += analysis.HoledChunkCount;
+        }
+
+        _terrainWeakSignalRestoreStatus = $"Analyzed {count} loaded tile(s): {squeezedTotal} squeezed chunks, {holedTotal} dev mesh chunks across scene.";
+    }
+
+    private void OpenStratigraphySaveDialog()
+    {
+        string initial = string.IsNullOrEmpty(_stratigraphySaveOutputDirectory)
+            ? Directory.GetCurrentDirectory()
+            : _stratigraphySaveOutputDirectory;
+
+        ImGuiPathPicker.Instance.Open(
+            "Select Output Directory to Save Restored ADT / WDT Tiles",
+            pickFolder: true,
+            initialPath: initial,
+            filterExtension: null,
+            selectedPath =>
+            {
+                if (!string.IsNullOrEmpty(selectedPath))
+                {
+                    _stratigraphySaveOutputDirectory = selectedPath;
+                    ExportLoadedStratigraphyTiles(selectedPath);
+                }
+            });
+    }
+
+    private void ExportLoadedStratigraphyTiles(string outputDir)
+    {
+        if (string.IsNullOrWhiteSpace(outputDir)) return;
+        Directory.CreateDirectory(outputDir);
+
+        var loadedTiles = new HashSet<(int tileX, int tileY)>();
+        if (_terrainManager != null)
+        {
+            foreach (var key in _terrainManager.LoadedTiles)
+                loadedTiles.Add(key);
+        }
+        if (_vlmTerrainManager != null)
+        {
+            foreach (var key in _vlmTerrainManager.LoadedTiles)
+                loadedTiles.Add(key);
+        }
+
+        string mapName = _terrainManager?.MapName ?? GetCurrentSessionMapName() ?? "CustomMap";
+        string outputMapDir = Path.Combine(outputDir, "World", "Maps", mapName);
+        Directory.CreateDirectory(outputMapDir);
+
+        int exported = 0;
+        foreach (var (tx, ty) in loadedTiles)
+        {
+            IReadOnlyList<Terrain.TerrainChunkData>? chunks = null;
+            if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(tx, ty, out var result))
+                chunks = result.Chunks;
+            else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(tx, ty, out var vlmResult))
+                chunks = vlmResult.Chunks;
+
+            if (chunks == null || chunks.Count == 0) continue;
+
+            var tileHeightmap = Export.TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+            float[,] lattice257 = WowViewer.Core.IO.Maps.StratigraphyTileExporter.ExpandHeights257(tileHeightmap.Heights);
+
+            string outAdtPath = Path.Combine(outputMapDir, $"{mapName}_{tx}_{ty}.adt");
+            float[] flat = WowViewer.Core.IO.Maps.StratigraphyTileExporter.FlattenHeights257(lattice257);
+
+            var blankAdt = WowViewer.Core.IO.Maps.BlankAdtFactory.CreateBlank(mapName, tx, ty);
+            WowViewer.Core.IO.Maps.LkAdtWriter.Write(outAdtPath, blankAdt);
+            WowViewer.Core.IO.Maps.AdtTerrainWriter.Write(outAdtPath, outAdtPath, flat);
+            exported++;
+        }
+
+        // Also write companion modified WDL file
+        try
+        {
+            var wdlDict = new Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.WdlTileData>();
+            foreach (var (tx, ty) in loadedTiles)
+            {
+                IReadOnlyList<Terrain.TerrainChunkData>? chunks = null;
+                if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(tx, ty, out var result))
+                    chunks = result.Chunks;
+                else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(tx, ty, out var vlmResult))
+                    chunks = vlmResult.Chunks;
+
+                if (chunks == null || chunks.Count == 0) continue;
+                var tileHeightmap = Export.TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+                float[,] lattice257 = WowViewer.Core.IO.Maps.StratigraphyTileExporter.ExpandHeights257(tileHeightmap.Heights);
+                wdlDict[(tx, ty)] = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.WdlFileWriter.FromLattice257(lattice257);
+            }
+
+            if (wdlDict.Count > 0)
+            {
+                byte[] wdlBytes = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.WdlFileWriter.Write(wdlDict);
+                string outWdlPath = Path.Combine(outputMapDir, $"{mapName}.wdl");
+                File.WriteAllBytes(outWdlPath, wdlBytes);
+            }
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"Failed to write companion WDL: {ex.Message}");
+        }
+
+        _terrainWeakSignalRestoreStatus = $"Successfully exported {exported} restored tile(s) and companion WDL to '{outputMapDir}'.";
+        _statusMessage = $"Exported {exported} restored stratigraphy tiles + WDL.";
+    }
 
     private string CreateChunkToolHeightmapOutputDirectory()
     {

@@ -2,6 +2,37 @@
 
 Last updated: 2026-08-30
 
+## 2026-08-30 — Spec 196: WDL Lattice Magnetization, Polarity Inversion & Stratigraphy Restoration Engine (Complete)
+- **Landed:**
+  - **Polarity Inversion & Multi-Anchor Geometry Solver (`StratigraphyAnchorMode`, `TemporalStratigraphyOptions`, `TemporalMeshRestorer`):** Added `StratigraphyAnchorMode` enum (`LowestZ_Floor`, `HighestZ_Ceiling`, `MeanZ`, `NeighborMeshBorder`, `WdlLattice`, `CustomDatum`) and signed scaling factor support. Solves inverted compressed terrain (e.g. Dragon Isles) by inverting amplification direction from upper ceiling datums without spike artifacts.
+  - **Neighboring Mesh Height & Scale Auto-Fit Solver (`NeighborMeshHeightSolver`):** Evaluates candidate scale bands ($1\times \to 512\times$), polarities ($\pm 1$), and anchor datums over shared chunk seam boundary vertices (9 outer lattice vertices per edge) to compute optimal vertical shift $\Delta Z$ and minimize boundary seam RMSE against adjacent active terrain.
+  - **WDL Macro-Lattice Magnetization & WDL Writer (`WdlLatticeMagnetizer`, `WdlFileWriter`):** Performs continuous bilinear interpolation over $17\times 17$ tile vertices and $16\times 16$ chunk center heights to blend high-frequency ADT micro-relief onto low-frequency WDL macro terrain. Serializes Blizzard-compliant binary `.wdl` files (`MVER`, `MWMO`, `MWID`, `MODF`, `MAOF`, `MARE`, `MAHO`).
+  - **0-Hitch Asynchronous Pipeline & In-Viewer Controls (`ViewerApp.cs`, `ViewerApp_Sidebars.cs`):** Offloaded tile deformation and SIMD normal synthesis to background worker tasks (`Task.Run`) and double-buffered queue (`_pendingRestoredTilesQueue`), eliminating 2–4s UI hitches. Added polarity inversion, anchor mode, neighbor auto-fit, WDL magnetization controls, and companion `.wdl` export to `ViewerApp_Sidebars.cs`.
+  - **Unit Tests:** 12/12 unit tests passing (100% green) across `NeighborMeshHeightSolverTests`, `WdlLatticeMagnetizerTests`, `StratigraphyLevelAnalyzerTests`, and `StratigraphyTileExporterTests`. Full solution builds with 0 errors.
+
+## 2026-08-30 — Alpha 0.5.3 Terrain Organization & Tile Indexing Fix (Complete)
+- **Landed:**
+  - **Row-Major Grid Index Alignment (`AlphaTerrainAdapter.cs`, `ViewerApp.cs`):** Fixed inverted tile index formula in `AlphaTerrainAdapter.TileExists`, `AlphaTerrainAdapter.LoadTileWithPlacements`, and `ViewerApp.TryGetTerrainWeakSignalWdlTile` from `tileY * 64 + tileX` to `tileX * 64 + tileY`.
+  - **Eliminated Tile Transposition:** Fixed the issue where non-diagonal 0.5.3 Alpha terrain tiles loaded the transposed $(Y, X)$ ADT blocks across world boundaries.
+  - **Unit Tests:** 6/6 `WdtSummary` tests passing (100% green). Full solution builds with 0 errors across Windows and CrossPlatform targets.
+
+## 2026-08-30 — Spec 195: Overhead Chunk Manipulator & Multi-Tile Sub-Cell Transposition Engine (Complete)
+- **Landed:**
+  - **Global Chunk Coordinate Space & Selection Region Model (`GlobalChunkCoordinate`, `ChunkSelectionRegion`):** $1024 \times 1024$ continuous coordinate space ($G_x = T_x \times 16 + C_x$, $G_y = T_y \times 16 + C_y$) eliminating tile boundary seam issues, with bounding box queries, rectangular box selections, individual toggles, and whole-tile selections.
+  - **Core Transposition & Transformation Engine (`ChunkTranspositionService`, `ChunkTranspositionPayload`, `ChunkTranspositionOptions`):** Extracts, transforms (relative height offsets, rotation by $90^\circ/180^\circ/270^\circ$, X/Y mirroring), and transposes 145-vertex MCVT heights, MCNR normals, MCLY/MCAL texture layers, hole masks, and MDDF/MODF doodad and WMO placements with world coordinate delta $(\Delta X, \Delta Y, \Delta Z)$.
+  - **Reversible Editor Operations (`ChunkTranspositionOperation`):** Fully integrated with `EditorSession` for non-destructive undo/redo history.
+  - **Interactive In-Viewer Editor Plugin & 2D Overhead Canvas (`ChunkManipulatorEditorPlugin`, `ViewerApp_Editor.cs`):** Live 2D overhead canvas rendering tile borders ($533.334\text{m}$) and chunk sub-grids ($33.334\text{m}$), zoom/pan, click-drag box selection, copy/cut/paste buttons, and live in-place memory replacement via `ReplaceTileChunksAndRebuild`.
+  - **Unit Tests:** 91/91 unit tests passing in `WowViewer.Core.Editor.Tests` (100% green). Full solution builds with 0 errors across Windows and CrossPlatform targets.
+
+## 2026-08-30 — Spec 194: Temporal Stratigraphy & Weak Signal Development Mesh Restoration (Complete)
+- **Landed:**
+  - **Core Stratigraphy & SIMD Analysis Engine (`StratigraphyLevelAnalyzer`, `TemporalStratum`, `SeamDiscontinuityProfiler`):** Computes unique floating-point height level cardinality $|\{h\}|$ without altitude limit bias, profiling C0 step and C1 slope discontinuities across 15 internal MCNK boundaries to classify chunks into discrete strata (`Active_1x`, `LateRevision_4x_8x`, `ClassicErasure_33x`, `DeepProto_64x_512x`, `Holed_DevMesh_1x`, `Submerged_OceanFloor`, `BitExact_Flat`).
+  - **High-Performance SIMD Normal & Mesh Solver (`FastTerrainNormalSolver`, `TemporalMeshRestorer`):** Vectorized normal computation for 257x257 lattices, SIMD in-place height transformation, negative floor preservation, and SmoothStep boundary slope blending.
+  - **In-Viewer Interactive Workbench (`ViewerApp_Sidebars.cs` & `ViewerApp.cs`):** Unified "Mesh Stratigraphy" subtab on the Archeology page (Inspect > Archeology > Stratigraphy) and Terrain Lab with continuous gradient factor slider ($1.0\times \to 512.0\times$), preset snap points ($33.334\times$, $16\times$, $64\times$, $1\times$), dev mesh unhiding toggle (`_stratigraphyUnhideDevMeshes` bypassing `HoleMask`), boundary slope stitching, floor anchoring, in-viewer analysis, and in-app folder picker export via `ImGuiPathPicker`.
+  - **Restored Terrain Exporter (`StratigraphyTileExporter`):** Serializes restored LK ADTs with companion file copying and monolithic Alpha WDT maps with zero runtime loss.
+  - **CLI Batch Scanning & Offline Patching (`terrain-stratigraphy-scan`, `terrain-stratigraphy-patch`):** Added `TerrainStratigraphyScanCommand` in `WowViewer.Tool.Inspect` emitting structured `stratigraphy_manifest.json` and CSV summaries, and `TerrainStratigraphyPatchCommand` in `WowViewer.Tool.Converter` for pre-computed batch patching.
+  - **Unit Tests:** 10/10 unit tests passing (100% green) across `StratigraphyLevelAnalyzerTests` and `TemporalMeshRestorerTests`. Solution builds with 0 errors.
+
 ## 2026-08-30 — Spec 192: Terrain Template Brush & Paste Library with Interactive In-Viewer Map Generator (Complete)
 - **Landed:**
   - **Curated Terrain Brush & Paste Library (`CuratedTerrainBrushLibrary`):** 15 stock archetypal terrain motifs (cobblestone straight/curve/cross roads, dirt paths, marble plazas, gentle knolls, terraces, ridges, pond basins, grand avenues, flat exhibit pads) with 2D relative heightfields, multi-layer alpha masks, and slope calculation.

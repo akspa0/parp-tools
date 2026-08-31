@@ -27,6 +27,7 @@ public partial class ViewerApp
             ImGui.End();
             return;
         }
+
         DrawTerrainAnalysisContent();
         ImGui.End();
     }
@@ -39,12 +40,12 @@ public partial class ViewerApp
         if (_terrainAnalysisFollowCameraTile && (!_terrainAnalysisPreviewTile.HasValue || _terrainAnalysisPreviewTile.Value != cameraTile))
             RefreshTerrainAnalysisCurrentTile(cameraTile);
 
-        ImGui.Text($"Camera Tile: ({cameraTile.tileX}, {cameraTile.tileY})");
+        ImGui.Text($"Camera Tile: ({cameraTile.tileY}, {cameraTile.tileX})");
         if (_terrainAnalysisPreviewTile.HasValue)
         {
             var previewTile = _terrainAnalysisPreviewTile.Value;
             ImGui.SameLine();
-            ImGui.TextDisabled($"Preview Tile: ({previewTile.tileX}, {previewTile.tileY})");
+            ImGui.TextDisabled($"Preview Tile: ({previewTile.tileY}, {previewTile.tileX})");
         }
 
         ImGui.Checkbox("Follow camera tile", ref _terrainAnalysisFollowCameraTile);
@@ -79,7 +80,7 @@ public partial class ViewerApp
             if (_terrainAnalysisPreviewCompareTile.HasValue && _terrainAnalysisPreviewSimilarity.HasValue)
             {
                 var compareTile = _terrainAnalysisPreviewCompareTile.Value;
-                ImGui.Text($"Offset Match ({_terrainAnalysisHiddenCompareOffsetX:+#;-#;0}, {_terrainAnalysisHiddenCompareOffsetY:+#;-#;0}): tile ({compareTile.tileX}, {compareTile.tileY}) similarity {_terrainAnalysisPreviewSimilarity.Value:P1}");
+                ImGui.Text($"Offset Match ({_terrainAnalysisHiddenCompareOffsetX:+#;-#;0}, {_terrainAnalysisHiddenCompareOffsetY:+#;-#;0}): tile ({compareTile.tileY}, {compareTile.tileX}) similarity {_terrainAnalysisPreviewSimilarity.Value:P1}");
             }
         }
 
@@ -258,7 +259,7 @@ public partial class ViewerApp
         var chunks = LoadTileChunksForExport(tile.tileX, tile.tileY);
         if (chunks == null || chunks.Count == 0)
         {
-            _terrainAnalysisStatus = $"No terrain data available for tile ({tile.tileX}, {tile.tileY}).";
+            _terrainAnalysisStatus = $"No terrain data available for tile ({tile.tileY}, {tile.tileX}).";
             ClearTerrainAnalysisTextures(clearGlobal: false);
             _terrainAnalysisPreviewTile = tile;
             return;
@@ -311,7 +312,7 @@ public partial class ViewerApp
             _terrainAnalysisAlphaTexture?.Update(alphaPixels, atlas.Width, atlas.Height);
         }
 
-        _terrainAnalysisStatus = $"Terrain analysis refreshed for tile ({tile.tileX}, {tile.tileY}).";
+        _terrainAnalysisStatus = $"Terrain analysis refreshed for tile ({tile.tileY}, {tile.tileX}).";
     }
 
     private void RefreshTerrainAnalysisGlobalBounds()
@@ -443,7 +444,7 @@ public partial class ViewerApp
         var chunks = LoadTileChunksForExport(tile.tileX, tile.tileY);
         if (chunks == null || chunks.Count == 0)
         {
-            _terrainAnalysisStatus = $"No terrain data available to save for tile ({tile.tileX}, {tile.tileY}).";
+            _terrainAnalysisStatus = $"No terrain data available to save for tile ({tile.tileY}, {tile.tileX}).";
             return;
         }
 
@@ -496,7 +497,7 @@ public partial class ViewerApp
         };
         File.WriteAllText(metadataPath, JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
 
-        _terrainAnalysisStatus = $"Saved terrain analysis preview set for tile ({tile.tileX}, {tile.tileY}) to {outputDir}.";
+        _terrainAnalysisStatus = $"Saved terrain analysis preview set for tile ({tile.tileY}, {tile.tileX}) to {outputDir}.";
     }
 
     private void RefreshHiddenTerrainCandidates()

@@ -153,7 +153,7 @@ public partial class ViewerApp
                 _pendingMinimapTeleportClickCount = released.ClickCount;
                 _pendingMinimapTeleportLastClickUtc = DateTime.UtcNow;
                 int remainingClicks = MinimapTeleportConfirmClicks - released.ClickCount;
-                _statusMessage = $"Minimap teleport armed for tile ({tileX},{tileY}) "
+                _statusMessage = $"Minimap teleport armed for tile ({tileY},{tileX}) "
                     + $"{released.ClickCount}/{MinimapTeleportConfirmClicks}. "
                     + $"Click {remainingClicks} more time{(remainingClicks == 1 ? string.Empty : "s")} to teleport.";
             }
@@ -167,7 +167,7 @@ public partial class ViewerApp
         float worldX = WoWConstants.MapOrigin - clickTileX * MinimapWorldTileSize;
         float worldY = WoWConstants.MapOrigin - clickTileY * MinimapWorldTileSize;
         _camera.Position = new Vector3(worldX, worldY, _camera.Position.Z);
-        _statusMessage = $"Minimap teleported camera to tile ({tileX},{tileY}).";
+        _statusMessage = $"Minimap teleported camera to tile ({tileY},{tileX}).";
 
         if (closeFullscreenAfterTeleport && _fullscreenMinimap)
         {
