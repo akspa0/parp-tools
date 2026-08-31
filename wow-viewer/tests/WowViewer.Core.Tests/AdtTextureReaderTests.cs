@@ -73,6 +73,92 @@ public sealed class AdtTextureReaderTests
     }
 
     [Fact]
+    public void Read_SyntheticTex1Adt_UsesHeaderlessSplitParser()
+    {
+        byte[] bytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MTEX", CreateStringBlock("base.blp")),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", CreateTexChunkPayload(
+                CreateMclyPayload([0u], [0u]),
+                [])),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "synthetic_0_0_tex1.adt");
+        AdtTextureFile textureFile = AdtTextureReader.Read(stream, summary);
+
+        Assert.Equal(MapFileKind.AdtTex1, textureFile.Kind);
+        Assert.Equal(AdtMcalDecodeProfile.Cataclysm400, textureFile.DecodeProfile);
+        Assert.Single(textureFile.Chunks);
+        Assert.Single(textureFile.Chunks[0].Layers);
+        Assert.Equal("base.blp", textureFile.Chunks[0].Layers[0].TexturePath);
+    }
+
+    [Fact]
+    public void Read_SyntheticTex1Adt_WithSparseMcin_PreservesOriginalChunkSlot()
+    {
+        byte[] mcnkPayload = CreateTexChunkPayload(
+            CreateMclyPayload([0u], [0u]),
+            []);
+        byte[] mver = MapFileSummaryReaderTestsAccessor.CreateChunk(
+            "MVER",
+            MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18));
+        byte[] mtex = MapFileSummaryReaderTestsAccessor.CreateChunk(
+            "MTEX",
+            CreateStringBlock("base.blp"));
+        byte[] mhdrPayload = new byte[64];
+        int mhdrDataOffset = mver.Length + 8;
+        int mcinHeaderOffset =
+            mver.Length
+            + 8
+            + mhdrPayload.Length
+            + mtex.Length;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mhdrPayload.AsSpan(4, 4),
+            mcinHeaderOffset - mhdrDataOffset);
+        byte[] mhdr = MapFileSummaryReaderTestsAccessor.CreateChunk(
+            "MHDR",
+            mhdrPayload);
+        byte[] mcinPayload = new byte[256 * 16];
+        byte[] mcin = MapFileSummaryReaderTestsAccessor.CreateChunk(
+            "MCIN",
+            mcinPayload);
+
+        int mcnkHeaderOffset = mcinHeaderOffset + mcin.Length;
+        const int expectedSlot = 17;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mcinPayload.AsSpan(expectedSlot * 16, 4),
+            mcnkHeaderOffset);
+        mcin = MapFileSummaryReaderTestsAccessor.CreateChunk(
+            "MCIN",
+            mcinPayload);
+        byte[] mcnk = MapFileSummaryReaderTestsAccessor.CreateChunk(
+            "MCNK",
+            mcnkPayload);
+
+        byte[] bytes =
+        [
+            .. mver,
+            .. mhdr,
+            .. mtex,
+            .. mcin,
+            .. mcnk,
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(
+            stream,
+            "synthetic_0_0_tex1.adt");
+        AdtTextureFile textureFile = AdtTextureReader.Read(stream, summary);
+
+        AdtTextureChunk chunk = Assert.Single(textureFile.Chunks);
+        Assert.Equal(expectedSlot, chunk.ChunkIndex);
+        Assert.Equal(1, chunk.ChunkX);
+        Assert.Equal(1, chunk.ChunkY);
+    }
+
+    [Fact]
     public void Read_DevelopmentTexAdt_ProducesStableRealDataChunkSignals()
     {
         AdtTextureFile textureFile = AdtTextureReader.Read(MapTestPaths.DevelopmentTexAdtPath);

@@ -57,6 +57,12 @@ public class TerrainChunkData
 
     /// <summary>Raw flags from the chunk that supplied texture-layer and alpha data.</summary>
     public int AlphaSourceFlags { get; init; }
+
+    /// <summary>Cataclysm+/MoP split doodad references from the selected object companion.</summary>
+    public int[] McrdReferences { get; init; } = Array.Empty<int>();
+
+    /// <summary>Cataclysm+/MoP split WMO references from the selected object companion.</summary>
+    public int[] McrwReferences { get; init; } = Array.Empty<int>();
 }
 
 /// <summary>

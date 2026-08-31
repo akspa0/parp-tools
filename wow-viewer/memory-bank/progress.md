@@ -1,6 +1,38 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
+
+## 2026-08-31 — Spec 197: split reader/runtime and explicit conversion target boundary
+- **Landed:** Native-aligned 5.0.1 split-family discovery and loading for root plus selected `_obj0`/`_obj1` and `_tex0`/`_tex1` companions; headerless companion `MCNK` routing; sparse physical MCIN slot preservation; and focused regression coverage for band 1, split wrappers, sparse slots, and object references.
+- **Landed:** Core `MapConversionTargetFormat` contract and viewer target selector for Alpha 0.5.3 monolithic WDT, LK v18 monolithic ADT, and unavailable Cataclysm/MoP split ADT. The target is independent from source family, lossy routes display warnings, split-to-Alpha uses the Alpha command, and split-to-LK keeps archive client root separate from the loose split overlay directory.
+- **Safety boundary:** Target-aware `LkAdtWriter` calls accept only LK v18. Native MoP split output remains disabled because no slot-aware split writer exists; LK output is never labeled as native MoP. Alpha writer remains frozen.
+- **Validation:** Viewer and converter Debug builds completed with 0 errors after the routing correction; the focused `MapConversionFormat` test filter passed 6/6. Existing warnings, including the Snappier vulnerability advisory, remain non-blocking.
+- **Open:** Audit compact MCIN consumers and the runtime convenience path; extend merger/texture-transfer/converter inputs to band 1; define the canonical slot-aware document and loss policy; implement/test a genuine native MoP split writer; finish native WDT/MAIN, blend/seam, numeric FourCC, indirect-reachability, and address-resolution evidence.
+
+## 2026-08-31 — Spec 197: 5.0.1 dead/dormant/partial documentation checkpoint
+- **Recorded:** Added the focused [`5.0.1-dead-dormant-partial-rendering.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md) evidence note and consolidated [`wow-5.0.1-adt-wdt-definitive.md`](../docs/architecture/wow-5.0.1-adt-wdt-definitive.md) guide, following the legacy ADT/WDT and Ghidra definitive-guide structure.
+- **Confirmed/classified:** `FUN_00b7a230` has a partial liquid-factory default branch (`Not implemented!`) after supported selectors `7`, `9`, `10`, and `0xd`; `FUN_004b16d0` has a real `CSimpleEditBox.cpp` FIXME early-return branch; DepthCache/GBuffer are capability-gated implemented infrastructure; atlas/doodad/particle batching and water-detail paths are optional or explicitly unsupported settings; MapArea/MapRenderChunkState assertions are cleanup contracts.
+- **Boundary:** 2,184 zero-direct-xref functions remain low-reachability candidates because indirect dispatch is not ruled out. No function is called proven dead. A path-builder discrepancy (`0x00bb9490` vs `FUN_00b94990`) remains explicitly unresolved. No production code or Ghidra state changed.
+- **Next:** Complete native WDT/MAIN, numeric `MHID`/`MDID`/`MCXH`, blend/seam, indirect registration, and address-resolution evidence before reopening T118–T120.
+
+## 2026-08-31 — Spec 197: GhidraMCP 6.0.0 bridge recovery
+- **Diagnosed:** Ghidra itself was not the failure. The GhidraMCP 6.0.0 plugin was already running against the loaded `Mists of Pandaria 5.0.1.15464` project and serving HTTP on `127.0.0.1:8089` (status dialog: UDS + TCP running, 222 endpoints). The stale config referenced the absent `H:\ghidra_12.1.2_PUBLIC\GhidraMCP-5.14.2\.venv\Scripts\python.exe` and passed unsupported `--ghidra-server` arguments to the bridge script.
+- **Landed:** Downloaded the release-provided `ghidra_mcp_bridge-6.0.0-py3-none-any.whl` and installed it with `uv tool install --force`. Updated both [`.mcp.json`](../../.mcp.json) and [`.roo/mcp.json`](../../.roo/mcp.json) to launch `C:\Users\akspa\.local\bin\bridge-mcp-ghidra.exe --no-lazy` with `GHIDRA_MCP_URL=http://127.0.0.1:8089`.
+- **Validated:** JSON configs parse; bridge help works; stdio initialize succeeds; bridge auto-connects by TCP to the named 5.0.1 project and registers 221 live tools (the HTTP schema reports 222). `get_current_program_info` confirms `Wow.exe` PE x86, image base `0x00400000`, 38,405 functions, 175,352 symbols, and 790 data types. Read-only HTTP probes found 766 `.cpp`-matching strings, including rendering, terrain, WMO, liquid, and `CMapChunk` anchors.
+- **Next:** T117 is the read-only Ghidra extraction pass for rendering systems, parser entry points, and split-ADT/height-blend/WMO seams. No Ghidra program edits were made.
+
+## 2026-08-31 — Spec 197: 5.0.1 Ghidra reconnaissance checkpoint
+- **Recorded:** Added [`research-ghidra-5.0.1.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md) with the live binary provenance, source-path/function map, and the first confirmed `CMapChunk`/WMO reader facts.
+- **Confirmed:** `CMapChunk` accepts a 128-byte header, dispatches `MCMT`, `MCDD`, `MCAL`, `MCBB`, `MCCV`, `MCLQ`, `MCLV`, `MCLY`, `MCRD`, `MCRW`, `MCNR`, `MCRF`, `MCSH`, and `MCVT`, derives MCLY/reference/blend-batch counts from payload sizes, and uses the exact `33.333332` / `17066.666` world transform. WMO parsing asserts `MVER == 0x0011` and uses 0x10-byte material records.
+- **Open:** Literal string searches found no `MHID`, `MDID`, `MCXH`, or `CMapTile` tokens; this is not evidence of absence because the MCNK parser uses numeric FourCC comparisons. Blend/render batch routines and numeric split-ADT tracing remain T117.
+- **Boundary:** No production code or Ghidra state changed; parser/renderer implementation remains gated on the next decompilation and cross-check pass.
+
+## 2026-08-31 — Spec 197: native 5.0.1 ADT family matrix checkpoint
+- **Recorded:** Expanded [`research-ghidra-5.0.1.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md:173) and the Spec 197 plan/tasks with the versioned split-loader contract; documentation-only change, with no production reader/renderer or Ghidra edits.
+- **Confirmed:** The 5.0.1 path requires `MVER == 0x12`; constructs the root plus exactly one selected `_obj0`/`_obj1` and `_tex0`/`_tex1` pair; distinguishes at least cache types 0–4; requires 256 outer MCNK records per file-data object; consumes the 128-byte MCNK header only for root slot 0; and merges headerless split MCNK payloads by chunk index.
+- **Confirmed:** Native area creation is gated by the WDT/map-table `CMapTableEntry::Flag_Exists` bit, separate from root/split file discovery. This is now the leading explanation for false tile admission; it remains a hypothesis until a real WDT/MAIN sample is compared.
+- **Not confirmed:** `_lod.adt` is not constructed in the investigated 5.0.1 loader path; `MHID`, `MDID`, and `MCXH` have no confirmed native parser location; the relation between the two suffix bands and broader internal `LOD_COUNT` remains open.
+- **Viewer gap:** `AdtTileFamily`, `AdtTileFamilyResolver`, `WowFileDetector`, `StandardTerrainAdapter`, and split/export paths currently model only `_obj0`/`_tex0` plus `_lod`; band-1 routing and native tile-table admission need an evidence-gated follow-up. T117 remains in progress; T118–T120 remain blocked on the evidence pass.
 
 ## 2026-08-30 — Spec 196: WDL Lattice Magnetization, Polarity Inversion & Stratigraphy Restoration Engine (Complete)
 - **Landed:**

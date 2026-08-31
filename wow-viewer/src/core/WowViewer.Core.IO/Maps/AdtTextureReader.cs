@@ -33,19 +33,30 @@ public static class AdtTextureReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
 
-        if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtTex))
-            throw new InvalidDataException($"ADT texture reader requires a root ADT or _tex0.adt file, but found {fileSummary.Kind}.");
+        if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtTex1))
+            throw new InvalidDataException($"ADT texture reader requires a root ADT or split texture ADT file, but found {fileSummary.Kind}.");
 
-        AdtMcalDecodeProfile effectiveProfile = decodeProfile ?? (fileSummary.Kind == MapFileKind.AdtTex
+        AdtMcalDecodeProfile effectiveProfile = decodeProfile ?? (fileSummary.Kind.IsTextureCompanion()
             ? AdtMcalDecodeProfile.Cataclysm400
             : AdtMcalDecodeProfile.LichKingStrict);
 
-        if (fileSummary.Kind == MapFileKind.AdtTex
-            && TryReadSplitTextureFile(stream, out IReadOnlyList<string> splitTextureNames, out IReadOnlyList<byte[]> splitChunkPayloads))
+        if (fileSummary.Kind.IsTextureCompanion()
+            && TryReadSplitTextureFile(
+                stream,
+                out IReadOnlyList<string> splitTextureNames,
+                out IReadOnlyList<SplitMcnkPayload> splitChunkPayloads))
         {
             List<AdtTextureChunk> splitChunks = new(splitChunkPayloads.Count);
-            for (int chunkIndex = 0; chunkIndex < splitChunkPayloads.Count; chunkIndex++)
-                splitChunks.Add(AdtTextureChunkReader.Read(chunkIndex, splitChunkPayloads[chunkIndex], fileSummary.Kind, splitTextureNames, effectiveProfile, defaultBigAlpha: true));
+            foreach (SplitMcnkPayload splitPayload in splitChunkPayloads)
+            {
+                splitChunks.Add(AdtTextureChunkReader.Read(
+                    splitPayload.Slot,
+                    splitPayload.Payload,
+                    fileSummary.Kind,
+                    splitTextureNames,
+                    effectiveProfile,
+                    defaultBigAlpha: true));
+            }
 
             byte? splitMampValue = TryReadTopLevelByteChunk(stream, fileSummary, MapChunkIds.Mamp);
             return new AdtTextureFile(fileSummary.SourcePath, fileSummary.Kind, effectiveProfile, splitTextureNames, splitChunks, splitMampValue);
@@ -55,12 +66,10 @@ public static class AdtTextureReader
             MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mtex));
 
         List<AdtTextureChunk> chunks = [];
-        int resolvedChunkIndex = 0;
-        foreach (MapChunkLocation mcnkChunk in ResolveTextureChunkLocations(stream, fileSummary))
+        foreach (IndexedMcnkLocation indexedMcnk in ResolveTextureChunkLocations(stream, fileSummary))
         {
-            byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcnkChunk);
-            chunks.Add(AdtTextureChunkReader.Read(resolvedChunkIndex, payload, fileSummary.Kind, textureNames, effectiveProfile, defaultBigAlpha: false));
-            resolvedChunkIndex++;
+            byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, indexedMcnk.Location);
+            chunks.Add(AdtTextureChunkReader.Read(indexedMcnk.Slot, payload, fileSummary.Kind, textureNames, effectiveProfile, defaultBigAlpha: false));
         }
 
         byte? mampValue = TryReadTopLevelByteChunk(stream, fileSummary, MapChunkIds.Mamp);
@@ -73,10 +82,13 @@ public static class AdtTextureReader
         return payload is { Length: > 0 } ? payload[0] : null;
     }
 
-    private static bool TryReadSplitTextureFile(Stream stream, out IReadOnlyList<string> textureNames, out IReadOnlyList<byte[]> chunkPayloads)
+    private static bool TryReadSplitTextureFile(
+        Stream stream,
+        out IReadOnlyList<string> textureNames,
+        out IReadOnlyList<SplitMcnkPayload> chunkPayloads)
     {
         textureNames = Array.Empty<string>();
-        chunkPayloads = Array.Empty<byte[]>();
+        chunkPayloads = Array.Empty<SplitMcnkPayload>();
 
         if (!stream.CanSeek)
             return false;
@@ -92,21 +104,29 @@ public static class AdtTextureReader
         return textureNames.Count > 0 || chunkPayloads.Count > 0;
     }
 
-    private static IReadOnlyList<MapChunkLocation> ResolveTextureChunkLocations(Stream stream, MapFileSummary fileSummary)
+    private static IReadOnlyList<IndexedMcnkLocation> ResolveTextureChunkLocations(Stream stream, MapFileSummary fileSummary)
     {
         List<MapChunkLocation> topLevelChunks = fileSummary.Chunks
             .Where(static chunk => chunk.Id == MapChunkIds.Mcnk)
             .ToList();
 
         if (topLevelChunks.Count >= ExpectedChunkCount || !fileSummary.HasChunk(MapChunkIds.Mcin))
-            return topLevelChunks;
+        {
+            return topLevelChunks
+                .Select(static (chunk, ordinal) => new IndexedMcnkLocation(ordinal, chunk))
+                .ToArray();
+        }
 
         MapChunkLocation mcinChunk = fileSummary.Chunks.First(chunk => chunk.Id == MapChunkIds.Mcin);
         byte[] mcinPayload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcinChunk);
         if (mcinPayload.Length < McinEntrySize)
-            return topLevelChunks;
+        {
+            return topLevelChunks
+                .Select(static (chunk, ordinal) => new IndexedMcnkLocation(ordinal, chunk))
+                .ToArray();
+        }
 
-        List<MapChunkLocation> resolvedChunks = new(ExpectedChunkCount);
+        List<IndexedMcnkLocation> resolvedChunks = new(ExpectedChunkCount);
         for (int index = 0; index < ExpectedChunkCount && ((index + 1) * McinEntrySize) <= mcinPayload.Length; index++)
         {
             int entryOffset = index * McinEntrySize;
@@ -126,10 +146,17 @@ public static class AdtTextureReader
             if (dataOffset > stream.Length || dataOffset + header.Size > stream.Length)
                 continue;
 
-            resolvedChunks.Add(new MapChunkLocation(MapChunkIds.Mcnk, header.Size, headerOffset, dataOffset));
+            resolvedChunks.Add(new IndexedMcnkLocation(
+                index,
+                new MapChunkLocation(MapChunkIds.Mcnk, header.Size, headerOffset, dataOffset)));
         }
 
-        return resolvedChunks.Count > topLevelChunks.Count ? resolvedChunks : topLevelChunks;
+        if (resolvedChunks.Count > 0)
+            return resolvedChunks;
+
+        return topLevelChunks
+            .Select(static (chunk, ordinal) => new IndexedMcnkLocation(ordinal, chunk))
+            .ToArray();
     }
 
     private static bool TryReadChunkHeader(Stream stream, long headerOffset, out ChunkHeader header)
@@ -237,10 +264,13 @@ public static class AdtTextureReader
         return values;
     }
 
-    private static bool TryReadTopLevelSplitTextureFile(byte[] bytes, out IReadOnlyList<string> textureNames, out IReadOnlyList<byte[]> chunkPayloads)
+    private static bool TryReadTopLevelSplitTextureFile(
+        byte[] bytes,
+        out IReadOnlyList<string> textureNames,
+        out IReadOnlyList<SplitMcnkPayload> chunkPayloads)
     {
         List<string> names = [];
-        List<byte[]> payloads = [];
+        List<SplitMcnkPayload> payloads = [];
 
         int position = 0;
         while (position + ChunkHeader.SizeInBytes <= bytes.Length)
@@ -259,7 +289,7 @@ public static class AdtTextureReader
             {
                 byte[] payload = new byte[size];
                 Buffer.BlockCopy(bytes, dataOffset, payload, 0, size);
-                payloads.Add(payload);
+                payloads.Add(new SplitMcnkPayload(payloads.Count, payload));
             }
 
             int next = position + ChunkHeader.SizeInBytes + size;
@@ -274,68 +304,83 @@ public static class AdtTextureReader
         return names.Count > 0 || payloads.Count > 0;
     }
 
-    private static IReadOnlyList<byte[]> ResolveSplitMcnkPayloads(byte[] bytes, int mhdrDataOffset)
+    private static IReadOnlyList<SplitMcnkPayload> ResolveSplitMcnkPayloads(
+        byte[] bytes,
+        int mhdrDataOffset)
     {
-        List<int> offsets;
         if (mhdrDataOffset + MhdrMcinOffset + 4 > bytes.Length)
-            return Array.Empty<byte[]>();
+            return Array.Empty<SplitMcnkPayload>();
 
         int mcinOffset = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(mhdrDataOffset + MhdrMcinOffset, 4));
         if (mcinOffset == 0)
         {
-            offsets = ReadMcnkOffsetsByChunkScan(bytes);
+            List<int> offsets = ReadMcnkOffsetsByChunkScan(bytes);
+            List<SplitMcnkPayload> flatPayloads = new(offsets.Count);
+            for (int ordinal = 0; ordinal < offsets.Count; ordinal++)
+            {
+                if (TryReadSplitMcnkPayload(bytes, offsets[ordinal], out byte[] payload))
+                    flatPayloads.Add(new SplitMcnkPayload(ordinal, payload));
+            }
+
+            return flatPayloads;
         }
         else
         {
             int mcinAbsoluteOffset = mhdrDataOffset + mcinOffset;
             if (mcinAbsoluteOffset + ChunkHeader.SizeInBytes > bytes.Length)
-                return Array.Empty<byte[]>();
+                return Array.Empty<SplitMcnkPayload>();
 
             string mcinSignature = Encoding.ASCII.GetString(bytes, mcinAbsoluteOffset, 4);
             if (!string.Equals(mcinSignature, "NICM", StringComparison.Ordinal))
-                return Array.Empty<byte[]>();
+                return Array.Empty<SplitMcnkPayload>();
 
             int mcinSize = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(mcinAbsoluteOffset + 4, 4));
             int mcinDataOffset = mcinAbsoluteOffset + ChunkHeader.SizeInBytes;
             if (mcinSize <= 0 || mcinDataOffset + mcinSize > bytes.Length)
-                return Array.Empty<byte[]>();
+                return Array.Empty<SplitMcnkPayload>();
 
-            offsets = [];
-            for (int index = 0; index < ExpectedChunkCount && ((index + 1) * McinEntrySize) <= mcinSize; index++)
+            List<SplitMcnkPayload> payloads = [];
+            int entryCount = Math.Min(ExpectedChunkCount, mcinSize / McinEntrySize);
+            for (int slot = 0; slot < entryCount; slot++)
             {
-                int entryOffset = mcinDataOffset + (index * McinEntrySize);
+                int entryOffset = mcinDataOffset + (slot * McinEntrySize);
                 int chunkOffset = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(entryOffset, 4));
-                if (chunkOffset > 0)
-                    offsets.Add(chunkOffset);
+                if (chunkOffset > 0
+                    && TryReadSplitMcnkPayload(bytes, chunkOffset, out byte[] payload))
+                {
+                    payloads.Add(new SplitMcnkPayload(slot, payload));
+                }
             }
+
+            return payloads;
         }
-
-        if (offsets.Count == 0)
-            return Array.Empty<byte[]>();
-
-        List<byte[]> payloads = [];
-        int entryCount = Math.Min(ExpectedChunkCount, offsets.Count);
-        for (int index = 0; index < entryCount; index++)
-        {
-            int offset = offsets[index];
-            if (offset <= 0 || offset + ChunkHeader.SizeInBytes > bytes.Length)
-                continue;
-
-            string signature = Encoding.ASCII.GetString(bytes, offset, 4);
-            if (!string.Equals(signature, "KNCM", StringComparison.Ordinal))
-                continue;
-
-            int size = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset + 4, 4));
-            if (size <= 0 || offset + ChunkHeader.SizeInBytes + size > bytes.Length)
-                continue;
-
-            byte[] payload = new byte[size];
-            Buffer.BlockCopy(bytes, offset + ChunkHeader.SizeInBytes, payload, 0, size);
-            payloads.Add(payload);
-        }
-
-        return payloads;
     }
+
+    private static bool TryReadSplitMcnkPayload(
+        byte[] bytes,
+        int offset,
+        out byte[] payload)
+    {
+        payload = Array.Empty<byte>();
+        if (offset < 0 || offset + ChunkHeader.SizeInBytes > bytes.Length)
+            return false;
+
+        string signature = Encoding.ASCII.GetString(bytes, offset, 4);
+        if (!string.Equals(signature, "KNCM", StringComparison.Ordinal))
+            return false;
+
+        int size = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset + 4, 4));
+        if (size <= 0 || offset + ChunkHeader.SizeInBytes + size > bytes.Length)
+            return false;
+
+        payload = new byte[size];
+        Buffer.BlockCopy(bytes, offset + ChunkHeader.SizeInBytes, payload, 0, size);
+        return true;
+    }
+
+    private readonly record struct IndexedMcnkLocation(int Slot, MapChunkLocation Location);
+
+    private readonly record struct SplitMcnkPayload(int Slot, byte[] Payload);
 
     private static List<int> ReadMcnkOffsetsByChunkScan(byte[] bytes)
     {

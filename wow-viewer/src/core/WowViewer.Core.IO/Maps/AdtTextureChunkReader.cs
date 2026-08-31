@@ -13,7 +13,7 @@ public static class AdtTextureChunkReader
 
     public static AdtTextureChunk Read(int chunkIndex, byte[] payload, MapFileKind kind, IReadOnlyList<string> textureNames)
     {
-        return Read(chunkIndex, payload, kind, textureNames, decodeProfile: null, defaultBigAlpha: kind == MapFileKind.AdtTex);
+        return Read(chunkIndex, payload, kind, textureNames, decodeProfile: null, defaultBigAlpha: kind.IsTextureCompanion());
     }
 
     public static AdtTextureChunk Read(int chunkIndex, byte[] payload, MapFileKind kind, IReadOnlyList<string> textureNames, AdtMcalDecodeProfile? decodeProfile, bool defaultBigAlpha)
@@ -22,10 +22,10 @@ public static class AdtTextureChunkReader
         ArgumentNullException.ThrowIfNull(payload);
         ArgumentNullException.ThrowIfNull(textureNames);
 
-        if (kind is not (MapFileKind.Adt or MapFileKind.AdtTex))
-            throw new InvalidDataException($"ADT texture chunk reader requires a root ADT or _tex0.adt payload, but found {kind}.");
+        if (kind is not (MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtTex1))
+            throw new InvalidDataException($"ADT texture chunk reader requires a root ADT or split texture ADT payload, but found {kind}.");
 
-        AdtMcalDecodeProfile effectiveProfile = decodeProfile ?? (kind == MapFileKind.AdtTex
+        AdtMcalDecodeProfile effectiveProfile = decodeProfile ?? (kind.IsTextureCompanion()
             ? AdtMcalDecodeProfile.Cataclysm400
             : AdtMcalDecodeProfile.LichKingStrict);
 
@@ -196,7 +196,7 @@ public static class AdtTextureChunkReader
             return false;
 
         flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0, 4));
-        if (kind == MapFileKind.Adt || kind == MapFileKind.AdtTex)
+        if (kind is MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtTex1)
         {
             chunkX = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x04, 4)));
             chunkY = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x08, 4)));

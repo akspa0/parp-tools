@@ -139,22 +139,26 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private AdtProfile ResolveTerrainProfile(string? buildVersion, IReadOnlyList<int> existingTiles)
     {
         var resolvedProfile = FormatProfileRegistry.ResolveAdtProfile(buildVersion);
-        if (resolvedProfile.PreferTex0ForTextureData || resolvedProfile.PreferObj0ForPlacementData || existingTiles.Count == 0)
+        if (existingTiles.Count == 0 ||
+            string.Equals(
+                resolvedProfile.ProfileId,
+                FormatProfileRegistry.AdtProfile50xUnknown.ProfileId,
+                StringComparison.OrdinalIgnoreCase))
             return resolvedProfile;
 
-        if (!TryDetectSplitAdtCompanion(existingTiles, out bool hasTex0, out bool hasObj0, out string? detectedTileBasePath))
+        if (!TryDetectSplitAdtCompanion(existingTiles, out bool hasTexCompanion, out bool hasObjCompanion, out string? detectedTileBasePath))
             return resolvedProfile;
 
         var splitProfile = FormatProfileRegistry.AdtProfile40xUnknown;
         ViewerLog.Important(ViewerLog.Category.Terrain,
-            $"Split ADT companions detected for map '{_mapName}' at '{detectedTileBasePath}' (tex0={hasTex0}, obj0={hasObj0}); promoting terrain profile from {resolvedProfile.ProfileId} to {splitProfile.ProfileId} while keeping build={buildVersion ?? "unknown"} for non-terrain systems.");
+            $"Split ADT companions detected for map '{_mapName}' at '{detectedTileBasePath}' (texture={hasTexCompanion}, object={hasObjCompanion}); promoting terrain profile from {resolvedProfile.ProfileId} to {splitProfile.ProfileId} while keeping build={buildVersion ?? "unknown"} for non-terrain systems.");
         return splitProfile;
     }
 
-    private bool TryDetectSplitAdtCompanion(IReadOnlyList<int> existingTiles, out bool hasTex0, out bool hasObj0, out string? detectedTileBasePath)
+    private bool TryDetectSplitAdtCompanion(IReadOnlyList<int> existingTiles, out bool hasTextureCompanion, out bool hasObjectCompanion, out string? detectedTileBasePath)
     {
-        hasTex0 = false;
-        hasObj0 = false;
+        hasTextureCompanion = false;
+        hasObjectCompanion = false;
         detectedTileBasePath = null;
 
         foreach (int idx in existingTiles)
@@ -163,13 +167,15 @@ public class StandardTerrainAdapter : ITerrainAdapter
             int tileColumn = idx % 64;
             string basePath = $"{_mapDir}\\{_mapName}_{tileColumn}_{tileRow}";
 
-            bool tex0Exists = _dataSource.FileExists($"{basePath}_tex0.adt");
-            bool obj0Exists = _dataSource.FileExists($"{basePath}_obj0.adt");
-            if (!tex0Exists && !obj0Exists)
+            bool textureExists = _dataSource.FileExists($"{basePath}_tex0.adt")
+                || _dataSource.FileExists($"{basePath}_tex1.adt");
+            bool objectExists = _dataSource.FileExists($"{basePath}_obj0.adt")
+                || _dataSource.FileExists($"{basePath}_obj1.adt");
+            if (!textureExists && !objectExists)
                 continue;
 
-            hasTex0 = tex0Exists;
-            hasObj0 = obj0Exists;
+            hasTextureCompanion = textureExists;
+            hasObjectCompanion = objectExists;
             detectedTileBasePath = basePath;
             return true;
         }
@@ -228,11 +234,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
         string mapDir = $"World\\Maps\\{mapName}";
         string basePath = $"{mapDir}\\{mapName}_{tileY}_{tileX}";
         string rootPath = $"{basePath}.adt";
-        string texCandidate = $"{basePath}_tex0.adt";
-        string objCandidate = $"{basePath}_obj0.adt";
+        CompanionPaths companions = ResolveCompanionPaths(basePath);
 
-        string? texPath = (_adtProfile.PreferTex0ForTextureData || _dataSource.FileExists(texCandidate)) ? texCandidate : null;
-        string? objPath = (_adtProfile.PreferObj0ForPlacementData || _dataSource.FileExists(objCandidate)) ? objCandidate : null;
+        string? texPath = companions.TexturePath;
+        string? objPath = companions.ObjectPath;
 
         byte[]? texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
         byte[]? objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
@@ -262,10 +267,17 @@ public class StandardTerrainAdapter : ITerrainAdapter
             return new ParsedTileSource(result, []);
         }
 
-        ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}'");
+        ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}', companionBand={FormatCompanionBand(companions.SelectedBand)}");
         try
         {
-            List<string> textures = ParseAdt(adtBytes, texBytes, objBytes, tileX, tileY, result);
+            List<string> textures = ParseAdt(
+                adtBytes,
+                texBytes,
+                objBytes,
+                tileX,
+                tileY,
+                result,
+                companions.SelectedBand);
             return new ParsedTileSource(result, textures);
         }
         catch (Exception ex)
@@ -337,7 +349,67 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private bool HasTilePayload(string basePath)
         => _dataSource.FileExists($"{basePath}.adt")
             || _dataSource.FileExists($"{basePath}_obj0.adt")
-            || _dataSource.FileExists($"{basePath}_tex0.adt");
+            || _dataSource.FileExists($"{basePath}_tex0.adt")
+            || _dataSource.FileExists($"{basePath}_obj1.adt")
+            || _dataSource.FileExists($"{basePath}_tex1.adt");
+
+    private sealed record CompanionPaths(
+        string? TexturePath,
+        string? ObjectPath,
+        AdtLodBand? SelectedBand);
+
+    private CompanionPaths ResolveCompanionPaths(string basePath)
+    {
+        string rootPath = $"{basePath}.adt";
+        string tex0Path = $"{basePath}_tex0.adt";
+        string tex1Path = $"{basePath}_tex1.adt";
+        string obj0Path = $"{basePath}_obj0.adt";
+        string obj1Path = $"{basePath}_obj1.adt";
+
+        bool rootExists = _dataSource.FileExists(rootPath);
+        bool tex0Exists = _dataSource.FileExists(tex0Path);
+        bool tex1Exists = _dataSource.FileExists(tex1Path);
+        bool obj0Exists = _dataSource.FileExists(obj0Path);
+        bool obj1Exists = _dataSource.FileExists(obj1Path);
+
+        var family = new AdtTileFamily(
+            sourcePath: basePath,
+            basePath: basePath,
+            rootPath: rootPath,
+            tex0Path: tex0Path,
+            obj0Path: obj0Path,
+            tex1Path: tex1Path,
+            obj1Path: obj1Path,
+            lodPath: $"{basePath}_lod.adt",
+            hasRoot: rootExists,
+            hasTex0: tex0Exists,
+            hasObj0: obj0Exists,
+            hasTex1: tex1Exists,
+            hasObj1: obj1Exists,
+            hasLod: _dataSource.FileExists($"{basePath}_lod.adt"));
+
+        AdtLodBand? selectedBand = family.SelectCompanionBand();
+        AdtLodBand sourceBand = selectedBand ?? AdtLodBand.Band0;
+        return new CompanionPaths(
+            GetExistingCompanionPath(family.GetTextureSourcePath(sourceBand), rootPath),
+            GetExistingCompanionPath(family.GetPlacementSourcePath(sourceBand), rootPath),
+            selectedBand);
+    }
+
+    private string? GetExistingCompanionPath(string? candidatePath, string rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(candidatePath)
+            || string.Equals(candidatePath, rootPath, StringComparison.OrdinalIgnoreCase)
+            || !_dataSource.FileExists(candidatePath))
+        {
+            return null;
+        }
+
+        return candidatePath;
+    }
+
+    private static string FormatCompanionBand(AdtLodBand? band)
+        => band.HasValue ? band.Value.ToString() : "root-only";
 
     private sealed class ParsedTileSource
     {
@@ -384,15 +456,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
     {
         string basePath = $"{_mapDir}\\{_mapName}_{tileY}_{tileX}";
         string rootPath = $"{basePath}.adt";
-        string objPath = $"{basePath}_obj0.adt";
-
-        if (_adtProfile.PreferObj0ForPlacementData && _dataSource.FileExists(objPath))
-            return objPath;
-
-        if (_dataSource.FileExists(rootPath))
-            return rootPath;
-
-        return objPath;
+        CompanionPaths companions = ResolveCompanionPaths(basePath);
+        return companions.ObjectPath ?? rootPath;
     }
 
     private List<int> ResolveExistingTiles(byte[] wdtBytes)
@@ -454,7 +519,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             if (parts.Length == 3 &&
                 !string.Equals(parts[2], "obj0", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(parts[2], "tex0", StringComparison.OrdinalIgnoreCase))
+                !string.Equals(parts[2], "tex0", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(parts[2], "obj1", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(parts[2], "tex1", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -473,11 +540,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         return _dataSource.FileExists($"{basePath}.adt") ||
                _dataSource.FileExists($"{basePath}_obj0.adt") ||
-               _dataSource.FileExists($"{basePath}_tex0.adt");
+               _dataSource.FileExists($"{basePath}_tex0.adt") ||
+               _dataSource.FileExists($"{basePath}_obj1.adt") ||
+               _dataSource.FileExists($"{basePath}_tex1.adt");
     }
 
-    private List<string> ParseAdt(byte[] adtBytes, byte[]? texBytes, byte[]? objBytes,
-        int tileX, int tileY, TileLoadResult result)
+    private List<string> ParseAdt(
+        byte[] adtBytes,
+        byte[]? texBytes,
+        byte[]? objBytes,
+        int tileX,
+        int tileY,
+        TileLoadResult result,
+        AdtLodBand? selectedBand)
     {
         // Parse top-level MTEX chunk for texture names
         var textures = new List<string>();
@@ -485,16 +560,31 @@ public class StandardTerrainAdapter : ITerrainAdapter
         Dictionary<(int x, int y), Mcnk>? texMcnkByIndex = null;
         GillijimProject.WowFiles.Mhdr? texMhdr = null;
         int texMhdrStart = 0;
+        Dictionary<(int x, int y), Mcnk>? objMcnkByIndex = null;
         if (texBytes != null && texBytes.Length >= 16)
         {
             if (TryBuildMcnkIndexMap(texBytes, _mcnkParseOptions, out texMcnkByIndex, out texMhdrStart, out texMhdr))
             {
                 if (ViewerLog.Verbose)
-                    ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) split: parsed {texMcnkByIndex.Count} texture MCNKs from _tex0.adt");
+                    ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) split: parsed {texMcnkByIndex.Count} texture MCNKs from selected {FormatCompanionBand(selectedBand)} texture companion");
             }
             else
             {
                 texMcnkByIndex = null;
+            }
+        }
+
+        if (objBytes != null && objBytes.Length >= 16)
+        {
+            if (TryBuildMcnkIndexMap(
+                    objBytes,
+                    _mcnkParseOptions,
+                    out objMcnkByIndex,
+                    out _,
+                    out _)
+                && ViewerLog.Verbose)
+            {
+                ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) split: parsed {objMcnkByIndex.Count} object MCNKs from selected {FormatCompanionBand(selectedBand)} object companion");
             }
         }
 
@@ -752,11 +842,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 var layerSource = mcnk;
                 if (texMcnkByIndex != null)
                 {
-                    if (!texMcnkByIndex.TryGetValue((chunkX, chunkY), out layerSource) &&
-                        !texMcnkByIndex.TryGetValue((mcinChunkX, mcinChunkY), out layerSource))
+                    if (!texMcnkByIndex.TryGetValue((mcinChunkX, mcinChunkY), out layerSource) &&
+                        !texMcnkByIndex.TryGetValue((chunkX, chunkY), out layerSource))
                     {
                         layerSource = mcnk;
                     }
+                }
+
+                Mcnk? objectChunk = null;
+                if (objMcnkByIndex != null)
+                {
+                    objMcnkByIndex.TryGetValue((mcinChunkX, mcinChunkY), out objectChunk);
+                    if (objectChunk == null)
+                        objMcnkByIndex.TryGetValue((chunkX, chunkY), out objectChunk);
                 }
 
                 // Layers
@@ -782,6 +880,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 // Hole mask
                 int holeMask = (int)mcnk.Header.Holes;
+
+                // Cataclysm+/MoP object companions carry per-slot reference
+                // streams in headerless MCNK wrappers. Preserve those streams
+                // on the matching terrain chunk without changing tile admission.
+                int[] mcrdReferences = ReadReferenceIndices(objectChunk?.McrdData);
+                int[] mcrwReferences = ReadReferenceIndices(objectChunk?.McrwData);
 
                 // World position: tileX=row (north-south→rendererX), tileY=col (east-west→rendererY)
                 // Same convention as Alpha adapter (tx=row, ty=col).
@@ -838,7 +942,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     WorldPosition = new Vector3(worldX, worldY, 0f),
                     AreaId = (int)mcnk.Header.AreaId,
                     McnkFlags = (int)mcnkFlagsRaw,
-                    AlphaSourceFlags = (int)alphaSourceFlagsRaw
+                    AlphaSourceFlags = (int)alphaSourceFlagsRaw,
+                    McrdReferences = mcrdReferences,
+                    McrwReferences = mcrwReferences
                 };
                 chunks.Add(chunkData);
                 LegacyLiquidSoundEmitterFactory.Append(result.SoundEmitters, chunkData);
@@ -944,14 +1050,16 @@ public class StandardTerrainAdapter : ITerrainAdapter
         mhdrStart = 0;
         mhdr = null;
 
-        List<int> offsets;
+        List<McnkOffset> offsets;
         if (TryGetMhdr(adtBytes, out mhdrStart, out var foundMhdr) && foundMhdr != null)
         {
             mhdr = foundMhdr;
             int mcinOff = foundMhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
             if (mcinOff == 0)
             {
-                offsets = ReadMcnkOffsetsByChunkScan(adtBytes);
+                offsets = ReadMcnkOffsetsByChunkScan(adtBytes)
+                    .Select(static (offset, ordinal) => new McnkOffset(ordinal, offset))
+                    .ToList();
             }
             else
             {
@@ -960,18 +1068,24 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4) == "NICM")
                 {
                     var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
-                    offsets = mcin.GetMcnkOffsets();
+                    offsets = mcin.GetMcnkOffsets()
+                        .Select(static (offset, slot) => new McnkOffset(slot, offset))
+                        .ToList();
                 }
                 else
                 {
-                    offsets = ReadMcnkOffsetsByChunkScan(adtBytes);
+                    offsets = ReadMcnkOffsetsByChunkScan(adtBytes)
+                        .Select(static (offset, ordinal) => new McnkOffset(ordinal, offset))
+                        .ToList();
                 }
             }
         }
         else
         {
             // Flat chunk stream (e.g. Cataclysm / MoP split _tex0.adt and _obj0.adt)
-            offsets = ReadMcnkOffsetsByChunkScan(adtBytes);
+            offsets = ReadMcnkOffsetsByChunkScan(adtBytes)
+                .Select(static (offset, ordinal) => new McnkOffset(ordinal, offset))
+                .ToList();
         }
 
         if (offsets.Count == 0)
@@ -987,7 +1101,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         for (int ci = 0; ci < entryCount; ci++)
         {
-            int off = offsets[ci];
+            McnkOffset indexedOffset = offsets[ci];
+            int off = indexedOffset.Offset;
             if (off <= 0 || off + 8 > adtBytes.Length)
                 continue;
 
@@ -1003,11 +1118,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
             Array.Copy(adtBytes, off + 8, mcnkData, 0, mcnkSize);
 
             var mcnk = new Mcnk(mcnkData, texParseOptions);
-            mcnkByIndex[(ci % 16, ci / 16)] = mcnk;
+            mcnkByIndex[(indexedOffset.Slot % 16, indexedOffset.Slot / 16)] = mcnk;
         }
 
         return mcnkByIndex.Count > 0;
     }
+
+    private readonly record struct McnkOffset(int Slot, int Offset);
 
     private static List<int> ReadMcnkOffsetsByChunkScan(byte[] adtBytes)
     {
@@ -1088,6 +1205,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
             return textureChunk.MccvData;
 
         return null;
+    }
+
+    private static int[] ReadReferenceIndices(byte[]? payload)
+    {
+        if (payload == null || payload.Length < sizeof(int))
+            return Array.Empty<int>();
+
+        int count = payload.Length / sizeof(int);
+        var references = new int[count];
+        for (int index = 0; index < count; index++)
+            references[index] = BitConverter.ToInt32(payload, index * sizeof(int));
+
+        return references;
     }
 
     private static Dictionary<int, byte[]> ExtractAlphaMaps(Mcnk mcnk, TerrainAlphaDecodeMode decodeMode, bool useBigAlpha, bool doNotFixAlphaMap = false)

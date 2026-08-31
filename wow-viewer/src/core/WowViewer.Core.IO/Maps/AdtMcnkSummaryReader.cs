@@ -42,7 +42,7 @@ public static class AdtMcnkSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
 
-        if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj))
+        if (!fileSummary.Kind.IsAdtFamily())
             throw new InvalidDataException($"ADT MCNK summary requires an ADT-family file, but found {fileSummary.Kind}.");
 
         List<MapChunkLocation> mcnkChunks = fileSummary.Chunks.Where(static chunk => chunk.Id == MapChunkIds.Mcnk).ToList();

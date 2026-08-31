@@ -49,14 +49,44 @@ This technical plan bridges UI workflow clarity with next-generation engine form
 - Allow copying terrain chunk slices, heightmaps, vertex colors, and object placements from any mounted client map into the active restoration target map.
 
 ### Phase 5: 4.3.4 through 5.1 MoP ADT Format & Rendering Engine
-- **Ghidra Analysis Integration**: Use Ghidra MCP connection on `WoW.exe` 5.0.1.15464 to extract decompiled structures for `CMapChunk`, `CMapTile`, `MHID`, `MDID`, `MCXH`, and WMO terrain seam blending.
-- Expand `StandardTerrainAdapter`:
-  - Support multi-split ADT files (`_obj0.adt`, `_obj1.adt`, `_tex0.adt`, `_tex1.adt`, `_lod.adt`).
-  - Parse `MHID` (Material Height ID) and `MDID` (Material Diffuse ID) chunks.
-  - Parse `MCXH` per-chunk height blend parameters.
+- **Ghidra Analysis Integration**: Use the read-only Ghidra MCP connection on `WoW.exe` 5.0.1.15464 to extract decompiled structures for `CMapChunk`, `CMapTile`, split-file loading, and WMO terrain seam blending. The current evidence checkpoint is [`research-ghidra-5.0.1.md`](research-ghidra-5.0.1.md:173): this build requires `MVER == 0x12`, loads root + one selected `_obj0`/`_obj1` and `_tex0`/`_tex1` pair, expects 256 outer MCNK records in each file-data object, consumes the MCNK header only in the root slot, and gates area admission on map-table `Flag_Exists`. `MHID`, `MDID`, `MCXH`, and `_lod.adt` remain evidence-gated rather than assumed.
+- **Native evidence gates**: Complete the WDT/MAIN tile-table and internal LOD-band extraction, then complete native `MCBB`/alpha/height/WMO seam rendering extraction before changing production readers or shaders. Preserve the distinction between file discovery, map-table existence, and per-band residency.
+- **Dead/dormant evidence**: Preserve the separate [`5.0.1-dead-dormant-partial-rendering.md`](evidence/5.0.1-dead-dormant-partial-rendering.md) inventory and the consolidated [`wow-5.0.1-adt-wdt-definitive.md`](../../docs/architecture/wow-5.0.1-adt-wdt-definitive.md). The liquid factory default branch is a confirmed partial path; DepthCache/GBuffer are capability-gated infrastructure; atlas/batching are optional toggles; zero direct xrefs are only low-reachability candidates until indirect dispatch is ruled out.
+- **Documentation gate**: The address discrepancy between the earlier `0x00bb9490` path-builder note and the later `FUN_00b94990` inventory must be resolved before the native function map is treated as final. No production parser/renderer edit is authorized by this phase alone.
+- **Implemented reader/runtime slice:** Expand `StandardTerrainAdapter` and shared IO to discover the native 5.0.1 multi-split ADT family (`_obj0.adt`, `_obj1.adt`, `_tex0.adt`, `_tex1.adt`), load the root plus one selected object/texture band, route companion `MCNK` wrappers without the root-only 128-byte header, and preserve sparse MCIN physical-slot identity in the supported paths. `_lod.adt` remains separately evidence-gated.
+- **Still evidence-gated in the reader/runtime:** Parse and consume `MHID` (Material Height ID), `MDID` (Material Diffuse ID), and `MCXH` per-chunk height-blend parameters only when their exact native 5.0.1 consumers are established. Do not infer native shader behavior from chunk names alone.
 - Update `TerrainRenderer` shader pipeline:
   - Add height-blending terrain shader logic combining diffuse alpha and height map values for sharp, non-blurry texture transitions.
   - Support WMO-to-terrain seam blending.
+
+### Phase 5A: Explicit cross-era serialization boundary
+
+This phase is complete for target selection and safety, but not for native MoP
+split serialization:
+
+1. Keep source family independent from the output target.
+2. Register the explicit targets `AlphaWdt053`, `LkAdtV18`, and `MopSplitAdt` in Core,
+   with stable display/CLI names and route validation.
+3. Route Alpha identity output to the Alpha writer and Alpha/split normalization to
+   the appropriate existing converter.
+4. Guard `LkAdtWriter` so target-aware callers can request only LK v18 output.
+5. Report lossy conversion for Alpha→LK, split→Alpha, and split→LK.
+6. Keep MoP split output unavailable until a native-aligned split writer can emit
+   root/object/texture bands, 256 physical slots, root-only MCNK headers, and
+   modern split-only state. Never label LK monolithic output as native MoP.
+7. Keep archive client-root input separate from the selected loose split overlay
+   directory; route split→Alpha through the Alpha command rather than the
+   split→LK command.
+
+### Phase 5B: Remaining split conversion/model work
+
+1. Replace compact `LkAdtData.Chunks` assumptions with a slot-aware canonical ADT
+   document model before implementing a native split writer.
+2. Extend merger, texture-transfer, and converter paths to consume `_obj1` and
+   `_tex1` instead of only band 0.
+3. Define per-field loss policies for `MCRD`, `MCRW`, `MHID`, `MDID`, `MCXH`,
+   `MCBB`, and other modern-only state.
+4. Implement and test the native MoP split writer; only then enable the MoP target.
 
 ---
 

@@ -18,8 +18,8 @@ public static class AdtMcalSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
 
-        if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtTex))
-            throw new InvalidDataException($"ADT MCAL summary requires a root ADT or _tex0.adt file, but found {fileSummary.Kind}.");
+        if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtTex1))
+            throw new InvalidDataException($"ADT MCAL summary requires a root ADT or split texture ADT file, but found {fileSummary.Kind}.");
 
         AdtTextureFile textureFile = AdtTextureReader.Read(stream, fileSummary);
         AdtMcalDecodeProfile decodeProfile = textureFile.DecodeProfile;

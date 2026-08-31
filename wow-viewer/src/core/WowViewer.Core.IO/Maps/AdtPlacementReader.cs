@@ -25,7 +25,7 @@ public static class AdtPlacementReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
 
-        if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtObj))
+        if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtObj or MapFileKind.AdtObj1))
             throw new InvalidDataException($"ADT placement reading requires an ADT or ADTOBJ file, but found {fileSummary.Kind}.");
 
         byte[]? mmdxData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mmdx);

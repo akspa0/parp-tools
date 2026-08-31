@@ -138,6 +138,24 @@ public sealed class WowFileDetectorTests
         Assert.Equal(18u, detection.Version);
     }
 
+    [Theory]
+    [InlineData("synthetic_0_0_tex1.adt", WowFileKind.AdtTex1)]
+    [InlineData("synthetic_0_0_obj1.adt", WowFileKind.AdtObj1)]
+    public void Detect_SyntheticBandOneSplitAdt_RetainsBandKind(string sourcePath, WowFileKind expectedKind)
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("MVER", CreateUInt32Payload(18)),
+            .. CreateChunk("MHDR", new byte[0x40]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WowFileDetection detection = WowFileDetector.Detect(stream, sourcePath);
+
+        Assert.Equal(expectedKind, detection.Kind);
+        Assert.Equal(18u, detection.Version);
+    }
+
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         return MapFileSummaryReaderTestsAccessor.CreateChunk(id, payload);

@@ -62,6 +62,57 @@ public sealed class AdtRawChunkBlobCollectorTests
         }
     }
 
+    [Fact]
+    public void CollectMemory_WithSparseMcin_PreservesSlotAndCoordinatesOnRawSubchunks()
+    {
+        byte[] mver = CreateChunk("MVER", CreateUInt32Payload(18));
+        byte[] mhdrPayload = new byte[64];
+        int mhdrDataOffset = mver.Length + 8;
+        int mcinHeaderOffset = mhdrDataOffset + mhdrPayload.Length;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mhdrPayload.AsSpan(GillijimProject.WowFiles.Mhdr.McinOffset, 4),
+            mcinHeaderOffset - mhdrDataOffset);
+        byte[] mhdr = CreateChunk("MHDR", mhdrPayload);
+        byte[] mcinPayload = new byte[256 * 16];
+        byte[] mcin = CreateChunk("MCIN", mcinPayload);
+        int mcnkHeaderOffset = mcinHeaderOffset + mcin.Length;
+        const int expectedSlot = 17;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mcinPayload.AsSpan(expectedSlot * 16, 4),
+            mcnkHeaderOffset);
+        mcin = CreateChunk("MCIN", mcinPayload);
+        byte[] mcnk = CreateChunk(
+            "MCNK",
+            CreateRootMcnkPayload(
+                indexX: 1,
+                indexY: 1,
+                includeMcvt: false,
+                includeMcse: true,
+                includeMcrf: false,
+                includeUnknownMclv: false));
+
+        byte[] rootBytes =
+        [
+            .. mver,
+            .. mhdr,
+            .. mcin,
+            .. mcnk,
+        ];
+
+        IReadOnlyList<WowViewer.Core.Maps.TerrainRawChunkBlob> rawChunks =
+            AdtRawChunkBlobCollector.CollectMemory(
+                "synthetic_sparse_root_0_0.adt",
+                rootBytes);
+
+        WowViewer.Core.Maps.TerrainRawChunkBlob chunk = Assert.Single(
+            rawChunks,
+            static value => value.ChunkId == "MCSE");
+        Assert.Equal(expectedSlot, chunk.ChunkIndex);
+        Assert.Equal(1, chunk.ChunkX);
+        Assert.Equal(1, chunk.ChunkY);
+        Assert.Equal(new byte[] { 0x10, 0x11, 0x12, 0x13 }, chunk.Data);
+    }
+
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];

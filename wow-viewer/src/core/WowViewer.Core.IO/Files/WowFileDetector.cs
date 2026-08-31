@@ -104,6 +104,12 @@ public static class WowFileDetector
         if (fileName.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase))
             return new WowFileDetection(sourcePath, WowFileKind.AdtObj, version);
 
+        if (fileName.EndsWith("_tex1.adt", StringComparison.OrdinalIgnoreCase))
+            return new WowFileDetection(sourcePath, WowFileKind.AdtTex1, version);
+
+        if (fileName.EndsWith("_obj1.adt", StringComparison.OrdinalIgnoreCase))
+            return new WowFileDetection(sourcePath, WowFileKind.AdtObj1, version);
+
         if (chunks.Count == 0)
             return new WowFileDetection(sourcePath, WowFileKind.Unknown, version);
 

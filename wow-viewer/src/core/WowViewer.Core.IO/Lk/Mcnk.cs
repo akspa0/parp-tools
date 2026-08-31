@@ -40,6 +40,8 @@ namespace WowViewer.Core.IO.Lk
         public byte[] McshData;
         public byte[] McseData;  // MCSE positional sound emitters
         public byte[] MclqData;  // MCLQ legacy liquid
+        public byte[] McrdData;  // MCRD split doodad references
+        public byte[] McrwData;  // MCRW split WMO references
         private readonly ParseOptions _parseOptions;
 
         public Mcnk(byte[] data)
@@ -232,6 +234,24 @@ namespace WowViewer.Core.IO.Lk
                         {
                             MccvData = new byte[size];
                             Array.Copy(data, dataStart, MccvData, 0, (int)size);
+                        }
+                        break;
+
+                    case 0x4D435244: // MCRD split doodad references
+                    case 0x4452434D:
+                        if (size > 0 && dataStart + size <= data.Length)
+                        {
+                            McrdData = new byte[size];
+                            Array.Copy(data, dataStart, McrdData, 0, (int)size);
+                        }
+                        break;
+
+                    case 0x4D435257: // MCRW split WMO references
+                    case 0x5752434D:
+                        if (size > 0 && dataStart + size <= data.Length)
+                        {
+                            McrwData = new byte[size];
+                            Array.Copy(data, dataStart, McrwData, 0, (int)size);
                         }
                         break;
                 }

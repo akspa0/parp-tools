@@ -96,7 +96,7 @@ public static class MapFileSummaryReader
             uint? version = TryReadVersion(stream, chunks);
             WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
             MapFileKind kind = ToMapFileKind(detection.Kind);
-            if (kind is not (MapFileKind.Adt or MapFileKind.AdtV23 or MapFileKind.AdtV23Error or MapFileKind.AdtTex or MapFileKind.AdtObj or MapFileKind.AdtLod))
+            if (!kind.IsRecognizedAdt())
                 return false;
 
             summary = new MapFileSummary(
@@ -250,6 +250,8 @@ public static class MapFileSummaryReader
             WowFileKind.AdtTex => MapFileKind.AdtTex,
             WowFileKind.AdtObj => MapFileKind.AdtObj,
             WowFileKind.AdtLod => MapFileKind.AdtLod,
+            WowFileKind.AdtTex1 => MapFileKind.AdtTex1,
+            WowFileKind.AdtObj1 => MapFileKind.AdtObj1,
             _ => MapFileKind.Unknown,
         };
     }

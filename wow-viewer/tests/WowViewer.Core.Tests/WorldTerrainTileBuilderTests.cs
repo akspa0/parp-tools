@@ -173,6 +173,62 @@ public sealed class WorldTerrainTileBuilderTests
         Assert.Equal(0f, terrainTile.Heightmap!.GetHeight(0, 0));
     }
 
+    [Fact]
+    public void Read_SyntheticRootAdt_WithSparseMcin_PreservesOriginalSlotIdentity()
+    {
+        float[] heights = Enumerable.Range(0, 145).Select(static value => (float)value).ToArray();
+        byte[] mver = CreateChunk("MVER", CreateUInt32Payload(18));
+        byte[] mhdrPayload = new byte[64];
+        int mhdrDataOffset = mver.Length + 8;
+        int mcinHeaderOffset = mhdrDataOffset + mhdrPayload.Length;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mhdrPayload.AsSpan(GillijimProject.WowFiles.Mhdr.McinOffset, 4),
+            mcinHeaderOffset - mhdrDataOffset);
+        byte[] mhdr = CreateChunk("MHDR", mhdrPayload);
+        byte[] mcinPayload = new byte[256 * 16];
+        byte[] mcin = CreateChunk("MCIN", mcinPayload);
+        int mcnkHeaderOffset = mcinHeaderOffset + mcin.Length;
+        const int expectedSlot = 17;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mcinPayload.AsSpan(expectedSlot * 16, 4),
+            mcnkHeaderOffset);
+        mcin = CreateChunk("MCIN", mcinPayload);
+        byte[] mcnk = CreateChunk(
+            "MCNK",
+            CreateRootMcnkPayload(
+                flags: 0,
+                indexX: 1,
+                indexY: 1,
+                areaId: 17,
+                holes: 0,
+                layerCount: 1,
+                heights));
+
+        byte[] bytes =
+        [
+            .. mver,
+            .. mhdr,
+            .. mcin,
+            .. mcnk,
+        ];
+
+        using MemoryStream stream = new(bytes, writable: false);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(
+            stream,
+            "synthetic_sparse_root_0_0.adt");
+        stream.Position = 0;
+
+        WorldTerrainTileData terrainTile = WorldTerrainTileBuilder.Read(
+            stream,
+            fileSummary);
+
+        WorldTerrainChunkData chunk = Assert.Single(terrainTile.Chunks);
+        Assert.Equal(expectedSlot, chunk.ChunkIndex);
+        Assert.Equal(1, chunk.IndexX);
+        Assert.Equal(1, chunk.IndexY);
+        Assert.Equal(17u, chunk.AreaId);
+    }
+
     private static byte[] CreateRootMcnkPayload(uint flags, uint indexX, uint indexY, uint areaId, ushort holes, uint layerCount, float[] heights, float baseHeight = 0f, byte[]? normals = null)
     {
         byte[] header = new byte[128];

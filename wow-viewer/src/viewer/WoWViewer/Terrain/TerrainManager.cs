@@ -295,6 +295,8 @@ public class TerrainManager : ISceneRenderer
             AreaId = chunk.AreaId,
             McnkFlags = chunk.McnkFlags,
             AlphaSourceFlags = chunk.AlphaSourceFlags,
+            McrdReferences = chunk.McrdReferences?.ToArray() ?? Array.Empty<int>(),
+            McrwReferences = chunk.McrwReferences?.ToArray() ?? Array.Empty<int>(),
         };
 
     private void RebuildLoadedTilesForHoleVisibility()

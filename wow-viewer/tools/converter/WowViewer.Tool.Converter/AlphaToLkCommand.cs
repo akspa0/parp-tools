@@ -40,6 +40,14 @@ internal static class AlphaToLkCommand
             Console.WriteLine("WowViewer.Tool.Converter convert-alpha-to-lk report");
             Console.WriteLine($"  Input:    {wdtPath}");
             Console.WriteLine($"  Output:   {outputDir}");
+            MapConversionValidationResult formatValidation = MapConversionFormats.Validate(
+                MapConversionSourceFormat.AlphaWdt053,
+                MapConversionTargetFormat.LkAdtV18);
+            if (!formatValidation.IsSupported)
+                throw new NotSupportedException(formatValidation.Error);
+            Console.WriteLine($"  Target:   {MapConversionFormats.GetDisplayName(MapConversionTargetFormat.LkAdtV18)}");
+            foreach (string warning in formatValidation.Warnings)
+                Console.WriteLine($"  Warning:  {warning}");
             Console.WriteLine($"  Verbose:  {options.Verbose}");
 
             AreaIdMapper areaIdMapper = new();
@@ -90,7 +98,7 @@ internal static class AlphaToLkCommand
                 try
                 {
                     LkAdtData adtData = AlphaToLkConverter.ConvertTile(tileData, tileX, tileY);
-                    byte[] adtBytes = LkAdtWriter.Build(adtData);
+                    byte[] adtBytes = LkAdtWriter.Build(adtData, MapConversionTargetFormat.LkAdtV18);
                     string adtOutPath = Path.Combine(outputDir, $"{mapName}_{tileX}_{tileY}.adt");
                     File.WriteAllBytes(adtOutPath, adtBytes);
 

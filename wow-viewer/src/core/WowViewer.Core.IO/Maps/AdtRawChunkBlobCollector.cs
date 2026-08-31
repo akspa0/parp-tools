@@ -70,8 +70,9 @@ public static class AdtRawChunkBlobCollector
         ArgumentException.ThrowIfNullOrWhiteSpace(adtPath);
 
         AdtTileFamily family = AdtTileFamilyResolver.Resolve(adtPath);
-        string? effectiveTexturePath = ResolveTextureSourcePath(family, textureSourcePath);
-        string? effectivePlacementPath = family.PlacementSourcePath;
+        AdtLodBand selectedBand = family.SelectCompanionBand() ?? AdtLodBand.Band0;
+        string? effectiveTexturePath = ResolveTextureSourcePath(family, textureSourcePath, selectedBand);
+        string? effectivePlacementPath = family.GetPlacementSourcePath(selectedBand);
 
         Dictionary<string, RawChunkSourceContext> contexts = new(StringComparer.OrdinalIgnoreCase);
 
@@ -164,12 +165,12 @@ public static class AdtRawChunkBlobCollector
         return created;
     }
 
-    private static string? ResolveTextureSourcePath(AdtTileFamily family, string? textureSourcePath)
+    private static string? ResolveTextureSourcePath(AdtTileFamily family, string? textureSourcePath, AdtLodBand selectedBand)
     {
         if (!string.IsNullOrWhiteSpace(textureSourcePath))
             return Path.GetFullPath(textureSourcePath);
 
-        return family.TextureSourcePath;
+        return family.GetTextureSourcePath(selectedBand);
     }
 
     private static string ClassifySourceKind(string path, AdtTileFamily family)
@@ -179,6 +180,12 @@ public static class AdtRawChunkBlobCollector
 
         if (path.Equals(family.Obj0Path, StringComparison.OrdinalIgnoreCase))
             return "obj0";
+
+        if (path.Equals(family.Tex1Path, StringComparison.OrdinalIgnoreCase))
+            return "tex1";
+
+        if (path.Equals(family.Obj1Path, StringComparison.OrdinalIgnoreCase))
+            return "obj1";
 
         if (path.Equals(family.LodPath, StringComparison.OrdinalIgnoreCase))
             return "lod";
@@ -193,6 +200,10 @@ public static class AdtRawChunkBlobCollector
             return "tex0";
         if (fileName.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase))
             return "obj0";
+        if (fileName.EndsWith("_tex1.adt", StringComparison.OrdinalIgnoreCase))
+            return "tex1";
+        if (fileName.EndsWith("_obj1.adt", StringComparison.OrdinalIgnoreCase))
+            return "obj1";
         if (fileName.EndsWith("_lod.adt", StringComparison.OrdinalIgnoreCase))
             return "lod";
         return "root";
@@ -234,10 +245,10 @@ public static class AdtRawChunkBlobCollector
             });
         }
 
-        List<MapChunkLocation> mcnkChunks = fileSummary.Chunks.Where(static chunk => chunk.Id == MapChunkIds.Mcnk).ToList();
-        for (int mcnkIndex = 0; mcnkIndex < mcnkChunks.Count; mcnkIndex++)
+        IReadOnlyList<IndexedMcnkLocation> mcnkChunks = ResolveMcnkLocations(stream, fileSummary);
+        foreach (IndexedMcnkLocation indexedMcnk in mcnkChunks)
         {
-            MapChunkLocation mcnkChunk = mcnkChunks[mcnkIndex];
+            MapChunkLocation mcnkChunk = indexedMcnk.Location;
             byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcnkChunk);
             if (payload.Length == 0)
                 continue;
@@ -252,13 +263,13 @@ public static class AdtRawChunkBlobCollector
                 chunkY = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x08, 4));
                 scanOffset = RootMcnkSubchunkOffset;
             }
-            else if (mcnkIndex < 256)
+            else if (indexedMcnk.Slot < 256)
             {
-                chunkX = mcnkIndex % 16;
-                chunkY = mcnkIndex / 16;
+                chunkX = indexedMcnk.Slot % 16;
+                chunkY = indexedMcnk.Slot / 16;
             }
 
-            CollectRawMcnkSubchunks(context, payload, mcnkIndex, chunkX, chunkY, scanOffset, rawChunks);
+            CollectRawMcnkSubchunks(context, payload, indexedMcnk.Slot, chunkX, chunkY, scanOffset, rawChunks);
         }
     }
 
@@ -295,10 +306,10 @@ public static class AdtRawChunkBlobCollector
             });
         }
 
-        List<MapChunkLocation> mcnkChunks = fileSummary.Chunks.Where(static chunk => chunk.Id == MapChunkIds.Mcnk).ToList();
-        for (int mcnkIndex = 0; mcnkIndex < mcnkChunks.Count; mcnkIndex++)
+        IReadOnlyList<IndexedMcnkLocation> mcnkChunks = ResolveMcnkLocations(stream, fileSummary);
+        foreach (IndexedMcnkLocation indexedMcnk in mcnkChunks)
         {
-            MapChunkLocation mcnkChunk = mcnkChunks[mcnkIndex];
+            MapChunkLocation mcnkChunk = indexedMcnk.Location;
             byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcnkChunk);
             if (payload.Length == 0)
                 continue;
@@ -313,13 +324,13 @@ public static class AdtRawChunkBlobCollector
                 chunkY = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(0x08, 4));
                 scanOffset = RootMcnkSubchunkOffset;
             }
-            else if (mcnkIndex < 256)
+            else if (indexedMcnk.Slot < 256)
             {
-                chunkX = mcnkIndex % 16;
-                chunkY = mcnkIndex / 16;
+                chunkX = indexedMcnk.Slot % 16;
+                chunkY = indexedMcnk.Slot / 16;
             }
 
-            CollectRawMcnkSubchunks(context, payload, mcnkIndex, chunkX, chunkY, scanOffset, rawChunks);
+            CollectRawMcnkSubchunks(context, payload, indexedMcnk.Slot, chunkX, chunkY, scanOffset, rawChunks);
         }
     }
 
@@ -332,6 +343,92 @@ public static class AdtRawChunkBlobCollector
                 return false;
         }
         return true;
+    }
+
+    private static IReadOnlyList<IndexedMcnkLocation> ResolveMcnkLocations(
+        Stream stream,
+        MapFileSummary fileSummary)
+    {
+        List<MapChunkLocation> topLevelChunks = fileSummary.Chunks
+            .Where(static chunk => chunk.Id == MapChunkIds.Mcnk)
+            .ToList();
+
+        if (fileSummary.HasChunk(MapChunkIds.Mcin))
+        {
+            MapChunkLocation mcinChunk = fileSummary.Chunks
+                .First(static chunk => chunk.Id == MapChunkIds.Mcin);
+            byte[] mcinPayload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcinChunk);
+            List<IndexedMcnkLocation> resolvedChunks = [];
+            int entryCount = Math.Min(256, mcinPayload.Length / 16);
+
+            for (int slot = 0; slot < entryCount; slot++)
+            {
+                int entryOffset = slot * 16;
+                int headerOffset = BinaryPrimitives.ReadInt32LittleEndian(
+                    mcinPayload.AsSpan(entryOffset, 4));
+                if (headerOffset <= 0
+                    || !TryReadMcnkLocation(
+                        stream,
+                        fileSummary,
+                        headerOffset,
+                        out MapChunkLocation mcnkLocation))
+                {
+                    continue;
+                }
+
+                resolvedChunks.Add(new IndexedMcnkLocation(slot, mcnkLocation));
+            }
+
+            // Zero MCIN entries are absent slots, not a reason to renumber the
+            // surviving MCNK payloads. Prefer the table whenever it resolves
+            // at least one valid wrapper.
+            if (resolvedChunks.Count > 0)
+                return resolvedChunks;
+        }
+
+        return topLevelChunks
+            .Select(static (chunk, ordinal) => new IndexedMcnkLocation(ordinal, chunk))
+            .ToArray();
+    }
+
+    private static bool TryReadMcnkLocation(
+        Stream stream,
+        MapFileSummary fileSummary,
+        long headerOffset,
+        out MapChunkLocation location)
+    {
+        location = default;
+        if (headerOffset < 0
+            || headerOffset > stream.Length - ChunkHeader.SizeInBytes)
+        {
+            return false;
+        }
+
+        long previousPosition = stream.Position;
+        try
+        {
+            stream.Position = headerOffset;
+            Span<byte> headerBytes = stackalloc byte[ChunkHeader.SizeInBytes];
+            stream.ReadExactly(headerBytes);
+            if (!ChunkHeaderReader.TryRead(headerBytes, out ChunkHeader header)
+                || header.Id != MapChunkIds.Mcnk
+                || header.Size > stream.Length - headerOffset - ChunkHeader.SizeInBytes
+                || (fileSummary.Kind == MapFileKind.Adt && header.Size < RootMcnkHeaderSize))
+            {
+                return false;
+            }
+
+            location = new MapChunkLocation(
+                header.Id,
+                header.Size,
+                headerOffset,
+                headerOffset + ChunkHeader.SizeInBytes);
+            return true;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
     }
 
     private static void CollectRawMcnkSubchunks(
@@ -398,6 +495,10 @@ public static class AdtRawChunkBlobCollector
             position = (int)nextOffset;
         }
     }
+
+    private readonly record struct IndexedMcnkLocation(
+        int Slot,
+        MapChunkLocation Location);
 
     private interface IRawChunkContext
     {

@@ -21,7 +21,7 @@ public static class AdtSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
 
-        if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj))
+        if (!fileSummary.Kind.IsAdtFamily())
             throw new InvalidDataException($"ADT semantic summary requires an ADT-family file, but found {fileSummary.Kind}.");
 
         return new AdtSummary(

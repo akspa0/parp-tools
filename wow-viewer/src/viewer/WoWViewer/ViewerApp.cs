@@ -846,13 +846,15 @@ public partial class ViewerApp : IDisposable
 
     // Map Converter state
     private bool _showMapConverterDialog = false;
-    private int _mapConvertDirection = 0; // 0 = Alpha→LK, 1 = LK→Alpha
+    private int _mapConvertDirection = 0; // 0 = Alpha WDT source, 1 = split ADT source
+    private MapConversionTargetFormat _mapConvertTargetFormat = MapConversionTargetFormat.LkAdtV18;
     private string _mapConvertSourcePath = "";
     private string _mapConvertOutputDir = "";
     private string _mapConvertProjectSourceKey = string.Empty;
-    private string _mapConvertLkMapDir = ""; // LK→Alpha: directory containing LK ADT files
+    private string _mapConvertLkMapDir = ""; // Split ADT → Alpha: directory containing split ADT files
+    private string _mapConvertSplitClientRoot = "";
+    private string _mapConvertSplitMapName = "";
     private bool _mapConvertCopyAlphaSourceWdt = true;
-    private bool _mapConvertEmitLkSplitOutputs = true;
     private bool _mapConvertVerbose = true;
     private string _areaCrosswalkPath = ""; // Optional area crosswalk CSV for Alpha→LK conversion
     private bool _mapConverting = false;
@@ -4306,6 +4308,8 @@ void main() {
             AreaId = source.AreaId,
             McnkFlags = source.McnkFlags,
             AlphaSourceFlags = source.AlphaSourceFlags,
+            McrdReferences = source.McrdReferences?.ToArray() ?? Array.Empty<int>(),
+            McrwReferences = source.McrwReferences?.ToArray() ?? Array.Empty<int>(),
         };
 
     private static List<Terrain.TerrainChunkData> CloneTerrainChunkList(IReadOnlyList<Terrain.TerrainChunkData> chunks)
@@ -6858,22 +6862,80 @@ void main() {
 
     private void DrawMapConverterDialog()
     {
-        ImGui.SetNextWindowSize(new Vector2(580, 520), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(620, 640), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowPos(new Vector2(
-            ImGui.GetIO().DisplaySize.X / 2 - 290,
-            ImGui.GetIO().DisplaySize.Y / 2 - 260), ImGuiCond.FirstUseEver);
+            ImGui.GetIO().DisplaySize.X / 2 - 310,
+            ImGui.GetIO().DisplaySize.Y / 2 - 320), ImGuiCond.FirstUseEver);
 
         if (ImGui.Begin("Map Converter", ref _showMapConverterDialog))
         {
-            ImGui.TextWrapped("Convert maps between Alpha 0.5.3 monolithic WDT and split ADT formats, including LK 3.3.5 and no-MCIN later-era roots where supported.");
+            ImGui.TextWrapped("Convert maps between Alpha 0.5.3 monolithic WDT and later ADT families. The target format is explicit; a split ADT source is never silently sent to the LK writer as MoP output.");
             ImGui.TextDisabled("Conversions write into timestamped project folders under the configured project root. Original source files are not overwritten.");
             ImGui.Spacing();
 
-            // Direction selector
-            ImGui.Text("Direction:");
-            ImGui.RadioButton("Alpha WDT \u2192 LK ADTs", ref _mapConvertDirection, 0);
+            // Source family selector. The destination is selected independently below.
+            ImGui.Text("Source family:");
+            int previousDirection = _mapConvertDirection;
+            ImGui.RadioButton("Alpha 0.5.3 WDT", ref _mapConvertDirection, 0);
             ImGui.SameLine();
-            ImGui.RadioButton("Split ADTs \u2192 Alpha WDT", ref _mapConvertDirection, 1);
+            ImGui.RadioButton("Split ADT family", ref _mapConvertDirection, 1);
+            if (previousDirection != _mapConvertDirection)
+            {
+                _mapConvertTargetFormat = _mapConvertDirection == 0
+                    ? MapConversionTargetFormat.LkAdtV18
+                    : MapConversionTargetFormat.AlphaWdt053;
+                _mapConvertDone = false;
+                _mapConvertError = null;
+                _mapConvertLastLoadPath = null;
+                EnsureMapConverterProjectOutputDirectory(forceNew: false);
+            }
+
+            ImGui.Text("Target format / era:");
+            if (ImGui.BeginCombo("##mapconv_target_format", MapConversionFormats.GetDisplayName(_mapConvertTargetFormat)))
+            {
+                foreach (MapConversionTargetFormat format in MapConversionFormats.AllTargets)
+                {
+                    bool isSelected = format == _mapConvertTargetFormat;
+                    bool hasWriter = MapConversionFormats.HasWriter(format);
+                    string label = hasWriter
+                        ? MapConversionFormats.GetDisplayName(format)
+                        : $"{MapConversionFormats.GetDisplayName(format)} (writer unavailable)";
+                    if (ImGui.Selectable($"{label}##mapconv_target_{format}", isSelected))
+                    {
+                        _mapConvertTargetFormat = format;
+                        _mapConvertDone = false;
+                        _mapConvertError = null;
+                        _mapConvertLastLoadPath = null;
+                        EnsureMapConverterProjectOutputDirectory(forceNew: false);
+                    }
+
+                    if (isSelected)
+                        ImGui.SetItemDefaultFocus();
+                }
+
+                ImGui.EndCombo();
+            }
+
+            MapConversionSourceFormat sourceFormat = _mapConvertDirection == 0
+                ? MapConversionSourceFormat.AlphaWdt053
+                : MapConversionSourceFormat.SplitAdtFamily;
+            MapConversionValidationResult formatValidation = MapConversionFormats.Validate(
+                sourceFormat,
+                _mapConvertTargetFormat);
+            if (!formatValidation.IsSupported)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.45f, 0.25f, 1f));
+                ImGui.TextWrapped($"Blocked: {formatValidation.Error}");
+                ImGui.PopStyleColor();
+            }
+            else if (formatValidation.IsLossy)
+            {
+                ImGui.TextColored(new Vector4(1f, 0.8f, 0.35f, 1f), "Lossy conversion: modern or source-era-only state may be reduced.");
+            }
+
+            foreach (string warning in formatValidation.Warnings)
+                ImGui.TextWrapped($"Warning: {warning}");
+
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
@@ -6883,8 +6945,7 @@ void main() {
 
             if (_mapConvertDirection == 0)
             {
-                // Alpha → LK
-                ImGui.Text("Source Alpha WDT:");
+                ImGui.Text("Source Alpha 0.5.3 WDT:");
                 ImGui.SetNextItemWidth(-80);
                 ImGui.InputText("##a2l_src", ref _mapConvertSourcePath, 512);
                 ImGui.SameLine();
@@ -6907,12 +6968,14 @@ void main() {
                 }
 
                 ImGui.Checkbox("Copy source Alpha WDT into project", ref _mapConvertCopyAlphaSourceWdt);
-                ImGui.Checkbox("Emit converted LK split outputs", ref _mapConvertEmitLkSplitOutputs);
+                if (_mapConvertTargetFormat == MapConversionTargetFormat.LkAdtV18)
+                    ImGui.TextDisabled("Target output: one LK v18 monolithic ADT per occupied tile plus an LK WDT.");
+                else if (_mapConvertTargetFormat == MapConversionTargetFormat.AlphaWdt053)
+                    ImGui.TextDisabled("Target output: an explicit Alpha 0.5.3 identity copy under the project folder.");
             }
             else
             {
-                // Split ADTs → Alpha
-                ImGui.Text("Source Split-ADT WDT:");
+                ImGui.Text("Source split-ADT WDT:");
                 ImGui.SetNextItemWidth(-80);
                 ImGui.InputText("##l2a_src", ref _mapConvertSourcePath, 512);
                 ImGui.SameLine();
@@ -6931,7 +6994,7 @@ void main() {
                                 _mapConvertSourcePath = picked;
                                 EnsureMapConverterProjectOutputDirectory(forceNew: false);
                             }
-                        });
+                         });
                 }
 
                 ImGui.Text("Split ADT Directory (containing MapName_X_Y.adt roots):");
@@ -6949,8 +7012,36 @@ void main() {
                         {
                             if (!string.IsNullOrWhiteSpace(picked))
                                 _mapConvertLkMapDir = picked;
-                        });
+                         });
                 }
+
+                if (_mapConvertTargetFormat == MapConversionTargetFormat.LkAdtV18)
+                {
+                    ImGui.Text("Split ADT client root (required for the split-to-LK command):");
+                    ImGui.SetNextItemWidth(-80);
+                    ImGui.InputText("##split_client_root", ref _mapConvertSplitClientRoot, 512);
+                    ImGui.SameLine();
+                    if (ImGui.Button("Browse##split_client_root"))
+                    {
+                        ImGuiPathPicker.Instance.Open(
+                            "Select split ADT client root",
+                            pickFolder: true,
+                            initialPath: _mapConvertSplitClientRoot,
+                            filterExtension: null,
+                            picked =>
+                            {
+                                if (!string.IsNullOrWhiteSpace(picked))
+                                    _mapConvertSplitClientRoot = picked;
+                            });
+                    }
+
+                    ImGui.Text("Split ADT map name:");
+                    ImGui.SetNextItemWidth(-1);
+                    ImGui.InputText("##split_map_name", ref _mapConvertSplitMapName, 256);
+                }
+
+                if (_mapConvertTargetFormat == MapConversionTargetFormat.AlphaWdt053)
+                    ImGui.TextDisabled("Target output: Alpha 0.5.3 monolithic WDT; split companions are flattened by the Alpha converter.");
             }
 
             ImGui.Spacing();
@@ -6984,7 +7075,7 @@ void main() {
             ImGui.Checkbox("Verbose logging", ref _mapConvertVerbose);
             ImGui.Spacing();
 
-            if (_mapConvertDirection == 0)
+            if (_mapConvertDirection == 0 && _mapConvertTargetFormat == MapConversionTargetFormat.LkAdtV18)
             {
                 ImGui.Text("Area Crosswalk CSV (optional):");
                 ImGui.SetNextItemWidth(-80);
@@ -7007,17 +7098,28 @@ void main() {
                 ImGui.TextDisabled("Maps area IDs for Alpha→LK conversion");
             }
 
-            if (_mapConvertDirection == 1 && !string.IsNullOrEmpty(_mapConvertSourcePath) && string.IsNullOrEmpty(_mapConvertLkMapDir))
+            if (_mapConvertDirection == 1 && !string.IsNullOrEmpty(_mapConvertSourcePath))
             {
-                _mapConvertLkMapDir = Path.GetDirectoryName(_mapConvertSourcePath) ?? "";
+                if (string.IsNullOrEmpty(_mapConvertLkMapDir))
+                    _mapConvertLkMapDir = Path.GetDirectoryName(_mapConvertSourcePath) ?? "";
+                if (string.IsNullOrEmpty(_mapConvertSplitMapName))
+                    _mapConvertSplitMapName = Path.GetFileNameWithoutExtension(_mapConvertSourcePath);
+                if (string.IsNullOrEmpty(_mapConvertSplitClientRoot))
+                    _mapConvertSplitClientRoot = TryInferMapConverterClientRoot(_mapConvertSourcePath) ?? "";
             }
 
             // Convert button
+            bool hasSourceInput = !string.IsNullOrWhiteSpace(_mapConvertSourcePath);
+            bool hasTargetInputs = _mapConvertDirection == 0
+                || (_mapConvertTargetFormat == MapConversionTargetFormat.AlphaWdt053
+                    ? !string.IsNullOrWhiteSpace(_mapConvertLkMapDir)
+                    : !string.IsNullOrWhiteSpace(_mapConvertSplitClientRoot)
+                        && !string.IsNullOrWhiteSpace(_mapConvertSplitMapName));
             bool canConvert = !_mapConverting
-                && !string.IsNullOrWhiteSpace(_mapConvertSourcePath)
+                && formatValidation.IsSupported
+                && hasSourceInput
                 && !string.IsNullOrWhiteSpace(_mapConvertOutputDir)
-                && (_mapConvertDirection != 0 || _mapConvertCopyAlphaSourceWdt || _mapConvertEmitLkSplitOutputs)
-                && (_mapConvertDirection == 0 || !string.IsNullOrWhiteSpace(_mapConvertLkMapDir));
+                && hasTargetInputs;
 
             if (!canConvert) ImGui.BeginDisabled();
             if (ImGui.Button(_mapConverting ? "Converting..." : "Convert", new Vector2(120, 0)))
@@ -7030,10 +7132,13 @@ void main() {
                 string srcPath = _mapConvertSourcePath;
                 string outPath = _mapConvertOutputDir;
                 string lkMapDir = _mapConvertLkMapDir;
+                string splitClientRoot = _mapConvertSplitClientRoot;
+                string splitMapName = _mapConvertSplitMapName;
                 int direction = _mapConvertDirection;
+                MapConversionTargetFormat targetFormat = _mapConvertTargetFormat;
                 bool verbose = _mapConvertVerbose;
                 bool copyAlphaSourceWdt = _mapConvertCopyAlphaSourceWdt;
-                bool emitLkSplitOutputs = _mapConvertEmitLkSplitOutputs;
+                string areaCrosswalkPath = _areaCrosswalkPath;
                 _mapConvertLastLoadPath = null;
 
                 Task.Run(async () =>
@@ -7043,8 +7148,6 @@ void main() {
                         if (direction == 0)
                         {
                             string alphaCopyPath = BuildMapConverterAlphaSourceCopyPath(outPath, srcPath);
-                            string lkOutputDir = BuildMapConverterLkOutputDirectory(outPath, srcPath);
-                            string lkLoadPath = Path.Combine(lkOutputDir, Path.GetFileNameWithoutExtension(srcPath) + ".wdt");
 
                             if (copyAlphaSourceWdt)
                             {
@@ -7056,10 +7159,22 @@ void main() {
                                 _mapConvertLastLoadPath = alphaCopyPath;
                             }
 
-                            if (emitLkSplitOutputs)
+                            if (targetFormat == MapConversionTargetFormat.AlphaWdt053)
                             {
-                                // Execute the converter CLI and capture output
-                                var converterExe = FindConverterExecutable();
+                                string alphaMapName = Path.GetFileNameWithoutExtension(srcPath);
+                                string alphaOutputPath = BuildMapConverterAlphaOutputPath(outPath, alphaMapName);
+                                Directory.CreateDirectory(Path.GetDirectoryName(alphaOutputPath)!);
+                                File.Copy(srcPath, alphaOutputPath, overwrite: true);
+                                _mapConvertLastLoadPath = alphaOutputPath;
+                                lock (_mapConvertLog)
+                                    _mapConvertLog.Add($"\n=== SUCCESS: Alpha 0.5.3 identity output written to {alphaOutputPath} ===");
+                            }
+                            else if (targetFormat == MapConversionTargetFormat.LkAdtV18)
+                            {
+                                string sourceMapName = Path.GetFileNameWithoutExtension(srcPath);
+                                string lkOutputDir = BuildMapConverterLkOutputDirectory(outPath, sourceMapName);
+                                string lkLoadPath = Path.Combine(lkOutputDir, $"{sourceMapName}.wdt");
+                                string? converterExe = FindConverterExecutable();
                                 if (string.IsNullOrEmpty(converterExe))
                                 {
                                     _mapConvertError = "Converter executable not found. Build the project first.";
@@ -7075,13 +7190,13 @@ void main() {
                                         "--output", lkOutputDir
                                     };
                                     if (verbose) args.Add("--verbose");
-                                    if (!string.IsNullOrWhiteSpace(_areaCrosswalkPath))
+                                    if (!string.IsNullOrWhiteSpace(areaCrosswalkPath))
                                     {
                                         args.Add("--area-crosswalk");
-                                        args.Add(_areaCrosswalkPath);
+                                        args.Add(areaCrosswalkPath);
                                     }
 
-                                    var result = await RunConverterAsync(converterExe, args, _mapConvertLog, _mapConvertScrollToBottom);
+                                    ConverterResult result = await RunConverterAsync(converterExe, args, _mapConvertLog, _mapConvertScrollToBottom);
                                     if (!result.Success)
                                     {
                                         _mapConvertError = result.Error ?? "Conversion failed";
@@ -7090,53 +7205,85 @@ void main() {
                                     {
                                         _mapConvertLastLoadPath = lkLoadPath;
                                         lock (_mapConvertLog)
-                                            _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted in {result.ElapsedMs}ms ===");
+                                            _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted to {MapConversionFormats.GetDisplayName(targetFormat)} in {result.ElapsedMs}ms ===");
                                         lock (_mapConvertLog)
-                                            _mapConvertLog.Add($"Project outputs: alpha-source={(copyAlphaSourceWdt ? alphaCopyPath : "skipped")}, lk-split={lkOutputDir}");
+                                            _mapConvertLog.Add($"Project outputs: alpha-source={(copyAlphaSourceWdt ? alphaCopyPath : "skipped")}, lk-v18={lkOutputDir}");
                                     }
                                 }
                             }
                             else
                             {
-                                lock (_mapConvertLog)
-                                    _mapConvertLog.Add($"\n=== SUCCESS: source Alpha WDT copied to project only ({alphaCopyPath}) ===");
+                                _mapConvertError = MapConversionFormats.GetUnavailableReason(targetFormat);
                             }
                         }
                         else
                         {
-                            string alphaOutputPath = BuildMapConverterAlphaOutputPath(outPath, srcPath);
-
-                            // Execute the converter CLI and capture output
-                            var converterExe = FindConverterExecutable();
+                            string? converterExe = FindConverterExecutable();
                             if (string.IsNullOrEmpty(converterExe))
                             {
                                 _mapConvertError = "Converter executable not found. Build the project first.";
                                 lock (_mapConvertLog)
                                     _mapConvertLog.Add($"\n=== ERROR: {_mapConvertError} ===");
                             }
-                            else
+                            else if (targetFormat == MapConversionTargetFormat.AlphaWdt053)
                             {
                                 var args = new List<string>
                                 {
-                                    "convert-split-adt-to-lk",
-                                    "--input-root", srcPath,
-                                    "--output", alphaOutputPath
+                                    "convert-lk-to-alpha",
+                                    "--input", lkMapDir,
+                                    "--output", BuildMapConverterAlphaOutputPath(outPath, splitMapName)
                                 };
                                 if (verbose) args.Add("--verbose");
 
-                                var result = await RunConverterAsync(converterExe, args, _mapConvertLog, _mapConvertScrollToBottom);
+                                ConverterResult result = await RunConverterAsync(converterExe, args, _mapConvertLog, _mapConvertScrollToBottom);
                                 if (!result.Success)
                                 {
                                     _mapConvertError = result.Error ?? "Conversion failed";
                                 }
                                 else
                                 {
-                                    _mapConvertLastLoadPath = alphaOutputPath;
+                                    _mapConvertLastLoadPath = BuildMapConverterAlphaOutputPath(outPath, splitMapName);
                                     lock (_mapConvertLog)
-                                        _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted in {result.ElapsedMs}ms ===");
+                                        _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted to {MapConversionFormats.GetDisplayName(targetFormat)} in {result.ElapsedMs}ms ===");
                                     lock (_mapConvertLog)
-                                        _mapConvertLog.Add($"Project alpha output: {alphaOutputPath}");
+                                        _mapConvertLog.Add($"Project alpha-0.5.3 output: {_mapConvertLastLoadPath}");
                                 }
+                            }
+                            else if (targetFormat == MapConversionTargetFormat.LkAdtV18)
+                            {
+                                string lkOutputDir = BuildMapConverterLkOutputDirectory(outPath, splitMapName);
+                                string lkLoadPath = Path.Combine(lkOutputDir, $"{splitMapName}.wdt");
+                                var args = new List<string>
+                                {
+                                    "convert-split-adt-to-lk",
+                                    "--client-root", splitClientRoot,
+                                    "--map", splitMapName,
+                                    "--output-dir", lkOutputDir
+                                };
+                                if (!string.IsNullOrWhiteSpace(lkMapDir))
+                                {
+                                    args.Add("--overlay-root");
+                                    args.Add(lkMapDir);
+                                }
+                                if (verbose) args.Add("--verbose");
+
+                                ConverterResult result = await RunConverterAsync(converterExe, args, _mapConvertLog, _mapConvertScrollToBottom);
+                                if (!result.Success)
+                                {
+                                    _mapConvertError = result.Error ?? "Conversion failed";
+                                }
+                                else
+                                {
+                                    _mapConvertLastLoadPath = lkLoadPath;
+                                    lock (_mapConvertLog)
+                                        _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted to {MapConversionFormats.GetDisplayName(targetFormat)} in {result.ElapsedMs}ms ===");
+                                    lock (_mapConvertLog)
+                                        _mapConvertLog.Add($"Project LK v18 output: {lkOutputDir}");
+                                }
+                            }
+                            else
+                            {
+                                _mapConvertError = MapConversionFormats.GetUnavailableReason(targetFormat);
                             }
                         }
                     }
@@ -7189,21 +7336,16 @@ void main() {
             }
             ImGui.EndChild();
 
-            // Load result button
-            if (_mapConvertDone && _mapConvertError == null && _mapConvertDirection == 0)
+            // Load result button. The target, not the source direction, determines the label and
+            // the format that the viewer will consume.
+            if (_mapConvertDone && _mapConvertError == null && !string.IsNullOrWhiteSpace(_mapConvertLastLoadPath))
             {
-                if (ImGui.Button("Load Converted Map in Viewer"))
-                {
-                    if (!string.IsNullOrWhiteSpace(_mapConvertLastLoadPath) && File.Exists(_mapConvertLastLoadPath))
-                    {
-                        LoadWdtTerrain(_mapConvertLastLoadPath);
-                        _showMapConverterDialog = false;
-                    }
-                }
-            }
-            else if (_mapConvertDone && _mapConvertError == null && _mapConvertDirection == 1)
-            {
-                if (ImGui.Button("Load Converted Alpha WDT in Viewer"))
+                string loadLabel = _mapConvertTargetFormat == MapConversionTargetFormat.AlphaWdt053
+                    ? "Load Converted Alpha 0.5.3 WDT in Viewer"
+                    : _mapConvertTargetFormat == MapConversionTargetFormat.LkAdtV18
+                        ? "Load Converted LK v18 WDT in Viewer"
+                        : "Load Converted Map in Viewer";
+                if (ImGui.Button(loadLabel))
                 {
                     if (!string.IsNullOrWhiteSpace(_mapConvertLastLoadPath) && File.Exists(_mapConvertLastLoadPath))
                     {
@@ -8314,7 +8456,7 @@ void main() {
     private string BuildMapConverterProjectSourceKey()
     {
         string fullSourcePath = Path.GetFullPath(_mapConvertSourcePath);
-        return $"map-convert:{_mapConvertDirection}:{fullSourcePath}";
+        return $"map-convert:{_mapConvertDirection}:{_mapConvertTargetFormat}:{fullSourcePath}";
     }
 
     private string EnsureMapConverterProjectOutputDirectory(bool forceNew)
@@ -8331,9 +8473,11 @@ void main() {
         }
 
         _mapConvertProjectSourceKey = sourceKey;
+        string targetSegment = SanitizeProjectPathSegment(
+            MapConversionFormats.GetCommandValue(_mapConvertTargetFormat));
         _mapConvertOutputDir = CreateTimestampedProjectOutputDirectory(
             GetProjectOutputRootDirectory(),
-            Path.GetFileNameWithoutExtension(_mapConvertSourcePath));
+            $"{Path.GetFileNameWithoutExtension(_mapConvertSourcePath)}-{targetSegment}");
         return _mapConvertOutputDir;
     }
 
@@ -8345,7 +8489,12 @@ void main() {
         string projectName = string.IsNullOrWhiteSpace(_mapConvertSourcePath)
             ? "map-conversion"
             : Path.GetFileNameWithoutExtension(_mapConvertSourcePath);
-        return Path.Combine(GetProjectOutputRootDirectory(), SanitizeProjectPathSegment(projectName), "<timestamp>");
+        string targetSegment = SanitizeProjectPathSegment(
+            MapConversionFormats.GetCommandValue(_mapConvertTargetFormat));
+        return Path.Combine(
+            GetProjectOutputRootDirectory(),
+            SanitizeProjectPathSegment($"{projectName}-{targetSegment}"),
+            "<timestamp>");
     }
 
     private static string BuildMapConverterAlphaSourceCopyPath(string projectOutputDir, string sourceWdtPath)
@@ -8354,16 +8503,54 @@ void main() {
         return Path.Combine(projectOutputDir, "alpha-source", "World", "Maps", mapName, Path.GetFileName(sourceWdtPath));
     }
 
-    private static string BuildMapConverterLkOutputDirectory(string projectOutputDir, string sourceWdtPath)
+    private static string BuildMapConverterLkOutputDirectory(string projectOutputDir, string mapName)
     {
-        string mapName = Path.GetFileNameWithoutExtension(sourceWdtPath);
-        return Path.Combine(projectOutputDir, "lk-split", "World", "Maps", mapName);
+        return Path.Combine(projectOutputDir, "lk-v18", "World", "Maps", mapName);
     }
 
-    private static string BuildMapConverterAlphaOutputPath(string projectOutputDir, string sourceWdtPath)
+    private static string BuildMapConverterAlphaOutputPath(string projectOutputDir, string mapName)
     {
-        string mapName = Path.GetFileNameWithoutExtension(sourceWdtPath);
-        return Path.Combine(projectOutputDir, "alpha-output", "World", "Maps", mapName, $"{mapName}.wdt");
+        return Path.Combine(projectOutputDir, "alpha-0.5.3", "World", "Maps", mapName, $"{mapName}.wdt");
+    }
+
+    private static string? TryInferMapConverterClientRoot(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return null;
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(sourcePath);
+        }
+        catch
+        {
+            return null;
+        }
+
+        string normalized = fullPath.Replace('/', '\\');
+        int worldMapsIndex = normalized.IndexOf("\\World\\Maps\\", StringComparison.OrdinalIgnoreCase);
+        if (worldMapsIndex > 0)
+        {
+            string candidate = normalized[..worldMapsIndex];
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        DirectoryInfo? directory = new(
+            Directory.Exists(fullPath) ? fullPath : Path.GetDirectoryName(fullPath) ?? fullPath);
+        while (directory is not null)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, "Data"))
+                || Directory.EnumerateFiles(directory.FullName, "*.mpq", SearchOption.TopDirectoryOnly).Any())
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
     }
 
     private void StartVlmExport()

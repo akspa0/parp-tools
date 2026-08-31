@@ -493,8 +493,8 @@ public static class FormatProfileRegistry
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = true,
         BigAlphaFlagsMask = 0x4u | 0x80u,
-        PreferTex0ForTextureData = true,
-        PreferObj0ForPlacementData = true,
+        PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = true,
         UseMcnkHeaderShadowSize = true,
         AlphaDecodeMode = TerrainAlphaDecodeMode.Cataclysm400
@@ -511,8 +511,8 @@ public static class FormatProfileRegistry
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = true,
         BigAlphaFlagsMask = 0x4u | 0x80u,
-        PreferTex0ForTextureData = true,
-        PreferObj0ForPlacementData = true,
+        PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = true,
         UseMcnkHeaderShadowSize = true,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict

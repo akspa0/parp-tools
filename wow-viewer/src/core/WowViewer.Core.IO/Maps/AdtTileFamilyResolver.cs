@@ -21,6 +21,10 @@ public static class AdtTileFamilyResolver
             baseStem = stem[..^5];
         else if (stem.EndsWith("_obj0", StringComparison.OrdinalIgnoreCase))
             baseStem = stem[..^5];
+        else if (stem.EndsWith("_tex1", StringComparison.OrdinalIgnoreCase))
+            baseStem = stem[..^5];
+        else if (stem.EndsWith("_obj1", StringComparison.OrdinalIgnoreCase))
+            baseStem = stem[..^5];
         else if (stem.EndsWith("_lod", StringComparison.OrdinalIgnoreCase))
             baseStem = stem[..^4];
         else
@@ -30,6 +34,8 @@ public static class AdtTileFamilyResolver
         string rootPath = basePath + ".adt";
         string tex0Path = basePath + "_tex0.adt";
         string obj0Path = basePath + "_obj0.adt";
+        string tex1Path = basePath + "_tex1.adt";
+        string obj1Path = basePath + "_obj1.adt";
         string lodPath = basePath + "_lod.adt";
 
         return new AdtTileFamily(
@@ -38,10 +44,14 @@ public static class AdtTileFamilyResolver
             rootPath,
             tex0Path,
             obj0Path,
+            tex1Path,
+            obj1Path,
             lodPath,
             hasRoot: File.Exists(rootPath),
             hasTex0: File.Exists(tex0Path),
             hasObj0: File.Exists(obj0Path),
+            hasTex1: File.Exists(tex1Path),
+            hasObj1: File.Exists(obj1Path),
             hasLod: File.Exists(lodPath));
     }
 }

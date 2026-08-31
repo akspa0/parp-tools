@@ -39,6 +39,16 @@ internal static class SplitAdtToLkCommand
                 return;
             }
 
+            MapConversionValidationResult formatValidation = MapConversionFormats.Validate(
+                MapConversionSourceFormat.SplitAdtFamily,
+                MapConversionTargetFormat.LkAdtV18);
+            if (!formatValidation.IsSupported)
+            {
+                Console.Error.WriteLine($"Error: {formatValidation.Error}");
+                Environment.ExitCode = 1;
+                return;
+            }
+
             LkDonorContext? lkDonor = TryCreateLkDonorContext(options, out string? lkDonorError);
             if (!string.IsNullOrWhiteSpace(lkDonorError))
             {
@@ -62,6 +72,9 @@ internal static class SplitAdtToLkCommand
             Console.WriteLine($"  Client:   {clientRoot}");
             Console.WriteLine($"  Map:      {mapName}");
             Console.WriteLine($"  Overlay:  {overlayRoot ?? "<none>"}");
+            Console.WriteLine($"  Target:   {MapConversionFormats.GetDisplayName(MapConversionTargetFormat.LkAdtV18)}");
+            foreach (string warning in formatValidation.Warnings)
+                Console.WriteLine($"  Warning:  {warning}");
             if (lkDonor is not null)
                 Console.WriteLine($"  LK Donor: {lkDonor.Root}");
             if (alphaDonor is not null)
@@ -117,7 +130,7 @@ internal static class SplitAdtToLkCommand
                 {
                     if (TryBuildLkDonorTile(lkDonor, mapName, tile.TileX, tile.TileY, overlayRoot, out LkAdtData? lkDonorTile, out SplitAdtTileSourceDetails lkDonorDetails))
                     {
-                        byte[] donorBytes = LkAdtWriter.Build(lkDonorTile);
+                        byte[] donorBytes = LkAdtWriter.Build(lkDonorTile, MapConversionTargetFormat.LkAdtV18);
                         string donorOutputPath = Path.Combine(outputDir, $"{mapName}_{tile.TileX}_{tile.TileY}.adt");
                         File.WriteAllBytes(donorOutputPath, donorBytes);
                         emittedTiles.Add((tile.TileX, tile.TileY));
@@ -135,7 +148,7 @@ internal static class SplitAdtToLkCommand
 
                     if (TryBuildAlphaDonorTile(alphaDonor, tile.TileX, tile.TileY, out LkAdtData? donorTile, out string donorSource))
                     {
-                        byte[] donorBytes = LkAdtWriter.Build(donorTile);
+                        byte[] donorBytes = LkAdtWriter.Build(donorTile, MapConversionTargetFormat.LkAdtV18);
                         string donorOutputPath = Path.Combine(outputDir, $"{mapName}_{tile.TileX}_{tile.TileY}.adt");
                         File.WriteAllBytes(donorOutputPath, donorBytes);
                         emittedTiles.Add((tile.TileX, tile.TileY));
@@ -193,7 +206,7 @@ internal static class SplitAdtToLkCommand
                 try
                 {
                     LkAdtData adtData = LkAdtReader.Read(adtBytes, tex0Bytes, obj0Bytes, tile.TileX, tile.TileY);
-                    byte[] monolithicBytes = LkAdtWriter.Build(adtData);
+                    byte[] monolithicBytes = LkAdtWriter.Build(adtData, MapConversionTargetFormat.LkAdtV18);
                     string outputPath = Path.Combine(outputDir, $"{mapName}_{tile.TileX}_{tile.TileY}.adt");
                     File.WriteAllBytes(outputPath, monolithicBytes);
                     emittedTiles.Add((tile.TileX, tile.TileY));

@@ -48,7 +48,16 @@ internal static class LkToAlphaCommand
             string mapName = useMpq ? options.MapName! : Path.GetFileNameWithoutExtension(outputPath);
             AreaIdMapper areaIdMapper = new();
 
+            MapConversionValidationResult formatValidation = MapConversionFormats.Validate(
+                MapConversionSourceFormat.SplitAdtFamily,
+                MapConversionTargetFormat.AlphaWdt053);
+            if (!formatValidation.IsSupported)
+                throw new NotSupportedException(formatValidation.Error);
+
             Console.WriteLine("WowViewer.Tool.Converter convert-lk-to-alpha report");
+            Console.WriteLine($"  Target:   {MapConversionFormats.GetDisplayName(MapConversionTargetFormat.AlphaWdt053)}");
+            foreach (string warning in formatValidation.Warnings)
+                Console.WriteLine($"  Warning:  {warning}");
 
             // Load target client for asset existence checks (filtering missing placements)
             HashSet<string>? targetFileSet = null;

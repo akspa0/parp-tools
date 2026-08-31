@@ -10,6 +10,8 @@ public enum WowFileKind
     AdtTex,
     AdtObj,
     AdtLod,
+    AdtTex1,
+    AdtObj1,
     Wmo,
     WmoGroup,
     Pm4,

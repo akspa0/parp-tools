@@ -1,14 +1,60 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
+
+**Spec 197 implementation handoff (2026-08-31).** The read-only 5.0.1 native
+evidence has been written into the focused
+[`5.0.1-dead-dormant-partial-rendering.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md)
+note and consolidated
+[`wow-5.0.1-adt-wdt-definitive.md`](../docs/architecture/wow-5.0.1-adt-wdt-definitive.md)
+guide. The liquid geometry factory default branch is classified as partial;
+DepthCache/GBuffer as capability-gated; atlas, doodad batching, particle
+batching, and water-detail settings as optional/configuration paths; and terrain
+cleanup assertions as ownership contracts. The broad 2,184 zero-direct-xref
+inventory remains a candidate pool, not a dead-code count. The split reader/runtime
+slice is now implemented and tested: `_obj0`/`_obj1` and `_tex0`/`_tex1` are
+classified, root plus selected companions are loaded, split MCNK wrappers skip
+only the root-only 128-byte header, and sparse MCIN physical slots are preserved
+in the supported reader paths. The map converter now exposes an explicit target
+format and loss policy. `LkAdtWriter` is target-guarded to LK v18; split-to-LK and
+split-to-Alpha are deliberate lossy down-conversions; native MoP split output is
+disabled because no native split writer exists. T117 remains open for numeric
+FourCC, blend/seam, WDT/MAIN, indirect-caller, and path-builder-address follow-up.
+Remaining implementation work is the compact MCIN consumer/merger/transfer audit
+and a slot-aware native split writer.
+
+**Spec 197 Ghidra/ADT evidence checkpoint (2026-08-31).** The loaded GhidraMCP 6.0.0
+plugin is healthy and serves the `Mists of Pandaria 5.0.1.15464` project with
+`Wow.exe` over `http://127.0.0.1:8089`; its status dialog reports UDS and TCP
+running, version 6.0.0, and 222 endpoints. The broken part was only the local
+MCP launcher: both [`.mcp.json`](../../.mcp.json) and [`.roo/mcp.json`](../../.roo/mcp.json)
+pointed at a nonexistent Ghidra `.venv` and passed the unsupported
+`--ghidra-server` option. Installed `ghidra_mcp_bridge-6.0.0` with `uv tool
+install`; both configs now launch the installed `bridge-mcp-ghidra.exe` with
+`GHIDRA_MCP_URL=http://127.0.0.1:8089` and `--no-lazy`. Stdio smoke proof:
+bridge initializes as `ghidra-mcp` 1.29.1, auto-connects to the named 5.0.1
+project, and registers the live schema (221 tools observed during startup;
+the Ghidra endpoint itself reports 222). Program proof: `Wow.exe`, PE x86,
+image base `0x00400000`, 38,405 functions, 175,352 symbols, 790 data types,
+and 766 `.cpp`-matching strings. The first T117 evidence pass is now recorded in
+[`research-ghidra-5.0.1.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md:173).
+Native 5.0.1 requires `MVER == 0x12`, builds root + one selected
+`_obj0`/`_obj1` and `_tex0`/`_tex1` companion pair, requires 256 outer MCNK
+records in every file-data object, consumes the 128-byte MCNK header only in
+the root slot, and gates area creation on map-table `Flag_Exists`. The exact
+loader path does not construct `_lod.adt`; `MHID`/`MDID`/`MCXH` remain
+unconfirmed for this build. T116 is complete and T117 remains in progress.
+Do not modify the loaded Ghidra program; production parser/runtime changes are
+now limited to the evidenced split-loading slice, while native blend/shader
+semantics remain gated on further review.
 
 **Spec 197 lane (2026-08-30, checkpoint 51).** UI Workspace Profiles, Editor Mode Integration, PM4 Mouse Inspection, Multi-Client Map Staging & MoP 5.0.1 ADT Pipeline — ACTIVE:
 1. **Workspace Mode / Profile Switcher**: Add top-bar mode switcher (`[Viewer]`, `[Editor]`, `[Archaeology]`) and expose the missing Editor button in the right sidebar. Filter sidebar tool tabs and top menus dynamically based on the active mode.
 2. **Menu Audit & Legacy "MK Dataset" Purge**: Remove all defunct "MK Dataset" / `MkDatasetHarvester` references from menus and loaders.
 3. **PM4 Mouse Raycasting & Viewport Selection**: Add bounding-box and triangle raycast pick candidates for PM4 objects/surfaces directly from viewport mouse clicks.
 4. **Multi-Client Restoration Staging**: Architecture for mounting multiple client archives simultaneously and copying terrain/placements into an active restoration library map.
-5. **4.3.4 through 5.1 MoP ADT & Blending Engine**: Support multi-split ADT chunks (`_obj0`/`_obj1`, `_tex0`/`_tex1`), height texture blending (`MHID`, `MDID`, `MCXH`), and WMO terrain seam blending via Ghidra analysis of `WoW.exe` 5.0.1.15464.
-6. **Verification**: Unit tests for Mop ADT parser, multi-client staging, and full build validation.
+5. **4.3.4 through 5.1 MoP ADT & Blending Engine**: Support multi-split ADT chunks (`_obj0`/`_obj1`, `_tex0`/`_tex1`), height texture blending (`MHID`, `MDID`, `MCXH`), and WMO terrain seam blending via Ghidra analysis of `WoW.exe` 5.0.1.15464. Reader/runtime support is landed; native blend/seam semantics remain evidence-gated.
+6. **Verification and serialization safety**: The split reader/runtime and explicit map-conversion target boundary have focused source/build/test proof. A genuine native MoP split writer, full band-1 merger/transfer conversion, and real-client visual proof remain open.
 
 **Spec 196 lane (2026-08-30, checkpoint 50).** WDL Lattice Magnetization, Polarity Inversion, Neighbor Auto-Fit & 0-Hitch Async Stratigraphy Restoration Engine — COMPLETE:
 1. **Polarity Inversion & Multi-Anchor Datum Geometry**: Added `StratigraphyAnchorMode` enum (`LowestZ_Floor`, `HighestZ_Ceiling`, `MeanZ`, `NeighborMeshBorder`, `WdlLattice`, `CustomDatum`) and polarity inversion (`PolarityInverted`) to `TemporalStratigraphyOptions` and `TemporalMeshRestorer`. Resolves developmental terrain inverted compression (e.g. Dragon Isles) by inverting scale direction from an upper ceiling datum without vertical wall spikes.

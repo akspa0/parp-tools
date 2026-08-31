@@ -32,8 +32,12 @@ public static class WorldTerrainTileBuilder
 
         AdtTextureFile? textureFile = null;
         AdtTileFamily family = AdtTileFamilyResolver.Resolve(path);
-        if (family.HasTex0 && fileSummary.Kind == MapFileKind.Adt)
-            textureFile = AdtTextureReader.Read(family.Tex0Path);
+        if ((family.HasTex0 || family.HasTex1) && fileSummary.Kind == MapFileKind.Adt)
+        {
+            string? texturePath = family.TextureSourcePath;
+            if (texturePath is not null)
+                textureFile = AdtTextureReader.Read(texturePath);
+        }
 
         return Read(stream, fileSummary, textureFile, applyBaseHeightOffset);
     }
@@ -51,19 +55,15 @@ public static class WorldTerrainTileBuilder
         if (fileSummary.Kind != MapFileKind.Adt)
             throw new InvalidDataException($"World terrain tile builder requires a root ADT file, but found {fileSummary.Kind}.");
 
-        IReadOnlyList<MapChunkLocation> terrainChunkLocations = ResolveTerrainChunkLocations(stream, fileSummary);
-    IReadOnlyList<string> inlineTextureNames = ReadTextureNames(stream, fileSummary);
-    Dictionary<int, AdtTextureChunk>? externalTextureChunks = textureFile?.Chunks.ToDictionary(static chunk => chunk.ChunkIndex);
+        IReadOnlyList<IndexedMcnkLocation> terrainChunkLocations = ResolveTerrainChunkLocations(stream, fileSummary);
+        IReadOnlyList<string> inlineTextureNames = ReadTextureNames(stream, fileSummary);
+        Dictionary<int, AdtTextureChunk>? externalTextureChunks = textureFile?.Chunks.ToDictionary(static chunk => chunk.ChunkIndex);
         List<WorldTerrainChunkData> chunks = new(terrainChunkLocations.Count);
-        int chunkOrdinal = 0;
-        foreach (MapChunkLocation chunk in terrainChunkLocations)
+        foreach (IndexedMcnkLocation indexedChunk in terrainChunkLocations)
         {
-            byte[] payload = ReadChunkPayload(stream, chunk);
+            byte[] payload = ReadChunkPayload(stream, indexedChunk.Location);
             if (payload.Length < RootMcnkHeaderSize)
-            {
-                chunkOrdinal++;
                 continue;
-            }
 
             uint flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x00, 4));
             int indexX = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x04, 4)));
@@ -74,10 +74,10 @@ public static class WorldTerrainTileBuilder
             float baseHeight = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(0x70, 4));
             float[]? heights = TryReadMcvtHeights(payload, baseHeight, applyBaseHeightOffset);
             Vector3[]? normals = TryReadMcnrNormals(payload);
-            AdtTextureChunk? textureChunk = ResolveTextureChunk(chunkOrdinal, payload, fileSummary.Kind, inlineTextureNames, externalTextureChunks);
+            AdtTextureChunk? textureChunk = ResolveTextureChunk(indexedChunk.Slot, payload, fileSummary.Kind, inlineTextureNames, externalTextureChunks);
 
             chunks.Add(new WorldTerrainChunkData(
-                chunkOrdinal,
+                indexedChunk.Slot,
                 indexX,
                 indexY,
                 areaId,
@@ -90,7 +90,6 @@ public static class WorldTerrainTileBuilder
                 textureChunk?.Layers,
                 normals,
                 textureChunk?.ShadowMap));
-            chunkOrdinal++;
         }
 
         return new WorldTerrainTileData(fileSummary.SourcePath, fileSummary.Kind, chunks, BuildHeightmap(chunks));
@@ -142,21 +141,29 @@ public static class WorldTerrainTileBuilder
         return entries;
     }
 
-    private static IReadOnlyList<MapChunkLocation> ResolveTerrainChunkLocations(Stream stream, MapFileSummary fileSummary)
+    private static IReadOnlyList<IndexedMcnkLocation> ResolveTerrainChunkLocations(Stream stream, MapFileSummary fileSummary)
     {
         List<MapChunkLocation> topLevelChunks = fileSummary.Chunks
             .Where(static chunk => chunk.Id == MapChunkIds.Mcnk)
             .ToList();
 
         if (topLevelChunks.Count >= ExpectedChunkCount || !fileSummary.HasChunk(MapChunkIds.Mcin))
-            return topLevelChunks;
+        {
+            return topLevelChunks
+                .Select(static (chunk, ordinal) => new IndexedMcnkLocation(ordinal, chunk))
+                .ToArray();
+        }
 
         MapChunkLocation mcinChunk = fileSummary.Chunks.First(chunk => chunk.Id == MapChunkIds.Mcin);
         byte[] mcinPayload = ReadChunkPayload(stream, mcinChunk);
         if (mcinPayload.Length < McinEntrySize)
-            return topLevelChunks;
+        {
+            return topLevelChunks
+                .Select(static (chunk, ordinal) => new IndexedMcnkLocation(ordinal, chunk))
+                .ToArray();
+        }
 
-        List<MapChunkLocation> resolvedChunks = new(ExpectedChunkCount);
+        List<IndexedMcnkLocation> resolvedChunks = new(ExpectedChunkCount);
         for (int index = 0; index < ExpectedChunkCount && ((index + 1) * McinEntrySize) <= mcinPayload.Length; index++)
         {
             int entryOffset = index * McinEntrySize;
@@ -175,10 +182,17 @@ public static class WorldTerrainTileBuilder
             if (dataOffset > stream.Length || dataOffset + header.Size > stream.Length)
                 continue;
 
-            resolvedChunks.Add(new MapChunkLocation(MapChunkIds.Mcnk, header.Size, headerOffset, dataOffset));
+            resolvedChunks.Add(new IndexedMcnkLocation(
+                index,
+                new MapChunkLocation(MapChunkIds.Mcnk, header.Size, headerOffset, dataOffset)));
         }
 
-        return resolvedChunks.Count > topLevelChunks.Count ? resolvedChunks : topLevelChunks;
+        if (resolvedChunks.Count > 0)
+            return resolvedChunks;
+
+        return topLevelChunks
+            .Select(static (chunk, ordinal) => new IndexedMcnkLocation(ordinal, chunk))
+            .ToArray();
     }
 
     private static bool TryReadChunkHeader(Stream stream, long headerOffset, out ChunkHeader header)
@@ -256,6 +270,10 @@ public static class WorldTerrainTileBuilder
 
         return null;
     }
+
+    private readonly record struct IndexedMcnkLocation(
+        int Slot,
+        MapChunkLocation Location);
 
     private static Vector3[]? TryReadMcnrNormals(byte[] payload)
     {

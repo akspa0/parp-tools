@@ -227,7 +227,13 @@ public sealed class SplitAdtMerger
                 Console.WriteLine($"[INFO] Parsed {tex0Mcnks.Count} MCNKs from tex0");
                 result.Tex0McnkCount = tex0Mcnks.Count;
                 
-                // Merge texture data into root MCNKs
+                // Split MCNKs are normally emitted in MCIN slot order. Match
+                // by the root MCNK coordinates when the source exposes them,
+                // rather than assuming that a sparse companion list is dense.
+                // Merge texture data into root MCNKs. Warcraft.NET's texture
+                // MCNK model has no independent slot property, so the legacy
+                // parser remains ordinal here; the canonical readers retain
+                // sparse slot identity before this conversion boundary.
                 for (int i = 0; i < Math.Min(mcnkList.Count, tex0Mcnks.Count); i++)
                 {
                     if (tex0Mcnks[i].TextureLayers != null)

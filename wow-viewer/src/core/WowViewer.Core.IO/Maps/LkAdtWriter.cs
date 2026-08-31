@@ -35,6 +35,26 @@ public static class LkAdtWriter
         File.WriteAllBytes(path, Build(adt));
     }
 
+    /// <summary>
+    /// Writes an LK v18 ADT only when the caller has explicitly selected the LK target.
+    /// This overload is the conversion boundary: a future split-family document must not be
+    /// accidentally serialized by passing it through the legacy monolithic writer.
+    /// </summary>
+    public static void Write(string path, LkAdtData adt, MapConversionTargetFormat targetFormat)
+    {
+        EnsureTargetFormat(targetFormat);
+        Write(path, adt);
+    }
+
+    /// <summary>
+    /// Builds an LK v18 ADT only for the explicit LK target format.
+    /// </summary>
+    public static byte[] Build(LkAdtData adt, MapConversionTargetFormat targetFormat)
+    {
+        EnsureTargetFormat(targetFormat);
+        return Build(adt);
+    }
+
     public static byte[] Build(LkAdtData adt)
     {
         ArgumentNullException.ThrowIfNull(adt);
@@ -139,6 +159,16 @@ public static class LkAdtWriter
         PatchMcin(result, (int)mcinStart + ChunkHeaderSize, mcnkOffsets, mcnkSizes);
 
         return result;
+    }
+
+    private static void EnsureTargetFormat(MapConversionTargetFormat targetFormat)
+    {
+        if (targetFormat != MapConversionTargetFormat.LkAdtV18)
+        {
+            throw new NotSupportedException(
+                $"{nameof(LkAdtWriter)} writes only {MapConversionFormats.GetDisplayName(MapConversionTargetFormat.LkAdtV18)}; " +
+                $"requested {MapConversionFormats.GetDisplayName(targetFormat)}. Use a target-specific writer instead.");
+        }
     }
 
     private static byte[] BuildMver()
