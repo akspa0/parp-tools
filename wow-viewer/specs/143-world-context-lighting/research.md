@@ -232,3 +232,96 @@ this implementation.
 - `lit profile --archive-root H:\\053-client --virtual-path World\\Maps\\Azeroth\\areatest.lit`: decoded
   `Global Light`, version `2`, raw count `-1`, track count `9`, stride `0x1484`, and primary
   `Partial` samples successfully. Viewer visual/runtime proof remains user-owned.
+
+
+---
+
+## Native lighting and M2 shader evidence — 5.0.1.15464 (recorded 2026-09-01)
+
+Read from `Wow.exe` (MoP Beta 5.0.1.15464) via GhidraMCP. Addresses are image-base
+`0x00400000`.
+
+### 1. The engine has indexed lights, not one sun
+
+The Lua binding signatures name the per-light parameter set exactly:
+
+```
+SetLight(enabled[, omni, dirX, dirY, dirZ, ambIntensity[, ambR, ambG, ambB],
+                              dirIntensity[, dirR, dirG, dirB]])          @ 0x00d630b8
+AddLight(index, enabled[, omni, ...])                                     @ 0x00d937a0
+AddCharacterLight(index, enabled[, omni, ...])                            @ 0x00d93828
+```
+
+So each light carries: enabled, an **omni/directional flag**, a direction, an ambient
+intensity + RGB, and a diffuse intensity + RGB. `AddLight` is **indexed** — a set, not a
+singleton — and characters get their **own** light set on top.
+
+Our M2 path has one directional light and one ambient term
+(`M2Renderer.cs:844-846`: `uLightDir`, `uLightColor`, `uAmbientColor`), with no omni
+support, no light index, and no character light set.
+
+### 2. Zone lights are polygonal regions — we do not implement them at all
+
+`DNZoneLight.cpp` builds a sorted, binary-searchable table of **40-byte (0x28) zone light
+records** (`FUN_00c26090` searches it; `FUN_00c26900` builds it):
+
+| Offset | Meaning |
+|---|---|
+| `+0x00` | zone light id (sort key) |
+| `+0x04` | point count |
+| `+0x08`, `+0x0c` | running min X, min Y |
+| `+0x10`, `+0x14` | running max X, max Y |
+| `+0x1c` | point array capacity |
+| `+0x20` | point array pointer |
+
+It is populated from two client DBs: the zone light table, then a **zone light point**
+table whose records carry a parent zone-light id at `+0x04`, an X/Y at `+0x08`/`+0x0c`, and
+a 1-based **point order** at `+0x10` (asserted `>= 1` and `<= capacity`,
+`DNZoneLight.cpp:0x99` "invalid point order for zone lights"). Points are written into the
+parent's array at `order - 1`, and the parent's AABB is accumulated as each point lands.
+
+That is an **ordered polygon per zone with a derived bounding box** — spatial lighting
+regions that override the global day/night light. `ZoneLight`/`ZoneLightPoint` have **zero
+references anywhere in our codebase**, which is the single largest missing piece of "the
+real lighting."
+
+We do already model the DBC side of the global lighting: `BuildScopedLightDbcModels`
+carries `Light.dbc`, `LightParams` (`DBFilesClient\\LightParams.dbc` @ `0x00e0628c`),
+18 `LightIntBand` colour tracks and 6 `LightFloatBand` float tracks.
+
+### 3. The M2 shader table — 17 vertex x ~30 pixel permutations
+
+The client selects a shader **pair** per batch. Both halves are named in the binary:
+
+**Vertex (`Diffuse_*`, @ `0x00d722c4`-`0x00d72858`)** — `T1`, `T2`, `T1_T2`, `T1_Env`,
+`Env_T1`, `Env_Env`, `Env`, `T1_T1`, `T1_T1_T1`, `T1_Env_T1`, `T1_Env_T2`, `T1_T2_T1`,
+`T1_T1_T1_T2`, `EdgeFade_T1`, `EdgeFade_Env`, `EdgeFade_T1_T2`.
+
+**Pixel (`Combiners_*`, @ `0x00d7286c`-`0x00d72bcc`)** — `Mod`, `Opaque`, `Mod_Mod`,
+`Mod_Mod2x`, `Mod_Add`, `Mod_AddNA`, `Mod_Mod2xNA`, `Mod_Opaque`, `Mod_Depth`,
+`Mod_AddAlpha`, `Mod_AddAlpha_Alpha`, `Mod_AddAlpha_Wgt`, `Mod_Add_Alpha`,
+`Mod_Dual_Crossfade`, `Mod_Masked_Dual_Crossfade`, `Opaque_Alpha`, `Opaque_Alpha_Alpha`,
+`Opaque_Opaque`, `Opaque_Mod`, `Opaque_Mod2x`, `Opaque_Mod2xNA`, `Opaque_ModNA_Alpha`,
+`Opaque_AddAlpha`, `Opaque_AddAlpha_Alpha`, `Opaque_AddAlpha_Wgt`, `Opaque_Mod_Add_Wgt`,
+`Opaque_Mod2xNA_Alpha`, `Opaque_Mod2xNA_Alpha_Add`, `Opaque_Mod2xNA_Alpha_Alpha`,
+`Opaque_Mod2xNA_Alpha_3s`, `Opaque_Mod2xNA_Alpha_UnshAlpha`.
+
+WMO has its own smaller set: `MapObjDiffuse`, `MapObjSpecular`, `MapObjTwoLayerDiffuse`,
+`MapObjDiffuseEmissive`, `MapObjTwoLayerDiffuseOpaque`, `MapObjTwoLayerDiffuseEmissive`
+(@ `0x00dee4b4`-`0x00dee5c8`).
+
+Our renderers carry **no permutation system at all** — a search for `Combiners_` or
+`Diffuse_T1` across `src/` returns nothing. Every M2 batch goes through one program, so the
+per-batch texture-combiner work the client resolves at shader-select time is either done on
+the CPU or not done. This is the concrete form of "more shader programs to reduce CPU
+compute."
+
+### 4. What this means for sequencing
+
+- Spec 136 (doodad performance) is **9/11**, and both open tasks (T008, T011) are
+  user-owned measurement, not code. GPU instancing exists and is wired
+  (`IGpuInstancedModelRenderer`, used from `WorldScene.cs:10940`).
+- The shader-permutation gap is a **separate, unspecified lane** from 136's batching work.
+  136 reduces draw calls; permutations reduce per-batch CPU material work and are what make
+  doodads look right.
+- Zone lights are a data + spatial-query feature, largely independent of both.
