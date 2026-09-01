@@ -243,6 +243,16 @@ public class StandardTerrainAdapter : ITerrainAdapter
         byte[]? objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
         byte[]? adtBytes = _dataSource.ReadFile(rootPath);
 
+        // MPQ-era clients (Cata+ / MoP) ship patched ADTs as PTCH/BSDIFF artifacts; the native
+        // resource layer hands MapArea already-reconstructed bytes (MapAdtFileData.cpp). The
+        // viewer must apply the same reconstruction before parsing, otherwise the artifact bytes
+        // reach ParseAdt and the tile silently produces zero chunks.
+        adtBytes = ResolvePatchArtifactBytes(adtBytes, rootPath);
+        if (texPath != null)
+            texBytes = ResolvePatchArtifactBytes(texBytes, texPath);
+        if (objPath != null)
+            objBytes = ResolvePatchArtifactBytes(objBytes, objPath);
+
         if (adtBytes == null || adtBytes.Length == 0)
         {
             bool rootIsEmptyPlaceholder = adtBytes != null && adtBytes.Length == 0;
@@ -410,6 +420,35 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
     private static string FormatCompanionBand(AdtLodBand? band)
         => band.HasValue ? band.Value.ToString() : "root-only";
+
+    /// <summary>
+    /// If the raw bytes are a PTCH/BSDIFF patch artifact, reconstruct the final file bytes by
+    /// matching the artifact's embedded base MD5 against raw copies of the same virtual file
+    /// across all backing sources. Returns null (treated as missing) when reconstruction fails,
+    /// so artifact bytes never reach the ADT parser.
+    /// </summary>
+    private byte[]? ResolvePatchArtifactBytes(byte[]? data, string virtualPath)
+    {
+        if (data is not { Length: > 8 } || !AdtPatchArtifactDecoder.IsPatchArtifact(data))
+            return data;
+
+        bool reconstructed = AdtPatchArtifactDecoder.TryReconstruct(
+            data,
+            _dataSource.ReadFileCopies(virtualPath),
+            out byte[]? result,
+            out string failureReason);
+
+        if (reconstructed && result != null)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[StandardADT] Reconstructed patched ADT '{virtualPath}' ({data.Length} → {result.Length} bytes) via embedded BSDIFF patch.");
+            return result;
+        }
+
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"[StandardADT] '{virtualPath}' is a PTCH patch artifact ({data.Length} bytes) but could not be reconstructed: {failureReason}. Treating as missing.");
+        return null;
+    }
 
     private sealed class ParsedTileSource
     {

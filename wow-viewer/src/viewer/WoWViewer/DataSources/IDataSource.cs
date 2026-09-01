@@ -20,6 +20,18 @@ public interface IDataSource : IDisposable
     byte[]? ReadFile(string virtualPath);
 
     /// <summary>
+    /// Enumerates distinct raw copies of a virtual file across all backing sources, ordered
+    /// lowest source priority first (base archives before overlays). Used for patch-artifact
+    /// base resolution where the base copy is matched by content hash. Default: the single
+    /// <see cref="ReadFile"/> result.
+    /// </summary>
+    IEnumerable<byte[]?> ReadFileCopies(string virtualPath)
+    {
+        byte[]? data = ReadFile(virtualPath);
+        return data is null ? [] : [data];
+    }
+
+    /// <summary>
     /// Resolve a virtual path to a writable loose-file path when one exists.
     /// Returns false for archive-backed files with no loose source on disk.
     /// </summary>

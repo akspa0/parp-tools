@@ -1,6 +1,26 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
+
+**Spec 197 PTCH patch-artifact fix (2026-09-01).** Root cause of the random
+missing Thunder Isle tiles is confirmed: loose 5.0.1 `.adt` files are frequently
+PTCH/BSDIFF patch artifacts, and the viewer fed them raw to `ParseAdt` (zero
+`KNCM` records → empty tile). Native proof: `MapArea` (`FUN_00BB0850`) receives
+already-reconstructed bytes — the load-complete callback `FUN_00BB70F0`
+(`MapAdtFileData.cpp`) stores final `(fileData, size)`; the cache helpers
+(`FUN_00BB71B0`, `FUN_00BB7C80`) are pure hash-table plumbing. Fix shipped:
+[`AdtPatchArtifact.cs`](../src/core/WowViewer.Core.IO/Maps/AdtPatchArtifact.cs)
+(PTCH parse + BSDIFF40 apply + MD5-matched base selection), `ReadFileCopies`
+base-copy enumeration on `IDataSource`/`MpqDataSource`/`IArchiveCatalog`, and a
+reconstruction hook in `StandardTerrainAdapter.LoadMapTile` for root + tex/obj
+companions (failure logs Important and treats the file as missing). 7 new tests
+in `AdtPatchArtifactTests.cs`; focused run 12/12 passed; full Core.Tests 1245
+passed with 9 pre-existing failures verified identical at HEAD (disjoint
+modules). Evidence note:
+[`5.0.1-adt-ptch-patch-artifacts.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-adt-ptch-patch-artifacts.md).
+**Proof owner: user** — reload Thunder Isle from MoPBeta and confirm missing
+tiles render plus `Reconstructed patched ADT` log lines. Out of scope: multi-step
+patch-chain base synthesis, patched-WDT reconstruction, editing patched companions.
 
 **Spec 197 implementation handoff (2026-08-31).** The read-only 5.0.1 native
 evidence has been written into the focused

@@ -1,6 +1,13 @@
 # Progress — wow-viewer
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
+
+## 2026-09-01 — Spec 197: PTCH/BSDIFF patch-artifact reconstruction (random missing tiles root cause)
+- **Root cause confirmed:** Loose 5.0.1 `.adt` files are frequently PTCH/BSDIFF patch artifacts (`PTCH`/`MD5_`/`BSD0`/`BSDIFF40`); the viewer fed them raw to `ParseAdt`, the `KNCM` scan found nothing, and the tile silently produced zero chunks. Native proof: `MapArea` (`FUN_00BB0850`) receives already-reconstructed bytes — load-complete callback `FUN_00BB70F0` (`MapAdtFileData.cpp`) stores final `(fileData, size)`; cache helpers `FUN_00BB71B0`/`FUN_00BB7C80` are pure hash-table plumbing; key builder `FUN_00BB6C70` packs `mapId|adtFileType|y|x`.
+- **Landed:** [`AdtPatchArtifact.cs`](../src/core/WowViewer.Core.IO/Maps/AdtPatchArtifact.cs) — pure PTCH parse, standard BSDIFF40 applier (BZip2 control/diff/extra), MD5-matched base selection with `REVM` validation. `ReadFileCopies` base-copy enumeration added to `IDataSource` (default single-copy), `MpqDataSource` (archives lowest-priority first, alpha wrapper, loose last), and `IArchiveCatalog.ReadFileCopiesLowestFirst` (default + `MpqArchiveCatalog` override). `StandardTerrainAdapter.LoadMapTile` reconstructs root + `_texN`/`_objN` companions; reconstruction failure logs Important and treats the file as missing instead of parsing artifact bytes.
+- **Validation:** Full solution Debug build 0 errors. New `AdtPatchArtifactTests` (7 tests) + existing terrain builder tests: 12/12 passed. Full `WowViewer.Core.Tests`: 1245 passed / 9 failed — the 9 failures were verified identical at HEAD via a path-scoped stash (frame-pass ordering, M2 footprints, WTF classifier, V23 summaries, enrichment streams, V18 placements; all disjoint from this change).
+- **Evidence:** [`5.0.1-adt-ptch-patch-artifacts.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-adt-ptch-patch-artifacts.md).
+- **Open (user-owned proof):** Reload Thunder Isle from MoPBeta; confirm previously missing tiles render and `Reconstructed patched ADT ... via embedded BSDIFF patch` log lines appear. Out of scope: multi-step chain base synthesis, patched-WDT reconstruction, editing patched companions.
 
 ## 2026-08-31 — Spec 197: split reader/runtime and explicit conversion target boundary
 - **Landed:** Native-aligned 5.0.1 split-family discovery and loading for root plus selected `_obj0`/`_obj1` and `_tex0`/`_tex1` companions; headerless companion `MCNK` routing; sparse physical MCIN slot preservation; and focused regression coverage for band 1, split wrappers, sparse slots, and object references.

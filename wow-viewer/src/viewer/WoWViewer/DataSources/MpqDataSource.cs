@@ -714,6 +714,25 @@ public class MpqDataSource : IDataSource
         return data;
     }
 
+    /// <inheritdoc />
+    public IEnumerable<byte[]?> ReadFileCopies(string virtualPath)
+    {
+        string normalized = virtualPath.Replace('/', '\\');
+
+        // 1. Archive copies, lowest priority first (base MPQs before patch MPQs).
+        foreach (byte[]? copy in _archiveCatalog.ReadFileCopiesLowestFirst(normalized))
+            yield return copy;
+
+        // 2. Alpha nested wrapper copy.
+        if (_alphaMpqCache.TryGetValue(normalized, out string? alphaPath))
+            yield return ReadFromAlphaMpq(alphaPath, normalized);
+
+        // 3. Loose copies last (loose overlays sit at the top of the patch chain).
+        string? loosePath = TryResolveLoosePath(normalized);
+        if (loosePath != null)
+            yield return File.ReadAllBytes(loosePath);
+    }
+
     /// <summary>
     /// Reads the primary data file from an Alpha listfile-less .ext.MPQ archive.
     /// Uses AlphaArchiveReader which has smart block selection (name hash lookup, largest block fallback,

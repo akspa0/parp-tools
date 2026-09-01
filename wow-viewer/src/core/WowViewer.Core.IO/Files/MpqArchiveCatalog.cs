@@ -488,6 +488,27 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog, IArchiveFileSourceResol
         return null;
     }
 
+    /// <inheritdoc />
+    public IEnumerable<byte[]?> ReadFileCopiesLowestFirst(string virtualPath)
+    {
+        string normalized = NormalizeVirtualPath(virtualPath);
+        for (int i = 0; i < _archives.Count; i++)
+        {
+            MpqArchive archive = _archives[i];
+            BlockEntry? block = FindFileInArchive(archive, normalized);
+            if (block is null || block.FileSize == 0)
+            {
+                continue;
+            }
+
+            byte[]? data = ReadFileFromArchive(archive, block, normalized);
+            if (data is { Length: > 0 })
+            {
+                yield return data;
+            }
+        }
+    }
+
     public bool TryResolveFileSource(string virtualPath, out string sourcePath)
     {
         string normalized = NormalizeVirtualPath(virtualPath);

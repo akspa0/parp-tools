@@ -18,6 +18,18 @@ public interface IArchiveCatalog : IArchiveReader, IDisposable
     IReadOnlyList<string> ExtractInternalListfiles();
 
     IReadOnlyList<string> GetAllKnownFiles();
+
+    /// <summary>
+    /// Enumerates distinct raw copies of a virtual file across loaded archives in ascending
+    /// priority order (lowest-priority base archives first). Used for patch-artifact base
+    /// resolution where the base copy must be matched by content hash rather than priority.
+    /// Default: the single highest-priority copy from <see cref="IArchiveReader.ReadFile"/>.
+    /// </summary>
+    IEnumerable<byte[]?> ReadFileCopiesLowestFirst(string virtualPath)
+    {
+        byte[]? data = ReadFile(virtualPath);
+        return data is null ? [] : [data];
+    }
 }
 
 /// <summary>
