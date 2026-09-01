@@ -12,49 +12,29 @@ namespace WowViewer.Core.Tests;
 public class MopAdtChunkParserTests
 {
     [Fact]
-    public void ParseMdidChunk_ExtractsFileDataIds()
+    public void ParseMtxpChunk_DerivesStrideFromTextureCount()
     {
-        byte[] buffer = new byte[12];
-        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(0, 4), 123456);
-        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(4, 4), 234567);
-        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(8, 4), 345678);
+        // MTXP is the real per-texture parameter chunk (file-data +0x430, wired to the map
+        // area at +0x98 by FUN_00bb0b50). Its record layout is not asserted anywhere in the
+        // codebase because the client's consumer has not been isolated — the stride is
+        // measured against the texture count MTXP runs parallel to, so real files can settle
+        // it. Asserting a layout without that measurement is how MCXH came to exist.
+        byte[] payload = new byte[48];
 
-        List<uint> ids = MopAdtChunkParser.ParseMdidChunk(buffer);
-        Assert.Equal(3, ids.Count);
-        Assert.Equal(123456u, ids[0]);
-        Assert.Equal(234567u, ids[1]);
-        Assert.Equal(345678u, ids[2]);
+        AdtTextureParameters parameters = MopAdtChunkParser.ParseMtxpChunk(payload, textureCount: 3);
+
+        Assert.Equal(3, parameters.TextureCount);
+        Assert.Equal(16, parameters.StrideBytes);
     }
 
     [Fact]
-    public void ParseMhidChunk_ExtractsHeightFileDataIds()
+    public void ParseMtxpChunk_PayloadNotParallelToTextures_ReportsNoStride()
     {
-        byte[] buffer = new byte[8];
-        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(0, 4), 987654);
-        BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(4, 4), 876543);
+        // A non-dividing payload means MTXP is not parallel to MTEX after all. That must
+        // surface as "unknown", never as a rounded-off guess.
+        AdtTextureParameters parameters = MopAdtChunkParser.ParseMtxpChunk(new byte[50], textureCount: 3);
 
-        List<uint> ids = MopAdtChunkParser.ParseMhidChunk(buffer);
-        Assert.Equal(2, ids.Count);
-        Assert.Equal(987654u, ids[0]);
-        Assert.Equal(876543u, ids[1]);
-    }
-
-    [Fact]
-    public void ParseMcxhChunk_ExtractsHeightScaleAndOffsets()
-    {
-        byte[] buffer = new byte[16];
-        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(0, 4), 2.5f);
-        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(4, 4), -0.15f);
-
-        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(8, 4), 1.0f);
-        BinaryPrimitives.WriteSingleLittleEndian(buffer.AsSpan(12, 4), 0.0f);
-
-        List<MopHeightBlendLayer> layers = MopAdtChunkParser.ParseMcxhChunk(buffer);
-        Assert.Equal(2, layers.Count);
-        Assert.Equal(2.5f, layers[0].HeightScale, 2);
-        Assert.Equal(-0.15f, layers[0].HeightOffset, 2);
-        Assert.Equal(1.0f, layers[1].HeightScale, 2);
-        Assert.Equal(0.0f, layers[1].HeightOffset, 2);
+        Assert.Equal(0, parameters.StrideBytes);
     }
 
     [Fact]

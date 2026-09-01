@@ -602,7 +602,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         Dictionary<(int x, int y), Mcnk>? objMcnkByIndex = null;
         if (texBytes != null && texBytes.Length >= 16)
         {
-            if (TryBuildMcnkIndexMap(texBytes, _mcnkParseOptions, out texMcnkByIndex, out texMhdrStart, out texMhdr))
+            if (TryBuildMcnkIndexMap(texBytes, _mcnkParseOptions, out texMcnkByIndex, out texMhdrStart, out texMhdr,
+                    $"tile({tileX},{tileY}) texture companion"))
             {
                 if (ViewerLog.Verbose)
                     ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) split: parsed {texMcnkByIndex.Count} texture MCNKs from selected {FormatCompanionBand(selectedBand)} texture companion");
@@ -620,7 +621,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     _mcnkParseOptions,
                     out objMcnkByIndex,
                     out _,
-                    out _)
+                    out _,
+                    $"tile({tileX},{tileY}) object companion")
                 && ViewerLog.Verbose)
             {
                 ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) split: parsed {objMcnkByIndex.Count} object MCNKs from selected {FormatCompanionBand(selectedBand)} object companion");
@@ -642,20 +644,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 textures.AddRange(ParseMtexViaMhdr(texBytes, texMhdrStart, texMhdr));
             }
 
-            if (textures.Count == 0)
-            {
-                int texMdidOff = FindChunk(texBytes, "MDID");
-                if (texMdidOff >= 0 && texMdidOff + 8 <= texBytes.Length)
-                {
-                    int mdidSize = BitConverter.ToInt32(texBytes, texMdidOff + 4);
-                    if (mdidSize > 0 && texMdidOff + 8 + mdidSize <= texBytes.Length)
-                    {
-                        var fileDataIds = MopAdtChunkParser.ParseMdidChunk(new ReadOnlySpan<byte>(texBytes, texMdidOff + 8, mdidSize));
-                        foreach (uint fdid in fileDataIds)
-                            textures.Add($"FileDataID:{fdid}");
-                    }
-                }
-            }
         }
 
         // Find MHDR in root ADT — all other chunks located via MHDR offsets (or flat scan fallback)
@@ -682,20 +670,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     textures.AddRange(ParseNullStrings(adtBytes, mtexOff + 8, mtexSize));
             }
 
-            if (textures.Count == 0)
-            {
-                int rootMdidOff = FindChunk(adtBytes, "MDID");
-                if (rootMdidOff >= 0 && rootMdidOff + 8 <= adtBytes.Length)
-                {
-                    int mdidSize = BitConverter.ToInt32(adtBytes, rootMdidOff + 4);
-                    if (mdidSize > 0 && rootMdidOff + 8 + mdidSize <= adtBytes.Length)
-                    {
-                        var fileDataIds = MopAdtChunkParser.ParseMdidChunk(new ReadOnlySpan<byte>(adtBytes, rootMdidOff + 8, mdidSize));
-                        foreach (uint fdid in fileDataIds)
-                            textures.Add($"FileDataID:{fdid}");
-                    }
-                }
-            }
         }
 
         // Locate MCIN / MCNK chunks
@@ -703,7 +677,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         int mcinOff = mhdr?.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset) ?? 0;
         if (mcinOff == 0)
         {
-            mcnkOffsets = ReadMcnkOffsetsByChunkScan(adtBytes);
+            mcnkOffsets = ReadMcnkOffsetsByChunkScan(adtBytes, $"tile({tileX},{tileY}) root ADT");
             if (mcnkOffsets.Count == 0)
             {
                 Build335Diagnostics.Increment("MissingRequiredChunkCount");
@@ -1083,7 +1057,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         Mcnk.ParseOptions parseOptions,
         out Dictionary<(int x, int y), Mcnk> mcnkByIndex,
         out int mhdrStart,
-        out GillijimProject.WowFiles.Mhdr? mhdr)
+        out GillijimProject.WowFiles.Mhdr? mhdr,
+        string? diagnosticLabel = null)
     {
         mcnkByIndex = new Dictionary<(int x, int y), Mcnk>();
         mhdrStart = 0;
@@ -1096,7 +1071,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             int mcinOff = foundMhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
             if (mcinOff == 0)
             {
-                offsets = ReadMcnkOffsetsByChunkScan(adtBytes)
+                offsets = ReadMcnkOffsetsByChunkScan(adtBytes, diagnosticLabel)
                     .Select(static (offset, ordinal) => new McnkOffset(ordinal, offset))
                     .ToList();
             }
@@ -1113,7 +1088,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 }
                 else
                 {
-                    offsets = ReadMcnkOffsetsByChunkScan(adtBytes)
+                    offsets = ReadMcnkOffsetsByChunkScan(adtBytes, diagnosticLabel)
                         .Select(static (offset, ordinal) => new McnkOffset(ordinal, offset))
                         .ToList();
                 }
@@ -1122,7 +1097,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         else
         {
             // Flat chunk stream (e.g. Cataclysm / MoP split _tex0.adt and _obj0.adt)
-            offsets = ReadMcnkOffsetsByChunkScan(adtBytes)
+            offsets = ReadMcnkOffsetsByChunkScan(adtBytes, diagnosticLabel)
                 .Select(static (offset, ordinal) => new McnkOffset(ordinal, offset))
                 .ToList();
         }
@@ -1165,26 +1140,56 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
     private readonly record struct McnkOffset(int Slot, int Offset);
 
+    /// <summary>
+    /// Walk the top-level chunk stream and collect MCNK record offsets, following the native
+    /// 5.0.1 rule exactly: <c>next = payload + size</c>, <c>remaining -= 8 + size</c>, with no
+    /// alignment padding (<c>MapAdtFileData.cpp</c> FUN_00bb6f10). The native parser asserts
+    /// two invariants the caller cannot otherwise observe — the walk consumes the buffer
+    /// exactly (<c>dataSize == 0</c>) and yields exactly 0x100 MCNK records — so a desynced or
+    /// truncated walk is reported here instead of silently producing a partial tile.
+    /// </summary>
     private static List<int> ReadMcnkOffsetsByChunkScan(byte[] adtBytes)
+        => ReadMcnkOffsetsByChunkScan(adtBytes, null);
+
+    private static List<int> ReadMcnkOffsetsByChunkScan(byte[] adtBytes, string? diagnosticLabel)
     {
         var offsets = new List<int>(256);
         int position = 0;
+        bool desynced = false;
 
         while (position + 8 <= adtBytes.Length)
         {
             string signature = Encoding.ASCII.GetString(adtBytes, position, 4);
             int size = BitConverter.ToInt32(adtBytes, position + 4);
             if (size < 0)
+            {
+                desynced = true;
                 break;
+            }
 
             if (signature == "KNCM")
                 offsets.Add(position);
 
-            int next = position + 8 + size + ((size & 1) == 1 ? 1 : 0);
-            if (next <= position)
+            // Native 5.0.1 walks chunks as next = payload + size with no alignment padding
+            // (MapAdtFileData.cpp FUN_00bb6f10, MapChunk.cpp FUN_00ba3050: remaining -= 8 + size,
+            // then assert dataSize == 0). Padding an odd-sized chunk desyncs the walk and
+            // silently truncates the tile.
+            int next = position + 8 + size;
+            if (next <= position || next > adtBytes.Length)
+            {
+                desynced = next <= position || next > adtBytes.Length;
                 break;
+            }
 
             position = next;
+        }
+
+        if (diagnosticLabel != null && (desynced || position != adtBytes.Length || offsets.Count != 256))
+        {
+            Build335Diagnostics.Increment("AdtChunkWalkDesyncCount");
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[StandardADT] Chunk walk did not satisfy the native invariants for {diagnosticLabel}: " +
+                $"consumed {position}/{adtBytes.Length} bytes, found {offsets.Count} MCNK records (native asserts 256 and a fully consumed buffer)");
         }
 
         return offsets;
@@ -2771,7 +2776,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
             if (fcc == reversed)
                 return i;
 
-            int next = i + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            // Native 5.0.1 walks chunks as next = payload + size with no alignment
+            // padding (MapAdtFileData.cpp FUN_00bb6f10, MapChunk.cpp FUN_00ba3050:
+            // remaining -= 8 + size, then assert dataSize == 0). Padding an odd-sized
+            // chunk desyncs the walk and silently truncates the tile.
+            int next = i + 8 + size;
             if (next <= i) break;
             i = next;
         }

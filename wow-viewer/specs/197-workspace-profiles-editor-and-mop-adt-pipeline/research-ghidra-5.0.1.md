@@ -484,3 +484,141 @@ family path builder.
 The implementation task remains T117. Parser/renderer changes described by
 [`plan.md`](plan.md:51) and acceptance criteria AC-006/AC-007 in
 [`spec.md`](spec.md:39) are still gated on this evidence pass.
+
+---
+
+## 4. Chunk-walk rule and complete MCNK sub-chunk map (5.0.1.15464)
+
+Recorded 2026-09-01 from `FUN_00bb6f10` (`MapAdtFileData.cpp`) and `FUN_00ba3050`
+(`MapChunk.cpp`). This section is measured from the decompiled loader, not inferred.
+
+### 4.1 The walk rule — no alignment padding, at either level
+
+Both the top-level file walk and the MCNK sub-chunk walk advance identically:
+
+```
+next      = payload + size          // i.e. position + 8 + size
+remaining = remaining - 8 - size
+```
+
+There is **no** padding of odd-sized chunks. The native parser then asserts:
+
+| Assert | Site | Meaning |
+|---|---|---|
+| `dataSize == 0` | `MapAdtFileData.cpp:0x157` | the top-level walk consumes the buffer exactly |
+| `chunkIndex == 0x100` | `MapAdtFileData.cpp:0x158` | every file-data object holds exactly 256 MCNK records |
+| `dataSize == 0` | `MapChunk.cpp:0x461` | the sub-chunk walk consumes the MCNK payload exactly |
+
+A walker that rounds odd sizes up to even desynchronises on the first odd-sized chunk,
+never matches a fourcc again, and silently returns only the records it reached first.
+That was the defect fixed on 2026-09-01 in `StandardTerrainAdapter`.
+
+**MCIN is not consulted by this loader.** `FUN_00bb6f10` stores MCNK pointers into a flat
+array at `this+0x434` indexed by *sequential ordinal*. Slot order is `y * 16 + x`:
+`FUN_00bb0a30` reads `*(base + 0x434 + ((y & 0xf) * 0x10 + (x & 0xf)) * 4)` from all three
+file-data objects (root, tex, obj — loop bound `iVar3 < 3`) using the same index, and passes
+`iVar3 == 0` as the "consume the 128-byte MCNK header" flag. Only the root slot has a header.
+
+### 4.2 MCNK sub-chunk dispatch table
+
+Fields are offsets into the map-chunk object. "ptr" = payload pointer retained; the loader
+copies nothing except MCLY.
+
+| Token | Field | Stored | Count / notes |
+|---|---|---|---|
+| `MCVT` | `+0x110` | ptr | heights |
+| `MCCV` | `+0x114` | ptr | vertex colours |
+| `MCLV` | `+0x118` | ptr | |
+| `MCNR` | `+0x11c` | ptr | normals |
+| `MCSH` | `+0x120` | ptr | shadow map |
+| `MCAL` | `+0x124` | ptr | alpha maps |
+| `MCRF` | `+0x128` | ptr | monolithic references |
+| `MCRD` | `+0x12c` | ptr | count `size >> 2` at `+0x90` — doodad refs (split `_obj`) |
+| `MCRW` | `+0x130` | ptr | count `size >> 2` at `+0x92` — WMO refs (split `_obj`) |
+| `MCLQ` | `+0x134` | ptr | legacy liquid |
+| `MCMT` | `+0x13c` | **value** | dereferenced, not retained as a pointer |
+| `MCBB` | `+0x148` | ptr | blend batches, **20-byte** records; count `size / 0x14` at `+0x147`, asserted `<= 0xff` |
+| `MCDD` | `+0x9c` | ptr | size asserted `== 8 || == 32`; size 32 sets bit 0 of `+0x7c` |
+| `MCLY` | `+0xa0` | **memcpy'd inline** | layer count `size >> 4` at `+0x94` — 16-byte records |
+
+`MCLY` is the only sub-chunk copied into the object rather than referenced, which bounds its
+size. `MCRD`/`MCRW` are the split-file replacements for `MCRF`.
+
+### 4.3 The top-level parser retains only four tokens
+
+`FUN_00bb6f10` keeps exactly these from the file-data stream; everything else is walked
+past and discarded:
+
+| Token | Field | Note |
+|---|---|---|
+| `MCNK` | `+0x434` array | 256 pointers, sequential ordinal, asserted |
+| `MTEX` | passed to `FUN_00bb6e80` | texture name block |
+| `MTXF` | `+0x42c` | texture flags — we read this (`AdtMtxfReader`) |
+| `MTXP` | `+0x430` | texture parameters — reader added 2026-09-01; stride still unmeasured |
+
+**`MTXP` is the 5.0.1 texture-parameter chunk, and `MCXH` is not real.** `MHID`, `MDID`
+and `MCXH` appear nowhere in either dispatcher. The height-scale/offset data that spec 197
+has been attributing to `MCXH` is what `MTXP` carries. Its record layout is still unread —
+the next bounded step is the consumer of `+0x430`.
+
+`MopAdtChunkParser` declares parsers for `MDID`/`MHID`/`MCXH` plus
+`MopParsedAdtTile`/`MopParsedChunk` models that **no code produces**. It is unreachable
+scaffolding with guessed field semantics. Do not treat it as evidence.
+
+### 4.4 MCNR advance is era-dependent, and the client's own assertion resolves it
+
+3.3.5 MCNR declares 435 bytes but occupies 448; 5.0.1 declares its true size. A parser that
+hardcodes either rule loses every sub-chunk after MCNR in the other era — and since MCLY and
+MCAL follow MCNR, that renders as untextured terrain rather than as a parse failure.
+
+`Mcnk` now picks the rule by testing both against the invariant the client asserts
+(`MapChunk.cpp:0x461`, the walk consumes the payload exactly) rather than by branching on a
+build number. Unmodelled tokens are recorded in `Mcnk.UnknownSubchunks`: native falls through
+them and still advances by the declared size, so they do not break the walk, but they are
+gaps in our decode and are now visible instead of silent.
+
+
+### 4.5 The root-ADT dispatcher — `FUN_00bb0b50` (`MapArea.cpp:0x25a`)
+
+The file-data parser in 4.3 is not the whole story: the root ADT goes through a second,
+richer dispatcher. Same walk rule, and it loops `while (dataSize != 0)` so exact consumption
+is structural rather than merely asserted.
+
+| Token | Field | Count divisor / note |
+|---|---|---|
+| `MHDR` | `+0x3f` (byte) | takes dword index 14 of the payload |
+| `MAMP` | `+0x3f` (byte) | first byte of payload |
+| `MTEX` | `+0x88`…`+0x98` | wires the name block plus `+0x428`/`MTXF`/`MTXP` into the area |
+| `MDDF` | `+0x9c` | `size / 0x24` — **36-byte records, confirmed** |
+| `MODF` | `+0xa0` | `size >> 6` — **64-byte records, confirmed** |
+| `MMDX` | `+0xac` | |
+| `MMID` | `+0xb4` | |
+| `MWMO` | `+0xb0` | |
+| `MWID` | `+0xb8` | |
+| `MFBO` | `+0xbc` | |
+| `MH2O` | `+0xc0` | |
+| `MBMH` | `+0xc4`, count `+0xd0` | `size / 0x1c` — 28-byte blend-mesh headers |
+| `MBMI` | `+0xcc`, count `+0xd8` | `size >> 1` — 2-byte blend-mesh indices |
+| `MBMV` | `+0xc8`, count `+0xd4` | `size / 0x28` — 40-byte blend-mesh vertices |
+
+**`MBMH`/`MBMI`/`MBMV` are the WMO-to-terrain seam blending that T117b is chasing**, together
+with the per-chunk `MCBB` blend batches from 4.2. That is a real, measured mesh format — three
+parallel arrays with known strides — not a shader detail. It is the next bounded decode target,
+and it supersedes the `MHID`/`MDID`/`MCXH` line of enquiry entirely.
+
+### 4.6 Fiction removed from the codebase (2026-09-01)
+
+`MopAdtChunkParser` previously parsed `MDID`, `MHID` and `MCXH`, and declared
+`MopParsedAdtTile`/`MopParsedChunk`/`MopChunkLayer`/`MopMaterialTables` that no code produced.
+None of those three tokens appear in either dispatcher. Their unit tests asserted the invented
+layouts against themselves, so the whole thing was self-consistent and entirely unfounded.
+
+Removed: the three parsers, the unreachable models, their tests, `MCXH` from the headerless
+MCNK detection list, and the two `StandardTerrainAdapter` fallbacks that synthesised
+unresolvable `FileDataID:N` texture names from a chunk 5.0.1 never emits. Added in their place:
+`ParseMtxpChunk`, which returns the raw payload plus the texture count it parallels and
+*derives* the stride, reporting 0 when the payload does not divide evenly — a measurement, not
+an assertion.
+
+One `MDID` reference is deliberately retained, at `WowFileDetector.cs:150`, where it only
+widens file-kind recognition. It asserts no layout and parses nothing.

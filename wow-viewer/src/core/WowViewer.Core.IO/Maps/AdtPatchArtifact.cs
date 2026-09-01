@@ -183,6 +183,7 @@ public static class AdtPatchArtifactDecoder
         long newPos = 0;
         long oldPos = 0;
         long diffPos = 0;
+        long extraPos = 0;
         int controlPos = 0;
 
         while (newPos < newSize)
@@ -198,53 +199,53 @@ public static class AdtPatchArtifactDecoder
             long seek = BinaryPrimitives.ReadInt64BigEndian(control.AsSpan(controlPos + 16, 8));
             controlPos += 24;
 
+            // Diff run: bytes come from the DIFF block and are summed with the aligned old byte.
+            // bsdiff allows the old cursor to walk outside the base file; those positions
+            // contribute zero rather than aborting the apply.
             if (add < 0 || newPos + add > newSize)
             {
                 error = $"BSDIFF invalid add run ({add}) at new offset {newPos}";
                 return false;
             }
 
+            if (diffPos + add > diff.Length)
+            {
+                error = $"BSDIFF diff block exhausted at new offset {newPos} (need {add}, have {diff.Length - diffPos})";
+                return false;
+            }
+
             for (long i = 0; i < add; i++)
             {
-                if (oldPos + i >= oldData.Length || diffPos + i >= diff.Length)
-                {
-                    error = $"BSDIFF add run reads past old/diff data at new offset {newPos + i}";
-                    return false;
-                }
-
-                newData[newPos + i] = (byte)(diff[diffPos + i] + oldData[oldPos + i]);
+                byte delta = diff[diffPos + i];
+                long oldIndex = oldPos + i;
+                newData[newPos + i] = oldIndex >= 0 && oldIndex < oldData.Length
+                    ? (byte)(delta + oldData[oldIndex])
+                    : delta;
             }
 
             newPos += add;
             oldPos += add;
             diffPos += add;
 
+            // Insert run: literal bytes come from the EXTRA block, not the diff block.
             if (insert < 0 || newPos + insert > newSize)
             {
                 error = $"BSDIFF invalid insert run ({insert}) at new offset {newPos}";
                 return false;
             }
 
-            for (long i = 0; i < insert; i++)
+            if (extraPos + insert > extra.Length)
             {
-                if (diffPos + i >= diff.Length)
-                {
-                    error = $"BSDIFF insert run reads past diff data at new offset {newPos + i}";
-                    return false;
-                }
-
-                newData[newPos + i] = diff[diffPos + i];
-            }
-
-            newPos += insert;
-            diffPos += insert;
-
-            oldPos += seek;
-            if (oldPos < 0 || oldPos > oldData.Length)
-            {
-                error = $"BSDIFF seek moved old offset out of range ({oldPos})";
+                error = $"BSDIFF extra block exhausted at new offset {newPos} (need {insert}, have {extra.Length - extraPos})";
                 return false;
             }
+
+            extra.AsSpan((int)extraPos, (int)insert).CopyTo(newData.AsSpan((int)newPos, (int)insert));
+
+            newPos += insert;
+            extraPos += insert;
+
+            oldPos += seek;
         }
 
         result = newData;

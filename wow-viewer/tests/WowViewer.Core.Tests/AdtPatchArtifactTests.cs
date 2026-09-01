@@ -96,7 +96,7 @@ public sealed class AdtPatchArtifactTests
     {
         // old = "ABCDEF"
         // control: (add=2, insert=2, seek=-1) then (add=3, insert=0, seek=0)
-        // new = "AB" + "XY" + old[1..4) adjusted = "ABXYDEF"
+        // new = old[0..2) + literal "XY" + old[1..4) = "ABXYDEF"
         byte[] oldData = Encoding.ASCII.GetBytes("ABCDEF");
         byte[] expectedNew = Encoding.ASCII.GetBytes("ABXYDEF");
 
@@ -108,12 +108,64 @@ public sealed class AdtPatchArtifactTests
         BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(32, 8), 0);  // insert
         BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(40, 8), 0);  // seek
 
-        // add run 1: new[0..2) = diff[0..2) + old[0..2) → want "AB" → diff bytes 0,0
-        // insert run: literal "XY"
-        // add run 2: new[4..7) = diff[4..7) + old[1..4) → want "DEF" → diff bytes 2,2,2
-        byte[] diff = [(byte)0, (byte)0, (byte)'X', (byte)'Y', (byte)2, (byte)2, (byte)2];
+        // Diff block carries ONLY add-run bytes; insert literals live in the extra block.
+        // add run 1: new[0..2) = diff[0..2) + old[0..2) -> want "AB" -> diff bytes 0,0
+        // add run 2: new[4..7) = diff[2..5) + old[1..4) -> want "DEF" -> diff bytes 2,2,2
+        byte[] diff = [0, 0, 2, 2, 2];
+        byte[] extra = Encoding.ASCII.GetBytes("XY");
 
-        byte[] bsdiff = BuildBsdiff(control, diff, extra: []);
+        byte[] bsdiff = BuildBsdiff(control, diff, extra, expectedNew.Length);
+
+        bool ok = AdtPatchArtifactDecoder.TryApplyBsdiff(oldData, bsdiff, out byte[]? result, out string error);
+
+        Assert.True(ok, error);
+        Assert.Equal(expectedNew, result);
+    }
+
+    [Fact]
+    public void TryApplyBsdiff_InsertRunReadsExtraBlock_NotDiffBlock()
+    {
+        // Regression guard: an implementation that serves insert runs from the diff block
+        // reconstructs everything after the first insert run from the wrong bytes. Both blocks
+        // are populated with distinguishable data so that confusing them cannot pass.
+        byte[] oldData = Encoding.ASCII.GetBytes("0123456789");
+        byte[] expectedNew = Encoding.ASCII.GetBytes("01!!456789");
+
+        byte[] control = new byte[48];
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(0, 8), 2);  // add old[0..2)
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(8, 8), 2);  // insert "!!"
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(16, 8), 2); // skip old[2..4)
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(24, 8), 6); // add old[4..10)
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(32, 8), 0);
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(40, 8), 0);
+
+        byte[] diff = new byte[8]; // all-zero deltas: add runs copy the old bytes verbatim
+        byte[] extra = Encoding.ASCII.GetBytes("!!");
+
+        byte[] bsdiff = BuildBsdiff(control, diff, extra, expectedNew.Length);
+
+        bool ok = AdtPatchArtifactDecoder.TryApplyBsdiff(oldData, bsdiff, out byte[]? result, out string error);
+
+        Assert.True(ok, error);
+        Assert.Equal(expectedNew, result);
+    }
+
+    [Fact]
+    public void TryApplyBsdiff_OldCursorPastBaseEnd_ContributesZero()
+    {
+        // bsdiff lets the old cursor walk past the base file; those positions add nothing
+        // instead of aborting the apply.
+        byte[] oldData = Encoding.ASCII.GetBytes("AB");
+        byte[] expectedNew = Encoding.ASCII.GetBytes("ABZZ");
+
+        byte[] control = new byte[24];
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(0, 8), 4); // add run walks 2 bytes past the end
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(8, 8), 0);
+        BinaryPrimitives.WriteInt64BigEndian(control.AsSpan(16, 8), 0);
+
+        byte[] diff = [0, 0, (byte)'Z', (byte)'Z'];
+
+        byte[] bsdiff = BuildBsdiff(control, diff, [], expectedNew.Length);
 
         bool ok = AdtPatchArtifactDecoder.TryApplyBsdiff(oldData, bsdiff, out byte[]? result, out string error);
 
@@ -157,7 +209,7 @@ public sealed class AdtPatchArtifactTests
         for (int i = 0; i < newExpected.Length; i++)
             diff[i] = (byte)(newExpected[i] - baseData[i]);
 
-        byte[] bsdiff = BuildBsdiff(control, diff, extra: []);
+        byte[] bsdiff = BuildBsdiff(control, diff, extra: [], newSize: newExpected.Length);
 
         using MemoryStream ms = new();
         ms.Write("PTCH"u8);
@@ -170,7 +222,7 @@ public sealed class AdtPatchArtifactTests
         return ms.ToArray();
     }
 
-    private static byte[] BuildBsdiff(byte[] control, byte[] diff, byte[] extra)
+    private static byte[] BuildBsdiff(byte[] control, byte[] diff, byte[] extra, long newSize)
     {
         byte[] controlBz = Bzip2(control);
         byte[] diffBz = Bzip2(diff);
@@ -180,7 +232,7 @@ public sealed class AdtPatchArtifactTests
         ms.Write("BSDIFF40"u8);
         WriteInt64BigEndianAt(ms, controlBz.Length);
         WriteInt64BigEndianAt(ms, diffBz.Length);
-        WriteInt64BigEndianAt(ms, diff.Length + extra.Length);
+        WriteInt64BigEndianAt(ms, newSize);
         ms.Write(controlBz);
         ms.Write(diffBz);
         ms.Write(extraBz);

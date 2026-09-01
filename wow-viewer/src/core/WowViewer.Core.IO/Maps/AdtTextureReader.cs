@@ -210,7 +210,11 @@ public static class AdtTextureReader
             if (chunkId == reversed)
                 return position;
 
-            int next = position + ChunkHeader.SizeInBytes + size + ((size & 1) == 1 ? 1 : 0);
+            // Native 5.0.1 walks chunks as next = payload + size with no alignment
+            // padding (MapAdtFileData.cpp FUN_00bb6f10, MapChunk.cpp FUN_00ba3050:
+            // remaining -= 8 + size, then assert dataSize == 0). Padding an odd-sized
+            // chunk desyncs the walk and silently truncates the tile.
+            int next = position + ChunkHeader.SizeInBytes + size;
             if (next <= position)
                 break;
 
@@ -396,7 +400,11 @@ public static class AdtTextureReader
             if (string.Equals(signature, "KNCM", StringComparison.Ordinal))
                 offsets.Add(position);
 
-            int next = position + ChunkHeader.SizeInBytes + size + ((size & 1) == 1 ? 1 : 0);
+            // Native 5.0.1 walks chunks as next = payload + size with no alignment
+            // padding (MapAdtFileData.cpp FUN_00bb6f10, MapChunk.cpp FUN_00ba3050:
+            // remaining -= 8 + size, then assert dataSize == 0). Padding an odd-sized
+            // chunk desyncs the walk and silently truncates the tile.
+            int next = position + ChunkHeader.SizeInBytes + size;
             if (next <= position)
                 break;
 

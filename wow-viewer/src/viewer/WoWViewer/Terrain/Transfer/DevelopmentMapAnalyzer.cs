@@ -373,7 +373,11 @@ public static partial class DevelopmentMapAnalyzer
 
             chunks.Add(new TopLevelChunk(NormalizeFourCc(rawSignature), rawSignature, position, size));
 
-            int next = position + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            // Native 5.0.1 walks chunks as next = payload + size with no alignment
+            // padding (MapAdtFileData.cpp FUN_00bb6f10, MapChunk.cpp FUN_00ba3050:
+            // remaining -= 8 + size, then assert dataSize == 0). Padding an odd-sized
+            // chunk desyncs the walk and silently truncates the tile.
+            int next = position + 8 + size;
             if (next <= position)
                 break;
 

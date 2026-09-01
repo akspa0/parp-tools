@@ -1667,7 +1667,7 @@ public class VlmDatasetExporter
                 string fcc = System.Text.Encoding.ASCII.GetString(adtBytes, i, 4);
                 int sz = BitConverter.ToInt32(adtBytes, i + 4);
                 if (sz < 0) break;
-                int next = i + 8 + sz + ((sz & 1) == 1 ? 1 : 0);
+                int next = i + 8 + sz;
                 if (fcc == "RDHM") { mhdrOffset = i; break; }
                 if (i + 8 + sz > adtBytes.Length) break;
                 if (next <= i) break;
@@ -2122,7 +2122,7 @@ public class VlmDatasetExporter
                 break;
 
             int dataStart = i + 8;
-            int next = dataStart + sz + ((sz & 1) == 1 ? 1 : 0);
+            int next = dataStart + sz;
             if (dataStart + sz > source.Length)
                 break;
 
@@ -2238,7 +2238,7 @@ public class VlmDatasetExporter
             if (fcc == reversed)
                 return i;
 
-            int next = i + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            int next = i + 8 + size;
             if (next <= i) break;
             i = next;
         }
@@ -2465,7 +2465,7 @@ public class VlmDatasetExporter
             if (chunkId == fourCc || chunkId == reversedFourCc)
                 return true;
 
-            int next = offset + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            int next = offset + 8 + size;
             if (offset + 8 + size > fileBytes.Length || next <= offset)
                 break;
 

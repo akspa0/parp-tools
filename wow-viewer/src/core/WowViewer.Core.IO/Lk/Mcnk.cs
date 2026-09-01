@@ -24,6 +24,25 @@ namespace WowViewer.Core.IO.Lk
             public bool SkipHeader { get; init; }
         }
 
+        /// <summary>
+        /// How the sub-chunk walk advances past a record.
+        /// </summary>
+        public enum SubchunkAdvanceRule
+        {
+            /// <summary>
+            /// The 5.0.1 native rule (MapChunk.cpp FUN_00ba3050): advance by the declared
+            /// size and nothing else.
+            /// </summary>
+            DeclaredSize,
+
+            /// <summary>
+            /// Legacy over-consumption: MCNR occupies 0x1C0 bytes regardless of its declared
+            /// size, and MCAL/MCSH may be extended to the MCNK header's declared size. Correct
+            /// for 3.3.5-era files, where the declared MCNR size excludes 13 trailing bytes.
+            /// </summary>
+            LegacyOverConsume,
+        }
+
         public const string Signature = "MCNK";
         public McnkHeader Header;
         public float[] Heightmap; // MCVT
@@ -42,6 +61,38 @@ namespace WowViewer.Core.IO.Lk
         public byte[] MclqData;  // MCLQ legacy liquid
         public byte[] McrdData;  // MCRD split doodad references
         public byte[] McrwData;  // MCRW split WMO references
+        public byte[] McrfData;  // MCRF monolithic references
+        public byte[] MclvData;  // MCLV
+        public byte[] McbbData;  // MCBB blend batches (20-byte records)
+        public byte[] McddData;  // MCDD detail doodad disable mask
+        public uint? McmtValue;  // MCMT is dereferenced by the client, not retained as a pointer
+
+        /// <summary>Layer count as the client derives it: MCLY size &gt;&gt; 4 (16-byte records).</summary>
+        public int MclyRecordCount { get; private set; }
+        /// <summary>MCRD reference count as the client derives it: size &gt;&gt; 2.</summary>
+        public int McrdRecordCount { get; private set; }
+        /// <summary>MCRW reference count as the client derives it: size &gt;&gt; 2.</summary>
+        public int McrwRecordCount { get; private set; }
+        /// <summary>MCBB blend-batch count as the client derives it: size / 0x14, asserted &lt;= 0xff.</summary>
+        public int McbbRecordCount { get; private set; }
+
+        /// <summary>
+        /// FourCCs encountered in the sub-chunk stream that this parser does not model.
+        /// Empty is the goal: native asserts the walk consumes the payload exactly, so an
+        /// unmodelled token is a gap in our decode even though the walk survives it.
+        /// </summary>
+        public IReadOnlyList<string> UnknownSubchunks => _unknownSubchunks;
+
+        /// <summary>
+        /// True when the chosen advance rule consumed the MCNK payload exactly, which is the
+        /// invariant the client asserts (MapChunk.cpp:0x461 "dataSize == 0").
+        /// </summary>
+        public bool SubchunkWalkConsumedExactly { get; private set; }
+
+        /// <summary>Which advance rule satisfied the native exact-consumption invariant.</summary>
+        public SubchunkAdvanceRule AdvanceRuleUsed { get; private set; }
+
+        private readonly List<string> _unknownSubchunks = new();
         private readonly ParseOptions _parseOptions;
 
         public Mcnk(byte[] data)
@@ -60,7 +111,7 @@ namespace WowViewer.Core.IO.Lk
             if (_parseOptions.SkipHeader || IsHeaderlessSubchunkStream(data))
             {
                 Header = default;
-                ScanSubchunks(data, startOffset: 0);
+                ScanSubchunks(data, startOffset: 0, SelectAdvanceRule(data, 0));
             }
             else
             {
@@ -69,14 +120,14 @@ namespace WowViewer.Core.IO.Lk
                     if (IsHeaderlessSubchunkStream(data))
                     {
                         Header = default;
-                        ScanSubchunks(data, startOffset: 0);
+                        ScanSubchunks(data, startOffset: 0, SelectAdvanceRule(data, 0));
                         return;
                     }
                     throw new InvalidDataException("MCNK data too short for header");
                 }
 
                 Header = ReadHeader(data);
-                ScanSubchunks(data, startOffset: 0x80);
+                ScanSubchunks(data, startOffset: 0x80, SelectAdvanceRule(data, 0x80));
             }
         }
 
@@ -86,6 +137,9 @@ namespace WowViewer.Core.IO.Lk
                 return false;
 
             uint fourcc = BitConverter.ToUInt32(data, 0);
+            // Tokens this parser handles, so detection matches capability. MCXH was removed:
+            // it appears in neither 5.0.1 dispatcher and corresponds to nothing the client
+            // reads — the per-texture height/blend parameters it was invented for are MTXP.
             return fourcc is 0x4D434C59 or 0x594C434D   // MCLY
                         or 0x4D43414C or 0x4C41434D   // MCAL
                         or 0x4D435348 or 0x4853434D   // MCSH
@@ -95,7 +149,13 @@ namespace WowViewer.Core.IO.Lk
                         or 0x4D434C51 or 0x514C434D   // MCLQ
                         or 0x4D435345 or 0x4553434D   // MCSE
                         or 0x4D434D53 or 0x534D434D   // MCMS
-                        or 0x4D435848 or 0x4858434D;  // MCXH
+                        or 0x4D435246 or 0x4652434D   // MCRF
+                        or 0x4D434C56 or 0x564C434D   // MCLV
+                        or 0x4D434D54 or 0x544D434D   // MCMT
+                        or 0x4D434242 or 0x4242434D   // MCBB
+                        or 0x4D434444 or 0x4444434D   // MCDD
+                        or 0x4D435244 or 0x4452434D   // MCRD
+                        or 0x4D435257 or 0x5752434D;  // MCRW
         }
 
         /// <summary>
@@ -105,8 +165,110 @@ namespace WowViewer.Core.IO.Lk
         private static int _diagCount = 0;
         private static bool _diagLiquidDone = false;
 
-        private void ScanSubchunks(byte[] data, int startOffset = 0x80)
+        /// <summary>
+        /// Pick the advance rule by testing each against the invariant the client itself
+        /// asserts: the sub-chunk walk must consume the MCNK payload exactly
+        /// (MapChunk.cpp:0x461 "dataSize == 0"). The native declared-size rule is tried first;
+        /// 3.3.5-era files only satisfy the invariant under legacy over-consumption, because
+        /// their declared MCNR size excludes 13 trailing bytes. Nothing here is guessed from
+        /// the build — the data decides.
+        /// </summary>
+        private void RecordUnknownSubchunk(byte[] data, int pos)
         {
+            if (pos + 4 > data.Length)
+                return;
+
+            string token = System.Text.Encoding.ASCII.GetString(data, pos, 4);
+            if (!_unknownSubchunks.Contains(token))
+                _unknownSubchunks.Add(token);
+        }
+
+        private SubchunkAdvanceRule SelectAdvanceRule(byte[] data, int startOffset)
+        {
+            if (ProbeWalkConsumesExactly(data, startOffset, SubchunkAdvanceRule.DeclaredSize))
+                return SubchunkAdvanceRule.DeclaredSize;
+
+            if (ProbeWalkConsumesExactly(data, startOffset, SubchunkAdvanceRule.LegacyOverConsume))
+                return SubchunkAdvanceRule.LegacyOverConsume;
+
+            // Neither rule satisfies the native invariant. Keep the historical behaviour so
+            // existing readers are unchanged, and let ScanSubchunks record the shortfall.
+            return SubchunkAdvanceRule.LegacyOverConsume;
+        }
+
+        /// <summary>
+        /// Walk the sub-chunk stream without materialising anything, reporting whether the
+        /// walk lands exactly on the end of the payload under the supplied rule.
+        /// </summary>
+        private bool ProbeWalkConsumesExactly(byte[] data, int startOffset, SubchunkAdvanceRule rule)
+        {
+            int pos = startOffset;
+
+            while (pos + 8 <= data.Length)
+            {
+                uint fourcc = BitConverter.ToUInt32(data, pos);
+                uint size = BitConverter.ToUInt32(data, pos + 4);
+                int dataStart = pos + 8;
+
+                if (size > (uint)(data.Length - dataStart))
+                    return false;
+
+                int next = dataStart + (int)ComputeConsumedSize(fourcc, size, dataStart, data.Length, rule);
+                if (next <= pos || next > data.Length)
+                    return false;
+
+                pos = next;
+            }
+
+            return pos == data.Length;
+        }
+
+        /// <summary>
+        /// Bytes consumed by one sub-chunk record under the supplied rule. Under
+        /// <see cref="SubchunkAdvanceRule.DeclaredSize"/> this is always the declared size,
+        /// which is what the 5.0.1 dispatcher does for every token it handles.
+        /// </summary>
+        private uint ComputeConsumedSize(uint fourcc, uint size, int dataStart, int dataLength, SubchunkAdvanceRule rule)
+        {
+            if (rule == SubchunkAdvanceRule.DeclaredSize)
+                return size;
+
+            switch (fourcc)
+            {
+                case 0x4D434E52: // MCNR
+                case 0x524E434D:
+                    return Math.Max(size, 0x1C0u);
+
+                case 0x4D43414C: // MCAL
+                case 0x4C41434D:
+                {
+                    uint fromHeader = _parseOptions.UseHeaderAlphaSize && Header.SizeMcal >= 8
+                        ? Header.SizeMcal - 8
+                        : 0;
+                    return fromHeader > 0 && fromHeader <= (uint)(dataLength - dataStart)
+                        ? Math.Max(size, fromHeader)
+                        : size;
+                }
+
+                case 0x4D435348: // MCSH
+                case 0x4853434D:
+                {
+                    uint fromHeader = _parseOptions.UseHeaderShadowSize && Header.SizeMcsh >= 8
+                        ? Header.SizeMcsh - 8
+                        : 0;
+                    return fromHeader > 0 && fromHeader <= (uint)(dataLength - dataStart)
+                        ? Math.Max(size, fromHeader)
+                        : size;
+                }
+
+                default:
+                    return size;
+            }
+        }
+
+        private void ScanSubchunks(byte[] data, int startOffset, SubchunkAdvanceRule rule)
+        {
+            AdvanceRuleUsed = rule;
             int pos = startOffset;
             int remaining = data.Length - startOffset;
             // Diag: first chunk, AND first chunk with liquid flags
@@ -122,7 +284,7 @@ namespace WowViewer.Core.IO.Lk
                 uint fourcc = BitConverter.ToUInt32(data, pos);
                 uint size = BitConverter.ToUInt32(data, pos + 4);
                 int dataStart = pos + 8;
-                uint consumedSize = size;
+                uint consumedSize = ComputeConsumedSize(fourcc, size, dataStart, data.Length, rule);
 
                 if (diag)
                 {
@@ -146,26 +308,22 @@ namespace WowViewer.Core.IO.Lk
                     case 0x4D434E52: // MCNR
                     case 0x524E434D:
                     {
-                        // Ghidra-verified: client always consumes 0x1C0 bytes for MCNR
-                        // regardless of declared size. The declared size is often smaller
-                        // (e.g. 435 vs 448), and the gap is padding. We must advance by
-                        // the larger value so the scan lands on the next real FourCC.
-                        int mcnrConsumed = (int)Math.Max(size, 0x1C0);
-                        int readSize = (int)Math.Min(mcnrConsumed, data.Length - dataStart);
+                        // How far the walk advances past MCNR is decided by the selected rule
+                        // (5.0.1 uses the declared size; 3.3.5 files only satisfy the native
+                        // exact-consumption invariant when MCNR is treated as 0x1C0 bytes).
+                        int readSize = (int)Math.Min(consumedSize, (uint)(data.Length - dataStart));
                         if (readSize > 0)
                         {
                             McnrData = new byte[Math.Min(readSize, 0x1C0)];
                             Array.Copy(data, dataStart, McnrData, 0, McnrData.Length);
                         }
-                        // Override advance to use the actual consumed size
-                        pos = dataStart + mcnrConsumed;
-                        remaining = data.Length - pos;
-                        continue; // skip normal advance at bottom of loop
+                        break;
                     }
 
                     case 0x4D434C59: // MCLY
                     case 0x594C434D:
                         TextureLayers = ReadMclyData(data, dataStart, size);
+                        MclyRecordCount = (int)(size >> 4); // client: layerCount = size >> 4
                         // Also keep raw bytes for Alpha-style decode path
                         if (size > 0 && dataStart + size <= data.Length)
                         {
@@ -177,12 +335,6 @@ namespace WowViewer.Core.IO.Lk
                     case 0x4D43414C: // MCAL
                     case 0x4C41434D:
                     {
-                        uint sizeFromHeader = _parseOptions.UseHeaderAlphaSize && Header.SizeMcal >= 8
-                            ? Header.SizeMcal - 8
-                            : 0;
-                        if (sizeFromHeader > 0 && sizeFromHeader <= (uint)(data.Length - dataStart))
-                            consumedSize = Math.Max(size, sizeFromHeader);
-
                         if (consumedSize > 0 && dataStart + consumedSize <= data.Length)
                         {
                             var mcalBytes = new byte[consumedSize];
@@ -196,12 +348,6 @@ namespace WowViewer.Core.IO.Lk
                     case 0x4D435348: // MCSH
                     case 0x4853434D:
                     {
-                        uint sizeFromHeader = _parseOptions.UseHeaderShadowSize && Header.SizeMcsh >= 8
-                            ? Header.SizeMcsh - 8
-                            : 0;
-                        if (sizeFromHeader > 0 && sizeFromHeader <= (uint)(data.Length - dataStart))
-                            consumedSize = Math.Max(size, sizeFromHeader);
-
                         if (consumedSize > 0 && dataStart + consumedSize <= data.Length)
                         {
                             McshData = new byte[consumedSize];
@@ -244,6 +390,7 @@ namespace WowViewer.Core.IO.Lk
                             McrdData = new byte[size];
                             Array.Copy(data, dataStart, McrdData, 0, (int)size);
                         }
+                        McrdRecordCount = (int)(size >> 2); // client: count = size >> 2
                         break;
 
                     case 0x4D435257: // MCRW split WMO references
@@ -253,12 +400,62 @@ namespace WowViewer.Core.IO.Lk
                             McrwData = new byte[size];
                             Array.Copy(data, dataStart, McrwData, 0, (int)size);
                         }
+                        McrwRecordCount = (int)(size >> 2); // client: count = size >> 2
+                        break;
+
+                    case 0x4D435246: // MCRF monolithic references
+                    case 0x4652434D:
+                        if (size > 0 && dataStart + size <= data.Length)
+                        {
+                            McrfData = new byte[size];
+                            Array.Copy(data, dataStart, McrfData, 0, (int)size);
+                        }
+                        break;
+
+                    case 0x4D434C56: // MCLV
+                    case 0x564C434D:
+                        if (size > 0 && dataStart + size <= data.Length)
+                        {
+                            MclvData = new byte[size];
+                            Array.Copy(data, dataStart, MclvData, 0, (int)size);
+                        }
+                        break;
+
+                    case 0x4D434D54: // MCMT - client dereferences the payload, storing a value
+                    case 0x544D434D:
+                        if (size >= 4 && dataStart + 4 <= data.Length)
+                            McmtValue = BitConverter.ToUInt32(data, dataStart);
+                        break;
+
+                    case 0x4D434242: // MCBB blend batches, 20-byte records
+                    case 0x4242434D:
+                        if (size > 0 && dataStart + size <= data.Length)
+                        {
+                            McbbData = new byte[size];
+                            Array.Copy(data, dataStart, McbbData, 0, (int)size);
+                        }
+                        McbbRecordCount = (int)(size / 0x14); // client asserts this is <= 0xff
+                        break;
+
+                    case 0x4D434444: // MCDD detail-doodad mask; client asserts size 8 or 32
+                    case 0x4444434D:
+                        if (size > 0 && dataStart + size <= data.Length)
+                        {
+                            McddData = new byte[size];
+                            Array.Copy(data, dataStart, McddData, 0, (int)size);
+                        }
+                        break;
+
+                    default:
+                        RecordUnknownSubchunk(data, pos);
                         break;
                 }
 
                 pos = dataStart + (int)consumedSize;
                 remaining = data.Length - pos;
             }
+
+            SubchunkWalkConsumedExactly = pos == data.Length;
 
             // Fallback: if FourCC scan didn't find MCLQ but header has a valid offset,
             // use the header offset to locate MCLQ data (0.6.0 style).

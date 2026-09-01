@@ -1,162 +1,45 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.IO;
 using System.Numerics;
 using System.Text;
 
 namespace WowViewer.Core.IO.Maps;
 
 /// <summary>
-/// Model representing Material Diffuse (MDID) and Material Height (MHID) material tables
-/// introduced in late Cataclysm (4.3.4) and Mists of Pandaria (5.0.1–5.1.0).
+/// Parsers for late-Cataclysm (4.3.4) and Mists of Pandaria (5.0.1–5.1.0) ADT chunks.
 /// </summary>
-public sealed class MopMaterialTables
-{
-    public List<uint> DiffuseFileDataIds { get; } = new();
-    public List<uint> HeightFileDataIds { get; } = new();
-    public List<string> TextureFilenames { get; } = new();
-}
-
-/// <summary>
-/// Model representing height blend parameters per chunk layer (MCXH chunk).
-/// </summary>
-public sealed class MopHeightBlendLayer
-{
-    public float HeightScale { get; set; } = 1.0f;
-    public float HeightOffset { get; set; } = 0.0f;
-}
-
-/// <summary>
-/// Parsed MoP ADT chunk info containing multi-stream texture, height blend, and object placements.
-/// </summary>
-public sealed class MopParsedAdtTile
-{
-    public int TileX { get; set; }
-    public int TileY { get; set; }
-    public MopMaterialTables Materials { get; } = new();
-    public List<MopParsedChunk> Chunks { get; } = new();
-    public List<MopObjectPlacement> Placements { get; } = new();
-}
-
-/// <summary>
-/// Parsed single MCNK chunk in a MoP split ADT.
-/// </summary>
-public sealed class MopParsedChunk
-{
-    public int ChunkIndex { get; set; }
-    public int ChunkX { get; set; }
-    public int ChunkY { get; set; }
-    public uint AreaId { get; set; }
-    public uint Flags { get; set; }
-    public float PositionX { get; set; }
-    public float PositionY { get; set; }
-    public float PositionZ { get; set; }
-    public float[] Heights { get; } = new float[145];
-    public byte[]? Normals { get; set; }
-    public List<MopChunkLayer> Layers { get; } = new();
-    public List<MopHeightBlendLayer> HeightBlends { get; } = new();
-}
-
-public sealed class MopChunkLayer
-{
-    public uint TextureId { get; set; }
-    public uint Flags { get; set; }
-    public uint EffectId { get; set; }
-    public byte[]? AlphaMap { get; set; }
-}
-
-public sealed class MopObjectPlacement
-{
-    public bool IsWmo { get; set; }
-    public uint NameId { get; set; }
-    public uint UniqueId { get; set; }
-    public Vector3 Position { get; set; }
-    public Vector3 Rotation { get; set; }
-    public float Scale { get; set; } = 1.0f;
-    public uint Flags { get; set; }
-}
-
-/// <summary>
-/// Parser for late-Cataclysm (4.3.4) and Mists of Pandaria (5.0.1–5.1.0) split ADT files.
-/// </summary>
+/// <remarks>
+/// <para>
+/// Every chunk here is one the 5.0.1.15464 client actually dispatches on. Two dispatchers
+/// were read to establish that: <c>FUN_00bb6f10</c> (<c>MapAdtFileData.cpp</c>), which retains
+/// only <c>MCNK</c>, <c>MTEX</c>, <c>MTXF</c> and <c>MTXP</c>; and <c>FUN_00bb0b50</c>
+/// (<c>MapArea.cpp</c>), the root-ADT dispatcher, which adds <c>MHDR</c>, <c>MAMP</c>,
+/// <c>MDDF</c>, <c>MODF</c>, <c>MMDX</c>, <c>MMID</c>, <c>MWMO</c>, <c>MWID</c>, <c>MFBO</c>,
+/// <c>MH2O</c> and the blend-mesh trio <c>MBMH</c>/<c>MBMI</c>/<c>MBMV</c>.
+/// </para>
+/// <para>
+/// <b>MDID, MHID and MCXH are not in either dispatcher and are not parsed here.</b> Earlier
+/// revisions of this file carried parsers for all three plus a tile/chunk model that no code
+/// ever produced. MDID/MHID are a later-expansion FileDataID scheme outside this project's
+/// 0.5.3–5.1 range, and MCXH does not correspond to anything the client reads. The
+/// height-blend parameters that MCXH was invented to carry are in <c>MTXP</c>.
+/// </para>
+/// <para>
+/// Record sizes below are the client's own divisors, not conventions: MDDF <c>size / 0x24</c>
+/// and MODF <c>size &gt;&gt; 6</c> as read at <c>FUN_00bb0b50</c>.
+/// </para>
+/// </remarks>
 public static class MopAdtChunkParser
 {
-    private static uint MakeFourCC(string s) =>
-        (uint)(s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24));
+    /// <summary>MDDF record size as divided by the client (<c>size / 0x24</c>).</summary>
+    public const int MddfRecordSize = 36;
 
-    private static readonly uint FourCC_MVER = MakeFourCC("MVER");
-    private static readonly uint FourCC_MHDR = MakeFourCC("MHDR");
-    private static readonly uint FourCC_MCIN = MakeFourCC("MCIN");
-    private static readonly uint FourCC_MTEX = MakeFourCC("MTEX");
-    private static readonly uint FourCC_MDID = MakeFourCC("MDID");
-    private static readonly uint FourCC_MHID = MakeFourCC("MHID");
-    private static readonly uint FourCC_MCNK = MakeFourCC("MCNK");
-    private static readonly uint FourCC_MCVT = MakeFourCC("MCVT");
-    private static readonly uint FourCC_MCNR = MakeFourCC("MCNR");
-    private static readonly uint FourCC_MCLY = MakeFourCC("MCLY");
-    private static readonly uint FourCC_MCAL = MakeFourCC("MCAL");
-    private static readonly uint FourCC_MCXH = MakeFourCC("MCXH");
-    private static readonly uint FourCC_MMDX = MakeFourCC("MMDX");
-    private static readonly uint FourCC_MMID = MakeFourCC("MMID");
-    private static readonly uint FourCC_MWMO = MakeFourCC("MWMO");
-    private static readonly uint FourCC_MWID = MakeFourCC("MWID");
-    private static readonly uint FourCC_MDDF = MakeFourCC("MDDF");
-    private static readonly uint FourCC_MODF = MakeFourCC("MODF");
+    /// <summary>MODF record size as divided by the client (<c>size &gt;&gt; 6</c>).</summary>
+    public const int ModfRecordSize = 64;
 
     /// <summary>
-    /// Parses MDID (Material Diffuse FileDataIDs) chunk.
-    /// </summary>
-    public static List<uint> ParseMdidChunk(ReadOnlySpan<byte> data)
-    {
-        var result = new List<uint>(data.Length / 4);
-        for (int i = 0; i <= data.Length - 4; i += 4)
-        {
-            result.Add(BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(i, 4)));
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Parses MHID (Material Height FileDataIDs) chunk.
-    /// </summary>
-    public static List<uint> ParseMhidChunk(ReadOnlySpan<byte> data)
-    {
-        var result = new List<uint>(data.Length / 4);
-        for (int i = 0; i <= data.Length - 4; i += 4)
-        {
-            result.Add(BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(i, 4)));
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Parses MCXH (Material Height blend scale &amp; offset) chunk per layer.
-    /// Each layer contains 2 floats (scale, offset).
-    /// </summary>
-    public static List<MopHeightBlendLayer> ParseMcxhChunk(ReadOnlySpan<byte> data)
-    {
-        var result = new List<MopHeightBlendLayer>();
-        int layerCount = data.Length / 8;
-        for (int i = 0; i < layerCount; i++)
-        {
-            int offset = i * 8;
-            if (offset + 8 <= data.Length)
-            {
-                float scale = BinaryPrimitives.ReadSingleLittleEndian(data.Slice(offset, 4));
-                float heightOffset = BinaryPrimitives.ReadSingleLittleEndian(data.Slice(offset + 4, 4));
-                result.Add(new MopHeightBlendLayer
-                {
-                    HeightScale = scale,
-                    HeightOffset = heightOffset,
-                });
-            }
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Parses MTEX null-terminated string table.
+    /// Parses MTEX, a block of null-terminated texture paths.
     /// </summary>
     public static List<string> ParseMtexChunk(ReadOnlySpan<byte> data)
     {
@@ -167,10 +50,8 @@ public static class MopAdtChunkParser
             if (data[i] == 0)
             {
                 if (i > start)
-                {
-                    string str = Encoding.ASCII.GetString(data.Slice(start, i - start));
-                    result.Add(str);
-                }
+                    result.Add(Encoding.ASCII.GetString(data.Slice(start, i - start)));
+
                 start = i + 1;
             }
         }
@@ -178,64 +59,63 @@ public static class MopAdtChunkParser
     }
 
     /// <summary>
-    /// Reads MODF (WMO placements) in MoP format with scale and bounds support.
+    /// Parses MTXP, the per-texture parameter block the client stores alongside MTEX and MTXF
+    /// (file-data object <c>+0x430</c>, wired into the map area at <c>+0x98</c> by
+    /// <c>FUN_00bb0b50</c>).
+    /// </summary>
+    /// <remarks>
+    /// The record layout is deliberately <b>not</b> asserted. The client's consumer of
+    /// <c>+0x98</c> has not been isolated, so the stride is unknown, and guessing one is how
+    /// MCXH came to exist. <see cref="AdtTextureParameters.StrideBytes"/> derives it from real
+    /// data instead — MTXP is parallel to MTEX, so payload length divided by texture count is
+    /// a measurement, and a non-zero result across a corpus is what would settle the layout.
+    /// </remarks>
+    public static AdtTextureParameters ParseMtxpChunk(ReadOnlySpan<byte> data, int textureCount)
+        => new(data.ToArray(), textureCount);
+
+    /// <summary>
+    /// Reads MODF (WMO placements).
     /// </summary>
     public static List<MopObjectPlacement> ParseModfChunk(ReadOnlySpan<byte> data)
     {
         var result = new List<MopObjectPlacement>();
-        const int recordSize = 64; // Standard Blizzard MODF record size
-        int count = data.Length / recordSize;
+        int count = data.Length / ModfRecordSize;
 
         for (int i = 0; i < count; i++)
         {
-            var span = data.Slice(i * recordSize, recordSize);
-            uint nameId = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0, 4));
-            uint uniqueId = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(4, 4));
-            float posX = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(8, 4));
-            float posY = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(12, 4));
-            float posZ = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(16, 4));
-            float rotX = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(20, 4));
-            float rotY = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(24, 4));
-            float rotZ = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(28, 4));
-            uint flags = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(56, 4));
-
+            var span = data.Slice(i * ModfRecordSize, ModfRecordSize);
             result.Add(new MopObjectPlacement
             {
                 IsWmo = true,
-                NameId = nameId,
-                UniqueId = uniqueId,
-                Position = new Vector3(posX, posY, posZ),
-                Rotation = new Vector3(rotX, rotY, rotZ),
+                NameId = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0, 4)),
+                UniqueId = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(4, 4)),
+                Position = new Vector3(
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(8, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(12, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(16, 4))),
+                Rotation = new Vector3(
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(20, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(24, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(28, 4))),
                 Scale = 1.0f,
-                Flags = flags,
+                Flags = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(56, 4)),
             });
         }
         return result;
     }
 
     /// <summary>
-    /// Reads MDDF (M2 doodad placements) in MoP format.
+    /// Reads MDDF (M2 doodad placements).
     /// </summary>
     public static List<MopObjectPlacement> ParseMddfChunk(ReadOnlySpan<byte> data)
     {
         var result = new List<MopObjectPlacement>();
-        const int recordSize = 36; // Standard Blizzard MDDF record size
-        int count = data.Length / recordSize;
+        int count = data.Length / MddfRecordSize;
 
         for (int i = 0; i < count; i++)
         {
-            var span = data.Slice(i * recordSize, recordSize);
-            uint nameId = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0, 4));
-            uint uniqueId = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(4, 4));
-            float posX = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(8, 4));
-            float posY = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(12, 4));
-            float posZ = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(16, 4));
-            float rotX = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(20, 4));
-            float rotY = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(24, 4));
-            float rotZ = BinaryPrimitives.ReadSingleLittleEndian(span.Slice(28, 4));
+            var span = data.Slice(i * MddfRecordSize, MddfRecordSize);
             ushort scaleInt = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(32, 2));
-            ushort flags = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(34, 2));
-
             float scale = scaleInt / 1024.0f;
             if (scale <= 0.0001f)
                 scale = 1.0f;
@@ -243,14 +123,49 @@ public static class MopAdtChunkParser
             result.Add(new MopObjectPlacement
             {
                 IsWmo = false,
-                NameId = nameId,
-                UniqueId = uniqueId,
-                Position = new Vector3(posX, posY, posZ),
-                Rotation = new Vector3(rotX, rotY, rotZ),
+                NameId = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0, 4)),
+                UniqueId = BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(4, 4)),
+                Position = new Vector3(
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(8, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(12, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(16, 4))),
+                Rotation = new Vector3(
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(20, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(24, 4)),
+                    BinaryPrimitives.ReadSingleLittleEndian(span.Slice(28, 4))),
                 Scale = scale,
-                Flags = flags,
+                Flags = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(34, 2)),
             });
         }
         return result;
     }
+}
+
+/// <summary>
+/// The raw MTXP payload plus the texture count it runs parallel to, so the record stride can
+/// be measured rather than assumed.
+/// </summary>
+public sealed record AdtTextureParameters(byte[] Payload, int TextureCount)
+{
+    /// <summary>
+    /// Bytes per texture, or 0 when the payload does not divide evenly by the texture count —
+    /// which would mean MTXP is not parallel to MTEX and the assumption needs revisiting.
+    /// </summary>
+    public int StrideBytes => TextureCount > 0 && Payload.Length % TextureCount == 0
+        ? Payload.Length / TextureCount
+        : 0;
+}
+
+/// <summary>
+/// A doodad or WMO placement read from MDDF/MODF.
+/// </summary>
+public sealed class MopObjectPlacement
+{
+    public bool IsWmo { get; set; }
+    public uint NameId { get; set; }
+    public uint UniqueId { get; set; }
+    public Vector3 Position { get; set; }
+    public Vector3 Rotation { get; set; }
+    public float Scale { get; set; } = 1.0f;
+    public uint Flags { get; set; }
 }

@@ -183,6 +183,43 @@ public sealed class AdtTextureReaderTests
         return stream.ToArray();
     }
 
+    [Fact]
+    public void Read_TexAdtWithOddSizedChunk_StillFindsEveryMcnk()
+    {
+        // Pins the top-level split-texture walk to the native rule: next = payload + size,
+        // no alignment padding (MapAdtFileData.cpp FUN_00bb6f10). This walk was already
+        // correct; the test exists so it stays that way, since sibling walkers elsewhere in
+        // the codebase had drifted to padding odd-sized chunks and silently truncating tiles.
+        // NOTE: this does not cover StandardTerrainAdapter's walk (viewer project, not
+        // referenced by any test project) — that one is verified at runtime by the
+        // AdtChunkWalkDesyncCount diagnostic.
+        // a single NUL-terminated "base.blp" is 9 bytes, so this MTEX is deliberately odd-sized.
+        byte[] oddSizedMtex = CreateStringBlock("base.blp");
+        Assert.Equal(1, oddSizedMtex.Length % 2);
+
+        byte[] mcnkPayload = CreateTexChunkPayload(
+            CreateMclyPayload([0u], [0u]),
+            []);
+
+        byte[] bytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(18)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MTEX", oddSizedMtex),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", mcnkPayload),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", mcnkPayload),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MCNK", mcnkPayload),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "synthetic_0_0_tex0.adt");
+        AdtTextureFile textureFile = AdtTextureReader.Read(stream, summary);
+
+        Assert.Equal(3, textureFile.Chunks.Count);
+        Assert.Equal([0, 1, 2], textureFile.Chunks.Select(static chunk => chunk.ChunkIndex));
+        Assert.Single(textureFile.TextureNames);
+        Assert.Equal("base.blp", textureFile.TextureNames[0]);
+    }
+
     private static byte[] CreateRootTextureMcnkPayload(uint indexX, uint indexY, uint flags, byte[] mclyPayload, byte[] mcalPayload)
     {
         byte[] header = new byte[128];
