@@ -66,6 +66,31 @@ taking a `string path` instead of a `byte[]` can run. It buys no frame time, it 
 load, and it is exactly the extraction that the epic's spec 183 FR-004 already forbids for datastore
 loads. Retiring it is a self-contained win that does not depend on anything else in this spec.
 
+## ARCHITECTURE CONSTRAINT (operator directive, 2026-09-02) — read before touching this spec
+
+**Python owns the datastore. C# must not implement Zarr or TensorStore reading or writing.**
+
+The storage engine is **Python using TensorStore's Zarr driver** (today the Python side uses bare
+`zarr` + `numcodecs`; moving it to TensorStore is part of this spec's work). The operator has been
+down the C#-implements-Zarr road before and it **cost two months** to undo.
+
+**This spec's original framing of US2 was wrong.** It called "there is no C# Zarr array reader" a
+blocking gap. It is not a gap — it is the intended architecture. A C# reader was written on
+2026-09-02 and deleted the same day. The absence is deliberate.
+
+**The correct handoff already exists and is proven**: C# `harvest-stream` emits raw tile blobs in the
+`ARRY/ENDS` wire format via `RawArraySerializer`; Python's `harvester.raw_reader.read_tile_blob`
+ingests them and `zarr_io.py` / `zarr_store.py` build the store. **C# composes and emits. Python
+stores. Conversion to any output format happens from the store.**
+
+So US2 is re-scoped: it is not "give C# a Zarr reader", it is **"make the Python store the single
+storage engine, on TensorStore, and route everything the viewer needs through the existing ARRY
+handoff"**.
+
+**Pre-existing violations, flagged not extended**: `RosettaDatastoreWriter` writes Zarr v3 from C#,
+and `ZarrTileDatasetLoader` validates a store from C#. Both predate this constraint. Do not build on
+them; do not silently delete them either.
+
 ## The capability that is actually missing
 
 Zarr is already the project's chosen store, and there is more of it in place than a cold reader

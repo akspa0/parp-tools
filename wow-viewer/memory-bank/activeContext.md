@@ -1,5 +1,86 @@
 # Active Context — wow-viewer
 
+Last updated: 2026-09-02
+
+**START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
+open specs, with the reasoning for the order. This section is the session summary behind it.
+
+## Hard constraints (violating these has cost real time)
+
+- **Python owns the datastore. C# does NOT implement Zarr or TensorStore.** C# emits `ARRY/ENDS`
+  blobs via `RawArraySerializer`; Python's `harvester.raw_reader.read_tile_blob` ingests them and
+  `zarr_io.py` builds the store. A C# Zarr reader was written 2026-09-02 and **deleted the same day**;
+  the operator has been down that road before and it cost two months. Spec 206's framing of "no C#
+  Zarr reader" as a *gap* was wrong — the absence is the architecture.
+- **No test project references the viewer.** Logic that must be tested belongs in `WowViewer.Core*`.
+  This is why `PhaseCompositionPolicy`, `GpuInstanceBatchPolicy`, `PhaseSignalChannelMap` and
+  `LiquidSurfaceInterpolation` all live in Core rather than beside their callers.
+- **`DBCDRow.ID` is a POSITIONAL key** for MoP WDB2 tables, not the row id. Key on the `ID` column
+  (`DbcTableLoader.ResolveRowId`). Keying on `row.ID` silently resolves the wrong row for every
+  sparse id.
+- **Close the viewer before running tests** — it locks the build output and the test project pulls in
+  the viewer transitively.
+- **Baseline: 9 pre-existing test failures** (WtfLineClassifier x2, WorldFramePassCoordinator x3,
+  AdtV23SummaryReader, V18StorePlacementsReader, EnrichmentStreamFormat, ModelFootprintReader). Any
+  other failure is new. Current: **1350 passed**.
+
+## Landed 2026-09-02
+
+**Spec 205 — MH2O liquid.** Rivers decode. The wiki's "values >= 42 are LiquidObject ids" threshold is
+**wrong for 5.0.1**: real ids run 57..2390 and 42 is absent, so ocean stays unresolved and flat, which
+is correct. Rivers resolve `2325/2333/2372 -> LiquidType 5 -> Material 1 -> LVF 0`. Both decoders
+fixed; two-decoder parity test.
+
+**Terrain normals — the darkness cause.** MCNR component order is **era-split**: 0.5.3 is `(x,z,y)`,
+Cata+ is `(x,y,z)`; the shared decoder applied the alpha order everywhere. Renderer agreement against
+heightmap-derived normals: Cata **0.0437 -> 0.9953**, MoP **0.3282 -> 0.9985**, alpha unchanged at
+0.9179. **3.3.5 is the same as 4.0.1** (operator-confirmed), so LK writing is unblocked.
+
+**Spec 203 — phase composition.** Was a whole-chunk replacement preserving only liquid; now a
+per-channel patch with a presence gate. Placements were appended unconditionally; now presence-gated
+replace. Multi-layer stack + tile offsets + `Map.dbc.ParentMapID` discovery (5.0.1 only — **0.5.3's
+Map.dbc has no ParentMapID**, only 5 columns). Photoshop-style layers panel.
+
+**Spec 207 — object draw calls.** Ablation: terrain ~3.3 ms, WMOs ~55.5 ms, doodads ~41.2 ms —
+objects are ~97% of the frame, and at 4.6 us per submission the cost is **per-draw CPU overhead, not
+fill rate**. Faded instances were excluded from instancing *because* they were faded (36% of the
+visible disc); now split into opaque + faded batches. Zero-fade instances dropped. Asset load priority
+FIFO backlog bounded (12 promoted/frame vs 1-4 drained made it stale).
+
+**Minimap DXT1.** The codec existed but sat behind an opt-in flag emitting a *companion*; primary
+tiles were pristine 24-bit while authored tiles are decoded DXT1. **The scorecard had the same
+confound** and fixing only the files would not have fixed it. Now primary, encoded once, reused for
+writing + scoring + baseline + the visual A/B.
+
+**Spec 209 Mechanism A — MCLQ shoreline sag.** The 129->257 upsample admitted a pixel when *any*
+corner had presence, then blended **all four heights** including absent corners holding non-surface
+values. Partial-presence quads only occur at a water body's edge, so the error concentrated on
+coastlines — the operator's "Wetlands coast is the worst area". Fixed with presence-weighted
+interpolation (`LiquidSurfaceInterpolation`, 7 tests); identical to plain bilinear where all four
+corners are present, so open water is unchanged. **Mechanism B (`KeepOnlyAboveTerrain` culling WL* at
+the waterline) is NOT measured.**
+
+## Open, with the next concrete action
+
+- **Operator verification sweep** — six code-complete fixes need one pass in the viewer. See the plan's
+  Block 0. For 0.5.3 phase layers specifically, **send the `[AlphaADT]` / `[TerrainManager]` log
+  lines**; they say whether it is resolution, tile lookup, or the merge.
+- **Spec 209** — build the convergence report. **Confound**: `ReadWlFiles` runs only in
+  `Build(adtPath, …)`; `BuildFromBytes` passes null for WL*, so a bytes-based scanner reports zero WL
+  coverage regardless of truth.
+- **Spec 208 (cross-map transplant)** — the real purpose behind "phase maps": grafting terrain from
+  instance maps that preserve overworld state ~2 years older. **Spec 195 already ships the engine**
+  (rotate/mirror/offset on a global chunk lattice, undo/redo); the delta is cross-map sourcing, the
+  64x64 minimap picker, and provenance. Phase 0 is an audit, not construction.
+- **Spec 207 Phase 2** — WMO group admission: 0 of 80 groups rejected, 62.5% via conservative
+  fallback, portal traversal scoring 0.
+- **TensorStore migration** — blocked on the operator's environment; everything downstream of the
+  datastore waits on it.
+
+---
+
+## Earlier session history
+
 Last updated: 2026-09-01
 
 **Renderer + asset pipeline workstream handoff (2026-09-01).** Agreed implementation

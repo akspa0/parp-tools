@@ -4454,18 +4454,25 @@ private static byte[]? TryReadSplitMcnkSubchunkPayload(ReadOnlySpan<byte> payloa
                     float fx = sourceX - ix;
                     float fy = sourceY - iy;
 
-                    if (!mclqPresence[iy, ix]
-                        && !mclqPresence[iy, ix + 1]
-                        && !mclqPresence[iy + 1, ix]
-                        && !mclqPresence[iy + 1, ix + 1])
+                    // Interpolate ONLY across corners that carry liquid.
+                    //
+                    // This used to admit the pixel when any corner had presence and then blend all
+                    // four heights unconditionally. A corner with no presence holds no surface value
+                    // -- plausibly zero -- so blending it dragged the surface down. Partial-presence
+                    // quads occur at the EDGE of a water body, so the error concentrated on
+                    // shorelines and was invisible in open water: the reported "coast is the worst
+                    // area" symptom. Where all four corners are present this is identical to plain
+                    // bilinear, so open water is unchanged. See spec 209.
+                    if (!LiquidSurfaceInterpolation.TryInterpolate(
+                            mclqHeight[iy, ix], mclqHeight[iy, ix + 1],
+                            mclqHeight[iy + 1, ix], mclqHeight[iy + 1, ix + 1],
+                            mclqPresence[iy, ix], mclqPresence[iy, ix + 1],
+                            mclqPresence[iy + 1, ix], mclqPresence[iy + 1, ix + 1],
+                            fx, fy,
+                            out float h))
                     {
                         continue;
                     }
-
-                    float h = BilinearInterpolate(
-                        mclqHeight[iy, ix], mclqHeight[iy, ix + 1],
-                        mclqHeight[iy + 1, ix], mclqHeight[iy + 1, ix + 1],
-                        fx, fy);
 
                     mask[y, x] = 1.0f;
                     height[y, x] = h;
