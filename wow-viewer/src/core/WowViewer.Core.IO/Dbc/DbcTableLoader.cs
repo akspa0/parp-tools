@@ -13,7 +13,7 @@ namespace WowViewer.Core.IO.Dbc;
 /// Column names are <em>detected</em>, never assumed: a definition rename must surface as a named
 /// failure, not as a table that silently resolves everything to zero.
 /// </remarks>
-internal static class DbcTableLoader
+public static class DbcTableLoader
 {
     public static IDBCDStorage Load(
         IDBCProvider dbcProvider,

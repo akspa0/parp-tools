@@ -7,6 +7,8 @@ using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using Silk.NET.OpenGL;
 
+using WowViewer.Core.Maps;
+
 namespace WoWViewer.Terrain;
 
 /// <summary>
@@ -452,7 +454,52 @@ public class TerrainManager : ISceneRenderer
 
         _adapter.OverlayMapName = incoming;
 
-        // Evict all cached tiles so they reload with overlay resolution
+        int evicted = EvictAllTiles();
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            incoming != null
+                ? $"[TerrainManager] Secondary overlay map set to '{incoming}'. Evicted {evicted} cached tiles."
+                : $"[TerrainManager] Secondary overlay map cleared. Evicted {evicted} cached tiles.");
+    }
+
+    /// <summary>The live phase overlay stack. Mutate it, then call <see cref="RefreshPhaseLayers"/>.</summary>
+    public IList<PhaseLayerSettings> PhaseLayers => _adapter.PhaseLayers;
+
+    /// <summary>
+    /// Replace the phase overlay stack and re-stream every tile.
+    /// </summary>
+    public void SetPhaseLayers(IEnumerable<PhaseLayerSettings> layers)
+    {
+        ArgumentNullException.ThrowIfNull(layers);
+
+        _adapter.PhaseLayers.Clear();
+        foreach (PhaseLayerSettings layer in layers)
+            _adapter.PhaseLayers.Add(layer);
+
+        RefreshPhaseLayers();
+    }
+
+    /// <summary>
+    /// Re-stream every tile after the phase stack or any layer's channel selection changed.
+    /// </summary>
+    /// <remarks>
+    /// Composition happens at tile parse time, so a channel checkbox cannot take effect until the
+    /// affected tiles are rebuilt. This is the one call that makes an edit visible.
+    /// </remarks>
+    public void RefreshPhaseLayers()
+    {
+        int evicted = EvictAllTiles();
+        string described = _adapter.PhaseLayers.Count == 0
+            ? "none"
+            : string.Join(", ", _adapter.PhaseLayers.Select(static layer =>
+                $"{layer.MapName}{(layer.Enabled ? string.Empty : " (off)")}[{PhaseCompositionPolicy.Describe(layer.Channels)}]"));
+
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"[TerrainManager] Phase stack applied: {described}. Evicted {evicted} cached tiles.");
+    }
+
+    /// <summary>Drop every cached and resident tile so they reload under the current composition.</summary>
+    private int EvictAllTiles()
+    {
         var keysToEvict = _tileCache.Keys.ToList();
         foreach (var key in keysToEvict)
         {
@@ -469,10 +516,7 @@ public class TerrainManager : ISceneRenderer
         }
 
         InvalidateStreamingTargets();
-        ViewerLog.Important(ViewerLog.Category.Terrain,
-            incoming != null
-                ? $"[TerrainManager] Secondary overlay map set to '{incoming}'. Evicted {keysToEvict.Count} cached tiles."
-                : $"[TerrainManager] Secondary overlay map cleared. Evicted {keysToEvict.Count} cached tiles.");
+        return keysToEvict.Count;
     }
 
     /// <summary>

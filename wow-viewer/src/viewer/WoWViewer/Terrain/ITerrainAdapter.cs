@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using WowViewer.Core.Maps;
 
 namespace WoWViewer.Terrain;
 
@@ -47,8 +48,18 @@ public interface ITerrainAdapter
 
     /// <summary>
     /// Optional secondary overlay map name for phased terrain.
-    /// When set, sparse phase MCNK data patches matching primary-map chunks. Parent-map liquid
-    /// data remains authoritative.
     /// </summary>
+    /// <remarks>
+    /// Convenience shim over <see cref="PhaseLayers"/>: reading returns the first enabled layer,
+    /// and assigning replaces the whole stack with that single layer (or clears it). Adapters that
+    /// support more than one simultaneous phase should be driven through <see cref="PhaseLayers"/>.
+    /// </remarks>
     string? OverlayMapName { get; set; }
+
+    /// <summary>
+    /// The ordered phase overlay stack. Layers are applied in list order, so a later layer wins on
+    /// any channel it shares with an earlier one. An adapter that does not support phasing exposes
+    /// an empty list.
+    /// </summary>
+    IList<PhaseLayerSettings> PhaseLayers { get; }
 }

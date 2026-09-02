@@ -80,6 +80,17 @@ switch (area)
 	case "pm4":
 		RunPm4(tail);
 		break;
+	case "dbc":
+		if (tail.Length > 0 && string.Equals(tail[0], "dump", StringComparison.OrdinalIgnoreCase))
+		{
+			DbcDumpSupport.Run(tail[1..]);
+		}
+		else
+		{
+			Console.Error.WriteLine("Usage: dbc dump --client <client-dir> --table <name> [--build <version>] [--limit <n>] [--columns a,b,c] [--where col=value] [--id <n>]");
+			Environment.ExitCode = 1;
+		}
+		break;
 	case "adt":
 		RunAdt(tail);
 		break;

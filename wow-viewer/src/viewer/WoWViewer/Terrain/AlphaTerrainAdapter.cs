@@ -112,7 +112,22 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     public bool IsWmoBased { get; }
 
     /// <summary>Phased terrain overlay is not supported for Alpha WDTs.</summary>
-    public string? OverlayMapName { get; set; }
+    private readonly List<PhaseLayerSettings> _phaseLayers = [];
+
+    /// <inheritdoc />
+    public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
+
+    /// <inheritdoc />
+    public string? OverlayMapName
+    {
+        get => _phaseLayers.FirstOrDefault(static layer => layer.Enabled)?.MapName;
+        set
+        {
+            _phaseLayers.Clear();
+            if (!string.IsNullOrWhiteSpace(value))
+                _phaseLayers.Add(new PhaseLayerSettings { MapName = value.Trim() });
+        }
+    }
 
     public AlphaTerrainAdapter(string wdtPath)
     {

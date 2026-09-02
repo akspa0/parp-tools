@@ -222,6 +222,13 @@ public partial class ViewerApp : IDisposable
 
     // Map discovery
     private List<MapDefinition> _discoveredMaps = new();
+
+    /// <summary>
+    /// Ordering for every map list. Defaults to Map ID because every row is labelled
+    /// <c>[id] Name</c> and the id is how the DBC, phase relationships and external tooling
+    /// refer to maps; name ordering left that leading number in no order at all.
+    /// </summary>
+    private MapListSortMode _mapListSortMode = MapListSortMode.MapId;
     private Md5TranslateIndex? _md5Index;
     private MinimapRenderer? _minimapRenderer;
     private WdlPreviewRenderer? _wdlPreviewRenderer;

@@ -694,23 +694,26 @@ public partial class ViewerApp
         if (_discoveredMaps.Count == 0) return;
 
         ImGui.Text($"{_discoveredMaps.Count} maps discovered");
+        DrawMapSortModeSelector("##mapListSort");
         var previewWarmup = GetWdlPreviewWarmupStats();
         if (previewWarmup.total > 0)
             ImGui.TextDisabled($"WDL previews: {previewWarmup.ready}/{previewWarmup.total} cached, {previewWarmup.loading} warming, {previewWarmup.failed} failed");
         ImGui.Separator();
+
+        var sortedMaps = MapListSorting.Sort(_discoveredMaps, _mapListSortMode).ToList();
 
         float listHeight = MathF.Min(300f, MathF.Max(120f, ImGui.GetContentRegionAvail().Y - 34f));
         if (ImGui.BeginChild("MapList", new Vector2(0, listHeight), true))
         {
             var style = ImGui.GetStyle();
             float rowHeight = GetUniformListRowHeight();
-            GetVisibleListRange(_discoveredMaps.Count, rowHeight, out int startIndex, out int endIndex);
+            GetVisibleListRange(sortedMaps.Count, rowHeight, out int startIndex, out int endIndex);
             if (startIndex > 0)
                 ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
 
             for (int i = startIndex; i < endIndex; i++)
             {
-                var map = _discoveredMaps[i];
+                var map = sortedMaps[i];
                 bool hasWdt = map.HasWdt;
                 bool hasWdl = map.HasWdl;
                 string label = map.HasDbcEntry
@@ -776,7 +779,7 @@ public partial class ViewerApp
         }
 
         ImGui.Separator();
-        DrawPhasedTerrainOverlayControls();
+        DrawPhaseLayersPanel();
     }
 
     private void DrawFileBrowserContent(float reservedFooterHeight = 0f)

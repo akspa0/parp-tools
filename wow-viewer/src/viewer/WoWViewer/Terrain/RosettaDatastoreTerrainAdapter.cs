@@ -37,7 +37,22 @@ public sealed class RosettaDatastoreTerrainAdapter : ITerrainAdapter
     public bool IsWmoBased => false;
     public List<Vector3> LastLoadedChunkPositions { get; } = new();
     public IReadOnlyList<int> ExistingTiles => _existingTiles;
-    public string? OverlayMapName { get; set; }
+    private readonly List<PhaseLayerSettings> _phaseLayers = [];
+
+    /// <inheritdoc />
+    public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
+
+    /// <inheritdoc />
+    public string? OverlayMapName
+    {
+        get => _phaseLayers.FirstOrDefault(static layer => layer.Enabled)?.MapName;
+        set
+        {
+            _phaseLayers.Clear();
+            if (!string.IsNullOrWhiteSpace(value))
+                _phaseLayers.Add(new PhaseLayerSettings { MapName = value.Trim() });
+        }
+    }
 
     public RosettaDatastoreTerrainAdapter(
         RosettaObjectLibrary library,

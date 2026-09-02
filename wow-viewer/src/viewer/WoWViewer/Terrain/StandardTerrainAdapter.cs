@@ -56,13 +56,34 @@ public class StandardTerrainAdapter : ITerrainAdapter
     public List<Vector3> LastLoadedChunkPositions { get; } = new();
     public IReadOnlyList<int> ExistingTiles => _existingTiles;
 
+    private readonly List<PhaseLayerSettings> _phaseLayers = [];
+
     /// <summary>
-    /// Optional secondary overlay map name for phased terrain.
-    /// When set, sparse MCNK data present in World\Maps\{OverlayMapName}\ patches the
-    /// primary map at matching chunk coordinates. The primary map remains authoritative for
-    /// liquid data because phase maps do not own the parent map's liquids.
+    /// The ordered phase overlay stack. Applied in list order, so a later layer wins on any channel
+    /// it shares with an earlier one.
     /// </summary>
-    public string? OverlayMapName { get; set; }
+    public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
+
+    /// <summary>
+    /// Single-overlay shim over <see cref="PhaseLayers"/>, kept so existing callers and saved
+    /// settings keep working. Reads the first enabled layer; assigning replaces the whole stack.
+    /// </summary>
+    public string? OverlayMapName
+    {
+        get => _phaseLayers.FirstOrDefault(static layer => layer.Enabled)?.MapName;
+        set
+        {
+            _phaseLayers.Clear();
+            if (!string.IsNullOrWhiteSpace(value))
+                _phaseLayers.Add(new PhaseLayerSettings { MapName = value.Trim() });
+        }
+    }
+
+    /// <summary>Distinct phase warnings already reported, so each is logged once.</summary>
+    private readonly HashSet<string> _reportedPhaseIssues = new(StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<PhaseLayerSettings> ActivePhaseLayers =>
+        _phaseLayers.Where(static layer => layer.Enabled && !string.IsNullOrWhiteSpace(layer.MapName));
 
     private readonly List<string> _mdxNames = new();
     private readonly List<string> _wmoNames = new();
@@ -201,8 +222,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (_existingTileSet.Contains(idx))
             return true;
 
-        if (!string.IsNullOrEmpty(OverlayMapName) && OverlayTileExists(tileX, tileY))
-            return true;
+        foreach (PhaseLayerSettings layer in ActivePhaseLayers)
+        {
+            if (OverlayTileExists(layer.MapName, tileX - layer.TileOffsetX, tileY - layer.TileOffsetY))
+                return true;
+        }
 
         return false;
     }
@@ -210,12 +234,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
     /// <summary>
     /// Check whether the overlay map has an ADT at the given tile coordinate.
     /// </summary>
-    private bool OverlayTileExists(int tileX, int tileY)
+    private bool OverlayTileExists(string overlayMapName, int tileX, int tileY)
     {
-        if (string.IsNullOrEmpty(OverlayMapName))
+        if (string.IsNullOrEmpty(overlayMapName))
             return false;
 
-        string overlayBase = $"World\\Maps\\{OverlayMapName}\\{OverlayMapName}_{tileY}_{tileX}";
+        string overlayBase = $"World\\Maps\\{overlayMapName}\\{overlayMapName}_{tileY}_{tileX}";
         return HasTilePayload(overlayBase);
     }
 
@@ -226,15 +250,27 @@ public class StandardTerrainAdapter : ITerrainAdapter
             return result;
 
         ParsedTileSource parent = LoadMapTile(_mapName, tileX, tileY);
-        if (string.IsNullOrEmpty(OverlayMapName) || !OverlayTileExists(tileX, tileY))
+
+        foreach (PhaseLayerSettings layer in ActivePhaseLayers)
         {
-            PublishTileTextures(tileX, tileY, parent.Textures);
-            PostProcessTileAlpha(parent.Result.Chunks);
-            return parent.Result;
+            if (layer.Channels == PhaseDataChannel.None)
+                continue;
+
+            // A layer may be authored at different tile coordinates than the map it overlays --
+            // instance and dungeon maps are often copies of an earlier revision of a zone stored
+            // elsewhere in the grid -- so read the shifted source tile.
+            int sourceTileX = tileX - layer.TileOffsetX;
+            int sourceTileY = tileY - layer.TileOffsetY;
+            if (!OverlayTileExists(layer.MapName, sourceTileX, sourceTileY))
+                continue;
+
+            ParsedTileSource phase = LoadMapTile(layer.MapName, sourceTileX, sourceTileY);
+            if (layer.HasTileOffset)
+                TranslatePhasePlacements(phase, layer);
+
+            MergePhaseTile(parent, phase, layer, tileX, tileY);
         }
 
-        ParsedTileSource phase = LoadMapTile(OverlayMapName!, tileX, tileY);
-        MergePhaseTile(parent, phase, tileX, tileY);
         PublishTileTextures(tileX, tileY, parent.Textures);
         PostProcessTileAlpha(parent.Result.Chunks);
         return parent.Result;
@@ -309,52 +345,179 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
     }
 
-    private void MergePhaseTile(ParsedTileSource parent, ParsedTileSource phase, int tileX, int tileY)
+    /// <summary>
+    /// Compose one phase layer onto the tile, channel by channel.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This used to assign <c>parent.Chunks[i] = phaseChunk</c> and preserve only <c>Liquid</c>, so
+    /// every base field the phase chunk did not carry was destroyed. Once split <c>_obj0</c>/
+    /// <c>_tex0</c> companions landed, a phase tile became a <em>partial</em> chunk, and a partial
+    /// chunk replacing a complete one is exactly the reported symptom: missing trees, and blank
+    /// plates where the phase had no texturing of its own.
+    /// </para>
+    /// <para>
+    /// Placements had the mirror-image bug: they were appended unconditionally, so a phase that
+    /// restaged objects produced the old set <em>and</em> the new one. They are now presence-gated
+    /// replace -- a phase that ships objects owns them for this tile; a phase that ships none is
+    /// saying nothing about objects and the base map's survive.
+    /// </para>
+    /// </remarks>
+    private void MergePhaseTile(ParsedTileSource parent, ParsedTileSource phase, PhaseLayerSettings layer, int tileX, int tileY)
     {
         var mergedTextures = new List<string>(parent.Textures);
         var textureIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < mergedTextures.Count; i++)
             textureIndices.TryAdd(mergedTextures[i], i);
 
+        int replacedChunks = 0;
+        int addedChunks = 0;
+        int skippedBlank = 0;
+        PhaseDataChannel contributed = PhaseDataChannel.None;
+
         foreach (TerrainChunkData phaseChunk in phase.Result.Chunks)
         {
-            for (int layerIndex = 0; layerIndex < phaseChunk.Layers.Length; layerIndex++)
-            {
-                TerrainLayer layer = phaseChunk.Layers[layerIndex];
-                if ((uint)layer.TextureIndex < (uint)phase.Textures.Count)
-                {
-                    string textureName = phase.Textures[layer.TextureIndex];
-                    if (!textureIndices.TryGetValue(textureName, out int mergedIndex))
-                    {
-                        mergedIndex = mergedTextures.Count;
-                        mergedTextures.Add(textureName);
-                        textureIndices.Add(textureName, mergedIndex);
-                    }
-
-                    layer.TextureIndex = mergedIndex;
-                    phaseChunk.Layers[layerIndex] = layer;
-                }
-            }
-
             TerrainChunkData? parentChunk = parent.Result.Chunks.FirstOrDefault(candidate =>
                 candidate.ChunkX == phaseChunk.ChunkX && candidate.ChunkY == phaseChunk.ChunkY);
-            phaseChunk.Liquid = parentChunk?.Liquid;
+
+            PhaseDataChannel present = PhaseChunkMerger.DescribePresence(phaseChunk);
+            PhaseDataChannel take = PhaseCompositionPolicy.ResolveChannelsToTake(
+                layer.Channels, present, layer.OnlyTakeWhatThePhaseCarries);
+
+            // Only remap texture indices for a chunk whose texturing is actually being taken;
+            // rewriting them otherwise would renumber layers the composed chunk never uses.
+            if ((take & PhaseDataChannel.TextureLayers) != 0)
+                RemapPhaseTextureIndices(phaseChunk, phase.Textures, mergedTextures, textureIndices);
 
             if (parentChunk == null)
-                parent.Result.Chunks.Add(phaseChunk);
-            else
             {
-                int parentIndex = parent.Result.Chunks.IndexOf(parentChunk);
-                parent.Result.Chunks[parentIndex] = phaseChunk;
+                // The base map has no chunk here, so there is nothing to protect and nothing to
+                // patch: the phase supplies the whole chunk or the tile stays empty here.
+                if (present == PhaseDataChannel.None)
+                {
+                    skippedBlank++;
+                    continue;
+                }
+
+                RemapPhaseTextureIndices(phaseChunk, phase.Textures, mergedTextures, textureIndices);
+                parent.Result.Chunks.Add(phaseChunk);
+                addedChunks++;
+                contributed |= present;
+                continue;
             }
+
+            if (take == PhaseDataChannel.None)
+            {
+                skippedBlank++;
+                continue;
+            }
+
+            int parentIndex = parent.Result.Chunks.IndexOf(parentChunk);
+            parent.Result.Chunks[parentIndex] = PhaseChunkMerger.Merge(parentChunk, phaseChunk, take);
+            replacedChunks++;
+            contributed |= take;
         }
 
-        parent.Result.MddfPlacements.AddRange(phase.Result.MddfPlacements);
-        parent.Result.ModfPlacements.AddRange(phase.Result.ModfPlacements);
+        MergePhasePlacements(parent, phase, layer, ref contributed);
 
         parent.Textures = mergedTextures;
+
         ViewerLog.Important(ViewerLog.Category.Terrain,
-            $"[StandardADT] Phase patch ({tileX},{tileY}) from '{OverlayMapName}': phaseChunks={phase.Result.Chunks.Count}, mergedChunks={parent.Result.Chunks.Count}, parentLiquidsPreserved=true");
+            $"[StandardADT] Phase patch ({tileX},{tileY}) from '{layer.MapName}': "
+            + $"phaseChunks={phase.Result.Chunks.Count} patched={replacedChunks} added={addedChunks} "
+            + $"skippedEmpty={skippedBlank} channels={PhaseCompositionPolicy.Describe(contributed)} "
+            + $"requested={PhaseCompositionPolicy.Describe(layer.Channels)} "
+            + $"presenceGated={layer.OnlyTakeWhatThePhaseCarries}"
+            + (layer.HasTileOffset ? $" tileOffset=({layer.TileOffsetX},{layer.TileOffsetY})" : string.Empty));
+    }
+
+    /// <summary>
+    /// Shift a shifted layer's placements into the base map's coordinates.
+    /// </summary>
+    /// <remarks>
+    /// Chunk identity is taken from the base chunk during the merge, so terrain relocates for free.
+    /// Placements do not: MDDF/MODF carry world coordinates, so without this an offset layer's
+    /// terrain moves while its objects stay behind at the donor map's coordinates.
+    /// </remarks>
+    private static void TranslatePhasePlacements(ParsedTileSource phase, PhaseLayerSettings layer)
+    {
+        (float dx, float dy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+            layer.TileOffsetX, layer.TileOffsetY, WoWConstants.ChunkSize);
+
+        for (int i = 0; i < phase.Result.MddfPlacements.Count; i++)
+        {
+            MddfPlacement placement = phase.Result.MddfPlacements[i];
+            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            phase.Result.MddfPlacements[i] = placement;
+        }
+
+        for (int i = 0; i < phase.Result.ModfPlacements.Count; i++)
+        {
+            ModfPlacement placement = phase.Result.ModfPlacements[i];
+            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            phase.Result.ModfPlacements[i] = placement;
+        }
+    }
+
+    /// <summary>
+    /// Presence-gated replace for placements. Appending both sets -- the previous behaviour -- is
+    /// the one option that is never right, because it duplicates everything the phase restaged.
+    /// </summary>
+    private void MergePhasePlacements(
+        ParsedTileSource parent,
+        ParsedTileSource phase,
+        PhaseLayerSettings layer,
+        ref PhaseDataChannel contributed)
+    {
+        if (PhaseCompositionPolicy.PhaseOwnsPlacements(layer.Channels, PhaseDataChannel.Doodads, phase.Result.MddfPlacements.Count))
+        {
+            parent.Result.MddfPlacements.Clear();
+            parent.Result.MddfPlacements.AddRange(phase.Result.MddfPlacements);
+            contributed |= PhaseDataChannel.Doodads;
+        }
+        else if ((layer.Channels & PhaseDataChannel.Doodads) != 0 && !layer.OnlyTakeWhatThePhaseCarries)
+        {
+            // The phase is authoritative and deliberately empty: it is clearing the doodads.
+            parent.Result.MddfPlacements.Clear();
+            contributed |= PhaseDataChannel.Doodads;
+        }
+
+        if (PhaseCompositionPolicy.PhaseOwnsPlacements(layer.Channels, PhaseDataChannel.WorldObjects, phase.Result.ModfPlacements.Count))
+        {
+            parent.Result.ModfPlacements.Clear();
+            parent.Result.ModfPlacements.AddRange(phase.Result.ModfPlacements);
+            contributed |= PhaseDataChannel.WorldObjects;
+        }
+        else if ((layer.Channels & PhaseDataChannel.WorldObjects) != 0 && !layer.OnlyTakeWhatThePhaseCarries)
+        {
+            parent.Result.ModfPlacements.Clear();
+            contributed |= PhaseDataChannel.WorldObjects;
+        }
+    }
+
+    private static void RemapPhaseTextureIndices(
+        TerrainChunkData phaseChunk,
+        IReadOnlyList<string> phaseTextures,
+        List<string> mergedTextures,
+        Dictionary<string, int> textureIndices)
+    {
+        for (int layerIndex = 0; layerIndex < phaseChunk.Layers.Length; layerIndex++)
+        {
+            TerrainLayer chunkLayer = phaseChunk.Layers[layerIndex];
+            if ((uint)chunkLayer.TextureIndex >= (uint)phaseTextures.Count)
+                continue;
+
+            string textureName = phaseTextures[chunkLayer.TextureIndex];
+            if (!textureIndices.TryGetValue(textureName, out int mergedIndex))
+            {
+                mergedIndex = mergedTextures.Count;
+                mergedTextures.Add(textureName);
+                textureIndices.Add(textureName, mergedIndex);
+            }
+
+            chunkLayer.TextureIndex = mergedIndex;
+            phaseChunk.Layers[layerIndex] = chunkLayer;
+        }
     }
 
     private void PublishTileTextures(int tileX, int tileY, IReadOnlyList<string> textures)
