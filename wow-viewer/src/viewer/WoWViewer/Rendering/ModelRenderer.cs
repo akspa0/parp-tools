@@ -132,6 +132,21 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     private readonly bool _deferInitialTextureLoads;
     private readonly Queue<int> _pendingTextureLoads = new();
     private readonly List<GpuInstanceData> _gpuInstanceData = new();
+
+    /// <summary>
+    /// Distance-faded instances, batched separately from the fully-opaque ones.
+    /// </summary>
+    /// <remarks>
+    /// Spec 207 US1. One instanced draw shares one blend state, so faded geometry cannot ride in the
+    /// opaque batch without rendering fully opaque. Splitting by fade state keeps both correct and
+    /// costs two draws per model instead of one draw per instance -- the fade band is ~36% of the
+    /// visible disc (1 - 0.8^2) and every instance in it used to be unbatched precisely because it
+    /// was faded.
+    /// </remarks>
+    private readonly List<GpuInstanceData> _gpuInstanceFadedData = new();
+
+    /// <summary>True while drawing the faded instance batch: forces blending and disables depth write.</summary>
+    private bool _gpuInstanceFadedPass;
     private float[] _gpuInstanceUploadScratch = Array.Empty<float>();
     private uint _gpuInstanceVbo;
     private bool _gpuInstanceBatchActive;
@@ -807,16 +822,32 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     {
         BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
         _gpuInstanceData.Clear();
+        _gpuInstanceFadedData.Clear();
         _gpuInstanceBatchActive = true;
     }
 
+    /// <summary>
+    /// Queue one instance for the current batch, routing it by fade state.
+    /// </summary>
+    /// <remarks>
+    /// This used to <c>return</c> silently for any instance below the 0.999 fade threshold. That was
+    /// a silent drop (spec 207 FR-004): safe only because the caller happened to gate the same way,
+    /// and an instance that ever reached it past that gate would simply never be drawn. Faded
+    /// instances now go to their own batch instead of being discarded.
+    /// </remarks>
     public void QueueGpuInstance(Matrix4x4 modelMatrix, float fadeAlpha = 1.0f)
     {
-        if (!_gpuInstanceBatchActive || !SupportsGpuInstancedOpaque || fadeAlpha < 0.999f)
+        if (!_gpuInstanceBatchActive || !SupportsGpuInstancedOpaque)
             return;
 
-        _gpuInstanceData.Add(new GpuInstanceData(modelMatrix, fadeAlpha));
+        if (fadeAlpha >= GpuInstanceOpaqueFadeThreshold)
+            _gpuInstanceData.Add(new GpuInstanceData(modelMatrix, fadeAlpha));
+        else if (fadeAlpha > 0f)
+            _gpuInstanceFadedData.Add(new GpuInstanceData(modelMatrix, fadeAlpha));
     }
+
+    /// <summary>At or above this an instance is fully opaque and needs no blending.</summary>
+    private const float GpuInstanceOpaqueFadeThreshold = 0.999f;
 
     public unsafe void EndGpuInstanceBatch()
     {
@@ -824,12 +855,24 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
             return;
 
         _gpuInstanceBatchActive = false;
-        if (_gpuInstanceData.Count == 0 || _gpuInstanceVbo == 0)
+        if (_gpuInstanceVbo == 0)
             return;
 
-        UploadGpuInstanceData();
-        _gpuInstanceCount = (uint)_gpuInstanceData.Count;
+        // Opaque first, then the faded set over the top: faded geometry writes no depth, so it must
+        // not precede the opaque instances it may sit in front of.
+        DrawGpuInstanceSet(_gpuInstanceData, fadedPass: false);
+        DrawGpuInstanceSet(_gpuInstanceFadedData, fadedPass: true);
+    }
+
+    private unsafe void DrawGpuInstanceSet(List<GpuInstanceData> instances, bool fadedPass)
+    {
+        if (instances.Count == 0)
+            return;
+
+        UploadGpuInstanceData(instances);
+        _gpuInstanceCount = (uint)instances.Count;
         _gpuInstanceDrawActive = true;
+        _gpuInstanceFadedPass = fadedPass;
 
         try
         {
@@ -841,6 +884,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         finally
         {
             _gpuInstanceDrawActive = false;
+            _gpuInstanceFadedPass = false;
             _gpuInstanceCount = 0;
             _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
             _gl.BindVertexArray(0);
@@ -1134,7 +1178,10 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
                     // Layer 0 + Transparent blend = alpha-tested cutout (trees/foliage)
                     // Render in opaque pass with high alpha threshold, not as blended
                     bool isAlphaCutout = ShouldUseAlphaCutout(l, texId, layer.BlendMode, effectiveBlendMode);
-                    bool needsBlend = !isAlphaCutout && (l > 0 || effectiveBlendMode != MdlTexOp.Load);
+                    // A faded instance batch carries per-instance alpha below 1, so it must blend
+                    // even where the material alone would have been opaque.
+                    bool needsBlend = _gpuInstanceFadedPass
+                        || (!isAlphaCutout && (l > 0 || effectiveBlendMode != MdlTexOp.Load));
 
                     // Filter by render pass — alpha cutout renders in opaque pass
                     if (pass == RenderPass.Opaque && needsBlend) continue;
@@ -1395,15 +1442,15 @@ if (isAlphaCutout)
         }
     }
 
-    private unsafe void UploadGpuInstanceData()
+    private unsafe void UploadGpuInstanceData(List<GpuInstanceData> instances)
     {
-        int requiredFloatCount = _gpuInstanceData.Count * 17;
+        int requiredFloatCount = instances.Count * 17;
         if (_gpuInstanceUploadScratch.Length < requiredFloatCount)
             _gpuInstanceUploadScratch = new float[requiredFloatCount];
 
-        for (int index = 0; index < _gpuInstanceData.Count; index++)
+        for (int index = 0; index < instances.Count; index++)
         {
-            Matrix4x4 model = _gpuInstanceData[index].ModelMatrix;
+            Matrix4x4 model = instances[index].ModelMatrix;
             int offset = index * 17;
             _gpuInstanceUploadScratch[offset + 0] = model.M11;
             _gpuInstanceUploadScratch[offset + 1] = model.M12;
@@ -1421,7 +1468,7 @@ if (isAlphaCutout)
             _gpuInstanceUploadScratch[offset + 13] = model.M42;
             _gpuInstanceUploadScratch[offset + 14] = model.M43;
             _gpuInstanceUploadScratch[offset + 15] = model.M44;
-            _gpuInstanceUploadScratch[offset + 16] = _gpuInstanceData[index].FadeAlpha;
+            _gpuInstanceUploadScratch[offset + 16] = instances[index].FadeAlpha;
         }
 
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _gpuInstanceVbo);

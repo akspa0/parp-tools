@@ -137,6 +137,16 @@ public struct WorldModelSubmissionTally
     public WorldModelPathTally ConversionFallback;
     public WorldModelPathTally MdxDirect;
 
+    /// <summary>
+    /// Instances that were instanced despite being distance-faded (spec 207 US1).
+    /// </summary>
+    /// <remarks>
+    /// This population used to be forced unbatched by an <c>OpaqueFade &gt;= 0.999</c> gate, one draw
+    /// call each. Its size is the measure of what removing that gate was worth, so it is reported
+    /// separately from the fully-opaque instanced count rather than folded into it.
+    /// </remarks>
+    public int FadedInstanced;
+
     public int GatedRendererUnavailable;
     public int GatedBatchingDisabled;
     public int GatedRouteRequiresUnbatchedRender;
@@ -156,6 +166,9 @@ public struct WorldModelSubmissionTally
     /// is the floor the instanced count is converging on (spec 202 research R2).
     /// </summary>
     public int DistinctModelCount;
+
+    /// <summary>Record that an instanced submission was distance-faded.</summary>
+    public void RecordFadedInstanced() => FadedInstanced++;
 
     public void Record(WorldModelRenderPath path, WorldModelSubmissionOutcome outcome, WorldModelBatchGate gate)
     {
@@ -246,6 +259,7 @@ public struct WorldModelSubmissionTally
         GatedBatchingDisabled += other.GatedBatchingDisabled;
         GatedRouteRequiresUnbatchedRender += other.GatedRouteRequiresUnbatchedRender;
         GatedGpuInstancingUnsupported += other.GatedGpuInstancingUnsupported;
+        FadedInstanced += other.FadedInstanced;
         GatedOpaqueFadeBelowThreshold += other.GatedOpaqueFadeBelowThreshold;
         GatedPassHasNoBatchPath += other.GatedPassHasNoBatchPath;
 
@@ -267,6 +281,7 @@ public struct WorldModelSubmissionTally
         GatedBatchingDisabled = GatedBatchingDisabled,
         GatedRouteRequiresUnbatchedRender = GatedRouteRequiresUnbatchedRender,
         GatedGpuInstancingUnsupported = GatedGpuInstancingUnsupported,
+        FadedInstanced = FadedInstanced,
         GatedOpaqueFadeBelowThreshold = GatedOpaqueFadeBelowThreshold,
         GatedPassHasNoBatchPath = GatedPassHasNoBatchPath,
         DrawCalls = DrawCalls,
@@ -308,6 +323,8 @@ public readonly record struct WorldModelSubmissionStats
     public int GatedBatchingDisabled { get; init; }
     public int GatedRouteRequiresUnbatchedRender { get; init; }
     public int GatedGpuInstancingUnsupported { get; init; }
+    public int FadedInstanced { get; init; }
+
     public int GatedOpaqueFadeBelowThreshold { get; init; }
     public int GatedPassHasNoBatchPath { get; init; }
 

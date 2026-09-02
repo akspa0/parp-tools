@@ -12,6 +12,11 @@ public static class WorldObjectVisibilityCollector
     private const float DoodadCullDistanceSq = DoodadCullDistance * DoodadCullDistance;
     private const float DoodadSmallThreshold = 10f;
     private const float FadeStartFraction = 0.80f;
+
+    /// <summary>
+    /// Below this the instance cannot affect an 8-bit target, so drawing it is pure cost.
+    /// </summary>
+    private const float MinimumVisibleFade = 1.0f / 255.0f;
     private const float WmoCullDistance = 1600f;
     private const float NoCullRadius = 512f;
     private const float ObjectNearHoldRadius = 384f;
@@ -246,6 +251,22 @@ public static class WorldObjectVisibilityCollector
             float coneFade = ComputeConeFade(visibilityConeFactor, centerDistanceSq);
             opaqueFade *= coneFade;
             transparentFade *= coneFade;
+
+            // An instance faded to nothing contributes no pixels, but submitting it still costs a
+            // full draw call -- and, because the instancing path admits only OpaqueFade >= 0.999,
+            // it costs an UNBATCHED one. That is the worst of both: invisible and unbatchable.
+            // Below 1/255 the result cannot differ from not drawing it at all in an 8-bit target.
+            // Fade is derived from distance and the vision cone, so a capture that overrides either
+            // of those is explicitly asking for objects distance would otherwise remove. Dropping
+            // them here would silently defeat that override -- which is what the capture-bypass
+            // test exists to catch.
+            bool fadeMayRemove = !context.IgnoreDistanceCulling && !context.IgnoreVisionConeCulling;
+            if (fadeMayRemove && opaqueFade < MinimumVisibleFade && transparentFade < MinimumVisibleFade)
+            {
+                frame.FullyFadedMdxCount++;
+                culledCount++;
+                continue;
+            }
 
             frame.VisibleMdx.Add(new WorldVisibleMdxEntry(inst, centerDistanceSq, opaqueFade, transparentFade, context.CountAsTaxiActor));
             if (context.CountAsTaxiActor)

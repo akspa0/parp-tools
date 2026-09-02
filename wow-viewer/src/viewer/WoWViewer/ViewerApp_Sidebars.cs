@@ -3640,6 +3640,14 @@ public partial class ViewerApp
             DrawPathRow("Unknown (no route decision)", stats.Unknown);
         }
 
+        if (stats.FadedInstanced > 0)
+        {
+            // Spec 207 US1: this population used to be forced unbatched by the fade gate, one draw
+            // call each. Its size is the measure of what removing that gate was worth.
+            ImGui.TextColored(new Vector4(0.4f, 0.9f, 0.5f, 1f),
+                $"  of which distance-faded          {stats.FadedInstanced,6}  (previously 1 draw call EACH)");
+        }
+
         ImGui.Text("  blocked from instancing by:");
         DrawGateRow("batching toggle off", stats.GatedBatchingDisabled);
         DrawGateRow("route requires unbatched render", stats.GatedRouteRequiresUnbatchedRender);

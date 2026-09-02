@@ -11153,9 +11153,14 @@ public class WorldScene : ISceneRenderer
 
                                     frame.OpaqueSubmittedModelKeyScratch.Add(visible.Instance.ModelKey);
 
+                                    // Spec 207 US1: the OpaqueFade >= 0.999 condition that used to
+                                    // stand here forced every distance-faded instance onto the
+                                    // one-draw-per-instance path -- roughly a third of the visible
+                                    // disc, and exactly the population instancing helps most. The
+                                    // renderer now batches faded instances separately so they blend
+                                    // correctly, so fade no longer disqualifies instancing.
                                     if (renderer is IGpuInstancedModelRenderer gpuRenderer
-                                        && gpuRenderer.SupportsGpuInstancedOpaque
-                                        && visible.OpaqueFade >= 0.999f)
+                                        && gpuRenderer.SupportsGpuInstancedOpaque)
                                     {
                                         if (gpuBatchRenderers.Add(gpuRenderer))
                                         {
@@ -11171,6 +11176,12 @@ public class WorldScene : ISceneRenderer
                                             renderPath,
                                             WorldModelSubmissionOutcome.Instanced,
                                             WorldModelBatchGate.None);
+
+                                        // Track the faded share separately: it is the population
+                                        // spec 207 moved onto this path, so its size is the measure
+                                        // of whether that was worth doing.
+                                        if (visible.OpaqueFade < 0.999f)
+                                            frame.OpaqueModelSubmission.RecordFadedInstanced();
                                     }
                                     else
                                     {
