@@ -6701,10 +6701,14 @@ static void RunAdt(string[] args)
 		case "liquid-formats":
 			AdtLiquidFormatSupport.Run(tail);
 			break;
+		case "liquid-convergence":
+			AdtLiquidConvergenceSupport.Run(tail);
+			break;
 		default:
 			Console.Error.WriteLine("Usage: adt validate --input <file.adt|directory>");
 			Console.Error.WriteLine("       adt liquid-formats --client <client-dir> [--map <name>] [--limit <n>]");
 			Console.Error.WriteLine("       adt terrain-shading --client <client-dir> [--map <name>] [--limit <n>] [--build <version>]");
+			Console.Error.WriteLine("       adt liquid-convergence --client <client-dir> [--map <name>] [--tile-x <x>] [--tile-y <y>] [--limit <n>]");
 			Environment.ExitCode = 1;
 			break;
 	}

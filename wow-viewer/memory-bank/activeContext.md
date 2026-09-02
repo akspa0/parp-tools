@@ -22,9 +22,26 @@ open specs, with the reasoning for the order. This section is the session summar
   the viewer transitively.
 - **Baseline: 9 pre-existing test failures** (WtfLineClassifier x2, WorldFramePassCoordinator x3,
   AdtV23SummaryReader, V18StorePlacementsReader, EnrichmentStreamFormat, ModelFootprintReader). Any
-  other failure is new. Current: **1350 passed**.
+  other failure is new. Current: **1354 passed**.
 
 ## Landed 2026-09-02
+
+**Spec 209 — Liquid Convergence Measured (Phase 1 Complete).** Built `inspect adt liquid-convergence`
+and `LiquidConvergenceAnalyzer` (4 new tests). Catalog discovery loads 108 WL* files directly from
+`misc.mpq` in 0.5.3. Scanned 500 liquid tiles on Azeroth. **Union invariant verified (SC-002 / FR-004)**:
+exactly **0 cells** missing from unified array across all 500 tiles. **Mechanism B CONFIRMED**:
+`KeepOnlyAboveTerrain` culled 585,108 WL* cells across Azeroth; **459,374 of those culled cells had NO
+MCLQ coverage**, creating empty waterline strips along coastlines (23,192 cells on Wetlands coast tile
+`Azeroth_31_29` alone). In open water where sources overlap, surface heights agree almost identically
+(mean ΔH = 0.00).
+
+**Spec 208 — Cross-Map Transplant Phase 0 Complete.** Completed technical audit & reconciliation
+([`evidence/phase0-reconciliation.md`](../specs/208-cross-map-tile-transplant/evidence/phase0-reconciliation.md)):
+(1) Map identity enters at source chunkReader and target MCLY texture re-mapping boundaries. (2) Source
+inspection proved 195 fails to rotate normals, placement rotations, and placement relative positions
+(defect in 195 to fix there). (3) Reconciled `ChunkTranspositionOptions` directly onto `PhaseDataChannel`
+(Constitution II). (4) Confirmed chunk granularity (1/16 tile = 33.33 yd) preserves raw vertex fidelity.
+(5) Staged transplant proposal lives in `EditorSession`.
 
 **Spec 205 — MH2O liquid.** Rivers decode. The wiki's "values >= 42 are LiquidObject ids" threshold is
 **wrong for 5.0.1**: real ids run 57..2390 and 42 is absent, so ocean stays unresolved and flat, which
@@ -52,26 +69,15 @@ tiles were pristine 24-bit while authored tiles are decoded DXT1. **The scorecar
 confound** and fixing only the files would not have fixed it. Now primary, encoded once, reused for
 writing + scoring + baseline + the visual A/B.
 
-**Spec 209 Mechanism A — MCLQ shoreline sag.** The 129->257 upsample admitted a pixel when *any*
-corner had presence, then blended **all four heights** including absent corners holding non-surface
-values. Partial-presence quads only occur at a water body's edge, so the error concentrated on
-coastlines — the operator's "Wetlands coast is the worst area". Fixed with presence-weighted
-interpolation (`LiquidSurfaceInterpolation`, 7 tests); identical to plain bilinear where all four
-corners are present, so open water is unchanged. **Mechanism B (`KeepOnlyAboveTerrain` culling WL* at
-the waterline) is NOT measured.**
-
 ## Open, with the next concrete action
 
 - **Operator verification sweep** — six code-complete fixes need one pass in the viewer. See the plan's
   Block 0. For 0.5.3 phase layers specifically, **send the `[AlphaADT]` / `[TerrainManager]` log
   lines**; they say whether it is resolution, tile lookup, or the merge.
-- **Spec 209** — build the convergence report. **Confound**: `ReadWlFiles` runs only in
-  `Build(adtPath, …)`; `BuildFromBytes` passes null for WL*, so a bytes-based scanner reports zero WL
-  coverage regardless of truth.
-- **Spec 208 (cross-map transplant)** — the real purpose behind "phase maps": grafting terrain from
-  instance maps that preserve overworld state ~2 years older. **Spec 195 already ships the engine**
-  (rotate/mirror/offset on a global chunk lattice, undo/redo); the delta is cross-map sourcing, the
-  64x64 minimap picker, and provenance. Phase 0 is an audit, not construction.
+- **Spec 209 Phase 2** — Shoreline convergence remediation: soften `KeepOnlyAboveTerrain` at the
+  waterline so shoreline WL* water is not culled when MCLQ has no water coverage.
+- **Spec 208 Phase 1** — Cross-map sourcing: load source map tiles independently of the active target
+  map and re-map MCLY texture indices into the target's palette (T101–T106).
 - **Spec 207 Phase 2** — WMO group admission: 0 of 80 groups rejected, 62.5% via conservative
   fallback, portal traversal scoring 0.
 - **TensorStore migration** — blocked on the operator's environment; everything downstream of the
