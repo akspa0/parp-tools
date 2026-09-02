@@ -64,6 +64,10 @@ using WorldFramePassOptions = WowViewer.Core.Runtime.World.Passes.WorldFramePass
 using WorldFramePasses = WowViewer.Core.Runtime.World.Passes.WorldFramePasses;
 using WorldObjectPassCoordinator = WowViewer.Core.Runtime.World.Passes.WorldObjectPassCoordinator;
 using WorldObjectPassFrame = WowViewer.Core.Runtime.World.Passes.WorldObjectPassFrame;
+using WorldModelBatchGate = WowViewer.Core.Runtime.World.Passes.WorldModelBatchGate;
+using WorldModelRenderPath = WowViewer.Core.Runtime.World.Passes.WorldModelRenderPath;
+using WorldModelSubmissionOutcome = WowViewer.Core.Runtime.World.Passes.WorldModelSubmissionOutcome;
+using WorldModelSubmissionTally = WowViewer.Core.Runtime.World.Passes.WorldModelSubmissionTally;
 using VisibleMdxInstance = WowViewer.Core.Runtime.World.Visibility.WorldVisibleMdxEntry;
 using VisibleWmoInstance = WowViewer.Core.Runtime.World.Visibility.WorldVisibleWmoEntry;
 using WowViewer.Core.Runtime.World;
@@ -941,6 +945,13 @@ public class WorldScene : ISceneRenderer
         public Dictionary<string, WmoRenderer> VisibleWmoRendererCache { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, IModelRenderer> VisibleMdxRendererCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Applied render path per visible model key, resolved once per frame from the asset
+        /// manager's route decisions. Spec 201 FR-002: attribution uses the applied route, because
+        /// a model whose primary route failed and fell back drew on the fallback.
+        /// </summary>
+        public Dictionary<string, WorldModelRenderPath> VisibleMdxRenderPathCache { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         // Opaque-pass scratch, reused across frames and cleared in place. These were allocated fresh
         // every frame inside the batching pass — the pass that exists to reduce work. Named scratch,
         // not cache: they are rebuilt every frame by design.
@@ -950,6 +961,12 @@ public class WorldScene : ISceneRenderer
         public HashSet<IModelRenderer> UpdatedRendererScratch { get; } = [];
         public HashSet<IGpuInstancedModelRenderer> GpuBatchRendererScratch { get; } = [];
         public HashSet<IModelRenderer> ImmediateBatchRendererScratch { get; } = [];
+
+        // Distinct model keys submitted per pass. Per-model instancing cannot collapse opaque
+        // draws below this count, so it is the floor the instanced counter converges on
+        // (spec 202 research R2).
+        public HashSet<string> OpaqueSubmittedModelKeyScratch { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> TransparentSubmittedModelKeyScratch { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<(bool IsWmo, int Index, float DistanceSq)> TransparentSortScratch { get; } = [];
         public List<VisibleWmoInstance> WmoInstanceBatchScratch { get; } = [];
 
@@ -979,6 +996,8 @@ public class WorldScene : ISceneRenderer
             UpdatedRendererScratch.Clear();
             GpuBatchRendererScratch.Clear();
             ImmediateBatchRendererScratch.Clear();
+            OpaqueSubmittedModelKeyScratch.Clear();
+            TransparentSubmittedModelKeyScratch.Clear();
             TransparentSortScratch.Clear();
             WmoInstanceBatchScratch.Clear();
         }
@@ -995,6 +1014,15 @@ public class WorldScene : ISceneRenderer
         public int OpaqueUnbatchedMdxCount { get; set; }
         public int TransparentBatchedMdxCount { get; set; }
         public int TransparentUnbatchedMdxCount { get; set; }
+
+        /// <summary>
+        /// Specs 201 and 202 Phase 0. Decomposes the four aggregate counters above by render path
+        /// and by the gate that stopped each instance short of GPU instancing, and carries the
+        /// draw calls the pass actually issued. The aggregates are kept so the decomposition can
+        /// be proved to sum to them (spec 201 FR-005).
+        /// </summary>
+        public WorldModelSubmissionTally OpaqueModelSubmission;
+        public WorldModelSubmissionTally TransparentModelSubmission;
         public int WmoDrawCallCount { get; set; }
         public int WmoBatchDrawCallCount { get; set; }
         public int WmoOpaqueBatchInstanceCount { get; set; }
@@ -1036,7 +1064,10 @@ public class WorldScene : ISceneRenderer
             ObjectPasses.Reset();
             VisibleWmoRendererCache.Clear();
             VisibleMdxRendererCache.Clear();
+            VisibleMdxRenderPathCache.Clear();
             ResetOpaquePassScratch();
+            OpaqueModelSubmission.Reset();
+            TransparentModelSubmission.Reset();
             OpaqueBatchedMdxCount = 0;
             OpaqueUnbatchedMdxCount = 0;
             TransparentBatchedMdxCount = 0;
@@ -1157,6 +1188,8 @@ public class WorldScene : ISceneRenderer
             {
                 OverlayOwners = OverlayOwners.ToArray(),
                 WmoAdmission = WmoAdmission.ToStats(),
+                OpaqueModelSubmission = OpaqueModelSubmission.ToStats(),
+                TransparentModelSubmission = TransparentModelSubmission.ToStats(),
             };
         }
     }
@@ -1385,6 +1418,24 @@ public class WorldScene : ISceneRenderer
     /// </para>
     /// </summary>
     public bool MdxOpaqueBatchingEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Whether world doodads (ADT/MDDF placements) advance their animators each frame. WMO-internal
+    /// doodads are driven separately by <c>WmoRenderer.UpdateDoodadAnimations</c> and are unaffected.
+    /// </summary>
+    /// <remarks>
+    /// Default off, per the operator's rule that only WMO doodads should auto-animate in the world
+    /// renderer. Kept as a toggle rather than a deletion because it is also the measurement: the
+    /// MdxAnimation stage timer with this on versus off is the size of the world-doodad animation
+    /// bill, which was previously an estimate.
+    /// <para>
+    /// Note this does **not** stop bone matrices being uploaded. A model that owns an animator still
+    /// reports <c>ShouldUploadBoneMatrices</c>, so its pose is still sent — it simply stops changing.
+    /// Skipping the upload as well would render the bind pose, which is usually but not always the
+    /// same thing, and that is a separate decision from whether the animation advances.
+    /// </para>
+    /// </remarks>
+    public bool WorldDoodadAnimationEnabled { get; set; }
 
     private Vector3 _frameHistoryPreviousCameraPosition = new(float.NaN, float.NaN, float.NaN);
     private Vector3 _frameHistoryPreviousCameraForward = new(float.NaN, float.NaN, float.NaN);
@@ -8853,6 +8904,38 @@ public class WorldScene : ISceneRenderer
         return renderer;
     }
 
+    /// <summary>
+    /// The render path that actually drew <paramref name="modelKey"/>, from the asset manager's
+    /// recorded route decision.
+    /// </summary>
+    /// <remarks>
+    /// Spec 201 FR-002. Reads <c>AppliedRoute</c>, not <c>PrimaryRoute</c>: a model whose primary
+    /// route failed and fell back drew on the fallback, and that is what the metric has to say.
+    /// A key with no recorded decision maps to <see cref="WorldModelRenderPath.Unknown"/> rather
+    /// than being guessed at or dropped.
+    /// </remarks>
+    private WorldModelRenderPath ResolveVisibleMdxRenderPath(WorldRenderFrame frame, string modelKey)
+    {
+        if (frame.VisibleMdxRenderPathCache.TryGetValue(modelKey, out WorldModelRenderPath cached))
+            return cached;
+
+        M2RouteDecision? decision = _assets.GetRouteDecision(modelKey);
+        WorldModelRenderPath path = decision is null
+            ? WorldModelRenderPath.Unknown
+            : decision.AppliedRoute switch
+            {
+                M2RouteType.AdapterSkin => WorldModelRenderPath.AdapterSkin,
+                M2RouteType.AdapterEmbeddedProfile => WorldModelRenderPath.AdapterEmbeddedProfile,
+                M2RouteType.NativeEmbeddedProfile => WorldModelRenderPath.NativeEmbeddedProfile,
+                M2RouteType.ConversionFallback => WorldModelRenderPath.ConversionFallback,
+                M2RouteType.MdxDirect => WorldModelRenderPath.MdxDirect,
+                _ => WorldModelRenderPath.Unknown,
+            };
+
+        frame.VisibleMdxRenderPathCache[modelKey] = path;
+        return path;
+    }
+
     private WmoRenderer? ResolveVisibleWmoRenderer(WorldRenderFrame frame, string modelKey)
     {
         if (frame.VisibleWmoRendererCache.TryGetValue(modelKey, out WmoRenderer? renderer))
@@ -10987,6 +11070,9 @@ public class WorldScene : ISceneRenderer
                     // pure idle CPU cost on large maps even when only a fraction were visible.
                     frame.MdxAnimationMs = MeasureDurationMs(() =>
                     {
+                        if (!WorldDoodadAnimationEnabled)
+                            return;
+
                         HashSet<IModelRenderer> updatedRenderers = frame.UpdatedRendererScratch;
                         WorldObjectPassCoordinator.ExecuteVisibleMdxAnimation(frame.ObjectPasses, frame.Visibility, visible =>
                         {
@@ -11005,6 +11091,13 @@ public class WorldScene : ISceneRenderer
                         HashSet<IGpuInstancedModelRenderer> gpuBatchRenderers = frame.GpuBatchRendererScratch;
                         HashSet<IModelRenderer> immediateBatchRenderers = frame.ImmediateBatchRendererScratch;
 
+                        // Spec 202 T003. Draw calls, not instances, are what batching exists to
+                        // reduce, and the two cannot be converted: a model draws once per geoset or
+                        // section, so this has to be read from the GL call sites. Sampled across the
+                        // whole pass including EndGpuInstanceBatch, which is where the instanced
+                        // draws are actually issued.
+                        long opaqueDrawCallStart = ModelDrawCallCounter.Count;
+
                         try
                         {
                             (frame.OpaqueBatchedMdxCount, frame.OpaqueUnbatchedMdxCount) =
@@ -11014,8 +11107,28 @@ public class WorldScene : ISceneRenderer
                                 visible =>
                                 {
                                     IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                                    WorldModelRenderPath renderPath = ResolveVisibleMdxRenderPath(frame, visible.Instance.ModelKey);
                                     if (renderer == null)
+                                    {
+                                        // Counted, not silently absent: an instance that resolved no
+                                        // renderer never reached the GPU at all, while the aggregate
+                                        // counter above still counts it as an unbatched draw.
+                                        frame.OpaqueModelSubmission.RecordRendererUnavailable();
                                         return;
+                                    }
+
+                                    frame.OpaqueSubmittedModelKeyScratch.Add(visible.Instance.ModelKey);
+
+                                    // Which of the three gates (spec 202 research R3) sent this
+                                    // instance down the per-instance path. The toggle and the route
+                                    // are different problems with different fixes, and the aggregate
+                                    // counter cannot tell them apart.
+                                    frame.OpaqueModelSubmission.Record(
+                                        renderPath,
+                                        WorldModelSubmissionOutcome.Unbatched,
+                                        !MdxOpaqueBatchingEnabled
+                                            ? WorldModelBatchGate.BatchingDisabled
+                                            : WorldModelBatchGate.RouteRequiresUnbatchedRender);
 
                                     if (!_renderDiagPrinted)
                                     {
@@ -11031,8 +11144,14 @@ public class WorldScene : ISceneRenderer
                                 visible =>
                                 {
                                     IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                                    WorldModelRenderPath renderPath = ResolveVisibleMdxRenderPath(frame, visible.Instance.ModelKey);
                                     if (renderer == null)
+                                    {
+                                        frame.OpaqueModelSubmission.RecordRendererUnavailable();
                                         return;
+                                    }
+
+                                    frame.OpaqueSubmittedModelKeyScratch.Add(visible.Instance.ModelKey);
 
                                     if (renderer is IGpuInstancedModelRenderer gpuRenderer
                                         && gpuRenderer.SupportsGpuInstancedOpaque
@@ -11046,6 +11165,12 @@ public class WorldScene : ISceneRenderer
                                         }
 
                                         gpuRenderer.QueueGpuInstance(visible.Instance.Transform, visible.OpaqueFade);
+
+                                        // The only outcome on this callback that reduces draw calls.
+                                        frame.OpaqueModelSubmission.Record(
+                                            renderPath,
+                                            WorldModelSubmissionOutcome.Instanced,
+                                            WorldModelBatchGate.None);
                                     }
                                     else
                                     {
@@ -11057,6 +11182,18 @@ public class WorldScene : ISceneRenderer
                                         }
 
                                         renderer.RenderInstance(visible.Instance.Transform, RenderPass.Opaque, visible.OpaqueFade);
+
+                                        // Spec 202 research R1: this arm hoists state setup but still
+                                        // issues one draw per instance. Counting it as "batched"
+                                        // alongside the instanced arm is what made the batched counter
+                                        // unreadable, so it gets its own outcome and the gate that put
+                                        // it here.
+                                        frame.OpaqueModelSubmission.Record(
+                                            renderPath,
+                                            WorldModelSubmissionOutcome.StateHoisted,
+                                            renderer is IGpuInstancedModelRenderer { SupportsGpuInstancedOpaque: true }
+                                                ? WorldModelBatchGate.OpaqueFadeBelowInstancingThreshold
+                                                : WorldModelBatchGate.GpuInstancingUnsupported);
                                     }
 
                                     MdxRenderedCount++;
@@ -11066,6 +11203,13 @@ public class WorldScene : ISceneRenderer
                         {
                             foreach (IGpuInstancedModelRenderer gpuRenderer in gpuBatchRenderers)
                                 gpuRenderer.EndGpuInstanceBatch();
+
+                            frame.OpaqueModelSubmission.RecordDrawCalls(ModelDrawCallCounter.Since(opaqueDrawCallStart));
+
+                            // The floor per-model instancing converges on (spec 202 research R2).
+                            // Recorded next to the instanced count so the gap between them is
+                            // readable without a second flight.
+                            frame.OpaqueModelSubmission.DistinctModelCount = frame.OpaqueSubmittedModelKeyScratch.Count;
                         }
                     });
 
@@ -11136,8 +11280,15 @@ public class WorldScene : ISceneRenderer
 
                             var visibleMdx = frame.Visibility.VisibleMdx[entry.Index];
                             IModelRenderer? mdxRenderer = ResolveVisibleMdxRenderer(frame, visibleMdx.Instance.ModelKey);
+                            WorldModelRenderPath transparentRenderPath = ResolveVisibleMdxRenderPath(frame, visibleMdx.Instance.ModelKey);
                             if (mdxRenderer == null)
+                            {
+                                frame.TransparentModelSubmission.RecordRendererUnavailable();
                                 continue;
+                            }
+
+                            frame.TransparentSubmittedModelKeyScratch.Add(visibleMdx.Instance.ModelKey);
+                            long transparentDrawCallStart = ModelDrawCallCounter.Count;
 
                             double mdxTransparentMs = MeasureDurationMs(() =>
                             {
@@ -11147,7 +11298,19 @@ public class WorldScene : ISceneRenderer
                             });
                             frame.MdxTransparentSubmissionMs += mdxTransparentMs;
                             frame.TransparentUnbatchedMdxCount++;
+
+                            // The transparent pass has no batch path at all: draw order is
+                            // observable here, so every instance is submitted on its own. That is a
+                            // property of the pass, not a gate any instance failed, and
+                            // TransparentBatchedMdxCount is consequently never incremented.
+                            frame.TransparentModelSubmission.Record(
+                                transparentRenderPath,
+                                WorldModelSubmissionOutcome.Unbatched,
+                                WorldModelBatchGate.PassHasNoBatchPath);
+                            frame.TransparentModelSubmission.RecordDrawCalls(ModelDrawCallCounter.Since(transparentDrawCallStart));
                         }
+
+                        frame.TransparentModelSubmission.DistinctModelCount = frame.TransparentSubmittedModelKeyScratch.Count;
 
                         foreach (WmoRenderer renderer in _worldFrameWmoRenderers)
                             renderer.EndWorldFrame();

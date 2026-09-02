@@ -6683,8 +6683,12 @@ static void RunAdt(string[] args)
 		case "validate":
 			RunAdtValidate(tail);
 			break;
+		case "liquid-formats":
+			AdtLiquidFormatSupport.Run(tail);
+			break;
 		default:
 			Console.Error.WriteLine("Usage: adt validate --input <file.adt|directory>");
+			Console.Error.WriteLine("       adt liquid-formats --client <client-dir> [--map <name>] [--limit <n>]");
 			Environment.ExitCode = 1;
 			break;
 	}

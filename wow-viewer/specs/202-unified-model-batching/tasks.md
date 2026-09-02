@@ -15,38 +15,65 @@ the command and stops.
 
 No rendering behaviour changes in this phase.
 
-- [ ] **T001** Land spec 201 Phase 1 (per-render-path attribution). This spec consumes it; do
+- [x] **T001** Land spec 201 Phase 1 (per-render-path attribution). This spec consumes it; do
       not duplicate the counters.
-- [ ] **T002** Split the `batched` counter into **instanced** (one draw per renderer, via
+- [x] **T002** Split the `batched` counter into **instanced** (one draw per renderer, via
       `QueueGpuInstance`) and **state-hoisted** (`BeginBatch` + per-instance
       `RenderInstance`). research.md R1: these are counted identically today, and the second
       does **not** reduce draw calls.
-- [ ] **T003** Report actual **draw calls** issued for opaque models, separately from instance
+- [x] **T003** Report actual **draw calls** issued for opaque models, separately from instance
       count. Draw calls are the thing being optimised; instances are not.
-- [ ] **T004** Report which of the three gates (research.md R3) forced each unbatched
+- [x] **T004** Report which of the three gates (research.md R3) forced each unbatched
       instance: `RequiresUnbatchedWorldRender`, `!SupportsGpuInstancedOpaque`, or
       `OpaqueFade < 0.999`.
-- [ ] **T005** **(operator)** Re-fly the Wandering Isle route with the spec 153 US3 toggle
-      **on**, then **off**. Record both. This resolves R4's ambiguity: whether the recorded
-      `0 batched / 13180 unbatched` was the toggle or the absence of any batch path.
+- [x] **T005** ~~Re-fly with the toggle on, then off, to resolve R4's ambiguity.~~
+      **Answered from source instead (R7)**: `MdxOpaqueBatchingEnabled` is declared `= true`, so
+      the recorded `0 batched / 13,180 unbatched` was *not* the toggle. No flight needed for
+      this question.
 
 **Phase 0 exit**: batched/instanced/state-hoisted/unbatched/unbatchable are five distinct
 numbers, draw calls are reported, and every unbatched instance has a named gate.
+
+**T001-T004 landed 2026-09-01.** `ModelSubmissionAccounting.cs` in `Core.Runtime` carries the
+decomposition; `WorldScene` records one outcome plus one gate per submitted instance; the frame
+panel's "Submission efficiency" node reports it. The old aggregate pair is kept and shown
+greyed-out as the FR-005 sum check, not as a performance figure.
+
+**Draw calls are counted at the GL call sites**, not inferred. `ModelDrawCallCounter.Record()`
+sits at the four model draw sites (three in `ModelRenderer`, one in `M2Renderer`) and the pass
+brackets it with `Since()`. This is not an implementation preference: a model draws once per
+geoset (legacy MDX) or once per section (native M2), so no arithmetic over the instance counters
+can produce the draw-call number, and the panel's new `per instance` column is the figure that
+says whether batching bought anything at all.
 
 ---
 
 ## Phase 1 — Measure the ceiling before building toward it
 
-- [ ] **T101** Count **distinct visible models** per frame. This is the floor per-model
+- [x] **T101** Count **distinct visible models** per frame. This is the floor per-model
       instancing can reach (research.md R2).
-- [ ] **T102** Confirm or refute that the status bar's `429` in `MDX 13180/20115 (429 ok/0 fail)`
+- [x] **T102** Confirm or refute that the status bar's `429` in `MDX 13180/20115 (429 ok/0 fail)`
       is the distinct loaded-model count. **Do not infer it** — the field's meaning has not
       been checked, and this project has a history of reading meaning into unverified fields.
-- [ ] **T103** Measure the share of instances blocked by each of the three gates, so the
+- [-] **T103** Measure the share of instances blocked by each of the three gates, so the
       largest is known. The fade gate is a live suspicion: distance-faded doodads are exactly
       the dense population and every one drops out of instancing today.
 - [ ] **T104** **(operator)** Fly the route and record T101–T103. Compute the projected
       reduction: `13,180 instances → N distinct models`.
+
+**T101 landed** as `DistinctModelCount` on each pass tally — distinct model keys actually
+submitted, which is exactly the floor rather than a proxy for it. Folded into Phase 0's code so
+T005 and T104 can be the **same single flight**; the gate this phase enforces is on acting
+on the number, and none of Phase 3 has been touched.
+
+**T102 answered by reading the code, and the answer is a qualified yes.** The status bar's `429`
+is `WorldAssetManager.MdxModelsLoaded`, defined as `_mdxModels.Count(kv => kv.Value != null)` —
+so it is a **distinct-model count**, confirming R2 in kind. But it counts distinct models
+**resident in the asset manager**, not distinct models **visible this frame**, so it is an upper
+bound on the floor, not the floor. The ~30x figure in research.md stands only as a ceiling on the
+prize. `DistinctModelCount` measures the real thing. The same read disposes of the `13180/20115`
+note: those are `VisibleMdxCount`/`MdxInstanceCount`, so the ~7,000 gap is **culled placements**,
+not lost ones.
 
 **Phase 1 exit**: the theoretical floor is a number and the biggest gate is named. **If the
 floor is close to 13,180** — i.e. instances are nearly all distinct models — then per-model
@@ -75,19 +102,48 @@ code is written.
 
 ## Phase 3 — Close the three gates
 
-- [ ] **T301** Implement the backend-specific batch key for native-route M2 (absorbs spec 201
-      Phase 2). `M2Renderer.RequiresUnbatchedWorldRender` stops returning true merely because
-      `_legacyRenderer is null`.
-- [ ] **T302** Carry fade in the GPU instance payload so `OpaqueFade < 0.999` no longer forces
-      an instance out of instancing.
-- [ ] **T303** Give every route a per-model instancing path, or a recorded reason it cannot
-      have one (FR-003).
+**Brought forward ahead of the Phase 1 flight, deliberately.** The gate exists to stop us
+building toward an *unmeasured* ceiling. R8 replaced that measurement with something stronger:
+the instanced count was **provably zero** because no renderer could return
+`SupportsGpuInstancedOpaque = true`, so no flight could have reported anything else. Making
+instancing reachable was a precondition for the measurement, not a bet on its outcome.
+
+- [ ] **T301** Give native-route M2 a real batch path (absorbs spec 201 Phase 2). **This is the
+      whole remaining blocker — see R11.** `WowViewerM2RuntimeBridge.PreferNativeStaticRenderer`
+      returns **`true` when its env var is unset**, so `ShouldUseNativeStaticRenderer` always wins
+      and *every* M2 gets the native-only constructor with `_legacyRenderer == null`, making
+      `M2Renderer.RequiresUnbatchedWorldRender` unconditionally true. Three sub-parts, in order:
+      - **T301a** Hoist the ten shared uniforms out of `RenderCore` into `BeginBatch` state. R9:
+        `RenderInstance` and `RenderWithTransform` call the same `RenderCore`, which re-uploads
+        view, projection, three fog values, camera position, light direction, light colour and
+        ambient **per instance** — so flipping the flag without this buys literally nothing.
+      - **T301b** Give the native `M2Renderer` its own instance attributes and shader branch, the
+        same surgery already done on `MdxRenderer` in R8. `QueueGpuInstance` currently delegates to
+        the null `_legacyRenderer` and is a no-op.
+      - **T301c** Only then narrow `RequiresUnbatchedWorldRender` so it stops returning true merely
+        because `_legacyRenderer is null`.
+- [-] **T302** Carry fade in the GPU instance payload so `OpaqueFade < 0.999` no longer forces
+      an instance out of instancing. **Half done**: the shader now carries `aInstanceFade` and
+      multiplies it into the final alpha, so the payload exists. The `>= 0.999` gate is
+      **deliberately retained** — `RenderGeosets` decides blend state once per batch from a
+      single `fadeAlpha`, so mixing faded and unfaded instances in one batch would render the
+      faded ones opaque. Closing it properly means splitting faded instances into their own
+      blended batch. The new `GatedOpaqueFadeBelowThreshold` counter says how much that is
+      worth before it is built.
+- [x] **T303** Give every route a per-model instancing path, or a recorded reason it cannot
+      have one (FR-003). Legacy-MDX and legacy-backed M2 now instance; native-route M2's reason
+      is R9; models with local MDX lights are excluded with the reason in R10.
 - [ ] **T304** Absorb spec 153 US3's mechanism into the planner rather than leaving two
       systems (Constitution II).
-- [ ] **T305** **(operator)** Fly the route. SC-001: opaque draw calls fall toward the Phase 1
-      floor; every remaining unbatched instance has a reason. SC-002: median frame time against
-      the 84.44 ms baseline.
-- [ ] **T306** **(operator)** Capture comparison. SC-004: no appearance change.
+- [ ] **T305** **(operator)** Fly the route with **"GPU instancing for opaque models"** on, then
+      off — both toggles now sit together in *Submission efficiency*. SC-001: opaque draw calls
+      fall toward `distinct models`; every remaining unbatched instance has a named gate.
+      SC-002: median frame time against the 84.44 ms baseline. This single flight also closes
+      T103, T104 and spec 201's T005/T006.
+- [ ] **T306** **(operator)** Capture comparison. SC-004: no appearance change. The specific
+      things to look at are **lamps, braziers and campfires** (R10 excludes locally-lit models
+      from instancing — confirm they are unchanged) and **distance-faded doodads** at the far
+      edge of the draw distance (T302 keeps them off the instanced path).
 
 ---
 

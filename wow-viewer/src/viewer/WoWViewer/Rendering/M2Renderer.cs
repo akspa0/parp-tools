@@ -748,6 +748,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
             _gl.BindVertexArray(section.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, section.IndexCount, DrawElementsType.UnsignedInt, null);
+            ModelDrawCallCounter.Record();
         }
 
         _gl.BindTexture(TextureTarget.Texture2D, 0);

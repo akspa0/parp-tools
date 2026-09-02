@@ -1,3 +1,4 @@
+using WowViewer.Core.Runtime.World.Passes;
 using WowViewer.Core.Runtime.World.Visibility;
 
 namespace WowViewer.Core.Runtime.World;
@@ -58,6 +59,24 @@ public readonly record struct WorldRenderFrameStats(
     /// lazy class-constructor check on a path that runs every frame.
     /// </remarks>
     public WmoAdmissionStats WmoAdmission { get; init; }
+
+    /// <summary>
+    /// Opaque model submission broken out by render path and by the gate that stopped each
+    /// instance short of GPU instancing, plus the draw calls the pass actually issued.
+    /// </summary>
+    /// <remarks>
+    /// Specs 201 and 202 Phase 0. <see cref="OpaqueBatchedMdxCount"/> and
+    /// <see cref="OpaqueUnbatchedMdxCount"/> are kept alongside this so the decomposition can be
+    /// proved to sum to the pre-change totals (spec 201 FR-005). They are the weaker numbers:
+    /// they label M2-routed models <c>MDX</c>, and their "batched" adds GPU-instanced draws to
+    /// state-hoisted ones, which do not reduce draw calls at all.
+    /// </remarks>
+    public WorldModelSubmissionStats OpaqueModelSubmission { get; init; }
+
+    /// <summary>
+    /// Transparent model submission, same decomposition as <see cref="OpaqueModelSubmission"/>.
+    /// </summary>
+    public WorldModelSubmissionStats TransparentModelSubmission { get; init; }
 
     public static WorldRenderFrameStats Empty { get; } = new(
         0,

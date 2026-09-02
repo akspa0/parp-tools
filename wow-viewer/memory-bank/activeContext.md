@@ -2,6 +2,81 @@
 
 Last updated: 2026-09-01
 
+**Renderer + asset pipeline workstream handoff (2026-09-01).** Agreed implementation
+order for a fresh session: **205 liquid → 204 async asset loading → 202 T301 native-M2
+instancing**. All three are diagnosed and measured; none is speculative.
+
+**205 — MH2O LiquidObject vertex format (do first).** MEASURED via the new
+`inspect adt liquid-formats` command against `C:\WoW4-data\MoPBeta` / `HawaiiMainLand`,
+80 root ADTs, 17,461 liquid layers: **100% carry a `LiquidObject.dbc` id in
+`liquid_object_or_lvf` (values 42, 2325, 2333, 2372), not a vertex format**. Both MH2O
+decoders `switch` on that field with **no `default`**, so every layer falls through with
+`heights = null` and renders flat at the header `minHeight`. Ocean (id 42, 17,317 layers,
+liquidType 2) is genuinely depth-only and **correct today**; the 144 river layers (ids
+2325/2333/2372, liquidType 5) carry real sloped heightmaps with spreads of 11.90 / 70.15 /
+163.25 world units, all discarded — and the substituted flat plane is at the wrong height
+too (lowest vertex disagrees with the header in every varying layer). That is both reported
+symptoms from one cause: flat waterways, and chunk-boundary steps because each chunk
+flattens to its own wrong value. **Two decoders carry the defect independently and only one
+is in the render path**: `StandardTerrainAdapter` calls `Mh2oChunk.Parse`; `AdtLiquidReader`
+serves harvest/converter — fixing the wrong one produces a change with no visible effect.
+Fix is the DBC chain `LiquidObject → LiquidType → LiquidMaterial → LVF`; neither
+`LiquidObject` nor `LiquidMaterial` has a reader yet, and the offsets are wiki-documented and
+**unverified against this client** (Phase 1 gate). The float-plausibility probe that made the
+diagnosis is **not** acceptable as the decoder — 0.3% false positives on ocean.
+See [`specs/205-mh2o-liquid-object-vertex-format/`](../specs/205-mh2o-liquid-object-vertex-format/spec.md).
+Tool: [`AdtLiquidFormatSupport.cs`](../tools/inspect/WowViewer.Tool.Inspect/AdtLiquidFormatSupport.cs).
+
+**204 — Off-thread asset decode (do second).** `DeferredAssetLoads` owns 12 of 13 recent
+hitches at 26.4–68.1 ms on a 2048-frame MoP flight (median 75.26, p95 144.59, p99 235.37,
+2047/2048 frames over 33.3 ms). The operator's premise was right: it is **not** the SSD or the
+MPQ reader — `MpqDataSource` already runs 2 prefetch workers and root bytes are usually warm.
+`WorldAssetManager` has **no threading at all**, so parse, adaptation, BLP decode and GL upload
+all run inside the frame. `DeferredLoadBudget` admits **one unbounded load per frame by
+design** (guaranteed progress) and its own docs name this exact work as *"Spec 153 Phase 5
+step 2, deliberately not attempted here"*; it counts the damage in `OversizedAdmissionCount`,
+which nothing read until today (now surfaced in the frame panel). The CPU throttle clamps to
+1 load/frame on a slow frame while the first load stays unconditional — cutting streaming ~6x
+**without reducing the hitch**, a self-reinforcing spiral. **Phase 1 is a hard gate**: GL
+objects live on static fields and `MdxTextureDiagnosticLogger` is a process-global
+`StreamWriter` re-opened per model from a renderer constructor.
+See [`specs/204-off-thread-asset-decode/`](../specs/204-off-thread-asset-decode/spec.md).
+
+**202 T301 — Native-M2 instancing (do third).** Batching still reports `route requires
+unbatched render` for every M2. Cause: `WowViewerM2RuntimeBridge.PreferNativeStaticRenderer`
+**defaults to `true`** when its env var is unset, so `ShouldUseNativeStaticRenderer` always
+wins and every M2 gets the native-only `M2Renderer` with `_legacyRenderer == null` —
+making `RequiresUnbatchedWorldRender` unconditionally true. The native renderer has **no
+instancing path at all** (`QueueGpuInstance` delegates to the null legacy renderer) and its
+`RenderCore` re-uploads all ten shared uniforms per instance, so merely flipping the flag buys
+nothing. It needs the same shader surgery already done on `MdxRenderer`.
+
+**Landed today (2026-09-01), specs 201/202 Phase 0 + Phase 3 partial.** Instanced /
+state-hoisted / unbatched / unbatchable are now four separate numbers per render path, with
+draw calls counted at the four GL call sites (a model draws once per geoset or section, so no
+arithmetic over instance counts can produce that number) and a named gate on every instance
+short of instancing. **GPU instancing was unreachable dead code**: `SupportsGpuInstancedOpaque`
+was hardcoded `false` on `MdxRenderer` and delegated to it by `M2Renderer`, and the CPU side
+was complete (instance VBO, divisor-tagged attributes at locations 6–10,
+`DrawElementsInstanced`) while **the vertex shader declared only locations 0–5** — enabling the
+flag as it stood would have stacked every doodad on the world origin. Shader completed with a
+constant-folded non-instanced fallback and an automatic disable if it fails to compile.
+`MdxRenderer.RequiresUnbatchedWorldRender` narrowed to `_wireframe` alone: the particle/ribbon
+terms blocked 3,305 of 3,313 opaque instances for effects the opaque pass never draws (the M2
+adapter copies header emitter counts but never populates `ParticleEmitters2` — the
+"[M2] Unresolved effect systems" log). Models with local MDX lights are held out of instancing:
+`UploadMdxLights` transforms light pivots per instance and that state is not in the instance
+payload. Added a "Animate world doodads" toggle (default **off**, per the operator's rule that
+only WMO doodads should auto-animate). **Note the state-hoisted path cannot hoist bone
+matrices**: submission walks instances in visibility order and calls `BeginBatch` lazily, so
+renderers interleave and per-model uniforms would be clobbered — only GPU instancing fixes the
+per-instance bone upload.
+
+**Open, not yet investigated.** Taxi paths and camera model paths on 3.x+; right-sidebar
+duplication; `MergePhaseTile` wholesale replacement dropping base placements (spec 203);
+MCAL alpha blockiness (spec 199); portal culling admitting 60.8% of groups via the
+conservative fallback (spec 200).
+
 **Spec 197 PTCH patch-artifact fix (2026-09-01).** Root cause of the random
 missing Thunder Isle tiles is confirmed: loose 5.0.1 `.adt` files are frequently
 PTCH/BSDIFF patch artifacts, and the viewer fed them raw to `ParseAdt` (zero

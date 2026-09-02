@@ -115,6 +115,8 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     private static int _uUvSet;
     private static int _uUseUvTransform, _uUvTranslation, _uUvScale, _uUvRotationRow0, _uUvRotationRow1;
     private static int _uBones; // Bone matrix array uniform location
+    private static int _uUseGpuInstancing; // Selects aInstanceModel over uModel
+    private static bool _gpuInstancingShaderAvailable = true; // Cleared if the instanced vertex shader fails to compile
     private static int _uHasBones; // Enable skinning flag
     private static bool _shaderInitialized;
 
@@ -184,14 +186,68 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     public Vector3 BoundsMax => _effectiveBoundsMax;
     public bool IsM2AdapterModel => _isM2AdapterModel;
     public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
-    // `_wireframe` is honoured by RenderWithTransform's polygon-mode switch but not by the shared
-    // BeginBatch state, so a wireframe-flagged model would silently draw filled on the batch path.
-    // Declaring it here keeps batched output visually equivalent to unbatched output (FR-006)
-    // rather than making the batch path a second, subtly different renderer.
-    public bool RequiresUnbatchedWorldRender => _wireframe || _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
-    // The GPU-instanced MDX shader is held out until it has portable compile and visual
-    // parity proof. Keep every MDX variant on the established CPU/state path meanwhile.
-    public bool SupportsGpuInstancedOpaque => false;
+    // Only state that changes how the OPAQUE geosets are drawn belongs here — this property is
+    // consulted by the opaque batch planner and by WMO opaque doodad collection, and by nothing
+    // else.
+    //
+    // `_wireframe` qualifies: RenderWithTransform sets the polygon mode around RenderGeosets and
+    // the shared BeginBatch state does not, so a wireframe-flagged model would silently draw
+    // filled on the batch path. Keeping it here makes batched output visually equivalent to
+    // unbatched output (FR-006) rather than making the batch path a subtly different renderer.
+    //
+    // Particle and ribbon emitters do **not** qualify, though they gated this until spec 202
+    // measured what it cost: 3,305 of 3,313 opaque instances on a MoP frame, which was every
+    // instance that could otherwise have been instanced. Two independent reasons they do not
+    // belong:
+    //
+    //  1. Particles are submitted only under RenderPass.Transparent, and the transparent pass
+    //     does not batch — it calls RenderWithTransform per instance regardless of this flag —
+    //     so emitters draw exactly as they did before.
+    //  2. On M2 adapter models they are not drawn at all. WarcraftNetM2Adapter copies the M2
+    //     header's emitter counts but never populates ParticleEmitters2, so _particleEmitters
+    //     stays empty and _particleRenderer is never constructed. That is what the
+    //     "[M2] Unresolved effect systems" log line reports. The opaque pass was being held back
+    //     by effects that do not exist at runtime.
+    public bool RequiresUnbatchedWorldRender => _wireframe;
+    /// <summary>
+    /// Runtime switch for GPU-instanced opaque MDX submission, so the instanced and
+    /// per-instance paths can be compared inside one session rather than across two flights.
+    /// </summary>
+    /// <remarks>
+    /// Spec 202 Phase 3. The instancing machinery — instance VBO, divisor-tagged attributes at
+    /// locations 6-10, <c>DrawElementsInstanced</c>, the bone upload — was already complete on
+    /// the CPU side, but the vertex shader never declared the instance attributes, so every
+    /// instance would have drawn at <c>uModel</c>, which <c>EndGpuInstanceBatch</c> sets to
+    /// identity: the whole scene collapsed onto the world origin. That is what the old
+    /// hardcoded <c>false</c> was protecting against, and completing the shader is what makes
+    /// flipping it meaningful rather than reckless.
+    /// </remarks>
+    public static bool GpuInstancingEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Whether the instanced vertex shader compiled on this driver. Read-only: a toggle cannot
+    /// make a shader exist.
+    /// </summary>
+    public static bool GpuInstancingShaderAvailable => _gpuInstancingShaderAvailable;
+
+    // Instancing draws one geoset once for the whole batch, so anything that varies per
+    // instance below the model level must already be excluded. RequiresUnbatchedWorldRender
+    // covers wireframe. Bone pose is per-model, not per-instance,
+    // on the unbatched path too — ExecuteVisibleMdxAnimation updates each model once per frame
+    // and every instance shares the result — so instancing does not change it.
+    //
+    // Local MDX lights are the one piece of genuinely per-instance state left, and they are
+    // excluded rather than approximated. RenderInstance calls UploadMdxLights(modelMatrix),
+    // which transforms each light's pivot into world space per instance; the instanced path
+    // uploads them once from BeginBatch with an identity matrix. Batching a lamp or brazier
+    // would therefore light every copy as though it stood at the world origin. Per contract C2,
+    // state that differs per instance either goes in the instance payload or keeps the model
+    // out of the batch — approximating it is what makes instancing change appearance.
+    public bool SupportsGpuInstancedOpaque
+        => _gpuInstancingShaderAvailable
+           && GpuInstancingEnabled
+           && !RequiresUnbatchedWorldRender
+           && _mdx.Lights.Count == 0;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
     public IAnimationController? Animator => _animator;
@@ -1005,6 +1061,11 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     {
         ProcessDeferredTextureLoads();
 
+        // Set on every entry, not just when instancing. The shader program is static and shared
+        // by every MdxRenderer, so a stale 1 left behind by an instanced batch would silently
+        // move the next unbatched model to whatever is in the instance buffer.
+        _gl.Uniform1(_uUseGpuInstancing, _gpuInstanceDrawActive ? 1 : 0);
+
         List<int>? geosetOrder = null;
         if (pass == RenderPass.Transparent && _geosets.Count > 1)
         {
@@ -1250,6 +1311,7 @@ if (isAlphaCutout)
                         _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null, _gpuInstanceCount);
                     else
                         _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+                    ModelDrawCallCounter.Record();
                     _gl.BindVertexArray(0);
                     anyLayerRendered = true;
 
@@ -1285,6 +1347,7 @@ if (isAlphaCutout)
                     _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null, _gpuInstanceCount);
                 else
                     _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+                ModelDrawCallCounter.Record();
                 _gl.BindVertexArray(0);
             }
         }
@@ -1322,6 +1385,7 @@ if (isAlphaCutout)
             _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null, _gpuInstanceCount);
         else
             _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+        ModelDrawCallCounter.Record();
         _gl.BindVertexArray(0);
 
         if (!forceBackdropState)
@@ -1592,7 +1656,7 @@ if (isAlphaCutout)
     private void InitShaders()
     {
         if (_shaderInitialized) return; // Shared across all MdxRenderer instances
-        string vertSrc = @"
+        const string vertPrefix = @"
 #version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
@@ -1600,7 +1664,29 @@ layout(location = 2) in vec2 aTexCoord0;
 layout(location = 3) in vec2 aTexCoord1;
 layout(location = 4) in vec4 aBoneIndices;
 layout(location = 5) in vec4 aBoneWeights;
+";
 
+        // Per-instance attributes. The VAO has bound and divisor-tagged these since the GPU
+        // instancing path was first written, but the shader never declared them, so the path
+        // could not work and SupportsGpuInstancedOpaque was hardcoded false. mat4 occupies
+        // locations 6-9; the fade alpha follows at 10.
+        const string vertInstancedDecls = @"
+layout(location = 6) in mat4 aInstanceModel;
+layout(location = 10) in float aInstanceFade;
+uniform int uUseGpuInstancing;
+";
+
+        // The fallback declares the same three names as compile-time constants, so the shared
+        // body below is byte-identical between the two variants and constant-folds to the
+        // pre-instancing shader. A second hand-written copy of the body would be free to drift
+        // from the first, which is exactly the bug this whole change exists to avoid.
+        const string vertNonInstancedDecls = @"
+const mat4 aInstanceModel = mat4(1.0);
+const float aInstanceFade = 1.0;
+const int uUseGpuInstancing = 0;
+";
+
+        const string vertSuffix = @"
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
@@ -1612,6 +1698,7 @@ out vec2 vTexCoord0;
 out vec2 vTexCoord1;
 out vec3 vFragPos;
 out vec3 vViewNormal;
+out float vInstanceFade;
 
 void main() {
     vec4 position = vec4(aPos, 1.0);
@@ -1638,9 +1725,15 @@ void main() {
         }
     }
     
-    vec4 worldPos = uModel * position;
+    // One expression, two paths: instanced draws take their transform from the instance
+    // buffer, everything else keeps the uniform. Both must agree exactly or batching
+    // changes appearance, which is the failure mode this whole change is guarding.
+    mat4 modelMatrix = uUseGpuInstancing > 0 ? aInstanceModel : uModel;
+    vInstanceFade = uUseGpuInstancing > 0 ? aInstanceFade : 1.0;
+
+    vec4 worldPos = modelMatrix * position;
     vFragPos = worldPos.xyz;
-    vNormal = mat3(transpose(inverse(uModel))) * normal;
+    vNormal = mat3(transpose(inverse(modelMatrix))) * normal;
     vViewNormal = mat3(uView) * vNormal;
     vTexCoord0 = aTexCoord0;
     vTexCoord1 = aTexCoord1;
@@ -1659,6 +1752,7 @@ in vec2 vTexCoord0;
 in vec2 vTexCoord1;
 in vec3 vFragPos;
 in vec3 vViewNormal;
+in float vInstanceFade;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
@@ -1785,7 +1879,7 @@ void main()
     float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
     vec3 finalColor = mix(uFogColor, litColor, fogFactor);
     float outputAlpha = uUseTextureAlpha == 1 ? texColor.a : 1.0;
-    float finalAlpha = outputAlpha * uColor.a;
+    float finalAlpha = outputAlpha * uColor.a * vInstanceFade;
     vec3 finalRgb = finalColor * uColor.rgb;
     if (uPremultiplyAlpha == 1)
         finalRgb *= finalAlpha;
@@ -1798,6 +1892,7 @@ void main()
 in vec2 vTexCoord0;
 in vec2 vTexCoord1;
 in vec3 vViewNormal;
+in float vInstanceFade;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
@@ -1834,7 +1929,7 @@ void main()
     if (uAlphaTest == 1 && texColor.a < uAlphaThreshold)
         discard;
 
-    float finalAlpha = texColor.a * uColor.a;
+    float finalAlpha = texColor.a * uColor.a * vInstanceFade;
     vec3 finalRgb = texColor.rgb * uColor.rgb;
     if (uPremultiplyAlpha == 1)
         finalRgb *= finalAlpha;
@@ -1842,7 +1937,23 @@ void main()
 }
 """;
 
-        uint vert = CompileShader(ShaderType.VertexShader, vertSrc);
+        uint vert;
+        try
+        {
+            vert = CompileShader(ShaderType.VertexShader, vertPrefix + vertInstancedDecls + vertSuffix);
+        }
+        catch (Exception ex)
+        {
+            // Availability is decided by what compiled, not by what was intended. Without this
+            // the renderer would keep queueing instances into a shader that cannot read them,
+            // and every doodad would draw at the world origin.
+            _gpuInstancingShaderAvailable = false;
+            ViewerLog.Important(
+                ViewerLog.Category.Shader,
+                $"MDX instanced vertex shader rejected; GPU instancing disabled for this session: {ex.Message}");
+            vert = CompileShader(ShaderType.VertexShader, vertPrefix + vertNonInstancedDecls + vertSuffix);
+        }
+
         uint frag;
         try
         {
@@ -1874,6 +1985,7 @@ void main()
 
         _gl.UseProgram(_shaderProgram);
         _uModel = _gl.GetUniformLocation(_shaderProgram, "uModel");
+        _uUseGpuInstancing = _gl.GetUniformLocation(_shaderProgram, "uUseGpuInstancing");
         _uView = _gl.GetUniformLocation(_shaderProgram, "uView");
         _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");

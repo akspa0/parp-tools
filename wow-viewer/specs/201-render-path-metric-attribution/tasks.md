@@ -11,16 +11,16 @@ Legend: `[ ]` open · `[x]` done · `[-]` in progress · **(operator)** = user-r
 
 ## Phase 1 — Attribute, change nothing
 
-- [ ] **T001** Add per-render-path opaque/transparent submission counters to
+- [x] **T001** Add per-render-path opaque/transparent submission counters to
       `WorldRenderFrameStats`, keyed by applied `M2RouteType` (FR-001, FR-002). Keep the
       existing aggregate fields so FR-005's sum check is testable.
-- [ ] **T002** Record submission outcome per instance as batched / unbatched / **unbatchable**,
+- [x] **T002** Record submission outcome per instance as batched / unbatched / **unbatchable**,
       with the reason for unbatchable (FR-003, FR-004). `M2Renderer.RequiresUnbatchedWorldRender`
       and `SupportsGpuInstancedOpaque` already carry the signal — surface it rather than
       re-deriving it.
-- [ ] **T003** Unit-test FR-005: per-path counts sum exactly to the aggregate totals. This is
+- [x] **T003** Unit-test FR-005: per-path counts sum exactly to the aggregate totals. This is
       what proves the change is a decomposition and not a redefinition.
-- [ ] **T004** Update the frame-history panel to show the per-path breakdown, and stop labelling
+- [x] **T004** Update the frame-history panel to show the per-path breakdown, and stop labelling
       M2-routed models as `MDX` in the panel and the status bar (FR-006).
 - [ ] **T005** **(operator)** Re-fly the Wandering Isle route with batching **off**. Record the
       per-path split of the 13,180 unbatched opaque draws. **This number decides whether Phase 2
@@ -30,6 +30,25 @@ Legend: `[ ]` open · `[x]` done · `[-]` in progress · **(operator)** = user-r
 
 **Phase 1 exit**: "100% unbatched" resolves into per-path counts, and the share that is
 structurally unbatchable is a number.
+
+**T001-T004 landed 2026-09-01** in `WowViewer.Core.Runtime/World/Passes/ModelSubmissionAccounting.cs`,
+implemented jointly with spec 202 Phase 0 because the same submission callbacks carry both
+decompositions. `WorldModelRenderPath` is declared in `Core.Runtime` rather than reusing the
+viewer's `M2RouteType`, which `Core.Runtime` cannot reference; `ResolveVisibleMdxRenderPath` maps
+one to the other at the submission site from `WorldAssetManager.GetRouteDecision`, reading
+`AppliedRoute` per FR-002. The per-path/aggregate sum check (FR-005) is
+`ModelSubmissionAccountingTests.PerPathCounts_SumExactlyToAggregateTotals`.
+
+**Two findings while the counters were open**, neither in scope here:
+
+- `TransparentBatchedMdxCount` is **dead**. The transparent pass is inlined over
+  `transparentObjectSort` rather than going through `ExecutePlannedTransparentMdx`, and only
+  increments the unbatched counter. The panel has been reporting a batched/unbatched ratio whose
+  numerator can never be anything but zero. The new transparent tally records
+  `PassHasNoBatchPath` against every instance, which says the same thing truthfully.
+- `WorldAssetManager.MdxModelsLoaded` and `MdxModelsFailed` are `_mdxModels.Count(kv => ...)` —
+  two O(n) LINQ passes, evaluated every frame by the status bar. Harmless at 429 entries; worth
+  knowing before that dictionary grows.
 
 ---
 

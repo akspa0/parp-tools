@@ -8,6 +8,7 @@ using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Passes;
 using WowViewer.Core.Runtime.World.Visibility;
 using WoWViewer.Population;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
@@ -3444,18 +3445,23 @@ public partial class ViewerApp
             int mdxOpaqueTotal = live.OpaqueBatchedMdxCount + live.OpaqueUnbatchedMdxCount;
             int mdxTransparentTotal = live.TransparentBatchedMdxCount + live.TransparentUnbatchedMdxCount;
 
-            ImGui.Text($"MDX opaque:      batched {live.OpaqueBatchedMdxCount,6}  unbatched {live.OpaqueUnbatchedMdxCount,6}"
-                + (mdxOpaqueTotal > 0 ? $"   ({100.0 * live.OpaqueUnbatchedMdxCount / mdxOpaqueTotal:0.0}% unbatched)" : ""));
-            ImGui.Text($"MDX transparent: batched {live.TransparentBatchedMdxCount,6}  unbatched {live.TransparentUnbatchedMdxCount,6}"
-                + (mdxTransparentTotal > 0 ? $"   ({100.0 * live.TransparentUnbatchedMdxCount / mdxTransparentTotal:0.0}% unbatched)" : ""));
+            // Specs 201 and 202 Phase 0. The aggregate pair above conflates two things at once:
+            // it labels M2-routed models MDX, and its "batched" adds GPU-instanced draws (one draw
+            // per batch) to state-hoisted ones (still one draw per instance). Both totals are kept
+            // so the decomposition below can be checked to sum to them, but the decomposition is
+            // what to read.
+            DrawModelSubmissionCounters("Opaque models", live.OpaqueModelSubmission);
+            ImGui.Spacing();
+            DrawModelSubmissionCounters("Transparent models", live.TransparentModelSubmission);
+
+            ImGui.Spacing();
             ImGui.Text($"WMO draw calls:  total {live.WmoDrawCallCount,6}  batched {live.WmoBatchDrawCallCount,6}  group-fallback {live.WmoGroupFallbackDrawCallCount,6}");
             ImGui.Text($"WMO doodad submissions: {live.WmoDoodadSubmissionCount}   visible groups: {live.WmoVisibleGroupSubmissionCount}");
 
-            if (mdxOpaqueTotal > 0 && live.OpaqueUnbatchedMdxCount > live.OpaqueBatchedMdxCount)
-            {
-                ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
-                    "Most opaque MDX are UNBATCHED: one draw call per instance.");
-            }
+            ImGui.Spacing();
+            ImGui.TextDisabled($"Pre-decomposition aggregate (spec 201 FR-005 sum check): opaque batched {live.OpaqueBatchedMdxCount}"
+                + $"/unbatched {live.OpaqueUnbatchedMdxCount} of {mdxOpaqueTotal}"
+                + $", transparent batched {live.TransparentBatchedMdxCount}/unbatched {live.TransparentUnbatchedMdxCount} of {mdxTransparentTotal}.");
 
             // Same-flight before/after for Spec 153 US3. Off reproduces the recorded 100%-unbatched
             // baseline exactly, so the comparison does not depend on reflying the route.
@@ -3463,6 +3469,26 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Opaque MDX batching (Spec 153 US3)", ref mdxBatching))
                 _worldScene.MdxOpaqueBatchingEnabled = mdxBatching;
             ImGui.TextDisabled("Off = per-instance state setup per draw (the recorded baseline).");
+
+            bool worldDoodadAnimation = _worldScene.WorldDoodadAnimationEnabled;
+            if (ImGui.Checkbox("Animate world doodads", ref worldDoodadAnimation))
+                _worldScene.WorldDoodadAnimationEnabled = worldDoodadAnimation;
+            ImGui.TextDisabled("Off = only WMO doodads auto-animate. Watch the MdxAnimation stage timer.");
+
+            // Spec 202 Phase 3. This is the only switch here that changes the number of draw
+            // calls rather than the setup cost per draw, so it is the one to flip when comparing.
+            if (MdxRenderer.GpuInstancingShaderAvailable)
+            {
+                bool gpuInstancing = MdxRenderer.GpuInstancingEnabled;
+                if (ImGui.Checkbox("GPU instancing for opaque models (Spec 202)", ref gpuInstancing))
+                    MdxRenderer.GpuInstancingEnabled = gpuInstancing;
+                ImGui.TextDisabled("On = one draw call per model instead of one per instance.");
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
+                    "GPU instancing unavailable: the instanced vertex shader did not compile on this driver.");
+            }
             ImGui.TreePop();
         }
 
@@ -3577,6 +3603,69 @@ public partial class ViewerApp
             }
             ImGui.TextDisabled($"Recorder overhead: {snapshot.RecorderOverheadMsPerFrame * 1000.0:0.00} us/frame");
             ImGui.TreePop();
+        }
+    }
+
+    /// <summary>
+    /// Specs 201 and 202 Phase 0 instrumentation. Reports one pass's model submissions by render
+    /// path and by the gate that stopped each instance short of GPU instancing, plus the draw
+    /// calls the pass actually issued. Diagnostic only; it changes no submission decision.
+    /// </summary>
+    private static void DrawModelSubmissionCounters(string label, WorldModelSubmissionStats stats)
+    {
+        ImGui.Text($"{label}: instanced {stats.Instanced,6}  state-hoisted {stats.StateHoisted,6}  unbatched {stats.Unbatched,6}   (total {stats.Total})");
+
+        // The number the batching work is actually trying to move. Instances are not draw calls:
+        // a model draws once per geoset or section, so this is counted at the GL call sites.
+        ImGui.Text($"  draw calls {stats.DrawCalls,6}  per instance {stats.DrawCallsPerInstance,6:0.00}"
+            + $"   distinct models {stats.DistinctModelCount,5} (per-model instancing floor)");
+
+        if (stats.StateHoisted > 0)
+        {
+            // Spec 202 research R1: the defect that made every previous before/after unreadable.
+            ImGui.TextDisabled("  state-hoisted still issues one draw per instance - it saves setup, not draws.");
+        }
+
+        if (stats.Total > 0)
+        {
+            ImGui.Text("  by render path:");
+            DrawPathRow("AdapterSkin", stats.AdapterSkin);
+            DrawPathRow("AdapterEmbeddedProfile", stats.AdapterEmbeddedProfile);
+            DrawPathRow("NativeEmbeddedProfile", stats.NativeEmbeddedProfile);
+            DrawPathRow("ConversionFallback", stats.ConversionFallback);
+            DrawPathRow("MdxDirect", stats.MdxDirect);
+            DrawPathRow("Unknown (no route decision)", stats.Unknown);
+        }
+
+        ImGui.Text("  blocked from instancing by:");
+        DrawGateRow("batching toggle off", stats.GatedBatchingDisabled);
+        DrawGateRow("route requires unbatched render", stats.GatedRouteRequiresUnbatchedRender);
+        DrawGateRow("renderer has no GPU instancing", stats.GatedGpuInstancingUnsupported);
+        DrawGateRow("distance fade below 0.999", stats.GatedOpaqueFadeBelowThreshold);
+        DrawGateRow("pass has no batch path", stats.GatedPassHasNoBatchPath);
+        if (stats.GatedRendererUnavailable > 0)
+        {
+            ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
+                $"    no renderer resolved            {stats.GatedRendererUnavailable,6}  (never reached the GPU)");
+        }
+
+        if (stats.DominantGate != WorldModelBatchGate.None)
+            ImGui.TextDisabled($"  largest gate: {stats.DominantGate}");
+
+        static void DrawPathRow(string name, WorldModelPathStats path)
+        {
+            if (path.Total == 0)
+                return;
+
+            ImGui.Text($"    {name,-30} instanced {path.Instanced,6}  hoisted {path.StateHoisted,6}  unbatched {path.Unbatched,6}");
+        }
+
+        static void DrawGateRow(string name, int count)
+        {
+            if (count == 0)
+                return;
+
+            ImGui.Text($"    {name,-30} {count,6}");
         }
     }
 
@@ -3704,7 +3793,8 @@ public partial class ViewerApp
         ImGui.Text($"WMO draws batch/fallback/liquid/doodad: {renderStats.WmoBatchDrawCallCount}/{renderStats.WmoGroupFallbackDrawCallCount}/{renderStats.WmoLiquidDrawCallCount}/{renderStats.WmoDoodadSubmissionCount}  instances={renderStats.WmoOpaqueBatchInstanceCount} groups={renderStats.WmoVisibleGroupSubmissionCount}");
         ImGui.Text($"MDX anim/vis/opaque: {renderStats.MdxAnimation.DurationMs:0.00} / {renderStats.MdxVisibility.DurationMs:0.00} / {renderStats.MdxOpaqueSubmission.DurationMs:0.00} ms");
         ImGui.Text($"MDX sort/trans: {renderStats.MdxTransparentSort.DurationMs:0.00} / {renderStats.MdxTransparentSubmission.DurationMs:0.00} ms");
-        ImGui.Text($"MDX opaque shared/unbatched: {renderStats.OpaqueBatchedMdxCount}/{renderStats.OpaqueUnbatchedMdxCount}  transparent shared/unbatched: {renderStats.TransparentBatchedMdxCount}/{renderStats.TransparentUnbatchedMdxCount}");
+        ImGui.Text($"Models opaque inst/hoisted/unbatched: {renderStats.OpaqueModelSubmission.Instanced}/{renderStats.OpaqueModelSubmission.StateHoisted}/{renderStats.OpaqueModelSubmission.Unbatched}"
+            + $"  transparent: {renderStats.TransparentModelSubmission.Unbatched}  draw calls: {renderStats.OpaqueModelSubmission.DrawCalls}+{renderStats.TransparentModelSubmission.DrawCalls}");
         ImGui.Text($"Sky/backdrop/overlay: {renderStats.Sky.DurationMs:0.00} / {renderStats.SkyboxBackdrop.DurationMs:0.00} / {renderStats.Overlay.DurationMs:0.00} ms");
         ImGui.TextWrapped(_worldScene.RendererOptimizationHint);
 
@@ -3712,6 +3802,25 @@ public partial class ViewerApp
         ImGui.Separator();
         ImGui.Text($"Asset I/O req/cache: {assetReadStats.ReadRequests}/{assetReadStats.FileCacheHits}  resolved-cache: {assetReadStats.ResolvedPathCacheHits}  probes hit/miss: {assetReadStats.PathProbeResolutions}/{assetReadStats.PathProbeMisses}");
         ImGui.Text($"Asset raw cache: {assetReadStats.FileCacheCount} files / {FormatBytes(assetReadStats.FileCacheBytes)}");
+
+        // Spec 153 Phase 5. DeferredLoadBudget records these and, until now, nothing read them.
+        // OversizedAdmissionCount is documented in that class as "the honest measure of the residual
+        // the off-thread decode still owes": every one of these is a frame that paid a full
+        // synchronous load because the policy guarantees progress even when the load cannot fit.
+        DeferredLoadBudget loadBudget = _worldScene.Assets.LoadBudget;
+        ImGui.Text($"Deferred loads: oversized admissions {loadBudget.OversizedAdmissionCount}"
+            + $"  budget deferrals {loadBudget.BudgetDeferralCount}"
+            + $"  worst single load {loadBudget.WorstObservedLoadMs:0.0} ms");
+        ImGui.Text($"  predicted cost: MDX {loadBudget.PredictedCostMs(DeferredLoadKind.Mdx):0.0} ms"
+            + $"  WMO {loadBudget.PredictedCostMs(DeferredLoadKind.Wmo):0.0} ms");
+        if (loadBudget.OversizedAdmissionCount > 0)
+        {
+            ImGui.TextWrapped(
+                "Oversized admissions are synchronous loads larger than the whole frame budget, "
+                + "admitted anyway so the asset eventually appears. They are the DeferredAssetLoads "
+                + "hitches. The budget cannot subdivide one load - only moving decode off the render "
+                + "thread can.");
+        }
         ImGui.Text($"Asset misses: failed retry suppress={_worldScene.Assets.SuppressedFailedMdxRetryCount}  known missing M2 skins={_worldScene.Assets.KnownMissingM2SkinCount}  duplicate skin logs={_worldScene.Assets.SuppressedMissingM2SkinLogCount}");
 
         if (_dataSource is MpqDataSource mpqDataSource)
