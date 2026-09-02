@@ -11450,9 +11450,24 @@ public class WorldScene : ISceneRenderer
                     {
                         if (SelectedInstance is ObjectInstance selectedInstance && !ShouldHideObjectInstanceByUniqueId(selectedInstance))
                         {
+                            // Enforce a minimum visible selection box size so tiny objects
+                            // (books, candles, coins, early Ironforge doodads) always have
+                            // a clearly visible selection box that encompasses the object.
+                            const float minHalfExtent = 0.75f; // 1.5 yards minimum per axis
+                            Vector3 bbMin = selectedInstance.BoundsMin;
+                            Vector3 bbMax = selectedInstance.BoundsMax;
+                            Vector3 center = (bbMin + bbMax) * 0.5f;
+                            Vector3 halfExtent = (bbMax - bbMin) * 0.5f;
+                            halfExtent = new Vector3(
+                                MathF.Max(halfExtent.X, minHalfExtent),
+                                MathF.Max(halfExtent.Y, minHalfExtent),
+                                MathF.Max(halfExtent.Z, minHalfExtent));
+                            bbMin = center - halfExtent;
+                            bbMax = center + halfExtent;
+
                             _bbRenderer.BatchHighlightedBoxMinMax(
-                                selectedInstance.BoundsMin,
-                                selectedInstance.BoundsMax,
+                                bbMin,
+                                bbMax,
                                 selectedBoundsTime,
                                 selectedBoundsInnerColor,
                                 selectedBoundsAccentA,
