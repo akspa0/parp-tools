@@ -45,6 +45,7 @@ of the mouse and object selection system.
     - Enforced a strict spatial proximity cluster threshold ($\le 2.0\text{ yd}$ from closest hit) and terrain occlusion culling: objects 40 yards apart along the ray no longer trigger ambiguous cluster popups; foreground objects select immediately on a single click.
     - Resolved selection lock: removed stale candidate block in `TryHandleSceneClickSelection`, ensuring subsequent clicks can pick different objects seamlessly.
     - Added comprehensive deselection: clicking on empty terrain/sky clears selection, clicking an already-selected object toggles it off, and pressing Escape immediately deselects active world objects or closes the cluster card. All builds clean. Ready for operator interactive verification.
+16. Spec 211 Opened: WMO Interior Ray Picking, Doodad Selection & Ghost Transparent Wireframes. SpecKit authored (`spec.md`, `plan.md`, `tasks.md`) and registered in `specs/STATUS.md`. Resolves WMO container lockout by prioritizing interior MDX/M2 objects within WMO bounds, adds interactive WMO doodad ray picking, and implements dual-pass 33% transparent ghost wireframe rendering for M2/MDX, WMOs, and terrain.
 
 **Spec 209 — Liquid Convergence Measured (Phase 1 Complete).** Built `inspect adt liquid-convergence`
 and `LiquidConvergenceAnalyzer` (4 new tests). Catalog discovery loads 108 WL* files directly from
