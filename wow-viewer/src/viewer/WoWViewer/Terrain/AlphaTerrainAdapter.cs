@@ -111,8 +111,25 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// <summary>True if this is a WMO-only map (no terrain tiles).</summary>
     public bool IsWmoBased { get; }
 
-    /// <summary>Phased terrain overlay is not supported for Alpha WDTs.</summary>
+    /// <summary>
+    /// The phase overlay stack. Each layer is a second alpha WDT, read through its own adapter.
+    /// </summary>
     private readonly List<PhaseLayerSettings> _phaseLayers = [];
+
+    /// <summary>Adapters for phase maps, cached per map name. A cached null is a cached failure.</summary>
+    private readonly Dictionary<string, AlphaTerrainAdapter?> _phaseAdapters = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves a phase map name to a readable alpha WDT path.
+    /// </summary>
+    /// <remarks>
+    /// REQUIRED for phase layers to work, because <see cref="_wdtPath"/> is NOT
+    /// <c>World/Maps/&lt;map&gt;/&lt;map&gt;.wdt</c>. The viewer extracts archive-backed WDTs to a
+    /// flat cache directory and hands the adapter that path, so probing for a sibling map directory
+    /// finds nothing -- which is exactly how phase layers on alpha maps silently did nothing. The
+    /// host supplies this so phase maps are resolved through the same source the base map came from.
+    /// </remarks>
+    public Func<string, string?>? PhaseWdtPathResolver { get; set; }
 
     /// <inheritdoc />
     public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
@@ -189,8 +206,21 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     public bool TileExists(int tileX, int tileY)
     {
         // Alpha WDT MAIN is row-major: index = tileX*64+tileY (where tileX is row and tileY is col)
-        int idx = tileX * 64 + tileY;
-        return idx >= 0 && idx < _adtOffsets.Count && _adtOffsets[idx] != 0;
+        if (TileExistsInOwnWdt(tileX, tileY))
+            return true;
+
+        // A phase layer may supply a tile the base map does not have.
+        foreach (PhaseLayerSettings layer in _phaseLayers)
+        {
+            if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName) || layer.Channels == PhaseDataChannel.None)
+                continue;
+
+            AlphaTerrainAdapter? phaseAdapter = ResolvePhaseAdapter(layer.MapName);
+            if (phaseAdapter != null && phaseAdapter.TileExistsInOwnWdt(tileX - layer.TileOffsetX, tileY - layer.TileOffsetY))
+                return true;
+        }
+
+        return false;
     }
 
     public bool TryGetPlacementSourceData(int tileX, int tileY, out string sourcePath, out byte[] sourceBytes)
@@ -220,7 +250,229 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// Load a tile and return terrain chunks + per-tile MDDF/MODF placements.
     /// Placements are collected into the returned TileLoadResult AND into the global lists.
     /// </summary>
+    /// <summary>
+    /// Load the tile and compose every active phase layer onto it.
+    /// </summary>
+    /// <remarks>
+    /// Alpha WDTs keep their terrain inside the WDT rather than in loose ADTs, so a phase layer here
+    /// is a second alpha WDT read through its own adapter. Composition then reuses the same
+    /// <see cref="PhaseCompositionPolicy"/> rules as the split-ADT path, so the two eras cannot drift
+    /// apart on what a channel means.
+    /// </remarks>
     public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
+    {
+        TileLoadResult result = LoadTileCore(tileX, tileY);
+
+        foreach (PhaseLayerSettings layer in _phaseLayers)
+        {
+            if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName) || layer.Channels == PhaseDataChannel.None)
+                continue;
+
+            AlphaTerrainAdapter? phaseAdapter = ResolvePhaseAdapter(layer.MapName);
+            if (phaseAdapter == null)
+                continue;
+
+            int sourceTileX = tileX - layer.TileOffsetX;
+            int sourceTileY = tileY - layer.TileOffsetY;
+            if (!phaseAdapter.TileExistsInOwnWdt(sourceTileX, sourceTileY))
+                continue;
+
+            TileLoadResult phase = phaseAdapter.LoadTileCore(sourceTileX, sourceTileY);
+            phaseAdapter.TileTextures.TryGetValue((sourceTileX, sourceTileY), out List<string>? phaseTextures);
+            MergePhaseTile(result, phase, phaseTextures ?? new List<string>(), layer, tileX, tileY);
+        }
+
+        return result;
+    }
+
+    /// <summary>Resolve (and cache) the adapter for a phase map's own alpha WDT.</summary>
+    private AlphaTerrainAdapter? ResolvePhaseAdapter(string mapName)
+    {
+        if (_phaseAdapters.TryGetValue(mapName, out AlphaTerrainAdapter? cached))
+            return cached;
+
+        AlphaTerrainAdapter? adapter = null;
+        var attempted = new List<string>();
+        try
+        {
+            // Preferred: ask the host, which can read the map out of the same archive the base map
+            // came from. The sibling probe below only works for genuinely loose map directories.
+            string? resolved = PhaseWdtPathResolver?.Invoke(mapName);
+            if (!string.IsNullOrWhiteSpace(resolved))
+                attempted.Add(resolved!);
+
+            if (string.IsNullOrWhiteSpace(resolved) || !File.Exists(resolved))
+            {
+                string? mapsRoot = Path.GetDirectoryName(Path.GetDirectoryName(_wdtPath));
+                if (!string.IsNullOrEmpty(mapsRoot))
+                {
+                    string candidate = Path.Combine(mapsRoot, mapName, mapName + ".wdt");
+                    attempted.Add(candidate);
+                    if (File.Exists(candidate))
+                        resolved = candidate;
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved))
+            {
+                adapter = new AlphaTerrainAdapter(resolved!) { PhaseWdtPathResolver = PhaseWdtPathResolver };
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"[AlphaADT] Phase map '{mapName}' opened from '{resolved}' ({adapter._existingTiles.Count} tiles).");
+            }
+            else
+            {
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"[AlphaADT] Phase map '{mapName}' could not be resolved to a WDT; the layer contributes nothing. "
+                    + $"Tried: {(attempted.Count == 0 ? "<no candidates>" : string.Join(", ", attempted))}");
+            }
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[AlphaADT] Phase map '{mapName}' failed to open: {ex.Message}");
+        }
+
+        _phaseAdapters[mapName] = adapter;
+        return adapter;
+    }
+
+    /// <summary>Tiles present in this adapter's own WDT, ignoring any phase layers it carries.</summary>
+    private bool TileExistsInOwnWdt(int tileX, int tileY)
+    {
+        int idx = tileX * 64 + tileY;
+        return idx >= 0 && idx < _adtOffsets.Count && _adtOffsets[idx] != 0;
+    }
+
+    /// <summary>Compose one phase layer's tile onto the base tile, channel by channel.</summary>
+    private void MergePhaseTile(
+        TileLoadResult parent,
+        TileLoadResult phase,
+        IReadOnlyList<string> phaseTextures,
+        PhaseLayerSettings layer,
+        int tileX,
+        int tileY)
+    {
+        TileTextures.TryGetValue((tileX, tileY), out List<string>? baseTextures);
+        var mergedTextures = new List<string>(baseTextures ?? new List<string>());
+        var textureIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < mergedTextures.Count; i++)
+            textureIndices.TryAdd(mergedTextures[i], i);
+
+        int patched = 0;
+        int added = 0;
+        int skipped = 0;
+        PhaseDataChannel contributed = PhaseDataChannel.None;
+
+        foreach (TerrainChunkData phaseChunk in phase.Chunks)
+        {
+            TerrainChunkData? parentChunk = parent.Chunks.FirstOrDefault(candidate =>
+                candidate.ChunkX == phaseChunk.ChunkX && candidate.ChunkY == phaseChunk.ChunkY);
+
+            PhaseDataChannel present = PhaseChunkMerger.DescribePresence(phaseChunk);
+            PhaseDataChannel take = PhaseCompositionPolicy.ResolveChannelsToTake(
+                layer.Channels, present, layer.OnlyTakeWhatThePhaseCarries);
+
+            if ((take & PhaseDataChannel.TextureLayers) != 0 || parentChunk == null)
+                RemapPhaseTextureIndices(phaseChunk, phaseTextures, mergedTextures, textureIndices);
+
+            if (parentChunk == null)
+            {
+                if (present == PhaseDataChannel.None)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                parent.Chunks.Add(phaseChunk);
+                added++;
+                contributed |= present;
+                continue;
+            }
+
+            if (take == PhaseDataChannel.None)
+            {
+                skipped++;
+                continue;
+            }
+
+            int parentIndex = parent.Chunks.IndexOf(parentChunk);
+            parent.Chunks[parentIndex] = PhaseChunkMerger.Merge(parentChunk, phaseChunk, take);
+            patched++;
+            contributed |= take;
+        }
+
+        if (layer.HasTileOffset)
+            TranslatePhasePlacements(phase, layer);
+
+        if (PhaseCompositionPolicy.PhaseOwnsPlacements(layer.Channels, PhaseDataChannel.Doodads, phase.MddfPlacements.Count))
+        {
+            parent.MddfPlacements.Clear();
+            parent.MddfPlacements.AddRange(phase.MddfPlacements);
+            contributed |= PhaseDataChannel.Doodads;
+        }
+
+        if (PhaseCompositionPolicy.PhaseOwnsPlacements(layer.Channels, PhaseDataChannel.WorldObjects, phase.ModfPlacements.Count))
+        {
+            parent.ModfPlacements.Clear();
+            parent.ModfPlacements.AddRange(phase.ModfPlacements);
+            contributed |= PhaseDataChannel.WorldObjects;
+        }
+
+        TileTextures[(tileX, tileY)] = mergedTextures;
+
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"[AlphaADT] Phase patch ({tileX},{tileY}) from '{layer.MapName}': "
+            + $"phaseChunks={phase.Chunks.Count} patched={patched} added={added} skippedEmpty={skipped} "
+            + $"channels={PhaseCompositionPolicy.Describe(contributed)}"
+            + (layer.HasTileOffset ? $" tileOffset=({layer.TileOffsetX},{layer.TileOffsetY})" : string.Empty));
+    }
+
+    private static void TranslatePhasePlacements(TileLoadResult phase, PhaseLayerSettings layer)
+    {
+        (float dx, float dy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+            layer.TileOffsetX, layer.TileOffsetY, WoWConstants.ChunkSize);
+
+        for (int i = 0; i < phase.MddfPlacements.Count; i++)
+        {
+            MddfPlacement placement = phase.MddfPlacements[i];
+            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            phase.MddfPlacements[i] = placement;
+        }
+
+        for (int i = 0; i < phase.ModfPlacements.Count; i++)
+        {
+            ModfPlacement placement = phase.ModfPlacements[i];
+            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            phase.ModfPlacements[i] = placement;
+        }
+    }
+
+    private static void RemapPhaseTextureIndices(
+        TerrainChunkData phaseChunk,
+        IReadOnlyList<string> phaseTextures,
+        List<string> mergedTextures,
+        Dictionary<string, int> textureIndices)
+    {
+        for (int layerIndex = 0; layerIndex < phaseChunk.Layers.Length; layerIndex++)
+        {
+            TerrainLayer chunkLayer = phaseChunk.Layers[layerIndex];
+            if ((uint)chunkLayer.TextureIndex >= (uint)phaseTextures.Count)
+                continue;
+
+            string textureName = phaseTextures[chunkLayer.TextureIndex];
+            if (!textureIndices.TryGetValue(textureName, out int mergedIndex))
+            {
+                mergedIndex = mergedTextures.Count;
+                mergedTextures.Add(textureName);
+                textureIndices.Add(textureName, mergedIndex);
+            }
+
+            chunkLayer.TextureIndex = mergedIndex;
+            phaseChunk.Layers[layerIndex] = chunkLayer;
+        }
+    }
+
+    private TileLoadResult LoadTileCore(int tileX, int tileY)
     {
         // Alpha WDT MAIN is row-major: index = tileX*64+tileY (where tileX is row and tileY is col)
         int tileIdx = tileX * 64 + tileY;

@@ -922,21 +922,24 @@ public class WorldScene : ISceneRenderer
         int MaxNewMdxLoadsPerFrame,
         int MaxNewWmoLoadsPerFrame,
         int MaxDeferredLoadsPerFrame,
-        double MaxDeferredLoadBudgetMs);
+        double MaxDeferredLoadBudgetMs,
+        int MaxPriorityLoadBacklog);
 
     private static readonly TerrainAssetLoadPolicy WmoOnlyAssetLoadPolicy = new(
         PrewarmTileAssets: false,
         MaxNewMdxLoadsPerFrame: 6,
         MaxNewWmoLoadsPerFrame: 3,
         MaxDeferredLoadsPerFrame: 2,
-        MaxDeferredLoadBudgetMs: 6.0);
+        MaxDeferredLoadBudgetMs: 6.0,
+        MaxPriorityLoadBacklog: 8);
 
     private static readonly TerrainAssetLoadPolicy StreamingTerrainAssetLoadPolicy = new(
         PrewarmTileAssets: false,
         MaxNewMdxLoadsPerFrame: 12,
         MaxNewWmoLoadsPerFrame: 6,
         MaxDeferredLoadsPerFrame: 4,
-        MaxDeferredLoadBudgetMs: 3.5);
+        MaxDeferredLoadBudgetMs: 3.5,
+        MaxPriorityLoadBacklog: 16);
 
     private sealed class WorldRenderFrame
     {
@@ -1592,6 +1595,18 @@ public class WorldScene : ISceneRenderer
         get => _terrainManager?.OverlayMapName;
         set => _terrainManager?.SetOverlayMap(value);
     }
+
+    /// <summary>
+    /// The phase overlay stack, for consumers that need more than the first enabled layer.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SecondaryOverlayMap"/> is a single-overlay shim and reports only the first enabled
+    /// layer, with no tile offset. Anything that renders overlay content -- the minimap included --
+    /// has to read the stack, or it silently shows one layer at the wrong coordinates.
+    /// </remarks>
+    public IReadOnlyList<PhaseLayerSettings> PhaseLayers =>
+        _terrainManager?.PhaseLayers as IReadOnlyList<PhaseLayerSettings>
+        ?? (_terrainManager?.PhaseLayers?.ToList() ?? new List<PhaseLayerSettings>());
     public bool EnableRuntimeWmoGroupVisibility
     {
         get => _assets.EnableRuntimeWmoGroupVisibility;
@@ -9089,8 +9104,18 @@ public class WorldScene : ISceneRenderer
         _pendingVisibleMdxLoadScratch.AddRange(_pendingVisibleMdxLoadDistances);
         _pendingVisibleMdxLoadScratch.Sort((left, right) => left.Value.CompareTo(right.Value));
 
+        // Bound the backlog. The priority queue is a FIFO, so promoting more per frame than the
+        // loader drains turns it into a stale insertion-ordered list: at 12 in and as few as 1 out
+        // (the CPU throttle clamps to 1 whenever the previous frame exceeded 33 ms), an entry pops
+        // many frames after it was queued, when the camera has moved on. That is what makes distant
+        // objects appear before near ones. Anything not promoted this frame is re-derived from
+        // visibility next frame and reconsidered against its distance then, so nothing is lost.
+        int budget = Math.Min(
+            _assetLoadPolicy.MaxNewMdxLoadsPerFrame,
+            Math.Max(0, _assetLoadPolicy.MaxPriorityLoadBacklog - _assets.PriorityMdxLoadCount));
+
         int queued = 0;
-        for (int i = 0; i < _pendingVisibleMdxLoadScratch.Count && queued < _assetLoadPolicy.MaxNewMdxLoadsPerFrame; i++)
+        for (int i = 0; i < _pendingVisibleMdxLoadScratch.Count && queued < budget; i++)
         {
             _assets.PrioritizeMdxLoad(_pendingVisibleMdxLoadScratch[i].Key);
             queued++;
@@ -9106,8 +9131,12 @@ public class WorldScene : ISceneRenderer
         _pendingVisibleWmoLoadScratch.AddRange(_pendingVisibleWmoLoadDistances);
         _pendingVisibleWmoLoadScratch.Sort((left, right) => left.Value.CompareTo(right.Value));
 
+        int budget = Math.Min(
+            _assetLoadPolicy.MaxNewWmoLoadsPerFrame,
+            Math.Max(0, _assetLoadPolicy.MaxPriorityLoadBacklog - _assets.PriorityWmoLoadCount));
+
         int queued = 0;
-        for (int i = 0; i < _pendingVisibleWmoLoadScratch.Count && queued < _assetLoadPolicy.MaxNewWmoLoadsPerFrame; i++)
+        for (int i = 0; i < _pendingVisibleWmoLoadScratch.Count && queued < budget; i++)
         {
             _assets.PrioritizeWmoLoad(_pendingVisibleWmoLoadScratch[i].Key);
             queued++;

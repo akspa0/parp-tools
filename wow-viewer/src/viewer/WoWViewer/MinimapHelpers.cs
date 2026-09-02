@@ -60,8 +60,29 @@ internal static class MinimapHelpers
             bool drewTexture = false;
             if (minimapRenderer != null && !string.IsNullOrEmpty(mapName))
             {
-                string? overlayMap = worldScene?.SecondaryOverlayMap;
-                uint tileTex = minimapRenderer.GetTileTexture(mapName, ty, tx, overlayMap);
+                // Resolve through the whole phase stack, not just the first enabled layer, and apply
+                // each layer's tile offset. Reading SecondaryOverlayMap here showed one layer at the
+                // base map's coordinates, so an offset layer's minimap never moved with its terrain.
+                // Later layers win, matching the composition order the terrain adapters use.
+                uint tileTex = 0;
+                IReadOnlyList<WowViewer.Core.Maps.PhaseLayerSettings>? phaseLayers = worldScene?.PhaseLayers;
+                if (phaseLayers != null)
+                {
+                    for (int layerIndex = phaseLayers.Count - 1; layerIndex >= 0 && tileTex == 0; layerIndex--)
+                    {
+                        WowViewer.Core.Maps.PhaseLayerSettings layer = phaseLayers[layerIndex];
+                        if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName))
+                            continue;
+
+                        // tx is the adapter's tileX (row) and ty its tileY (col); GetTileTexture
+                        // takes them in the opposite order, which is why the offsets cross over.
+                        tileTex = minimapRenderer.GetTileTexture(
+                            layer.MapName, ty - layer.TileOffsetY, tx - layer.TileOffsetX);
+                    }
+                }
+
+                if (tileTex == 0)
+                    tileTex = minimapRenderer.GetTileTexture(mapName, ty, tx);
                 if (tileTex != 0)
                 {
                     var texId = (IntPtr)tileTex;

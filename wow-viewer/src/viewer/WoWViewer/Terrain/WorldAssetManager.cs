@@ -134,6 +134,23 @@ public class WorldAssetManager : IDisposable
     public int FileCacheCount => _fileDataCache.Count;
     public long FileCacheBytes => _fileDataCacheBytes;
     public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
+
+    /// <summary>
+    /// Entries waiting in the distance-prioritised MDX queue.
+    /// </summary>
+    /// <remarks>
+    /// The priority queue is a <b>FIFO</b>, so its order is insertion order, not distance. That is
+    /// only equivalent to "nearest first" while the backlog is short: promotion runs at up to
+    /// <c>MaxNewMdxLoadsPerFrame</c> (12) while the loader drains
+    /// <c>MaxDeferredLoadsPerFrame</c> (4, clamped to 1 whenever the previous frame exceeded 33 ms),
+    /// so an unbounded backlog grows every frame and eventually pops entries that were near many
+    /// frames ago -- which renders as distant objects appearing before near ones. Callers bound the
+    /// backlog with this count.
+    /// </remarks>
+    public int PriorityMdxLoadCount => _priorityMdxLoads.Count;
+
+    /// <inheritdoc cref="PriorityMdxLoadCount"/>
+    public int PriorityWmoLoadCount => _priorityWmoLoads.Count;
     public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
     public int PendingDeferredWmoMaterialTextureLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingMaterialTextureLoadCount ?? 0);
     public int KnownMissingM2SkinCount => _knownMissingM2SkinPaths.Count;

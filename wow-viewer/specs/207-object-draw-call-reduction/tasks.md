@@ -45,6 +45,24 @@ Status key: `[ ]` not started · `[x]` done · `[~]` in progress · `[O]` operat
 - [O] **T108** Operator: pixel-compare the fade band for popping, z-fighting or sorting artifacts
       (SC-004 / acceptance 1.3). If present, sort the faded batch back-to-front by centroid.
 
+## Phase 1b — Asset load ordering (operator report, 2026-09-02)
+
+Not in the original spec: "objects nearest to the camera take a long time to pop in, while the
+distant stuff is loaded in first."
+
+- [x] **T151** Diagnose. The distance sort is **correct** (ascending, nearest first) and the priority
+      queue **is** drained before the bulk queue — both verified before looking further. The defect is
+      that `_priorityMdxLoads` is a **FIFO**: promoted at 12/frame, drained at 4/frame and as low as
+      1/frame under the CPU throttle (373 of 373 frames in the capture), so it grows ~11/frame and
+      pops entries queued dozens of frames ago. The "distant" objects loading first were near a few
+      seconds ago.
+- [x] **T152** Bound the backlog with `MaxPriorityLoadBacklog` (16 streaming / 8 WMO-only) so FIFO
+      order still approximates distance order. Unpromoted models are re-derived from visibility next
+      frame, so nothing is lost.
+- [O] **T153** Operator: fly into a dense area and confirm near objects resolve before distant ones.
+- [ ] **T154** Consider replacing the FIFO with a real distance-ordered structure, which would remove
+      the need for a backlog bound entirely. Only worth doing if T153 still shows ordering problems.
+
 ## Phase 2 — WMO group admission (US2) — FR-006..FR-008
 
 - [ ] **T201** Split the conservative-fallback counter by reason, separating "no portal data in file"

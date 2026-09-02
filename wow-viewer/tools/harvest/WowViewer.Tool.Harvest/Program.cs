@@ -1566,10 +1566,21 @@ static class Program
         SyntheticMinimapScorecard? scorecard = scoreAgainstAuthored ? new SyntheticMinimapScorecard() : null;
         const string BaselineVariantName = "legacy";
         const string CurrentVariantName = "current";
-        // --dxt1-parity: emit a DXT1-compressed parity companion per tile alongside the pristine
-        // render, so authored and synthetic tiles compare on equal terms (FR-015). The pristine
-        // render remains the primary output; the parity companion is a parity-only companion.
-        bool dxt1Parity = HasFlag(args, "--dxt1-parity");
+        // Authored 0.5.3 minimaps are BLP2/DXT1 256x256 (MEASURED, see MinimapEncodingSurvey), so
+        // DXT1's 4x4 block fit and RGB565 endpoint quantisation ARE part of what a real minimap looks
+        // like -- not an artifact to be avoided. A pristine 24-bit synth tile is therefore not the
+        // same image as a real one no matter how good the shading is, and every comparison against
+        // authored tiles was scoring a clean image against a lossy one.
+        //
+        // The DXT1 cycle is now applied to the PRIMARY synthesized tiles. The pristine render is
+        // still emitted as a "_pristine" companion rather than discarded: quantisation is one-way, so
+        // the unquantised render is the higher-information artifact and is worth keeping for any
+        // consumer that wants the signal before the codec floor.
+        //
+        // --no-dxt1: opt out and emit pristine tiles as primary (the pre-2026-09-02 behaviour).
+        // --dxt1-parity is retained as a no-op alias so existing scripts keep working.
+        bool dxt1Primary = !HasFlag(args, "--no-dxt1");
+        bool emitPristineCompanion = dxt1Primary;
         // --encoding-survey: report the per-build/map distribution of encodings found, so the DXT1
         // assumption is verified rather than inherited (FR-013).
         bool encodingSurvey = HasFlag(args, "--encoding-survey");
@@ -1918,20 +1929,35 @@ static class Program
                 stage = "compositing liquid minimap";
                 using Image<Rgba32> liquidImage = TerrainMinimapLiquidCompositor.Compose(
                     image, pack, out int liquidPixelCount, tuning.LiquidPalette);
-                stage = "writing terrain PNG";
-                image.SaveAsPng(tilePath);
-                stage = "writing liquid PNG";
-                liquidImage.SaveAsPng(liquidTilePath);
-                if (dxt1Parity)
+                // Encode ONCE and reuse for both writing and scoring. Writing the DXT1 tile while
+                // scoring the pristine one would leave the scorecard measuring a different image than
+                // the one on disk -- the exact confound this change exists to remove.
+                stage = "encoding terrain DXT1";
+                using Image<Rgba32> terrainEncoded = dxt1Primary
+                    ? Dxt1TileCodec.EncodeDecode(image)
+                    : image.Clone();
+                stage = "encoding liquid DXT1";
+                using Image<Rgba32> liquidEncoded = dxt1Primary
+                    ? Dxt1TileCodec.EncodeDecode(liquidImage)
+                    : liquidImage.Clone();
+
+                if (emitPristineCompanion)
                 {
-                    // Emit a DXT1-compressed parity companion so authored and synthetic tiles compare
-                    // on equal terms (FR-015). The pristine liquid render remains the primary output.
-                    stage = "writing DXT1 parity companion";
-                    using Image<Rgba32> parityImage = Dxt1TileCodec.EncodeDecode(liquidImage);
-                    parityImage.SaveAsPng(Path.Combine(
+                    // Quantisation is one-way, so keep the unquantised render for consumers that want
+                    // the signal before the codec floor.
+                    stage = "writing pristine companions";
+                    image.SaveAsPng(Path.Combine(
                         tilesDirectory,
-                        $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_dxt1.png"));
+                        $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_synthesized_pristine.png"));
+                    liquidImage.SaveAsPng(Path.Combine(
+                        tilesDirectory,
+                        $"{mapName}_{tile.TileX:D2}_{tile.TileY:D2}_synthesized_liquid_pristine.png"));
                 }
+
+                stage = "writing terrain PNG";
+                terrainEncoded.SaveAsPng(tilePath);
+                stage = "writing liquid PNG";
+                liquidEncoded.SaveAsPng(liquidTilePath);
                 if (texturelessResiduals)
                 {
                     // Emit a textureless terrain-shadow residual: compose with a neutral white albedo
@@ -1962,11 +1988,14 @@ static class Program
                 if (scorecard is not null && authoredReference is not null)
                 {
                     stage = "scoring against the authored minimap";
+                    // Score the SAME pixels that were written. The authored reference is a decoded
+                    // DXT1 tile, so comparing a pristine 24-bit synth against it scored a clean image
+                    // against a lossy one and charged the codec floor to the shading model.
                     scorecard.Add(
                         tile.TileX,
                         tile.TileY,
                         CurrentVariantName,
-                        MinimapComparisonMetrics.Compare(authoredReference, liquidImage));
+                        MinimapComparisonMetrics.Compare(authoredReference, liquidEncoded));
 
                     // Re-render with the configuration that predates cast shadows, linear-space
                     // shading and the era liquid palette, so the report compares like with like on
@@ -1978,11 +2007,16 @@ static class Program
                     using Image<Rgba32> legacyTerrain = TerrainMinimapCompositor.Compose(pack, textures, legacyOptions);
                     using Image<Rgba32> legacyLiquid = TerrainMinimapLiquidCompositor.Compose(
                         legacyTerrain, pack, out _, MinimapLiquidPalette.ViewerFlatV1);
+                    // The baseline gets the same treatment, or the comparison between variants would
+                    // measure the codec instead of the change between them.
+                    using Image<Rgba32> legacyEncoded = dxt1Primary
+                        ? Dxt1TileCodec.EncodeDecode(legacyLiquid)
+                        : legacyLiquid.Clone();
                     scorecard.Add(
                         tile.TileX,
                         tile.TileY,
                         BaselineVariantName,
-                        MinimapComparisonMetrics.Compare(authoredReference, legacyLiquid));
+                        MinimapComparisonMetrics.Compare(authoredReference, legacyEncoded));
                 }
 
                 if (authoredReference is not null && authoredTilePath is not null && comparisonTilePath is not null)
@@ -1994,7 +2028,7 @@ static class Program
                     // Compare against the LIQUID-bearing synthesized tile: authored minimaps
                     // include water, so comparing the terrain-only (no-liquid) render against
                     // them is not a fair A/B.
-                    using Image<Rgba32> comparisonImage = CreateAuthoredSyntheticComparison(authoredImage, liquidImage);
+                    using Image<Rgba32> comparisonImage = CreateAuthoredSyntheticComparison(authoredImage, liquidEncoded);
                     comparisonImage.SaveAsPng(comparisonTilePath);
                 }
                 emittedTiles[(tile.TileX, tile.TileY)] = tilePath;

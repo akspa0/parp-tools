@@ -2210,7 +2210,41 @@ void main()
         _bufferDiagEmptySkipped = 0;
 
         if (_gpuInstanceVbo == 0)
+        {
             _gpuInstanceVbo = _gl.GenBuffer();
+
+            // Prime the store with one identity instance before any VAO binds it.
+            //
+            // Every geoset VAO below enables attributes 6-10 against this buffer with divisor 1, and
+            // those arrays stay enabled for EVERY draw of this model -- including the non-instanced
+            // DrawElements issued by RenderInstance and by the transparent pass. A generated but
+            // never-filled buffer has a ZERO-SIZED data store, so such a draw sources 68 bytes from
+            // a 0-byte allocation and the driver faults (0xC0000005 inside glDrawElements).
+            //
+            // A model only gets a real upload once an instanced batch runs for it, which is not
+            // guaranteed: a model drawn solely through the transparent pass, or one whose instances
+            // are all unbatchable, never uploads. Priming removes the entire failure class rather
+            // than relying on some earlier draw having happened to fill it.
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _gpuInstanceVbo);
+            Span<float> identityInstance = stackalloc float[17]
+            {
+                1f, 0f, 0f, 0f,
+                0f, 1f, 0f, 0f,
+                0f, 0f, 1f, 0f,
+                0f, 0f, 0f, 1f,
+                1f,
+            };
+            fixed (float* primed = identityInstance)
+            {
+                _gl.BufferData(
+                    BufferTargetARB.ArrayBuffer,
+                    (nuint)(identityInstance.Length * sizeof(float)),
+                    primed,
+                    BufferUsageARB.StreamDraw);
+            }
+
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
+        }
 
         for (int i = 0; i < _mdx.Geosets.Count; i++)
         {

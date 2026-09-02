@@ -385,13 +385,60 @@ public class TerrainManager : ISceneRenderer
         return loaded;
     }
 
+    /// <summary>
+    /// Materialise a phase map's alpha WDT next to the base map's extracted copy.
+    /// </summary>
+    /// <remarks>
+    /// The alpha parsers (<c>WdtAlpha</c>, <c>AdtAlpha</c>) take file paths, not streams, so an
+    /// archive-backed phase map has to exist on disk before it can be read. It is written beside the
+    /// base map's own extracted copy and reused on subsequent loads.
+    /// </remarks>
+    private static string? ResolvePhaseWdtPath(string baseWdtPath, string mapName, IDataSource? dataSource)
+    {
+        if (string.IsNullOrWhiteSpace(mapName))
+            return null;
+
+        try
+        {
+            string? directory = Path.GetDirectoryName(baseWdtPath);
+            if (string.IsNullOrEmpty(directory))
+                return null;
+
+            string target = Path.Combine(directory, mapName + ".wdt");
+            if (File.Exists(target))
+                return target;
+
+            byte[]? bytes = dataSource?.ReadFile($"World\\Maps\\{mapName}\\{mapName}.wdt");
+            if (bytes is not { Length: > 0 })
+                return null;
+
+            Directory.CreateDirectory(directory);
+            File.WriteAllBytes(target, bytes);
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[TerrainManager] Extracted phase map WDT '{mapName}' ({bytes.Length} bytes) to '{target}'.");
+            return target;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[TerrainManager] Could not materialise phase map '{mapName}': {ex.Message}");
+            return null;
+        }
+    }
+
     public TerrainManager(GL gl, string wdtPath, IDataSource? dataSource)
     {
         _gl = gl;
         _dataSource = dataSource;
         MapName = Path.GetFileNameWithoutExtension(wdtPath);
 
-        _adapter = new AlphaTerrainAdapter(wdtPath);
+        var alphaAdapter = new AlphaTerrainAdapter(wdtPath)
+        {
+            // Alpha WDTs arrive as a flat extracted path, so a phase map cannot be found by walking
+            // up from it. Resolve through the same data source the base map came from.
+            PhaseWdtPathResolver = mapName => ResolvePhaseWdtPath(wdtPath, mapName, dataSource),
+        };
+        _adapter = alphaAdapter;
         _directionalTileSelector = new DirectionalTileSelector(
             WoWConstants.MapOrigin,
             WoWConstants.ChunkSize,
