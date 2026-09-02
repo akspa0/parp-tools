@@ -7,6 +7,7 @@ using WoWViewer.DataSources;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using WowViewer.Core.Diagnostics;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Lk;
 using WowViewer.Core.IO.Liquids;
 using WowViewer.Core.IO.Maps;
@@ -37,6 +38,14 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly Dictionary<ushort, LiquidType> _mh2oLiquidTypesById = new();
     private readonly HashSet<ushort> _reportedUnknownMh2oLiquidTypeIds = new();
     private bool _mh2oLiquidTypeLookupAttempted;
+
+    /// <summary>
+    /// Resolves MH2O's <c>liquid_object_or_lvf</c> to a real vertex format (spec 205). Never null;
+    /// falls back to <see cref="LiquidVertexFormatChain.Empty"/>, which reproduces the pre-fix
+    /// behaviour exactly rather than guessing.
+    /// </summary>
+    private LiquidVertexFormatChain _liquidVertexFormatChain = LiquidVertexFormatChain.Empty;
+    private readonly HashSet<ushort> _reportedUnresolvedVertexFormats = new();
 
     public ConcurrentDictionary<(int tileX, int tileY), List<string>> TileTextures { get; } = new();
     public IReadOnlyList<string> MdxModelNames => _mdxNames;
@@ -107,7 +116,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
             $"Standard ADT profile: {_adtProfile.ProfileId} (build={_buildVersion ?? "unknown"})");
 
         if (dbcProvider != null && !string.IsNullOrWhiteSpace(dbdDir) && !string.IsNullOrWhiteSpace(buildVersion))
+        {
             LoadMh2oLiquidTypeLookup(dbcProvider, dbdDir, buildVersion);
+            LoadLiquidVertexFormatChain(dbcProvider, dbdDir, buildVersion);
+        }
 
         bool shouldParseWdtGlobalWmoPlacements = IsWmoBased
             || (_mphdFlags & WdtUsesGlobalMapObjFlag) != 0
@@ -1933,7 +1945,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         Mh2oChunk mh2o;
         try
         {
-            mh2o = Mh2oChunk.Parse(mh2oPayload);
+            mh2o = Mh2oChunk.Parse(mh2oPayload, _liquidVertexFormatChain);
         }
         catch (Exception ex)
         {
@@ -1969,6 +1981,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 liquidCount++;
             }
         }
+
+        ReportUnresolvedVertexFormats(tileX, tileY);
 
         if (liquidCount > 0 && ViewerLog.Verbose)
             ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) MH2O: {liquidCount} liquid chunks");
@@ -2110,6 +2124,53 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (!float.IsNaN(instance.MinHeightLevel) && !float.IsInfinity(instance.MinHeightLevel))
             return instance.MinHeightLevel;
         return 0f;
+    }
+
+    /// <summary>
+    /// Load the LiquidObject -&gt; LiquidType -&gt; LiquidMaterial chain that resolves MH2O vertex
+    /// formats. A failure here is reported and leaves the chain empty; it never throws the map load.
+    /// </summary>
+    private void LoadLiquidVertexFormatChain(IDBCProvider dbcProvider, string dbdDir, string build)
+    {
+        try
+        {
+            _liquidVertexFormatChain = LiquidVertexFormatChain.Load(
+                dbcProvider, dbdDir, build, out IReadOnlyList<string> diagnostics);
+
+            foreach (string line in diagnostics)
+                ViewerLog.Important(ViewerLog.Category.Dbc, $"[MH2O] {line}");
+
+            ViewerLog.Important(ViewerLog.Category.Dbc,
+                $"[MH2O] Liquid vertex-format chain for build {build}: "
+                + $"{_liquidVertexFormatChain.LiquidObjectRowCount} LiquidObject rows, "
+                + $"{_liquidVertexFormatChain.LiquidTypeMaterialRowCount} LiquidType material rows, "
+                + $"{_liquidVertexFormatChain.LiquidMaterialRowCount} LiquidMaterial rows.");
+        }
+        catch (Exception ex)
+        {
+            _liquidVertexFormatChain = LiquidVertexFormatChain.Empty;
+            ViewerLog.Important(ViewerLog.Category.Dbc,
+                $"[MH2O] Failed to load the liquid vertex-format chain for build {build}: {ex.Message}. "
+                + "Liquid layers carrying a LiquidObject id will keep the flat-plane fallback.");
+        }
+    }
+
+    /// <summary>
+    /// Report each distinct unresolved <c>liquid_object_or_lvf</c> once. Spec 205 FR-004: an
+    /// encoding the reader cannot decode must be visible, not silently rendered as a flat plane.
+    /// </summary>
+    private void ReportUnresolvedVertexFormats(int tileX, int tileY)
+    {
+        foreach ((ushort rawValue, int count) in _liquidVertexFormatChain.UnresolvedCounts)
+        {
+            if (!_reportedUnresolvedVertexFormats.Add(rawValue))
+                continue;
+
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[MH2O] Tile({tileX},{tileY}): liquid_object_or_lvf {rawValue} did not resolve to a "
+                + $"vertex format ({count} layers so far); those layers keep the flat fallback at the "
+                + "header height. This is correct for depth-only water and wrong for anything sloped.");
+        }
     }
 
     private LiquidType MapMh2oLiquidType(ushort liquidTypeId)

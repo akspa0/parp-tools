@@ -6,6 +6,41 @@ Last updated: 2026-09-01
 order for a fresh session: **205 liquid → 204 async asset loading → 202 T301 native-M2
 instancing**. All three are diagnosed and measured; none is speculative.
 
+**205 — MH2O LiquidObject vertex format: IMPLEMENTED 2026-09-01, operator proof owed.**
+The Phase 1 DBC gate passed and **corrected two assumptions in its own research**. First, the
+wowdev threshold "values >= 42 are LiquidObject ids" is **wrong for 5.0.1.15464**: `LiquidObject`
+real ids run **57..2390** and **42 is absent from the table**, so the 17,317 ocean layers must stay
+*unresolved* — which keeps the flat plane, and R2 already showed flat is correct for ocean. Second,
+the first gate run reported the exact inverse (42 resolved, rivers absent) because **`DBCDRow.ID` is
+a positional key for these WDB2 tables**, not the row id: `storage[42]` returned a row whose `ID`
+column read 316, and `LiquidMaterial`'s keys 1..7 hide real ids {1,2,3,4,5,8,10}. Keying `map[row.ID]`
+builds a table indexed by row order that silently resolves the wrong row for every sparse id and
+calls every id past the row count absent. Fixed by `DbcTableLoader.ResolveRowId`; **audit other
+`row.ID` lookups against Cata+ clients**. The verified answer: the 144 river layers
+`2325/2333/2372 -> LiquidType 5 -> LiquidMaterial 1 -> LVF 0 (HeightDepth)`, and the independent
+float-plausibility probe **agrees** on all 144. This client's `LiquidMaterial` only ever yields LVF
+0 or 1, so no depth-only material exists here. Shipped: `LiquidVertexFormatChain`,
+`DbcLiquidObjectTable`, `DbcLiquidMaterialTable` in `Core.IO/Dbc`; **both** decoders now resolve the
+field and gate their vertex-block switch on `Resolved` (`Mh2oChunk.Parse` is the render path,
+`AdtLiquidReader.ParseLayer` the harvest path); `StandardTerrainAdapter` loads the chain and reports
+each unresolved value once (FR-004). 15 new tests including a two-decoder parity test; full
+Core.Tests 1282 passed with the same 9 pre-existing failures. **Proof owner: operator** — load
+`HawaiiMainLand` and confirm the waterways slope and the chunk-boundary steps are gone. Evidence:
+[`phase1-dbc-chain-verified.md`](../specs/205-mh2o-liquid-object-vertex-format/evidence/phase1-dbc-chain-verified.md).
+
+**Spec 206 — Zarr-first asset residency (NEW, drafted 2026-09-01).** Operator asked for the render
+data to live in a Zarr dataset from the start instead of a cache folder, as a universal interchange
+format. Drafted as a member of the **Client Datastore epic (179-183)**, not a new store. The premise
+was re-aimed: the operator named the MPQ read as the bottleneck, but 204 measured the read as *not*
+the cost, so 206 stores **already-decoded, render-ready** arrays to delete the decode stage rather
+than relocate it — complementary to 204, which still owns moving the GPU upload off-thread.
+Measured anchors: `output/cache/` is **~1.75 GB** of byte-for-byte client copies (`Kalimdor.wdt`
+1.03 GB) written by `ViewerApp.cs:12398` purely as a **path shim** for parsers that want a path; and
+the **C# Zarr array reader does not exist** (`ZarrTileDatasetLoader.LoadTile` throws,
+`StoreIndexReader` says so outright, `RosettaDatastoreWriter` emits uncompressed `codecs: [bytes]`
+while Python writes Blosc/lz4). Operator decisions: full renderer coverage, derived/rebuildable
+store, textures stored **both** as portable pixels and a derived block-compressed array.
+
 **205 — MH2O LiquidObject vertex format (do first).** MEASURED via the new
 `inspect adt liquid-formats` command against `C:\WoW4-data\MoPBeta` / `HawaiiMainLand`,
 80 root ADTs, 17,461 liquid layers: **100% carry a `LiquidObject.dbc` id in

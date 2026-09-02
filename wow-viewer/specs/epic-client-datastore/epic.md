@@ -4,7 +4,7 @@
 **Created**: 2026-08-19
 **Member specs**: [179](../179-patch-chain-resolver/spec.md) · [180](../180-multi-build-datastore/spec.md) ·
 [181](../181-incremental-processing/spec.md) · [182](../182-adaptive-encoding/spec.md) ·
-[183](../183-datastore-viewer-load/spec.md)
+[183](../183-datastore-viewer-load/spec.md) · [206](../206-zarr-first-residency/spec.md)
 
 **Background** (superseded draft, kept for rationale — **not** requirements):
 [`background/165-unified-zarr-datastore.md`](background/165-unified-zarr-datastore.md).
@@ -107,6 +107,27 @@ Recomputing costs time. A wrong reuse costs trust in the corpus.
                                                └──> 183 viewer load
 ```
 
+206 adds the **render-ready layer** on top of 183 and needs the same store, so it sits beside 183 in
+that chain rather than after it.
+
+## Amendment 2026-09-01 — the viewer-last ordering has an operator-requested exception
+
+The epic says viewer loading is last because the primary consumer is ML/AI. That still holds for
+*what the store is for*. It no longer holds for *when the viewer reads it*, for one reason that did
+not exist when this was written: the viewer now has a **measured** frame-time problem
+(`DeferredAssetLoads` owning every recent hitch, 26–68 ms and worse) whose fix is this store holding
+decoded data. [206](../206-zarr-first-residency/spec.md) is that slice.
+
+Two things 206 does **not** change: it builds no second store, and it inherits every design decision
+above unaltered. What it adds is a **render-ready array** alongside the preservation array — derived,
+regenerable, and versioned by the decoder that produced it, precisely because the stale-derivation
+hazard below applies to it with full force.
+
+**It also records the capability gap that blocks all of this**: there is no C# Zarr array reader.
+`ZarrTileDatasetLoader.LoadTile` throws, `StoreIndexReader` says so in its own summary, and
+`RosettaDatastoreWriter` writes `codecs: [bytes]` — uncompressed — while the Python side writes
+Blosc/lz4. The store is write-mostly from C# and read-only from Python today.
+
 179 must land first: everything downstream inherits whatever it resolves, correctly or not.
 
 ## Measured baselines
@@ -140,3 +161,4 @@ Recomputing costs time. A wrong reuse costs trust in the corpus.
 | 181 | Incremental processing | Draft | Second build costs work ∝ its unique content; output identical to from-scratch |
 | 182 | Adaptive per-type encoding | Draft | Beats 4:1; ratio **and** decompression throughput reported per type |
 | 183 | Viewer: Load Zarr Datastore | Draft | Same render as loading the original client; no extraction to disk |
+| 206 | Zarr-first asset residency | Draft | No client bytes copied to disk; C# reads the arrays Python writes; no parse/decode on the render thread for resident content |

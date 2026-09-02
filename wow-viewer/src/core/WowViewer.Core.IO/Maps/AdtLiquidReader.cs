@@ -43,6 +43,18 @@ public static class AdtLiquidReader
     }
 
     public static AdtLiquidFile Read(Stream stream, MapFileSummary fileSummary, AdtFormatProfile? profile, DbcLiquidTypeTable? dbcTable)
+        => Read(stream, fileSummary, profile, dbcTable, vertexFormatChain: null);
+
+    /// <summary>
+    /// Read a root ADT's liquid, resolving each layer's vertex format through
+    /// <paramref name="vertexFormatChain"/> (spec 205).
+    /// </summary>
+    public static AdtLiquidFile Read(
+        Stream stream,
+        MapFileSummary fileSummary,
+        AdtFormatProfile? profile,
+        DbcLiquidTypeTable? dbcTable,
+        LiquidVertexFormatChain? vertexFormatChain)
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(fileSummary);
@@ -55,7 +67,7 @@ public static class AdtLiquidReader
         if (payload is null)
             return CreateEmpty(fileSummary.SourcePath, fileSummary.Kind);
 
-        return Parse(fileSummary.SourcePath, fileSummary.Kind, payload, dbcTable);
+        return Parse(fileSummary.SourcePath, fileSummary.Kind, payload, dbcTable, vertexFormatChain);
     }
 
     private static byte[]? TryReadMh2oPayloadViaMhdr(Stream stream, MapFileSummary fileSummary, AdtFormatProfile? profile)
@@ -120,7 +132,7 @@ public static class AdtLiquidReader
         }
     }
 
-    private static AdtLiquidFile Parse(string sourcePath, MapFileKind kind, byte[] payload, DbcLiquidTypeTable? dbcTable)
+    private static AdtLiquidFile Parse(string sourcePath, MapFileKind kind, byte[] payload, DbcLiquidTypeTable? dbcTable, LiquidVertexFormatChain? vertexFormatChain)
     {
         if (payload.Length < ChunkCount * ChunkHeaderSize)
             throw new InvalidDataException($"MH2O payload is too small to contain {ChunkCount} chunk headers.");
@@ -148,7 +160,7 @@ public static class AdtLiquidReader
                 int layerOffset = checked((int)offsetInstances);
                 for (int layerIndex = 0; layerIndex < layerCount && layerOffset + LayerSize <= payload.Length; layerIndex++)
                 {
-                    layers.Add(ParseLayer(payload, layerOffset, dbcTable));
+                    layers.Add(ParseLayer(payload, layerOffset, dbcTable, vertexFormatChain));
                     layerOffset += LayerSize;
                 }
             }
@@ -159,10 +171,17 @@ public static class AdtLiquidReader
         return new AdtLiquidFile(sourcePath, kind, chunks);
     }
 
-    private static AdtLiquidLayer ParseLayer(byte[] payload, int offset, DbcLiquidTypeTable? dbcTable)
+    private static AdtLiquidLayer ParseLayer(byte[] payload, int offset, DbcLiquidTypeTable? dbcTable, LiquidVertexFormatChain? vertexFormatChain)
     {
         ushort liquidTypeId = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset, 2));
-        AdtLiquidVertexFormat vertexFormat = (AdtLiquidVertexFormat)BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 2, 2));
+
+        // Cataclysm+ stores liquid_object_or_lvf here. Casting it straight to a vertex-format enum
+        // and switching with no default is the spec 205 defect: on MoP every layer carries a
+        // LiquidObject id, matches no case, and its heightmap is silently discarded.
+        ushort liquidObjectOrLvf = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset + 2, 2));
+        LiquidVertexFormatResolution resolution =
+            (vertexFormatChain ?? LiquidVertexFormatChain.Empty).Resolve(liquidObjectOrLvf);
+        AdtLiquidVertexFormat vertexFormat = resolution.Format;
         float minHeight = BitConverter.ToSingle(payload, offset + 4);
         float maxHeight = BitConverter.ToSingle(payload, offset + 8);
         int xOffset = payload[offset + 12];
@@ -188,7 +207,7 @@ public static class AdtLiquidReader
         byte[]? depths = null;
         ushort[]? uvs = null;
 
-        if (vertexCount > 0 && offsetVertexData > 0 && offsetVertexData < payload.Length)
+        if (resolution.Resolved && vertexCount > 0 && offsetVertexData > 0 && offsetVertexData < payload.Length)
         {
             int vertexDataOffset = checked((int)offsetVertexData);
             switch (vertexFormat)

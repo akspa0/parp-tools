@@ -1,5 +1,7 @@
 using System.Buffers.Binary;
+using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.Maps;
 
 /// <summary>
 /// Histograms the second uint16 of every MH2O SMLiquidInstance across a client's ADTs.
@@ -32,12 +34,14 @@ internal static class AdtLiquidFormatSupport
         string? clientRoot = GetOption(args, "--client");
         if (string.IsNullOrWhiteSpace(clientRoot))
         {
-            Console.Error.WriteLine("Usage: adt liquid-formats --client <client-dir> [--map <name>] [--limit <n>]");
+            Console.Error.WriteLine("Usage: adt liquid-formats --client <client-dir> [--map <name>] [--limit <n>] [--build <version>] [--defs <WoWDBDefs/definitions>]");
             Environment.ExitCode = 1;
             return;
         }
 
         string? mapFilter = GetOption(args, "--map");
+        string? buildVersion = GetOption(args, "--build");
+        string? definitionsDir = GetOption(args, "--defs") ?? ResolveDefinitionsDirectory();
         int limit = int.TryParse(GetOption(args, "--limit"), out int parsedLimit) ? parsedLimit : 200;
 
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
@@ -133,6 +137,208 @@ internal static class AdtLiquidFormatSupport
               + "the mesh falls back to a flat plane. Hypothesis CONFIRMED."
             : "VERDICT: every layer uses a vertex format in 0-3. The LiquidObject hypothesis is "
               + "REFUTED for this data; the flat-plane cause is elsewhere.");
+
+        if (!string.IsNullOrWhiteSpace(buildVersion))
+            ReportChainResolution(archiveCatalog, definitionsDir, buildVersion!, detail);
+        else
+        {
+            Console.WriteLine();
+            Console.WriteLine("Pass --build <version> to resolve each value through LiquidObject -> LiquidType -> LiquidMaterial.");
+        }
+    }
+
+    /// <summary>
+    /// Spec 205 Phase 1 gate: resolve every observed value through the DBC chain and cross-check the
+    /// answer against the vertex-block plausibility probe.
+    /// </summary>
+    /// <remarks>
+    /// The probe is an instrument, never the decoder (research R6: it misread 18 of 6,194 ocean
+    /// layers). Its only job here is disagreement detection: where the DBC says "heights" and the
+    /// block reads as garbage, or the DBC says "depth only" and the block reads as clean varying
+    /// floats, one of the two is wrong and this report says which layers to look at.
+    /// </remarks>
+    private static void ReportChainResolution(
+        IArchiveCatalog archiveCatalog,
+        string? definitionsDirectory,
+        string buildVersion,
+        SortedDictionary<int, FormatDetail> detail)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== DBC chain resolution (spec 205 Phase 1 gate) ===");
+
+        if (string.IsNullOrWhiteSpace(definitionsDirectory) || !Directory.Exists(definitionsDirectory))
+        {
+            Console.WriteLine($"WoWDBDefs definitions not found (looked for '{definitionsDirectory ?? "<null>"}'). Pass --defs.");
+            return;
+        }
+
+        Console.WriteLine($"build={buildVersion} defs={definitionsDirectory}");
+
+        ArchiveReaderDbcProvider provider = new(archiveCatalog);
+        LiquidVertexFormatChain chain = LiquidVertexFormatChain.Load(
+            provider, definitionsDirectory, buildVersion, out IReadOnlyList<string> diagnostics);
+
+        foreach (string line in diagnostics)
+            Console.WriteLine($"  {line}");
+
+        DumpTables(provider, definitionsDirectory, buildVersion, detail);
+
+        Console.WriteLine();
+        Console.WriteLine("value  layers  ->liquidType  ->material  ->LVF                 source        probe agreement");
+
+        int resolved = 0;
+        int unresolved = 0;
+        foreach ((int value, FormatDetail d) in detail)
+        {
+            if (value is < 0 or > ushort.MaxValue)
+                continue;
+
+            LiquidVertexFormatResolution r = chain.Resolve((ushort)value);
+            if (r.Resolved)
+                resolved += d.Layers;
+            else
+                unresolved += d.Layers;
+
+            string lvf = r.Resolved ? $"{(int)r.Format} {r.Format}" : "-";
+            string source = r.Resolved ? r.Source.ToString() : "UNRESOLVED";
+
+            // Does the chain's answer match what the bytes look like?
+            bool chainSaysHeights = r.Resolved && r.Format != AdtLiquidVertexFormat.DepthOnly;
+            bool bytesLookLikeHeights = d.HeightsPlausible > d.HeightsImplausible;
+            string agreement = !r.Resolved
+                ? "n/a"
+                : chainSaysHeights == bytesLookLikeHeights
+                    ? "agree"
+                    : $"DISAGREE (chain={(chainSaysHeights ? "heights" : "depth")}, bytes={(bytesLookLikeHeights ? "heights" : "depth")})";
+
+            Console.WriteLine($"{value,5}  {d.Layers,6}  {(r.LiquidTypeId == 0 ? "-" : r.LiquidTypeId.ToString()),12}  {(r.MaterialId == 0 ? "-" : r.MaterialId.ToString()),9}  {lvf,-20} {source,-13} {agreement}");
+
+            if (!r.Resolved)
+                Console.WriteLine($"       reason: {r.FailureReason}");
+        }
+
+        Console.WriteLine();
+        int total = resolved + unresolved;
+        Console.WriteLine(total == 0
+            ? "GATE: nothing to resolve."
+            : unresolved == 0
+                ? $"GATE PASS: all {total} layers resolve through the DBC chain."
+                : $"GATE: {resolved} of {total} layers resolve ({100.0 * resolved / total:0.0}%); {unresolved} do not and would keep today's flat fallback.");
+    }
+
+    /// <summary>
+    /// Print the raw contents of each link so a wrong answer can be blamed on the right thing.
+    /// Without this, a table that loaded with the wrong layout is indistinguishable from a client
+    /// that genuinely does not use the documented chain.
+    /// </summary>
+    private static void DumpTables(
+        ArchiveReaderDbcProvider provider,
+        string definitionsDirectory,
+        string buildVersion,
+        SortedDictionary<int, FormatDetail> detail)
+    {
+        DumpOne(provider, definitionsDirectory, buildVersion, "LiquidObject", detail.Keys);
+        DumpOne(provider, definitionsDirectory, buildVersion, "LiquidMaterial", null);
+        DumpOne(provider, definitionsDirectory, buildVersion, "LiquidType", null);
+    }
+
+    private static void DumpOne(
+        ArchiveReaderDbcProvider provider,
+        string definitionsDirectory,
+        string buildVersion,
+        string tableName,
+        IEnumerable<int>? idsOfInterest)
+    {
+        Console.WriteLine();
+        try
+        {
+            DBCD.Providers.FilesystemDBDProvider dbd = new(definitionsDirectory);
+            DBCD.DBCD dbcd = new(provider, dbd);
+            DBCD.IDBCDStorage storage;
+            try { storage = dbcd.Load(tableName, buildVersion, DBCD.Locale.EnUS); }
+            catch { storage = dbcd.Load(tableName, buildVersion, DBCD.Locale.None); }
+
+            // Key by the ID COLUMN, not DBCDRow.ID: for these WDB2 tables the latter is positional.
+            string? idColumn = null;
+            foreach (string candidate in new[] { "ID", "Id" })
+            {
+                foreach (string column in storage.AvailableColumns)
+                {
+                    if (string.Equals(column, candidate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        idColumn = column;
+                        break;
+                    }
+                }
+
+                if (idColumn is not null)
+                    break;
+            }
+
+            Dictionary<int, DBCD.DBCDRow> byRealId = [];
+            foreach (DBCD.DBCDRow row in storage.Values)
+            {
+                int realId = row.ID;
+                if (idColumn is not null)
+                {
+                    try { realId = Convert.ToInt32(row[idColumn]); }
+                    catch { realId = row.ID; }
+                }
+
+                byRealId[realId] = row;
+            }
+
+            int[] ids = byRealId.Keys.OrderBy(static k => k).ToArray();
+            Console.WriteLine($"--- {tableName}: {ids.Length} rows, REAL id range {(ids.Length == 0 ? "-" : ids[0] + ".." + ids[^1])} (idColumn '{idColumn ?? "<none>"}'), positional keys {storage.Keys.Count}");
+            Console.WriteLine($"    columns: {string.Join(", ", storage.AvailableColumns)}");
+
+            if (ids.Length <= 12)
+            {
+                foreach (int id in ids)
+                    Console.WriteLine($"    [{id}] {RowToString(byRealId[id], storage.AvailableColumns)}");
+                return;
+            }
+
+            Console.WriteLine($"    lowest ids: {string.Join(", ", ids.Take(12))}");
+            foreach (int id in (idsOfInterest ?? []).Distinct().OrderBy(static k => k))
+            {
+                Console.WriteLine(byRealId.TryGetValue(id, out DBCD.DBCDRow? found)
+                    ? $"    [{id}] {RowToString(found, storage.AvailableColumns)}"
+                    : $"    [{id}] ABSENT from {tableName}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"--- {tableName}: FAILED: {ex.Message}");
+        }
+    }
+
+    private static string RowToString(DBCD.DBCDRow row, string[] columns)
+    {
+        List<string> parts = [];
+        foreach (string column in columns.Take(10))
+        {
+            try { parts.Add($"{column}={row[column]}"); }
+            catch { parts.Add($"{column}=?"); }
+        }
+
+        return string.Join(" ", parts);
+    }
+
+    /// <summary>Walk up from the binary looking for the vendored WoWDBDefs definitions.</summary>
+    private static string? ResolveDefinitionsDirectory()
+    {
+        DirectoryInfo? dir = new(AppDomain.CurrentDomain.BaseDirectory);
+        while (dir is not null)
+        {
+            string candidate = Path.Combine(dir.FullName, "libs", "wowdev", "WoWDBDefs", "definitions");
+            if (Directory.Exists(candidate))
+                return candidate;
+
+            dir = dir.Parent;
+        }
+
+        return null;
     }
 
     private static int ScanMh2o(

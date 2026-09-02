@@ -1,3 +1,5 @@
+using WowViewer.Core.IO.Dbc;
+
 namespace WowViewer.Core.IO.Liquids;
 
 /// <summary>
@@ -20,7 +22,17 @@ public class Mh2oChunk
     /// <summary>
     /// Parse MH2O chunk from raw bytes.
     /// </summary>
-    public static Mh2oChunk Parse(byte[] data)
+    public static Mh2oChunk Parse(byte[] data) => Parse(data, vertexFormatChain: null);
+
+    /// <summary>
+    /// Parse MH2O chunk from raw bytes, resolving each layer's vertex format through
+    /// <paramref name="vertexFormatChain"/>.
+    /// </summary>
+    /// <remarks>
+    /// Pass null to keep the pre-spec-205 behaviour: values 0-3 decode, everything else yields no
+    /// heights and the consumer falls back to the header level.
+    /// </remarks>
+    public static Mh2oChunk Parse(byte[] data, LiquidVertexFormatChain? vertexFormatChain)
     {
         var chunk = new Mh2oChunk();
         int offset = 0;
@@ -59,7 +71,7 @@ public class Mh2oChunk
                 int instOffset = (int)header.OffsetInstances;
                 for (int layer = 0; layer < header.LayerCount && instOffset + 24 <= data.Length; layer++)
                 {
-                    var instance = Mh2oInstance.Parse(data, ref instOffset, i);
+                    var instance = Mh2oInstance.Parse(data, ref instOffset, i, vertexFormatChain);
                     chunk.Instances.Add(instance);
                 }
             }
@@ -132,8 +144,25 @@ public class Mh2oInstance
     /// <summary>LiquidType.dbc entry ID.</summary>
     public ushort LiquidTypeId { get; set; }
 
-    /// <summary>Liquid vertex format (0-3).</summary>
+    /// <summary>
+    /// The resolved liquid vertex format. Only meaningful when <see cref="VertexFormatResolved"/>
+    /// is true.
+    /// </summary>
     public Mh2oVertexFormat VertexFormat { get; set; }
+
+    /// <summary>
+    /// The raw second <c>uint16</c> of the instance, before resolution. In Cataclysm and later this
+    /// is <c>liquid_object_or_lvf</c> and is frequently a <c>LiquidObject.dbc</c> id rather than a
+    /// vertex format. Kept so a decode failure can name the value that failed.
+    /// </summary>
+    public ushort LiquidObjectOrLvf { get; set; }
+
+    /// <summary>
+    /// False when the raw field could not be resolved to a vertex format. The vertex block is then
+    /// left undecoded and the consumer falls back to the header height, which is the pre-spec-205
+    /// behaviour.
+    /// </summary>
+    public bool VertexFormatResolved { get; set; }
 
     /// <summary>Minimum height level.</summary>
     public float MinHeightLevel { get; set; }
@@ -175,11 +204,22 @@ public class Mh2oInstance
     public int VertexCount => (Width + 1) * (Height + 1);
 
     public static Mh2oInstance Parse(byte[] data, ref int offset, int chunkIndex)
+        => Parse(data, ref offset, chunkIndex, vertexFormatChain: null);
+
+    public static Mh2oInstance Parse(byte[] data, ref int offset, int chunkIndex, LiquidVertexFormatChain? vertexFormatChain)
     {
         var inst = new Mh2oInstance { ChunkIndex = chunkIndex };
 
         inst.LiquidTypeId = BitConverter.ToUInt16(data, offset); offset += 2;
-        inst.VertexFormat = (Mh2oVertexFormat)BitConverter.ToUInt16(data, offset); offset += 2;
+        inst.LiquidObjectOrLvf = BitConverter.ToUInt16(data, offset); offset += 2;
+
+        // The field is only a vertex format when it resolves to one. Casting it straight to the
+        // enum and switching with no default is the spec 205 defect: on MoP every layer carries a
+        // LiquidObject id, matches no case, and silently renders as a flat plane.
+        LiquidVertexFormatResolution resolution =
+            (vertexFormatChain ?? LiquidVertexFormatChain.Empty).Resolve(inst.LiquidObjectOrLvf);
+        inst.VertexFormatResolved = resolution.Resolved;
+        inst.VertexFormat = (Mh2oVertexFormat)(int)resolution.Format;
         inst.MinHeightLevel = BitConverter.ToSingle(data, offset); offset += 4;
         inst.MaxHeightLevel = BitConverter.ToSingle(data, offset); offset += 4;
         inst.XOffset = data[offset++];
@@ -199,7 +239,7 @@ public class Mh2oInstance
         }
 
         // Parse vertex data based on format
-        if (inst.OffsetVertexData > 0 && inst.OffsetVertexData < data.Length)
+        if (inst.VertexFormatResolved && inst.OffsetVertexData > 0 && inst.OffsetVertexData < data.Length)
         {
             int vOffset = (int)inst.OffsetVertexData;
             int vCount = inst.VertexCount;
