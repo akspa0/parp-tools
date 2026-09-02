@@ -493,7 +493,7 @@ public class TerrainRenderer : IDisposable
         _shader.SetVec3("uCameraPos", cameraPos);
 
         ApplySurfaceCulling();
-        _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
         _shader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
         _shader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);
@@ -517,6 +517,8 @@ public class TerrainRenderer : IDisposable
         ChunksRendered = 0;
         ChunksCulled = 0;
 
+        List<TerrainChunkMesh>? wireframeChunks = _wireframe ? new List<TerrainChunkMesh>() : null;
+
         foreach (var chunk in _chunks)
         {
             float distanceSq = WorldDistanceMath.DistanceSquaredPointToAabb(
@@ -537,6 +539,22 @@ public class TerrainRenderer : IDisposable
 
             RenderChunk(chunk);
             ChunksRendered++;
+            wireframeChunks?.Add(chunk);
+        }
+
+        if (_wireframe && wireframeChunks != null && wireframeChunks.Count > 0)
+        {
+            _gl.Enable(EnableCap.PolygonOffsetLine);
+            _gl.PolygonOffset(-1.0f, -1.0f);
+            _gl.LineWidth(1.5f);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+            foreach (var chunk in wireframeChunks)
+            {
+                RenderChunk(chunk);
+            }
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+            _gl.LineWidth(1.0f);
+            _gl.Disable(EnableCap.PolygonOffsetLine);
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
@@ -675,7 +693,7 @@ public class TerrainRenderer : IDisposable
         _tileShader.SetVec3("uCameraPos", cameraPos);
 
         ApplySurfaceCulling();
-        _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
         _tileShader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
         _tileShader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);
@@ -703,6 +721,8 @@ public class TerrainRenderer : IDisposable
         bool baseVisible = ShowLayer0;
         bool overlayVisible = ShowLayer1 || ShowLayer2 || ShowLayer3;
         bool blendOverlaysOnly = !baseVisible && overlayVisible;
+
+        List<TerrainTileMesh>? wireframeTiles = _wireframe ? new List<TerrainTileMesh>() : null;
 
         foreach (var tile in _tiles)
         {
@@ -763,6 +783,24 @@ public class TerrainRenderer : IDisposable
 
             LastFrameDrawCalls++;
             ChunksRendered += tile.ChunkCount;
+            wireframeTiles?.Add(tile);
+        }
+
+        if (_wireframe && wireframeTiles != null && wireframeTiles.Count > 0)
+        {
+            _gl.Enable(EnableCap.PolygonOffsetLine);
+            _gl.PolygonOffset(-1.0f, -1.0f);
+            _gl.LineWidth(1.5f);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+            foreach (var tile in wireframeTiles)
+            {
+                _gl.BindVertexArray(tile.Vao);
+                _gl.DrawElements(PrimitiveType.Triangles, tile.IndexCount, DrawElementsType.UnsignedShort, null);
+            }
+            _gl.BindVertexArray(0);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+            _gl.LineWidth(1.0f);
+            _gl.Disable(EnableCap.PolygonOffsetLine);
         }
 
         _gl.Disable(EnableCap.Blend);

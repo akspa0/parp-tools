@@ -986,11 +986,28 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         UploadMdxLights(modelMatrix);
 
         if (_wireframe)
-            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
-        else
+        {
+            // Pass 1: Ghost Fill with 33% opacity
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            RenderGeosets(pass, fadeAlpha * 0.33f);
 
-        RenderGeosets(pass, fadeAlpha);
+            // Pass 2: Prominent Wireframe Overlay
+            _gl.Enable(EnableCap.PolygonOffsetLine);
+            _gl.PolygonOffset(-1.0f, -1.0f);
+            _gl.LineWidth(1.5f);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+            RenderGeosets(pass, fadeAlpha);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+            _gl.LineWidth(1.0f);
+            _gl.Disable(EnableCap.PolygonOffsetLine);
+        }
+        else
+        {
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+            RenderGeosets(pass, fadeAlpha);
+        }
 
         // Render particles during transparent pass (standalone path)
         if (pass == RenderPass.Transparent && _particleEmitters.Count > 0 && _particleRenderer != null)

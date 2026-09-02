@@ -1548,9 +1548,11 @@ public class WorldScene : ISceneRenderer
     // Object selection
     private ObjectType _selectedObjectType = ObjectType.None;
     private int _selectedObjectIndex = -1;
+    private int _selectedWmoParentIndex = -1;
     private SelectedSceneObjectKey? _selectedSceneObjectKey;
     public ObjectType SelectedObjectType => _selectedObjectType;
     public int SelectedObjectIndex => _selectedObjectIndex;
+    public int SelectedWmoParentIndex => _selectedWmoParentIndex;
     public bool WireframeRevealEnabled => _wireframeRevealEnabled;
     public bool TerrainWireframeEnabled => _terrainManager.IsWireframe;
     public bool ObjectWireframeEnabled => _assets.ObjectWireframeEnabled;
@@ -8847,6 +8849,26 @@ public class WorldScene : ISceneRenderer
         return false;
     }
 
+    public bool TryGetSelectedWmoDoodad(out WmoDoodadInfo doodadInfo, out Vector3 worldPosition, out ObjectInstance parentWmo)
+    {
+        doodadInfo = default;
+        worldPosition = Vector3.Zero;
+        parentWmo = default;
+
+        if (_selectedObjectType != ObjectType.WmoDoodad || _selectedWmoParentIndex < 0 || _selectedWmoParentIndex >= _wmoInstances.Count)
+            return false;
+
+        parentWmo = _wmoInstances[_selectedWmoParentIndex];
+        if (!_assets.TryGetLoadedWmo(parentWmo.ModelKey, out WmoRenderer? wmo) || wmo == null)
+            return false;
+
+        if (!wmo.TryGetDoodadInfo(_selectedObjectIndex, out doodadInfo))
+            return false;
+
+        worldPosition = Vector3.Transform(doodadInfo.LocalPosition, parentWmo.Transform);
+        return true;
+    }
+
     private bool TryGetSceneObjectByIndex(ObjectType objectType, int objectIndex, out ObjectInstance instance)
     {
         switch (objectType)
@@ -8856,6 +8878,18 @@ public class WorldScene : ISceneRenderer
                 return true;
             case ObjectType.Mdx when objectIndex >= 0 && objectIndex < _mdxInstances.Count:
                 instance = _mdxInstances[objectIndex];
+                return true;
+            case ObjectType.WmoDoodad when TryGetSelectedWmoDoodad(out var dInfo, out var wPos, out var parent):
+                instance = new ObjectInstance
+                {
+                    ModelKey = dInfo.ModelPath,
+                    PlacementPosition = wPos,
+                    BoundsMin = wPos - new Vector3(1f, 1f, 1f),
+                    BoundsMax = wPos + new Vector3(1f, 1f, 1f),
+                    BoundsResolved = true,
+                    UniqueId = dInfo.DoodadDefIndex,
+                    Transform = Matrix4x4.CreateTranslation(wPos)
+                };
                 return true;
             default:
                 instance = default;
@@ -12850,7 +12884,7 @@ public class WorldScene : ISceneRenderer
         _selectedSceneObjectKey = null;
     }
 
-    public bool SelectSceneObject(ObjectType objectType, int objectIndex)
+    public bool SelectSceneObject(ObjectType objectType, int objectIndex, int parentWmoIndex = -1)
     {
         if (_instancesDirty)
             RebuildInstanceLists();
@@ -12860,12 +12894,20 @@ public class WorldScene : ISceneRenderer
             case ObjectType.Wmo when objectIndex >= 0 && objectIndex < _wmoInstances.Count:
                 _selectedObjectType = objectType;
                 _selectedObjectIndex = objectIndex;
+                _selectedWmoParentIndex = -1;
                 _selectedSceneObjectKey = CreateSelectedSceneObjectKey(objectType, _wmoInstances[objectIndex]);
                 return true;
             case ObjectType.Mdx when objectIndex >= 0 && objectIndex < _mdxInstances.Count:
                 _selectedObjectType = objectType;
                 _selectedObjectIndex = objectIndex;
+                _selectedWmoParentIndex = -1;
                 _selectedSceneObjectKey = CreateSelectedSceneObjectKey(objectType, _mdxInstances[objectIndex]);
+                return true;
+            case ObjectType.WmoDoodad when parentWmoIndex >= 0 && parentWmoIndex < _wmoInstances.Count:
+                _selectedObjectType = objectType;
+                _selectedObjectIndex = objectIndex;
+                _selectedWmoParentIndex = parentWmoIndex;
+                _selectedSceneObjectKey = null;
                 return true;
             default:
                 return false;
@@ -12923,6 +12965,7 @@ public class WorldScene : ISceneRenderer
             RebuildInstanceLists();
 
         AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _wmoInstances, ObjectType.Wmo, new Vector3(2f, 2f, 2f), clickedChunkKey, clickedWorldPoint);
+        AppendWmoDoodadPickHits(rayOrigin, rayDir, hits, clickedChunkKey, clickedWorldPoint);
         AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _mdxInstances, ObjectType.Mdx, new Vector3(1f, 1f, 1f), clickedChunkKey, clickedWorldPoint);
 
         if (clickedChunkKey.HasValue && hits.Any(static hit => hit.SharesClickedChunk))
@@ -13002,6 +13045,69 @@ public class WorldScene : ISceneRenderer
                 selectionPointDistanceSq,
                 sharesClickedChunk,
                 chunkGridDistance));
+        }
+    }
+
+    private void AppendWmoDoodadPickHits(
+        Vector3 rayOrigin,
+        Vector3 rayDir,
+        List<SceneObjectPickHit> hits,
+        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey,
+        Vector3? clickedWorldPoint)
+    {
+        var doodadHitsScratch = new List<(int index, float distance, Vector3 hitPoint, Vector3 boundsMin, Vector3 boundsMax, WmoDoodadInfo info)>();
+        for (int wmoIndex = 0; wmoIndex < _wmoInstances.Count; wmoIndex++)
+        {
+            ObjectInstance wmo = _wmoInstances[wmoIndex];
+            if (ShouldHideObjectInstanceByUniqueId(wmo))
+                continue;
+
+            if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, wmo, new Vector3(5f, 5f, 5f), out _))
+                continue;
+
+            if (!_assets.TryGetLoadedWmo(wmo.ModelKey, out WmoRenderer? wmoRenderer) || wmoRenderer == null)
+                continue;
+
+            doodadHitsScratch.Clear();
+            if (!wmoRenderer.TryPickDoodadsByRay(rayOrigin, rayDir, wmo.Transform, doodadHitsScratch))
+                continue;
+
+            foreach (var dh in doodadHitsScratch)
+            {
+                if (!IsHoverPickDistanceAllowed(dh.distance))
+                    continue;
+
+                bool sharesClickedChunk = clickedChunkKey.HasValue
+                    && TryGetTerrainChunkKey(dh.hitPoint.X, dh.hitPoint.Y, out var chunkKey)
+                    && chunkKey == clickedChunkKey.Value;
+
+                int chunkGridDistance = clickedChunkKey.HasValue && TryGetTerrainChunkKey(dh.hitPoint.X, dh.hitPoint.Y, out chunkKey)
+                    ? Math.Abs(chunkKey.tileX - clickedChunkKey.Value.tileX)
+                        + Math.Abs(chunkKey.tileY - clickedChunkKey.Value.tileY)
+                        + Math.Abs(chunkKey.chunkX - clickedChunkKey.Value.chunkX)
+                        + Math.Abs(chunkKey.chunkY - clickedChunkKey.Value.chunkY)
+                    : int.MaxValue;
+
+                float selectionPointDistanceSq = clickedWorldPoint.HasValue
+                    ? Vector3.DistanceSquared(dh.hitPoint, clickedWorldPoint.Value)
+                    : float.MaxValue;
+
+                hits.Add(new SceneObjectPickHit(
+                    ObjectType.WmoDoodad,
+                    dh.index,
+                    dh.distance,
+                    Path.GetFileName(dh.info.ModelPath),
+                    dh.info.ModelPath,
+                    dh.info.DoodadDefIndex,
+                    dh.hitPoint,
+                    dh.boundsMin,
+                    dh.boundsMax,
+                    dh.hitPoint,
+                    selectionPointDistanceSq,
+                    sharesClickedChunk,
+                    chunkGridDistance,
+                    ParentWmoIndex: wmoIndex));
+            }
         }
     }
 
@@ -13145,6 +13251,7 @@ public class WorldScene : ISceneRenderer
     {
         _selectedObjectType = ObjectType.None;
         _selectedObjectIndex = -1;
+        _selectedWmoParentIndex = -1;
         _selectedSceneObjectKey = null;
     }
 
@@ -13635,7 +13742,7 @@ public class WorldScene : ISceneRenderer
     /// <summary>
     /// Ray-AABB slab intersection test. Returns distance along ray, or -1 if no hit.
     /// </summary>
-    private static float RayAABBIntersect(Vector3 origin, Vector3 dir, Vector3 bmin, Vector3 bmax)
+    public static float RayAABBIntersect(Vector3 origin, Vector3 dir, Vector3 bmin, Vector3 bmax)
     {
         float tmin = float.NegativeInfinity;
         float tmax = float.PositiveInfinity;
@@ -16256,7 +16363,7 @@ public readonly struct Pm4OverlayTileStats
 /// Lightweight placement instance — just a model key and world transform.
 /// The actual renderer is looked up from WorldAssetManager at render time.
 /// </summary>
-public enum ObjectType { None, Wmo, Mdx }
+public enum ObjectType { None, Wmo, Mdx, WmoDoodad }
 
 public enum UniqueIdVisibilityScope
 {
@@ -16323,7 +16430,7 @@ public readonly struct HoveredAssetInfo
     public int SceneObjectIndex { get; }
     public string WlBodyKey { get; }
     public bool IsPreciseRayHit { get; }
-    public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo && SceneObjectIndex >= 0;
+    public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo or ObjectType.WmoDoodad && SceneObjectIndex >= 0;
 
     public HoveredAssetInfo WithPreciseRayHit() => new(
         AssetKind, DisplayName, SourcePath, DetailLine, WorldPosition, AdditionalHitCount, Pm4ObjectKey,
@@ -16343,9 +16450,15 @@ public readonly record struct SceneObjectPickHit(
     Vector3 SelectionPoint,
     float SelectionPointDistanceSq,
     bool SharesClickedChunk,
-    int ChunkGridDistance)
+    int ChunkGridDistance,
+    int ParentWmoIndex = -1)
 {
-    public string KindLabel => ObjectType == ObjectType.Wmo ? "WMO" : "MDX";
+    public string KindLabel => ObjectType switch
+    {
+        ObjectType.Wmo => "WMO",
+        ObjectType.WmoDoodad => "WMO Doodad",
+        _ => "MDX"
+    };
 }
 
 /// <summary>One node of the PM4 outliner: a placed object, or an unresolved object group.</summary>

@@ -159,7 +159,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     /// object-level batch; transparent/liquid/doodad work remains placement-aware.
     /// </summary>
     public bool SupportsGpuInstancedOpaque
-        => _groups.Count > 0
+        => !_wireframe
+            && _groups.Count > 0
             && _wmo.Portals.Count == 0
             && _groups.All(static group => group.ManualVisible);
 
@@ -459,6 +460,39 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         return false;
     }
 
+    public bool TryPickDoodadsByRay(
+        Vector3 rayOrigin,
+        Vector3 rayDir,
+        in Matrix4x4 modelMatrix,
+        List<(int index, float distance, Vector3 hitPoint, Vector3 boundsMin, Vector3 boundsMax, WmoDoodadInfo info)> hits)
+    {
+        if (!_doodadsVisible || _doodadInstances.Count == 0)
+            return false;
+
+        bool found = false;
+        Vector3 padding = new Vector3(0.5f);
+        for (int i = 0; i < _doodadInstances.Count; i++)
+        {
+            var d = _doodadInstances[i];
+            if (!d.Visible)
+                continue;
+
+            if (!TryGetDoodadBounds(i, modelMatrix, out Vector3 bMin, out Vector3 bMax))
+                continue;
+
+            float dist = Terrain.WorldScene.RayAABBIntersect(rayOrigin, rayDir, bMin - padding, bMax + padding);
+            if (dist >= 0f)
+            {
+                Vector3 hitPoint = rayOrigin + rayDir * dist;
+                TryGetDoodadInfo(i, out WmoDoodadInfo info);
+                hits.Add((i, dist, hitPoint, bMin, bMax, info));
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
     public bool TryGetDoodadDef(int doodadDefIndex, out WmoV14ToV17Converter.WmoDoodadDef def)
     {
         if (doodadDefIndex >= 0 && doodadDefIndex < _wmo.DoodadDefs.Count)
@@ -682,17 +716,25 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
 
         UpdateRuntimeVisibility(modelMatrix, view, proj, cp);
 
-        if (_wireframe)
-            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
-        else
-            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
-        // Pass 1: Opaque geometry (BlendMode 0) — depth write ON, no blending
+        // Pass 1: Opaque geometry (BlendMode 0) — depth write ON, 33% alpha blend if ghost wireframe
         if (renderOpaquePass)
         {
             _gl.Enable(EnableCap.DepthTest);
-            _gl.DepthMask(true);
-            _gl.Disable(EnableCap.Blend);
+            if (_wireframe)
+            {
+                _gl.DepthMask(true);
+                _gl.Enable(EnableCap.Blend);
+                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 0.33f);
+            }
+            else
+            {
+                _gl.DepthMask(true);
+                _gl.Disable(EnableCap.Blend);
+                _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
+            }
             _gl.Uniform1(_uAlphaTest, 0.0f);
 
             foreach (var gb in _groups)
@@ -714,13 +756,13 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
 
                         if (blendMode == EGxBlend.AlphaKey)
                         {
-                            _gl.Disable(EnableCap.Blend);
+                            if (!_wireframe) _gl.Disable(EnableCap.Blend);
                             _gl.DepthMask(true);
                             _gl.Uniform1(_uAlphaTest, WoWConstants.AlphaKeyThreshold);
                         }
                         else
                         {
-                            _gl.Disable(EnableCap.Blend);
+                            if (!_wireframe) _gl.Disable(EnableCap.Blend);
                             _gl.DepthMask(true);
                             _gl.Uniform1(_uAlphaTest, 0.0f);
                         }
@@ -874,6 +916,12 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
             _gl.Disable(EnableCap.Blend);
             _gl.Uniform1(_uAlphaTest, 0.0f);
         }
+
+        if (_wireframe)
+        {
+            RenderWireframeOverlay(modelMatrix, view, proj, fc, fogStart, fogEnd, cp, ld, lc, ac);
+        }
+
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
         LastRenderStats = new WmoRenderStats(

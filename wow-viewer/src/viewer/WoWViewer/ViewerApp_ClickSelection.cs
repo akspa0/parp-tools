@@ -110,6 +110,39 @@ public partial class ViewerApp
                     validHits.Add(hit);
                 }
 
+                // 2. WMO Container Fall-Through:
+                // When clicking within the confines of a WMO's bounding box, clicks must fall through
+                // to interior MDX/M2 objects, WMO doodads, or nested smaller WMOs.
+                // If an interior object is hit along the ray inside a WMO's bounding box,
+                // the enclosing WMO must not occlude or capture the click.
+                var containerWmoIndices = new HashSet<int>();
+                foreach (var hit in validHits)
+                {
+                    if (hit.ObjectType != ObjectType.Wmo)
+                        continue;
+
+                    bool hasInteriorHit = validHits.Any(other =>
+                    {
+                        if (other.ObjectType == ObjectType.Wmo && other.ObjectIndex == hit.ObjectIndex)
+                            return false;
+
+                        // Test if other object's selection point is within this WMO's bounding box (with slight margin)
+                        return other.SelectionPoint.X >= hit.BoundsMin.X - 0.5f && other.SelectionPoint.X <= hit.BoundsMax.X + 0.5f
+                            && other.SelectionPoint.Y >= hit.BoundsMin.Y - 0.5f && other.SelectionPoint.Y <= hit.BoundsMax.Y + 0.5f
+                            && other.SelectionPoint.Z >= hit.BoundsMin.Z - 0.5f && other.SelectionPoint.Z <= hit.BoundsMax.Z + 0.5f;
+                    });
+
+                    if (hasInteriorHit)
+                        containerWmoIndices.Add(hit.ObjectIndex);
+                }
+
+                if (containerWmoIndices.Count > 0)
+                {
+                    var nonContainerHits = validHits.Where(h => h.ObjectType != ObjectType.Wmo || !containerWmoIndices.Contains(h.ObjectIndex)).ToList();
+                    if (nonContainerHits.Count > 0)
+                        validHits = nonContainerHits;
+                }
+
                 if (validHits.Count > 0)
                 {
                     // Sort candidate hits strictly by ray distance to camera
@@ -353,7 +386,9 @@ public partial class ViewerApp
 
     private void AddSceneObjectClickSelectionCandidate(HashSet<string> addedKeys, SceneObjectPickHit hit)
     {
-        string dedupKey = $"scene:{hit.ObjectType}:{hit.ObjectIndex}";
+        string dedupKey = hit.ObjectType == ObjectType.WmoDoodad
+            ? $"scene:{hit.ObjectType}:{hit.ParentWmoIndex}:{hit.ObjectIndex}"
+            : $"scene:{hit.ObjectType}:{hit.ObjectIndex}";
         string detail = $"UniqueId: {hit.UniqueId}  Pos: ({hit.PlacementPosition.X:F1}, {hit.PlacementPosition.Y:F1}, {hit.PlacementPosition.Z:F1})";
 
         TryAddClickSelectionCandidate(
@@ -379,7 +414,7 @@ public partial class ViewerApp
                         return;
                     }
 
-                    if (!_worldScene.SelectSceneObject(hit.ObjectType, hit.ObjectIndex))
+                    if (!_worldScene.SelectSceneObject(hit.ObjectType, hit.ObjectIndex, hit.ParentWmoIndex))
                         return;
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);

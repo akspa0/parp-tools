@@ -45,7 +45,14 @@ of the mouse and object selection system.
     - Enforced a strict spatial proximity cluster threshold ($\le 2.0\text{ yd}$ from closest hit) and terrain occlusion culling: objects 40 yards apart along the ray no longer trigger ambiguous cluster popups; foreground objects select immediately on a single click.
     - Resolved selection lock: removed stale candidate block in `TryHandleSceneClickSelection`, ensuring subsequent clicks can pick different objects seamlessly.
     - Added comprehensive deselection: clicking on empty terrain/sky clears selection, clicking an already-selected object toggles it off, and pressing Escape immediately deselects active world objects or closes the cluster card. All builds clean. Ready for operator interactive verification.
-16. Spec 211 Opened: WMO Interior Ray Picking, Doodad Selection & Ghost Transparent Wireframes. SpecKit authored (`spec.md`, `plan.md`, `tasks.md`) and registered in `specs/STATUS.md`. Resolves WMO container lockout by prioritizing interior MDX/M2 objects within WMO bounds, adds interactive WMO doodad ray picking, and implements dual-pass 33% transparent ghost wireframe rendering for M2/MDX, WMOs, and terrain.
+16. Spec 211 Landed (Phases 1–3 Implemented & Unit Tested 2026-09-02; Ready for Operator Interactive Verification):
+    - WMO Interior Ray Picking & Container Fall-Through: Authored `WmoContainerFallThroughFilter` in `WowViewer.Core.Runtime.World` with comprehensive unit tests (6/6 passing). When a ray hits an interior object (MDX, WMO doodad, or nested WMO) enclosed within a WMO's bounding box, clicks fall through to the interior object rather than locking onto the outer building envelope.
+    - WMO Doodad Selection: Added `ObjectType.WmoDoodad`, implemented `TryPickDoodadsByRay` in `WmoRenderer.cs`, wired doodads into `WorldScene.cs` candidate gathering and selection state (`SelectedWmoParentIndex`, `TryGetSelectedWmoDoodad`), and connected to inspector and camera framing in `ViewerApp.cs`.
+    - Ghost Transparent Wireframes: Implemented dual-pass ghost wireframe rendering across all 3 subsystems:
+      - MDX / M2 models (`ModelRenderer.cs`): Pass 1 fills textured geometry with 33% alpha blending (`fadeAlpha * 0.33f`); Pass 2 draws prominent wireframe lines with `PolygonOffsetLine` (-1.0, -1.0) and 1.5 line width.
+      - WMO objects (`WmoRenderer.cs`): Opaque batches unbind GPU instancing and render with 33% alpha blending (`uColor = (1, 1, 1, 0.33)`), followed by `RenderWireframeOverlay` with polygon offset and 1.5 line width.
+      - Terrain (`TerrainRenderer.cs`): Draws textured terrain fill in `PolygonMode.Fill`, followed by a line pass with `PolygonOffsetLine` (-1.0, -1.0) and 1.5 line width so wireframes are obvious while terrain texturing remains clearly visible.
+    - Clean build, zero errors across solution, all unit tests green. Ready for operator interactive verification.
 
 **Spec 209 — Liquid Convergence Measured (Phase 1 Complete).** Built `inspect adt liquid-convergence`
 and `LiquidConvergenceAnalyzer` (4 new tests). Catalog discovery loads 108 WL* files directly from

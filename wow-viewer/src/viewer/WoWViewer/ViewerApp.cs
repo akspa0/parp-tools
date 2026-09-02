@@ -13487,7 +13487,12 @@ void main() {
         _selectedAreaPoiId = -1;
 
         ObjectInstance inst = selected.Value;
-        string type = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? "WMO" : "MDX";
+        string type = _worldScene.SelectedObjectType switch
+        {
+            Terrain.ObjectType.Wmo => "WMO",
+            Terrain.ObjectType.WmoDoodad => "WMO Doodad",
+            _ => "MDX"
+        };
         int idx = _worldScene.SelectedObjectIndex;
         float wowX = WoWConstants.MapOrigin - inst.PlacementPosition.Y;
         float wowY = WoWConstants.MapOrigin - inst.PlacementPosition.X;
@@ -13496,7 +13501,7 @@ void main() {
         _selectedObjectType = type;
         _selectedObjectIndex = idx;
 
-        if (_useTabUi && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo)
+        if (_useTabUi && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo or Terrain.ObjectType.WmoDoodad)
             OpenWorkbenchTab(ModelBottomTab.Info);
 
         _selectedObjectInfo = $"{type} [{idx}] {inst.ModelName}\n" +
