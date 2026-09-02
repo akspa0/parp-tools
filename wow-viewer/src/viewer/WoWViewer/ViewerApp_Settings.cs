@@ -148,7 +148,7 @@ public partial class ViewerApp
         ImGui.Separator();
         ImGui.Text("3D In-Scene Cursor:");
 
-        int currentStyle = (int)(_sceneCursorRenderer?.Style ?? CursorStyle.AuthenticWoWGauntlet);
+        int currentStyle = (int)(_sceneCursorRenderer?.Style ?? CursorStyle.ClassicOSArrow);
         string[] styleNames = { "Authentic WoW Gauntlet", "Procedural 3D Pointer", "3D Target Reticle", "Classic OS Arrow" };
         if (ImGui.Combo("Cursor Style", ref currentStyle, styleNames, styleNames.Length))
         {

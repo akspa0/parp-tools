@@ -36,7 +36,7 @@ public sealed class SceneCursorRenderer : IDisposable
     private IDataSource? _dataSource;
     private ReplaceableTextureResolver? _texResolver;
 
-    private CursorStyle _style = CursorStyle.AuthenticWoWGauntlet;
+    private CursorStyle _style = CursorStyle.ClassicOSArrow;
     private SceneCursorState _state = SceneCursorState.Pointer;
     private float _userScale = 1.0f;
 
