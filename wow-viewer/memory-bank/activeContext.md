@@ -26,6 +26,26 @@ open specs, with the reasoning for the order. This section is the session summar
 
 ## Landed 2026-09-02
 
+**Spec 210 — 3D Scene Cursor & In-World Spatial Selection (Phases 1–4 Landed).** User initiated full redesign
+of the mouse and object selection system.
+1. Configured and tested OpenSCAD MCP server (`quellant/openscad-mcp`) wrapping CLI at `C:\Program Files\OpenSCAD\openscad.com`.
+2. Implemented headless `OffGeometry` in `WowViewer.Core.Geometry` (with 3/3 passing unit tests in `OffGeometryTests.cs`) and `ProceduralMeshLoader` in `WoWViewer.Rendering` for OpenSCAD OFF/STL models and primitives.
+3. Implemented `SceneCursorRenderer` loading authentic `Interface\Cursor\Cursor.mdx` (Alpha 0.5.3) / `Point.mdx` with fallback to procedural pointer.
+4. Enforced camera culling invariant: near-plane clamp $Z \ge Z_{\text{near}} + 0.15\text{ yd}$, depth range bias `0.0..0.05` (always visible on contact geometry), and perspective scaling $S = \text{BaseScale} \times \text{Distance} \times \tan(\text{FOV}/2)$.
+5. Seamless ImGui interop: hides OS cursor (`ImGui.SetMouseCursor(None)`) only when inside the 3D viewport, instantly restoring it over ImGui panels/menus/modals.
+6. Implemented `SceneClusterSelector3D` replacing intrusive 2D modal menus with in-world 3D orbital rings and interactive candidate markers with 1-9 keyboard shortcuts.
+7. Authored 5 production-grade OpenSCAD assets in source tree (`Assets/OpenScad/`): `cursor_pointer.scad`, `cursor_reticle.scad`, `cluster_pin.scad`, `camera_hud_gimbal.scad`, `hud_frame_bracket.scad` + compiled `.off` files + batch compiler script `compile_openscad_assets.ps1`.
+9. Added Settings controls for Cursor Style/Scale and 3D Camera HUD toggles in Settings > Interface.
+10. Eliminated overlapping popups: suppressed legacy 2D hover overlay (`##SceneHoverAssetOverlay`) when in 3D cursor mode or during active cluster selection; removed legacy 2D `ClickSelectionOverlay` modal list entirely; consolidated cluster disambiguation into a single non-overlapping in-scene card anchored cleanly above the 3D orbital ring.
+11. Fixed hardware cursor overlap: toggled physical OS cursor visibility via Silk.NET `CursorMode.Hidden` / `CursorMode.Normal` directly on `_input.Mice`, guaranteeing the white OS arrow is invisible over the 3D viewport and immediately reappears over ImGui panels/menus.
+12. Added UI Typography & Font Size scaling: continuous slider (`0.85x`–`2.20x`) and quick presets (`100%`, `120%`, `135%`, `150%`, `175%`) under Settings > Interface with live `ImGui.GetIO().FontGlobalScale` scaling and persistent storage in `ViewerSettings.UiFontScale`.
+13. Reconciled Phase Map Layer offset controls in `ViewerApp_PhaseLayers.cs`: swapped the UI text identifiers (`Tile offset X` now controls horizontal/col `TileOffsetY`, and `Tile offset Y` now controls vertical/row `TileOffsetX`) with descriptive tooltips, resolving the discrepancy where phased maps worked on the minimap but had swapped axes in 3D terrain.
+14. Startup scene cursor guarantee: decoupled 3D viewport setup, sky gradient backdrop, 3D camera HUD, and `RenderSceneCursor()` from `_renderer != null` in `ViewerApp.cs`. The viewer now always renders a single active 3D scene on startup with the in-scene cursor floating smoothly over a clean sky gradient backdrop even when nothing is loaded, preventing cursor disappearance on launch.
+15. Spatial clustering proximity filter & selection lifecycle:
+    - Enforced a strict spatial proximity cluster threshold ($\le 2.0\text{ yd}$ from closest hit) and terrain occlusion culling: objects 40 yards apart along the ray no longer trigger ambiguous cluster popups; foreground objects select immediately on a single click.
+    - Resolved selection lock: removed stale candidate block in `TryHandleSceneClickSelection`, ensuring subsequent clicks can pick different objects seamlessly.
+    - Added comprehensive deselection: clicking on empty terrain/sky clears selection, clicking an already-selected object toggles it off, and pressing Escape immediately deselects active world objects or closes the cluster card. All builds clean. Ready for operator interactive verification.
+
 **Spec 209 — Liquid Convergence Measured (Phase 1 Complete).** Built `inspect adt liquid-convergence`
 and `LiquidConvergenceAnalyzer` (4 new tests). Catalog discovery loads 108 WL* files directly from
 `misc.mpq` in 0.5.3. Scanned 500 liquid tiles on Azeroth. **Union invariant verified (SC-002 / FR-004)**:

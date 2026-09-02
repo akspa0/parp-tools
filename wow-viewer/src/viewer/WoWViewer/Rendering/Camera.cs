@@ -34,6 +34,19 @@ public class Camera
         }
     }
 
+    public Vector3 Up
+    {
+        get
+        {
+            float rollRadians = Roll * (MathF.PI / 180f);
+            return Vector3.Transform(
+                Vector3.UnitZ,
+                Quaternion.CreateFromAxisAngle(Forward, rollRadians));
+        }
+    }
+
+    public Vector3 Right => Vector3.Normalize(Vector3.Cross(Forward, Up));
+
     public Matrix4x4 GetViewMatrix()
     {
         // LookAt target is camera position + forward direction

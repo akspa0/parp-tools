@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Terrain;
+using WoWViewer.Rendering;
 
 namespace WoWViewer;
 
@@ -38,10 +39,12 @@ public partial class ViewerApp
         if (_worldScene == null)
             return false;
 
-        // If overlay is already showing, skip the pick but DON'T return false
-        // (that would trigger ClearPendingClickSelection in the caller)
-        if (_clickSelectionCandidates.Count > 1)
-            return true;
+        // If cluster selector is already open, close it so new clicks can select other objects or clear
+        if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
+        {
+            _sceneClusterSelector3D.Close();
+            ClearPendingClickSelection();
+        }
 
         (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey = null;
         Vector3? clickedWorldPoint = null;
@@ -95,13 +98,58 @@ public partial class ViewerApp
         if (!pm4Hit || !_worldScene.ShowPm4Overlay)
         {
             if (_worldScene.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
-        {
-            int sceneHitCount = Math.Min(_sceneClickSelectionHits.Count, MaxSceneClickSelectionHits);
-            _clickSelectionSceneHitOverflowCount = Math.Max(0, _sceneClickSelectionHits.Count - sceneHitCount);
+            {
+                // 1. Cull any hits that are behind the clicked terrain point (occluded by terrain)
+                float? terrainDist = clickedWorldPoint.HasValue ? (clickedWorldPoint.Value - rayOrigin).Length() : null;
+                var validHits = new List<SceneObjectPickHit>();
+                for (int i = 0; i < _sceneClickSelectionHits.Count; i++)
+                {
+                    var hit = _sceneClickSelectionHits[i];
+                    if (terrainDist.HasValue && hit.Distance > terrainDist.Value + 1.5f)
+                        continue;
+                    validHits.Add(hit);
+                }
 
-            for (int i = 0; i < sceneHitCount; i++)
-                AddSceneObjectClickSelectionCandidate(addedKeys, _sceneClickSelectionHits[i]);
+                if (validHits.Count > 0)
+                {
+                    // Sort candidate hits strictly by ray distance to camera
+                    validHits.Sort(static (a, b) => a.Distance.CompareTo(b.Distance));
+                    float minHitDist = validHits[0].Distance;
+
+                    // Spatial proximity threshold: only cluster objects if literally on top of each other (<= 2.0 yards)
+                    const float clusterThreshold = 2.0f;
+                    var clusteredHits = new List<SceneObjectPickHit>();
+                    for (int i = 0; i < validHits.Count; i++)
+                    {
+                        if (validHits[i].Distance <= minHitDist + clusterThreshold)
+                            clusteredHits.Add(validHits[i]);
+                    }
+
+                    int sceneHitCount = Math.Min(clusteredHits.Count, MaxSceneClickSelectionHits);
+                    _clickSelectionSceneHitOverflowCount = Math.Max(0, clusteredHits.Count - sceneHitCount);
+
+                    for (int i = 0; i < sceneHitCount; i++)
+                        AddSceneObjectClickSelectionCandidate(addedKeys, clusteredHits[i]);
+                }
+            }
         }
+
+        // Global cluster proximity filter:
+        // If multiple candidates were added, cull any candidate that is far behind the closest candidate
+        if (_clickSelectionCandidates.Count > 1)
+        {
+            float minDistance = float.MaxValue;
+            foreach (var c in _clickSelectionCandidates)
+            {
+                if (c.Distance.HasValue && c.Distance.Value < minDistance)
+                    minDistance = c.Distance.Value;
+            }
+
+            if (minDistance < float.MaxValue)
+            {
+                const float globalClusterThreshold = 2.0f;
+                _clickSelectionCandidates.RemoveAll(c => c.Distance.HasValue && c.Distance.Value > minDistance + globalClusterThreshold);
+            }
         }
 
         if (_clickSelectionCandidates.Count == 0)
@@ -115,6 +163,24 @@ public partial class ViewerApp
             return true;
         }
 
+        Vector3 clusterCenter = clickedWorldPoint ?? (rayOrigin + rayDir * 10f);
+        if (_sceneClusterSelector3D != null)
+        {
+            var clusterItems = new List<ClusterItem>();
+            foreach (var c in _clickSelectionCandidates)
+            {
+                clusterItems.Add(new ClusterItem(
+                    c.DedupKey,
+                    c.Title,
+                    c.Detail,
+                    c.SecondaryDetail,
+                    clusterCenter,
+                    c.Distance,
+                    c.Apply));
+            }
+            _sceneClusterSelector3D.Open(clusterCenter, clusterItems);
+        }
+
         _clickSelectionOverlayPosition = new Vector2(mouseX + 18f, mouseY + 18f);
         _statusMessage = $"Ambiguous click: {_clickSelectionCandidates.Count} candidates under the cursor.";
         return true;
@@ -122,121 +188,38 @@ public partial class ViewerApp
 
     private void DrawClickSelectionOverlay()
     {
-        if (_clickSelectionCandidates.Count <= 1)
-            return;
-
-        if (ImGui.IsKeyPressed(ImGuiKey.Escape))
+        if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
         {
-            ClearPendingClickSelection();
-            return;
-        }
-
-        // Keyboard shortcuts: number keys 1-9 select by index
-        for (int keyIndex = 0; keyIndex < Math.Min(_clickSelectionCandidates.Count, 9); keyIndex++)
-        {
-            if (ImGui.IsKeyPressed(ImGuiKey._1 + keyIndex))
+            if (_sceneClusterSelector3D.HandleInput())
             {
-                Action apply = _clickSelectionCandidates[keyIndex].Apply;
                 ClearPendingClickSelection();
-                apply();
                 return;
             }
-        }
 
-        Vector2 displaySize = ImGui.GetIO().DisplaySize;
-        Vector2 overlayPos = new(
-            MathF.Min(_clickSelectionOverlayPosition.X, MathF.Max(8f, displaySize.X - 480f)),
-            MathF.Min(_clickSelectionOverlayPosition.Y, MathF.Max(8f, displaySize.Y - 460f)));
-
-        ImGui.SetNextWindowPos(overlayPos, ImGuiCond.Always);
-        ImGui.SetNextWindowSizeConstraints(new Vector2(320f, 80f), new Vector2(480f, 600f));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(16f, 14f));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 4f);
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.04f, 0.05f, 0.09f, 0.985f));
-        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.95f, 0.79f, 0.28f, 0.98f));
-        ImGui.PushStyleColor(ImGuiCol.Separator, new Vector4(0.88f, 0.73f, 0.22f, 0.82f));
-        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.28f, 0.40f, 0.72f, 0.70f));
-
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration
-            | ImGuiWindowFlags.AlwaysAutoResize
-            | ImGuiWindowFlags.NoDocking
-            | ImGuiWindowFlags.NoSavedSettings
-            | ImGuiWindowFlags.NoMove;
-
-        Action? pendingAction = null;
-        bool shouldClose = false;
-
-        if (!ImGui.Begin("##ClickSelectionOverlay", flags))
-        {
-            ImGui.End();
-            ImGui.PopStyleColor(4);
-            ImGui.PopStyleVar(3);
-            return;
-        }
-
-        ImGui.SetWindowFontScale(1.20f);
-        ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.38f, 1.0f), "Choose Target");
-        ImGui.TextColored(new Vector4(0.82f, 0.86f, 0.94f, 1.0f), "Click or press 1-9 to pick:");
-        ImGui.SetWindowFontScale(1.0f);
-        ImGui.Separator();
-
-        for (int i = 0; i < _clickSelectionCandidates.Count; i++)
-        {
-            ClickSelectionCandidate candidate = _clickSelectionCandidates[i];
-            string prefix = i < 9 ? $"[{i + 1}] " : "";
-            if (ImGui.Selectable($"{prefix}{candidate.Title}##click_pick_{i}", false, ImGuiSelectableFlags.None, new Vector2(400f, 0f)))
+            if (TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
             {
-                pendingAction = candidate.Apply;
-                break;
+                var view = _camera.GetViewMatrix();
+                float aspect = vpW / Math.Max(vpH, 1f);
+                var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, GetSceneFarPlane());
+                _sceneClusterSelector3D.RenderScreenOverlay(view, proj, vpX, vpY, vpW, vpH);
             }
 
-            if (!string.IsNullOrWhiteSpace(candidate.Detail))
-                ImGui.TextColored(new Vector4(0.92f, 0.94f, 0.98f, 1.0f), $"  {candidate.Detail}");
-
-            if (!string.IsNullOrWhiteSpace(candidate.SecondaryDetail))
+            if (!_sceneClusterSelector3D.IsActive)
             {
-                ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 400f);
-                ImGui.TextColored(new Vector4(0.54f, 0.84f, 0.52f, 1.0f), $"  {candidate.SecondaryDetail}");
-                ImGui.PopTextWrapPos();
+                ClearPendingClickSelection();
             }
-
-            if (candidate.Distance.HasValue)
-                ImGui.TextDisabled($"  Hit: {candidate.Distance.Value:F1}");
-
-            if (i + 1 < _clickSelectionCandidates.Count)
-                ImGui.Separator();
         }
-
-        if (_clickSelectionSceneHitOverflowCount > 0)
-        {
-            ImGui.Separator();
-            ImGui.TextDisabled($"+{_clickSelectionSceneHitOverflowCount} farther scene hits omitted from this list.");
-        }
-
-        ImGui.Spacing();
-        if (ImGui.Button("Cancel") || ImGui.IsKeyPressed(ImGuiKey.Escape))
-            shouldClose = true;
-
-        ImGui.End();
-        ImGui.PopStyleColor(4);
-        ImGui.PopStyleVar(3);
-
-        if (pendingAction != null)
+        else if (_clickSelectionCandidates.Count > 0)
         {
             ClearPendingClickSelection();
-            pendingAction();
-            return;
         }
-
-        if (shouldClose)
-            ClearPendingClickSelection();
     }
 
     private void ClearPendingClickSelection()
     {
         _clickSelectionCandidates.Clear();
         _clickSelectionSceneHitOverflowCount = 0;
+        _sceneClusterSelector3D?.Close();
     }
 
     private void AddTaxiNodeClickSelectionCandidate(HashSet<string> addedKeys, int nodeId, string source)
@@ -383,7 +366,20 @@ public partial class ViewerApp
                 hit.Distance,
                 () =>
                 {
-                    if (_worldScene == null || !_worldScene.SelectSceneObject(hit.ObjectType, hit.ObjectIndex))
+                    if (_worldScene == null)
+                        return;
+
+                    // Toggle off / deselect if already selected
+                    if (_worldScene.SelectedObjectType == hit.ObjectType && _worldScene.SelectedObjectIndex == hit.ObjectIndex)
+                    {
+                        _worldScene.ClearSelection();
+                        _selectedObjectIndex = -1;
+                        _selectedObjectType = "";
+                        _selectedObjectInfo = "";
+                        return;
+                    }
+
+                    if (!_worldScene.SelectSceneObject(hit.ObjectType, hit.ObjectIndex))
                         return;
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);

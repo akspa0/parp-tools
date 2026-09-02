@@ -720,6 +720,10 @@ public partial class ViewerApp : IDisposable
     private TerrainManager? _terrainManager;
     private VlmTerrainManager? _vlmTerrainManager;
     private WorldScene? _worldScene;
+    private SceneCursorRenderer? _sceneCursorRenderer;
+    private SceneClusterSelector3D? _sceneClusterSelector3D;
+    private CameraHudRig3D? _cameraHudRig3D;
+    private float _uiFontScale = 1.0f;
     private bool _wantOpenVlmProject = false;
     private bool _wantOpenZarrDataset = false;
 
@@ -993,6 +997,9 @@ public partial class ViewerApp : IDisposable
         _gl.Enable(EnableCap.CullFace);
 
         _loadingScreen = new Rendering.LoadingScreen(_gl);
+        _sceneCursorRenderer = new SceneCursorRenderer(_gl, _dataSource, _texResolver);
+        _sceneClusterSelector3D = new SceneClusterSelector3D(_gl);
+        _cameraHudRig3D = new CameraHudRig3D(_gl);
 
         TryAutoPopulateAlphaCoreRoot();
         LoadViewerSettings();
@@ -1297,6 +1304,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
     private bool _pKeyWasPressed = false;
     private bool _iKeyWasPressed = false;
     private bool _tabKeyWasPressed = false;
+    private bool _escKeyWasPressed = false;
     private bool _leftArrowWasPressed = false;
     private bool _rightArrowWasPressed = false;
     private bool _spaceWasPressed = false;
@@ -1359,6 +1367,29 @@ var seq = animator.Sequences[animator.CurrentSequence];
         if (canSceneConsumeKeyboard && tabPressed && !_tabKeyWasPressed)
             _hideUiChrome = !_hideUiChrome;
         _tabKeyWasPressed = tabPressed;
+
+        bool escPressed = kb.IsKeyPressed(Key.Escape);
+        if (canSceneConsumeKeyboard && escPressed && !_escKeyWasPressed)
+        {
+            if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
+            {
+                _sceneClusterSelector3D.Close();
+                ClearPendingClickSelection();
+            }
+            else if (_worldScene != null)
+            {
+                ClearPendingClickSelection();
+                ClearSelectedWlLiquidBody(clearListIsolation: true);
+                _worldScene.ClearSelection();
+                _worldScene.ClearTaxiSelection();
+                _worldScene.ClearPm4ObjectSelection();
+                ClearSelectedAreaPoiInfo();
+                _selectedObjectIndex = -1;
+                _selectedObjectType = "";
+                _selectedObjectInfo = "";
+            }
+        }
+        _escKeyWasPressed = escPressed;
 
         bool pPressed = kb.IsKeyPressed(Key.P);
         if (canSceneConsumeKeyboard && pPressed && !_pKeyWasPressed)
@@ -1496,34 +1527,34 @@ var seq = animator.Sequences[animator.CurrentSequence];
             }
         }
 
-        // Render 3D scene first
+        // Render 3D scene first (always set up viewport and 3D scene cursor even on startup when _renderer is null)
+        var size = _window.Size;
+        bool hasSceneViewportRect = TryGetSceneViewportRect(out float sceneViewportX, out float sceneViewportY, out float sceneViewportWidth, out float sceneViewportHeight);
+        int sceneFramebufferX = 0;
+        int sceneFramebufferY = 0;
+        uint sceneFramebufferWidth = 0;
+        uint sceneFramebufferHeight = 0;
+        bool hasSceneViewport = hasSceneViewportRect
+            && TryGetSceneFramebufferViewport(out sceneFramebufferX, out sceneFramebufferY, out sceneFramebufferWidth, out sceneFramebufferHeight);
+        if (hasSceneViewport)
+            _gl.Viewport(sceneFramebufferX, sceneFramebufferY, sceneFramebufferWidth, sceneFramebufferHeight);
+        else
+            _gl.Viewport(_window.FramebufferSize);
+
+        float aspect = hasSceneViewport
+            ? sceneViewportWidth / Math.Max(sceneViewportHeight, 1f)
+            : (float)size.X / Math.Max(size.Y, 1);
+        float farPlane = GetSceneFarPlane();
+        Matrix4x4 view;
+        Matrix4x4 proj;
+        if (!TryGetMkHarvestViewerValidationSceneMatrices(aspect, out view, out proj))
+        {
+            view = _camera.GetViewMatrix();
+            proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
+        }
+
         if (_renderer != null)
         {
-            var size = _window.Size;
-            bool hasSceneViewportRect = TryGetSceneViewportRect(out float sceneViewportX, out float sceneViewportY, out float sceneViewportWidth, out float sceneViewportHeight);
-            int sceneFramebufferX = 0;
-            int sceneFramebufferY = 0;
-            uint sceneFramebufferWidth = 0;
-            uint sceneFramebufferHeight = 0;
-            bool hasSceneViewport = hasSceneViewportRect
-                && TryGetSceneFramebufferViewport(out sceneFramebufferX, out sceneFramebufferY, out sceneFramebufferWidth, out sceneFramebufferHeight);
-            if (hasSceneViewport)
-                _gl.Viewport(sceneFramebufferX, sceneFramebufferY, sceneFramebufferWidth, sceneFramebufferHeight);
-            else
-                _gl.Viewport(_window.FramebufferSize);
-
-            float aspect = hasSceneViewport
-                ? sceneViewportWidth / Math.Max(sceneViewportHeight, 1f)
-                : (float)size.X / Math.Max(size.Y, 1);
-            float farPlane = GetSceneFarPlane();
-            Matrix4x4 view;
-            Matrix4x4 proj;
-            if (!TryGetMkHarvestViewerValidationSceneMatrices(aspect, out view, out proj))
-            {
-                view = _camera.GetViewMatrix();
-                proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
-            }
-
             // Update terrain AOI before rendering
             if (_terrainManager != null)
                 _terrainManager.UpdateAOI(_camera.Position, _camera.Forward);
@@ -1595,10 +1626,26 @@ var seq = animator.Sequences[animator.CurrentSequence];
                         sceneViewportHeight);
                 }
             }
-
-            if (hasSceneViewport)
-                _gl.Viewport(_window.FramebufferSize);
         }
+        else
+        {
+            // Empty / startup scene: render clean backdrop gradient so the viewport is lively
+            RenderSkyGradient();
+        }
+
+        if (hasSceneViewportRect)
+        {
+            if (_cameraHudRig3D != null && _cameraHudRig3D.Enabled)
+            {
+                float hudAspect = (float)sceneViewportWidth / Math.Max(1, sceneViewportHeight);
+                _cameraHudRig3D.Render(_camera, proj, _fovDegrees, hudAspect);
+            }
+
+            RenderSceneCursor(view, proj, sceneViewportX, sceneViewportY, sceneViewportWidth, sceneViewportHeight);
+        }
+
+        if (hasSceneViewport)
+            _gl.Viewport(_window.FramebufferSize);
 
         CaptureVideoFrameIfNeeded(includeUi: false, dt);
         CompleteCaptureIfReady(includeUi: false);
@@ -1608,6 +1655,27 @@ var seq = animator.Sequences[animator.CurrentSequence];
         // underlying context is not available.
         if (HasImGuiContext())
         {
+            bool hideHardwareCursor = _sceneCursorRenderer != null
+                && _sceneCursorRenderer.Style != CursorStyle.ClassicOSArrow
+                && CanSceneConsumeMouse(_lastMouseX, _lastMouseY);
+
+            if (hideHardwareCursor)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.None);
+            }
+
+            if (_input != null)
+            {
+                CursorMode targetMode = hideHardwareCursor ? CursorMode.Hidden : CursorMode.Normal;
+                foreach (var mouse in _input.Mice)
+                {
+                    if (mouse.Cursor.CursorMode != targetMode)
+                    {
+                        mouse.Cursor.CursorMode = targetMode;
+                    }
+                }
+            }
+
             DrawUI();
             // The in-app path picker is a global modal: drive it every frame so it works from any
             // surface, independent of which panel opened it.
@@ -14696,6 +14764,58 @@ void main() {
         _worldScene.UpdateHoveredAssetInfo(view, proj, localX, localY, vpW, vpH);
     }
 
+    private void RenderSceneCursor(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        float vpX,
+        float vpY,
+        float vpW,
+        float vpH)
+    {
+        if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
+        {
+            _sceneClusterSelector3D.RenderWorld3D(_camera, proj);
+        }
+
+        if (_sceneCursorRenderer == null || _sceneCursorRenderer.Style == CursorStyle.ClassicOSArrow)
+            return;
+
+        if (!CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
+            return;
+
+        float localX = _lastMouseX - vpX;
+        float localY = _lastMouseY - vpY;
+        float ndcX = (localX / vpW) * 2f - 1f;
+        float ndcY = 1f - (localY / vpH) * 2f;
+
+        var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
+
+        float? hitDistance = null;
+        if (_worldScene?.HoveredAssetInfo is HoveredAssetInfo hoverInfo && hoverInfo.IsPreciseRayHit)
+        {
+            hitDistance = (hoverInfo.WorldPosition - rayOrigin).Length();
+            _sceneCursorRenderer.State = (hoverInfo.AssetKind.Contains("NPC", StringComparison.OrdinalIgnoreCase)
+                || hoverInfo.DisplayName.Contains("Creature", StringComparison.OrdinalIgnoreCase))
+                ? SceneCursorState.Speak
+                : SceneCursorState.Interact;
+        }
+        else
+        {
+            TerrainRenderer? terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+            if (terrainRenderer != null && TryRaycastTerrain(terrainRenderer, rayOrigin, rayDir, GetSceneFarPlane(), out _, out Vector3 hitPoint))
+            {
+                hitDistance = (hitPoint - rayOrigin).Length();
+            }
+
+            _sceneCursorRenderer.State = _workspaceMode == WorkspaceMode.Editor
+                && (_editorWorkspaceTask == EditorWorkspaceTask.Terrain || _editorWorkspaceTask == EditorWorkspaceTask.Objects)
+                ? SceneCursorState.CastGlow
+                : SceneCursorState.Pointer;
+        }
+
+        _sceneCursorRenderer.Render(_camera, proj, rayOrigin, rayDir, hitDistance, _fovDegrees, 0.1f);
+    }
+
     /// <summary>
     /// Coloured text that is NOT run through printf formatting.
     /// </summary>
@@ -14720,6 +14840,12 @@ void main() {
             TryDrawTerrainChunkHoverOverlay();
             return;
         }
+
+        if (_sceneCursorRenderer != null && _sceneCursorRenderer.Style != CursorStyle.ClassicOSArrow)
+            return;
+
+        if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
+            return;
 
         if (_worldScene != null && !_worldScene.ShowHoveredAssetTooltips)
             return;
@@ -15747,6 +15873,13 @@ void main() {
             _defaultFogEnd = float.IsFinite(settings.DefaultFogEnd)
                 ? Math.Clamp(settings.DefaultFogEnd, 100f, 6000f)
                 : 1500f;
+            _uiFontScale = float.IsFinite(settings.UiFontScale) && settings.UiFontScale > 0.5f
+                ? Math.Clamp(settings.UiFontScale, 0.75f, 2.5f)
+                : 1.0f;
+            if (HasImGuiContext())
+            {
+                ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            }
             _cameraSpeed = float.IsFinite(settings.CameraSpeed)
                 ? Math.Clamp(settings.CameraSpeed, 1f, 500f)
                 : 50f;
@@ -15992,6 +16125,7 @@ void main() {
                 CameraSpeed = _cameraSpeed,
                 FovDegrees = _fovDegrees,
                 KnownGoodClientPaths = _knownGoodClientPaths,
+                UiFontScale = _uiFontScale,
                 ShowMinimapWindow = _showMinimapWindow,
                 UseDockspaceUi = _useDockspaceUi,
                 ShowLeftSidebar = _showLeftSidebar,
@@ -16210,6 +16344,12 @@ void main() {
         SaveViewerSettings();
 
         _loadingScreen?.Dispose();
+        _sceneCursorRenderer?.Dispose();
+        _sceneCursorRenderer = null;
+        _sceneClusterSelector3D?.Dispose();
+        _sceneClusterSelector3D = null;
+        _cameraHudRig3D?.Dispose();
+        _cameraHudRig3D = null;
         _wdlPreviewCacheService?.Dispose();
         _wdlPreviewRenderer?.Dispose();
         _editorOverlayBb?.Dispose();
@@ -16249,6 +16389,7 @@ void main() {
     private sealed class ViewerSettings
     {
         public int UiTheme { get; set; } = (int)UiThemeKind.ModernSlate;
+        public float UiFontScale { get; set; } = 1.0f;
         public int WmoMliqRotationQuarterTurns { get; set; }
         public bool HasExplicitWmoMliqRotationOverride { get; set; }
         public string? LastGameFolderPath { get; set; }

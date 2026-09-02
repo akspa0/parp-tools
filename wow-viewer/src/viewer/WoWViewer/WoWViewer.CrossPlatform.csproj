@@ -77,6 +77,13 @@
     </Content>
   </ItemGroup>
 
+  <!-- Bundle authored OpenSCAD assets and geometry with the output -->
+  <ItemGroup>
+    <None Update="Assets\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
   <!-- No StormLib needed — pure C# NativeMpqService handles all MPQ access -->
 
 </Project>
