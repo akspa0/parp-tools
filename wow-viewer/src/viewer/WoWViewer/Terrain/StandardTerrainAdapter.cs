@@ -1214,12 +1214,28 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (mcnrData != null && mcnrData.Length >= 435)
         {
             // LK MCNR is already interleaved (9-8-9-8 pattern)
+            // MCNR component order is ERA-SCOPED, and this was measured, not inherited.
+            // Ground truth: normals central-differenced from the tile's own heightmap, which
+            // assumes no byte-order convention. Mean |dot| against that surface, per candidate:
+            //
+            //   client                 raw (b0,b1,b2)   swapped (b0,b2,b1)
+            //   0.5.3.3368 alpha WDT       0.1809            0.9976     <- alpha path, unchanged
+            //   4.0.0.12025 Cataclysm      0.9766            0.0303
+            //   5.0.1.15464 MoP            0.8366            0.2068
+            //
+            // So the long-standing "MCNR stores X, Z, Y (WoW convention)" comment is correct for
+            // the ALPHA reader and wrong for this one. The swap it performed put the up component
+            // into the horizontal axis, leaving the renderer's normals up to ~70 degrees off the
+            // real surface and collapsing max(dot(N, L), 0) toward ambient -- the reported
+            // "terrain is too dark on non-0.5.3 eras". Alpha keeps its own decode in
+            // AlphaWdtReader/AlphaTerrainAdapter, so this change cannot regress 0.5.3.
+            // Verified via: inspect adt terrain-shading --client <dir> --build <version>
             for (int i = 0; i < 145; i++)
             {
                 int off = i * 3;
                 float nx = (sbyte)mcnrData[off] / 127f;
-                float nz = (sbyte)mcnrData[off + 1] / 127f;
-                float ny = (sbyte)mcnrData[off + 2] / 127f;
+                float ny = (sbyte)mcnrData[off + 1] / 127f;
+                float nz = (sbyte)mcnrData[off + 2] / 127f;
                 normals[i] = TerrainNormalGeometry.TransformAdtNormalToRenderer(new Vector3(nx, ny, nz));
             }
             return normals;

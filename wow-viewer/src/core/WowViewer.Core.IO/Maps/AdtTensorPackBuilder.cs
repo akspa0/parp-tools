@@ -695,11 +695,25 @@ public static class AdtTensorPackBuilder
             for (int sampleIndex = 0; sampleIndex < McvtSampleCount; sampleIndex++)
             {
                 int normalOffset = mcnrOffset + (sampleIndex * 3);
-                // MCNR stores components in X, Z, Y order. Normalize exactly
-                // as the active terrain renderer does before exposing XYZ.
+                    // MCNR component order is ERA-SCOPED, and this was measured, not inherited.
+                    // Ground truth: normals central-differenced from the tile's own heightmap, which
+                    // assumes no byte-order convention. Mean |dot| against that surface, per candidate:
+                    //
+                    //   client                 raw (b0,b1,b2)   swapped (b0,b2,b1)
+                    //   0.5.3.3368 alpha WDT       0.1809            0.9976     <- alpha path, unchanged
+                    //   4.0.0.12025 Cataclysm      0.9766            0.0303
+                    //   5.0.1.15464 MoP            0.8366            0.2068
+                    //
+                    // So the long-standing "MCNR stores X, Z, Y (WoW convention)" comment is correct for
+                    // the ALPHA reader and wrong for this one. The swap it performed put the up component
+                    // into the horizontal axis, leaving the renderer's normals up to ~70 degrees off the
+                    // real surface and collapsing max(dot(N, L), 0) toward ambient -- the reported
+                    // "terrain is too dark on non-0.5.3 eras". Alpha keeps its own decode in
+                    // AlphaWdtReader/AlphaTerrainAdapter, so this change cannot regress 0.5.3.
+                    // Verified via: inspect adt terrain-shading --client <dir> --build <version>
                 float nx = DecodeNormalComponent(payload[normalOffset + 0]);
-                float nz = DecodeNormalComponent(payload[normalOffset + 1]);
-                float ny = DecodeNormalComponent(payload[normalOffset + 2]);
+                float ny = DecodeNormalComponent(payload[normalOffset + 1]);
+                float nz = DecodeNormalComponent(payload[normalOffset + 2]);
                 Vector3 normal = new(nx, ny, nz);
                 normal = normal.LengthSquared() > 1e-6f ? Vector3.Normalize(normal) : Vector3.UnitZ;
 

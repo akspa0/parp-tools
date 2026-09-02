@@ -64,20 +64,31 @@ public sealed class AdtTerrainVertexLatticeTests
             Assert.Equal(writerTile.InnerHeights,
                 wdl.Inner16.Cast<float>().Select(static value => (short)Math.Clamp(Math.Round(value), short.MinValue, short.MaxValue)));
 
-            // Disk MCNR is X,Z,Y. The public tensor is normalized XYZ.
+            // Disk MCNR components are X, Y, Z in order, so the public tensor is a straight copy.
+            //
+            // This is MEASURED, not a convention taken from documentation. Normals derived by
+            // central difference from each tile's own heightmap -- which assumes no byte order at
+            // all -- agree with this reading at mean |dot| 0.9766 on 4.0.0.12025 and 0.8366 on
+            // 5.0.1.15464, versus 0.0303 and 0.2068 for the X,Z,Y reading this test previously
+            // asserted. The alpha WDT path is the opposite (0.9976 for X,Z,Y) and keeps its own
+            // decoder in AlphaWdtReader. Re-check with: inspect adt terrain-shading.
+            //
+            // The previous expectations were self-consistent with the old decoder and with a
+            // fixture written to match it, so they could never have caught this. If this test is
+            // ever red again, re-run the measurement before editing the numbers.
             Assert.Equal(1f, pack.McnrNormalXyz![0, 0, 0], 5);
             Assert.Equal(0f, pack.McnrNormalXyz[0, 0, 1], 5);
             Assert.Equal(0f, pack.McnrNormalXyz[0, 0, 2], 5);
 
-            TerrainVertexLattice.ResolveDenseCoordinates(0, 0, 1, out int zX, out int zY);
-            Assert.Equal(0f, pack.McnrNormalXyz[zY, zX, 0], 5);
-            Assert.Equal(0f, pack.McnrNormalXyz[zY, zX, 1], 5);
-            Assert.Equal(1f, pack.McnrNormalXyz[zY, zX, 2], 5);
-
-            TerrainVertexLattice.ResolveDenseCoordinates(0, 0, 2, out int yX, out int yY);
+            TerrainVertexLattice.ResolveDenseCoordinates(0, 0, 1, out int yX, out int yY);
             Assert.Equal(0f, pack.McnrNormalXyz[yY, yX, 0], 5);
             Assert.Equal(1f, pack.McnrNormalXyz[yY, yX, 1], 5);
             Assert.Equal(0f, pack.McnrNormalXyz[yY, yX, 2], 5);
+
+            TerrainVertexLattice.ResolveDenseCoordinates(0, 0, 2, out int zX, out int zY);
+            Assert.Equal(0f, pack.McnrNormalXyz[zY, zX, 0], 5);
+            Assert.Equal(0f, pack.McnrNormalXyz[zY, zX, 1], 5);
+            Assert.Equal(1f, pack.McnrNormalXyz[zY, zX, 2], 5);
         }
         finally
         {
@@ -129,7 +140,7 @@ public sealed class AdtTerrainVertexLatticeTests
 
         byte[] mcnrPayload = new byte[0x1C0];
         for (int sample = 0; sample < TerrainVertexLattice.SamplesPerChunk; sample++)
-            mcnrPayload[(sample * 3) + 1] = 127; // disk Z -> public Z
+            mcnrPayload[(sample * 3) + 2] = 127; // disk byte 2 is the UP component -> public Z
         if (chunkX == 0 && chunkY == 0)
         {
             mcnrPayload[0] = 127; mcnrPayload[1] = 0; mcnrPayload[2] = 0;
