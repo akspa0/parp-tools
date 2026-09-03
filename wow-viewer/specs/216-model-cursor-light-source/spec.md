@@ -11,10 +11,32 @@
 ## Context & Motivation
 
 There is one 2001 screenshot of a thief holding a torch in a dark scene, the torch the only light in
-it. That image is a record of how the alpha engine's lighting actually behaved — not a mock-up, and
-not something any current view of this data reproduces. Reconstructing the conditions that produce it
-is a measurement, not a decoration: if the scene can be made to look like the screenshot, the
-lighting model is right; if it cannot, something in it is wrong and the screenshot says so.
+it. That image is a record of what the alpha engine's data *described* — not a mock-up, and not
+something any current view of this data reproduces.
+
+**The lights were always in the data; the hardware could not afford them.** `areatest.lit` carries
+authored point lights, and a single point light picking out an otherwise dark scene was expensive to
+do well in 2001. That is why this look appears in one screenshot and then effectively vanishes from
+the shipped game for roughly a decade — not because the data changed, but because real-time dynamic
+lighting of that kind only became cheap much later. The constraint that suppressed it no longer
+applies. This feature is therefore not an effect being invented; it is **running the lighting the
+data has described since 2001 on hardware that can finally do it.**
+
+That framing is also why the screenshot is a measurement rather than a target: if the scene can be
+made to look like it, the lighting model is right; if it cannot, something in it is wrong and the
+screenshot says so.
+
+**And it was never only about a hand-held torch.** Era screenshots of dungeon interiors — Deadmines
+among them — show warm point lights pooling on nearby surfaces and falling off into darkness, lighting
+the room from braziers, lanterns and lit props. That is the same phenomenon at world scale: light
+emitted by *placed objects* rather than by a single carried one. The cursor is the cheapest possible
+test rig for that mechanism — one light source the operator can move by hand and observe — but the
+mechanism it proves is the one the world needs.
+
+This spec therefore requires the light path to be **general in design and cursor-only in
+activation**. Enabling it for every brazier and sconce in the world is a separate decision with its
+own cost question; building a mechanism that could never do so would be the wrong foundation and
+would have to be thrown away.
 
 Spec 210 put a cursor into the scene as real geometry and established the asset path for it. This
 feature generalises that cursor from a fixed set of styles to **any model**, and then makes the
@@ -32,12 +54,25 @@ Four facts were measured in the existing code before this spec was written:
   cursor's flame should work through the existing path.
 - **MDX lights are parsed and partly used** — `MdxLightSummary`, `MdxLightType`, the `LITE` chunk,
   and `UploadMdxLights` in `ModelRenderer`.
-- **But those lights light only their own model.** `UploadMdxLights` uploads a model's `LITE` lights
-  as uniforms into *that model's own shader program*, capped at `MaxMdxLocalLights = 8`. A torch's
-  flame currently illuminates the torch and nothing else. **This is the gap.** Terrain, WMOs and
-  other doodads receive nothing from it, so the defining property of the 2001 screenshot — one small
-  light source picking out the world around it — cannot happen today no matter which model is used
-  as a cursor.
+- **But nothing a model emits lights anything else.** `UploadMdxLights` uploads a model's `LITE`
+  lights as uniforms into *that model's own shader program*, capped at `MaxMdxLocalLights = 8`, and
+  particle emitters contribute no illumination at all. Terrain, WMOs and other doodads receive
+  nothing from either. **This is the gap**, and it is why the defining property of the screenshot —
+  one small light source picking out the world around it — cannot happen today no matter which model
+  is used as a cursor.
+
+**The light comes from the effect, not only from the `LITE` chunk.** A torch's illumination is its
+*fire*: a particle system, not a static light node. Making a torch light a room therefore means
+making its **effects** cast light, which is how later engines do it and is the operator's explicit
+direction for this feature. The existing emitter data already carries everything a light needs —
+`MdxParticleEmitter2` has `PivotPoint` and `ParentId` for position, `StartColor`/`MiddleColor`/
+`EndColor` for a colour ramp, `StartAlpha`/`MiddleAlpha`/`EndAlpha` and the scale and emission-rate
+fields for an intensity proxy, all animated over the particle lifetime. A light derived from those
+flickers because the fire flickers, without any of it being authored separately.
+
+Whether the 5.0.1 client derives its light from the effect in this specific way is **not yet
+measured**; `ParticleSystem2.cpp` and `M2Light.cpp` are the anchors to check. The requirement here is
+behavioural — effects illuminate the scene — and the technique is a planning decision.
 
 The time-of-day control needed to reach 3am exists as `ImGui.SliderFloat("Time of Day", 0..1)` in
 `DrawTimeOfDayControl`. Replacing that linear slider with an interactive clock is a UI concern and is
@@ -96,34 +131,42 @@ movement and lifetime look correct as the pointer moves.
 
 ---
 
-### User Story 3 - The cursor model's lights illuminate the scene (Priority: P1)
+### User Story 3 - The model's effects cast light into the scene (Priority: P1)
 
-The torch lights the world. Its `LITE` lights contribute to terrain, WMOs and other models around
+The torch lights the world, and the light comes from its **fire**. The cursor model's particle
+effects — and its `LITE` lights where it has them — illuminate terrain, WMOs and other models around
 the pointer, falling off with distance, so moving the pointer moves a pool of light through the
-scene.
+scene. Because the light is derived from the effect, it flickers as the flame does.
 
 **Why this priority**: This is the feature. It is also the only part that does not already exist —
-model lights currently illuminate only the model that owns them. Without this, every other story
-here produces a torch that glows on its own in an unchanged dark room, which is precisely not the
-screenshot.
+`LITE` lights illuminate only their own model, and particle effects illuminate nothing at all.
+Without this, every other story here produces a torch that glows on its own in an unchanged dark
+room, which is precisely not the screenshot. Deriving the light from the *effect* rather than from a
+static light node is what makes it a fire rather than a lamp.
 
-**Independent Test**: Place a light-emitting cursor model in a dark scene and confirm that surfaces
-near the pointer are lit, that lighting tracks the pointer, and that it falls off with distance.
+**Independent Test**: Place a torch-like cursor model in a dark scene and confirm that surfaces near
+the pointer are lit by its flame, that the illumination flickers with the effect, that it tracks the
+pointer, and that it falls off with distance.
 
 **Acceptance Scenarios**:
 
-1. **Given** a cursor model carrying one or more lights, **When** the scene renders, **Then**
-   terrain, world objects and other models near the pointer are illuminated by them.
-2. **Given** the pointer moving, **When** the scene renders, **Then** the illuminated region follows
+1. **Given** a cursor model with a light-emitting particle effect, **When** the scene renders,
+   **Then** terrain, world objects and other models near the pointer are illuminated by it.
+2. **Given** a cursor model carrying `LITE` lights, **When** the scene renders, **Then** those also
+   illuminate surrounding geometry rather than only the model that owns them.
+3. **Given** an effect whose colour and intensity change over its lifetime, **When** it renders,
+   **Then** the light it casts follows that change, so a flame's light flickers as the flame does.
+4. **Given** an emitter parented to an animated node, **When** the model animates, **Then** the light
+   follows the node.
+5. **Given** the pointer moving, **When** the scene renders, **Then** the illuminated region follows
    it continuously.
-3. **Given** a lit surface at increasing distance from the light, **When** rendered, **Then**
-   illumination falls off according to the light's declared attenuation rather than cutting off
-   abruptly.
-4. **Given** a cursor model with more lights than the renderer supports at once, **When** rendered,
-   **Then** the selection of which lights apply is deterministic and stated, not arbitrary.
-5. **Given** a cursor model with no lights, **When** rendered, **Then** scene lighting is unchanged
-   from before this feature.
-6. **Given** the cursor light active, **When** frame cost is measured, **Then** it stays within the
+6. **Given** a lit surface at increasing distance, **When** rendered, **Then** illumination falls off
+   smoothly rather than cutting off abruptly.
+7. **Given** more light sources than the renderer supports at once, **When** rendered, **Then** the
+   selection of which apply is deterministic and stated, not arbitrary.
+8. **Given** a cursor model with no light-emitting effects and no lights, **When** rendered, **Then**
+   scene lighting is unchanged from before this feature.
+9. **Given** the cursor light active, **When** frame cost is measured, **Then** it stays within the
    feature's declared budget.
 
 ---
@@ -144,6 +187,9 @@ disappointing picture.
 
 1. **Given** a map with an `areatest.lit` profile, **When** the operator selects it, **Then** it is
    loaded and applied, and the UI states which LIT source is active.
+1a. **Given** the `areatest.lit` profile's authored point lights, **When** the scene renders, **Then**
+   they are applied as real lights rather than only as an ambient tint — this is the capability the
+   2001 hardware could not afford, and without it there is no dark scene for a torch to light.
 2. **Given** the time set to approximately 3am, **When** the scene renders, **Then** it is dark
    enough that a single small light source is the dominant illumination.
 3. **Given** a torch cursor in that scene, **When** it moves, **Then** it reads as the only light
@@ -220,22 +266,35 @@ its own profile, with the decision recorded.
 
 **Scene lighting**
 
-- **FR-008**: The system MUST apply the cursor model's lights to surrounding scene geometry —
-  terrain, world objects and other models — not only to the cursor model itself.
-- **FR-009**: The system MUST apply each light's declared attenuation.
-- **FR-010**: The system MUST apply a stated, deterministic rule when more lights are present than
-  can be applied at once.
+- **FR-008**: The system MUST derive light from the cursor model's **particle effects** and apply it
+  to surrounding scene geometry — terrain, world objects and other models.
+- **FR-008a**: The derived light MUST follow the effect's colour and intensity over the effect's
+  lifetime, so that a flickering flame casts a flickering light.
+- **FR-008b**: The derived light MUST follow the emitter's node, including when that node is
+  animated.
+- **FR-008c**: The system MUST also apply the cursor model's `LITE` lights to surrounding scene
+  geometry, not only to the model that owns them.
+- **FR-009**: The system MUST apply each light's declared attenuation, and MUST derive a defined
+  falloff for effect-derived lights that have none declared.
+- **FR-010**: The system MUST apply a stated, deterministic rule when more light sources are present
+  than can be applied at once.
 - **FR-011**: The system MUST handle non-point light types according to their declared type rather
   than treating every light as a point source.
-- **FR-012**: The system MUST leave scene lighting unchanged when the cursor model carries no lights.
+- **FR-012**: The system MUST leave scene lighting unchanged when the cursor model has no
+  light-emitting effects and no lights.
 - **FR-013**: The system MUST define cursor-light behaviour when the pointer is outside the scene
   viewport or has no surface hit.
 - **FR-014**: Cursor lighting MUST stay within a declared frame budget.
+- **FR-014a**: The effect-derived light mechanism MUST be designed to apply to any model instance in
+  the scene, not only the cursor. Activating it for world objects is out of scope here; foreclosing it
+  is not permitted.
 
 **The reproduction scenario**
 
 - **FR-015**: Operators MUST be able to select the `areatest.lit` profile where a map provides one,
   and the UI MUST state which LIT source is active.
+- **FR-015a**: The active LIT profile's authored point lights MUST be applied as real lights, not
+  only as an ambient tint. (Coordinated with spec 143, which owns the LIT chain — see Assumptions.)
 - **FR-016**: The system MUST report clearly when a requested LIT variant is not present for a map.
 - **FR-017**: Operators MUST be able to set the time of day to reach night values. (The control's
   form is spec 212's concern; this feature requires only that the capability exists.)
@@ -254,8 +313,10 @@ its own profile, with the decision recorded.
 
 - **Cursor Model**: The model currently acting as the pointer — its asset identity, scale, animation
   state, particle emitters and lights.
-- **Cursor Light Contribution**: The illumination the cursor model contributes to the scene: position,
-  colour, intensity, attenuation and type.
+- **Effect-Derived Light**: Illumination derived from a particle effect — its position from the
+  emitter node, its colour and intensity from the effect's own animated values, and its falloff.
+- **Cursor Light Contribution**: The total illumination the cursor model contributes to the scene,
+  from its effects and its `LITE` lights together.
 - **Scene Light Set**: The lights applied to a surface when it is shaded, and the rule that selects
   them when there are more than can be applied.
 - **LIT Profile Selection**: Which LIT source is active for the current map, and why.
@@ -269,9 +330,14 @@ its own profile, with the decision recorded.
 
 - **SC-001**: Any loadable model in the client data can be made the cursor, and swapping cursor
   models requires no restart.
-- **SC-002**: A light-emitting cursor model illuminates terrain, world objects and other models —
-  demonstrated by a measurable brightness difference on surfaces near the pointer with the light on
-  versus off.
+- **SC-002**: A cursor model whose light comes from a **particle effect** illuminates terrain, world
+  objects and other models — demonstrated by a measurable brightness difference on surfaces near the
+  pointer with the effect present versus absent.
+- **SC-002a**: The light cast by an animated effect varies over time in step with that effect —
+  measured as a correlation between the effect's own intensity and the illumination it produces, not
+  merely asserted visually.
+- **SC-002b**: The active LIT profile's authored point lights produce measurable local illumination,
+  distinguishable from a uniform ambient change.
 - **SC-003**: Illumination tracks the pointer continuously, with no visible lag or stepping.
 - **SC-004**: With a cursor model carrying no lights, scene output is identical to the pre-feature
   baseline.
@@ -284,13 +350,25 @@ its own profile, with the decision recorded.
 - **SC-008**: The scene preset restores an identical configuration across sessions.
 - **SC-009**: Every lighting result carries an era profile and LIT source; unrecognised builds are
   flagged, never defaulted.
+- **SC-010**: The light mechanism can be pointed at a non-cursor model instance without redesign —
+  demonstrated once against a placed world object, even if that path ships disabled.
 
 ## Assumptions
 
-- **The measured gap is scene-wide model lighting.** `UploadMdxLights` applies a model's lights only
-  within that model's own shader program. Making a model's light illuminate *other* geometry is the
-  substantive work of this feature; everything else is selection and wiring. Planning must not assume
-  the existing local-light path can be reused unchanged.
+- **The measured gap is scene-wide lighting from a model's output.** `UploadMdxLights` applies a
+  model's `LITE` lights only within that model's own shader program, and particle effects contribute
+  no illumination at all. Making either reach *other* geometry is the substantive work of this
+  feature; everything else is selection and wiring. Planning must not assume the existing local-light
+  path can be reused unchanged.
+- **The light comes from the effect.** Operator direction: a torch's illumination is its fire, so
+  effects must cast light, as later engines do. The emitter data already carries position, an
+  animated colour ramp and an intensity proxy. Whether 5.0.1 derives its light this same way is
+  **unmeasured** — `ParticleSystem2.cpp` and `M2Light.cpp` are the anchors to check — so the spec
+  states the required behaviour and leaves the technique to planning.
+- **This is a capability question, not a data question.** `areatest.lit`'s point lights have been in
+  the data since 2001; a single well-done point light in a dark scene was too expensive then, which
+  is why the look survives in one screenshot. Nothing here needs inventing, and a failure to
+  reproduce it points at our lighting model rather than at missing data.
 - **Particles already work.** The existing `ParticleRenderer` path is expected to serve; if it does
   not, that is a finding about the particle path rather than new scope here.
 - **`areatest.lit` already resolves.** `LitSourcePathResolver` probes it today. What is missing is
@@ -302,7 +380,10 @@ its own profile, with the decision recorded.
 - **The clock control is spec 212's.** This feature needs only that the time of day can be set; the
   existing slider satisfies that.
 - **The LIT chain belongs to spec 143.** This feature selects a profile and reports it; it does not
-  re-implement LIT parsing or the lighting chain.
+  re-implement LIT parsing or the lighting chain. **FR-015a is the coordination point**: making the
+  profile's authored point lights render as real lights may belong to 143 rather than here. Planning
+  must settle ownership with that spec rather than growing a second lighting path — but the
+  capability is a precondition for this feature, so it cannot simply be dropped.
 - **Testability follows the standing constraint.** No test project references the viewer, so light
   selection rules, attenuation, preset serialisation and era gating belong in `WowViewer.Core*`.
 - **Visual judgement is operator work.** The screenshot comparison is not automatable.
@@ -311,7 +392,9 @@ its own profile, with the decision recorded.
 
 - The interactive clock control and any other UI form work (spec 212).
 - Re-implementing LIT parsing or the day/night lighting chain (spec 143; see also 106, 160).
-- A general dynamic-lights system for arbitrary world objects. This feature makes the *cursor* model
-  a scene light; generalising that to every doodad is a larger change and a separate decision.
+- **Enabling** dynamic lights for arbitrary world objects — every brazier, sconce and campfire. The
+  era evidence says that is where this ends up, and FR-014a requires the mechanism to be capable of
+  it, but turning it on world-wide brings a cost question this spec does not answer. Design for it;
+  do not ship it here.
 - Shadow casting from cursor lights.
 - Weather and fog interaction (spec 215).

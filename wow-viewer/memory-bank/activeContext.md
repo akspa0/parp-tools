@@ -155,8 +155,15 @@ writing + scoring + baseline + the visual A/B.
   2001 thief-with-torch screenshot (`areatest.lit`, ~3am, torch as the only light). **Measured: the
   LIT variant is already probed, particles already render, and MDX lights are already parsed — but
   `UploadMdxLights` uploads a model's lights into that model's own shader program, so a torch lights
-  only itself.** That is the entire feature; everything else is wiring. The screenshot is evidence, so
-  a mismatch is a recorded lighting finding, not something to tune away.
+  only itself — and particle effects illuminate nothing at all.** **Operator correction: the light
+  comes from the EFFECT, not the `LITE` chunk** — a torch's illumination is its fire. The emitter data
+  already carries position, an animated colour ramp and an intensity proxy, so a derived light
+  flickers because the flame does. **The lights were always in the data; 2001 hardware could not
+  afford them** — `areatest.lit` has authored point lights, and one well-done point light in a dark
+  scene was expensive then, which is why the look survives in one screenshot and then vanishes for a
+  decade. So a failure to reproduce it points at our lighting model, never at missing data. Era
+  dungeon shots (Deadmines) show the same thing from *placed* objects, so the mechanism must be
+  designed to drive any model instance (activation for world objects stays out of scope).
 - **Spec 217 — audio lifecycle** (drafted 2026-09-02, not planned). One-shots fire forever and music
   does not play, so audio is off by default. **The 5.0.1 binary explains it: a sound is a state
   machine over six explicit lists, and one that never reaches the delete list never stops. It is a
