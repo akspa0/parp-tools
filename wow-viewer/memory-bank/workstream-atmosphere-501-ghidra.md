@@ -109,6 +109,35 @@ not perform like it.
 `TransportPhysics.dbc` (`0x00e6befc`, with strings `TransportPhysics` / `transportPhysics` at
 `0x00da2314` / `0x00da2824`) is a separate data-driven path for transports.
 
+### Followed up 2026-09-03 — the adapter and the sidecar format are solved
+
+Spec 214 worked this section to conclusion. Full evidence lives in that spec; the results that belong
+in this shared note:
+
+- **The two outliers at `0x005a3010` / `0x005a40d0` are identified.** `FUN_005a3010` is world creation
+  (`PhysicsInt.cpp:16`, asserts `s_world == 0`); `FUN_005a40d0` is the per-instance update. Both
+  assert the Domino finite-float check `dmMath.h:127`, which is why `dmMath.h`'s string is pooled with
+  the `Physics.cpp` strings rather than with the other Domino headers.
+- **The model sidecar is `.phys`**, located by replacing the model filename's extension — no id and no
+  lookup table. **There is no `.phys` string in the binary**; the extension is written as two
+  immediates (`0x7968702e` then `0x73`), so a string search returns a false negative.
+- **The container is fully decoded**: reversed-tag chunks, magic `PHYS`, version `u16` must be 0, nine
+  record chunks with strides measured from the parser's own size divisions. Field names come from
+  Blizzard's `PhysData.h` bounds asserts.
+- **Gravity is `(0, 0, -10.0)`** written at world `+0x80` — Z-up, magnitude 10.0, not 9.81.
+- **The culling distance CVar is `0x00EB6358`**, and culling is enforced by an early return in the
+  per-instance update, not inside the solver.
+- **The client pins x87 control word and MXCSR around physics work and restores them afterwards.**
+  Anything reimplementing this needs an equivalent deterministic FP discipline.
+
+Method note for anyone repeating this: the caller map was recovered from **header-string
+cross-references**, not from ~90 decompilations. That is far cheaper, but it sees 58 named functions
+where direct xrefs to `FUN_00c29680` see ~90 — the difference is call sites inside regions Ghidra has
+not resolved into functions, plus hoisted string operands. Neither number is the subsystem size.
+
+See [`214-mop-physics-domino/evidence/physics-adapter-contract.md`](../specs/214-mop-physics-domino/evidence/physics-adapter-contract.md)
+and [`domino-caller-map.md`](../specs/214-mop-physics-domino/evidence/domino-caller-map.md).
+
 ## Atmosphere data chain — measured
 
 DBC filenames present in the binary:

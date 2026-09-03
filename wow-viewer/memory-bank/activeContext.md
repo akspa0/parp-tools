@@ -209,6 +209,30 @@ writing + scoring + baseline + the visual A/B.
   1 skipped, same 9 unrelated baseline failures** (existing `Snappier` NU1903 warnings only).
   This is not simulation: sidecar resolution/parsing, solver, bodies, collision response, cloth, joints,
   animation binding, and viewer integration remain absent and gated.
+  **Phase 2 evidence gate PASSED 2026-09-03 (T003/T004/T005) — the sidecar format is solved.** The
+  file is **`.phys`**, found **by replacing the model's extension**; no id, no table. Reversed-tag
+  chunked container, magic `PHYS`, **version u16 must be 0**, nine chunks with measured strides
+  (`BOXS` 60, `CAPS` 28, `SPHS` 16, `SHAP` 20, `BODY` 28, `SPHJ` 28, `SHOJ` 108, `WELJ` 104,
+  `JOIN` 16). **The array names are Blizzard's**, recovered from `PhysData.h` bounds asserts — so
+  `SHOJ` is a *shoulder* joint and `SPHJ` a *spherical* joint by measurement, not by guess. The
+  recovered `PhysData` field map ends at exactly `0x50`, matching the allocation at `Physics.cpp:50`,
+  which proves it has no gaps. **Gravity is `(0, 0, -10.0)`, not 9.81.** Distance culling early-returns
+  in the per-instance update (validating the budget policy already landed); the first update
+  *teleports* bodies to their bones instead of velocity-driving them; `0xFFFF` is the no-bone
+  sentinel; the client **pins x87 control word and MXCSR across physics work and restores them**,
+  which is a determinism requirement for SC-004/SC-005, not a detail. Malformed/absent data fails
+  closed at every stage, and **unknown chunk tags are skipped by size** — the format is
+  forward-compatible, so a reader that rejects unknown tags would be *stricter than the client*.
+  **Detector trap worth remembering: there is no `.phys` string in the binary.** The extension is
+  written as two immediates (`0x7968702e` then `0x73`), so a string search returns a false negative —
+  same shape as [[feedback_verify_detector_power_before_null_results]]. Method note: the caller map
+  was built from **header-string xrefs, not ~90 decompilations**, which is far cheaper but sees 58
+  functions where the direct-xref count sees ~90; the delta is call sites in Ghidra-undefined regions
+  and hoisted string operands, and is recorded rather than papered over. Evidence:
+  [`domino-caller-map.md`](../specs/214-mop-physics-domino/evidence/domino-caller-map.md),
+  [`physics-adapter-contract.md`](../specs/214-mop-physics-domino/evidence/physics-adapter-contract.md).
+  **Next: T007** (exact-version BepuPhysics v2 / Jitter2 license + deterministic cloth) blocks all
+  solver work; **T002** (real-client asset manifest) blocks real-byte validation of the layouts above.
 - **Spec 215 — 5.0.1 weather** (drafted 2026-09-02, not planned). Owns `MapWeather`, `Weather.dbc`,
   precipitation and `Lightning`. **Does not own lighting/fog/sky** — 143/147/160 do, and 160 is
   already tasked at 72 tasks / 8 phases. Weather drives them through interfaces; FR-015 forbids a

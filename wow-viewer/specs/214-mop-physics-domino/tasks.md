@@ -9,6 +9,19 @@ until T005 proves the sidecar discovery boundary and T007 records the exact sele
 permissive license and cloth route. Solver-independent era/provenance and admission policy may proceed
 because it does not assume a file layout, solver API, or Domino algorithm.
 
+**Phase 2 evidence gate PASSED 2026-09-03.** T003/T004/T005 are complete and recorded in
+[domino-caller-map.md](evidence/domino-caller-map.md) and
+[physics-adapter-contract.md](evidence/physics-adapter-contract.md). The headline results:
+the sidecar is **`.phys`**, associated with its model **by filename with the extension replaced**
+(no id, no table); the container is a standard reversed-tag Blizzard chunked file with magic `PHYS`,
+**version `u16` must be 0**, and nine record chunks whose strides are measured, not guessed; every
+array's field name is recovered from Blizzard's own `PhysData.h` bounds asserts; malformed and
+absent data **fail closed at every stage** and unknown chunk tags are **skipped by size**, so the
+format is forward-compatible by construction. Gravity is measured as **`(0, 0, -10.0)`**, not 9.81.
+
+**Sidecar parsing (Phase 2) is therefore unblocked by evidence** but still waits on T002 for
+real-byte validation. **Solver work remains fully blocked on T007.**
+
 **Current implementation audit**: [current-implementation-audit.md](evidence/current-implementation-audit.md)
 confirms that `HasPhysicsSidecar` is unconsumed metadata, classic MDX `CLID` is inspection geometry,
 camera collision is an opt-in navigation approximation, and particle movement is not the requested
@@ -35,9 +48,9 @@ parsing and a solver decision that cannot deliver cloth.
 
 ## Phase 2 — Foundational evidence gate
 
-- [ ] T003 Enumerate callers of `FUN_00c29680` and record source-path/header/line attribution only in `specs/214-mop-physics-domino/evidence/domino-caller-map.md`
-- [ ] T004 Trace the `Physics.cpp` / `PhysData.cpp` adapter boundary without decoding Domino algorithms in `specs/214-mop-physics-domino/evidence/physics-adapter-contract.md`
-- [ ] T005 Trace model-sidecar discovery from the confirmed adapter and record the actual model association plus malformed-data behaviour in `specs/214-mop-physics-domino/evidence/physics-adapter-contract.md`
+- [x] T003 Enumerate callers of `FUN_00c29680` and record source-path/header/line attribution only in `specs/214-mop-physics-domino/evidence/domino-caller-map.md`
+- [x] T004 Trace the `Physics.cpp` / `PhysData.cpp` adapter boundary without decoding Domino algorithms in `specs/214-mop-physics-domino/evidence/physics-adapter-contract.md`
+- [x] T005 Trace model-sidecar discovery from the confirmed adapter and record the actual model association plus malformed-data behaviour in `specs/214-mop-physics-domino/evidence/physics-adapter-contract.md`
 
 ## Phase 3 — User Story 1: address-cited physics contract (P1)
 
