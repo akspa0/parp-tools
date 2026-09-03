@@ -194,11 +194,18 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     private Matrix4x4 _currentModelMatrix = Matrix4x4.Identity;
     private readonly Vector3 _effectiveBoundsMin;
     private readonly Vector3 _effectiveBoundsMax;
+    private readonly Vector3 _renderableBoundsMin;
+    private readonly Vector3 _renderableBoundsMax;
 
-    /// <summary>Model-space bounding box min corner.</summary>
+    /// <summary>Model-space bounding box min corner, as used for culling.</summary>
     public Vector3 BoundsMin => _effectiveBoundsMin;
-    /// <summary>Model-space bounding box max corner.</summary>
+    /// <summary>Model-space bounding box max corner, as used for culling.</summary>
     public Vector3 BoundsMax => _effectiveBoundsMax;
+
+    /// <summary>Tight geometry-derived min corner, for selection highlighting and picking.</summary>
+    public Vector3 SelectionBoundsMin => _renderableBoundsMin;
+    /// <summary>Tight geometry-derived max corner, for selection highlighting and picking.</summary>
+    public Vector3 SelectionBoundsMax => _renderableBoundsMax;
     public bool IsM2AdapterModel => _isM2AdapterModel;
     public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
     // Only state that changes how the OPAQUE geosets are drawn belongs here — this property is
@@ -284,9 +291,14 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
                 FormatProfileRegistry.ResolveModelProfile(buildVersion)?.ProfileId,
                 FormatProfileRegistry.M2Profile3018303.ProfileId,
                 StringComparison.Ordinal);
+        // Geometry-derived bounds are computed once and used for selection and picking regardless of
+        // era. Culling keeps whatever this model reported before: for M2 that is the declared header
+        // extent, which is an animation/collision volume and can be far larger than the mesh. Keeping
+        // the two separate means a tighter selection box cannot make anything cull early or pop.
+        (_renderableBoundsMin, _renderableBoundsMax) = ComputeRenderableBounds(_mdx);
         (_effectiveBoundsMin, _effectiveBoundsMax) = _isM2AdapterModel
             ? GetDeclaredModelBounds(_mdx)
-            : ComputeRenderableBounds(_mdx);
+            : (_renderableBoundsMin, _renderableBoundsMax);
         string? m2AnimationSetting = Environment.GetEnvironmentVariable("PARP_M2_ENABLE_ANIMATION");
         bool disableM2Animation = !string.IsNullOrWhiteSpace(m2AnimationSetting)
             && (string.Equals(m2AnimationSetting, "0", StringComparison.OrdinalIgnoreCase)

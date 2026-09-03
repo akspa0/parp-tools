@@ -9466,6 +9466,24 @@ public class WorldScene : ISceneRenderer
             inst.BoundsMin = worldMin;
             inst.BoundsMax = worldMax;
             inst.BoundsResolved = true;
+
+            // Selection and picking use the tight geometry bounds; culling above keeps the
+            // conservative ones. For M2 the two differ substantially because the declared header
+            // extent is an animation/collision volume, not the mesh.
+            if (_assets.TryGetMdxSelectionBounds(inst.ModelKey, out var selectionMin, out var selectionMax)
+                && AreFiniteOrderedBounds(selectionMin, selectionMax))
+            {
+                inst.SelectionLocalBoundsMin = selectionMin;
+                inst.SelectionLocalBoundsMax = selectionMax;
+                inst.SelectionBoundsResolved = true;
+            }
+            else
+            {
+                inst.SelectionLocalBoundsMin = localMin;
+                inst.SelectionLocalBoundsMax = localMax;
+                inst.SelectionBoundsResolved = false;
+            }
+
             instances[i] = inst;
             UpdateSceneGraphPlacementBounds(tileKey, WorldSceneNodeKind.M2Placement, i, inst, isSkybox, isExternal);
             changed = true;
@@ -9497,6 +9515,14 @@ public class WorldScene : ISceneRenderer
             inst.BoundsMin = worldMin;
             inst.BoundsMax = worldMax;
             inst.BoundsResolved = true;
+
+            // A WMO's placement bounds already describe the building itself, so there is no tighter
+            // source to switch to. It still benefits from being drawn oriented rather than re-fitted
+            // to the world axes.
+            inst.SelectionLocalBoundsMin = localMin;
+            inst.SelectionLocalBoundsMax = localMax;
+            inst.SelectionBoundsResolved = true;
+
             instances[i] = inst;
             UpdateSceneGraphPlacementBounds(tileKey, WorldSceneNodeKind.WmoPlacement, i, inst, isSkybox, isExternal);
             changed = true;
@@ -11534,8 +11560,23 @@ public class WorldScene : ISceneRenderer
                             // where a tiny doodad is genuinely hard to see, the operator is not
                             // trying to select it anyway.
                             const float minHalfExtent = 0.02f;
-                            Vector3 bbMin = selectedInstance.BoundsMin;
-                            Vector3 bbMax = selectedInstance.BoundsMax;
+
+                            // Draw the model's own box carried through its placement transform, so
+                            // the outline is oriented with the object. Re-fitting a rotated box to
+                            // the world axes inflates it by up to 1.73x, and picking already tests
+                            // the oriented box — so the drawn box used to be larger than the
+                            // clickable one.
+                            bool useOrientedBox = selectedInstance.SelectionBoundsResolved
+                                && AreFiniteOrderedBounds(
+                                    selectedInstance.SelectionLocalBoundsMin,
+                                    selectedInstance.SelectionLocalBoundsMax);
+
+                            Vector3 bbMin = useOrientedBox
+                                ? selectedInstance.SelectionLocalBoundsMin
+                                : selectedInstance.BoundsMin;
+                            Vector3 bbMax = useOrientedBox
+                                ? selectedInstance.SelectionLocalBoundsMax
+                                : selectedInstance.BoundsMax;
                             Vector3 center = (bbMin + bbMax) * 0.5f;
                             Vector3 halfExtent = (bbMax - bbMin) * 0.5f;
                             halfExtent = new Vector3(
@@ -11545,13 +11586,27 @@ public class WorldScene : ISceneRenderer
                             bbMin = center - halfExtent;
                             bbMax = center + halfExtent;
 
-                            _bbRenderer.BatchHighlightedBoxMinMax(
-                                bbMin,
-                                bbMax,
-                                selectedBoundsTime,
-                                selectedBoundsInnerColor,
-                                selectedBoundsAccentA,
-                                selectedBoundsAccentB);
+                            if (useOrientedBox)
+                            {
+                                _bbRenderer.BatchHighlightedBoxOriented(
+                                    bbMin,
+                                    bbMax,
+                                    selectedInstance.Transform,
+                                    selectedBoundsTime,
+                                    selectedBoundsInnerColor,
+                                    selectedBoundsAccentA,
+                                    selectedBoundsAccentB);
+                            }
+                            else
+                            {
+                                _bbRenderer.BatchHighlightedBoxMinMax(
+                                    bbMin,
+                                    bbMax,
+                                    selectedBoundsTime,
+                                    selectedBoundsInnerColor,
+                                    selectedBoundsAccentA,
+                                    selectedBoundsAccentB);
+                            }
                             selectionBoundsPreparedCount++;
                         }
 
@@ -13059,9 +13114,14 @@ public class WorldScene : ISceneRenderer
         if (_instancesDirty)
             RebuildInstanceLists();
 
-        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _wmoInstances, ObjectType.Wmo, new Vector3(2f, 2f, 2f), clickedChunkKey, clickedWorldPoint);
+        // Pick padding is applied in the model's own local space, so it already scales with the
+        // placement. It was 2 yd for WMOs and 1 yd for doodads, which inflated every click volume by
+        // that much in all six directions: a nearby object then swallowed rays aimed past it, which
+        // is what made objects close to the camera hard to inspect. Keep just enough forgiveness for
+        // thin geometry such as fences and poles.
+        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _wmoInstances, ObjectType.Wmo, new Vector3(0.25f, 0.25f, 0.25f), clickedChunkKey, clickedWorldPoint);
         AppendWmoDoodadPickHits(rayOrigin, rayDir, hits, clickedChunkKey, clickedWorldPoint);
-        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _mdxInstances, ObjectType.Mdx, new Vector3(1f, 1f, 1f), clickedChunkKey, clickedWorldPoint);
+        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _mdxInstances, ObjectType.Mdx, new Vector3(0.1f, 0.1f, 0.1f), clickedChunkKey, clickedWorldPoint);
 
         if (clickedChunkKey.HasValue && hits.Any(static hit => hit.SharesClickedChunk))
             hits.RemoveAll(static hit => !hit.SharesClickedChunk);
@@ -13877,13 +13937,22 @@ public class WorldScene : ISceneRenderer
             Vector3 localOrigin = Vector3.Transform(origin, inverseTransform);
             Vector3 localDirection = Vector3.TransformNormal(dir, inverseTransform);
 
+            // Pick against the tight geometry box where one is available. Using the culling bounds
+            // here meant an M2's declared animation extent was the click target, so a nearby object
+            // swallowed rays aimed past it — the reason objects close to the camera were hard to
+            // inspect.
+            bool useSelectionBounds = instance.SelectionBoundsResolved
+                && AreFiniteOrderedBounds(instance.SelectionLocalBoundsMin, instance.SelectionLocalBoundsMax);
+            Vector3 pickMin = useSelectionBounds ? instance.SelectionLocalBoundsMin : instance.LocalBoundsMin;
+            Vector3 pickMax = useSelectionBounds ? instance.SelectionLocalBoundsMax : instance.LocalBoundsMax;
+
             if (localDirection.LengthSquared() > 1e-10f)
             {
                 float localT = RayAABBIntersect(
                     localOrigin,
                     localDirection,
-                    instance.LocalBoundsMin - padding,
-                    instance.LocalBoundsMax + padding);
+                    pickMin - padding,
+                    pickMax + padding);
 
                 if (localT >= 0f)
                 {

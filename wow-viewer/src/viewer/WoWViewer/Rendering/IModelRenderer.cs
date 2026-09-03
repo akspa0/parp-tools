@@ -8,6 +8,20 @@ public interface IModelRenderer : ISceneRenderer
 
     Vector3 BoundsMax { get; }
 
+    /// <summary>
+    /// Tight, geometry-derived model-space bounds for selection highlighting and ray picking.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from <see cref="BoundsMin"/>/<see cref="BoundsMax"/>, which stay
+    /// conservative because culling depends on them. M2 models report a declared header extent that
+    /// is an animation/collision volume, routinely far larger than the mesh; drawing or picking
+    /// against that produces a selection box that does not describe the object it selects.
+    /// Implementations without tighter information fall back to the culling bounds.
+    /// </remarks>
+    Vector3 SelectionBoundsMin => BoundsMin;
+
+    Vector3 SelectionBoundsMax => BoundsMax;
+
     bool HasTransparentWorldPass { get; }
 
     bool RequiresUnbatchedWorldRender { get; }

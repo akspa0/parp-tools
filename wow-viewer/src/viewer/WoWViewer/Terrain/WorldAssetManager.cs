@@ -405,6 +405,24 @@ public class WorldAssetManager : IDisposable
     }
 
     /// <summary>
+    /// Get the tight, geometry-derived model-space bounds for a loaded MDX/M2 model, for selection
+    /// highlighting and ray picking. Distinct from <see cref="TryGetMdxBounds"/>, which stays
+    /// conservative because culling uses it.
+    /// Returns false if the model is not loaded.
+    /// </summary>
+    public bool TryGetMdxSelectionBounds(string normalizedKey, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (_mdxModels.TryGetValue(normalizedKey, out var r) && r != null)
+        {
+            boundsMin = r.SelectionBoundsMin;
+            boundsMax = r.SelectionBoundsMax;
+            return true;
+        }
+        boundsMin = boundsMax = Vector3.Zero;
+        return false;
+    }
+
+    /// <summary>
     /// Get the bounding box center for a loaded MDX model.
     /// MDX geometry is offset from origin — the BB center is the effective pivot.
     /// Returns false if the model is not loaded.

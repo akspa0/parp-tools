@@ -258,6 +258,90 @@ void main() { FragColor = vColor; }";
     }
 
     /// <summary>
+    /// Highlight a model-space box carried through its own placement transform, so the outline is
+    /// oriented with the object instead of being re-fitted to the world axes.
+    /// </summary>
+    /// <remarks>
+    /// Re-fitting a rotated box to an axis-aligned one inflates it by up to 1.73x on the diagonal,
+    /// which is why a rotated object's outline used to stand well clear of the object. Picking
+    /// already tested the oriented box, so the drawn box was larger than the clickable one.
+    /// The accent halo is offset along the box's own axes and sized in world units, so a scaled
+    /// placement does not get a proportionally thicker halo.
+    /// </remarks>
+    public void BatchHighlightedBoxOriented(
+        Vector3 localMin,
+        Vector3 localMax,
+        in Matrix4x4 transform,
+        float timeSeconds,
+        Vector3 innerColor,
+        Vector3 accentColorA,
+        Vector3 accentColorB)
+    {
+        GetSanitizedBoxCorners(localMin, localMax,
+            out Vector3 l0, out Vector3 l1, out Vector3 l2, out Vector3 l3,
+            out Vector3 l4, out Vector3 l5, out Vector3 l6, out Vector3 l7);
+
+        Vector3 v0 = Vector3.Transform(l0, transform);
+        Vector3 v1 = Vector3.Transform(l1, transform);
+        Vector3 v2 = Vector3.Transform(l2, transform);
+        Vector3 v3 = Vector3.Transform(l3, transform);
+        Vector3 v4 = Vector3.Transform(l4, transform);
+        Vector3 v5 = Vector3.Transform(l5, transform);
+        Vector3 v6 = Vector3.Transform(l6, transform);
+        Vector3 v7 = Vector3.Transform(l7, transform);
+
+        BatchLine(v0, v1, innerColor); BatchLine(v1, v2, innerColor);
+        BatchLine(v2, v3, innerColor); BatchLine(v3, v0, innerColor);
+        BatchLine(v4, v5, innerColor); BatchLine(v5, v6, innerColor);
+        BatchLine(v6, v7, innerColor); BatchLine(v7, v4, innerColor);
+        BatchLine(v0, v4, innerColor); BatchLine(v1, v5, innerColor);
+        BatchLine(v2, v6, innerColor); BatchLine(v3, v7, innerColor);
+
+        // Derive the world-space extents from the transformed edges so scale is already accounted for.
+        Vector3 edgeX = v1 - v0;
+        Vector3 edgeY = v3 - v0;
+        Vector3 edgeZ = v4 - v0;
+        float maxDimension = MathF.Max(edgeX.Length(), MathF.Max(edgeY.Length(), edgeZ.Length()));
+
+        float pulse = 0.85f + 0.35f * (0.5f + 0.5f * MathF.Sin(timeSeconds * 4.0f));
+        float inflate = Math.Clamp(maxDimension * 0.06f, 0.03f, 6.0f) * pulse;
+
+        Vector3 axisX = SafeNormalize(edgeX, Vector3.UnitX) * inflate;
+        Vector3 axisY = SafeNormalize(edgeY, Vector3.UnitY) * inflate;
+        Vector3 axisZ = SafeNormalize(edgeZ, Vector3.UnitZ) * inflate;
+
+        Vector3 a0 = v0 - axisX - axisY - axisZ;
+        Vector3 a1 = v1 + axisX - axisY - axisZ;
+        Vector3 a2 = v2 + axisX + axisY - axisZ;
+        Vector3 a3 = v3 - axisX + axisY - axisZ;
+        Vector3 a4 = v4 - axisX - axisY + axisZ;
+        Vector3 a5 = v5 + axisX - axisY + axisZ;
+        Vector3 a6 = v6 + axisX + axisY + axisZ;
+        Vector3 a7 = v7 - axisX + axisY + axisZ;
+
+        float segmentLength = Math.Clamp(maxDimension * 0.08f, 0.08f, 22.0f);
+
+        BatchAlternatingLine(a0, a1, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a1, a2, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a2, a3, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a3, a0, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a4, a5, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a5, a6, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a6, a7, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a7, a4, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a0, a4, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a1, a5, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a2, a6, accentColorA, accentColorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(a3, a7, accentColorA, accentColorB, timeSeconds, segmentLength);
+    }
+
+    private static Vector3 SafeNormalize(Vector3 value, Vector3 fallback)
+    {
+        float lengthSquared = value.LengthSquared();
+        return lengthSquared > 1e-12f ? value / MathF.Sqrt(lengthSquared) : fallback;
+    }
+
+    /// <summary>
     /// Add a pin marker to the batch: vertical line + diamond head wireframe.
     /// Adds 28 vertices (14 line segments) per pin.
     /// </summary>
