@@ -166,7 +166,30 @@ context rig nor US4's authored shells. **FR-032 is the constraint that matters**
 invoke the *same* underlying action as its full-shell equivalent. Two implementations of one
 operation drift apart, and the profile silently becomes a fork with its own bugs.
 
-### 4. Spec 216 — model cursor as a scene light source
+### 4. Specs 218 + 216 — the reconstruction pair
+
+Do these together; neither reproduces the reference image alone.
+
+**218 first** — it is the rig. The measured gap is that **attachment points are parsed and never
+rendered**: `MdxAttachment*` exists in Core and nothing in `Rendering/` touches it, which is why a
+torch cannot be put in a hand. Spawning and capture automation already exist, so the work is
+attachment rendering, item-to-appearance resolution (the largest unknown — establish it from data,
+do not assume it mirrors the creature-display path), and saved replayable scenes. Treat US4 (saved
+scenes) as load-bearing: without it every re-test of the lighting is a manual reassembly and the
+results are not comparable.
+
+**Then 216** — the light. The real work is **not** the cursor: `UploadMdxLights` uploads a model's
+lights into that model's own shader program and particle effects contribute nothing, so making a
+model's output reach terrain, WMOs and other models is a change across three render paths. The light
+comes from the **effect**, not the `LITE` chunk — a torch's illumination is its fire, and a light
+derived from the emitter's animated colour and alpha flickers because the flame does.
+
+The operator's reading of the reference image is the useful constraint: **the night colour profile is
+already right; the point light is what is missing.** Nearly every other variable is already correct,
+so a remaining difference is attributable — but report the colour-profile finding and the point-light
+finding separately so they are not conflated.
+
+### 4b. Spec 216 — original note
 
 Do this after 212 US7, because the museum profile is the setting the torch scene wants. The real
 work is **not** the cursor: `UploadMdxLights` uploads a model's lights into that model's own shader

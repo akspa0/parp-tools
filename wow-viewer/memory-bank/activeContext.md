@@ -150,6 +150,14 @@ writing + scoring + baseline + the visual A/B.
 
 ## Open, with the next concrete action
 
+- **Spec 218 — creature staging** (drafted 2026-09-02, not planned). Spawn a subject, **attach** an
+  equipped torch, paper-doll UI, and save the whole arrangement so it replays through the existing
+  capture automation. **Measured: spawning already exists and capture automation already exists, but
+  attachment points are PARSED AND NEVER RENDERED — `MdxAttachment*` is in Core and nothing in
+  `Rendering/` references it.** That is why a torch cannot be put in a hand. Item-to-appearance
+  resolution also does not exist and is the largest unknown. Saved scenes are P1, not convenience:
+  216's value depends on re-running the comparison whenever lighting changes, and manual reassembly
+  each time is not comparable. This is the test rig for 216.
 - **Spec 216 — model cursor as a scene light source** (drafted 2026-09-02, not planned). Any MDX/M2
   as the cursor, with particles, and **its lights illuminating the scene** — aimed at reproducing the
   2001 thief-with-torch screenshot (`areatest.lit`, ~3am, torch as the only light). **Measured: the
@@ -163,7 +171,9 @@ writing + scoring + baseline + the visual A/B.
   scene was expensive then, which is why the look survives in one screenshot and then vanishes for a
   decade. So a failure to reproduce it points at our lighting model, never at missing data. Era
   dungeon shots (Deadmines) show the same thing from *placed* objects, so the mechanism must be
-  designed to drive any model instance (activation for world objects stays out of scope).
+  designed to drive any model instance (activation for world objects stays out of scope). **Operator's
+  reading of the reference image: the night colour profile is already right — the point light is the
+  only missing piece.** Recorded as a judgement, not a measurement; the reconstruction checks it.
 - **Spec 217 — audio lifecycle** (drafted 2026-09-02, not planned). One-shots fire forever and music
   does not play, so audio is off by default. **The 5.0.1 binary explains it: a sound is a state
   machine over six explicit lists, and one that never reaches the delete list never stops. It is a

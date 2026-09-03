@@ -10,21 +10,37 @@
 
 ## Context & Motivation
 
-There is one 2001 screenshot of a thief holding a torch in a dark scene, the torch the only light in
-it. That image is a record of what the alpha engine's data *described* — not a mock-up, and not
-something any current view of this data reproduces.
+There is an early press screenshot of a rogue at night holding a lit torch, the flame throwing warm
+light onto a stone well, the wooden frame beside it, his own arm and the ground, with everything else
+in cool night colour. (The operator dates the assets to roughly 2003; the exact year is not load-
+bearing and is not asserted here.) That image is a record of what the engine's data *described* — not
+a mock-up, and not something any current view of this data reproduces.
+
+**The operator's reading of the current viewer against that image narrows the problem sharply: the
+night colour profile is already right. What is missing is the point light.** That makes the
+reconstruction a genuine test rather than an aesthetic exercise — nearly every other variable is
+already correct, so any remaining difference is attributable. It is an operator judgement rather than
+a measurement, and the reconstruction is partly a way of checking it.
 
 **The lights were always in the data; the hardware could not afford them.** `areatest.lit` carries
 authored point lights, and a single point light picking out an otherwise dark scene was expensive to
-do well in 2001. That is why this look appears in one screenshot and then effectively vanishes from
-the shipped game for roughly a decade — not because the data changed, but because real-time dynamic
-lighting of that kind only became cheap much later. The constraint that suppressed it no longer
-applies. This feature is therefore not an effect being invented; it is **running the lighting the
-data has described since 2001 on hardware that can finally do it.**
+do well on early-2000s hardware. That is why this look appears in press shots of the era and then
+effectively vanishes from the shipped game for roughly a decade — not because the data changed, but
+because real-time dynamic lighting of that kind only became cheap much later. The constraint that
+suppressed it no longer applies. This feature is therefore not an effect being invented; it is
+**running the lighting the data has described all along, on hardware that can finally do it.**
 
 That framing is also why the screenshot is a measurement rather than a target: if the scene can be
 made to look like it, the lighting model is right; if it cannot, something in it is wrong and the
 screenshot says so.
+
+**Spec 218 builds the rig that holds the torch.** The reference image is a character holding a torch
+in his hand, and attachment points are parsed but never rendered, so that arrangement cannot be
+assembled today. Spec 218 covers spawning a subject, attaching an equipped torch, and saving the
+whole arrangement so the comparison can be replayed through the existing capture automation whenever
+the lighting model changes. This spec makes the flame cast light; 218 puts it in a hand and makes the
+test repeatable. Either is useful alone — 216 can be exercised on a bare model — but the
+reconstruction needs both.
 
 **And it was never only about a hand-held torch.** Era screenshots of dungeon interiors — Deadmines
 among them — show warm point lights pooling on nearby surfaces and falling off into darkness, lighting
@@ -192,6 +208,9 @@ disappointing picture.
    2001 hardware could not afford, and without it there is no dark scene for a torch to light.
 2. **Given** the time set to approximately 3am, **When** the scene renders, **Then** it is dark
    enough that a single small light source is the dominant illumination.
+2a. **Given** the assembled scene, **When** it is compared against the reference, **Then** the night
+   colour profile is confirmed or corrected as a separate finding from the point-light behaviour, so
+   the two are not conflated.
 3. **Given** a torch cursor in that scene, **When** it moves, **Then** it reads as the only light
    source, revealing surfaces as it passes.
 4. **Given** the reproduced scene, **When** compared against the 2001 screenshot, **Then** the
@@ -386,6 +405,10 @@ its own profile, with the decision recorded.
   capability is a precondition for this feature, so it cannot simply be dropped.
 - **Testability follows the standing constraint.** No test project references the viewer, so light
   selection rules, attenuation, preset serialisation and era gating belong in `WowViewer.Core*`.
+- **The night colour profile is already correct**, per the operator's reading of the current viewer
+  against the reference. Recorded as an assumption, not a measurement; US4 checks it.
+- **Spec 218 is the test rig, not a dependency.** It stages the subject, attaches the torch and makes
+  the arrangement replayable. This feature can be exercised on a bare model without it.
 - **Visual judgement is operator work.** The screenshot comparison is not automatable.
 
 ## Out of Scope

@@ -119,5 +119,24 @@ behaviour and leaves the technique to planning rather than asserting a mechanism
 owns the LIT chain. Planning must settle that rather than growing a second lighting path — but it is
 a precondition for this feature, so it cannot simply be dropped.
 
+**Fourth pass — the reference image, and a date correction.** The operator supplied the actual
+screenshot: a rogue at night with a lit torch, warm light on a stone well and his arm, everything
+else cool night colour. Two changes followed.
+
+- **Date claims removed.** Earlier drafts asserted "2001" from the initial description; the operator
+  later dated the assets to roughly 2003. The year is not load-bearing, so the spec now says "an
+  early press screenshot" and notes the operator's dating without asserting it. Better to carry no
+  claim than a wrong one.
+- **"The night colour profile is already right; what is missing is the point light."** Recorded in
+  Context and in Assumptions, explicitly as an operator judgement rather than a measurement. This is
+  the most useful thing in the whole reference: it means nearly every variable is already correct, so
+  a remaining difference is attributable. US4 AC2a now requires the colour-profile finding and the
+  point-light finding to be reported separately so the two are not conflated.
+
+**Spec 218 added as the test rig.** The reference is a character *holding* a torch, and attachment
+points are parsed but never rendered, so the arrangement cannot be assembled today. 218 covers
+spawning, attachment, equipping and replayable scenes through the existing capture automation.
+Recorded as a companion rather than a dependency — this spec can be exercised on a bare model.
+
 **Status**: All items pass or are deliberately partial with documented rationale. Ready for
 speckit-plan.
