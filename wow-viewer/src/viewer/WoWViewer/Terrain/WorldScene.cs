@@ -8282,6 +8282,8 @@ public class WorldScene : ISceneRenderer
                 bbMin = p.Position - new Vector3(2f);
                 bbMax = p.Position + new Vector3(2f);
             }
+            ResolveMdxSelectionBounds(key, localMin, localMax, boundsResolved,
+                out Vector3 selectionMin, out Vector3 selectionMax, out bool selectionResolved);
             string modelPath = mdxNames[p.NameIndex];
             var instance = new ObjectInstance
             {
@@ -8292,6 +8294,9 @@ public class WorldScene : ISceneRenderer
                 LocalBoundsMin = localMin,
                 LocalBoundsMax = localMax,
                 BoundsResolved = boundsResolved,
+                SelectionLocalBoundsMin = selectionMin,
+                SelectionLocalBoundsMax = selectionMax,
+                SelectionBoundsResolved = selectionResolved,
                 ModelName = Path.GetFileName(modelPath),
                 ModelPath = modelPath,
                 PlacementPosition = p.Position,
@@ -8438,11 +8443,16 @@ public class WorldScene : ISceneRenderer
             }
             else
             { bbMin = p.Position - new Vector3(2f); bbMax = p.Position + new Vector3(2f); }
+            ResolveMdxSelectionBounds(key, localMin, localMax, boundsResolved,
+                out Vector3 selectionMin, out Vector3 selectionMax, out bool selectionResolved);
             string modelPath = mdxNames[p.NameIndex];
             var instance = new ObjectInstance
             {
                 ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax,
                 LocalBoundsMin = localMin, LocalBoundsMax = localMax, BoundsResolved = boundsResolved,
+                SelectionLocalBoundsMin = selectionMin,
+                SelectionLocalBoundsMax = selectionMax,
+                SelectionBoundsResolved = selectionResolved,
                 ModelName = Path.GetFileName(modelPath), ModelPath = modelPath,
                 PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = scale,
                 UniqueId = p.UniqueId,
@@ -9443,6 +9453,35 @@ public class WorldScene : ISceneRenderer
         return boundsDistSq <= MaxWorldObjectViewDistanceSq;
     }
 
+    /// <summary>
+    /// Resolve the tight, geometry-derived selection bounds for a model, falling back to the
+    /// supplied culling bounds when no tighter box is available.
+    /// </summary>
+    /// <remarks>
+    /// For native MDX the two are the same box, so this is a no-op there. It exists for M2, whose
+    /// culling bounds are a declared animation/collision extent much larger than the mesh.
+    /// </remarks>
+    private void ResolveMdxSelectionBounds(
+        string modelKey,
+        Vector3 fallbackMin,
+        Vector3 fallbackMax,
+        bool fallbackResolved,
+        out Vector3 selectionMin,
+        out Vector3 selectionMax,
+        out bool selectionResolved)
+    {
+        if (_assets.TryGetMdxSelectionBounds(modelKey, out selectionMin, out selectionMax)
+            && AreFiniteOrderedBounds(selectionMin, selectionMax))
+        {
+            selectionResolved = true;
+            return;
+        }
+
+        selectionMin = fallbackMin;
+        selectionMax = fallbackMax;
+        selectionResolved = fallbackResolved && AreFiniteOrderedBounds(fallbackMin, fallbackMax);
+    }
+
     private bool RefreshMdxInstanceBounds(
         List<ObjectInstance> instances,
         (int tileX, int tileY)? tileKey,
@@ -9470,19 +9509,12 @@ public class WorldScene : ISceneRenderer
             // Selection and picking use the tight geometry bounds; culling above keeps the
             // conservative ones. For M2 the two differ substantially because the declared header
             // extent is an animation/collision volume, not the mesh.
-            if (_assets.TryGetMdxSelectionBounds(inst.ModelKey, out var selectionMin, out var selectionMax)
-                && AreFiniteOrderedBounds(selectionMin, selectionMax))
-            {
-                inst.SelectionLocalBoundsMin = selectionMin;
-                inst.SelectionLocalBoundsMax = selectionMax;
-                inst.SelectionBoundsResolved = true;
-            }
-            else
-            {
-                inst.SelectionLocalBoundsMin = localMin;
-                inst.SelectionLocalBoundsMax = localMax;
-                inst.SelectionBoundsResolved = false;
-            }
+            ResolveMdxSelectionBounds(
+                inst.ModelKey, localMin, localMax, fallbackResolved: true,
+                out Vector3 selectionMin, out Vector3 selectionMax, out bool selectionResolved);
+            inst.SelectionLocalBoundsMin = selectionMin;
+            inst.SelectionLocalBoundsMax = selectionMax;
+            inst.SelectionBoundsResolved = selectionResolved;
 
             instances[i] = inst;
             UpdateSceneGraphPlacementBounds(tileKey, WorldSceneNodeKind.M2Placement, i, inst, isSkybox, isExternal);
@@ -11566,17 +11598,28 @@ public class WorldScene : ISceneRenderer
                             // the world axes inflates it by up to 1.73x, and picking already tests
                             // the oriented box — so the drawn box used to be larger than the
                             // clickable one.
-                            bool useOrientedBox = selectedInstance.SelectionBoundsResolved
+                            // Prefer the tight geometry box, but fall back to the instance's own
+                            // local box before falling back to the world AABB. That matters for
+                            // native MDX, where LocalBounds is ALREADY the geometry box — most
+                            // instances are constructed with bounds resolved inline and never pass
+                            // through the lazy refresh, so keying only on SelectionBoundsResolved
+                            // sent the common case to the axis-aligned path and changed nothing.
+                            bool hasTightBox = selectedInstance.SelectionBoundsResolved
                                 && AreFiniteOrderedBounds(
                                     selectedInstance.SelectionLocalBoundsMin,
                                     selectedInstance.SelectionLocalBoundsMax);
+                            bool hasLocalBox = selectedInstance.BoundsResolved
+                                && AreFiniteOrderedBounds(
+                                    selectedInstance.LocalBoundsMin,
+                                    selectedInstance.LocalBoundsMax);
+                            bool useOrientedBox = hasTightBox || hasLocalBox;
 
-                            Vector3 bbMin = useOrientedBox
+                            Vector3 bbMin = hasTightBox
                                 ? selectedInstance.SelectionLocalBoundsMin
-                                : selectedInstance.BoundsMin;
-                            Vector3 bbMax = useOrientedBox
+                                : hasLocalBox ? selectedInstance.LocalBoundsMin : selectedInstance.BoundsMin;
+                            Vector3 bbMax = hasTightBox
                                 ? selectedInstance.SelectionLocalBoundsMax
-                                : selectedInstance.BoundsMax;
+                                : hasLocalBox ? selectedInstance.LocalBoundsMax : selectedInstance.BoundsMax;
                             Vector3 center = (bbMin + bbMax) * 0.5f;
                             Vector3 halfExtent = (bbMax - bbMin) * 0.5f;
                             halfExtent = new Vector3(
