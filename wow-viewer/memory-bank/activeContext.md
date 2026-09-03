@@ -150,7 +150,49 @@ writing + scoring + baseline + the visual A/B.
 
 ## Open, with the next concrete action
 
-- **Spec 212 — 3D spatial UI shell** (drafted 2026-09-02, not planned). Panels become interactive
+- **Spec 216 — model cursor as a scene light source** (drafted 2026-09-02, not planned). Any MDX/M2
+  as the cursor, with particles, and **its lights illuminating the scene** — aimed at reproducing the
+  2001 thief-with-torch screenshot (`areatest.lit`, ~3am, torch as the only light). **Measured: the
+  LIT variant is already probed, particles already render, and MDX lights are already parsed — but
+  `UploadMdxLights` uploads a model's lights into that model's own shader program, so a torch lights
+  only itself.** That is the entire feature; everything else is wiring. The screenshot is evidence, so
+  a mismatch is a recorded lighting finding, not something to tune away.
+- **Spec 217 — audio lifecycle** (drafted 2026-09-02, not planned). One-shots fire forever and music
+  does not play, so audio is off by default. **The 5.0.1 binary explains it: a sound is a state
+  machine over six explicit lists, and one that never reaches the delete list never stops. It is a
+  lifecycle defect, not a decoding one** — which is why work on the decoders never fixed it. Also:
+  **three** repeat modes, not two (periodic = repeats *with gaps*), duplicate suppression at the play
+  call, and finite prioritised channels where exhaustion routes to deletion as a *handled* outcome.
+  Backend is era-split (0.5.3 DirectSound/DirectMusic, 5.0.1 FMOD): the discipline transfers, the
+  backend does not. Autoplay is the *outcome*, gated on the lifecycle being demonstrated.
+- **Spec 214 — 5.0.1 physics (Domino)** (drafted 2026-09-02, not planned). The solver is **Domino**,
+  a separate engine at `Engine\Source\Domino/`; WoW's adapter (`Physics.cpp`, `PhysData.h`) is the
+  *sibling* directory — two layers, do not conflate. Entry point is the Domino assertion string
+  `0x00e0ac8c` → handler `FUN_00c29680`, whose ~90 callers each pass their own file and line.
+  **~90 is a floor, not the size** — only asserting functions are visible to that pivot. **Operator
+  direction: license in an existing permissively-licensed C# solver; no copyrighted engine code.**
+  Domino is decoded as a *contract* — data layouts and observable behaviour — and never reproduced;
+  transcribing its algorithms would make this a derivative of Blizzard's engine. Library selection and
+  license verification are `plan.md` deliverables, and cloth must be a selection criterion rather than
+  a discovery. The client culls physics by distance, so an unbudgeted implementation is both
+  unfaithful and a frame-cost regression on top of a known one. **Next: speckit-plan.**
+- **Spec 215 — 5.0.1 weather** (drafted 2026-09-02, not planned). Owns `MapWeather`, `Weather.dbc`,
+  precipitation and `Lightning`. **Does not own lighting/fog/sky** — 143/147/160 do, and 160 is
+  already tasked at 72 tasks / 8 phases. Weather drives them through interfaces; FR-015 forbids a
+  parallel model. Wind is its own interface, the single join with 214, so neither blocks the other.
+  **Next: speckit-plan.**
+- **[`workstream-atmosphere-501-ghidra.md`](workstream-atmosphere-501-ghidra.md)** — shared 5.0.1
+  native evidence (physics, weather, sky, light, fog anchors + the Light\* DBC chain), consumed by
+  214, 215, **and** 160/147/143. Read-only Ghidra session; the program was opened but nothing was
+  edited. Carries the era warning: **5.0.1 is the complete implementation and is not evidence about
+  0.5.3** — Domino does not exist there. Same failure mode as
+  [[project_mcnr_axis_order_wrong]] and [[feedback_era_gate_minimap_generation]].
+- **Spec 212 — 3D spatial UI shell** (drafted 2026-09-02, not planned; US6/US7/US8 added the same
+  day and all independently shippable — **US6** selection outlines that trace the object instead of a
+  box, **US7** the museum profile: a camera-locked floating HUD with the panels and readouts gone,
+  "more museum than in-your-face data explorer", **US8** 3D tool controls starting with an
+  interactive clock face for time of day. FR-032 is load-bearing: a HUD element must invoke the *same*
+  action as its full-shell equivalent, never a second implementation). Panels become interactive
   surfaces composited over a full-window scene instead of 2D windows carved out of it by
   `TryGetSceneViewportRect`, mounted on a rig whose profile follows the top-bar workspace task.
   Generalises spec 210's OpenSCAD asset path. **Next: speckit-plan.** The phase ordering is

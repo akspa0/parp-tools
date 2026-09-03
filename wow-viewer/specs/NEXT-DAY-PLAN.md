@@ -130,3 +130,80 @@ Everything downstream of the store — merged-tile export, alpha WDT / LK ADT co
 - **`DBCDRow.ID` is positional** for MoP WDB2 tables. Key on the `ID` column.
 - **No test project references the viewer.** Logic that must be tested belongs in `WowViewer.Core*`.
 - **Close the viewer before running tests** — it locks the build output.
+
+---
+
+# Addendum 2026-09-02 — New spec pack (212–217)
+
+Six specs were drafted on 2026-09-02. **None are planned yet**; each needs `speckit-plan` before
+implementation. This addendum is the recommended order and the reasoning, for a fresh session.
+
+## Recommended order
+
+### 1. Spec 217 — audio lifecycle *(start here)*
+
+Highest value per unit of work, and the only one with a defect the operator hits every session.
+The diagnosis is already made from client evidence: a sound is a state machine over six explicit
+lists and one that never reaches the delete list never stops. **Planning's first task is to confirm
+that diagnosis against our own audio code** — the spec asserts it from the binary plus the symptom,
+not from an audit of our implementation. If it is wrong, that is the finding.
+
+Most of it is unit-testable in `WowViewer.Core*` without a sound device — lifecycle transitions,
+repeat-mode classification, priority, weighted selection — which matters because no test project
+references the viewer. Autoplay is the *outcome*, not the starting point.
+
+### 2. Spec 212 US6 — selection outlines
+
+Small, self-contained, and a standing daily annoyance. Independent of the rest of 212 by design.
+The box overlay's inflation was already made proportional on 2026-09-02, which treated the symptom;
+US6 removes the cause by tracing the object's silhouette.
+
+### 3. Spec 212 US7 — museum profile
+
+The largest experience change available for the least new machinery: a camera-locked HUD over a
+full-window scene, with panels and readouts hidden. Independently shippable — it needs neither US3's
+context rig nor US4's authored shells. **FR-032 is the constraint that matters**: a HUD element must
+invoke the *same* underlying action as its full-shell equivalent. Two implementations of one
+operation drift apart, and the profile silently becomes a fork with its own bugs.
+
+### 4. Spec 216 — model cursor as a scene light source
+
+Do this after 212 US7, because the museum profile is the setting the torch scene wants. The real
+work is **not** the cursor: `UploadMdxLights` uploads a model's lights into that model's own shader
+program, so a torch lights only itself. Making a model's light reach terrain, WMOs and other models
+is a change across three render paths, and it is the whole feature. Plan it as such, or it will be
+scoped as a day of wiring and produce a torch glowing alone in an unchanged dark room.
+
+Spec 212 US8 (the clock) pairs naturally here — reaching 3am is the concrete task the clock exists
+for — but neither blocks the other; the existing linear slider satisfies 216's requirement.
+
+### 5. Spec 214 — physics
+
+Now much smaller than first drafted: the solver is **licensed in, not written**. Planning's first
+deliverable is library selection with license verification — and **cloth must be a selection
+criterion, not a discovery**, because US4 (flags moving) is the visible payoff. Domino is decoded as
+a contract only: data layouts and observable behaviour, never transcribed algorithms.
+
+### 6. Spec 215 — weather
+
+Depends on interfaces from 143/147/160 that may not exist yet. Coordination work with those specs
+comes first. **FR-015 forbids a parallel lighting or fog model** — the failure mode is building one
+because the interface was inconvenient. Wind is the single join with 214, and is useful with no
+solver behind it.
+
+### 7. Spec 213 — MCP tooling harness
+
+Independent of everything above and can be done at any time. Its load-bearing requirement is FR-007:
+the MCP schema and the CLI parser must derive from **one shared definition**, with the build failing
+on divergence. A hand-maintained parallel schema does not satisfy it and would reproduce the
+documented CLI-drift defect with an extra surface to keep in sync.
+
+## Standing constraints for all of these
+
+- **Era-gate everything.** 5.0.1 is decoded because it is the *complete* implementation; it is not
+  evidence about 0.5.3. Domino does not exist there, and the audio backend is entirely different.
+  Carry provenance, flag unknown builds. This project has paid for era-blind decoding twice.
+- **Logic that must be tested goes in `WowViewer.Core*`.** No test project references the viewer.
+- **Close the viewer before running tests.** It locks the build output.
+- **Baseline: 9 pre-existing test failures.** Any other failure is new.
+- **Ghidra sessions are read-only** unless the operator says otherwise.

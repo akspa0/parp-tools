@@ -171,10 +171,122 @@ rect are byte-for-byte the behaviour that shipped before this feature.
 
 ---
 
+### User Story 6 - Selection outlines follow the object, not a box (Priority: P1)
+
+When the operator selects or hovers something in the world, the highlight traces the object's actual
+silhouette. A lamp post is outlined as a lamp post; a scroll on a table is outlined as a scroll. No
+wireframe cube, and nothing drawn outside the object's own shape.
+
+**Why this priority**: A box is a proxy for the thing rather than the thing, and at small scales the
+proxy is larger than what it describes — a third-of-a-yard scroll inside a wireframe cube tells the
+operator nothing about what they just selected, and reads as a bug. This is the same thesis as the
+rest of this feature (stop approximating; make the UI follow the real geometry) applied to selection,
+which is why it lives here.
+
+**This story has no dependency on US1–US5** and is separately shippable. It does not require panels
+to be surfaces, the scene to be full-window, or any authored shell geometry. It is P1 because it is a
+standing annoyance in daily use, and it must not be gated behind the shell work.
+
+**Independent Test**: Select objects across the full size range — a building, a lamp post, a table
+scroll — and confirm each highlight traces that object's silhouette and nothing beyond it.
+
+**Acceptance Scenarios**:
+
+1. **Given** any selectable object, **When** it is selected, **Then** the highlight traces the
+   object's own silhouette and does not extend beyond its geometry.
+2. **Given** a very small object, **When** it is selected, **Then** the outline matches its actual
+   size — it is not inflated to a minimum extent that exceeds the object.
+3. **Given** an object partly occluded by other geometry, **When** it is selected, **Then** the
+   outline communicates the selection without the operator losing track of which object it is.
+4. **Given** a hovered object and a separately selected object, **When** both are shown, **Then**
+   they are visually distinguishable.
+5. **Given** an object whose renderable geometry has not loaded, **When** it is selected, **Then**
+   the fallback is presented as a position marker and is not mistaken for the object's extent.
+6. **Given** many selectable objects on screen, **When** one is outlined, **Then** frame cost stays
+   within the feature's declared budget.
+
+---
+
+### User Story 7 - A museum profile that dials everything back (Priority: P1)
+
+The operator switches to a profile that removes the panels, docks, tabs and dense readouts and leaves
+a small floating HUD locked to the camera. The world fills the screen. What remains is what is needed
+to move through and look at the world, presented as 3D elements rather than as a data explorer.
+
+**Why this priority**: The current shell has every capability and is, in the operator's words, "in
+your face". A viewer that can be *inhabited* rather than operated is a different product, and it is
+the reason the spatial shell is worth building at all. It is independently shippable — a minimal
+camera-locked HUD over a full-window scene delivers the experience without US3's context rig or US4's
+authored shells.
+
+**Independent Test**: Switch to the museum profile and traverse a loaded world, confirming the scene
+is unobstructed, the HUD stays legible and camera-locked, and every action the profile offers works.
+
+**Acceptance Scenarios**:
+
+1. **Given** the museum profile, **When** it is active, **Then** the docked panels, tab bars and
+   dense readouts are hidden and the scene fills the window.
+2. **Given** the museum profile, **When** the camera moves or turns, **Then** the HUD stays fixed
+   relative to the camera and does not swim, lag or drift.
+3. **Given** a HUD element, **When** the operator clicks it, **Then** the underlying action is
+   invoked exactly as it is from the full shell — the same action, not a reimplementation of it.
+4. **Given** the museum profile, **When** the operator needs a capability it does not surface,
+   **Then** there is a discoverable way back to the full shell without losing scene state.
+5. **Given** either profile, **When** the operator switches between them, **Then** camera position,
+   loaded content and selection survive the switch.
+6. **Given** the museum profile, **When** the scene renders, **Then** its HUD costs less than the
+   full shell it replaces.
+
+---
+
+### User Story 8 - Tools are 3D controls shaped like what they do (Priority: P2)
+
+Controls read as the thing they control. The time-of-day control is a clock face the operator can
+turn to an hour, not a labelled bar from 0 to 1. Other tools follow the same principle as they are
+converted.
+
+**Why this priority**: This is what makes the museum profile navigable rather than merely emptier,
+and the clock is the concrete case the operator named — reaching 3am to light a scene by torchlight
+is a thing to *do*, and a linear 0..1 slider is a poor instrument for it. It is P2 because the
+profile must exist before its controls matter, and because each control is independently valuable.
+
+**Independent Test**: Set the time of day to a specific hour using the clock control and confirm the
+scene lighting matches what the same value produces through the existing slider.
+
+**Acceptance Scenarios**:
+
+1. **Given** a time-of-day control, **When** the operator drags around its face, **Then** the time
+   changes continuously and the position corresponds to the hour in an obvious way.
+2. **Given** the clock control, **When** a time is set, **Then** it produces the same result as the
+   same time set through the existing linear control.
+3. **Given** the clock control, **When** the automatic day cycle is running, **Then** the control
+   reflects the current time rather than fighting it, and the operator can take manual control.
+4. **Given** a wrap-around drag through midnight, **When** it occurs, **Then** the value wraps
+   without jumping or clamping.
+5. **Given** any converted 3D control, **When** it is used, **Then** it drives the same underlying
+   state as the control it replaces, with no second source of truth.
+6. **Given** a converted control, **When** the operator prefers the original, **Then** the original
+   remains reachable.
+
+---
+
 ### Edge Cases
 
 - **Pointer misses every panel.** Ray hits no panel surface — the scene must receive the input, and
   the correct cursor must be shown.
+- **Outlining an object with no loaded geometry.** There is no silhouette to trace; whatever is shown
+  must not read as the object's size.
+- **Outlining instanced or batched geometry**, where one draw covers many objects but only one is
+  selected.
+- **Outlining terrain, liquid surfaces and PM4 overlay surfaces**, which are not discrete models and
+  may have no meaningful silhouette.
+- **Very large objects.** A building's outline at close range is mostly off-screen.
+- **A museum-profile action with no HUD affordance.** The operator needs something the profile does
+  not surface and must not be stranded.
+- **HUD legibility across window sizes and aspect ratios**, including very wide and very small.
+- **A circular control dragged through its wrap point**, or released outside its face.
+- **A circular control while the value is being driven automatically** by the day cycle.
+- **A converted control and its original both visible**, which must not become two sources of truth.
 - **Panel surface is edge-on or behind the camera.** A panel at a grazing angle presents almost no
   pointer target and its text is unreadable; a panel behind the near plane cannot be hit at all.
   Behaviour must be defined rather than emergent.
@@ -263,6 +375,37 @@ rect are byte-for-byte the behaviour that shipped before this feature.
 - **FR-023**: The system MUST keep the pointer-to-content mapping correct across the full supported
   UI font scale and display DPI range.
 
+**Selection presentation**
+
+- **FR-024**: The system MUST present selection and hover highlights as an outline of the selected
+  object's own silhouette.
+- **FR-025**: The system MUST NOT draw a highlight outside the selected object's geometry, and MUST
+  NOT inflate a highlight to a minimum extent that exceeds the object.
+- **FR-026**: The system MUST visually distinguish a hovered object from a selected one.
+- **FR-027**: The system MUST present a fallback for an object whose geometry has not loaded in a
+  form that cannot be mistaken for the object's extent.
+- **FR-028**: The system MUST define and apply behaviour for surfaces that are not discrete models —
+  terrain, liquid, and overlay surfaces.
+- **FR-029**: Selection outlining MUST stay within a declared frame budget with many selectable
+  objects on screen.
+
+**Museum profile and 3D controls**
+
+- **FR-030**: The system MUST provide a profile that hides docked panels, tab bars and dense readouts
+  and presents a reduced HUD over a full-window scene.
+- **FR-031**: The museum HUD MUST remain fixed relative to the camera without swim, lag or drift.
+- **FR-032**: A HUD element MUST invoke the same underlying action as its full-shell equivalent, with
+  no duplicated implementation and no second source of truth.
+- **FR-033**: The system MUST provide a discoverable way back to the full shell, and camera position,
+  loaded content and selection MUST survive a profile switch in both directions.
+- **FR-034**: The museum profile MUST cost less to render than the full shell it replaces.
+- **FR-035**: The system MUST provide a circular, directly-manipulated time-of-day control that wraps
+  continuously through midnight without jumping or clamping.
+- **FR-036**: A circular value control MUST reflect an externally driven value while it is being
+  driven, and MUST allow the operator to take manual control.
+- **FR-037**: Any converted 3D control MUST drive the same underlying state as the control it
+  replaces, and that original MUST remain reachable.
+
 ### Key Entities
 
 - **Panel Surface**: One existing panel presented as an interactive object in the scene. Has a
@@ -299,6 +442,24 @@ rect are byte-for-byte the behaviour that shipped before this feature.
 - **SC-007**: A clean clone builds and runs the shell with no OpenSCAD installed and no MCP server
   reachable.
 - **SC-008**: Capture and validation automation output is unchanged from its pre-feature baseline.
+- **SC-009**: Across a test set spanning the full object size range — building, lamp post, table
+  scroll — every selection highlight traces the object's silhouette, with zero highlights extending
+  beyond the object's own geometry.
+- **SC-010**: For the smallest selectable object in the test set, the highlight's on-screen extent
+  matches the object's rendered extent — no minimum-size inflation.
+- **SC-011**: Selection outlining with the maximum expected number of selectable objects on screen
+  stays within its declared frame budget, measured against the frame-time distribution rather than a
+  static-camera average.
+- **SC-012**: In the museum profile the scene occupies the full window and the HUD obscures no more
+  than 10% of it.
+- **SC-013**: Every action the museum profile offers invokes the same underlying operation as its
+  full-shell equivalent — zero duplicated implementations.
+- **SC-014**: Switching profiles in either direction preserves camera position, loaded content and
+  selection exactly.
+- **SC-015**: The museum profile's HUD costs less per frame than the full shell it replaces, measured
+  against the frame-time distribution.
+- **SC-016**: A time set on the clock control produces lighting identical to the same time set through
+  the existing linear control, including across the midnight wrap.
 
 ## Assumptions
 
@@ -311,8 +472,14 @@ rect are byte-for-byte the behaviour that shipped before this feature.
 - **The tab shell is the target.** `_useTabUi` is the default shell and the one this feature converts.
   The dockspace path is not a target; see the note in `memory-bank/activeContext.md` about
   `ShouldBypassDockspaceMouseCapture`.
-- **Top chrome and status bar stay 2D.** The menu bar and status bar are not converted. They are the
-  operator's fixed reference frame and the anchor for screen-space constructs.
+- **Top chrome and status bar stay 2D in the full shell.** The menu bar and status bar are the
+  operator's fixed reference frame and the anchor for screen-space constructs. The museum profile
+  (US7) hides them; that is the point of it.
+- **The museum profile is a presentation, not a fork.** It surfaces existing actions through fewer,
+  simpler affordances. FR-032 forbids reimplementing an action behind a HUD element, because two
+  implementations of one operation is how they drift apart.
+- **ImGui has no built-in circular control.** A directly-manipulated clock face has to be drawn and
+  hit-tested. The spec states the behaviour required; the drawing approach is a planning decision.
 - **Spec 210 supplies the pointer.** The scene cursor, its OpenSCAD asset path (`OffGeometry`,
   `ProceduralMeshLoader`), and the post-ImGui overlay pass established there are the foundation this
   feature builds on rather than re-derives.

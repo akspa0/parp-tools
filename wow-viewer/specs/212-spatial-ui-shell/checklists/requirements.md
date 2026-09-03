@@ -56,6 +56,21 @@
   ray" and "workspace task" are that reader's vocabulary; removing them would cost precision and buy
   nothing.
 
+**Added 2026-09-02 — US6, selection outlines.** Operator-reported annoyance: selection highlights are
+wireframe boxes, which at small scales are larger than the object they describe. Added here rather
+than as a new spec because it is the same thesis as the rest of the feature — stop approximating,
+make the UI follow the real geometry — and because spec 211 already established selection visual
+treatment as an owned concern rather than an ad-hoc one.
+
+Deliberately marked **P1 with no dependency on US1–US5**, so it is separately shippable and is not
+gated behind the shell work. If the shell is deferred or descoped, US6 still lands. `plan.md` must
+preserve that independence.
+
+Related, already fixed outside this spec (2026-09-02): the box overlay's accent inflate had a *fixed*
+0.75 yd floor and its dash length a 6.0 yd floor, so a small object got a halo six times its own size
+and a second solid-looking box. Both are now proportional. That was a mitigation of the symptom;
+US6 removes the cause.
+
 **Open risk carried into planning (not a spec defect):**
 
 - The pointer-to-content mapping on curved surfaces (US4) is the feature's main technical risk. The
@@ -66,3 +81,22 @@
 
 **Status**: All items pass or are deliberately partial with documented rationale. Ready for
 speckit-plan.
+
+**Added 2026-09-02 (second pass) — US7 museum profile, US8 3D tool controls.** Operator direction:
+a profile that "dials it all back" to a camera-locked floating HUD over the world — "more of a museum
+than an in-your-face data explorer" — and controls shaped like what they control, the time-of-day
+slider becoming an interactive clock.
+
+- **US7 is P1 and independently shippable.** A minimal camera-locked HUD over a full-window scene
+  delivers the experience without US3's context rig or US4's authored shells. It is the reason the
+  spatial shell is worth building, so it must not sit behind the harder stories.
+- **FR-032 is the load-bearing constraint**: a HUD element must invoke the *same* underlying action as
+  its full-shell equivalent. The failure mode is obvious and expensive — two implementations of one
+  operation drift apart, and the museum profile silently becomes a fork with its own bugs.
+- **US8's clock is grounded**: the current control is `ImGui.SliderFloat("Time of Day", 0..1)` in
+  `DrawTimeOfDayControl`. ImGui has no built-in circular control, so this has to be drawn and
+  hit-tested; SC-016 pins correctness to producing identical lighting to the existing linear control,
+  including across the midnight wrap, so the new control cannot quietly disagree with the old one.
+- **Connects to spec 216**: reaching 3am to light a scene by torchlight is the concrete task the clock
+  exists for. 216 requires only that time can be set — the existing slider satisfies that — so neither
+  spec blocks the other.
