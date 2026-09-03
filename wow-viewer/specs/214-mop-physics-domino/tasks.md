@@ -128,17 +128,32 @@ Jitter2 is a permanent commitment and waits for operator go-ahead.
 
 ### Phase 2 — `.phys` reader (US2/US3, solver-independent, may start now)
 
-- [ ] T013 Add `PhysSidecarPath` in Core.IO: model path → `.phys` by extension replacement, matching `FUN_005a29a0`. Must be pure and testable with no file access
-- [ ] T014 Add `PhysChunkReader` in Core.IO: reversed-tag chunk walk, `PHYS` magic, **version `u16` must be 0**, `8 + size` advance, and **unknown tags skipped by size** (never rejected — the client is permissive here and a stricter reader breaks on later eras)
-- [ ] T015 Add record readers for `BOXS`/`CAPS`/`SPHS`/`SHAP`/`BODY`/`JOIN` at the measured strides (60/28/16/20/28/16). Leave `BOXS` `0..47`, `SHAP` `+4`/`+8`/`+12`/`+16` and `JOIN` `+8` as **raw preserved bytes**, not interpreted fields — they are unverified
-- [ ] T016 Add `SPHJ`/`SHOJ`/`WELJ` as **length-validated opaque records** (28/108/104). Per-field semantics are undecoded; preserve bytes and report presence rather than inventing a layout
-- [ ] T017 Add `PhysDocument` + diagnostics: one explicit diagnostic per malformed, unsupported, or skipped construct (FR-010/FR-012). **Match the client's fail-closed fallback, not its silence**
-- [ ] T018 [P] Add focused tests in `WowViewer.Core.Tests`: bad magic, version ≠ 0, truncated chunk, **unknown tag skipped**, absent chunk, `0xFFFF` bone sentinel preserved, and a stride-mismatch case. Synthetic bytes only — these test safety, not fidelity
+- [x] T013 Add `PhysSidecarPath` in Core.IO: model path → `.phys` by extension replacement, matching `FUN_005a29a0`. Must be pure and testable with no file access
+- [x] T014 Add `PhysChunkReader` in Core.IO: reversed-tag chunk walk, `PHYS` magic, **version `u16` must be 0**, `8 + size` advance, and **unknown tags skipped by size** (never rejected — the client is permissive here and a stricter reader breaks on later eras)
+- [x] T015 Add record readers for `BOXS`/`CAPS`/`SPHS`/`SHAP`/`BODY`/`JOIN` at the measured strides (60/28/16/20/28/16). Leave `BOXS` `0..47`, `SHAP` `+4`/`+8`/`+12`/`+16` and `JOIN` `+8` as **raw preserved bytes**, not interpreted fields — they are unverified
+- [x] T016 Add `SPHJ`/`SHOJ`/`WELJ` as **length-validated opaque records** (28/108/104). Per-field semantics are undecoded; preserve bytes and report presence rather than inventing a layout
+- [x] T017 Add `PhysDocument` + diagnostics: one explicit diagnostic per malformed, unsupported, or skipped construct (FR-010/FR-012). **Match the client's fail-closed fallback, not its silence**
+- [x] T018 [P] Add focused tests in `WowViewer.Core.Tests`: bad magic, version ≠ 0, truncated chunk, **unknown tag skipped**, absent chunk, `0xFFFF` bone sentinel preserved, and a stride-mismatch case. Synthetic bytes only — these test safety, not fidelity
 - [ ] T019 Wire `M2ModelDocument.HasPhysicsSidecar` to the real resolver, replacing the unconsumed metadata identified in [current-implementation-audit.md](evidence/current-implementation-audit.md)
 - [ ] T020 Add a thin `inspect model phys` command reporting bodies, shapes, joints, provenance and diagnostics
 
+**T013–T018 landed and validated 2026-09-03.** `PhysSidecarPath` + `PhysReader` (Core.IO/Phys) and
+`PhysDocument` (Core/Phys). **24/24 focused tests pass**; `WowViewer.Core.IO` Debug builds with
+**0 errors**; full Core scope **1,403 passed / 1 skipped / the same 9 unrelated baseline failures**
+(1,403 = the previous 1,379 plus exactly these 24 — no regression).
+
+Worth recording: `FourCC.FromString("PHYS").ToFileUInt32()` is `0x50485953`, **bit-identical to the
+constant the client compares against**, so the existing `FourCC` type already models the reversed-tag
+convention and needed no special case. The reader is span-based and deliberately does **not** reuse
+`ChunkedFileReader`, which throws on malformed input and pads odd chunk sizes — the client does
+neither.
+
 **Gate**: models without a sidecar render exactly as today; malformed data fails closed **with a
 diagnostic**; no construct is silently dropped. Fidelity against real assets is **T002's** gate, not
+this one.
+
+**Stopped deliberately at T019.** The reader is a complete, tested, self-contained unit. Wiring it
+into model loading touches the render path and deserves its own change rather than being tacked onto
 this one.
 
 ### Phase 3 — Jitter2 adapter (US5, needs operator go-ahead for the package reference)
