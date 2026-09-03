@@ -245,9 +245,29 @@ writing + scoring + baseline + the visual A/B.
   selection criterion. **No package reference was added** — Phase 3, needs operator go-ahead.
   **Open risk: shoulder and weld joints have no obvious Jitter2 counterpart**; only spherical maps
   cleanly. Evidence: [`solver-selection.md`](../specs/214-mop-physics-domino/evidence/solver-selection.md).
-  **Both Phase 0 gates are now answered. The only remaining blocker is T002** (real-client asset
-  manifest), which gates real-byte validation of the layouts above; T012 parser/adapter task
-  generation is now eligible.
+  **Both Phase 0 gates are now answered. US1 is closed** (T006 contract + T008 review: PASS, with
+  SC-002's line-level attribution recorded as a **partial** and recommended for acceptance —
+  Domino-internal line numbers have no consumer, since we never reproduce those algorithms, so
+  closing it would cost ~90 decompilations for information nothing will act on. Written down rather
+  than quietly dropped; it is the operator's cost call).
+  **The `.phys` reader is landed and green (T013–T018).** `PhysSidecarPath` + `PhysReader`
+  (Core.IO/Phys) and `PhysDocument` (Core/Phys). **Fail-closed and never throwing**; **unknown chunk
+  tags skipped by size, never rejected** (a stricter reader would be stricter than the client and
+  break on later eras); unverified regions (`BOXS` `0..47`, `SHAP` `+4`/`+8`/`+12`/`+16`, `JOIN` `+8`,
+  all of `SPHJ`/`SHOJ`/`WELJ`) **preserved raw rather than interpreted**; `0xFFFF` no-bone sentinel
+  preserved. One deliberate divergence from the client: it matches the fail-closed *fallback* but not
+  the *silence* — every skip carries a diagnostic (FR-010/FR-012).
+  **24/24 focused tests; full Core 1,403 passed / 1 skipped / the same 9 baseline failures**
+  (1,403 = 1,379 + exactly these 24, so nothing regressed). Note: `FourCC.FromString("PHYS")
+  .ToFileUInt32()` is `0x50485953`, **bit-identical to the client's compared constant** — the
+  existing `FourCC` already models the reversed-tag convention, no special case needed. The reader
+  does **not** reuse `ChunkedFileReader`, which throws on malformed input and pads odd chunk sizes;
+  the client does neither.
+  **Next**: **T002 real-client asset manifest is the only remaining blocker** on real-byte validation
+  and is **operator-owned** — everything above is recovered from decompiled arithmetic, not from an
+  observed `.phys` file. Then T019 (wire `HasPhysicsSidecar` to the resolver — **deliberately
+  deferred**, it touches the render path and deserves its own change), T020 (`inspect model phys`),
+  and **T021, an operator decision**: approve the Jitter2 2.8.10 package reference.
 - **Spec 215 — 5.0.1 weather** (drafted 2026-09-02, not planned). Owns `MapWeather`, `Weather.dbc`,
   precipitation and `Lightning`. **Does not own lighting/fog/sky** — 143/147/160 do, and 160 is
   already tasked at 72 tasks / 8 phases. Weather drives them through interfaces; FR-015 forbids a
