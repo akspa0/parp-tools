@@ -19,8 +19,22 @@ array's field name is recovered from Blizzard's own `PhysData.h` bounds asserts;
 absent data **fail closed at every stage** and unknown chunk tags are **skipped by size**, so the
 format is forward-compatible by construction. Gravity is measured as **`(0, 0, -10.0)`**, not 9.81.
 
-**Sidecar parsing (Phase 2) is therefore unblocked by evidence** but still waits on T002 for
-real-byte validation. **Solver work remains fully blocked on T007.**
+**Solver selection gate PASSED 2026-09-03 (T007).** **Jitter2 2.8.10** is selected and BepuPhysics v2
+rejected — not on licensing (Apache-2.0 was acceptable) but because it has **no cloth or soft-body
+support and no determinism evidence**, the two properties this feature is chosen for. Jitter2 is
+**MIT** (verified from the `LICENSE` file; the empty NuGet `licenseExpression` on 2.7.x+ is a
+`<license type="file">` packaging change, not a license change), targets **`net10.0`**, ships
+`SoftBodyTriangle` + `SpringConstraint` in the library with a ~115-line first-party
+`SoftBodyCloth : SoftBody` **demo** built on them (sample code to adapt, *not* public API — state it
+that way), and enforces determinism through `World.Deterministic.cs`, `StableMath.cs`,
+reproducibility tests, and a **CI workflow that hashes simulation output**. See
+[solver-selection.md](evidence/solver-selection.md).
+
+**Both Phase 0 gates are now answered on evidence.** Sidecar parsing (Phase 2) is unblocked but still
+waits on **T002** for real-byte validation. **No package reference has been added** — that is Phase 3
+and needs the operator's go-ahead, being a permanent third-party dependency.
+
+**T012 is now eligible**: its precondition was T005 and T007, and both are complete.
 
 **Current implementation audit**: [current-implementation-audit.md](evidence/current-implementation-audit.md)
 confirms that `HasPhysicsSidecar` is unconsumed metadata, classic MDX `CLID` is inspection geometry,
@@ -60,7 +74,7 @@ parsing and a solver decision that cannot deliver cloth.
 that the contract labels it as measured or inferred.
 
 - [ ] T006 [US1] Consolidate verified layouts, data flow, update observations, adapter boundary, and explicit unknowns into `specs/214-mop-physics-domino/evidence/physics-contract.md`
-- [ ] T007 [P] [US1] Evaluate exact BepuPhysics v2 and Jitter2 versions for license, deterministic stepping, collision scope, and cloth route in `specs/214-mop-physics-domino/evidence/solver-selection.md`
+- [x] T007 [P] [US1] Evaluate exact BepuPhysics v2 and Jitter2 versions for license, deterministic stepping, collision scope, and cloth route in `specs/214-mop-physics-domino/evidence/solver-selection.md`
 - [ ] T008 [US1] Review `specs/214-mop-physics-domino/evidence/physics-contract.md` against FR-001 through FR-005 and record the Phase 0 pass/block decision in `specs/214-mop-physics-domino/tasks.md`
 
 ## Phase 4 — User Story 7: era gating, provenance, and admission policy (P1, complete)

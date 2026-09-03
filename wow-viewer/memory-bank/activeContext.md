@@ -231,8 +231,23 @@ writing + scoring + baseline + the visual A/B.
   and hoisted string operands, and is recorded rather than papered over. Evidence:
   [`domino-caller-map.md`](../specs/214-mop-physics-domino/evidence/domino-caller-map.md),
   [`physics-adapter-contract.md`](../specs/214-mop-physics-domino/evidence/physics-adapter-contract.md).
-  **Next: T007** (exact-version BepuPhysics v2 / Jitter2 license + deterministic cloth) blocks all
-  solver work; **T002** (real-client asset manifest) blocks real-byte validation of the layouts above.
+  **T007 solver selection also PASSED 2026-09-03: Jitter2 2.8.10, BepuPhysics v2 rejected.** Not on
+  licensing — Apache-2.0 was acceptable — but because Bepu has **no cloth/soft-body support and no
+  determinism evidence**, the two properties this feature exists to deliver. Jitter2 is **MIT**
+  (verified from the `LICENSE` file itself; the empty NuGet `licenseExpression` on 2.7.x+ is a
+  `<license type="file">` packaging change, **not** a license change — a metadata trap worth
+  remembering), targets **`net10.0`** exactly, and enforces determinism through
+  `World.Deterministic.cs`, `StableMath.cs`, reproducibility tests, and a **CI workflow that hashes
+  simulation output** — tested and gated, not merely documented. Cloth route, stated precisely:
+  `SoftBodyTriangle` + `SpringConstraint` are **library** types, but `SoftBodyCloth : SoftBody`
+  (~115 lines) is **demo sample code**, so the route is "adapt MIT sample onto shipped primitives",
+  not "call a supported Cloth class". Saying that plainly now is the whole point of making cloth a
+  selection criterion. **No package reference was added** — Phase 3, needs operator go-ahead.
+  **Open risk: shoulder and weld joints have no obvious Jitter2 counterpart**; only spherical maps
+  cleanly. Evidence: [`solver-selection.md`](../specs/214-mop-physics-domino/evidence/solver-selection.md).
+  **Both Phase 0 gates are now answered. The only remaining blocker is T002** (real-client asset
+  manifest), which gates real-byte validation of the layouts above; T012 parser/adapter task
+  generation is now eligible.
 - **Spec 215 — 5.0.1 weather** (drafted 2026-09-02, not planned). Owns `MapWeather`, `Weather.dbc`,
   precipitation and `Lightning`. **Does not own lighting/fog/sky** — 143/147/160 do, and 160 is
   already tasked at 72 tasks / 8 phases. Weather drives them through interfaces; FR-015 forbids a
