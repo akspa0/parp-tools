@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "x64dbg": {
+      "command": "I:\\parp\\parp-tools\\.venv\\Scripts\\x64dbg-automate-mcp.exe",
+      "env": {
+        "X64DBG_PATH": "C:\\x64dbg\\release\\x32\\x32dbg.exe"
+      }
+    },
+    "ghidra": {
+      "command": "C:\\Users\\akspa\\.local\\bin\\bridge-mcp-ghidra.exe",
+      "args": [
+        "--no-lazy"
+      ],
+      "env": {
+        "GHIDRA_MCP_URL": "http://127.0.0.1:8089"
+      }
+    }
+  }
+}

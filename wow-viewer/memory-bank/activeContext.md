@@ -54,6 +54,57 @@ of the mouse and object selection system.
       - Terrain (`TerrainRenderer.cs`): Draws textured terrain fill in `PolygonMode.Fill`, followed by a line pass with `PolygonOffsetLine` (-1.0, -1.0) and 1.5 line width so wireframes are obvious while terrain texturing remains clearly visible.
     - Clean build, zero errors across solution, all unit tests green. Ready for operator interactive verification.
 
+**Scene cursor drew under the UI — draw order, not depth.** The 3D scene cursor was rendered with the
+rest of the 3D pass (`ViewerApp.cs`, before `_imGui.Render()`), so **every** ImGui window painted over
+it. No depth state can fix this: ImGui is a separate pass, and the cursor already defeats depth
+occlusion deliberately via `DepthRange(0, 0.05)`. Because the hardware cursor is hidden while a 3D
+cursor style is active, the pointer disappeared entirely under any overlapping panel/menu/card —
+exactly when aiming a click. Fixes:
+
+- Split `RenderSceneCursor` into `RenderSceneClusterSelector3D(proj)` (stays in the 3D pass; the rings
+  are scene geometry and must occlude correctly) and the cursor overlay pass, moved to **after**
+  `_imGui.Render()` and after both `CaptureVideoFrameIfNeeded` taps (cursors do not belong in
+  captures). Caller re-sets the scene viewport around it.
+- The overlay runs on whatever GL state ImGui left, so it now sets scissor/cull/blend/depth-mask
+  explicitly. **Leaving `ScissorTest` enabled would silently clip the cursor away.**
+- `DrawUI` only cleared `_dockspaceHostPosition/Size` for the chrome and dockspace toggles, not for
+  `_useTabUi`, but `DrawDockspaceHost` runs only when `!_useTabUi`. Toggling tab UI on at runtime left
+  a **stale non-zero host rect**, making `ShouldBypassDockspaceMouseCapture` claim the mouse for the
+  scene across the whole viewport rect — defeating ImGui capture for floating windows over it, so
+  clicks meant for those windows also fired scene picking. Now cleared for `_useTabUi` too.
+
+Related standing note: the dockspace already passes `ImGuiDockNodeFlags.PassthruCentralNode`, which is
+the supported mechanism for letting the empty central node ignore the mouse. That makes
+`ShouldBypassDockspaceMouseCapture` largely redundant in dockspace mode; it was not removed because
+that mode is not exercised by default. Revisit if dockspace mode is ever made primary.
+
+**WMO doodad selection was a placeholder, not a read.** Operator-reported 2026-09-02: blank asset
+paths, boxes that do not fit the object, and a "UniqueId" on WMO doodads. All one cause —
+`TryGetSceneObjectByIndex`'s `ObjectType.WmoDoodad` case *synthesised* an `ObjectInstance` instead of
+reading the doodad:
+
+- **Bounds were a hard-coded `position ± 1` cube.** `WmoRenderer.TryGetDoodadBounds` already computes
+  the real transformed AABB and `TryPickDoodadsByRay` already carried it in the pick hit; the
+  selection path discarded it. The 0.75 yd min-half-extent clamp added in `4c73d263` **could never
+  have fixed this** — 1.0 already exceeds the 0.75 floor, so the clamp was a no-op on exactly the
+  objects it was written for.
+- **`BatchHighlightedBoxMinMax` then inflated it further.** Accent inflate was
+  `Clamp(maxDim * 0.015, 0.75, 6.0)` — a *fixed* 0.75 yd floor, so a third-of-a-yard scroll got a halo
+  six times its own size, and `segmentLength`'s 6.0 yd floor collapsed the dashes into a second solid
+  box. Both are now proportional (`0.06` inflate / `0.03` floor; segment floor `0.08`).
+- **`UniqueId = DoodadDefIndex` was the subtle one.** MODD carries `NameIndex, Position, Orientation,
+  Scale, Color` and **no uniqueId** — uniqueId is an MDDF/MODF (ADT placement) concept. This was not
+  just a mislabel: `ShouldHideObjectInstanceByUniqueId` keys on that field, so the uniqueId range
+  filter could hide a doodad whose MODD index happened to fall in range. Def index now lives in
+  `PlacementEntryIndex`; `UniqueId` is 0, which that filter already treats as "no id".
+- `ModelName`/`ModelPath` were never assigned (only `ModelKey`) — hence the blank Path. `Rotation`
+  `(0,0,0,0)` and `Scale 0.000` were unassigned defaults; both are available on the MODD def, and the
+  instance transform is `Scale * Rotation * Translation` so it carried them all along.
+
+Bounds now report `BoundsResolved`, and the inspector marks a placeholder box as one rather than
+presenting a guess as a measurement. General rule, same as [[feedback_a_name_stops_the_looking]]: a
+field named `UniqueId` on a record type that has no unique id is an assertion nobody checked.
+
 **Spec 209 — Liquid Convergence Measured (Phase 1 Complete).** Built `inspect adt liquid-convergence`
 and `LiquidConvergenceAnalyzer` (4 new tests). Catalog discovery loads 108 WL* files directly from
 `misc.mpq` in 0.5.3. Scanned 500 liquid tiles on Azeroth. **Union invariant verified (SC-002 / FR-004)**:
@@ -99,6 +150,18 @@ writing + scoring + baseline + the visual A/B.
 
 ## Open, with the next concrete action
 
+- **Spec 212 — 3D spatial UI shell** (drafted 2026-09-02, not planned). Panels become interactive
+  surfaces composited over a full-window scene instead of 2D windows carved out of it by
+  `TryGetSceneViewportRect`, mounted on a rig whose profile follows the top-bar workspace task.
+  Generalises spec 210's OpenSCAD asset path. **Next: speckit-plan.** The phase ordering is
+  load-bearing: pointer-to-content accuracy (US1) must fully pass on flat surfaces before curved
+  shells (US4) are attempted, because that mapping is the whole technical risk.
+- **Spec 213 — MCP tooling harness** (drafted 2026-09-02, not planned). MCP *server* over the ten CLI
+  tool projects so an external orchestration/inference harness can drive them; client deferred.
+  **Next: speckit-plan.** FR-007 is the load-bearing requirement — one shared definition behind both
+  the MCP schema and the CLI parser, build failing on divergence. That is the mechanism that prevents
+  [[feedback_verify_cli_docs_against_argparse]] from recurring; a hand-maintained parallel schema
+  does not satisfy it.
 - **Operator verification sweep** — six code-complete fixes need one pass in the viewer. See the plan's
   Block 0. For 0.5.3 phase layers specifically, **send the `[AlphaADT]` / `[TerrainManager]` log
   lines**; they say whether it is resolution, tile lookup, or the merge.

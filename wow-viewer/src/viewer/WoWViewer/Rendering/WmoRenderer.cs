@@ -17,13 +17,26 @@ using WowViewer.Core.IO.Converters;
 
 namespace WoWViewer.Rendering;
 
+/// <summary>
+/// One placed doodad inside a WMO, as described by its MODD record.
+/// </summary>
+/// <remarks>
+/// MODD carries <c>NameIndex, Position, Orientation, Scale, Color</c> and <b>no uniqueId</b>.
+/// uniqueId is an MDDF/MODF concept — it identifies a placement in an ADT, not a doodad inside a
+/// WMO. <see cref="DoodadDefIndex"/> is an index into this WMO's own MODD table and is meaningful
+/// only relative to this WMO. Do not present it as a uniqueId and do not feed it to anything that
+/// keys on uniqueId; two different WMOs both have a doodad 65.
+/// </remarks>
 public readonly record struct WmoDoodadInfo(
     int Index,
     string ModelPath,
     int DoodadDefIndex,
     Vector3 LocalPosition,
     bool Visible,
-    bool IsLoaded);
+    bool IsLoaded,
+    Quaternion Orientation = default,
+    float Scale = 1f,
+    uint NameIndex = 0);
 
 public readonly record struct WmoOpaqueDoodadBatchItem(
     IModelRenderer Renderer,
@@ -424,13 +437,30 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         if (index >= 0 && index < _doodadInstances.Count)
         {
             DoodadInstance doodad = _doodadInstances[index];
+
+            // Orientation and scale come from the MODD record, not from the instance transform.
+            // Reading them back out of the composed matrix would lose them whenever the transform
+            // was built from a default.
+            Quaternion orientation = Quaternion.Identity;
+            float scale = 1f;
+            uint nameIndex = 0;
+            if (TryGetDoodadDef(doodad.DoodadDefIndex, out WmoV14ToV17Converter.WmoDoodadDef def))
+            {
+                orientation = def.Orientation;
+                scale = def.Scale;
+                nameIndex = def.NameIndex;
+            }
+
             info = new WmoDoodadInfo(
                 index,
                 doodad.ModelPath,
                 doodad.DoodadDefIndex,
                 doodad.LocalPosition,
                 doodad.Visible,
-                doodad.Renderer != null);
+                doodad.Renderer != null,
+                orientation,
+                scale,
+                nameIndex);
             return true;
         }
 
@@ -439,6 +469,18 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     }
 
     public bool TryGetDoodadBounds(int index, in Matrix4x4 modelMatrix, out Vector3 boundsMin, out Vector3 boundsMax)
+        => TryGetDoodadBounds(index, modelMatrix, out boundsMin, out boundsMax, out _);
+
+    /// <summary>
+    /// World-space AABB of one placed doodad.
+    /// </summary>
+    /// <param name="boundsResolved">
+    /// True when the box came from the doodad's actual model geometry. False when the model is not
+    /// loaded yet and the box is the placeholder cube around the placement point — callers that
+    /// present a selection box to the operator must not show a placeholder as if it were the
+    /// object's real extent.
+    /// </param>
+    public bool TryGetDoodadBounds(int index, in Matrix4x4 modelMatrix, out Vector3 boundsMin, out Vector3 boundsMax, out bool boundsResolved)
     {
         if (index >= 0 && index < _doodadInstances.Count)
         {
@@ -447,16 +489,34 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
             if (doodad.Renderer is IModelRenderer modelRenderer)
             {
                 TransformAabb(modelRenderer.BoundsMin, modelRenderer.BoundsMax, doodadWorld, out boundsMin, out boundsMax);
+                boundsResolved = true;
                 return true;
             }
 
             Vector3 worldPosition = Vector3.Transform(doodad.LocalPosition, modelMatrix);
             boundsMin = worldPosition - new Vector3(2f);
             boundsMax = worldPosition + new Vector3(2f);
+            boundsResolved = false;
             return true;
         }
 
         boundsMin = boundsMax = Vector3.Zero;
+        boundsResolved = false;
+        return false;
+    }
+
+    /// <summary>
+    /// Full world transform of one placed doodad, including the MODD orientation and scale.
+    /// </summary>
+    public bool TryGetDoodadWorldTransform(int index, in Matrix4x4 modelMatrix, out Matrix4x4 transform)
+    {
+        if (index >= 0 && index < _doodadInstances.Count)
+        {
+            transform = _doodadInstances[index].Transform * modelMatrix;
+            return true;
+        }
+
+        transform = Matrix4x4.Identity;
         return false;
     }
 

@@ -389,7 +389,12 @@ public partial class ViewerApp
         string dedupKey = hit.ObjectType == ObjectType.WmoDoodad
             ? $"scene:{hit.ObjectType}:{hit.ParentWmoIndex}:{hit.ObjectIndex}"
             : $"scene:{hit.ObjectType}:{hit.ObjectIndex}";
-        string detail = $"UniqueId: {hit.UniqueId}  Pos: ({hit.PlacementPosition.X:F1}, {hit.PlacementPosition.Y:F1}, {hit.PlacementPosition.Z:F1})";
+        // WMO doodads have no uniqueId to report (MODD carries none), so the position is the whole
+        // identity here. Printing "UniqueId: 0" would read as a real id.
+        string position = $"Pos: ({hit.PlacementPosition.X:F1}, {hit.PlacementPosition.Y:F1}, {hit.PlacementPosition.Z:F1})";
+        string detail = hit.ObjectType == ObjectType.WmoDoodad
+            ? $"in WMO [{hit.ParentWmoIndex}]  {position}"
+            : $"UniqueId: {hit.UniqueId}  {position}";
 
         TryAddClickSelectionCandidate(
             addedKeys,

@@ -241,10 +241,18 @@ void main() { FragColor = vColor; }";
         Vector3 size = actualMax - actualMin;
         float maxDimension = MathF.Max(size.X, MathF.Max(size.Y, size.Z));
         float pulse = 0.85f + 0.35f * (0.5f + 0.5f * MathF.Sin(timeSeconds * 4.0f));
-        float inflate = Math.Clamp(maxDimension * 0.015f, 0.75f, 6.0f) * pulse;
+
+        // The accent outline is a halo around the object's box, so its offset must scale WITH the
+        // object. A fixed 0.75 yd floor here meant every small doodad got the same 1.5 yd of extra
+        // wireframe a building got proportionally none of: around a third-of-a-yard scroll that
+        // halo was six times the size of the object, and read as the selection box itself.
+        float inflate = Math.Clamp(maxDimension * 0.06f, 0.03f, 6.0f) * pulse;
         Vector3 accentMin = actualMin - new Vector3(inflate);
         Vector3 accentMax = actualMax + new Vector3(inflate);
-        float segmentLength = Math.Clamp(maxDimension * 0.08f, 6.0f, 22.0f);
+
+        // Dash length must also scale, for the same reason: a 6 yd minimum segment on a sub-yard
+        // box collapsed the dashed outline into a solid one, doubling the apparent box.
+        float segmentLength = Math.Clamp(maxDimension * 0.08f, 0.08f, 22.0f);
 
         BatchAlternatingBoxMinMax(accentMin, accentMax, accentColorA, accentColorB, timeSeconds, segmentLength);
     }

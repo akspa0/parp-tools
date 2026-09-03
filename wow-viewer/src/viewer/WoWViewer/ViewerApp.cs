@@ -1641,7 +1641,10 @@ var seq = animator.Sequences[animator.CurrentSequence];
                 _cameraHudRig3D.Render(_camera, proj, _fovDegrees, hudAspect);
             }
 
-            RenderSceneCursor(view, proj, sceneViewportX, sceneViewportY, sceneViewportWidth, sceneViewportHeight);
+            // World-space selection rings belong in the 3D pass: they are scene geometry and must
+            // occlude and be occluded like scene geometry. The cursor itself does NOT draw here -
+            // see the overlay pass after ImGui.
+            RenderSceneClusterSelector3D(proj);
         }
 
         if (hasSceneViewport)
@@ -1685,6 +1688,27 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
         CaptureVideoFrameIfNeeded(includeUi: true, dt);
         CompleteCaptureIfReady(includeUi: true);
+
+        // The scene cursor is drawn LAST, after ImGui and after both capture taps.
+        //
+        // It used to draw with the rest of the 3D pass, which put it underneath every ImGui window:
+        // a menu dropdown, a popup, a docked panel or the hover card that opens next to the pointer
+        // would all paint over it. Because the hardware cursor is hidden while the 3D cursor is
+        // active, that left no pointer at all exactly where the user was trying to aim. GL depth
+        // cannot fix this - ImGui is a separate pass - so the only correct place is after it.
+        //
+        // Drawing after the capture taps also keeps the cursor out of recorded frames, which is
+        // where it belongs.
+        if (hasSceneViewportRect)
+        {
+            if (hasSceneViewport)
+                _gl.Viewport(sceneFramebufferX, sceneFramebufferY, sceneFramebufferWidth, sceneFramebufferHeight);
+
+            RenderSceneCursor(view, proj, sceneViewportX, sceneViewportY, sceneViewportWidth, sceneViewportHeight);
+
+            if (hasSceneViewport)
+                _gl.Viewport(_window.FramebufferSize);
+        }
     }
 
     /// <summary>
@@ -1774,7 +1798,13 @@ void main() {
         UpdateShellLayout(ImGui.GetIO().DisplaySize);
 
         ResetDockPanelStates();
-        if (_hideUiChrome || !_useDockspaceUi)
+
+        // Clear the host rect whenever DrawDockspaceHost will not run this frame - which includes
+        // tab UI mode, not just the chrome/dockspace toggles. A stale non-zero rect makes
+        // ShouldBypassDockspaceMouseCapture claim the mouse for the scene across the whole viewport
+        // rect, defeating ImGui's own capture for any floating window drawn over it: clicks meant
+        // for that window also fire scene picking, and the hardware cursor is hidden over it.
+        if (_hideUiChrome || !_useDockspaceUi || _useTabUi)
         {
             _dockspaceHostPosition = Vector2.Zero;
             _dockspaceHostSize = Vector2.Zero;
@@ -13504,14 +13534,24 @@ void main() {
         if (_useTabUi && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo or Terrain.ObjectType.WmoDoodad)
             OpenWorkbenchTab(ModelBottomTab.Info);
 
+        // WMO doodads come from MODD, which has no uniqueId — uniqueId identifies an MDDF/MODF
+        // placement in an ADT. Showing the MODD table index under a "UniqueId" label asserts a
+        // relationship that does not exist. Label it for what it is.
+        string identityLine = _worldScene.SelectedObjectType == Terrain.ObjectType.WmoDoodad
+            ? $"Doodad def: {inst.PlacementEntryIndex} (MODD index, WMO-local; MODD has no uniqueId)\n"
+            : $"UniqueId: {inst.UniqueId}\n";
+
         _selectedObjectInfo = $"{type} [{idx}] {inst.ModelName}\n" +
             $"Path: {inst.ModelPath}\n" +
-            $"UniqueId: {inst.UniqueId}\n" +
+            identityLine +
             $"Local: ({inst.PlacementPosition.X:F1}, {inst.PlacementPosition.Y:F1}, {inst.PlacementPosition.Z:F1})\n" +
             $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
             $"Rotation: ({inst.PlacementRotation.X:F1}, {inst.PlacementRotation.Y:F1}, {inst.PlacementRotation.Z:F1})\n" +
             $"Scale: {inst.PlacementScale:F3}\n" +
-            $"BB: ({inst.BoundsMin.X:F1},{inst.BoundsMin.Y:F1},{inst.BoundsMin.Z:F1}) - ({inst.BoundsMax.X:F1},{inst.BoundsMax.Y:F1},{inst.BoundsMax.Z:F1})";
+            $"BB: ({inst.BoundsMin.X:F1},{inst.BoundsMin.Y:F1},{inst.BoundsMin.Z:F1}) - ({inst.BoundsMax.X:F1},{inst.BoundsMax.Y:F1},{inst.BoundsMax.Z:F1})"
+            // A placeholder box around the placement point is not the object's extent. Say which
+            // one this is rather than letting the operator read a guess as a measurement.
+            + (inst.BoundsResolved ? "" : "  [placeholder — model not loaded]");
     }
 
     private void DrawSelectedPlacementEditControls()
@@ -14769,6 +14809,32 @@ void main() {
         _worldScene.UpdateHoveredAssetInfo(view, proj, localX, localY, vpW, vpH);
     }
 
+    /// <summary>
+    /// World-space pass for the in-scene cluster selection rings. Runs with the rest of the 3D
+    /// scene so the rings occlude correctly against terrain and objects.
+    /// </summary>
+    private void RenderSceneClusterSelector3D(Matrix4x4 proj)
+    {
+        if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
+        {
+            _sceneClusterSelector3D.RenderWorld3D(_camera, proj);
+        }
+    }
+
+    /// <summary>
+    /// Overlay pass for the 3D scene cursor.
+    /// </summary>
+    /// <remarks>
+    /// Called after <c>_imGui.Render()</c>, never with the 3D scene. ImGui draws in its own pass on
+    /// top of whatever the 3D pass produced, so a cursor drawn during the 3D pass is painted over by
+    /// every panel, menu, popup and hover card - and since the hardware cursor is hidden while this
+    /// cursor is active, the pointer simply vanishes under the UI. Depth state cannot help; only
+    /// draw order can. The caller is responsible for setting the scene viewport before this and
+    /// restoring the full framebuffer viewport after.
+    ///
+    /// ImGui's Silk.NET controller restores the GL state it found, but this pass runs on whatever
+    /// it left, so the state the cursor depends on is set explicitly below rather than assumed.
+    /// </remarks>
     private void RenderSceneCursor(
         Matrix4x4 view,
         Matrix4x4 proj,
@@ -14777,11 +14843,6 @@ void main() {
         float vpW,
         float vpH)
     {
-        if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
-        {
-            _sceneClusterSelector3D.RenderWorld3D(_camera, proj);
-        }
-
         if (_sceneCursorRenderer == null || _sceneCursorRenderer.Style == CursorStyle.ClassicOSArrow)
             return;
 
@@ -14817,6 +14878,15 @@ void main() {
                 ? SceneCursorState.CastGlow
                 : SceneCursorState.Pointer;
         }
+
+        // ImGui leaves scissor test enabled and clipped to its last draw command; anything left
+        // clipped here would silently discard the cursor. Blending must be on for the cursor's
+        // alpha, and face culling off because the billboard can present either winding.
+        _gl.Disable(EnableCap.ScissorTest);
+        _gl.Disable(EnableCap.CullFace);
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.DepthMask(true);
 
         _sceneCursorRenderer.Render(_camera, proj, rayOrigin, rayDir, hitDistance, _fovDegrees, 0.1f);
     }

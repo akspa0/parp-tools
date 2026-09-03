@@ -8869,6 +8869,92 @@ public class WorldScene : ISceneRenderer
         return true;
     }
 
+    /// <summary>
+    /// Build the selected WMO doodad as an <see cref="ObjectInstance"/> for the inspector and the
+    /// selection-bounds overlay.
+    /// </summary>
+    /// <remarks>
+    /// This used to synthesise a placeholder: a hard-coded <c>position ± 1</c> cube for bounds, no
+    /// model name or path, no rotation, no scale, and the MODD table index copied into
+    /// <c>UniqueId</c>. Three separate defects followed from that.
+    ///
+    /// The bounds were the visible one. <see cref="WmoRenderer.TryGetDoodadBounds"/> already
+    /// computes the doodad's real transformed AABB and the picker already carried it, but this
+    /// method threw it away and substituted a 2-yard cube. The selection overlay then inflates
+    /// whatever it is given by a further 0.75 yd or more for its accent box, so a scroll a third of
+    /// a yard across was drawn inside about 3.8 yards of wireframe. The minimum-half-extent clamp
+    /// added alongside the overlay could never have helped: 1.0 already exceeds the 0.75 floor, so
+    /// the clamp was a no-op on exactly the objects it was meant to fix.
+    ///
+    /// <c>UniqueId</c> was the subtle one. MODD has no uniqueId field at all — uniqueId identifies
+    /// an MDDF/MODF placement in an ADT. Copying the MODD index into it did not merely mislabel the
+    /// inspector; <c>ShouldHideObjectInstanceByUniqueId</c> keys on that field, so a doodad could be
+    /// hidden by an unrelated placement's id colliding with its table index. The def index is kept
+    /// in <see cref="ObjectInstance.PlacementEntryIndex"/>, which is what it actually is, and
+    /// UniqueId is left at 0 to mean "this kind of object does not have one".
+    /// </remarks>
+    private bool TryBuildSelectedWmoDoodadInstance(out ObjectInstance instance)
+    {
+        instance = default;
+
+        if (!TryGetSelectedWmoDoodad(out WmoDoodadInfo dInfo, out Vector3 worldPosition, out ObjectInstance parentWmo))
+            return false;
+
+        if (!_assets.TryGetLoadedWmo(parentWmo.ModelKey, out WmoRenderer? wmoRenderer) || wmoRenderer == null)
+            return false;
+
+        // Real geometry bounds when the doodad's model is loaded. When it is not, say so rather
+        // than presenting the placeholder cube as the object's extent.
+        bool boundsResolved = false;
+        Vector3 boundsMin = worldPosition;
+        Vector3 boundsMax = worldPosition;
+        if (wmoRenderer.TryGetDoodadBounds(dInfo.Index, parentWmo.Transform, out Vector3 bMin, out Vector3 bMax, out boundsResolved))
+        {
+            boundsMin = bMin;
+            boundsMax = bMax;
+        }
+
+        if (!wmoRenderer.TryGetDoodadWorldTransform(dInfo.Index, parentWmo.Transform, out Matrix4x4 doodadTransform))
+            doodadTransform = Matrix4x4.CreateTranslation(worldPosition);
+
+        instance = new ObjectInstance
+        {
+            ModelKey = dInfo.ModelPath,
+            ModelPath = dInfo.ModelPath,
+            ModelName = System.IO.Path.GetFileName(dInfo.ModelPath),
+            AssetKind = "WMO Doodad",
+            PlacementPosition = worldPosition,
+            PlacementRotation = QuaternionToEulerDegrees(dInfo.Orientation),
+            PlacementScale = dInfo.Scale,
+            BoundsMin = boundsMin,
+            BoundsMax = boundsMax,
+            BoundsResolved = boundsResolved,
+            // MODD has no uniqueId. The def index is a MODD table index, meaningful only inside this
+            // WMO; it belongs here, not in UniqueId. See the remarks above.
+            PlacementEntryIndex = dInfo.DoodadDefIndex,
+            UniqueId = 0,
+            Transform = doodadTransform
+        };
+        return true;
+    }
+
+    private static Vector3 QuaternionToEulerDegrees(Quaternion q)
+    {
+        float sinR = 2f * (q.W * q.X + q.Y * q.Z);
+        float cosR = 1f - 2f * (q.X * q.X + q.Y * q.Y);
+        float roll = MathF.Atan2(sinR, cosR);
+
+        float sinP = Math.Clamp(2f * (q.W * q.Y - q.Z * q.X), -1f, 1f);
+        float pitch = MathF.Asin(sinP);
+
+        float sinY = 2f * (q.W * q.Z + q.X * q.Y);
+        float cosY = 1f - 2f * (q.Y * q.Y + q.Z * q.Z);
+        float yaw = MathF.Atan2(sinY, cosY);
+
+        const float ToDegrees = 180f / MathF.PI;
+        return new Vector3(roll * ToDegrees, pitch * ToDegrees, yaw * ToDegrees);
+    }
+
     private bool TryGetSceneObjectByIndex(ObjectType objectType, int objectIndex, out ObjectInstance instance)
     {
         switch (objectType)
@@ -8879,17 +8965,7 @@ public class WorldScene : ISceneRenderer
             case ObjectType.Mdx when objectIndex >= 0 && objectIndex < _mdxInstances.Count:
                 instance = _mdxInstances[objectIndex];
                 return true;
-            case ObjectType.WmoDoodad when TryGetSelectedWmoDoodad(out var dInfo, out var wPos, out var parent):
-                instance = new ObjectInstance
-                {
-                    ModelKey = dInfo.ModelPath,
-                    PlacementPosition = wPos,
-                    BoundsMin = wPos - new Vector3(1f, 1f, 1f),
-                    BoundsMax = wPos + new Vector3(1f, 1f, 1f),
-                    BoundsResolved = true,
-                    UniqueId = dInfo.DoodadDefIndex,
-                    Transform = Matrix4x4.CreateTranslation(wPos)
-                };
+            case ObjectType.WmoDoodad when TryBuildSelectedWmoDoodadInstance(out instance):
                 return true;
             default:
                 instance = default;
@@ -11450,10 +11526,14 @@ public class WorldScene : ISceneRenderer
                     {
                         if (SelectedInstance is ObjectInstance selectedInstance && !ShouldHideObjectInstanceByUniqueId(selectedInstance))
                         {
-                            // Enforce a minimum visible selection box size so tiny objects
-                            // (books, candles, coins, early Ironforge doodads) always have
-                            // a clearly visible selection box that encompasses the object.
-                            const float minHalfExtent = 0.75f; // 1.5 yards minimum per axis
+                            // Guard against a degenerate (zero-volume) box only. This floor used to
+                            // be 0.75 yd, which made the box stop describing the object: a scroll a
+                            // third of a yard across was drawn inside 1.5 yd of wireframe, and the
+                            // accent pass then inflated that further. A selection box that does not
+                            // match the thing it selects is worse than a small one — at a distance
+                            // where a tiny doodad is genuinely hard to see, the operator is not
+                            // trying to select it anyway.
+                            const float minHalfExtent = 0.02f;
                             Vector3 bbMin = selectedInstance.BoundsMin;
                             Vector3 bbMax = selectedInstance.BoundsMax;
                             Vector3 center = (bbMin + bbMax) * 0.5f;
@@ -13113,7 +13193,9 @@ public class WorldScene : ISceneRenderer
                     dh.distance,
                     Path.GetFileName(dh.info.ModelPath),
                     dh.info.ModelPath,
-                    dh.info.DoodadDefIndex,
+                    // MODD has no uniqueId; the def index is not one. Putting it in this slot made
+                    // the disambiguation list report a uniqueId the record does not have.
+                    UniqueId: 0,
                     dh.hitPoint,
                     dh.boundsMin,
                     dh.boundsMax,
