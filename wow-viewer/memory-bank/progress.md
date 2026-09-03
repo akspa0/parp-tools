@@ -1,6 +1,12 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-01
+Last updated: 2026-09-03
+
+## 2026-09-03 — Spec 214: solver-independent physics policy implemented and validated
+- **Planning and audit:** Authored the Spec Kit pack and [`current-implementation-audit.md`](../specs/214-mop-physics-domino/evidence/current-implementation-audit.md). The audit separates the unconsumed M2 `0x20` flag, MDX `CLID` inspection geometry, camera navigation clamping, and visual particle gravity from actual physicalised-model simulation.
+- **Landed in Core.Runtime:** [`PhysicsRuntimePolicy.cs`](../src/core/WowViewer.Core.Runtime/World/Physics/PhysicsRuntimePolicy.cs) reuses `ClientBuildKey` to resolve exact `0.5.3.3368` as known-disabled, exact `5.0.1.15464` as admission-enabled, and every malformed/unmeasured build as unknown. Every decision carries activation state, profile/build/evidence provenance, diagnostics, and an explicit admitted/cull/defer/refusal reason. Budget and candidate inputs are validated; capacity selection is deterministic by priority, distance, then ordinal stable id, while results preserve input order.
+- **Verification:** [`PhysicsRuntimePolicyTests.cs`](../tests/WowViewer.Core.Tests/PhysicsRuntimePolicyTests.cs) passes **16/16**; the affected `WowViewer.Core.Runtime` Debug build succeeds with **0 errors**. The full Core scope gate reports **1,379 passed, 1 skipped, and the same 9 unrelated baseline failures**. Existing `Snappier` NU1903 warnings remain unrelated. No runtime, visual, real-client, or solver claim was made.
+- **Still absent and gated:** no sidecar resolver/parser, solver package, body simulation, collision response, cloth, joints, animation binding, or viewer integration. Next evidence remains read-only adapter-to-sidecar discovery plus exact-version solver license/cloth evaluation; parser/solver/viewer tasks stay blocked until those gates pass.
 
 ## 2026-09-02 — Spec 211: WMO Interior Ray Picking, Doodad Selection & Ghost Transparent Wireframes
 - **Landed (Spec 211 Phases 1–3):**

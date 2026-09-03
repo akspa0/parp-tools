@@ -182,7 +182,8 @@ writing + scoring + baseline + the visual A/B.
   call, and finite prioritised channels where exhaustion routes to deletion as a *handled* outcome.
   Backend is era-split (0.5.3 DirectSound/DirectMusic, 5.0.1 FMOD): the discipline transfers, the
   backend does not. Autoplay is the *outcome*, gated on the lifecycle being demonstrated.
-- **Spec 214 — 5.0.1 physics (Domino)** (drafted 2026-09-02, not planned). The solver is **Domino**,
+- **Spec 214 — 5.0.1 physics (Domino)** (**implementing 2026-09-03; solver-independent
+  US7 policy validated, Phase 0 evidence gate next**). The client solver is **Domino**,
   a separate engine at `Engine\Source\Domino/`; WoW's adapter (`Physics.cpp`, `PhysData.h`) is the
   *sibling* directory — two layers, do not conflate. Entry point is the Domino assertion string
   `0x00e0ac8c` → handler `FUN_00c29680`, whose ~90 callers each pass their own file and line.
@@ -192,7 +193,22 @@ writing + scoring + baseline + the visual A/B.
   transcribing its algorithms would make this a derivative of Blizzard's engine. Library selection and
   license verification are `plan.md` deliverables, and cloth must be a selection criterion rather than
   a discovery. The client culls physics by distance, so an unbudgeted implementation is both
-  unfaithful and a frame-cost regression on top of a known one. **Next: speckit-plan.**
+  unfaithful and a frame-cost regression on top of a known one. The new [`plan.md`](../specs/214-mop-physics-domino/plan.md),
+  [`research.md`](../specs/214-mop-physics-domino/research.md), [`data-model.md`](../specs/214-mop-physics-domino/data-model.md),
+  contract, quickstart, and [`tasks.md`](../specs/214-mop-physics-domino/tasks.md) enforce the format/solver gate:
+  read-only caller attribution, adapter-to-model-sidecar discovery, real-client manifest, and exact-version
+  BepuPhysics/Jitter2 license + deterministic-cloth evaluation. **No parser, package, simulation, cloth,
+  or viewer path starts first.**
+  **Current-source audit complete:** [`current-implementation-audit.md`](../specs/214-mop-physics-domino/evidence/current-implementation-audit.md)
+  confirms `M2ModelDocument.HasPhysicsSidecar` is unconsumed metadata and MDX `CLID`, camera collision,
+  and particle gravity are unrelated adjacent paths. **Landed policy slice:** `PhysicsRuntimePolicy.cs`
+  reuses `ClientBuildKey` for exact 0.5.3.3368 disabled / exact 5.0.1.15464 enabled / all others
+  unknown, carries activation + provenance + diagnostics on every decision, validates input, and assigns
+  deterministic priority/distance/ordinal admission with explicit cull/defer reasons. Focused tests pass
+  **16/16**; Runtime Debug build passes with **0 errors**. Full Core scope gate: **1,379 passed,
+  1 skipped, same 9 unrelated baseline failures** (existing `Snappier` NU1903 warnings only).
+  This is not simulation: sidecar resolution/parsing, solver, bodies, collision response, cloth, joints,
+  animation binding, and viewer integration remain absent and gated.
 - **Spec 215 — 5.0.1 weather** (drafted 2026-09-02, not planned). Owns `MapWeather`, `Weather.dbc`,
   precipitation and `Lightning`. **Does not own lighting/fog/sky** — 143/147/160 do, and 160 is
   already tasked at 72 tasks / 8 phases. Weather drives them through interfaces; FR-015 forbids a
