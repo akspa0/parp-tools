@@ -74,6 +74,12 @@ internal static class MinimapHelpers
                         if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName))
                             continue;
 
+                        // Cartography (Spec 222): a WMO-based donor (dungeon) has no terrain tiles;
+                        // querying its minimap textures returned garbage for leftover MAIN
+                        // coordinates and painted fragments at wrong screen positions.
+                        if (worldScene.IsWmoBasedMap(layer.MapName))
+                            continue;
+
                         // tx is the adapter's tileX (row) and ty its tileY (col); GetTileTexture
                         // takes them in the opposite order, which is why the offsets cross over.
                         tileTex = minimapRenderer.GetTileTexture(
@@ -105,6 +111,11 @@ internal static class MinimapHelpers
                 drawList.AddRectFilled(new Vector2(x, y), new Vector2(x + cellSize, y + cellSize), color);
             }
         }
+
+        // Cartography (Spec 222): phase-layer footprints. Drawn under the camera indicator so the
+        // camera stays readable, but over the base tiles so a donor footprint is visible even where
+        // the donor map does not overlap the base — that visibility is the whole point.
+        RenderPhaseFootprints(drawList, cursorPos, worldScene, viewMinTx, viewMinTy, cellSize, mapSize);
 
         // Camera position (centered, adjusted for pan)
         float clampedCamTileX = Math.Clamp(camTileX, 0f, MapTileCount);
@@ -197,6 +208,75 @@ internal static class MinimapHelpers
 
         // Border
         drawList.AddRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF666666);
+    }
+
+    /// <summary>
+    /// Cartography (Spec 222): draws each enabled, resolved phase layer's donor footprint with the
+    /// layer's offset applied, so the operator sees where the content will land on the base map —
+    /// including layers that do not overlap the base at all (the silent-no-op case this feature
+    /// exists to kill). The selected layer draws brighter with a thicker border.
+    /// </summary>
+    private static void RenderPhaseFootprints(
+        ImDrawListPtr drawList,
+        Vector2 cursorPos,
+        WorldScene? worldScene,
+        float viewMinTx,
+        float viewMinTy,
+        float cellSize,
+        float mapSize)
+    {
+        if (worldScene == null)
+            return;
+
+        float viewMaxTx = viewMinTx + mapSize / cellSize;
+        float viewMaxTy = viewMinTy + mapSize / cellSize;
+
+        foreach ((var layer, var tiles) in worldScene.GetLayerFootprints())
+        {
+            int paletteIndex = layer.FootprintColorIndex >= 0
+                ? layer.FootprintColorIndex % Terrain.TerrainManager.FootprintPalette.Count
+                : 0;
+            (float r, float g, float b) = Terrain.TerrainManager.FootprintPalette[paletteIndex];
+            bool selected = worldScene.SelectedPhaseLayerIndex >= 0
+                && worldScene.SelectedPhaseLayerIndex < worldScene.PhaseLayers.Count
+                && ReferenceEquals(worldScene.PhaseLayers[worldScene.SelectedPhaseLayerIndex], layer);
+            uint fill = FootprintColor(r, g, b, selected ? 0x66u : 0x3Cu);
+            uint border = FootprintColor(r, g, b, selected ? 0xFFu : 0xB4u);
+
+            foreach ((int tx, int ty) in tiles)
+            {
+                // Target position = donor tile + the layer's offset. tx is the adapter's tileX
+                // (row → vertical) and ty its tileY (col → horizontal), matching the base-tile
+                // drawing above.
+                float targetTx = tx + layer.TileOffsetX;
+                float targetTy = ty + layer.TileOffsetY;
+                if (targetTx + 1 < viewMinTx || targetTx > viewMaxTx
+                    || targetTy + 1 < viewMinTy || targetTy > viewMaxTy)
+                {
+                    continue;
+                }
+
+                float x = cursorPos.X + (targetTy - viewMinTy) * cellSize;
+                float y = cursorPos.Y + (targetTx - viewMinTx) * cellSize;
+                drawList.AddRectFilled(new Vector2(x, y), new Vector2(x + cellSize, y + cellSize), fill);
+                drawList.AddRect(
+                    new Vector2(x, y),
+                    new Vector2(x + cellSize, y + cellSize),
+                    border,
+                    0f,
+                    ImDrawFlags.None,
+                    selected ? 2.5f : 1.25f);
+            }
+        }
+    }
+
+    /// <summary>Packs linear RGB + alpha into an ImGui ABGR color.</summary>
+    private static uint FootprintColor(float r, float g, float b, uint alpha)
+    {
+        uint ri = (uint)(Math.Clamp(r, 0f, 1f) * 255f);
+        uint gi = (uint)(Math.Clamp(g, 0f, 1f) * 255f);
+        uint bi = (uint)(Math.Clamp(b, 0f, 1f) * 255f);
+        return (alpha << 24) | (bi << 16) | (gi << 8) | ri;
     }
 
     /// <summary>Returns the nearest visible positional LIT marker under a minimap point.</summary>

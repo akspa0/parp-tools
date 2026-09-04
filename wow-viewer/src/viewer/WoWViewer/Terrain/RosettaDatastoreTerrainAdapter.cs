@@ -43,6 +43,32 @@ public sealed class RosettaDatastoreTerrainAdapter : ITerrainAdapter
     public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
 
     /// <inheritdoc />
+    public bool TryResolveMap(string mapName)
+        => !string.IsNullOrWhiteSpace(mapName)
+            && string.Equals(mapName, _mapName, StringComparison.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public bool IsMapWmoBased(string mapName) => false;
+
+    /// <inheritdoc />
+    public IReadOnlyList<(int TileX, int TileY)> GetOccupiedTiles(string mapName)
+    {
+        // The datastore adapter serves exactly one map; it does not resolve other maps. Its own
+        // footprint comes from the placements it was built with.
+        if (string.IsNullOrWhiteSpace(mapName)
+            || !string.Equals(mapName, _mapName, StringComparison.OrdinalIgnoreCase))
+        {
+            return Array.Empty<(int, int)>();
+        }
+
+        var tiles = new List<(int, int)>();
+        foreach (var key in _placementsByTile.Keys)
+            tiles.Add((key.X, key.Y));
+
+        return tiles;
+    }
+
+    /// <inheritdoc />
     public string? OverlayMapName
     {
         get => _phaseLayers.FirstOrDefault(static layer => layer.Enabled)?.MapName;

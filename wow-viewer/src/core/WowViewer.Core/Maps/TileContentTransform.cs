@@ -64,6 +64,61 @@ public static class TileContentTransform
         };
     }
 
+    /// <summary>
+    /// Cartography (Spec 222): applies a composed transform sequence to every chunk of one donor
+    /// tile — content transformed per kind in order, and each chunk re-slotted within the 16x16
+    /// grid so content lands in the slot the composed transform dictates. Slots are exact-grid;
+    /// no resampling. Returns the same list instance when no transforms are supplied.
+    /// </summary>
+    public static List<TerrainChunkData> TransformTileChunks(
+        List<TerrainChunkData> chunks,
+        IReadOnlyList<TileTransformKind> kinds)
+    {
+        ArgumentNullException.ThrowIfNull(chunks);
+        if (kinds.Count == 0)
+            return chunks;
+
+        var result = new List<TerrainChunkData>(chunks.Count);
+        foreach (TerrainChunkData chunk in chunks)
+        {
+            TerrainChunkData transformed = chunk;
+            foreach (TileTransformKind kind in kinds)
+                transformed = TransformChunk(transformed, kind);
+
+            int slotX = chunk.ChunkX;
+            int slotY = chunk.ChunkY;
+            foreach (TileTransformKind kind in kinds)
+                (slotX, slotY) = TransformChunkSlot(slotX, slotY, kind);
+
+            result.Add(WithSlots(transformed, slotX, slotY));
+        }
+
+        return result;
+    }
+
+    /// <summary>Rebuilds a chunk with different 16x16 slot coordinates, preserving everything else.</summary>
+    private static TerrainChunkData WithSlots(TerrainChunkData chunk, int chunkX, int chunkY)
+        => new()
+        {
+            McinIndex = chunk.McinIndex,
+            TileX = chunk.TileX,
+            TileY = chunk.TileY,
+            ChunkX = chunkX,
+            ChunkY = chunkY,
+            Heights = chunk.Heights,
+            Normals = chunk.Normals,
+            HoleMask = chunk.HoleMask,
+            Layers = chunk.Layers,
+            AlphaMaps = chunk.AlphaMaps,
+            ShadowMap = chunk.ShadowMap,
+            MccvColors = chunk.MccvColors,
+            Liquid = chunk.Liquid,
+            WorldPosition = chunk.WorldPosition,
+            AreaId = chunk.AreaId,
+            McnkFlags = chunk.McnkFlags,
+            AlphaSourceFlags = chunk.AlphaSourceFlags,
+        };
+
     /// <summary>Which chunk slot (within a 16x16 ADT) the content of (cx, cy) lands in after the transform.</summary>
     public static (int ChunkX, int ChunkY) TransformChunkSlot(int chunkX, int chunkY, TileTransformKind kind)
     {

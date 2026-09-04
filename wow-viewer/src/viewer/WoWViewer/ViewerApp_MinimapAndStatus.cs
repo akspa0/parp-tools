@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
+using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.World.Minimap;
 
 namespace WoWViewer;
@@ -54,6 +55,39 @@ public partial class ViewerApp
         return false;
     }
 
+    /// <summary>
+    /// Cartography (Spec 222): index of the layer whose footprint is being dragged on the minimap,
+    /// -1 when the drag is a normal pan. While a footprint is grabbed, pointer movement moves the
+    /// LAYER OFFSET instead of panning the view; the composition re-streams exactly once on release.
+    /// </summary>
+    private int _footprintDragLayerIndex = -1;
+    private (float TileX, float TileY) _footprintDragStartTile;
+    private (int OffsetX, int OffsetY) _footprintDragBaseOffset;
+
+    /// <summary>
+    /// Cartography (Spec 222): true when the given tile coordinate hits the selected layer's
+    /// footprint (donor tile + offset). Pure geometry over the layer's occupied tiles.
+    /// </summary>
+    private static bool TryGetFootprintTileAt(WorldScene worldScene, int layerIndex, float clickTileX, float clickTileY)
+    {
+        if (layerIndex < 0 || layerIndex >= worldScene.PhaseLayers.Count)
+            return false;
+
+        PhaseLayerSettings layer = worldScene.PhaseLayers[layerIndex];
+        if (!layer.Enabled || layer.Resolution != PhaseLayerResolution.Resolved)
+            return false;
+
+        int targetTx = (int)MathF.Floor(clickTileX) - layer.TileOffsetX;
+        int targetTy = (int)MathF.Floor(clickTileY) - layer.TileOffsetY;
+        foreach ((PhaseLayerSettings footprintLayer, IReadOnlyList<(int TileX, int TileY)> tiles) in worldScene.GetLayerFootprints())
+        {
+            if (ReferenceEquals(footprintLayer, layer) && tiles.Contains((targetTx, targetTy)))
+                return true;
+        }
+
+        return false;
+    }
+
     private void HandleMinimapInteraction(string interactionId, Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize, MinimapTeleportMode teleportMode)
     {
         ImGui.SetCursorScreenPos(cursorPos);
@@ -67,6 +101,21 @@ public partial class ViewerApp
         {
             _minimapInteractionState.Process(MinimapPointerPhase.Pressed, mousePos);
             _minimapDragging = false;
+
+            // Cartography: a press on the selected layer's footprint grabs it for a drag. A click
+            // (no drag) still falls through to teleport — the grab only matters once the pointer
+            // crosses the drag threshold.
+            _footprintDragLayerIndex = -1;
+            if (_worldScene != null
+                && _worldScene.SelectedPhaseLayerIndex >= 0
+                && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float pressTx, out float pressTy)
+                && TryGetFootprintTileAt(_worldScene, _worldScene.SelectedPhaseLayerIndex, pressTx, pressTy))
+            {
+                _footprintDragLayerIndex = _worldScene.SelectedPhaseLayerIndex;
+                _footprintDragStartTile = (pressTx, pressTy);
+                PhaseLayerSettings grabbed = _worldScene.PhaseLayers[_footprintDragLayerIndex];
+                _footprintDragBaseOffset = (grabbed.TileOffsetX, grabbed.TileOffsetY);
+            }
         }
         else if (pointerCaptured && ImGui.IsMouseDown(ImGuiMouseButton.Left)
             && _minimapInteractionState.PointerDown)
@@ -74,7 +123,25 @@ public partial class ViewerApp
             MinimapInteractionResult moved = _minimapInteractionState.Process(
                 MinimapPointerPhase.Moved,
                 mousePos);
-            if (moved.PanDeltaPixels != Vector2.Zero)
+            if (moved.WasDragging && _footprintDragLayerIndex >= 0
+                && _worldScene != null
+                && _footprintDragLayerIndex < _worldScene.PhaseLayers.Count
+                && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float curTx, out float curTy))
+            {
+                // Live footprint feedback: the offset follows the pointer (clamped), but the
+                // expensive tile re-stream waits for release.
+                PhaseLayerSettings layer = _worldScene.PhaseLayers[_footprintDragLayerIndex];
+                (int newOffsetX, int newOffsetY) = MapFootprint.ApplyDragDelta(
+                    _footprintDragBaseOffset.OffsetX,
+                    _footprintDragBaseOffset.OffsetY,
+                    _footprintDragStartTile.TileX,
+                    _footprintDragStartTile.TileY,
+                    curTx,
+                    curTy);
+                layer.TileOffsetX = newOffsetX;
+                layer.TileOffsetY = newOffsetY;
+            }
+            else if (moved.PanDeltaPixels != Vector2.Zero)
             {
                 _minimapPanOffset -= new Vector2(
                     moved.PanDeltaPixels.Y / cellSize,
@@ -115,8 +182,21 @@ public partial class ViewerApp
             _minimapDragging = false;
             if (released.WasDragging)
             {
+                // Cartography: a footprint drag ends here — re-stream the composition exactly once
+                // so the 3D view matches the offset the operator just set. A pan drag does nothing.
+                if (_footprintDragLayerIndex >= 0 && _terrainManager != null)
+                {
+                    _terrainManager.RefreshPhaseLayers();
+                    _statusMessage = $"Layer '{_worldScene?.PhaseLayers[_footprintDragLayerIndex].MapName}' "
+                        + $"offset set to ({_worldScene?.PhaseLayers[_footprintDragLayerIndex].TileOffsetX},"
+                        + $"{_worldScene?.PhaseLayers[_footprintDragLayerIndex].TileOffsetY}) by minimap drag.";
+                }
+
+                _footprintDragLayerIndex = -1;
                 return;
             }
+
+            _footprintDragLayerIndex = -1;
 
             if (hitLitMarker)
             {

@@ -34,6 +34,13 @@ public class TerrainManager : ISceneRenderer
     // Persistent cache: parsed tile data stays in memory forever to avoid re-parsing from disk
     private readonly ConcurrentDictionary<(int, int), TileLoadResult> _tileCache = new();
 
+    // Composition generation: bumped on every EvictAllTiles (phase-stack or channel edit).
+    // Background tile loads capture the generation at queue time and DISCARD their result when
+    // the generation moved on — otherwise a load started under the old composition finishes after
+    // the eviction, writes its stale composed result back into _tileCache and _pendingTiles, and
+    // the operator sees "sticky" tiles that refuse to reflect the new layer offsets (Spec 222).
+    private int _compositionGeneration;
+
     // Async streaming: background-parsed tiles waiting for GPU upload
     private readonly ConcurrentQueue<(int tx, int ty, TileLoadResult result)> _pendingTiles = new();
     // Background completion order is not spatial order. Keep a render-thread scratch
@@ -540,13 +547,76 @@ public class TerrainManager : ISceneRenderer
             : string.Join(", ", _adapter.PhaseLayers.Select(static layer =>
                 $"{layer.MapName}{(layer.Enabled ? string.Empty : " (off)")}[{PhaseCompositionPolicy.Describe(layer.Channels)}]"));
 
+        RefreshLayerResolutionStates();
+
         ViewerLog.Important(ViewerLog.Category.Terrain,
             $"[TerrainManager] Phase stack applied: {described}. Evicted {evicted} cached tiles.");
+    }
+
+    /// <summary>
+    /// Cartography (Spec 222): the tile coordinates a layer's donor map occupies in its own grid.
+    /// Empty when the map is unresolvable — pair with <see cref="PhaseLayerSettings.Resolution"/>
+    /// for the displayable reason.
+    /// </summary>
+    public IReadOnlyList<(int TileX, int TileY)> GetLayerFootprint(PhaseLayerSettings layer)
+        => _adapter.GetOccupiedTiles(layer.MapName);
+
+    /// <summary>
+    /// Cartography (Spec 222): true when the named map is WMO-based (a dungeon/global-WMO map) —
+    /// no terrain tiles, so layers sourced from it must not claim tiles or paint minimap textures.
+    /// </summary>
+    public bool IsMapWmoBased(string mapName) => _adapter.IsMapWmoBased(mapName);
+
+    /// <summary>
+    /// Cartography (Spec 222): the base map's own occupied tiles — the alignment target for
+    /// non-overlapping layers.
+    /// </summary>
+    public IReadOnlyList<(int TileX, int TileY)> GetBaseFootprint()
+        => _adapter.GetOccupiedTiles(MapName);
+
+    /// <summary>
+    /// Cartography (Spec 222): footprint colors for the minimap overlay and the row swatches.
+    /// Saturated, mutually distinct hues; index by <see cref="PhaseLayerSettings.FootprintColorIndex"/>.
+    /// </summary>
+    public static IReadOnlyList<(float R, float G, float B)> FootprintPalette { get; } = new[]
+    {
+        (0.95f, 0.30f, 0.30f),  // red
+        (0.30f, 0.60f, 1.00f),  // blue
+        (0.30f, 0.90f, 0.40f),  // green
+        (1.00f, 0.80f, 0.20f),  // amber
+        (0.85f, 0.40f, 1.00f),  // violet
+        (0.20f, 0.95f, 0.90f),  // cyan
+        (1.00f, 0.55f, 0.20f),  // orange
+        (0.95f, 0.40f, 0.70f),  // pink
+    };
+
+    /// <summary>
+    /// Cartography (Spec 222): check each layer's donor map against the adapter and record the
+    /// outcome + a stable palette color. Called from <see cref="RefreshPhaseLayers"/> so badges and
+    /// footprints are always current after an edit.
+    /// </summary>
+    public void RefreshLayerResolutionStates()
+    {
+        IList<PhaseLayerSettings> layers = _adapter.PhaseLayers;
+        for (int i = 0; i < layers.Count; i++)
+        {
+            PhaseLayerSettings layer = layers[i];
+            bool resolved = _adapter.TryResolveMap(layer.MapName);
+            layer.Resolution = resolved
+                ? PhaseLayerResolution.Resolved
+                : PhaseLayerResolution.Unresolved;
+            layer.FootprintColorIndex = i % FootprintPalette.Count;
+        }
     }
 
     /// <summary>Drop every cached and resident tile so they reload under the current composition.</summary>
     private int EvictAllTiles()
     {
+        // Invalidate in-flight work BEFORE touching the caches: any background load started under
+        // the previous composition must not write its stale result back after this returns.
+        _compositionGeneration++;
+        while (_pendingTiles.TryDequeue(out _)) { }
+
         var keysToEvict = _tileCache.Keys.ToList();
         foreach (var key in keysToEvict)
         {
@@ -746,6 +816,7 @@ public class TerrainManager : ISceneRenderer
 
             var capturedTx = tx;
             var capturedTy = ty;
+            int capturedGeneration = _compositionGeneration;
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 if (_disposed) return;
@@ -754,6 +825,14 @@ public class TerrainManager : ISceneRenderer
                 try
                 {
                     var result = LoadTileWithPlacementsSerialized(capturedTx, capturedTy);
+                    if (capturedGeneration != _compositionGeneration)
+                    {
+                        // Composition changed while this load was in flight (phase offset, channel
+                        // toggle, add/remove). The result was composed under the OLD settings —
+                        // writing it back would make stale tiles stick after EvictAllTiles.
+                        return;
+                    }
+
                     _tileCache[(capturedTx, capturedTy)] = result; // Cache for future re-entry
                     if (!_disposed)
                         _pendingTiles.Enqueue((capturedTx, capturedTy, result));

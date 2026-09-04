@@ -12499,9 +12499,14 @@ void main() {
             _lastVirtualPath = resolvedVirtualPath;
             _loadedFileName = Path.GetFileName(resolvedVirtualPath);
 
-            // Write to cache folder for parsers that expect file paths
+            // Write to cache folder for parsers that expect file paths. The cache is VERSIONED by
+            // client root: a flat cache let a stale Shadowfang.wdt extracted from one client
+            // version shadow the 0.5.3 alphaWDT from another, silently feeding the terrain
+            // pipeline a WDT that was never from the active client (Spec 222, 2026-09-04).
             Directory.CreateDirectory(CacheDir);
-            var cachePath = Path.Combine(CacheDir, _loadedFileName!);
+            string clientCacheSegment = BuildCacheSegment(BuildWdlPreviewCacheIdentity());
+            var cachePath = Path.Combine(CacheDir, clientCacheSegment, _loadedFileName!);
+            Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
             File.WriteAllBytes(cachePath, data);
             _loadedFilePath = cachePath;
 

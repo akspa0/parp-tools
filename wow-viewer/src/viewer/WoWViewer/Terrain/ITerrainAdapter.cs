@@ -62,4 +62,28 @@ public interface ITerrainAdapter
     /// an empty list.
     /// </summary>
     IList<PhaseLayerSettings> PhaseLayers { get; }
+
+    /// <summary>
+    /// Cartography (Spec 222): the tile coordinates a named map occupies in its own grid, as
+    /// (tileX, tileY) pairs. This is the donor footprint drawn on the minimap and the source of
+    /// the donor tile-picker grid. Returns an empty set when the map cannot be resolved — callers
+    /// should consult <see cref="TryResolveMap"/> to distinguish "resolved but empty" from
+    /// "unresolved".
+    /// </summary>
+    IReadOnlyList<(int TileX, int TileY)> GetOccupiedTiles(string mapName);
+
+    /// <summary>
+    /// Cartography (Spec 222): whether a named map can be resolved to readable terrain data
+    /// through this adapter's data source. Never throws; a false result is a displayable state,
+    /// not an error.
+    /// </summary>
+    bool TryResolveMap(string mapName);
+
+    /// <summary>
+    /// Cartography (Spec 222): true when the named map is WMO-based (a dungeon/global-WMO map).
+    /// Such maps carry no terrain tiles — their WDT MAIN entries are leftovers — so layers sourced
+    /// from them must not claim terrain tiles or draw footprints. Unresolvable maps return false;
+    /// combine with <see cref="TryResolveMap"/> for the displayable state.
+    /// </summary>
+    bool IsMapWmoBased(string mapName);
 }

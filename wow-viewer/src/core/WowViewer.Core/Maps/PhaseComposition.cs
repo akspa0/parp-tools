@@ -52,6 +52,22 @@ public enum PhaseDataChannel
 }
 
 /// <summary>
+/// Whether the host has checked a layer's donor map and what it found. Cartography (Spec 222)
+/// surfaces this as an inline row badge so an unresolvable map is never a silent no-op.
+/// </summary>
+public enum PhaseLayerResolution
+{
+    /// <summary>No resolution attempt has been made yet.</summary>
+    NotYetChecked = 0,
+
+    /// <summary>The donor map resolved to readable terrain data.</summary>
+    Resolved = 1,
+
+    /// <summary>The donor map could not be resolved; the layer contributes nothing.</summary>
+    Unresolved = 2,
+}
+
+/// <summary>
 /// One entry in the phase overlay stack: which map, whether it is active, and what it may
 /// contribute. Layers are applied in list order, so a later layer overrides an earlier one on any
 /// channel they both supply.
@@ -59,6 +75,15 @@ public enum PhaseDataChannel
 public sealed class PhaseLayerSettings
 {
     public required string MapName { get; init; }
+
+    /// <summary>Cartography (Spec 222): the host's last resolution attempt outcome for this layer's donor map.</summary>
+    public PhaseLayerResolution Resolution { get; set; } = PhaseLayerResolution.NotYetChecked;
+
+    /// <summary>
+    /// Cartography (Spec 222): index into the host's footprint color palette, assigned by stack
+    /// position so the minimap overlay and the row swatch agree. Negative means unassigned.
+    /// </summary>
+    public int FootprintColorIndex { get; set; } = -1;
 
     /// <summary>
     /// Rotation of this layer's content, in degrees, about <see cref="RotationOriginTileX"/> /
@@ -142,6 +167,8 @@ public sealed class PhaseLayerSettings
             OnlyTakeWhatThePhaseCarries = OnlyTakeWhatThePhaseCarries,
             TileOffsetX = TileOffsetX,
             TileOffsetY = TileOffsetY,
+            Resolution = Resolution,
+            FootprintColorIndex = FootprintColorIndex,
         };
 
         foreach (PhaseTilePlacement placement in TilePlacements)

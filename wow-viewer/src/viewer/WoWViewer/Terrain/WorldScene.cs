@@ -1609,6 +1609,46 @@ public class WorldScene : ISceneRenderer
     public IReadOnlyList<PhaseLayerSettings> PhaseLayers =>
         _terrainManager?.PhaseLayers as IReadOnlyList<PhaseLayerSettings>
         ?? (_terrainManager?.PhaseLayers?.ToList() ?? new List<PhaseLayerSettings>());
+
+    /// <summary>Cartography (Spec 222): which layer row is expanded/selected on the minimap; -1 = none.</summary>
+    public int SelectedPhaseLayerIndex { get; set; } = -1;
+
+    /// <summary>
+    /// Cartography (Spec 222): true when the named map is WMO-based (a dungeon/global-WMO map) —
+    /// such layers carry no terrain tiles and must not paint minimap textures or claim tiles.
+    /// Measured 2026-09-04: Shadowfang's leftover MAIN entries painted minimap fragments at wrong
+    /// coordinates and drove 667 missing/failed terrain loads.
+    /// </summary>
+    public bool IsWmoBasedMap(string mapName)
+        => _terrainManager != null && _terrainManager.IsMapWmoBased(mapName);
+
+    /// <summary>
+    /// Cartography (Spec 222): each enabled, resolved layer with its donor footprint in DONOR tile
+    /// coordinates. The minimap overlay applies the layer's offset to show where the content will
+    /// land; an unoffset layer's footprint therefore appears at its true coordinates — which is
+    /// exactly how a non-overlapping map (Shadowfang over Azeroth) stays visible instead of
+    /// silently contributing nothing.
+    /// </summary>
+    public IReadOnlyList<(PhaseLayerSettings Layer, IReadOnlyList<(int TileX, int TileY)> Tiles)> GetLayerFootprints()
+    {
+        var result = new List<(PhaseLayerSettings, IReadOnlyList<(int, int)>)>();
+        if (_terrainManager == null)
+            return result;
+
+        foreach (PhaseLayerSettings layer in _terrainManager.PhaseLayers)
+        {
+            if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName))
+                continue;
+            if (layer.Resolution != PhaseLayerResolution.Resolved)
+                continue;
+            if (_terrainManager.IsMapWmoBased(layer.MapName))
+                continue;
+
+            result.Add((layer, _terrainManager.GetLayerFootprint(layer)));
+        }
+
+        return result;
+    }
     public bool EnableRuntimeWmoGroupVisibility
     {
         get => _assets.EnableRuntimeWmoGroupVisibility;

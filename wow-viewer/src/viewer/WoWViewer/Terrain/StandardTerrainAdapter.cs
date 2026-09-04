@@ -243,6 +243,65 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return HasTilePayload(overlayBase);
     }
 
+    /// <summary>Occupied-tile footprints per map, cached — each scan is 4096 existence probes.</summary>
+    private readonly Dictionary<string, IReadOnlyList<(int TileX, int TileY)>> _occupiedTileCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <inheritdoc />
+    public bool TryResolveMap(string mapName)
+    {
+        if (string.IsNullOrWhiteSpace(mapName))
+            return false;
+
+        // The base map is trivially resolvable — this adapter is its WDT/ADT source.
+        if (string.Equals(mapName, _mapName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return OverlayTileExists(mapName, 0, 0)
+            || GetOccupiedTiles(mapName).Count > 0;
+    }
+
+    /// <inheritdoc />
+    public bool IsMapWmoBased(string mapName)
+    {
+        // Standard overlay WDTs are read through the data source without a parsed WDT header
+        // cache; assume terrain. WMO-only standard maps are rare and handled by the global-WMO
+        // path, not phase composition.
+        return false;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<(int TileX, int TileY)> GetOccupiedTiles(string mapName)
+    {
+        if (string.IsNullOrWhiteSpace(mapName))
+            return Array.Empty<(int, int)>();
+
+        if (_occupiedTileCache.TryGetValue(mapName, out var cached))
+            return cached;
+
+        var tiles = new List<(int, int)>();
+        if (string.Equals(mapName, _mapName, StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (int idx in _existingTileSet)
+                tiles.Add((idx / 64, idx % 64));
+        }
+        else
+        {
+            for (int tileX = 0; tileX < 64; tileX++)
+            {
+                for (int tileY = 0; tileY < 64; tileY++)
+                {
+                    if (OverlayTileExists(mapName, tileX, tileY))
+                        tiles.Add((tileX, tileY));
+                }
+            }
+        }
+
+        IReadOnlyList<(int, int)> result = tiles;
+        _occupiedTileCache[mapName] = result;
+        return result;
+    }
+
     public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
     {
         var result = new TileLoadResult();

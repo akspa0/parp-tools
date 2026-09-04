@@ -148,6 +148,64 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// <inheritdoc />
     public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
 
+    /// <summary>The map directory name this adapter's WDT belongs to (e.g. "Azeroth").</summary>
+    public string MapName => Path.GetFileNameWithoutExtension(_wdtPath);
+
+    /// <inheritdoc />
+    public bool TryResolveMap(string mapName)
+    {
+        if (string.IsNullOrWhiteSpace(mapName))
+            return false;
+
+        // The base map itself is trivially resolvable — this adapter is its WDT.
+        if (string.Equals(mapName, MapName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return ResolvePhaseAdapter(mapName) != null;
+    }
+
+    /// <inheritdoc />
+    public bool IsMapWmoBased(string mapName)
+    {
+        if (string.IsNullOrWhiteSpace(mapName))
+            return false;
+
+        if (string.Equals(mapName, MapName, StringComparison.OrdinalIgnoreCase))
+            return IsWmoBased;
+
+        AlphaTerrainAdapter? phaseAdapter = ResolvePhaseAdapter(mapName);
+        return phaseAdapter != null && phaseAdapter.IsWmoBased;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<(int TileX, int TileY)> GetOccupiedTiles(string mapName)
+    {
+        if (string.IsNullOrWhiteSpace(mapName))
+            return Array.Empty<(int, int)>();
+
+        // The base map's own footprint comes from this adapter's WDT.
+        IReadOnlyList<int> offsets;
+        if (string.Equals(mapName, MapName, StringComparison.OrdinalIgnoreCase))
+        {
+            offsets = _adtOffsets;
+        }
+        else
+        {
+            AlphaTerrainAdapter? phaseAdapter = ResolvePhaseAdapter(mapName);
+            if (phaseAdapter == null)
+                return Array.Empty<(int, int)>();
+
+            // WMO-based maps (dungeons) have no terrain tiles; their MAIN entries are leftovers,
+            // not a footprint (2026-09-04: Shadowfang drew 10 phantom tiles on the minimap).
+            if (phaseAdapter.IsWmoBased)
+                return Array.Empty<(int, int)>();
+
+            offsets = phaseAdapter._adtOffsets;
+        }
+
+        return MapFootprint.FromMainOffsets(offsets);
+    }
+
     /// <inheritdoc />
     public string? OverlayMapName
     {
@@ -223,14 +281,21 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         if (TileExistsInOwnWdt(tileX, tileY))
             return true;
 
-        // A phase layer may supply a tile the base map does not have.
+        // A phase layer may supply a tile the base map does not have. WMO-based donor maps
+        // (dungeons) carry leftover MAIN entries that mean nothing as terrain tiles — measured
+        // 2026-09-04: Shadowfang's WDT produced 10 bogus tile claims, drawing footprints in
+        // random places and 667 missing/failed terrain loads. A WMO-based donor contributes its
+        // global WMO, never terrain tiles.
         foreach (PhaseLayerSettings layer in _phaseLayers)
         {
             if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName) || layer.Channels == PhaseDataChannel.None)
                 continue;
 
             AlphaTerrainAdapter? phaseAdapter = ResolvePhaseAdapter(layer.MapName);
-            if (phaseAdapter != null && phaseAdapter.TileExistsInOwnWdt(tileX - layer.TileOffsetX, tileY - layer.TileOffsetY))
+            if (phaseAdapter == null || phaseAdapter.IsWmoBased)
+                continue;
+
+            if (phaseAdapter.TileExistsInOwnWdt(tileX - layer.TileOffsetX, tileY - layer.TileOffsetY))
                 return true;
         }
 
@@ -317,20 +382,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 continue;
             }
 
+            // WMO-based donor maps contribute their global WMO, never terrain tiles — skip before
+            // the tile lookup so leftover MAIN entries cannot compose garbage terrain (2026-09-04,
+            // Shadowfang over Azeroth: 667 missing/failed tiles from exactly this).
+            if (phaseAdapter.IsWmoBased)
+                continue;
+
             int sourceTileX = tileX - layer.TileOffsetX;
             int sourceTileY = tileY - layer.TileOffsetY;
-            if (layer.HasTileOffset)
-            {
-                (float worldDx, float worldDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
-                    layer.TileOffsetX,
-                    layer.TileOffsetY,
-                    WoWConstants.TileSize);
-                ViewerLog.Important(ViewerLog.Category.Terrain,
-                    $"[AlphaADT] Phase offset mapping '{layer.MapName}': targetTile=({tileX},{tileY}) "
-                    + $"offset=({layer.TileOffsetX},{layer.TileOffsetY}) "
-                    + $"sourceTile=target-offset=({sourceTileX},{sourceTileY}) "
-                    + $"placementDelta=({worldDx:F1},{worldDy:F1})");
-            }
             if (!phaseAdapter.TileExistsInOwnWdt(sourceTileX, sourceTileY))
             {
                 string missingTileKey = $"tile-miss:{layer.MapName}:{layer.TileOffsetX}:{layer.TileOffsetY}";
@@ -362,6 +421,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         return result;
     }
 
+    /// <summary>
     /// <summary>
     /// Converts a phase WDT's local MDNM/MONM indices into this base adapter's combined name tables.
     /// </summary>
