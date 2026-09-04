@@ -5,6 +5,25 @@ Last updated: 2026-09-04
 **START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
 open specs, with the reasoning for the order. This section is the session summary behind it.
 
+## Landed 2026-09-04 — Spec 222 v2: Cartography (multi-map, multi-tile workbench) — operator accepted
+
+- **The 0.5.3 "phase overlay regression" was diagnosed and is NOT a code defect.** Measured via the
+  new admission diagnostics: `Shadowfang` over `Azeroth` — stack propagates, WDT resolves (10 tiles),
+  but target (34,28) maps to source (34,28) at zero offset and Shadowfang has no tile there, so
+  composition correctly contributes nothing. The failure is the interaction model: numeric offsets
+  with no spatial feedback. Diagnostics remain in `AlphaTerrainAdapter` (admission / skipped /
+  unresolved / tile-miss, one-shot per configuration) plus occupied-tile coordinates in the resolver
+  log.
+- **Operator accepted the workbench deal with expanded scope**: any TILE, not just any map, bundled
+  with copy/paste/rotate, as one right-sidebar **Cartography** feature replacing the phase panel,
+  the chunk manipulator (195), and the scattered selection surfaces — multiple layers of tile data
+  from multiple maps. Spec 222 v2 ([spec](../specs/222-map-composition-workbench/spec.md) ·
+  [plan](../specs/222-map-composition-workbench/plan.md) ·
+  [tasks](../specs/222-map-composition-workbench/tasks.md)): footprints AND tile placements drawn
+  and dragged on the minimap; transform tools wrap the validated Spec 219 seam (`TileContentTransform`);
+  full-channel paste fixes 195's partial-paste defect; old surfaces retired in the same change
+  (FR-11). Composition semantics unchanged. **Next: 222-T101.**
+
 ## Landed 2026-09-04 — Spec 211 Phase 5: doodad selection bounds + 3D aids (build green, operator visual check owed)
 
 - Selected WMO doodads now get REAL oriented geometry boxes: `WmoRenderer.TryGetDoodadLocalBounds`

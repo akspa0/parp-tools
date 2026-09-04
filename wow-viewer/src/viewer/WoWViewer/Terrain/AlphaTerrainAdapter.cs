@@ -128,6 +128,11 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// <summary>Adapters for phase maps, cached per map name. A cached null is a cached failure.</summary>
     private readonly Dictionary<string, AlphaTerrainAdapter?> _phaseAdapters = new(StringComparer.OrdinalIgnoreCase);
 
+    // Tile loads run repeatedly while streaming. Keep phase admission diagnostics actionable
+    // without emitting one line for every visible tile. Keys include the current layer settings,
+    // so editing a layer naturally produces a new diagnostic on the next reload.
+    private readonly ConcurrentDictionary<string, byte> _phaseDiagnosticOnce = new(StringComparer.Ordinal);
+
     /// <summary>
     /// Resolves a phase map name to a readable alpha WDT path.
     /// </summary>
@@ -272,14 +277,45 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     {
         TileLoadResult result = LoadTileCore(tileX, tileY);
 
+        if (_phaseLayers.Count > 0)
+        {
+            string stackKey = string.Join("|", _phaseLayers.Select(layer =>
+                $"{layer.MapName}:{layer.Enabled}:{(int)layer.Channels}:{layer.TileOffsetX}:{layer.TileOffsetY}"));
+            if (_phaseDiagnosticOnce.TryAdd($"stack:{stackKey}", 0))
+            {
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"[AlphaADT] Phase admission: base='{Path.GetFileNameWithoutExtension(_wdtPath)}' "
+                    + $"layers={_phaseLayers.Count}; first requested tile=({tileX},{tileY}); "
+                    + $"stack={stackKey}");
+            }
+        }
+
         foreach (PhaseLayerSettings layer in _phaseLayers)
         {
             if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName) || layer.Channels == PhaseDataChannel.None)
+            {
+                string rejectedKey = $"rejected:{layer.MapName}:{layer.Enabled}:{(int)layer.Channels}";
+                if (_phaseDiagnosticOnce.TryAdd(rejectedKey, 0))
+                {
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        $"[AlphaADT] Phase skipped before resolution: map='{layer.MapName}' "
+                        + $"enabled={layer.Enabled} channels={PhaseCompositionPolicy.Describe(layer.Channels)}.");
+                }
                 continue;
+            }
 
             AlphaTerrainAdapter? phaseAdapter = ResolvePhaseAdapter(layer.MapName);
             if (phaseAdapter == null)
+            {
+                string unresolvedKey = $"unresolved:{layer.MapName}";
+                if (_phaseDiagnosticOnce.TryAdd(unresolvedKey, 0))
+                {
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        $"[AlphaADT] Phase admitted but no adapter: map='{layer.MapName}'. "
+                        + "See the preceding resolver diagnostic for every attempted WDT path.");
+                }
                 continue;
+            }
 
             int sourceTileX = tileX - layer.TileOffsetX;
             int sourceTileY = tileY - layer.TileOffsetY;
@@ -296,7 +332,18 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                     + $"placementDelta=({worldDx:F1},{worldDy:F1})");
             }
             if (!phaseAdapter.TileExistsInOwnWdt(sourceTileX, sourceTileY))
+            {
+                string missingTileKey = $"tile-miss:{layer.MapName}:{layer.TileOffsetX}:{layer.TileOffsetY}";
+                if (_phaseDiagnosticOnce.TryAdd(missingTileKey, 0))
+                {
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        $"[AlphaADT] Phase WDT opened but has no source tile for map='{layer.MapName}': "
+                        + $"target=({tileX},{tileY}) source=({sourceTileX},{sourceTileY}) "
+                        + $"offset=({layer.TileOffsetX},{layer.TileOffsetY}) ownTiles={phaseAdapter._existingTiles.Count}. "
+                        + "This is an overlap/offset issue, not a phase-stack propagation failure.");
+                }
                 continue;
+            }
 
             TileLoadResult phase = phaseAdapter.LoadTileCore(sourceTileX, sourceTileY);
             phaseAdapter.TileTextures.TryGetValue((sourceTileX, sourceTileY), out List<string>? phaseTextures);
@@ -431,8 +478,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if (!string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved))
             {
                 adapter = new AlphaTerrainAdapter(resolved!) { PhaseWdtPathResolver = PhaseWdtPathResolver };
+                string occupiedTilePreview = string.Join(", ", adapter._existingTiles
+                    .Take(16)
+                    .Select(static index => $"({index / 64},{index % 64})"));
+                if (adapter._existingTiles.Count > 16)
+                    occupiedTilePreview += $", … +{adapter._existingTiles.Count - 16}";
                 ViewerLog.Important(ViewerLog.Category.Terrain,
-                    $"[AlphaADT] Phase map '{mapName}' opened from '{resolved}' ({adapter._existingTiles.Count} tiles).");
+                    $"[AlphaADT] Phase map '{mapName}' opened from '{resolved}' ({adapter._existingTiles.Count} tiles): "
+                    + $"occupied tile coordinates={occupiedTilePreview}.");
             }
             else
             {
