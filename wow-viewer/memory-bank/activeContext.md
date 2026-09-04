@@ -1,9 +1,21 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-02
+Last updated: 2026-09-04
 
 **START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
 open specs, with the reasoning for the order. This section is the session summary behind it.
+
+## Next lane — Spec 220 WMO doodad editing & writing (spec authored 2026-09-04, not implemented)
+
+- Operator follow-up to 211's doodad picking: edit MODD placements (move/rotate/scale/add/delete),
+  author MODS doodad sets, save the WMO back in the opened file's version. Full Spec Kit trio at
+  [`specs/220-wmo-doodad-editing/`](../specs/220-wmo-doodad-editing/spec.md); registered in STATUS.md.
+- Feasibility measured before writing: V17 canonical read model, a V14 root writer
+  (`WmoV17ToV14Converter.WriteWmoV14`), MODD/MODS/MODN detail readers, Core.Editor ops+undo patterns,
+  and 211's selection pipeline all already exist — the spec composes them, no forks, readers frozen.
+- **Phase 0 is blocking**: round-trip gate (V14 → V17 → V14 → byte/field equality on a real WMO)
+  before any editing UI, so the writer is proven on unmodified data first. Next bounded action:
+  **220-T001**.
 
 ## Hard constraints (violating these has cost real time)
 
@@ -23,6 +35,52 @@ open specs, with the reasoning for the order. This section is the session summar
 - **Baseline: 9 pre-existing test failures** (WtfLineClassifier x2, WorldFramePassCoordinator x3,
   AdtV23SummaryReader, V18StorePlacementsReader, EnrichmentStreamFormat, ModelFootprintReader). Any
   other failure is new. Current: **1354 passed**.
+
+## Current lane — Spec 211 Phase 4 doodad hover tooltip (landed 2026-09-04, awaiting operator visual check)
+
+- Precise-ray hover now reuses the Spec 211 click picker (`CollectSceneObjectPickHits`) so WMO doodads
+  show the hover overlay, with `WmoContainerFallThroughFilter` applied after WMO/doodad visibility
+  gates so an enclosing WMO AABB cannot hide its interior doodads.
+- `HoveredAssetInfo` carries `ParentWmoIndex`/`ParentSourcePath`; "Left-click to inspect" now selects
+  the exact hovered doodad via `SelectSceneObject(type, index, parentIndex)`. Tooltip shows MODD
+  definition index, MODN offset, active MODS set, MODR group references, and parent WMO identity.
+- **Proof:** focused `WmoContainerFallThroughFilterTests` 7/7 green (new doodad fall-through case);
+  viewer Debug build 0 errors. Source/build/unit proof only — operator must hover a placed WMO
+  doodad to verify the tooltip visually (T407 open).
+- **Unrelated open regression (do not conflate):** Alpha 0.5.3 terrain shows chunk-aligned dark MCSH
+  patches. Tracked separately under Spec 219's earlier debug lane; not caused by this change.
+
+## Previous lane — Spec 219 phase-layer rotation
+
+- **Phase 1 Gate 1 passed 2026-09-03.** Core now owns a phase-agnostic `TileContentTransform` for
+  exact 90°/180° rotation and H/V mirrors across terrain vertices/normals, holes, alpha/shadow,
+  MCCV, liquid flags, complete MDDF/MODF placements, and MODF bounds. Mirrors are exact involutions;
+  CW/CCW round-trip is identity. Free-angle placement-point rotation is present; terrain free-rotate
+  remains a stated grid-snapped approximation.
+- `PhaseLayerSettings` now carries angle/origin/mirrors/per-tile mappings and preserves them in
+  `Clone`. `ResolveTileSource` is origin-aware, per-tile mappings win last, duplicate-target claims
+  are counted for diagnostics, negative quarter turns normalize, and approximation is explicit.
+- **Proof:** focused Core tests **55/55**; full `WowViewer.slnx` Debug build **0 errors** (existing
+  warnings only). This is source/build/unit proof, not runtime or visual proof.
+- **Next bounded action:** Phase 2 T007 — wire only `StandardTerrainAdapter` to
+  `ResolveTileSource`/`TileContentTransform`, keep the zero-transform path unchanged, then rerun the
+  focused tests before touching `AlphaTerrainAdapter`.
+- **Operator scope addition:** offsets need one-terrain-cell precision so terrain pasted across
+  unrelated source/target chunk or ADT boundaries can be aligned. Canonical unit: integer cells;
+  **8 cells = 1 chunk, 128 cells = 1 ADT**. Phase 2B owns Core boundary re-slicing plus adapter/UI
+  wiring. Preserve authored heights exactly; sub-cell/world-float shifts require an explicit future
+  resampling mode. Spec 196's `WdlLatticeMagnetizer` may supply an optional candidate offset + fit
+  score, but the operator accepts it and the integer cell offset remains authoritative.
+- **Workbench expansion (operator 2026-09-03):** selection must be a full 64×64 orthographic map
+  over minimap/heightmap/occupancy, with magnetic tile/chunk/cell click/check, paint, box, lasso,
+  source/target colors, and an explicit target. The same selection projects into configurable 3D
+  terrain selection. Base becomes a non-removable channel-gated first layer. Every phase card must
+  expose 90/45 CW/CCW, Mirror H/V, free angle, origin, approximation, and reset. The page also owns
+  preflighted Save Transformed Map to supported ADT/Alpha WDT output copies.
+- **Spec 195 correction:** its “complete” claim is false by source: camera-centered 280px dark grid,
+  no minimap/heightmap, click-only despite drag task, camera-derived target, and paste materializes
+  only heights/normals/holes. Reuse only audited Core coordinate/undo pieces; retire duplicate UI,
+  selection, clipboard, target, and paste state through Spec 219 Phase 4.
 
 ## Landed 2026-09-02
 
@@ -150,6 +208,21 @@ writing + scoring + baseline + the visual A/B.
 
 ## Open, with the next concrete action
 
+- **Spec 203 — Alpha phase fixes landed 2026-09-03, operator visual proof owed.** Two
+  operator-confirmed defects fixed in the Alpha phase-layer path: (1) **name-table remap** —
+  MDDF/MODF `NameIndex` is local to each WDT's MDNM/MONM table, so copying a phase index into the
+  base tile resolved the base table's unrelated entry (`newbindstone.mdx` became `gypsywagon.mdx`
+  at the correct transform); the Alpha adapter now resolves phase indices to phase-table paths,
+  reuses/appends them in the base table, and rewrites the index before rendering. (2) **tile-offset
+  double inversion** — the Phase Map Layers panel cross-wired its labels (now direct: X = row
+  `TileOffsetX`, Y = column `TileOffsetY`), and `TranslatePhasePlacements` in BOTH adapters passed
+  `ChunkSize` (533.33 yd) where offsets are in TILES, moving placements 1/16 of the terrain's
+  distance; the attempted `TileSize` (8533.33 yd) correction was later reverted after auditing the
+  coordinate formula: this codebase's misnamed `ChunkSize` is the one-ADT span (533.33 yd). Source
+  lookup stays `target - offset`. Build
+  **0 errors**; phase-composition tests **18/18**. **Proof owner: operator** — reload an offset
+  Alpha phase layer and confirm objects land on their terrain; the `[AlphaADT] Phase offset
+  mapping` and `Phase ... name map` log lines record the mapping.
 - **Spec 218 — creature staging** (drafted 2026-09-02, not planned). Spawn a subject, **attach** an
   equipped torch, paper-doll UI, and save the whole arrangement so it replays through the existing
   capture automation. **Measured: spawning already exists and capture automation already exists, but

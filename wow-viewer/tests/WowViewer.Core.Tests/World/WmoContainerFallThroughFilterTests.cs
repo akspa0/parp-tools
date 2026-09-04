@@ -113,4 +113,32 @@ public sealed class WmoContainerFallThroughFilterTests
         Assert.Single(result);
         Assert.Equal(2, result[0].Id);
     }
+
+    [Fact]
+    public void ApplyFallThrough_PreservesWmoDoodadCandidateAndUnrelatedRayOrder()
+    {
+        var parentWmo = new WmoContainerFallThroughFilter.CandidateObject(
+            Id: 0,
+            IsWmo: true,
+            BoundsMin: new Vector3(0, 0, 0),
+            BoundsMax: new Vector3(50, 50, 20),
+            SelectionPoint: new Vector3(25, 25, 10));
+        var activeSetDoodad = new WmoContainerFallThroughFilter.CandidateObject(
+            Id: 1,
+            IsWmo: false,
+            BoundsMin: new Vector3(19, 19, 0),
+            BoundsMax: new Vector3(21, 21, 4),
+            SelectionPoint: new Vector3(20, 20, 2));
+        var unrelatedObject = new WmoContainerFallThroughFilter.CandidateObject(
+            Id: 2,
+            IsWmo: false,
+            BoundsMin: new Vector3(70, 70, 0),
+            BoundsMax: new Vector3(74, 74, 4),
+            SelectionPoint: new Vector3(72, 72, 2));
+
+        var result = WmoContainerFallThroughFilter.ApplyFallThrough(
+            [parentWmo, activeSetDoodad, unrelatedObject]);
+
+        Assert.Equal([1, 2], result.Select(static candidate => candidate.Id));
+    }
 }

@@ -91,11 +91,20 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// <summary>Texture names referenced across all loaded tiles (MTEX).</summary>
     public ConcurrentDictionary<(int tileX, int tileY), List<string>> TileTextures { get; } = new();
 
-    /// <summary>MDX model name table from WDT MDNM.</summary>
-    public IReadOnlyList<string> MdxModelNames { get; }
+    private readonly List<string> _mdxModelNames;
+    private readonly List<string> _wmoModelNames;
 
-    /// <summary>WMO model name table from WDT MONM.</summary>
-    public IReadOnlyList<string> WmoModelNames { get; }
+    /// <summary>
+    /// MDX model name table from the base WDT MDNM, extended with phase-only model paths as they
+    /// are composed.
+    /// </summary>
+    public IReadOnlyList<string> MdxModelNames => _mdxModelNames;
+
+    /// <summary>
+    /// WMO model name table from the base WDT MONM, extended with phase-only model paths as they
+    /// are composed.
+    /// </summary>
+    public IReadOnlyList<string> WmoModelNames => _wmoModelNames;
 
     /// <summary>Collected MDDF placements from all loaded tiles (deduplicated by uniqueId).</summary>
     public List<MddfPlacement> MddfPlacements { get; } = new();
@@ -152,8 +161,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         _wdt = new WdtAlpha(wdtPath);
         _existingTiles = _wdt.GetExistingAdtsNumbers();
         _adtOffsets = _wdt.GetAdtOffsetsInMain();
-        MdxModelNames = _wdt.GetMdnmFileNames();
-        WmoModelNames = _wdt.GetMonmFileNames();
+        _mdxModelNames = _wdt.GetMdnmFileNames();
+        _wmoModelNames = _wdt.GetMonmFileNames();
         IsWmoBased = _wdt.IsWmoBased || _existingTiles.Count == 0;
 
         // Collect WDT-level MODF placement whenever available
@@ -274,15 +283,121 @@ public class AlphaTerrainAdapter : ITerrainAdapter
 
             int sourceTileX = tileX - layer.TileOffsetX;
             int sourceTileY = tileY - layer.TileOffsetY;
+            if (layer.HasTileOffset)
+            {
+                (float worldDx, float worldDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+                    layer.TileOffsetX,
+                    layer.TileOffsetY,
+                    WoWConstants.TileSize);
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"[AlphaADT] Phase offset mapping '{layer.MapName}': targetTile=({tileX},{tileY}) "
+                    + $"offset=({layer.TileOffsetX},{layer.TileOffsetY}) "
+                    + $"sourceTile=target-offset=({sourceTileX},{sourceTileY}) "
+                    + $"placementDelta=({worldDx:F1},{worldDy:F1})");
+            }
             if (!phaseAdapter.TileExistsInOwnWdt(sourceTileX, sourceTileY))
                 continue;
 
             TileLoadResult phase = phaseAdapter.LoadTileCore(sourceTileX, sourceTileY);
             phaseAdapter.TileTextures.TryGetValue((sourceTileX, sourceTileY), out List<string>? phaseTextures);
-            MergePhaseTile(result, phase, phaseTextures ?? new List<string>(), layer, tileX, tileY);
+            RemapPhasePlacementNameIndices(phase, phaseAdapter);
+            MergePhaseTile(
+                result,
+                phase,
+                phaseTextures ?? new List<string>(),
+                phaseAdapter.MdxModelNames.Count,
+                phaseAdapter.WmoModelNames.Count,
+                layer,
+                tileX,
+                tileY);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Converts a phase WDT's local MDNM/MONM indices into this base adapter's combined name tables.
+    /// </summary>
+    /// <remarks>
+    /// MDDF and MODF store an index, not a path. Each Alpha WDT owns its own name tables, so passing
+    /// a phase's raw index through to the base adapter makes the placement resolve whichever unrelated
+    /// entry happens to occupy the same slot in the base table.
+    /// </remarks>
+    private void RemapPhasePlacementNameIndices(TileLoadResult phase, AlphaTerrainAdapter phaseAdapter)
+    {
+        int remappedMddf = RemapPlacementNameIndices(
+            phase.MddfPlacements,
+            phaseAdapter.MdxModelNames,
+            _mdxModelNames,
+            "MDDF",
+            static (placement, index) =>
+            {
+                placement.NameIndex = index;
+                return placement;
+            });
+        int remappedModf = RemapPlacementNameIndices(
+            phase.ModfPlacements,
+            phaseAdapter.WmoModelNames,
+            _wmoModelNames,
+            "MODF",
+            static (placement, index) =>
+            {
+                placement.NameIndex = index;
+                return placement;
+            });
+
+        ViewerLog.Trace(
+            $"[AlphaADT] Phase placement name remap: MDDF={remappedMddf}/{phase.MddfPlacements.Count} "
+            + $"MODF={remappedModf}/{phase.ModfPlacements.Count} "
+            + $"baseNames=(mdx:{_mdxModelNames.Count},wmo:{_wmoModelNames.Count})");
+    }
+
+    private static int RemapPlacementNameIndices<TPlacement>(
+        List<TPlacement> placements,
+        IReadOnlyList<string> phaseNames,
+        List<string> baseNames,
+        string placementKind,
+        Func<TPlacement, int, TPlacement> withNameIndex)
+        where TPlacement : struct
+    {
+        int remapped = 0;
+        for (int i = 0; i < placements.Count; i++)
+        {
+            int phaseNameIndex = placements[i] switch
+            {
+                MddfPlacement mddf => mddf.NameIndex,
+                ModfPlacement modf => modf.NameIndex,
+                _ => -1,
+            };
+            if ((uint)phaseNameIndex >= (uint)phaseNames.Count)
+                continue;
+
+            string phasePath = phaseNames[phaseNameIndex];
+            int baseNameIndex = FindOrAddName(baseNames, phasePath);
+            placements[i] = withNameIndex(placements[i], baseNameIndex);
+            remapped++;
+
+            if (i < 3)
+            {
+                ViewerLog.Trace(
+                    $"[AlphaADT] Phase {placementKind} name map: phaseIndex={phaseNameIndex} "
+                    + $"path='{phasePath}' -> baseIndex={baseNameIndex}");
+            }
+        }
+
+        return remapped;
+    }
+
+    private static int FindOrAddName(List<string> names, string path)
+    {
+        for (int i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], path, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        names.Add(path);
+        return names.Count - 1;
     }
 
     /// <summary>Resolve (and cache) the adapter for a phase map's own alpha WDT.</summary>
@@ -348,10 +463,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         TileLoadResult parent,
         TileLoadResult phase,
         IReadOnlyList<string> phaseTextures,
+        int phaseMdxNameCount,
+        int phaseWmoNameCount,
         PhaseLayerSettings layer,
         int tileX,
         int tileY)
     {
+        int baseMddfCount = parent.MddfPlacements.Count;
+        int baseModfCount = parent.ModfPlacements.Count;
         TileTextures.TryGetValue((tileX, tileY), out List<string>? baseTextures);
         var mergedTextures = new List<string>(baseTextures ?? new List<string>());
         var textureIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -404,14 +523,22 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         if (layer.HasTileOffset)
             TranslatePhasePlacements(phase, layer);
 
-        if (PhaseCompositionPolicy.PhaseOwnsPlacements(layer.Channels, PhaseDataChannel.Doodads, phase.MddfPlacements.Count))
+        bool phaseReplacesDoodads = PhaseCompositionPolicy.PhaseOwnsPlacements(
+            layer.Channels,
+            PhaseDataChannel.Doodads,
+            phase.MddfPlacements.Count);
+        if (phaseReplacesDoodads)
         {
             parent.MddfPlacements.Clear();
             parent.MddfPlacements.AddRange(phase.MddfPlacements);
             contributed |= PhaseDataChannel.Doodads;
         }
 
-        if (PhaseCompositionPolicy.PhaseOwnsPlacements(layer.Channels, PhaseDataChannel.WorldObjects, phase.ModfPlacements.Count))
+        bool phaseReplacesWorldObjects = PhaseCompositionPolicy.PhaseOwnsPlacements(
+            layer.Channels,
+            PhaseDataChannel.WorldObjects,
+            phase.ModfPlacements.Count);
+        if (phaseReplacesWorldObjects)
         {
             parent.ModfPlacements.Clear();
             parent.ModfPlacements.AddRange(phase.ModfPlacements);
@@ -423,12 +550,22 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         ViewerLog.Important(ViewerLog.Category.Terrain,
             $"[AlphaADT] Phase patch ({tileX},{tileY}) from '{layer.MapName}': "
             + $"phaseChunks={phase.Chunks.Count} patched={patched} added={added} skippedEmpty={skipped} "
-            + $"channels={PhaseCompositionPolicy.Describe(contributed)}"
+            + $"channels={PhaseCompositionPolicy.Describe(contributed)} "
+            + $"doodads=base:{baseMddfCount}/phase:{phase.MddfPlacements.Count}/result:{parent.MddfPlacements.Count}"
+            + $"/{(phaseReplacesDoodads ? "replaced" : "preserved")} "
+            + $"wmos=base:{baseModfCount}/phase:{phase.ModfPlacements.Count}/result:{parent.ModfPlacements.Count}"
+            + $"/{(phaseReplacesWorldObjects ? "replaced" : "preserved")} "
+            + $"names=base(mdx:{MdxModelNames.Count},wmo:{WmoModelNames.Count})"
+            + $"/phase(mdx:{phaseMdxNameCount},wmo:{phaseWmoNameCount})"
             + (layer.HasTileOffset ? $" tileOffset=({layer.TileOffsetX},{layer.TileOffsetY})" : string.Empty));
     }
 
     private static void TranslatePhasePlacements(TileLoadResult phase, PhaseLayerSettings layer)
     {
+        // One tile of offset = one ADT in the 64x64 grid = 533.33 yds. Despite its name,
+        // WoWConstants.ChunkSize IS that span (cornerX = MapOrigin - tileX * ChunkSize below);
+        // WoWConstants.TileSize is 16 ADTs and would overshoot placements 16x. The 2026-09-03
+        // "TileSize fix" was a magnitude error and is reverted here; only the sign/label fix stands.
         (float dx, float dy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
             layer.TileOffsetX, layer.TileOffsetY, WoWConstants.ChunkSize);
 

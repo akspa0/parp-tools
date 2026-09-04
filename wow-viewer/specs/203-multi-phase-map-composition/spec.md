@@ -42,6 +42,37 @@ an existing placement — is neither implemented nor currently detectable.
 `ITerrainAdapter.OverlayMapName` is a single `string?`. All three adapters implement it as one
 value. Multiple simultaneous phases is an interface change, not a settings change.
 
+### Alpha WDT phase-name-table mismatch — confirmed 2026-09-03
+
+Alpha placement records store `NameIndex` values into the owning WDT's `MDNM` (MDDF doodads) or
+`MONM` (MODF world objects) table. The Alpha composition path previously copied a phase placement
+into the base tile unchanged, then the renderer resolved that index using the base WDT's table.
+The phase object's position/rotation therefore stayed correct while its model path became whichever
+unrelated base-table entry occupied the same numeric slot. The reported `newbindstone.mdx` →
+`gypsywagon.mdx` substitution is the expected signature of this defect.
+
+The composition boundary must resolve each phase-local index to its phase-table path, append or
+reuse that path in the base adapter's combined table, then replace the placement index before the
+placement reaches the renderer. The existing channel-level terrain merge remains separate from this
+name-table remap.
+
+### Alpha tile-offset double inversion — confirmed 2026-09-03
+
+Two independent defects made offset alignment confusing:
+
+1. **UI cross-wiring.** The Phase Map Layers panel deliberately swapped its labels ("Tile offset X"
+  edited `TileOffsetY` and vice versa), so an entered `(+11, -2)` did not mean the stored pair. The
+  labels now map directly: X edits `TileOffsetX` (row, North-South), Y edits `TileOffsetY`
+  (column, West-East).
+2. **Placement translation used the chunk span.** `TranslatePhasePlacements` passed
+  `WoWConstants.ChunkSize` (533.33 yd) to `TileOffsetToWorldTranslation`, but offsets are in
+  TILES — so placements moved 1/16 of the distance the terrain moved and were stranded near the
+  donor map's coordinates. Both adapters now pass `WoWConstants.TileSize` (8533.33 yd).
+
+The source-tile lookup itself was already correct (`target - offset`) and is retained. The
+`[AlphaADT] Phase offset mapping` log line records target tile, offset, source tile, and the
+placement delta for operator verification.
+
 ### What 5.0.1 actually has
 
 Confirmed present in `Wow.exe` 5.0.1.15464: `DBFilesClient\Phase.dbc`,
@@ -148,6 +179,8 @@ correctly. Stacking phases on top of a replacing merge would multiply the data l
 - **FR-007**: Phase composition MUST work with split ADT companions, patching per contributing
   file rather than assuming a phase supplies a complete tile.
 - **FR-008**: 0.5.3 behaviour MUST NOT change.
+- **FR-009**: Alpha phase MDDF and MODF placements MUST resolve their model path from the phase WDT's
+  own MDNM/MONM table, then be remapped into the base adapter's combined table before rendering.
 
 ### Key Entities
 
@@ -173,6 +206,9 @@ correctly. Stacking phases on top of a replacing merge would multiply the data l
 - **SC-005**: A 0.5.3 reference scene is pixel-identical to before.
 - **SC-006**: Whether `Map.dbc` carries a parent/child map relationship in 5.0.1 is answered
   from the file, and recorded either way.
+- **SC-007**: An Alpha phase placement that names a model absent or differently indexed in the base
+  WDT renders the phase-table model at its authored transform, confirmed by operator inspection and
+  the `[AlphaADT] Phase ... name map` diagnostic lines.
 
 ## Assumptions
 

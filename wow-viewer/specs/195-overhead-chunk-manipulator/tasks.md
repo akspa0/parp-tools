@@ -1,5 +1,10 @@
 # Tasks: Spec 195 — Overhead Chunk Manipulator & Multi-Tile Sub-Cell Transposition Engine
 
+> **Status correction (2026-09-03):** These historical checkmarks record attempted implementation,
+> not current acceptance proof. Source audit found click-only selection, no minimap/heightmap,
+> camera-derived paste target, and a paste loop that does not apply all exposed channels. Spec 219
+> supersedes this UI/operation owner and carries the migration/removal gates.
+
 ## Phase 1: Global Coordinate Space & Selection Region Model (US1)
 
 - [x] T001 Implement `GlobalChunkCoordinate` struct in `WowViewer.Core.Editor/Operations/GlobalChunkCoordinate.cs` with tile/chunk conversions, world coordinate translation, and decomposition helpers

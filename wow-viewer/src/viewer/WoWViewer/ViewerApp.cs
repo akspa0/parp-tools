@@ -10437,7 +10437,7 @@ void main() {
         if (_worldScene?.HoveredAssetInfo is not HoveredAssetInfo info || !info.HasSceneObject)
             return false;
 
-        if (!_worldScene.SelectSceneObject(info.SceneObjectType, info.SceneObjectIndex))
+        if (!_worldScene.SelectSceneObject(info.SceneObjectType, info.SceneObjectIndex, info.ParentWmoIndex))
             return false;
 
         ClearSelectedWlLiquidBody(clearListIsolation: true);
@@ -14979,6 +14979,13 @@ void main() {
             ImGui.PopTextWrapPos();
         }
 
+        if (!string.IsNullOrWhiteSpace(info.ParentSourcePath))
+        {
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 340f);
+            TextColoredUnformatted(new Vector4(0.62f, 0.72f, 0.86f, 1.0f), $"Parent WMO: {info.ParentSourcePath}");
+            ImGui.PopTextWrapPos();
+        }
+
         if (!string.IsNullOrWhiteSpace(info.DetailLine))
             TextColoredUnformatted(new Vector4(0.86f, 0.88f, 0.94f, 1.0f), info.DetailLine);
 
@@ -15010,6 +15017,7 @@ void main() {
         {
             "PM4" => new Vector4(1.0f, 0.82f, 0.32f, 1.0f),
             "WMO" => new Vector4(0.78f, 0.92f, 1.0f, 1.0f),
+            "WMO Doodad" => new Vector4(0.96f, 0.84f, 0.58f, 1.0f),
             "WL liquid" => new Vector4(0.60f, 0.88f, 1.0f, 1.0f),
             _ => new Vector4(0.92f, 0.96f, 1.0f, 1.0f)
         };

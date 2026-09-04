@@ -184,11 +184,14 @@ public sealed class PhaseCompositionPolicyTests
     public void TileOffsetToWorldTranslation_IsNegativeInBothAxes()
     {
         // Renderer X and Y both DECREASE as tile X/Y increase
-        // (worldX = MapOrigin - tileX * TileSize - ...), so a positive tile shift translates negative.
-        (float x, float y) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(1, 2, 533.33333f);
+        // (worldX = MapOrigin - tileX * ChunkSize - ...), so a positive tile shift translates negative.
+        // The span passed in MUST be ONE ADT tile in the 64x64 grid: WoWConstants.ChunkSize
+        // (533.33 — misnamed, but it is the ADT span; TileSize = 16 ADTs would overshoot 16x).
+        const float adtTileSpan = 533.33333f;
+        (float x, float y) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(1, 2, adtTileSpan);
 
-        Assert.Equal(-533.33333f, x, 3);
-        Assert.Equal(-1066.66666f, y, 3);
+        Assert.Equal(-adtTileSpan, x, 3);
+        Assert.Equal(-2f * adtTileSpan, y, 3);
     }
 
     [Fact]

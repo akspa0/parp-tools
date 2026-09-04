@@ -12905,54 +12905,35 @@ public class WorldScene : ISceneRenderer
     private bool TryBuildHoveredSceneInfoByRay(Vector3 rayOrigin, Vector3 rayDir, out HoveredAssetInfo info, out float distance)
     {
         info = default;
-        float currentDistance = float.MaxValue;
         distance = float.MaxValue;
-
-        HoveredAssetInfo? bestInfo = null;
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer;
 
-        void ConsiderCandidate(HoveredAssetInfo candidateInfo, float candidateDistance)
-        {
-            if (!IsHoverPickDistanceAllowed(candidateDistance))
-                return;
-
-            if (candidateDistance < currentDistance)
+        // Hover and click must agree about scene-object identity. Reuse the proven Spec 211 click
+        // picker so WMO doodads participate in hover and an enclosing WMO AABB cannot hide them.
+        var sceneHits = new List<SceneObjectPickHit>();
+        CollectSceneObjectPickHits(rayOrigin, rayDir, sceneHits, logHits: false);
+        var visibleSceneHits = sceneHits
+            .Where(hit => hit.ObjectType switch
             {
-                bestInfo = candidateInfo;
-                currentDistance = candidateDistance;
-            }
-        }
+                ObjectType.Wmo or ObjectType.WmoDoodad => _wmosVisible,
+                ObjectType.Mdx => _doodadsVisible,
+                _ => false,
+            })
+            .ToList();
+        IReadOnlyList<SceneObjectPickHit> filteredSceneHits = ApplyWmoContainerFallThrough(visibleSceneHits);
+        SceneObjectPickHit? bestSceneHit = filteredSceneHits
+            .Where(hit => IsHoverPickDistanceAllowed(hit.Distance))
+            .OrderBy(static hit => hit.Distance)
+            .Cast<SceneObjectPickHit?>()
+            .FirstOrDefault();
 
-        if (_wmosVisible)
+        if (bestSceneHit.HasValue)
         {
-            Vector3 padding = new(2f, 2f, 2f);
-            for (int i = 0; i < _wmoInstances.Count; i++)
-            {
-                ObjectInstance inst = _wmoInstances[i];
-                if (ShouldHideObjectInstanceByUniqueId(inst))
-                    continue;
-
-                if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, inst, padding, out float t))
-                    continue;
-
-                ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst, ObjectType.Wmo, i), t);
-            }
-        }
-
-        if (_doodadsVisible)
-        {
-            Vector3 padding = new(1f, 1f, 1f);
-            for (int i = 0; i < _mdxInstances.Count; i++)
-            {
-                ObjectInstance inst = _mdxInstances[i];
-                if (ShouldHideObjectInstanceByUniqueId(inst))
-                    continue;
-
-                if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, inst, padding, out float t))
-                    continue;
-
-                ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst, ObjectType.Mdx, i), t);
-            }
+            SceneObjectPickHit hit = bestSceneHit.Value;
+            info = hit.ObjectType == ObjectType.WmoDoodad
+                ? BuildHoveredWmoDoodadInfo(hit)
+                : BuildHoveredScenePickHitInfo(hit);
+            distance = hit.Distance;
         }
 
         if (_showWlLiquids && _wlLoader != null)
@@ -12965,19 +12946,104 @@ public class WorldScene : ISceneRenderer
                     continue;
 
                 float t = RayAABBIntersect(rayOrigin, rayDir, body.BoundsMin - padding, body.BoundsMax + padding);
-                if (t < 0f)
+                if (t < 0f || !IsHoverPickDistanceAllowed(t) || t >= distance)
                     continue;
 
-                ConsiderCandidate(BuildHoveredWlLiquidInfo(body), t);
+                info = BuildHoveredWlLiquidInfo(body);
+                distance = t;
             }
         }
 
-        if (!bestInfo.HasValue)
-            return false;
+        return distance < float.MaxValue;
+    }
 
-        info = bestInfo.Value;
-        distance = currentDistance;
-        return true;
+    private static IReadOnlyList<SceneObjectPickHit> ApplyWmoContainerFallThrough(IReadOnlyList<SceneObjectPickHit> hits)
+    {
+        if (hits.Count <= 1)
+            return hits;
+
+        var candidates = new WmoContainerFallThroughFilter.CandidateObject[hits.Count];
+        for (int index = 0; index < hits.Count; index++)
+        {
+            SceneObjectPickHit hit = hits[index];
+            candidates[index] = new WmoContainerFallThroughFilter.CandidateObject(
+                index,
+                hit.ObjectType == ObjectType.Wmo,
+                hit.BoundsMin,
+                hit.BoundsMax,
+                hit.SelectionPoint);
+        }
+
+        IReadOnlyList<WmoContainerFallThroughFilter.CandidateObject> filtered =
+            WmoContainerFallThroughFilter.ApplyFallThrough(candidates);
+        if (filtered.Count == hits.Count)
+            return hits;
+
+        var result = new List<SceneObjectPickHit>(filtered.Count);
+        foreach (WmoContainerFallThroughFilter.CandidateObject candidate in filtered)
+            result.Add(hits[candidate.Id]);
+        return result;
+    }
+
+    private static HoveredAssetInfo BuildHoveredScenePickHitInfo(in SceneObjectPickHit hit)
+    {
+        return new HoveredAssetInfo(
+            hit.KindLabel,
+            hit.ModelName,
+            hit.ModelPath,
+            $"UniqueId: {hit.UniqueId}",
+            hit.PlacementPosition,
+            0,
+            null,
+            hit.ObjectType,
+            hit.ObjectIndex,
+            null);
+    }
+
+    private HoveredAssetInfo BuildHoveredWmoDoodadInfo(in SceneObjectPickHit hit)
+    {
+        string detail = $"Active doodad index: {hit.ObjectIndex}";
+        string parentPath = string.Empty;
+        string parentName = $"WMO [{hit.ParentWmoIndex}]";
+
+        if (hit.ParentWmoIndex >= 0 && hit.ParentWmoIndex < _wmoInstances.Count)
+        {
+            ObjectInstance parent = _wmoInstances[hit.ParentWmoIndex];
+            parentPath = parent.ModelPath;
+            parentName = string.IsNullOrWhiteSpace(parent.ModelName) ? parent.ModelPath : parent.ModelName;
+
+            if (_assets.TryGetLoadedWmo(parent.ModelKey, out WmoRenderer? renderer) && renderer != null
+                && renderer.TryGetDoodadInfo(hit.ObjectIndex, out WmoDoodadInfo doodad))
+            {
+                string setName = renderer.GetDoodadSetName(renderer.ActiveDoodadSet);
+                List<int> renderGroups = renderer.GetRenderGroupsForDoodadDef(doodad.DoodadDefIndex);
+                string groupText = renderGroups.Count == 0
+                    ? "no MODR group reference"
+                    : string.Join(", ", renderGroups.Select(renderer.GetRenderGroupName));
+                detail = $"MODD definition: {doodad.DoodadDefIndex}   MODN offset: {doodad.NameIndex}\n"
+                    + $"Doodad set [{renderer.ActiveDoodadSet}]: {setName}\n"
+                    + $"WMO groups: {groupText}\n"
+                    + $"Parent WMO [{hit.ParentWmoIndex}]: {parentName}";
+            }
+            else
+            {
+                detail += $"\nParent WMO [{hit.ParentWmoIndex}]: {parentName}";
+            }
+        }
+
+        return new HoveredAssetInfo(
+            "WMO Doodad",
+            hit.ModelName,
+            hit.ModelPath,
+            detail,
+            hit.SelectionPoint,
+            0,
+            null,
+            ObjectType.WmoDoodad,
+            hit.ObjectIndex,
+            null,
+            parentWmoIndex: hit.ParentWmoIndex,
+            parentSourcePath: parentPath);
     }
 
     private bool TryBuildHoveredPm4InfoByRay(Vector3 rayOrigin, Vector3 rayDir, out HoveredAssetInfo info, out float distance)
@@ -16600,7 +16666,7 @@ public readonly struct UniqueIdArchaeologyLayer
     public int MdxCount { get; }
 }
 
-public readonly struct HoveredAssetInfo
+    public readonly struct HoveredAssetInfo
 {
     public HoveredAssetInfo(
         string assetKind,
@@ -16613,7 +16679,9 @@ public readonly struct HoveredAssetInfo
         ObjectType sceneObjectType = ObjectType.None,
         int sceneObjectIndex = -1,
         string? wlBodyKey = null,
-        bool isPreciseRayHit = false)
+        bool isPreciseRayHit = false,
+        int parentWmoIndex = -1,
+        string? parentSourcePath = null)
     {
         AssetKind = assetKind ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
@@ -16626,6 +16694,8 @@ public readonly struct HoveredAssetInfo
         SceneObjectIndex = sceneObjectIndex;
         WlBodyKey = wlBodyKey ?? string.Empty;
         IsPreciseRayHit = isPreciseRayHit;
+        ParentWmoIndex = parentWmoIndex;
+        ParentSourcePath = parentSourcePath ?? string.Empty;
     }
 
     public string AssetKind { get; }
@@ -16639,11 +16709,13 @@ public readonly struct HoveredAssetInfo
     public int SceneObjectIndex { get; }
     public string WlBodyKey { get; }
     public bool IsPreciseRayHit { get; }
+    public int ParentWmoIndex { get; }
+    public string ParentSourcePath { get; }
     public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo or ObjectType.WmoDoodad && SceneObjectIndex >= 0;
 
     public HoveredAssetInfo WithPreciseRayHit() => new(
         AssetKind, DisplayName, SourcePath, DetailLine, WorldPosition, AdditionalHitCount, Pm4ObjectKey,
-        SceneObjectType, SceneObjectIndex, WlBodyKey, isPreciseRayHit: true);
+        SceneObjectType, SceneObjectIndex, WlBodyKey, isPreciseRayHit: true, ParentWmoIndex, ParentSourcePath);
 }
 
 public readonly record struct SceneObjectPickHit(

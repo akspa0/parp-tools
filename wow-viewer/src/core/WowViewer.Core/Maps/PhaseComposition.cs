@@ -60,6 +60,34 @@ public sealed class PhaseLayerSettings
 {
     public required string MapName { get; init; }
 
+    /// <summary>
+    /// Rotation of this layer's content, in degrees, about <see cref="RotationOriginTileX"/> /
+    /// <see cref="RotationOriginTileY"/>. Zero (the default) short-circuits all rotation logic.
+    /// Exact-grid when a multiple of 90; free-rotate (grid-snapped tile lookup, exact placement
+    /// points) otherwise. Spec 219.
+    /// </summary>
+    public float RotationDegrees { get; set; }
+
+    /// <summary>Rotation origin, in donor tile coordinates. Defaults to the centre of the layer's
+    /// occupied tile bounds, computed by the adapter when unset (negative).</summary>
+    public float RotationOriginTileX { get; set; } = -1f;
+
+    /// <inheritdoc cref="RotationOriginTileX"/>
+    public float RotationOriginTileY { get; set; } = -1f;
+
+    /// <summary>Mirror this layer's content along the horizontal axis. Exact-grid involution.</summary>
+    public bool MirrorHorizontal { get; set; }
+
+    /// <summary>Mirror this layer's content along the vertical axis. Exact-grid involution.</summary>
+    public bool MirrorVertical { get; set; }
+
+    /// <summary>Per-tile donor-to-target mappings; a mapping claims its target over the whole-layer offset.</summary>
+    public IList<PhaseTilePlacement> TilePlacements { get; } = new List<PhaseTilePlacement>();
+
+    /// <summary>True when this layer carries any transform (rotation, mirror, or per-tile mapping).</summary>
+    public bool HasTransform =>
+        RotationDegrees != 0f || MirrorHorizontal || MirrorVertical || TilePlacements.Count > 0;
+
     /// <summary>Unchecked layers are skipped entirely without being removed from the stack.</summary>
     public bool Enabled { get; set; } = true;
 
@@ -99,15 +127,28 @@ public sealed class PhaseLayerSettings
     /// <summary>True when this layer is read from tile coordinates other than the base map's.</summary>
     public bool HasTileOffset => TileOffsetX != 0 || TileOffsetY != 0;
 
-    public PhaseLayerSettings Clone() => new()
+    public PhaseLayerSettings Clone()
     {
-        MapName = MapName,
-        Enabled = Enabled,
-        Channels = Channels,
-        OnlyTakeWhatThePhaseCarries = OnlyTakeWhatThePhaseCarries,
-        TileOffsetX = TileOffsetX,
-        TileOffsetY = TileOffsetY,
-    };
+        var clone = new PhaseLayerSettings
+        {
+            MapName = MapName,
+            RotationDegrees = RotationDegrees,
+            RotationOriginTileX = RotationOriginTileX,
+            RotationOriginTileY = RotationOriginTileY,
+            MirrorHorizontal = MirrorHorizontal,
+            MirrorVertical = MirrorVertical,
+            Enabled = Enabled,
+            Channels = Channels,
+            OnlyTakeWhatThePhaseCarries = OnlyTakeWhatThePhaseCarries,
+            TileOffsetX = TileOffsetX,
+            TileOffsetY = TileOffsetY,
+        };
+
+        foreach (PhaseTilePlacement placement in TilePlacements)
+            clone.TilePlacements.Add(placement);
+
+        return clone;
+    }
 }
 
 /// <summary>
@@ -197,8 +238,14 @@ public static class PhaseCompositionPolicy
     /// MDDF/MODF carry world coordinates, so a shifted layer's objects must be translated by the same
     /// amount or they stay at the donor map's coordinates while its terrain moves.
     /// <para>
-    /// Renderer X decreases as tile X increases (<c>worldX = MapOrigin - tileX * TileSize - ...</c>),
+    /// Renderer X decreases as tile X increases (<c>worldX = MapOrigin - tileX * ChunkSize - ...</c>),
     /// and likewise for Y, so the translation is negative in both axes.
+    /// </para>
+    /// <para>
+    /// <paramref name="tileSize"/> MUST be the world span of ONE tile in the 64x64 ADT grid.
+    /// In this codebase that span is <c>WoWConstants.ChunkSize</c> (533.33) — the constant is
+    /// misnamed but is the ADT-tile size (corner = MapOrigin - tileX * ChunkSize). Passing
+    /// <c>WoWConstants.TileSize</c> (8533.33 = 16 ADTs) overshoots placements 16x.
     /// </para>
     /// </remarks>
     public static (float X, float Y) TileOffsetToWorldTranslation(int tileOffsetX, int tileOffsetY, float tileSize)
@@ -207,4 +254,232 @@ public static class PhaseCompositionPolicy
     /// <summary>Human-readable channel list, for logs and the layers panel.</summary>
     public static string Describe(PhaseDataChannel channels)
         => channels == PhaseDataChannel.None ? "none" : channels.ToString();
+
+    /// <summary>
+    /// Resolve which donor tile fills base-map target tile (targetX, targetY) for one layer, and
+    /// what transform to apply to its content. Resolution order (fixed, per Spec 219 R3):
+    /// per-tile mappings last-wins first, then the whole-layer offset with rotation/mirror.
+    /// </summary>
+    /// <param name="layer">The phase layer being resolved.</param>
+    /// <param name="targetX">Base-map target tile X.</param>
+    /// <param name="targetY">Base-map target tile Y.</param>
+    /// <param name="hasDonorTile">
+    /// Predicate answering whether the donor map has content at a donor tile coordinate (the
+    /// caller supplies this so the policy stays I/O-free).</param>
+    public static PhaseTileSource ResolveTileSource(
+        PhaseLayerSettings layer,
+        int targetX,
+        int targetY,
+        Func<int, int, bool> hasDonorTile)
+    {
+        ArgumentNullException.ThrowIfNull(layer);
+        ArgumentNullException.ThrowIfNull(hasDonorTile);
+
+        // 1. Per-tile mappings: last one claiming this target wins. Count claims so the caller can
+        // report a deterministic conflict rather than silently hiding an earlier mapping.
+        int claimCount = 0;
+        PhaseTilePlacement? selectedPlacement = null;
+        for (int i = layer.TilePlacements.Count - 1; i >= 0; i--)
+        {
+            PhaseTilePlacement placement = layer.TilePlacements[i];
+            if (!placement.IsValid)
+                continue;
+
+            if (placement.TargetTileX == targetX && placement.TargetTileY == targetY)
+            {
+                claimCount++;
+                selectedPlacement ??= placement;
+            }
+        }
+
+        if (selectedPlacement is PhaseTilePlacement selected)
+        {
+            if (!hasDonorTile(selected.DonorTileX, selected.DonorTileY))
+                return PhaseTileSource.Empty with { TargetClaimCount = claimCount };
+
+            return new PhaseTileSource(
+                true,
+                selected.DonorTileX,
+                selected.DonorTileY,
+                PhaseTileSourceKind.PerTile,
+                ComposeTileTransforms(layer),
+                ResolveRotationApproximation(layer),
+                claimCount);
+        }
+
+        // 2. Whole-layer offset, with rotation/mirror composed into the lookup.
+        int sourceX = targetX - layer.TileOffsetX;
+        int sourceY = targetY - layer.TileOffsetY;
+        if (layer.RotationDegrees != 0f || layer.MirrorHorizontal || layer.MirrorVertical)
+        {
+            (sourceX, sourceY) = InverseTransformTile(sourceX, sourceY, layer);
+        }
+
+        if (!hasDonorTile(sourceX, sourceY))
+            return PhaseTileSource.Empty;
+
+        bool transformed = layer.RotationDegrees != 0f || layer.MirrorHorizontal || layer.MirrorVertical;
+        return new PhaseTileSource(
+            true,
+            sourceX,
+            sourceY,
+            transformed ? PhaseTileSourceKind.Rotation : PhaseTileSourceKind.Offset,
+            ComposeTileTransforms(layer),
+            ResolveRotationApproximation(layer),
+            0);
+    }
+
+    /// <summary>
+    /// The tile-content transforms a layer's sourced content must receive, in the fixed
+    /// application order: rotation first (exact-grid when a multiple of 90), then mirrors.
+    /// Free-angle rotations contribute no chunk-content transform (placements only; research R2).
+    /// Empty when the layer carries no exact-grid chunk transform.
+    /// </summary>
+    public static IReadOnlyList<TileTransformKind> ComposeTileTransforms(PhaseLayerSettings layer)
+    {
+        var kinds = new List<TileTransformKind>();
+
+        if (TryGetQuarterTurn(layer.RotationDegrees, out int quarter))
+        {
+            switch (quarter)
+            {
+                case 1: kinds.Add(TileTransformKind.Rotate90CW); break;
+                case 2: kinds.Add(TileTransformKind.Rotate180); break;
+                case 3: kinds.Add(TileTransformKind.Rotate90CCW); break;
+            }
+        }
+
+        if (layer.MirrorHorizontal)
+            kinds.Add(TileTransformKind.MirrorH);
+        if (layer.MirrorVertical)
+            kinds.Add(TileTransformKind.MirrorV);
+
+        return kinds;
+    }
+
+    /// <summary>The declared approximation used for this layer's rotation.</summary>
+    public static PhaseRotationApproximation ResolveRotationApproximation(PhaseLayerSettings layer)
+    {
+        if (layer.RotationDegrees == 0f)
+        {
+            return layer.MirrorHorizontal || layer.MirrorVertical
+                ? PhaseRotationApproximation.ExactGrid
+                : PhaseRotationApproximation.None;
+        }
+
+        return TryGetQuarterTurn(layer.RotationDegrees, out _)
+            ? PhaseRotationApproximation.ExactGrid
+            : PhaseRotationApproximation.FreeRotate;
+    }
+
+    /// <summary>
+    /// Inverse tile lookup: which donor tile fills the target, given the layer's rotation/mirror.
+    /// Exact-grid for quadrant turns and mirrors; for free angles this is the grid-snapped
+    /// approximation (research R2) and the caller reports the mode.
+    /// </summary>
+    public static (int X, int Y) InverseTransformTile(int x, int y, PhaseLayerSettings layer)
+    {
+        double originX = layer.RotationOriginTileX >= 0f ? layer.RotationOriginTileX : 0d;
+        double originY = layer.RotationOriginTileY >= 0f ? layer.RotationOriginTileY : 0d;
+
+        // Mirror is its own inverse: apply to the lookup first (order: rotate -> mirror, so the
+        // inverse is mirror -> rotate). Mirrors use the same declared origin as rotation.
+        double ix = x;
+        double iy = y;
+        // Tile X is the North-South row; tile Y is the West-East column. A horizontal (left-right)
+        // mirror therefore reflects tile Y, while a vertical (top-bottom) mirror reflects tile X.
+        if (layer.MirrorHorizontal)
+            iy = (2d * originY) - iy;
+        if (layer.MirrorVertical)
+            ix = (2d * originX) - ix;
+
+        if (layer.RotationDegrees == 0f)
+            return ((int)Math.Round(ix), (int)Math.Round(iy));
+
+        double rad = layer.RotationDegrees * Math.PI / 180.0;
+        double cos = Math.Cos(rad);
+        double sin = Math.Sin(rad);
+        double dx = ix - originX;
+        double dy = iy - originY;
+        // Forward positive rotation is clockwise in tile coordinates:
+        // (row, column) -> (column, -row). Its inverse is counter-clockwise.
+        return (
+            (int)Math.Round(originX + (dx * cos) - (dy * sin)),
+            (int)Math.Round(originY + (dx * sin) + (dy * cos)));
+    }
+
+    private static bool TryGetQuarterTurn(float degrees, out int normalizedQuarterTurn)
+    {
+        double rawQuarterTurn = degrees / 90d;
+        int roundedQuarterTurn = (int)Math.Round(rawQuarterTurn);
+        if (Math.Abs(rawQuarterTurn - roundedQuarterTurn) > 1e-5d)
+        {
+            normalizedQuarterTurn = 0;
+            return false;
+        }
+
+        normalizedQuarterTurn = NormalizeQuarterTurn(roundedQuarterTurn);
+        return true;
+    }
+
+    private static int NormalizeQuarterTurn(int quarterTurn)
+        => ((quarterTurn % 4) + 4) % 4;
+}
+
+/// <summary>
+/// One per-tile donor-to-target mapping on a phase layer (Spec 219 US5): the donor tile's full
+/// channel content is dropped onto the target tile of the base map, subject to the layer's
+/// per-channel gates. A mapping claims its target over the whole-layer offset; two mappings
+/// claiming the same target resolve last-wins, with the conflict reported by the caller.
+/// </summary>
+public readonly record struct PhaseTilePlacement(
+    int DonorTileX,
+    int DonorTileY,
+    int TargetTileX,
+    int TargetTileY)
+{
+    public bool IsValid =>
+        DonorTileX is >= 0 and < 64 && DonorTileY is >= 0 and < 64 &&
+        TargetTileX is >= 0 and < 64 && TargetTileY is >= 0 and < 64;
+}
+
+/// <summary>The result of resolving which donor tile fills a base-map target tile.</summary>
+/// <param name="HasSource">False when nothing fills this target.</param>
+/// <param name="SourceTileX">Donor tile to read, already in the donor map's grid.</param>
+/// <param name="SourceTileY">Donor tile to read, already in the donor map's grid.</param>
+/// <param name="Via">Which mechanism supplied the mapping, for logs and conflict reports.</param>
+/// <param name="Transforms">The tile-content transforms to apply, in application order.</param>
+/// <param name="Approximation">Whether rotation is exact-grid or uses free-rotate lookup.</param>
+/// <param name="TargetClaimCount">Valid per-tile mappings claiming this target (greater than one is a reportable conflict).</param>
+public readonly record struct PhaseTileSource(
+    bool HasSource,
+    int SourceTileX,
+    int SourceTileY,
+    PhaseTileSourceKind Via,
+    IReadOnlyList<TileTransformKind> Transforms,
+    PhaseRotationApproximation Approximation,
+    int TargetClaimCount)
+{
+    public bool HasConflict => TargetClaimCount > 1;
+
+    public static readonly PhaseTileSource Empty =
+        new(false, 0, 0, PhaseTileSourceKind.None, Array.Empty<TileTransformKind>(), PhaseRotationApproximation.None, 0);
+}
+
+/// <summary>Declared rotation approximation for diagnostics and the layer UI (Spec 219 FR-009).</summary>
+public enum PhaseRotationApproximation
+{
+    None = 0,
+    ExactGrid,
+    FreeRotate,
+}
+
+/// <summary>Provenance of a target tile's content, for logs and conflict reports.</summary>
+public enum PhaseTileSourceKind
+{
+    None = 0,
+    Base,
+    Offset,
+    Rotation,
+    PerTile,
 }

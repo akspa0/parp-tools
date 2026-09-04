@@ -2,6 +2,58 @@
 
 Last updated: 2026-09-03
 
+## 2026-09-03 — Spec 219: Phase 1 Core transform seam and policy gate passed
+- **Landed in Core:** [`TileContentTransform.cs`](../src/core/WowViewer.Core/Maps/TileContentTransform.cs)
+  implements exact 90°/180° rotation and horizontal/vertical mirrors for the interleaved 145-vertex
+  chunk lattice, renderer-space normals, hole masks, 64×64 alpha/shadow grids, MCCV, 8×8 liquid
+  flags, complete MDDF/MODF placement records, and MODF bounds. It also exposes origin-based free
+  point rotation and has no dependency on phase-system types.
+- **Composition policy:** [`PhaseComposition.cs`](../src/core/WowViewer.Core/Maps/PhaseComposition.cs)
+  now carries rotation angle/origin, mirrors, and donor→target mappings on `PhaseLayerSettings`;
+  clone preserves all state. `ResolveTileSource` enforces per-tile-last-wins precedence, reports
+  duplicate target claim counts, performs origin-aware inverse lookup, normalizes negative quarter
+  turns, and reports exact-grid versus free-rotate approximation.
+- **Validation:** focused `TileContentTransform|PhaseTileSource|PhaseComposition` tests **55/55
+  passed**; full `WowViewer.slnx` Debug build **0 errors** with existing warnings. No adapter/runtime,
+  visual, FPS, or real-client claim. Next: Phase 2 T007, wire `StandardTerrainAdapter` only and retain
+  byte-identical zero-transform routing before the Alpha adapter slice.
+- **Correction to earlier Spec 203 note:** `WoWConstants.ChunkSize` is misnamed but is the 533.33 yd
+  one-ADT tile span used by `MapOrigin - tile * ChunkSize`; the attempted switch to `TileSize`
+  (8533.33 yd = 16 ADTs) was reverted because it overshoots placement offsets 16×.
+- **Operator scope addition:** Spec 219 now requires exact integer terrain-cell offsets, with 8
+  cells/chunk and 128 cells/ADT, so misaligned transplanted terrain can be shifted and re-sliced
+  across chunk/ADT boundaries without interpolation. Added FR-020/021, SC-011, and Phase 2B.
+  Spec 196's existing WDL magnetizer can optionally score/propose the snap (FR-022/SC-012), but does
+  not own the transform and cannot change it without operator acceptance. Specified/planned only;
+  no cell-offset or WDL-fit implementation/runtime proof yet.
+- **Workbench scope specified:** full-map orthographic minimap/heightmap/occupancy canvas; magnetic
+  tile/chunk/cell selection and explicit targets; shared configurable 3D terrain selection; base
+  channel gating; complete controls on every phase card; one undo/operation model; and preflighted
+  Save Transformed Map through supported ADT/Alpha WDT outputs. No implementation proof claimed.
+- **Spec 195 completion claim corrected by source audit:** current panel is a camera-centered 280px
+  dark grid with no map backdrop and click-only selection; paste target is camera-derived; paste
+  applies only heights/normals/holes despite exposing texture/placement options. Spec 219 now owns
+  migration and retirement of the duplicate tool; audited coordinate/undo helpers may be reused.
+
+## 2026-09-03 — Spec 203: Alpha phase name-table remap + tile-offset double inversion fixed
+- **Name-table remap (operator-confirmed `newbindstone.mdx` → `gypsywagon.mdx`):** MDDF/MODF
+  `NameIndex` is local to its owning WDT's MDNM/MONM table. The Alpha composition path copied a
+  phase placement into the base tile unchanged, so the renderer resolved the base table's unrelated
+  entry at the same numeric slot — correct transform, wrong model. [`AlphaTerrainAdapter.cs`](../src/viewer/WoWViewer/Terrain/AlphaTerrainAdapter.cs)
+  now resolves each phase index to its phase-table path, reuses or appends that path in the base
+  table, and rewrites the placement index before rendering; logs record the index/path map.
+- **Tile-offset double inversion (operator-confirmed `+11,-2` behaving as `-11,+2`):** two causes.
+  (1) The Phase Map Layers panel cross-wired its labels; now X edits `TileOffsetX` (row) and Y
+  edits `TileOffsetY` (column) directly. (2) `TranslatePhasePlacements` in BOTH adapters passed
+  `WoWConstants.ChunkSize` (533.33 yd) where offsets are in TILES, moving placements 1/16 of the
+  terrain's distance. A later coordinate audit proved this conclusion backward: this codebase's
+  misnamed `WoWConstants.ChunkSize` is the 533.33 yd one-ADT span, while `TileSize` is 16 ADTs;
+  the attempted `TileSize` change was reverted. Source lookup stays `target - offset`.
+- **Verification:** full solution Debug build **0 errors**; focused phase-composition tests
+  **18/18 passed** (updated `TileOffsetToWorldTranslation_IsNegativeInBothAxes` to the tile-span
+  contract). Operator visual reload of an offset Alpha phase layer is the remaining proof.
+- **Spec:** [`203-multi-phase-map-composition/spec.md`](../specs/203-multi-phase-map-composition/spec.md).
+
 ## 2026-09-03 — Spec 214: solver-independent physics policy implemented and validated
 - **Planning and audit:** Authored the Spec Kit pack and [`current-implementation-audit.md`](../specs/214-mop-physics-domino/evidence/current-implementation-audit.md). The audit separates the unconsumed M2 `0x20` flag, MDX `CLID` inspection geometry, camera navigation clamping, and visual particle gravity from actual physicalised-model simulation.
 - **Landed in Core.Runtime:** [`PhysicsRuntimePolicy.cs`](../src/core/WowViewer.Core.Runtime/World/Physics/PhysicsRuntimePolicy.cs) reuses `ClientBuildKey` to resolve exact `0.5.3.3368` as known-disabled, exact `5.0.1.15464` as admission-enabled, and every malformed/unmeasured build as unknown. Every decision carries activation state, profile/build/evidence provenance, diagnostics, and an explicit admitted/cull/defer/refusal reason. Budget and candidate inputs are validated; capacity selection is deterministic by priority, distance, then ordinal stable id, while results preserve input order.

@@ -441,6 +441,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
     /// </remarks>
     private static void TranslatePhasePlacements(ParsedTileSource phase, PhaseLayerSettings layer)
     {
+        // One tile of offset = one ADT in the 64x64 grid = 533.33 yds. Despite its name,
+        // WoWConstants.ChunkSize IS that span; WoWConstants.TileSize is 16 ADTs and would
+        // overshoot placements 16x. The 2026-09-03 "TileSize fix" was a magnitude error and
+        // is reverted here; only the sign/label fix stands.
         (float dx, float dy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
             layer.TileOffsetX, layer.TileOffsetY, WoWConstants.ChunkSize);
 

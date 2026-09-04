@@ -1,5 +1,12 @@
 # Spec 195: Overhead Chunk Manipulator & Multi-Tile Sub-Cell Transposition Engine
 
+> **Supersession notice (2026-09-03):** Source audit found that the implemented canvas/paste path
+> does not satisfy this document's drag-selection, full-map backdrop, explicit-target, complete
+> channel-transfer, or live-integration claims. Spec 219 now owns the unified orthographic + 3D
+> tile/chunk/cell selection and transform workbench. Reusable Core coordinate/undo components from
+> this spec are migration inputs; this plugin must not remain a parallel active tool after Spec 219's
+> migration gate passes.
+
 ## 1. Executive Summary & Vision
 
 The **Overhead Chunk Manipulator** unifies fragmented tile selection and chunk clipboard tools into a single, high-performance, precision terrain manipulation workstation in Parp Tools WoWViewer. 
