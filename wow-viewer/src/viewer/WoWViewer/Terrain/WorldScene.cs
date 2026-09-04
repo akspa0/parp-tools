@@ -8924,6 +8924,13 @@ public class WorldScene : ISceneRenderer
             boundsMax = bMax;
         }
 
+        // Local (model-space) geometry bounds drive the oriented tight selection box. When the
+        // doodad's model has not streamed in yet, request it so real bounds resolve within a few
+        // frames instead of the selection sitting on a centroid cube indefinitely.
+        bool hasLocalBounds = wmoRenderer.TryGetDoodadLocalBounds(dInfo.Index, out Vector3 localMin, out Vector3 localMax);
+        if (!boundsResolved)
+            wmoRenderer.RequestDoodadModelLoad(dInfo.Index);
+
         if (!wmoRenderer.TryGetDoodadWorldTransform(dInfo.Index, parentWmo.Transform, out Matrix4x4 doodadTransform))
             doodadTransform = Matrix4x4.CreateTranslation(worldPosition);
 
@@ -8943,6 +8950,11 @@ public class WorldScene : ISceneRenderer
             // WMO; it belongs here, not in UniqueId. See the remarks above.
             PlacementEntryIndex = dInfo.DoodadDefIndex,
             UniqueId = 0,
+            LocalBoundsMin = hasLocalBounds ? localMin : Vector3.Zero,
+            LocalBoundsMax = hasLocalBounds ? localMax : Vector3.Zero,
+            SelectionLocalBoundsMin = hasLocalBounds ? localMin : Vector3.Zero,
+            SelectionLocalBoundsMax = hasLocalBounds ? localMax : Vector3.Zero,
+            SelectionBoundsResolved = hasLocalBounds,
             Transform = doodadTransform
         };
         return true;
@@ -11584,6 +11596,14 @@ public class WorldScene : ISceneRenderer
                     {
                         if (SelectedInstance is ObjectInstance selectedInstance && !ShouldHideObjectInstanceByUniqueId(selectedInstance))
                         {
+                            // A WMO doodad whose model has not streamed in yet has placeholder
+                            // bounds; flag that in the accent color so the operator reads the
+                            // box as "centroid marker", never as the object's extent.
+                            bool doodadPlaceholderBounds = selectedInstance.AssetKind == "WMO Doodad"
+                                && !selectedInstance.BoundsResolved;
+                            Vector3 selectedBoundsAccentBResolved = doodadPlaceholderBounds
+                                ? new Vector3(1.0f, 0.55f, 0.10f)   // orange = placeholder, not real extent
+                                : Pm4ColorHighlight;
                             // Guard against a degenerate (zero-volume) box only. This floor used to
                             // be 0.75 yd, which made the box stop describing the object: a scroll a
                             // third of a yard across was drawn inside 1.5 yd of wireframe, and the
@@ -11638,7 +11658,7 @@ public class WorldScene : ISceneRenderer
                                     selectedBoundsTime,
                                     selectedBoundsInnerColor,
                                     selectedBoundsAccentA,
-                                    selectedBoundsAccentB);
+                                    selectedBoundsAccentBResolved);
                             }
                             else
                             {
@@ -11648,8 +11668,39 @@ public class WorldScene : ISceneRenderer
                                     selectedBoundsTime,
                                     selectedBoundsInnerColor,
                                     selectedBoundsAccentA,
-                                    selectedBoundsAccentB);
+                                    selectedBoundsAccentBResolved);
                             }
+
+                            // 3D selection aids for WMO doodads: an origin jewel + gold position
+                            // pin mark the MODD placement point, and the RGB axis tripod shows the
+                            // placement's orientation and scale direction. Sized from the box so
+                            // they stay readable on both a torch and a chandelier.
+                            if (selectedInstance.AssetKind == "WMO Doodad")
+                            {
+                                Vector3 anchor = selectedInstance.PlacementPosition;
+                                float boxRadius = MathF.Max(
+                                    halfExtent.X,
+                                    MathF.Max(halfExtent.Y, halfExtent.Z));
+                                float aidScale = Math.Clamp(boxRadius * 1.5f, 0.35f, 4f);
+
+                                _bbRenderer.BatchOctahedron(
+                                    anchor,
+                                    Math.Clamp(boxRadius * 0.3f, 0.06f, 0.5f),
+                                    new Vector3(0.20f, 0.95f, 1.00f));
+                                _bbRenderer.BatchPin(
+                                    anchor,
+                                    aidScale,
+                                    Math.Clamp(boxRadius * 0.25f, 0.05f, 0.4f),
+                                    new Vector3(1.00f, 0.85f, 0.25f));
+
+                                Vector3 axisX = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitX, selectedInstance.Transform));
+                                Vector3 axisY = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitY, selectedInstance.Transform));
+                                Vector3 axisZ = Vector3.Normalize(Vector3.TransformNormal(Vector3.UnitZ, selectedInstance.Transform));
+                                _bbRenderer.BatchLine(anchor, anchor + axisX * aidScale, new Vector3(1.00f, 0.25f, 0.25f));
+                                _bbRenderer.BatchLine(anchor, anchor + axisY * aidScale, new Vector3(0.30f, 1.00f, 0.35f));
+                                _bbRenderer.BatchLine(anchor, anchor + axisZ * aidScale, new Vector3(0.40f, 0.55f, 1.00f));
+                            }
+
                             selectionBoundsPreparedCount++;
                         }
 

@@ -31,3 +31,11 @@
 - [x] 211-T405: Add `ApplyFallThrough_PreservesWmoDoodadCandidateAndUnrelatedRayOrder` to [`WmoContainerFallThroughFilterTests`](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/World/WmoContainerFallThroughFilterTests.cs).
 - [x] 211-T406: Gate: focused Spec 211 tests 7/7 green; viewer Debug build 0 errors.
 - [ ] 211-T407: Operator interactive verification — hover a doodad inside a placed WMO and confirm the tooltip shows set/group/parent context and left-click selects it.
+
+## Phase 5: Doodad selection bounds & 3D selection aids (operator follow-up 2026-09-04)
+
+- [x] 211-T501: [`WmoRenderer.TryGetDoodadLocalBounds`](file:///I:/parp/parp-tools/wow-viewer/src/viewer/WoWViewer/Rendering/WmoRenderer.cs) exposes the doodad model's local geometry bounds; `RequestDoodadModelLoad` queues the doodad's model for deferred loading on selection so real bounds resolve within a few frames instead of a permanent centroid cube.
+- [x] 211-T502: [`TryBuildSelectedWmoDoodadInstance`](file:///I:/parp/parp-tools/wow-viewer/src/viewer/WoWViewer/Terrain/WorldScene.cs) now feeds `LocalBoundsMin/Max` + `SelectionLocalBounds*`/`SelectionBoundsResolved` from the model geometry so the selection overlay takes the oriented tight-box path through the doodad's world transform instead of an axis-aligned centroid cube.
+- [x] 211-T503: Selection overlay draws 3D aids on selected WMO doodads: cyan origin octahedron + gold position pin at the MODD placement point, and an RGB (X/Y/Z) axis tripod through the placement transform, all sized from the box extents.
+- [x] 211-T504: Placeholder bounds render with an ORANGE accent so an unloaded model's centroid box is never readable as the object's extent; resolves to real geometry + normal accent once the model streams in.
+- [ ] 211-T505: Operator interactive verification — select a barrel in Ironforge with WMOs loaded and confirm the box wraps the barrel geometry, the pin/jewel/axes mark the placement, and the box snaps from orange placeholder to real bounds as the model loads.

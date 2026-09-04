@@ -520,6 +520,45 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         return false;
     }
 
+    /// <summary>
+    /// Model-space geometry bounds of one placed doodad, from its loaded renderer. False when
+    /// the model is not loaded yet — callers must not present placeholder bounds as geometry.
+    /// </summary>
+    public bool TryGetDoodadLocalBounds(int index, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (index >= 0 && index < _doodadInstances.Count
+            && _doodadInstances[index].Renderer is IModelRenderer modelRenderer)
+        {
+            boundsMin = modelRenderer.BoundsMin;
+            boundsMax = modelRenderer.BoundsMax;
+            return true;
+        }
+
+        boundsMin = boundsMax = Vector3.Zero;
+        return false;
+    }
+
+    /// <summary>
+    /// Queues the doodad's model for deferred loading so real geometry bounds resolve shortly
+    /// after selection or hover. No-op when already loaded, already queued, or when this
+    /// renderer loads doodads inline (in which case a null renderer means the load failed and
+    /// re-queueing would churn).
+    /// </summary>
+    public void RequestDoodadModelLoad(int index)
+    {
+        if (!_deferInitialDoodadLoads || index < 0 || index >= _doodadInstances.Count)
+            return;
+
+        DoodadInstance doodad = _doodadInstances[index];
+        if (doodad.Renderer != null)
+            return;
+
+        if (!_queuedDoodadModelLoads.Add(doodad.NormalizedModelPath))
+            return;
+
+        _pendingDoodadModelLoads.Enqueue(doodad.NormalizedModelPath);
+    }
+
     public bool TryPickDoodadsByRay(
         Vector3 rayOrigin,
         Vector3 rayDir,

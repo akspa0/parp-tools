@@ -5,6 +5,19 @@ Last updated: 2026-09-04
 **START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
 open specs, with the reasoning for the order. This section is the session summary behind it.
 
+## Landed 2026-09-04 — Spec 211 Phase 5: doodad selection bounds + 3D aids (build green, operator visual check owed)
+
+- Selected WMO doodads now get REAL oriented geometry boxes: `WmoRenderer.TryGetDoodadLocalBounds`
+  exposes model-space bounds, `TryBuildSelectedWmoDoodadInstance` feeds them as
+  `LocalBounds*/SelectionLocalBounds*/SelectionBoundsResolved` so the overlay takes the oriented
+  tight-box path through the doodad's world transform. `WmoRenderer.RequestDoodadModelLoad`
+  queues the doodad's model on selection so placeholder bounds resolve within a few frames.
+- 3D aids on selected doodads: cyan origin octahedron + gold position pin at the MODD point, RGB
+  axis tripod through the placement transform, sized from the box. Placeholder (model unloaded)
+  bounds draw an ORANGE accent — never readable as real extent. Tasks 211-T501..T505 in
+  [`specs/211-wmo-interior-picking-ghost-wireframe/tasks.md`](../specs/211-wmo-interior-picking-ghost-wireframe/tasks.md);
+  T505 is the operator's interactive check.
+
 ## Next lane — Spec 221: alpha round-trip — 3 defects fixed, 1 open (2026-09-04)
 
 - Fixed: (1) MCLY `0x200`→`0x100` on uncompressed alpha layers in `AlphaToLkConverter` (0x200 is
