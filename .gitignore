@@ -671,3 +671,6 @@ map-references/*.kra
 .reference_data/*
 .pytest-*
 wow-viewer/data-harvester/tests/fixtures/spec122_curation_manifest/curation/0_5_3_3368-fixture-20260730T000000000Z/curation_run.json
+.roo/mcp.json
+wow-viewer/data-harvester/tests/fixtures/spec122_curation_manifest/curation/0_5_3_3368-fixture-20260730T000000000Z/curation_run.json
+imgui.ini

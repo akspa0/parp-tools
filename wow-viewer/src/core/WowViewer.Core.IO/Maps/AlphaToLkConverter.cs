@@ -234,7 +234,11 @@ public static class AlphaToLkConverter
             uint flags = 0u;
             if (l > 0 && tile.McalAlphaPack != null)
             {
-                flags |= 0x200u; // big alpha (64×64, 4096 bytes per layer)
+                // MCLY 0x200 is the RLE-COMPRESSED-alpha flag, NOT big alpha; 0x100 is "use alpha
+                // map" and LK infers 8-bit (4096 bytes) from size. Flagging these uncompressed
+                // layers as 0x200 made the return leg RLE-decode raw bytes — Spec 221's Phase 0
+                // baseline caught it as 14/16 tiles failing texture alpha at max drift 1.000.
+                flags |= 0x100u;
             }
 
             layers.Add(new LkMclyEntry((uint)texIdx, flags, (uint)alphaOffset, 0));

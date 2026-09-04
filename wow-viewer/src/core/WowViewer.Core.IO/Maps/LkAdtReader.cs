@@ -476,24 +476,33 @@ public static class LkAdtReader
             }
         }
 
+        const int SubchunkHeaderSize = 8;
         if (ofsMcal >= headerSize && sizeMcal > 0)
         {
-            int srcOffset = mcnkPayloadOffset + ofsMcal;
-            if (srcOffset + sizeMcal <= adtBytes.Length)
+            // The header offsets land on the subchunk FourCC and the sizes include that
+            // 8-byte header. The payload consumers (LkToAlphaConverter, dataset harvest)
+            // expect raw payload bytes, so strip the header — the MCCV/MCLV scan below
+            // already does this. Keeping it shifted every alpha byte by 8 and prefixed the
+            // first 8 bytes of each chunk with the 'MCAL' FourCC + size (Spec 221 baseline:
+            // 14/16 real 0.5.3 tiles failed texture alpha at max drift 1.000).
+            int srcOffset = mcnkPayloadOffset + ofsMcal + SubchunkHeaderSize;
+            int payloadLength = sizeMcal - SubchunkHeaderSize;
+            if (payloadLength > 0 && srcOffset + payloadLength <= adtBytes.Length)
             {
-                alphaData = new byte[sizeMcal];
-                Buffer.BlockCopy(adtBytes, srcOffset, alphaData, 0, sizeMcal);
-                alphaTotalSize = sizeMcal;
+                alphaData = new byte[payloadLength];
+                Buffer.BlockCopy(adtBytes, srcOffset, alphaData, 0, payloadLength);
+                alphaTotalSize = payloadLength;
             }
         }
 
         if (ofsMcsh >= headerSize && sizeMcsh > 0)
         {
-            int srcOffset = mcnkPayloadOffset + ofsMcsh;
-            if (srcOffset + sizeMcsh <= adtBytes.Length)
+            int srcOffset = mcnkPayloadOffset + ofsMcsh + SubchunkHeaderSize;
+            int payloadLength = sizeMcsh - SubchunkHeaderSize;
+            if (payloadLength > 0 && srcOffset + payloadLength <= adtBytes.Length)
             {
-                shadowData = new byte[sizeMcsh];
-                Buffer.BlockCopy(adtBytes, srcOffset, shadowData, 0, sizeMcsh);
+                shadowData = new byte[payloadLength];
+                Buffer.BlockCopy(adtBytes, srcOffset, shadowData, 0, payloadLength);
             }
         }
 

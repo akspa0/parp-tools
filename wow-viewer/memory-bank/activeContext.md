@@ -5,7 +5,26 @@ Last updated: 2026-09-04
 **START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
 open specs, with the reasoning for the order. This section is the session summary behind it.
 
-## Next lane — Spec 220 WMO doodad editing & writing (spec authored 2026-09-04, not implemented)
+## Next lane — Spec 221: alpha round-trip — 3 defects fixed, 1 open (2026-09-04)
+
+- Fixed: (1) MCLY `0x200`→`0x100` on uncompressed alpha layers in `AlphaToLkConverter` (0x200 is
+  RLE; the old comment even said "big alpha"); (2) `LkAdtReader` now strips the 8-byte MCAL/MCSH
+  subchunk headers — `AlphaMapData` previously began with the literal bytes `MCAL`+size and every
+  alpha byte was shifted 8; (3) `ValidateRoundTripCommand` compares at matching resolution
+  (`McalAlphaPack` is a 4× downsampled 256 signal; the old compare compared `orig256[y,x]` against
+  `upsample(orig256)[y,x]`, so hard edges reported as 1.000 flips). Writer offsets verified correct
+  by byte probe; a writer-side −8 experiment broke MCVT and was reverted — do NOT retry it.
+- **Full suite 1441 passed / 10 failed**: 9 known baseline + NEW pinned test
+  `AlphaToLk_FlagContract_AllowsAlphaRoundTripThroughLkBytes` (deliberately red — drift 0.9333
+  through pack256→LK→pack256 proves at least one more defect; suspect the nearest-upsample
+  `y*16/64` mapping in `SliceChunkAlphaBytes` or layer-span inference in `LkToAlphaConverter`).
+  Also known: the Alpha→LK leg consumes the LOSSY 256 pack (4× alpha resolution loss by design).
+- Evidence with the full defect trail: [`specs/221-converter-validation-harness/evidence/phase0-baseline.md`](../specs/221-converter-validation-harness/evidence/phase0-baseline.md).
+- **Next bounded step**: one focused debug pass on the pinned test (its synthetic fixture isolates
+  the chain — no MPQ needed); then 221-T101 object corpus validator. Do not widen scope past the
+  pinned test's chain until it is green.
+
+## Queued lane — Spec 220 WMO doodad editing & writing (spec authored 2026-09-04, not implemented)
 
 - Operator follow-up to 211's doodad picking: edit MODD placements (move/rotate/scale/add/delete),
   author MODS doodad sets, save the WMO back in the opened file's version. Full Spec Kit trio at

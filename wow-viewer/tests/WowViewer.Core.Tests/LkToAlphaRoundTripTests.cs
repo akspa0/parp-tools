@@ -1094,6 +1094,111 @@ public sealed class LkToAlphaRoundTripTests
         return (doodadRefs, mapObjRefs);
     }
 
+    [Fact]
+    public void AlphaToLk_FlagContract_AllowsAlphaRoundTripThroughLkBytes()
+    {
+        // Spec 221 Phase 0 regression: AlphaToLkConverter flagged its uncompressed 8-bit MCAL
+        // layers with MCLY 0x200 (RLE-compressed). The return leg RLE-decoded raw bytes, and
+        // 14/16 real 0.5.3 Azeroth tiles failed texture alpha at max drift 1.000. Alpha layers
+        // must carry 0x100 (use alpha map) and never 0x200 unless actually RLE-encoded.
+        List<LkMcnkData> chunks = [];
+        for (int index = 0; index < 256; index++)
+        {
+            int chunkX = index % 16;
+            int chunkY = index / 16;
+            chunks.Add(new LkMcnkData
+            {
+                IndexX = chunkX,
+                IndexY = chunkY,
+                Flags = 0,
+                BaseHeight = 0f,
+                Heights = [],
+                Normals = [],
+                Layers = []
+            });
+        }
+
+        chunks[0] = CreateThreeLayerAlphaChunk(0, 0);
+
+        LkAdtData adt = new()
+        {
+            TileX = 0,
+            TileY = 0,
+            TextureNames = ["terrain_a.blp", "detail_1.blp", "detail_2.blp", "detail_3.blp"],
+            Chunks = chunks
+        };
+
+        AlphaTileData sourceTile = LkToAlphaConverter.ConvertTile(adt, 0, 0);
+        LkAdtData lkTile = AlphaToLkConverter.ConvertTile(sourceTile, 0, 0);
+
+        LkMcnkData alphaChunk = lkTile.Chunks[0];
+        Assert.True(alphaChunk.NLayers >= 2);
+        for (int layer = 1; layer < alphaChunk.NLayers; layer++)
+        {
+            uint flags = alphaChunk.Layers[layer].Flags;
+            Assert.NotEqual(0u, flags & 0x100u);
+            Assert.Equal(0u, flags & 0x200u);
+        }
+
+        byte[] adtBytes = LkAdtWriter.Build(lkTile);
+        LkAdtData readBack = LkAdtReader.Read(adtBytes, null, null, 0, 0);
+        AlphaTileData roundTripTile = LkToAlphaConverter.ConvertTile(readBack, 0, 0);
+
+        int layers = sourceTile.McalAlphaPack.GetLength(2);
+        Assert.Equal(layers, roundTripTile.McalAlphaPack.GetLength(2));
+        float maxDrift = 0f;
+        for (int layer = 1; layer < layers; layer++)
+        {
+            for (int y = 0; y < 1024; y++)
+            {
+                for (int x = 0; x < 1024; x++)
+                {
+                    float expected = sourceTile.McalAlphaPack[y, x, layer];
+                    float actual = roundTripTile.McalAlphaPack[y, x, layer];
+                    maxDrift = MathF.Max(maxDrift, MathF.Abs(expected - actual));
+                }
+            }
+        }
+
+        // 8-bit re-quantization of 4-bit-expanded values may drift at most one byte step;
+        // the pre-fix RLE misdecode produced drift 1.000 (full flip).
+        Assert.True(maxDrift <= 2f / 255f, $"Alpha round-trip drift {maxDrift:F4} exceeds one byte step");
+    }
+
+    private static LkMcnkData CreateThreeLayerAlphaChunk(int chunkX, int chunkY)
+    {
+        float[] heights = new float[145];
+        Array.Fill(heights, 10f);
+
+        List<LkMclyEntry> layers = [new LkMclyEntry(0, 0, 0, 0)];
+        byte[] alphaMapData = [];
+        for (int layer = 1; layer < 4; layer++)
+        {
+            layers.Add(new LkMclyEntry((uint)layer, 0x100u, (uint)((layer - 1) * 64 * 64), 0));
+            var alpha = new byte[64 * 64];
+            for (int i = 0; i < alpha.Length; i++)
+                alpha[i] = (byte)(17 * ((i + (layer * 5)) % 16));
+
+            alphaMapData = [.. alphaMapData, .. alpha];
+        }
+
+        return new LkMcnkData
+        {
+            IndexX = chunkX,
+            IndexY = chunkY,
+            Flags = 0,
+            AreaId = 0,
+            BaseHeight = 10f,
+            Heights = heights,
+            Normals = [],
+            Layers = layers,
+            AlphaMapData = alphaMapData,
+            AlphaMapSize = alphaMapData.Length,
+            DoodadRefs = [],
+            WorldModelRefs = []
+        };
+    }
+
     private static LkMcnkData CreateChunk(int chunkX, int chunkY, float baseHeight, float slope, int flags, bool withAlpha, AdtLiquidChunk? liquidData = null, IReadOnlyList<int>? doodadRefs = null, IReadOnlyList<int>? worldModelRefs = null, int areaId = 0)
     {
         float[] heights = new float[145];

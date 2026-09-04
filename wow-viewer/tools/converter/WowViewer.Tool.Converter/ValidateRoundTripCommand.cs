@@ -73,13 +73,34 @@ internal static class ValidateRoundTripCommand
                 var lkRead = LkAdtReader.Read(lkBytes, null, null, tx, ty);
                 var rt = LkToAlphaConverter.ConvertTile(lkRead, tx, ty);
 
+                if (verbose)
+                {
+                    // Byte-level probe: does the file's MCAL region match what the writer meant?
+                    // Divergence here indicts LkAdtWriter/LkAdtReader, not the pack math.
+                    for (int probe = 0; probe < 4; probe++)
+                    {
+                        var modelChunk = lk.Chunks[probe];
+                        // LK ADT: MVER(12) + MHDR header(8) + payload(64) + MCIN header(8) = 92.
+                        int mcinEntry = BitConverter.ToInt32(lkBytes, 12 + 8 + 64 + 8 + (probe * 16));
+                        int hdr = mcinEntry + 8;
+                        int ofsMcal = BitConverter.ToInt32(lkBytes, hdr + 0x24);
+                        int sizeMcal = BitConverter.ToInt32(lkBytes, hdr + 0x28);
+                        int ofsMcsh = BitConverter.ToInt32(lkBytes, hdr + 0x2C);
+                        int sizeMcsh = BitConverter.ToInt32(lkBytes, hdr + 0x30);
+                        string mcSig = ofsMcal >= 8
+                            ? new string(new[] { (char)lkBytes[hdr + ofsMcal - 8 + 3], (char)lkBytes[hdr + ofsMcal - 8 + 2], (char)lkBytes[hdr + ofsMcal - 8 + 1], (char)lkBytes[hdr + ofsMcal - 8] })
+                            : "n/a";
+                        Console.WriteLine($"    [{tx},{ty}] model chunk {probe}: layers={modelChunk.NLayers} alphaBytes={modelChunk.AlphaMapSize} fileOfsMcal={ofsMcal} fileSizeMcal={sizeMcal} sigAtOfs='{mcSig}' ofsMcsh={ofsMcsh} sizeMcsh={sizeMcsh}");
+                    }
+                }
+
                 if (lkRead.Chunks.Count == 0)
                 {
                     fail++;
                     continue;
                 }
 
-                var (pass, maxH, maxA, msgs) = CompareAlpha(orig, rt, hEps, aEps);
+                var (pass, maxH, maxA, msgs) = CompareAlpha(orig, rt, hEps, aEps, verbose, tx, ty);
                 gMaxH = MathF.Max(gMaxH, maxH); gMaxA = MathF.Max(gMaxA, maxA);
                 if (pass) { ok++; if (verbose) Console.WriteLine($"  PASS ({tx},{ty}) Δh={maxH:F3} Δα={maxA:F3}"); }
                 else { fail++; Console.WriteLine($"  FAIL ({tx},{ty}): {string.Join("; ", msgs)}"); }
@@ -136,7 +157,7 @@ internal static class ValidateRoundTripCommand
     }
 
     static (bool pass, float maxH, float maxA, List<string> msgs) CompareAlpha(
-        AlphaTileData orig, AlphaTileData rt, float hEps, float aEps)
+        AlphaTileData orig, AlphaTileData rt, float hEps, float aEps, bool verbose = false, int tx = 0, int ty = 0)
     {
         var msgs = new List<string>();
         float maxH = 0, maxA = 0;
@@ -166,21 +187,48 @@ internal static class ValidateRoundTripCommand
 
         if (orig.McalAlphaPack != null && rt.McalAlphaPack != null)
         {
+            // AlphaTileData.McalAlphaPack is the reader's 4x box-downsampled 256 signal while the
+            // return leg decodes full-resolution 1024. Comparing them index-for-index compared
+            // orig256[y,x] against upsample(orig256)[y,x] = orig256[y/4,x/4] and reported hard
+            // alpha edges as 1.000 flips. Compare at the ORIGINAL pack's resolution by box-
+            // downsampling the round-trip pack to match. (Known conversion-quality debt: the
+            // Alpha->LK leg itself consumes the lossy 256 pack; see Spec 221 evidence.)
+            float[,,] rtPack = rt.McalAlphaPack;
+            if (rtPack.GetLength(0) != orig.McalAlphaPack.GetLength(0)
+                || rtPack.GetLength(1) != orig.McalAlphaPack.GetLength(1))
+            {
+                int oH = orig.McalAlphaPack.GetLength(0), oW = orig.McalAlphaPack.GetLength(1);
+                int oL = Math.Min(orig.McalAlphaPack.GetLength(2), rtPack.GetLength(2));
+                int ratio = rtPack.GetLength(0) / oH;
+                var downsampled = new float[oH, oW, oL];
+                for (int y = 0; y < oH; y++)
+                    for (int x = 0; x < oW; x++)
+                        for (int l = 0; l < oL; l++)
+                        {
+                            float sum = 0f;
+                            for (int dy = 0; dy < ratio; dy++)
+                                for (int dx = 0; dx < ratio; dx++)
+                                    sum += rtPack[y * ratio + dy, x * ratio + dx, l];
+                            downsampled[y, x, l] = sum / (ratio * ratio);
+                        }
+                rtPack = downsampled;
+            }
+
             float origVal = 0, rtVal = 0;
             int badX = -1, badY = -1, badL = -1;
             int aBad = 0;
-            for (int y = 0; y < 256; y++)
-                for (int x = 0; x < 256; x++)
-                    for (int l = 0; l < 4; l++)
+            for (int y = 0; y < orig.McalAlphaPack.GetLength(0); y++)
+                for (int x = 0; x < orig.McalAlphaPack.GetLength(1); x++)
+                    for (int l = 0; l < Math.Min(orig.McalAlphaPack.GetLength(2), rtPack.GetLength(2)); l++)
                     {
-                        float d = MathF.Abs(orig.McalAlphaPack[y, x, l] - rt.McalAlphaPack[y, x, l]);
+                        float d = MathF.Abs(orig.McalAlphaPack[y, x, l] - rtPack[y, x, l]);
                         if (d > maxA) maxA = d;
                         if (d > aEps)
                         {
                             if (badX == -1)
                             {
                                 origVal = orig.McalAlphaPack[y, x, l];
-                                rtVal = rt.McalAlphaPack[y, x, l];
+                                rtVal = rtPack[y, x, l];
                                 badX = x; badY = y; badL = l;
                             }
                             aBad++;
@@ -188,6 +236,36 @@ internal static class ValidateRoundTripCommand
                     }
             if (aBad > 0)
                 msgs.Add($"alpha:{aBad} exceed ε (max={maxA:F3}) [orig={origVal:F3} rt={rtVal:F3} at {badX},{badY} l={badL}]");
+
+            if (verbose)
+            {
+                // Per-chunk/per-layer drift: localizes whether the fault is chunk-wide (index
+                // confusion), row/column bands (span or nibble order), or scattered (decode).
+                Console.WriteLine($"    [{tx},{ty}] pack dims orig=({orig.McalAlphaPack!.GetLength(0)},{orig.McalAlphaPack.GetLength(1)},{orig.McalAlphaPack.GetLength(2)}) rt=({rt.McalAlphaPack!.GetLength(0)},{rt.McalAlphaPack.GetLength(1)},{rt.McalAlphaPack.GetLength(2)})");
+                int layerCount = Math.Min(orig.McalAlphaPack.GetLength(2), rt.McalAlphaPack.GetLength(2));
+                int rows = Math.Min(orig.McalAlphaPack.GetLength(0), rt.McalAlphaPack.GetLength(0));
+                int cols = Math.Min(orig.McalAlphaPack.GetLength(1), rt.McalAlphaPack.GetLength(1));
+                for (int cy = 0; cy < 16 && cy * 64 < rows; cy++)
+                    for (int cx = 0; cx < 16 && cx * 64 < cols; cx++)
+                    {
+                        float chunkMax = 0f;
+                        int chunkBadLayer = -1;
+                        for (int l = 1; l < layerCount; l++)
+                        {
+                            float layerMax = 0f;
+                            for (int yy = 0; yy < 64 && cy * 64 + yy < rows; yy++)
+                                for (int xx = 0; xx < 64 && cx * 64 + xx < cols; xx++)
+                                {
+                                    float d = MathF.Abs(orig.McalAlphaPack[cy * 64 + yy, cx * 64 + xx, l]
+                                                        - rt.McalAlphaPack[cy * 64 + yy, cx * 64 + xx, l]);
+                                    if (d > layerMax) layerMax = d;
+                                }
+                            if (layerMax > chunkMax) { chunkMax = layerMax; chunkBadLayer = l; }
+                        }
+                        if (chunkMax > aEps)
+                            Console.WriteLine($"    [{tx},{ty}] chunk(c={cx},r={cy}) maxΔα={chunkMax:F3} (worst l={chunkBadLayer})");
+                    }
+            }
         }
         else if (orig.McalAlphaPack != null) msgs.Add("alpha lost");
 
