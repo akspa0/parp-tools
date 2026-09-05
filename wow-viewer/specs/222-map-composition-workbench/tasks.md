@@ -33,10 +33,12 @@ Checklist order = execution order. Each phase ends at a verification gate before
   clearing), `_pendingTiles` drained, and each background load captures the generation at queue
   time and DISCARDS its result when the generation moved on. Build green; operator should confirm
   the sticky behavior is gone by dragging a phase layer around and across the camera.
-- **222-T109 AMENDED — Cartography becomes a top-level feature**: add a **Cartography tab to the
-  top tab bar** (beside Viewer/Editor/Archaeology), simple, not overly dramatic. The phase/layer
-  panel lives in the **RIGHT sidebar** — explicitly NOT the left sidebar, where it is hidden away
-  from everything. Delete the left-sidebar Phase Map Layers panel in the same change (FR-11).
+- **222-T109 AMENDED, then SUPERSEDED by Spec 223 (same day)**: the original amendment made
+  Cartography a top-level tab with the layer panel in the right sidebar. Spec 223
+  ([`223-ui-consolidation-audit`](../223-ui-consolidation-audit/spec.md)) supersedes the
+  top-level-tab part: **Cartography lives under Archaeology** (which also owns the
+  save-merged-data-to-output capability), as part of the Editor+Archaeology merge-then-split
+  sequencing. The right-sidebar placement and the left-panel deletion still stand.
 - **222-T109a (new) — Synthesized minimap moves INTO Cartography**: the synthesized-minimap tooling
   must (a) render minimaps from the **merged phase-map layer stack using whatever channels are
   selected for each layer** (not just the base map), and (b) live as a **tab inside the right
