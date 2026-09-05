@@ -44,6 +44,15 @@ public partial class ViewerApp
             return;
         }
 
+        DrawSynthesizedMinimapExportContent(showCloseButton: true);
+
+        ImGui.End();
+    }
+
+    private void DrawSynthesizedMinimapExportContent(bool showCloseButton = false)
+    {
+        PrepareSynthesizedMinimapExportDialogInputs();
+
         ImGui.TextWrapped(
             "Build paired terrain-only and _liquid PNG minimaps directly from client BLP textures plus MCLY/MCAL, MCNR, MCSH, and decoded liquid coverage. " +
             "This does not read a shipped minimap image or use the retired VLM/MK dataset workflow.");
@@ -146,9 +155,13 @@ public partial class ViewerApp
             StartSynthesizedMinimapExport();
         if (!canStart)
             ImGui.EndDisabled();
-        ImGui.SameLine();
-        if (ImGui.Button("Close", new Vector2(80, 0)) && !_synthesizedMinimapRunning)
-            _showSynthesizedMinimapExportDialog = false;
+
+        if (showCloseButton)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Close", new Vector2(80, 0)) && !_synthesizedMinimapRunning)
+                _showSynthesizedMinimapExportDialog = false;
+        }
 
         if (_synthesizedMinimapError is not null)
         {
@@ -182,7 +195,6 @@ public partial class ViewerApp
             }
         }
         ImGui.EndChild();
-        ImGui.End();
     }
 
     private void StartSynthesizedMinimapExport()

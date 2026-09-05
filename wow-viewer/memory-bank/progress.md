@@ -1,6 +1,15 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
+
+## 2026-09-04 — Spec 223: Viewer UI Consolidation Audit (Phases 1–5 Complete)
+- **Landed in Core & Core.Runtime:** Created `WowViewer.Core.Runtime.World.Inspection` content model (`InspectorPayload`, `InspectorSection`, `InspectorAction`, `InspectorSubBlock`) and `WmoDoodadSetResolver.cs` ([`WmoDoodadSetResolverTests.cs`](../tests/WowViewer.Core.Tests/WmoDoodadSetResolverTests.cs) 16/16 green).
+- **Landed in Viewer:**
+  - **Unified Object Inspector (Phase 1):** Right-sidebar Inspector host ([`InspectorContentHost.cs`](../src/viewer/WoWViewer/Workbench/InspectorContentHost.cs)) consolidating ADT, MDX/M2, WMO (with MODS doodad-set switching), PM4, and WL* liquid inspection into unified sections with capability parity; compact hover overlays deep-linking to Inspector.
+  - **Duplicate Window Retirement (Phase 2):** Retired 7 floating inspection windows (`DrawMcnkExplorerWindow`, `DrawTerrainAnalysisWindow`, `DrawRenderQualityWindow`, `DrawPm4AlignmentWindow`, `DrawPm4WmoCorrelationWindow`, `DrawPm4ObjectMatchWindow`, `DrawChunkClipboardWindow`); Log and Perf floaters guarded to legacy UI and routed to Workbench Utilities in tab UI; deduplicated duplicate draw methods.
+  - **Editor & Archaeology Profile Split (Phases 3 & 4):** Cleanly separated authoring/writing features into dedicated `Editor` profile (`WorkbenchTab.Editor`, F6 shortcut) with dedicated sub-tabs (Tasks, Converters, ML Dataset & Training, Imports & Exports) from analysis/inspection in `Archaeology` profile (`WorkbenchTab.Archaeology`). Cartography (Spec 222) integrated under Archaeology. Top-bar action button sets configured per profile.
+  - **Authoritative Fog Controls & Quick Mirror (Phase 5):** Unified fog sliders into `DrawAuthoritativeFogControls` in [`ViewerApp_Settings.cs`](../src/viewer/WoWViewer/ViewerApp_Settings.cs) serving both Settings and Quick controls (FR-6 zero fork) with **Fog End rendered first**, immediate persistence to defaults, and profile-tailored Quick sections.
+- **Validation:** Solution build passes with 0 errors; focused Core unit tests 16/16 pass (`WmoDoodadSetResolverTests`).
 
 ## 2026-09-03 — Spec 219: Phase 1 Core transform seam and policy gate passed
 - **Landed in Core:** [`TileContentTransform.cs`](../src/core/WowViewer.Core/Maps/TileContentTransform.cs)

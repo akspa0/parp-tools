@@ -393,7 +393,7 @@ public partial class ViewerApp
 
         ImGui.SameLine();
         if (ImGui.Button("Open Advanced Align"))
-            _showPm4AlignmentWindow = true;
+            _activePm4TabIndex = (int)Pm4BottomTab.Alignment;
 
         ImGui.SameLine();
         if (ImGui.Button("Save Overlay Align"))
@@ -1136,18 +1136,11 @@ public partial class ViewerApp
         ImGui.EndChild();
     }
 
-    private void DrawPm4AlignmentWindow()
+    private void DrawPm4AlignmentContent()
     {
         if (_worldScene == null)
         {
-            _showPm4AlignmentWindow = false;
-            return;
-        }
-
-        ImGui.SetNextWindowSize(new Vector2(430, 0), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("PM4 Alignment", ref _showPm4AlignmentWindow, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.End();
+            ImGui.TextDisabled("Load a world scene to adjust PM4 alignment.");
             return;
         }
 
@@ -1226,10 +1219,9 @@ public partial class ViewerApp
             ImGui.SameLine();
             if (ImGui.Button("PM4/WMO Panel"))
             {
-                _showPm4WmoCorrelationWindow = true;
+                _activePm4TabIndex = (int)Pm4BottomTab.Correlation;
                 EnsurePm4WmoCorrelationReportLoaded();
             }
-            ImGui.End();
             return;
         }
 
@@ -1805,7 +1797,7 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("PM4/WMO Panel"))
         {
-            _showPm4WmoCorrelationWindow = true;
+            _activePm4TabIndex = (int)Pm4BottomTab.Correlation;
             EnsurePm4WmoCorrelationReportLoaded();
         }
         ImGui.SameLine();
@@ -1821,27 +1813,18 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Obj Move: ({_worldScene.SelectedPm4ObjectTranslation.X:F3}, {_worldScene.SelectedPm4ObjectTranslation.Y:F3}, {_worldScene.SelectedPm4ObjectTranslation.Z:F3})");
         ImGui.TextDisabled($"Obj Rot: ({_worldScene.SelectedPm4ObjectRotationDegrees.X:F3}, {_worldScene.SelectedPm4ObjectRotationDegrees.Y:F3}, {_worldScene.SelectedPm4ObjectRotationDegrees.Z:F3}) deg");
         ImGui.TextDisabled($"Obj Scale: ({_worldScene.SelectedPm4ObjectScale.X:F4}, {_worldScene.SelectedPm4ObjectScale.Y:F4}, {_worldScene.SelectedPm4ObjectScale.Z:F4})");
-
-        ImGui.End();
     }
 
-    private void DrawPm4WmoCorrelationWindow()
+    private void DrawPm4WmoCorrelationContent()
     {
         if (_worldScene == null)
         {
-            _showPm4WmoCorrelationWindow = false;
             _pm4WmoCorrelationReport = null;
+            ImGui.TextDisabled("Load a world scene to inspect PM4/WMO correlation.");
             return;
         }
 
         EnsurePm4WmoCorrelationReportLoaded();
-
-        ImGui.SetNextWindowSize(new Vector2(1120, 720), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("PM4/WMO Correlation", ref _showPm4WmoCorrelationWindow))
-        {
-            ImGui.End();
-            return;
-        }
 
         int requestedMatches = _pm4WmoCorrelationMaxMatchesPerPlacement;
         ImGui.SetNextItemWidth(90f);
@@ -1873,7 +1856,6 @@ public partial class ViewerApp
         if (_pm4WmoCorrelationReport == null)
         {
             ImGui.TextDisabled("No PM4/WMO correlation report is loaded.");
-            ImGui.End();
             return;
         }
 
@@ -1899,7 +1881,6 @@ public partial class ViewerApp
         if (filteredPlacements.Count == 0)
         {
             ImGui.TextDisabled("No placements matched the current filter.");
-            ImGui.End();
             return;
         }
 
@@ -2036,8 +2017,6 @@ public partial class ViewerApp
             }
         }
         ImGui.EndChild();
-
-        ImGui.End();
     }
 
     private void SaveCurrentPm4Alignment()
@@ -2227,70 +2206,6 @@ public partial class ViewerApp
             _statusMessage = $"PM4 object match refresh failed: {ex.Message}";
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Object Match] Report refresh failed: {ex}");
         }
-    }
-
-    private void DrawPm4ObjectMatchWindow()
-    {
-        if (_worldScene == null)
-        {
-            _showPm4ObjectMatchWindow = false;
-            _pm4ObjectMatchReport = null;
-            return;
-        }
-
-        EnsurePm4ObjectMatchReportLoaded();
-
-        ImGui.SetNextWindowSize(new Vector2(1220, 760), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("PM4 Object Match", ref _showPm4ObjectMatchWindow))
-        {
-            ImGui.End();
-            return;
-        }
-
-        int requestedMatches = _pm4ObjectMatchMaxMatchesPerObject;
-        ImGui.SetNextItemWidth(110f);
-        if (ImGui.SliderInt("Top Matches", ref requestedMatches, 3, 5))
-        {
-            _pm4ObjectMatchMaxMatchesPerObject = Math.Clamp(requestedMatches, 3, 5);
-            RefreshPm4ObjectMatchReport();
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Refresh"))
-            RefreshPm4ObjectMatchReport();
-
-        if (_pm4ObjectMatchReport == null)
-        {
-            ImGui.TextDisabled("No PM4 object match report is loaded.");
-            ImGui.End();
-            return;
-        }
-
-        Pm4ObjectMatchReport report = _pm4ObjectMatchReport;
-        ImGui.TextDisabled(
-            $"Generated {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss} UTC | PM4 objects {report.Summary.Pm4ObjectCount}, WMO placements {report.Summary.WmoPlacementCount}, M2 placements {report.Summary.M2PlacementCount}");
-        ImGui.TextDisabled(
-            $"Objects with candidates {report.Summary.ObjectsWithCandidates}/{report.Summary.Pm4ObjectCount}, near {report.Summary.ObjectsWithNearCandidates}, status: {report.Pm4Status}");
-        ImGui.TextDisabled("Ranking keeps WMO-mesh priority for non-zero families, but zero/root PM4 objects with linked refs now prefer M2 anchors before the usual tile/anchor/planar fit checks.");
-        ImGui.Separator();
-
-        if (!_worldScene.HasSelectedPm4Object)
-        {
-            ImGui.TextDisabled("Select a PM4 object in the scene to see its top suggested matches.");
-            ImGui.End();
-            return;
-        }
-
-        if (!TryGetSelectedPm4ObjectMatch(out Pm4ObjectMatchObject objectMatch))
-        {
-            ImGui.TextDisabled("The selected PM4 object is not present in the current match report. Refresh and try again.");
-            ImGui.End();
-            return;
-        }
-
-        DrawPm4SelectedObjectMatchSuggestions("WindowPm4Match", compact: false);
-
-        ImGui.End();
     }
 
     private bool TryGetSelectedPm4ObjectMatch(out Pm4ObjectMatchObject objectMatch)
@@ -2564,7 +2479,7 @@ public partial class ViewerApp
 
         _worldScene.SelectedPm4ObjectTranslation += delta;
         InvalidatePm4DerivedReports();
-        _showPm4AlignmentWindow = true;
+        _activePm4TabIndex = (int)Pm4BottomTab.Alignment;
 
         string axes = includeZ ? "XYZ" : "XY";
         _statusMessage =

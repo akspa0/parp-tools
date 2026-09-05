@@ -273,26 +273,6 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawMcnkExplorerWindow()
-    {
-        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
-        // Workbench sub-tab uses DrawMcnkExplorerContent directly.
-        if (_terrainManager == null && _vlmTerrainManager == null)
-        {
-            _showMcnkExplorerWindow = false;
-            return;
-        }
-
-        ImGui.SetNextWindowSize(new Vector2(480f, 0f), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("MCNK Explorer", ref _showMcnkExplorerWindow, ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.End();
-            return;
-        }
-        DrawMcnkExplorerContent();
-        ImGui.End();
-    }
-
     private void DrawMcnkExplorerContent()
     {
         ImGui.TextDisabled("Inspect the hovered or camera chunk, raw MCNK flags, layer stack, alpha usage, and weak-corner overlays.");
@@ -718,17 +698,7 @@ public partial class ViewerApp
         ImGui.TextColored(new Vector4(0.72f, 0.78f, 0.90f, 1.0f), $"World: ({chunkData.WorldPosition.X:F1}, {chunkData.WorldPosition.Y:F1}, {chunkData.WorldPosition.Z:F1})");
         ImGui.Separator();
 
-        for (int layerIndex = 0; layerIndex < chunkData.Layers.Length; layerIndex++)
-        {
-            TerrainLayer layer = chunkData.Layers[layerIndex];
-            string textureName = ResolveTerrainTextureName(tileTextures, layer.TextureIndex);
-            bool hasAlpha = layerIndex > 0 && chunkData.AlphaMaps.ContainsKey(layerIndex);
-            ImGui.TextColored(new Vector4(0.92f, 0.96f, 1.0f, 1.0f), $"L{layerIndex}: {textureName}");
-            ImGui.TextDisabled($"tex#{layer.TextureIndex} flags=0x{layer.Flags:X8} alpha={(hasAlpha ? "yes" : "no")}");
-        }
-
-        ImGui.Separator();
-        ImGui.TextColored(new Vector4(0.86f, 0.92f, 0.76f, 1.0f), "Use Inspect or Objects workspace for full chunk details.");
+        ImGui.TextColored(new Vector4(0.86f, 0.92f, 0.76f, 1.0f), "Left-click or use Inspector for full chunk details.");
         ImGui.End();
         ImGui.PopStyleColor(3);
         ImGui.PopStyleVar(3);

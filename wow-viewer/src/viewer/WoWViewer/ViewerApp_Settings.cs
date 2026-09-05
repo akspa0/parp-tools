@@ -59,15 +59,70 @@ public partial class ViewerApp
 
     private void DrawFogDefaultsContent()
     {
-        ImGui.TextDisabled("Global fog defaults apply when terrain loads without an active user override.");
+        DrawAuthoritativeFogControls(showDescription: true);
+    }
 
-        float fogStart = Math.Clamp(_defaultFogStart, 0f, MaxTerrainFogDistance - 1f);
-        float fogEnd = Math.Clamp(_defaultFogEnd, 100f, MaxTerrainFogDistance);
-        bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f);
-        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance);
-        if (fogStartChanged || fogEndChanged)
+    /// <summary>
+    /// Authoritative fog controls implementation (Spec 223 Phase 5 / US5 / FR-6).
+    /// Renders Fog End first per operator requirement ("Fog End is the first thing I set to 5000 or more, every time!").
+    /// Both Settings > Fog Defaults and Quick controls mirror this exact implementation.
+    /// </summary>
+    private void DrawAuthoritativeFogControls(bool showDescription = true)
+    {
+        if (showDescription)
+            ImGui.TextDisabled("Global fog defaults apply when terrain loads without an active user override, and update active terrain lighting immediately.");
+
+        TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
+        float currentFogEnd = lighting != null
+            ? lighting.FogEnd
+            : _defaultFogEnd;
+        float currentFogStart = lighting != null
+            ? lighting.FogStart
+            : _defaultFogStart;
+
+        float fogEnd = Math.Clamp(currentFogEnd, 100f, MaxTerrainFogDistance);
+        float fogStart = Math.Clamp(currentFogStart, 0f, MaxTerrainFogDistance - 1f);
+
+        // Operator requirement: Fog End rendered FIRST in every profile
+        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance, "%.0f");
+        bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f, "%.0f");
+
+        if (fogEndChanged || fogStartChanged)
         {
-            (_defaultFogStart, _defaultFogEnd) = TerrainLightingMath.NormalizeFogRange(fogStart, fogEnd);
+            SetAuthoritativeFogRange(fogStart, fogEnd, persistAsDefault: true);
+        }
+
+        if (lighting != null && _worldScene != null)
+        {
+            bool useLitFog = _worldScene.UseLitFogOverride;
+            if (ImGui.Checkbox("Use LIT fog", ref useLitFog))
+                _worldScene.UseLitFogOverride = useLitFog;
+            ImGui.TextDisabled($"Fog/detail range: {lighting.FogStart:F0}–{lighting.FogEnd:F0}; WDL horizon clips at {ComputeSceneFarPlane(lighting.FogEnd):F0} (+2500).");
+        }
+    }
+
+    private void SetAuthoritativeFogRange(float start, float end, bool persistAsDefault = true)
+    {
+        (float normalizedStart, float normalizedEnd) = TerrainLightingMath.NormalizeFogRange(start, end);
+
+        if (_worldScene != null)
+        {
+            _worldScene.SetUserFogRangeOverride(normalizedStart, normalizedEnd);
+        }
+        else
+        {
+            TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
+            if (lighting != null)
+            {
+                lighting.FogStart = normalizedStart;
+                lighting.FogEnd = normalizedEnd;
+            }
+        }
+
+        if (persistAsDefault)
+        {
+            _defaultFogStart = normalizedStart;
+            _defaultFogEnd = normalizedEnd;
             SaveViewerSettings();
         }
     }

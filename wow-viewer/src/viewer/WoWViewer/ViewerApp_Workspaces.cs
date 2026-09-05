@@ -46,6 +46,7 @@ public partial class ViewerApp
             switch (mode)
             {
                 case WorkspaceMode.Editor:
+                    _workspaceMode = WorkspaceMode.Editor;
                     OpenWorkbenchTab(WorkbenchTab.Editor);
                     EnsureEditorHost();
                     break;
@@ -145,24 +146,13 @@ public partial class ViewerApp
             }
         }
 
-        if (hasWorldLoaded)
-        {
-            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-            if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
-                DrawWorldOverviewContent();
-        }
+        DrawSharedWorldOverviewSection(inScrollableChild: false);
 
         ImGui.SetNextItemOpen(!hasWorldLoaded || _editorWorkspaceTask == EditorWorkspaceTask.Inspect, ImGuiCond.Once);
         if (_showFileBrowser && ImGui.CollapsingHeader("Map / Assets"))
             DrawFileBrowserContent();
 
-        if (_autoOpenWorldMapsPanel)
-            ImGui.SetNextItemOpen(true, ImGuiCond.Always);
-        else
-            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
-
-        if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
-            DrawMapDiscoveryContent();
+        DrawSharedWorldMapsSection(defaultOpenWhenNoWorld: true);
     }
 
     private void DrawEditorWorkspaceInspector()
@@ -198,8 +188,7 @@ public partial class ViewerApp
 
         ImGui.TextWrapped("Terrain actions are live-scene only in the current viewer. Use this workspace to make target and save status explicit.");
 
-        if (ImGui.CollapsingHeader("Chunk Clipboard", ImGuiTreeNodeFlags.DefaultOpen))
-            DrawChunkClipboardContent(renderer);
+        DrawSharedChunkClipboardSection(renderer, withHeader: true, headerTitle: "Chunk Clipboard");
 
         ImGui.Separator();
         ImGui.Text("Terrain Import / Export");
@@ -300,11 +289,22 @@ public partial class ViewerApp
             _showMinimapWindow = !_showMinimapWindow;
 
         ImGui.SameLine();
-        if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
-            _showLogViewer = !_showLogViewer;
+        if (_useTabUi)
+        {
+            if (ImGui.Button("Log Viewer"))
+                OpenWorkbenchTab(UtilitiesBottomTab.Log);
 
-        if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
-            _showPerfWindow = !_showPerfWindow;
+            if (ImGui.Button("Perf"))
+                OpenWorkbenchTab(UtilitiesBottomTab.Perf);
+        }
+        else
+        {
+            if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
+                _showLogViewer = !_showLogViewer;
+
+            if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
+                _showPerfWindow = !_showPerfWindow;
+        }
 
         ImGui.SameLine();
         if (ImGui.Button("Settings..."))

@@ -5,6 +5,29 @@ Last updated: 2026-09-04
 **START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
 open specs, with the reasoning for the order. This section is the session summary behind it.
 
+## Landed 2026-09-04 — Spec 223 COMPLETE (Phases 1–5): Viewer UI Consolidation Audit (build green, 16/16 unit tests passing)
+
+- **Phase 1 (223-T101..T107 Gate A)**:
+  - Unified Inspector host and HUD-ready inspection content model landed in `WowViewer.Core.Runtime.World.Inspection` (`InspectorPayload`, `InspectorSection`, `InspectorAction`, `InspectorSubBlock`).
+  - Inspector organizes ADT, MDX/M2, WMO, PM4, and WL* liquid inspection into unified sections with capability parity.
+  - WMO doodad-set switching integrated (`WmoDoodadSetResolver.cs`): MODS list, active set switching, dynamic reload preserving camera/selection.
+  - Removed 7-tab dropdown above Inspector (`WorkbenchTab.Inspect => []`).
+- **Phase 2 (223-T201..T202)**:
+  - Retired 7 absorbed/duplicate floating windows: `DrawMcnkExplorerWindow()`, `DrawTerrainAnalysisWindow()`, `DrawRenderQualityWindow()`, `DrawPm4AlignmentWindow()`, `DrawPm4WmoCorrelationWindow()`, `DrawPm4ObjectMatchWindow()`, `DrawChunkClipboardWindow()`.
+  - Converted PM4 Alignment and WMO Correlation to embedded content functions; removed dead `DrawPm4ObjectMatchWindow`.
+  - Guarded Log Viewer and Perf floaters to `!_useTabUi` (legacy UI only); routed to Workbench tabs in tab UI.
+  - Unified duplicate implementations (World Overview, World Maps, Chunk Clipboard) into shared draw methods used by both tab UI and legacy UI.
+  - 223-T203 (`DrawTerrainToolsWindow`) explicitly deferred pending Spec 222-T111 Cartography parity checklist.
+- **Phase 3 & 4 (223-T301..T302 Gate B, 223-T401)**:
+  - Profile merge and true-editor split: authoring/writing actions live under dedicated `Editor` profile (`WorkbenchTab.Editor`, F6 shortcut); analysis/inspection remains in `Archaeology` profile (`WorkbenchTab.Archaeology`).
+  - Top bar button layouts configured per profile (`Editor`: Quick/Editor/Inspector/Utilities; `Archaeology`: Quick/Archaeology/Inspector/Utilities; `Viewer`: Quick/Inspector/Scene/Utilities/Archaeology/Editor).
+  - Cartography (Spec 222) cleanly integrated under `Archaeology` sub-tab index 5 (`DrawArchaeologyWorkbenchSubTabContent`).
+- **Phase 5 (223-T501..T502)**:
+  - Authoritative fog control implementation: `DrawAuthoritativeFogControls(bool showDescription = true)` and `SetAuthoritativeFogRange` in `ViewerApp_Settings.cs` provide a single authoritative source for both Settings > Fog Defaults and Quick controls (FR-6 zero-fork).
+  - **Fog End rendered first in every profile**, followed by Fog Start and LIT fog toggle, saving immediately to persistent defaults.
+  - Profile-tailored Quick controls: Scene summaries in `Viewer`; placement queues and converter launchers in `Editor`; investigation tools and layer shortcuts in `Archaeology`.
+- **Next Spec**: Spec 222 (Cartography — multi-map, multi-tile composition workbench) starting at 222-T101.
+
 ## Landed 2026-09-04 — Spec 222 v2: Cartography (multi-map, multi-tile workbench) — operator accepted
 
 - **The 0.5.3 "phase overlay regression" was diagnosed and is NOT a code defect.** Measured via the

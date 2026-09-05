@@ -11,26 +11,6 @@ namespace WoWViewer;
 
 public partial class ViewerApp
 {
-    private void DrawTerrainAnalysisWindow()
-    {
-        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
-        // Workbench sub-tab uses DrawTerrainAnalysisContent directly.
-        if (_terrainManager == null && _vlmTerrainManager == null)
-        {
-            _showTerrainAnalysisWindow = false;
-            return;
-        }
-
-        ImGui.SetNextWindowSize(new Vector2(980f, 860f), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Terrain Analysis", ref _showTerrainAnalysisWindow, ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.End();
-            return;
-        }
-
-        DrawTerrainAnalysisContent();
-        ImGui.End();
-    }
 
     private void DrawTerrainAnalysisContent()
     {

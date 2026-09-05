@@ -539,19 +539,9 @@ public partial class ViewerApp
 
             ImGui.Separator();
 
+            DrawSharedWorldOverviewSection(inScrollableChild: true);
             if (hasWorldLoaded)
-            {
-                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    float overviewHeight = MathF.Min(340f, MathF.Max(210f, ImGui.GetContentRegionAvail().Y * 0.42f));
-                    if (ImGui.BeginChild("##LeftWorldOverview", new Vector2(0f, overviewHeight), true,
-                        ImGuiWindowFlags.None))
-                        DrawWorldOverviewContent();
-                    ImGui.EndChild();
-                }
                 ImGui.Separator();
-            }
 
             DrawFileBrowserContent(hasWorldLoaded ? 260f : 0f);
 
@@ -600,21 +590,51 @@ public partial class ViewerApp
     {
         bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
 
-        if (hasWorldLoaded)
-        {
-            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-            if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
-                DrawWorldOverviewContent();
-        }
+        DrawSharedWorldOverviewSection(inScrollableChild: false);
 
         ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
         if (_showFileBrowser && ImGui.CollapsingHeader("File Browser", hasWorldLoaded ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
             DrawFileBrowserContent(hasWorldLoaded ? 260f : 0f);
 
+        DrawSharedWorldMapsSection(defaultOpenWhenNoWorld: false);
+    }
+
+    private void DrawSharedWorldOverviewSection(bool inScrollableChild)
+    {
+        bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+        if (!hasWorldLoaded)
+            return;
+
+        ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+        if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            if (inScrollableChild)
+            {
+                float overviewHeight = MathF.Min(340f, MathF.Max(210f, ImGui.GetContentRegionAvail().Y * 0.42f));
+                if (ImGui.BeginChild("##LeftWorldOverview", new Vector2(0f, overviewHeight), true,
+                    ImGuiWindowFlags.None))
+                    DrawWorldOverviewContent();
+                ImGui.EndChild();
+            }
+            else
+            {
+                DrawWorldOverviewContent();
+            }
+        }
+    }
+
+    private void DrawSharedWorldMapsSection(bool defaultOpenWhenNoWorld = false)
+    {
+        if (_discoveredMaps.Count == 0)
+            return;
+
+        bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
         if (_autoOpenWorldMapsPanel)
             ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+        else if (defaultOpenWhenNoWorld)
+            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
 
-        if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
+        if (ImGui.CollapsingHeader("World Maps"))
             DrawMapDiscoveryContent();
     }
 
@@ -778,8 +798,6 @@ public partial class ViewerApp
             ImGui.EndChild();
         }
 
-        ImGui.Separator();
-        DrawPhaseLayersPanel();
     }
 
     private void DrawFileBrowserContent(float reservedFooterHeight = 0f)
@@ -931,7 +949,7 @@ public partial class ViewerApp
     {
         if (_worldScene != null)
         {
-            string[] tabs = ["Selection", "World", "Model", "Settings", "PM4"];
+            string[] tabs = ["Inspector", "World", "Model", "Settings", "PM4"];
             int current = _activeInspectorTab;
             if (current < 0 || current >= tabs.Length)
                 current = 0;
@@ -945,7 +963,7 @@ public partial class ViewerApp
                         _activeInspectorTab = i;
                         switch (i)
                         {
-                            case 0: DrawUnifiedSelectionSidebarContent(); break;
+                            case 0: DrawUnifiedInspectorContent(); break;
                             case 1: DrawWorldObjectsPanelContent(); break;
                             case 2: DrawModelInfoPanelContent(); break;
                             case 3: DrawUnifiedViewerSettingsSidebarContent(); break;
@@ -997,106 +1015,15 @@ public partial class ViewerApp
     /// </summary>
     private void DrawUnifiedInspectorContent()
     {
-        ImGui.TextDisabled("Current context");
-        bool hasContext = false;
-
-        if (_worldScene?.HasSelectedPm4Object == true)
+        var content = BuildInspectorContent();
+        if (content.HasContent)
         {
-            DrawSelectedPm4ContextSummary();
-            hasContext = true;
+            InspectorContentHost.Draw(content, HandleInspectorAction);
         }
-        else if (_worldScene?.SelectedInstance.HasValue == true)
+        else
         {
-            hasContext = DrawSelectedObjectSummaryContent();
-        }
-        else if (!string.IsNullOrWhiteSpace(_modelInfo))
-        {
-            DrawModelInfoCoreContent();
-            hasContext = true;
-        }
-
-        if (DrawCompactTerrainContextSummary())
-            hasContext = true;
-
-        if (DrawUnifiedInspectorDiagnosticsContent())
-            hasContext = true;
-
-        if (!hasContext)
+            ImGui.TextDisabled("Current context");
             ImGui.TextDisabled("Move the camera over a loaded ADT/MCNK or select a model, world object, or PM4 surface.");
-    }
-
-    private bool DrawUnifiedInspectorDiagnosticsContent()
-    {
-        switch ((InspectBottomTab)_activeBottomTabIndex)
-        {
-            case InspectBottomTab.SceneInvestigation:
-                if (_worldScene == null)
-                {
-                    ImGui.TextDisabled("Load a world to use scene investigation.");
-                    return false;
-                }
-
-                DrawSelectedPlacementEditControls();
-                ImGui.Separator();
-                DrawVisualInvestigationToolbox(showWorldObjectRangeControls: true);
-                return true;
-
-            case InspectBottomTab.Mcnk:
-                if (_terrainManager == null && _vlmTerrainManager == null)
-                {
-                    ImGui.TextDisabled("Load a terrain-backed world to inspect MCNK / ADT data.");
-                    return false;
-                }
-
-                DrawTerrainChunkInvestigationContent();
-                return true;
-
-            case InspectBottomTab.WorldContext:
-                if (_worldScene == null)
-                {
-                    ImGui.TextDisabled("Load a world to inspect world context.");
-                    return false;
-                }
-
-                DrawWlLiquidInvestigationPanel(defaultOpen: true);
-                ImGui.Separator();
-                DrawInspectorWorldContextContent();
-                return true;
-
-            case InspectBottomTab.Archeology:
-                DrawArcheologySubTabContent();
-                return _worldScene != null;
-
-            case InspectBottomTab.Animations:
-                if (_renderer is IModelRenderer
-                    || (_worldScene?.SelectedInstance.HasValue == true
-                        && _worldScene.SelectedObjectType == Terrain.ObjectType.Mdx))
-                {
-                    DrawModelAnimationsSubTab();
-                    return true;
-                }
-
-                ImGui.TextDisabled("Load a model or select a world MDX/M2 placement to inspect animations.");
-                return false;
-
-            case InspectBottomTab.Actions:
-                if (_renderer is IModelRenderer || _renderer is WmoRenderer)
-                {
-                    DrawModelActionsSubTab();
-                    return true;
-                }
-
-                ImGui.TextDisabled("Load a model (M2/MDX/WMO) to use model actions.");
-                return false;
-
-            case InspectBottomTab.Context:
-            default:
-                ImGui.TextDisabled("Select a model, world object, PM4 surface, or terrain chunk for more context.");
-                return _worldScene?.HasSelectedPm4Object == true
-                    || _worldScene?.SelectedInstance.HasValue == true
-                    || !string.IsNullOrWhiteSpace(_modelInfo)
-                    || _terrainManager != null
-                    || _vlmTerrainManager != null;
         }
     }
 
@@ -1331,16 +1258,33 @@ public partial class ViewerApp
                 ImGui.CloseCurrentPopup();
             }
 
-            if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
+            if (_useTabUi)
             {
-                _showLogViewer = !_showLogViewer;
-                ImGui.CloseCurrentPopup();
-            }
+                if (ImGui.Button("Log Viewer"))
+                {
+                    OpenWorkbenchTab(UtilitiesBottomTab.Log);
+                    ImGui.CloseCurrentPopup();
+                }
 
-            if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
+                if (ImGui.Button("Perf"))
+                {
+                    OpenWorkbenchTab(UtilitiesBottomTab.Perf);
+                    ImGui.CloseCurrentPopup();
+                }
+            }
+            else
             {
-                _showPerfWindow = !_showPerfWindow;
-                ImGui.CloseCurrentPopup();
+                if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
+                {
+                    _showLogViewer = !_showLogViewer;
+                    ImGui.CloseCurrentPopup();
+                }
+
+                if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
+                {
+                    _showPerfWindow = !_showPerfWindow;
+                    ImGui.CloseCurrentPopup();
+                }
             }
 
             if (ImGui.Button("Settings..."))
@@ -3874,24 +3818,23 @@ public partial class ViewerApp
         return changed;
     }
 
-    private void DrawChunkClipboardWindow()
+    private void DrawSharedChunkClipboardSection(TerrainRenderer? renderer, bool withHeader = true, string headerTitle = "Chunk Clipboard")
     {
-        var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (renderer == null)
         {
-            _showChunkClipboardWindow = false;
+            ImGui.TextDisabled("Terrain renderer not available for clipboard.");
             return;
         }
 
-        ImGui.SetNextWindowSize(new Vector2(420f, 0f), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Chunk Clipboard", ref _showChunkClipboardWindow))
+        if (withHeader)
         {
-            ImGui.End();
-            return;
+            if (ImGui.CollapsingHeader(headerTitle, ImGuiTreeNodeFlags.DefaultOpen))
+                DrawChunkClipboardContent(renderer);
         }
-
-        DrawChunkClipboardContent(renderer);
-        ImGui.End();
+        else
+        {
+            DrawChunkClipboardContent(renderer);
+        }
     }
 
     private void DrawChunkClipboardContent(TerrainRenderer renderer)
@@ -4422,6 +4365,10 @@ public partial class ViewerApp
                 // PM4 Archaeological Analysis
                 DrawPm4SubTabContent();
                 break;
+            case 5:
+                // Cartography (Spec 222 integration)
+                DrawArchaeologyCartographyContent();
+                break;
             default:
                 DrawTerrainControlsAdjustmentWeakSignalContent();
                 break;
@@ -4720,19 +4667,21 @@ public partial class ViewerApp
 
         if (_workspaceMode == WorkspaceMode.Editor)
         {
+            DrawTopTabButton(WorkbenchTab.Quick, "Quick");
+            ImGui.SameLine();
             DrawTopTabButton(WorkbenchTab.Editor, "Editor");
             ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Scene, "Scene");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Inspect, "Inspect");
+            DrawTopTabButton(WorkbenchTab.Inspect, "Inspector");
             ImGui.SameLine();
             DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
         }
         else if (_workspaceMode == WorkspaceMode.Archaeology)
         {
+            DrawTopTabButton(WorkbenchTab.Quick, "Quick");
+            ImGui.SameLine();
             DrawTopTabButton(WorkbenchTab.Archaeology, "Archaeology");
             ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Inspect, "Inspect");
+            DrawTopTabButton(WorkbenchTab.Inspect, "Inspector");
             ImGui.SameLine();
             DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
         }
@@ -4740,7 +4689,7 @@ public partial class ViewerApp
         {
             DrawTopTabButton(WorkbenchTab.Quick, "Quick");
             ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Inspect, "Inspect");
+            DrawTopTabButton(WorkbenchTab.Inspect, "Inspector");
             ImGui.SameLine();
             DrawTopTabButton(WorkbenchTab.Scene, "Scene");
             ImGui.SameLine();
@@ -4802,11 +4751,34 @@ public partial class ViewerApp
                     DrawExperimentalSubTabContent();
                     break;
                 case WorkbenchTab.Editor:
-                    DrawEditorContent();
+                    DrawEditorWorkbenchSubTabContent();
                     break;
             }
         }
         ImGui.EndChild();
+    }
+
+    private void DrawEditorWorkbenchSubTabContent()
+    {
+        EnsureEditorHost();
+        switch (_activeBottomTabIndex)
+        {
+            case 0:
+                DrawArchaeologyEditorTasksSubTab();
+                break;
+            case 1:
+                DrawConvertersSubTabContent();
+                break;
+            case 2:
+                DrawArchaeologyEditorMlSubTab();
+                break;
+            case 3:
+                DrawArchaeologyEditorImportsSubTab();
+                break;
+            default:
+                DrawArchaeologyEditorTasksSubTab();
+                break;
+        }
     }
 
     private static void DrawTimeOfDayControl(TerrainLighting lighting)
@@ -5272,8 +5244,7 @@ public partial class ViewerApp
 
         DrawTerrainWorkbenchSelectionContent(renderer);
         ImGui.Separator();
-        ImGui.Text("Chunk Clipboard + Save");
-        DrawChunkClipboardContent(renderer);
+        DrawSharedChunkClipboardSection(renderer, withHeader: true, headerTitle: "Chunk Clipboard + Save");
         ImGui.Separator();
         DrawTerrainControlsAdjustmentContent();
     }
@@ -5282,14 +5253,9 @@ public partial class ViewerApp
 
     private void DrawTerrainClipboardSubTab(TerrainRenderer? renderer)
     {
-        if (renderer == null)
-        {
-            ImGui.TextDisabled("Terrain renderer not available for clipboard.");
-            return;
-        }
         ImGui.TextDisabled("Chunk copy/paste + heightmap save (moved from Chunk Clipboard window).");
         ImGui.Separator();
-        DrawChunkClipboardContent(renderer);
+        DrawSharedChunkClipboardSection(renderer, withHeader: false);
     }
 
     private void DrawTerrainAnalysisSubTab()
@@ -5399,7 +5365,7 @@ public partial class ViewerApp
                 DrawPm4SelectionWorkbenchContent();
                 break;
             case Pm4BottomTab.Correlation:
-                DrawPm4WmoCorrelationWindow();
+                DrawPm4WmoCorrelationContent();
                 break;
             case Pm4BottomTab.Info:
                 DrawPm4InfoPanelContent();
@@ -5408,7 +5374,7 @@ public partial class ViewerApp
                 DrawReconciliationPanel();
                 break;
             case Pm4BottomTab.Alignment:
-                DrawPm4AlignmentWindow();
+                DrawPm4AlignmentContent();
                 break;
             case Pm4BottomTab.Outliner:
                 DrawPm4Outliner();
@@ -5613,11 +5579,34 @@ public partial class ViewerApp
 
     private void DrawQuickControlsContent()
     {
-        // Quick camera + lighting + scene settings.
-        // Layer/overlay/fog toggles moved to bottom bar (single source of truth).
+        // 1. Atmosphere & Fog (Authoritative Fog Controls, Fog End rendered first per US5/FR-6)
+        ImGui.Text("Atmosphere & Fog");
+        ImGui.Separator();
+        DrawAuthoritativeFogControls(showDescription: false);
 
-        // 1. Camera controls
-        ImGui.Text("Camera");
+        TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
+        if (lighting != null)
+        {
+            ImGui.Spacing();
+            DrawTimeOfDayControl(lighting);
+            float gameTime = lighting.GameTime;
+            string timeLabel = gameTime switch
+            {
+                < 0.15f => "Night",
+                < 0.25f => "Dawn",
+                < 0.35f => "Morning",
+                < 0.65f => "Day",
+                < 0.75f => "Evening",
+                < 0.85f => "Dusk",
+                _ => "Night"
+            };
+            ImGui.SameLine();
+            ImGui.Text(timeLabel);
+        }
+
+        // 2. Camera & Viewport
+        ImGui.Spacing();
+        ImGui.Text("Camera & Viewport");
         ImGui.Separator();
         ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
         ImGui.TextDisabled("Hold Shift for 5x boost");
@@ -5646,55 +5635,7 @@ public partial class ViewerApp
             }
         }
 
-        // 2. Lighting / fog
-        TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
-        if (lighting != null)
-        {
-            ImGui.Spacing();
-            ImGui.Text("Lighting + LIT fog");
-            ImGui.Separator();
-            DrawTimeOfDayControl(lighting);
-            float gameTime = lighting.GameTime;
-            string timeLabel = gameTime switch
-            {
-                < 0.15f => "Night",
-                < 0.25f => "Dawn",
-                < 0.35f => "Morning",
-                < 0.65f => "Day",
-                < 0.75f => "Evening",
-                < 0.85f => "Dusk",
-                _ => "Night"
-            };
-            ImGui.SameLine();
-            ImGui.Text(timeLabel);
-
-            float fogStart = Math.Clamp(lighting.FogStart, 0f, MaxTerrainFogDistance - 1f);
-            float fogEnd = Math.Clamp(lighting.FogEnd, 1f, MaxTerrainFogDistance);
-            bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f, "%.0f");
-            bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 1f, MaxTerrainFogDistance, "%.0f");
-            if (fogStartChanged || fogEndChanged)
-            {
-                fogStart = Math.Min(fogStart, fogEnd - 0.001f);
-                if (_worldScene != null)
-                    _worldScene.SetUserFogRangeOverride(fogStart, fogEnd);
-                else
-                {
-                    lighting.FogStart = fogStart;
-                    lighting.FogEnd = fogEnd;
-                }
-            }
-
-            if (_worldScene != null)
-            {
-                bool useLitFog = _worldScene.UseLitFogOverride;
-                if (ImGui.Checkbox("Use LIT fog", ref useLitFog))
-                    _worldScene.UseLitFogOverride = useLitFog;
-                ImGui.TextDisabled($"Fog/detail range: {lighting.FogStart:F0}–{lighting.FogEnd:F0}; WDL horizon clips at {ComputeSceneFarPlane(lighting.FogEnd):F0} (+2500). Detailed LIT facts are under Utilities > Lighting.");
-            }
-        }
-
-        // Reset view
-        ImGui.Spacing();
+        // Reset view & wireframe
         ImGui.Spacing();
         if (ImGui.Button("Reset Camera"))
             ResetCamera();
@@ -5702,9 +5643,25 @@ public partial class ViewerApp
         if (ImGui.Button("Toggle Wireframe"))
             _renderer?.ToggleWireframe();
 
-        // 5. Scene info + UI settings
+        // 3. Profile-tailored Quick controls (US5, 223-T501)
+        switch (_workspaceMode)
+        {
+            case WorkspaceMode.Editor:
+                DrawEditorQuickSection();
+                break;
+            case WorkspaceMode.Archaeology:
+                DrawArchaeologyQuickSection();
+                break;
+            default:
+                DrawViewerQuickSection();
+                break;
+        }
+    }
+
+    private void DrawViewerQuickSection()
+    {
         ImGui.Spacing();
-        ImGui.Text("Scene");
+        ImGui.Text("Scene & UI");
         ImGui.Separator();
         ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
         ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
@@ -5715,9 +5672,126 @@ public partial class ViewerApp
             _hideUiChrome = hideUi;
 
         ImGui.Spacing();
+        ImGui.Text("Quick Navigation");
+        ImGui.Separator();
+        if (ImGui.Button("Open Inspector##ViewerQuick"))
+            OpenWorkbenchTab(WorkbenchTab.Inspect, 0);
+        ImGui.SameLine();
+        if (ImGui.Button("Open Settings...##ViewerQuick"))
+            _showSettingsWindow = true;
+
+        ImGui.Spacing();
         ImGui.Text("UI Theme");
         ImGui.Separator();
         DrawUiThemeSettingsContent();
+    }
+
+    private void DrawEditorQuickSection()
+    {
+        ImGui.Spacing();
+        ImGui.Text("Editor Tasks");
+        ImGui.Separator();
+        ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
+        ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
+        ImGui.Spacing();
+
+        foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
+        {
+            bool isAvailable = IsEditorTaskAvailable(task);
+            if (!isAvailable)
+                ImGui.BeginDisabled();
+
+            bool isSelected = task == _editorWorkspaceTask;
+            if (isSelected)
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.38f, 0.25f, 0.08f, 1f));
+
+            if (ImGui.Button($"{GetEditorWorkspaceTaskLabel(task)}##QuickEditorTask_{task}"))
+            {
+                SetEditorWorkspaceTask(task);
+                OpenWorkbenchTab(WorkbenchTab.Editor, 0);
+            }
+
+            if (isSelected)
+                ImGui.PopStyleColor();
+
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(GetEditorWorkspaceTooltip(task));
+
+            if (!isAvailable)
+                ImGui.EndDisabled();
+
+            ImGui.SameLine();
+        }
+        ImGui.NewLine();
+
+        ImGui.Spacing();
+        ImGui.Text("Staged Placement Actions");
+        ImGui.Separator();
+        DrawPlacementSaveQueueActions(includeCurrentSourceSave: true);
+
+        ImGui.Spacing();
+        ImGui.Text("Quick Export & Conversion");
+        ImGui.Separator();
+        if (ImGui.Button("Map Converter...##Quick"))
+        {
+            PrepareMapConverterDialogInputs();
+            _showMapConverterDialog = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Export GLB Scene##Quick"))
+        {
+            _wantExportGlb = true;
+        }
+
+        if (_chunkClipboard != null || _chunkClipboardSet != null || _selectedChunks.Count > 0)
+        {
+            ImGui.Spacing();
+            if (ImGui.Button("Clear Chunk Clipboard##Quick"))
+            {
+                _chunkClipboard = null;
+                _chunkClipboardSet = null;
+                _chunkClipboardLockedTargetKey = null;
+                _selectedChunks.Clear();
+                _chunkClipboardStatus = "Clipboard cleared.";
+            }
+        }
+    }
+
+    private void DrawArchaeologyQuickSection()
+    {
+        ImGui.Spacing();
+        ImGui.Text("Visual Investigation");
+        ImGui.Separator();
+        DrawVisualInvestigationToolbox(showWorldObjectRangeControls: false);
+
+        ImGui.Spacing();
+        ImGui.Text("Phase Layers");
+        ImGui.Separator();
+        int phaseCount = _terrainManager?.PhaseLayers.Count ?? 0;
+        ImGui.TextDisabled(phaseCount == 0 ? "No active phase layers (base map only)." : $"{phaseCount} active phase layer(s) configured.");
+        if (ImGui.Button("Manage Layers & Provenance##Quick"))
+        {
+            OpenWorkbenchTab(WorkbenchTab.Archaeology, 2);
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Archaeological Launchers");
+        ImGui.Separator();
+        if (ImGui.Button("Cartography (Spec 222)##Quick"))
+        {
+            OpenWorkbenchTab(WorkbenchTab.Archaeology, 5);
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("UniqueId Timeline##Quick"))
+        {
+            OpenWorkbenchTab(WorkbenchTab.Archaeology, 1);
+        }
+
+        if (ImGui.Button("Synthesized Minimap Export...##Quick"))
+        {
+            PrepareSynthesizedMinimapExportDialogInputs();
+            _showSynthesizedMinimapExportDialog = true;
+        }
     }
 
     // ── Converters sub-tab content ──────────────────────────────────────────

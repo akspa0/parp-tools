@@ -432,6 +432,22 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     public string GetDoodadSetName(int index) =>
         index < _wmo.DoodadSets.Count ? (_wmo.DoodadSets[index].Name ?? $"Set {index}") : "";
 
+    public bool TryGetDoodadSetRange(int index, out string name, out int startIndex, out int count)
+    {
+        if (index >= 0 && index < _wmo.DoodadSets.Count)
+        {
+            var set = _wmo.DoodadSets[index];
+            name = set.Name ?? $"Set {index}";
+            startIndex = (int)set.StartIndex;
+            count = (int)set.Count;
+            return true;
+        }
+        name = string.Empty;
+        startIndex = 0;
+        count = 0;
+        return false;
+    }
+
     public bool TryGetDoodadInfo(int index, out WmoDoodadInfo info)
     {
         if (index >= 0 && index < _doodadInstances.Count)

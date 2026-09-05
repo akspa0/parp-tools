@@ -1289,4 +1289,256 @@ public partial class ViewerApp
         plugin.Status = $"Pasted {transformed.Chunks.Count} chunk(s) across {destChunksByTile.Count} tile(s).";
         ViewerLog.Info(ViewerLog.Category.General, $"[Chunk Manipulator] {plugin.Status}");
     }
+
+    private int _archaeologyEditorSubTab = 0;
+
+    /// <summary>
+    /// Editor workbench destination under Archaeology (Spec 223-T301 / US4).
+    /// Integrates editor task navigation, inspectors, converters, ML dataset & training,
+    /// and terrain/model import & export into the unified Archaeology profile.
+    /// </summary>
+    private void DrawArchaeologyEditorContent()
+    {
+        EnsureEditorHost();
+
+        string[] subTabs = ["Tasks & Workspace", "Converters", "ML Dataset & Training", "Imports & Exports"];
+        for (int i = 0; i < subTabs.Length; i++)
+        {
+            if (i > 0)
+                ImGui.SameLine();
+
+            bool isSelected = _archaeologyEditorSubTab == i;
+            if (isSelected)
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.26f, 0.59f, 0.98f, 0.8f));
+
+            if (ImGui.Button(subTabs[i]))
+                _archaeologyEditorSubTab = i;
+
+            if (isSelected)
+                ImGui.PopStyleColor();
+        }
+
+        ImGui.Separator();
+
+        switch (_archaeologyEditorSubTab)
+        {
+            case 0:
+                DrawArchaeologyEditorTasksSubTab();
+                break;
+            case 1:
+                DrawConvertersSubTabContent();
+                break;
+            case 2:
+                DrawArchaeologyEditorMlSubTab();
+                break;
+            case 3:
+                DrawArchaeologyEditorImportsSubTab();
+                break;
+        }
+    }
+
+    private void DrawArchaeologyEditorTasksSubTab()
+    {
+        ImGui.Text("Editor Tasks & Inspector");
+        ImGui.TextDisabled("Select an active editor task to display its specialized inspector.");
+
+        ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
+        ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
+
+        ImGui.Separator();
+
+        // Task selector buttons
+        foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
+        {
+            bool isAvailable = IsEditorTaskAvailable(task);
+            if (!isAvailable)
+                ImGui.BeginDisabled();
+
+            bool isSelected = task == _editorWorkspaceTask;
+            if (isSelected)
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.26f, 0.59f, 0.98f, 0.8f));
+
+            if (ImGui.Button(GetEditorWorkspaceTaskLabel(task)))
+                SetEditorWorkspaceTask(task);
+
+            if (isSelected)
+                ImGui.PopStyleColor();
+
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                ImGui.BeginTooltip();
+                ImGui.TextDisabled(GetEditorWorkspaceTooltip(task));
+                ImGui.EndTooltip();
+            }
+
+            if (!isAvailable)
+                ImGui.EndDisabled();
+
+            ImGui.SameLine();
+        }
+        ImGui.NewLine();
+
+        ImGui.Separator();
+
+        // Active task inspector
+        DrawEditorWorkspaceInspector();
+
+        ImGui.Separator();
+
+        // Collapsible Plugin Host & Placement Authoring
+        if (ImGui.CollapsingHeader("Plugin Host & Placement Authoring"))
+        {
+            DrawEditorContent();
+        }
+    }
+
+    private void DrawArchaeologyEditorMlSubTab()
+    {
+        ImGui.Text("Machine Learning Dataset & Model Training");
+        ImGui.TextDisabled("Launch ML dataset harvesters, training jobs, and texture transfer tools.");
+        ImGui.Separator();
+
+        if (ImGui.CollapsingHeader("VLM & Dataset Harvest", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Harvest visual-language dataset tiles and manifests for offline training.");
+            if (ImGui.Button("Build ML Dataset..."))
+            {
+                PrepareVlmExportDialogInputs();
+                PrepareMkHarvestDialogInputs();
+                _showVlmExportDialog = true;
+            }
+            ImGui.SameLine();
+            ImGui.TextDisabled("Tools > Offline Data / Conversion > Build ML Dataset...");
+
+            if (ImGui.Button("Open Zarr Dataset..."))
+                _wantOpenZarrDataset = true;
+            ImGui.SameLine();
+            ImGui.TextDisabled("Tools > Offline Data / Conversion > Open Zarr Dataset...");
+        }
+
+        if (ImGui.CollapsingHeader("V7 Terrain Model Training", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Train or fine-tune neural terrain generator models.");
+            if (ImGui.Button("Train V7 Terrain Model..."))
+            {
+                PrepareMlTrainingDialogInputs();
+                _showMlTrainingDialog = true;
+            }
+            ImGui.SameLine();
+            ImGui.TextDisabled("Tools > Offline Data / Conversion > Train V7 Terrain Model...");
+        }
+
+        if (ImGui.CollapsingHeader("Terrain Texture Transfer", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Transfer texture styles and layer alphamasks between tiles.");
+            if (ImGui.Button("Launch Terrain Texture Transfer..."))
+            {
+                PrepareTerrainTextureTransferDialogInputs();
+                _showTerrainTextureTransferDialog = true;
+            }
+            ImGui.SameLine();
+            ImGui.TextDisabled("Tools > Offline Data / Conversion > Terrain Texture Transfer...");
+        }
+    }
+
+    private void DrawArchaeologyEditorImportsSubTab()
+    {
+        bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+
+        ImGui.Text("Asset & Terrain Import / Export");
+        ImGui.TextDisabled("Import Alpha masks/heightmaps or export scene geometry and textures.");
+        ImGui.Separator();
+
+        if (ImGui.CollapsingHeader("Terrain Import", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            if (!hasTerrain)
+                ImGui.BeginDisabled();
+
+            if (ImGui.Button("Import Alpha Folder"))
+            {
+                _wantTerrainImport = true;
+                _terrainImportKind = TerrainImportKind.AlphaFolder;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Import Heightmaps Folder"))
+            {
+                _wantTerrainImport = true;
+                _terrainImportKind = TerrainImportKind.Heightmap257Folder;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Import MCCV Folder"))
+            {
+                _wantTerrainImport = true;
+                _terrainImportKind = TerrainImportKind.MccvFolder;
+            }
+
+            if (!hasTerrain)
+            {
+                ImGui.EndDisabled();
+                ImGui.TextDisabled("Load a terrain-backed world or map to import terrain layers.");
+            }
+        }
+
+        if (ImGui.CollapsingHeader("Terrain Export", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            if (!hasTerrain)
+                ImGui.BeginDisabled();
+
+            if (ImGui.Button("Export Alpha Current Tile Atlas"))
+            {
+                _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
+                _wantTerrainExport = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Export Heightmap (Current Tile)"))
+            {
+                _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
+                _wantTerrainExport = true;
+            }
+
+            if (!hasTerrain)
+            {
+                ImGui.EndDisabled();
+                ImGui.TextDisabled("Load a terrain-backed world or map to export terrain.");
+            }
+        }
+
+        if (ImGui.CollapsingHeader("GLB Scene & Model Export", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            if (ImGui.Button("Export GLB Scene"))
+                _wantExportGlb = true;
+            ImGui.SameLine();
+            if (ImGui.Button("Export GLB Collision"))
+                _wantExportGlbCollision = true;
+
+            bool canExportMapGlb = _terrainManager != null && _dataSource != null;
+            if (!canExportMapGlb)
+                ImGui.BeginDisabled();
+
+            ImGui.Text("Export Map Tiles GLB:");
+            if (ImGui.Button("Current Tile GLB"))
+            {
+                _mapGlbScope = TerrainTileScope.CurrentTile;
+                _wantExportMapGlbTiles = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Loaded Tiles GLB"))
+            {
+                _mapGlbScope = TerrainTileScope.LoadedTiles;
+                _wantExportMapGlbTiles = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Whole Map GLB"))
+            {
+                _mapGlbScope = TerrainTileScope.WholeMap;
+                _wantExportMapGlbTiles = true;
+            }
+
+            if (!canExportMapGlb)
+            {
+                ImGui.EndDisabled();
+                ImGui.TextDisabled("Terrain and active data source required for map GLB export.");
+            }
+        }
+    }
 }

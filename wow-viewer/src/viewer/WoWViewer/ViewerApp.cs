@@ -307,7 +307,6 @@ public partial class ViewerApp : IDisposable
     private bool _showLogViewer = false;
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
-    private bool _showRenderQualityWindow = false;
     private bool _openAboutPopup;
     private WorkspaceMode _workspaceMode = WorkspaceMode.Viewer;
     private EditorWorkspaceTask _editorWorkspaceTask = EditorWorkspaceTask.Terrain;
@@ -777,9 +776,6 @@ public partial class ViewerApp : IDisposable
     private float _pm4TranslationStepUnits = 10f;
     private float _pm4RotationStepDegrees = 90f;
     private float _pm4ScaleStepUnits = 0.1f;
-    private bool _showPm4AlignmentWindow;
-    private bool _showPm4ObjectMatchWindow;
-    private bool _showPm4WmoCorrelationWindow;
     private ShellPanelId? _pendingFocusedShellPanel;
     private Pm4WorkbenchTab? _pendingPm4WorkbenchTab;
     private Pm4ObjectMatchReport? _pm4ObjectMatchReport;
@@ -804,10 +800,7 @@ public partial class ViewerApp : IDisposable
     private int _selectedPm4WmoCorrelationMatchIndex;
     private bool _pm4WmoCorrelationNearOnly = true;
     private string _pm4WmoCorrelationModelFilter = string.Empty;
-    private bool _showChunkClipboardWindow = false;
-    private bool _showTerrainAnalysisWindow;
     private bool _showTerrainToolsWindow;
-    private bool _showMcnkExplorerWindow;
     private bool _showCaptureAutomationWindow = false;
     private bool _showCameraPathWindow;
     private bool _showUniqueIdArchaeologyWindow;
@@ -1861,8 +1854,8 @@ void main() {
                 // Asset Catalog (floating window)
                 _catalogView?.Draw();
 
-                // Log Viewer (floating window)
-                if (_showLogViewer)
+                // Log Viewer (floating window) - legacy mode only; tabbed mode uses Utilities > Log
+                if (_showLogViewer && !_useTabUi)
                     DrawLogViewer();
 
                 // WDL Preview (floating window)
@@ -1873,37 +1866,19 @@ void main() {
                 if (IsShellPanelActive(ShellPanelId.Minimap) && !_fullscreenMinimap)
                     DrawMinimapWindow();
 
-                // Perf (floating window)
-                if (_showPerfWindow)
+                // Perf (floating window) - legacy mode only; tabbed mode uses Utilities > Perf
+                if (_showPerfWindow && !_useTabUi)
                     DrawPerfWindow();
-
-                // Render quality (floating window)
-                if (_showRenderQualityWindow)
-                    DrawRenderQualityWindow();
 
                 // Terrain Tools (floating window) - available in both modes; tabbed mode also has Terrain > Tools sub-tab
                 if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null))
                     DrawTerrainToolsWindow();
-
-                // Chunk Clipboard (floating window)
-                if (_showChunkClipboardWindow && (_terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null))
-                    DrawChunkClipboardWindow();
-
-                if (_showTerrainAnalysisWindow && (_terrainManager != null || _vlmTerrainManager != null))
-                    DrawTerrainAnalysisWindow();
-
-                if (_showMcnkExplorerWindow && (_terrainManager != null || _vlmTerrainManager != null))
-                    DrawMcnkExplorerWindow();
 
                 if (_showCaptureAutomationWindow)
                     DrawCaptureAutomationWindow();
 
                 if (_showCameraPathWindow)
                     DrawCameraPathWindow();
-
-                // PM4 alignment (advanced fallback) - only in legacy mode; tabbed mode uses PM4 > Alignment sub-tab
-                if (_showPm4AlignmentWindow && !_useTabUi)
-                    DrawPm4AlignmentWindow();
 
                 // Tool windows extracted from right sidebar
                 if (_showUniqueIdArchaeologyWindow && _worldScene != null)
@@ -2191,11 +2166,13 @@ void main() {
                         OpenWorkbenchTab(WorkbenchTab.Archaeology, 1);
                     if (ImGui.MenuItem("PM4 Analysis", hasWorld))
                         OpenWorkbenchTab(WorkbenchTab.Archaeology, 4);
+                    if (ImGui.MenuItem("Cartography", hasTerrain))
+                        OpenWorkbenchTab(WorkbenchTab.Archaeology, 5);
 
                     ImGui.Separator();
 
                     if (ImGui.MenuItem("Editor Workbench", hasTerrain || hasWorld))
-                        OpenWorkbenchTab(WorkbenchTab.Editor);
+                        OpenWorkbenchTab(WorkbenchTab.Editor, 0);
 
                     ImGui.EndMenu();
                 }
@@ -2401,9 +2378,9 @@ void main() {
                 ImGui.SetCursorPosX(targetCenterX);
             }
 
-            bool isViewer = _workspaceMode == WorkspaceMode.Viewer;
             bool isEditor = _workspaceMode == WorkspaceMode.Editor;
             bool isArchaeology = _workspaceMode == WorkspaceMode.Archaeology;
+            bool isViewer = _workspaceMode == WorkspaceMode.Viewer;
 
             if (isViewer)
                 ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.18f, 0.42f, 0.75f, 1f));
@@ -15002,7 +14979,7 @@ void main() {
             DrawHoveredPm4MatchCandidates(info.Pm4ObjectKey.Value);
 
         ImGui.Separator();
-        ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.38f, 1.0f), "Left-click to inspect");
+        ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.38f, 1.0f), "Left-click to view in Inspector");
 
         if (info.AdditionalHitCount > 0)
         {

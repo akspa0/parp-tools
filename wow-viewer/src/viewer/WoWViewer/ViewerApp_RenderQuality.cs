@@ -53,18 +53,6 @@ public partial class ViewerApp
         _vlmTerrainManager?.Renderer.ApplyTextureSamplingSettings();
     }
 
-    private void DrawRenderQualityWindow()
-    {
-        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
-        // Workbench sub-tab uses DrawRenderQualityContent directly.
-        if (!ImGui.Begin("Render Quality", ref _showRenderQualityWindow, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.End();
-            return;
-        }
-        DrawRenderQualityContent();
-        ImGui.End();
-    }
 
     private void DrawRenderQualityContent()
     {
