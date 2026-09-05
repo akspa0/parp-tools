@@ -49,6 +49,19 @@
       **Fog End first in every profile**.
 - [x] 223-T502: Settings>Fog Defaults is the single implementation; Quick mirrors it (FR-6).
 
+## Phase 6 — Transport Fixes, MCNK Deep-Link, Shared UI Library & Documentation (US6)
+
+- [ ] 223-T601: Fix Taxi Riding and Camera Path Riding:
+      - Unconditionally simulate active taxi ride route poses in `WorldScene.UpdateTaxiActorInstances()` during rides regardless of UI selection filter.
+      - Relax strict map/build string matching and pending preloads in `UpdateCameraPathPlayback()`.
+- [ ] 223-T602: Fix Terrain/ADT Inspector blanking bug (`_renderer != null` trap) and add terrain chunk click-to-pin (`_selectedTerrainChunk`).
+- [ ] 223-T603: Absorb 'Scene' tab (`Placements` and `LOD & Budget`) into the Inspector tab; remove top-level 'Scene' tab.
+- [ ] 223-T604: Disperse 'Utilities' tab into Quick tab, Inspector, View menu, and Tools menu; remove top-level 'Utilities' tab.
+- [ ] 223-T605: Deep-link and integrate full MCNK Flag Overlay & MCNK Chunk Flags directly into the Inspector's ADT section; eliminate duplicate scattered MCNK explorer panels.
+- [ ] 223-T606: Build central shared UI library (`WoWViewer.UI.SharedUiWidgets`) standardizing section headers, `[?]` help pop-up ready widgets, action groups, and compact status readouts.
+- [ ] 223-T607: Universal Quick Tab & Profile State Preservation — retain active `Quick` tab and all viewer settings when switching top-level profiles (`Viewer`, `Editor`, `Archaeology`).
+- [ ] 223-T608: Update end-user documentation in `docs/WoWViewer/USERGUIDE.md` detailing the reorganized 4-tab workbench, 3D Object Library, Imports/Exports dashboard, MCNK flags in Inspector, and transport features.
+
 ## Standing verification
 
 - Build per phase: `dotnet build wow-viewer/WowViewer.slnx -c Debug`

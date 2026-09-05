@@ -5,6 +5,18 @@ Last updated: 2026-09-04
 **START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
 open specs, with the reasoning for the order. This section is the session summary behind it.
 
+## Active 2026-09-04 — Spec 223 Phase 6 (Transport Fixes, MCNK Deep-Link, Shared UI Library & Documentation)
+
+- **Phase 6 Scope & Focus**:
+  - Fixing taxi riding and camera path riding playback stalls: decouple simulation from UI selection checkboxes, ensure route poses update unconditionally during active rides, and relax fragile string map/build checks.
+  - Fixing Inspector terrain blanking bug: resolve `_renderer != null` trap when terrain is active; add click-to-pin terrain chunk target (`_selectedTerrainChunk`).
+  - Merging 'Scene' tab (`Placements` and `LOD & Budget`) into the Inspector as first-class subtabs; removing top-level 'Scene' tab.
+  - Dispersing 'Utilities' tab to Quick, Inspector, View menu, and Tools menu; removing top-level 'Utilities' tab.
+  - Promoting full MCNK Flag Overlays and Chunk Flags into the main Inspector ADT section; eliminating scattered redundant ADT explorer panels.
+  - Building central shared UI library (`WoWViewer.UI.SharedUiWidgets`) standardizing section headers, `[?]` help widgets, action groups, and compact status readouts.
+  - Making Quick tab universal and preserving its active state and settings when switching profiles (`Viewer`, `Editor`, `Archaeology`).
+  - Updating `docs/WoWViewer/USERGUIDE.md` with complete documentation for the streamlined 4-tab workbench, 3D Object Library, Imports/Exports dashboard, and updated controls.
+
 ## Landed 2026-09-04 — Menu Bar Refinement, First-Class Import/Export UI, Rosetta 3D Object Library & Spec 212 HUD Plan
 
 - **Menu Bar Refinement**:

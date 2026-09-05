@@ -72,18 +72,28 @@ and sub-blocks) so the same payload can later render as the Spec 212 HUD object.
 
 - 223-T501: Quick content becomes a shared mirror component; each profile's Quick lists that
   profile's top controls (derived from the inventory), Fog End first in every profile.
-- 223-T502: Settings>Fog Defaults becomes the single implementation Quick mirrors (FR-6).
+### Phase 6 — Transport Fixes, MCNK Deep-Link, Shared UI Library & Documentation (US6)
+
+- 223-T601: Transport Fixes — Unconditionally simulate and update active taxi ride route poses in `WorldScene.UpdateTaxiActorInstances()` during rides, regardless of UI selection filter; relax strict map/build string matching and pending preloads in `UpdateCameraPathPlayback()`.
+- 223-T602: Terrain Inspector Fix & Chunk Pinning — Fix standalone model check in `BuildInspectorContent()` (`_worldScene == null && _terrainManager == null && ...`); add click-to-pin terrain chunk target (`_selectedTerrainChunk`); enrich chunk inspection with Area Table names, liquid info, and tile doodad counts; provide active World Overview fallback.
+- 223-T603: Scene Tab Absorption — Merge 'Scene' pages (`Placements` and `LOD & Budget`) directly into the Inspector tab as first-class subtabs; remove top-level 'Scene' tab.
+- 223-T604: Utilities Tab Dispersion — Disperse Render Quality, Lighting, Audio, Capture, and Performance into the Quick tab, Inspector, View menu, and Tools menu; remove top-level 'Utilities' tab.
+- 223-T605: MCNK Flags Integration — Integrate MCNK Flag Overlays and Chunk Flags into the main Inspector ADT section; eliminate duplicate redundant ADT explorer panels.
+- 223-T606: Central Shared UI Library — Create `WoWViewer.UI.SharedUiWidgets` to standardize section headers, `[?]` help pop-up ready widgets, action groups, and compact status readouts across the workbench.
+- 223-T607: Universal Quick Tab & Profile State Preservation — Retain active `Quick` tab and all viewer settings when switching top-level profiles (`Viewer`, `Editor`, `Archaeology`).
+- 223-T608: User Guide & Documentation — Update `docs/WoWViewer/USERGUIDE.md` with complete documentation for the streamlined 4-tab workbench, 3D Object Library, Imports/Exports dashboard, and updated controls.
 
 ## File Changes (expected)
 
-- New: `src/viewer/WoWViewer/Workbench/InspectorHost.cs` (+ per-type section files),
-  `src/core/WowViewer.Core.Runtime/World/Inspection/*` (content model).
-- Modified: `ViewerApp_Sidebars.cs` (destination wiring), `ViewerApp_Workspaces.cs` (merge),
-  `ViewerApp_PhaseLayers.cs` (move), `Workbench/WorkbenchTab.cs` + `WorkbenchNavigator.cs`.
-- Deleted (after gates): absorbed floating windows and duplicate panels.
+- New: `src/viewer/WoWViewer/UI/SharedUiWidgets.cs`.
+- Modified: `src/viewer/WoWViewer/ViewerApp_InspectorPayloads.cs`, `src/viewer/WoWViewer/ViewerApp_Sidebars.cs`,
+  `src/viewer/WoWViewer/ViewerApp_Workspaces.cs`, `src/viewer/WoWViewer/ViewerApp_ClickSelection.cs`,
+  `src/viewer/WoWViewer/ViewerApp_CaptureAutomation.cs`, `src/viewer/WoWViewer/ViewerApp_CameraPaths.cs`,
+  `src/viewer/WoWViewer/Terrain/WorldScene.cs`, `src/viewer/WoWViewer/Workbench/WorkbenchNavigator.cs`,
+  `src/viewer/WoWViewer/ViewerApp.cs`, `docs/WoWViewer/USERGUIDE.md`.
 
 ## Validation
 
 - Build: `dotnet build wow-viewer/WowViewer.slnx -c Debug` per phase.
-- Focused tests for any Core inspection model.
-- Operator walkthrough gates A and B; SC-1..SC-6 from the spec.
+- Focused tests: `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug`.
+- Operator walkthrough: verify taxi ride follows path, camera path plays smoothly, Inspector shows ADT/MCNK flags without selection, and Quick tab stays consistent across profiles.
