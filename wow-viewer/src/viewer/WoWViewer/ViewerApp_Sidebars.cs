@@ -4770,7 +4770,7 @@ public partial class ViewerApp
                 DrawConvertersSubTabContent();
                 break;
             case 2:
-                DrawArchaeologyEditorMlSubTab();
+                DrawRosettaObjectLibrarySubTab();
                 break;
             case 3:
                 DrawArchaeologyEditorImportsSubTab();

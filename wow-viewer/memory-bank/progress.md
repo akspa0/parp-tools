@@ -2,6 +2,14 @@
 
 Last updated: 2026-09-04
 
+## 2026-09-04 — Menu Bar Refinement, First-Class Import/Export Dashboard, Rosetta 3D Object Library & Spec 212 Plan
+- **Menu Bar Refinement:** Cleaned up `File` (purged broken Rosetta Datastore Zarr loader; logical grouping of Open, MPQ Presets, Loose Map overrides, Base persistence, Settings/Exit) and `Tools` (retired broken `Offline Data / Conversion` submenu, elevated `Converters` directly, deduplicated `Settings...`).
+- **Editor Imports & Exports Dashboard:** Transformed sub-tab 3 into a comprehensive dashboard covering Synthesized Minimap generation & quick export, GLB Scene / Collision / Map Tile export (Current / Loaded / Whole Map scopes), Terrain layer export (Alpha masks, Heightmaps 257, MCCV), and Terrain layer import.
+- **Rosetta 3D Object Library:** Sub-tab 2 transformed from dead ML training into an interactive 3D model/WMO asset library (`WorkbenchNavigator.cs` and `ViewerApp_Editor.cs`). Discovers and parses `rosetta-manifest.json` into `RosettaReferenceLibrary` with 5,832 authentic assets (5,545 M2 models, 287 WMOs). Search, category filter (All, M2, WMO), size sorting, master-detail inspector (bounding box, span, center, volume, footprint, calibration tile occurrences), and direct actions: in-viewport 3D model inspection (`OnCatalogLoadModel`), path copying, and active placement assignment.
+- **OpenSCAD MCP 3D HUD Primitives:** Generated and committed `camera_hud_curved_bezel.off/.scad`, `camera_hud_reticle_tactical.off/.scad`, `camera_hud_compass_tape.off/.scad` into `src/viewer/WoWViewer/Assets/OpenScad/`.
+- **Spec 212 (3D Spatial UI Shell & Camera HUD):** Authored technical design plan (`specs/212-spatial-ui-shell/plan.md`) and task breakdown (`specs/212-spatial-ui-shell/tasks.md`) specifying camera-space attachment math, OpenSCAD procedural loading, and `Tab` shortcut visibility toggle (`!_hideUiChrome`).
+- **Validation:** Solution build passes with 0 errors; focused Core unit tests 16/16 pass (`WmoDoodadSetResolverTests`).
+
 ## 2026-09-04 — Spec 223: Viewer UI Consolidation Audit (Phases 1–5 Complete)
 - **Landed in Core & Core.Runtime:** Created `WowViewer.Core.Runtime.World.Inspection` content model (`InspectorPayload`, `InspectorSection`, `InspectorAction`, `InspectorSubBlock`) and `WmoDoodadSetResolver.cs` ([`WmoDoodadSetResolverTests.cs`](../tests/WowViewer.Core.Tests/WmoDoodadSetResolverTests.cs) 16/16 green).
 - **Landed in Viewer:**

@@ -5,6 +5,26 @@ Last updated: 2026-09-04
 **START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
 open specs, with the reasoning for the order. This section is the session summary behind it.
 
+## Landed 2026-09-04 — Menu Bar Refinement, First-Class Import/Export UI, Rosetta 3D Object Library & Spec 212 HUD Plan
+
+- **Menu Bar Refinement**:
+  - `File` menu cleaned up: purged defunct Rosetta Datastore Zarr loader; structured into Open Files, Game Folder / MPQ Presets, Loose Map overrides, Base persistence, and Preferences / Exit.
+  - `Tools` menu cleaned up: retired broken `Offline Data / Conversion` submenu (dead Zarr and ML training triggers); elevated `Converters` (`Map Converter...`, `WMO Converter...`) directly; deduplicated `Settings...`.
+- **Editor Profile Sub-Tab 3 (Imports & Exports Dashboard)**:
+  - Transformed into a full-featured dashboard: Synthesized Minimap generator & quick export, GLB Scene / Collision / Map Tile export (Current / Loaded / Whole Map scopes), Terrain layer export (Alpha masks, Heightmaps 257, MCCV), and Terrain layer import.
+- **Editor Profile Sub-Tab 2 (Rosetta 3D Object Library)**:
+  - Sub-tab 2 converted from dead "ML Dataset & Training" into the **Rosetta 3D Object Library** (`WorkbenchNavigator.cs` and `ViewerApp_Editor.cs`).
+  - Auto-discovers and parses `rosetta-manifest.json` (e.g. `output/rosetta_053e/...`) into calibrated `RosettaReferenceLibrary` with 5,832 authentic assets (5,545 M2 models, 287 WMOs).
+  - Search, category filter (All, M2, WMO), and dimension sorting (Volume, Footprint, Name).
+  - Master-detail inspector: Bounding box, span, center, volume, footprint area, aspect ratio, and calibration tile occurrences.
+  - Direct 3D Actions: "Inspect 3D Model in Viewport" (`OnCatalogLoadModel`), "Copy Model Path", "Set as Active Placement Model".
+- **OpenSCAD MCP 3D HUD Primitives**:
+  - High-fidelity 3D assets generated and committed to `Assets/OpenScad/`: `camera_hud_curved_bezel.off/.scad` (curved visor bezel), `camera_hud_reticle_tactical.off/.scad` (segmented multi-ring reticle), `camera_hud_compass_tape.off/.scad` (graduated cylindrical heading tape).
+- **Spec 212 (3D Spatial UI Shell & Camera HUD)**:
+  - Technical design plan ([`specs/212-spatial-ui-shell/plan.md`](../specs/212-spatial-ui-shell/plan.md)) and task breakdown ([`specs/212-spatial-ui-shell/tasks.md`](../specs/212-spatial-ui-shell/tasks.md)) authored.
+  - Camera-space attachment transform, Tab key visibility toggle (`_hideUiChrome`), and OpenSCAD asset loading defined.
+- **Build & Tests**: Clean build (0 errors, 565 warnings), Core unit tests 16/16 pass.
+
 ## Landed 2026-09-04 — Spec 223 COMPLETE (Phases 1–5): Viewer UI Consolidation Audit (build green, 16/16 unit tests passing)
 
 - **Phase 1 (223-T101..T107 Gate A)**:

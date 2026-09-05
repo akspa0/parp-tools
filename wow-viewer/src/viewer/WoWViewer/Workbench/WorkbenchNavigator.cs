@@ -141,7 +141,7 @@ public static class WorkbenchNavigator
 
     /// <summary>Labels for <see cref="WorkbenchTab.Editor"/> destination.</summary>
     public static string[] GetEditorWorkbenchLabels() =>
-        ["Tasks & Workspace", "Converters", "ML Dataset & Training", "Imports & Exports"];
+        ["Tasks & Workspace", "Converters", "3D Object Library", "Imports & Exports"];
 
     /// <summary>Labels for <see cref="UtilitiesBottomTab"/>; order must match the enum.</summary>
     public static string[] GetUtilitiesBottomTabLabels() =>

@@ -1301,7 +1301,7 @@ public partial class ViewerApp
     {
         EnsureEditorHost();
 
-        string[] subTabs = ["Tasks & Workspace", "Converters", "ML Dataset & Training", "Imports & Exports"];
+        string[] subTabs = Workbench.WorkbenchNavigator.GetEditorWorkbenchLabels();
         for (int i = 0; i < subTabs.Length; i++)
         {
             if (i > 0)
@@ -1329,7 +1329,7 @@ public partial class ViewerApp
                 DrawConvertersSubTabContent();
                 break;
             case 2:
-                DrawArchaeologyEditorMlSubTab();
+                DrawRosettaObjectLibrarySubTab();
                 break;
             case 3:
                 DrawArchaeologyEditorImportsSubTab();
@@ -1392,107 +1392,520 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawArchaeologyEditorMlSubTab()
+    // =========================================================================
+    // Editor Sub-Tab 2: Rosetta 3D Object Library & Asset Picker
+    // =========================================================================
+
+    private string _rosettaEditorManifestPath = "output/rosetta_053e/World/Maps/RosettaAlpha/rosetta-manifest.json";
+    private RosettaReferenceLibrary? _rosettaEditorLibrary;
+    private string _rosettaEditorStatus = string.Empty;
+    private string _rosettaSearchQuery = string.Empty;
+    private int _rosettaKindFilter = 0; // 0 = All, 1 = M2, 2 = WMO
+    private int _rosettaSizeSort = 0;   // 0 = Name, 1 = Volume Desc, 2 = Footprint Desc
+    private RosettaReferenceAsset? _rosettaSelectedAsset;
+    private string _rosettaActivePlacementModelPath = string.Empty;
+    private int _rosettaListPage = 0;
+    private const int RosettaListPageSize = 40;
+
+    private void EnsureRosettaEditorLibraryLoaded()
     {
-        ImGui.Text("Machine Learning Dataset & Model Training");
-        ImGui.TextDisabled("Launch ML dataset harvesters, training jobs, and texture transfer tools.");
-        ImGui.Separator();
+        if (_rosettaEditorLibrary != null)
+            return;
 
-        if (ImGui.CollapsingHeader("VLM & Dataset Harvest", ImGuiTreeNodeFlags.DefaultOpen))
+        string[] candidates =
+        [
+            _rosettaEditorManifestPath,
+            Path.Combine(AppContext.BaseDirectory, _rosettaEditorManifestPath),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", _rosettaEditorManifestPath)),
+            "output/rosetta_053e/World/Maps/RosettaAlpha/rosetta-manifest.json",
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "output", "rosetta_053e", "World", "Maps", "RosettaAlpha", "rosetta-manifest.json"))
+        ];
+
+        foreach (string candidate in candidates)
         {
-            ImGui.TextDisabled("Harvest visual-language dataset tiles and manifests for offline training.");
-            if (ImGui.Button("Build ML Dataset..."))
+            if (File.Exists(candidate))
             {
-                PrepareVlmExportDialogInputs();
-                PrepareMkHarvestDialogInputs();
-                _showVlmExportDialog = true;
+                try
+                {
+                    var corpus = RosettaCorpusReader.ReadFromManifestFile(candidate);
+                    _rosettaEditorLibrary = RosettaCorpusReader.BuildReferenceLibrary(corpus, corpus.MapName);
+                    _rosettaEditorManifestPath = candidate;
+                    _rosettaEditorStatus = $"Loaded manifest '{corpus.MapName}': {_rosettaEditorLibrary.TotalAssets:N0} assets ({_rosettaEditorLibrary.ModelCount:N0} M2, {_rosettaEditorLibrary.WorldModelCount:N0} WMO)";
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    ViewerLog.Trace($"Failed to auto-load candidate '{candidate}': {ex.Message}");
+                }
             }
-            ImGui.SameLine();
-            ImGui.TextDisabled("Tools > Offline Data / Conversion > Build ML Dataset...");
-
-            if (ImGui.Button("Open Zarr Dataset..."))
-                _wantOpenZarrDataset = true;
-            ImGui.SameLine();
-            ImGui.TextDisabled("Tools > Offline Data / Conversion > Open Zarr Dataset...");
-        }
-
-        if (ImGui.CollapsingHeader("V7 Terrain Model Training", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            ImGui.TextDisabled("Train or fine-tune neural terrain generator models.");
-            if (ImGui.Button("Train V7 Terrain Model..."))
-            {
-                PrepareMlTrainingDialogInputs();
-                _showMlTrainingDialog = true;
-            }
-            ImGui.SameLine();
-            ImGui.TextDisabled("Tools > Offline Data / Conversion > Train V7 Terrain Model...");
-        }
-
-        if (ImGui.CollapsingHeader("Terrain Texture Transfer", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            ImGui.TextDisabled("Transfer texture styles and layer alphamasks between tiles.");
-            if (ImGui.Button("Launch Terrain Texture Transfer..."))
-            {
-                PrepareTerrainTextureTransferDialogInputs();
-                _showTerrainTextureTransferDialog = true;
-            }
-            ImGui.SameLine();
-            ImGui.TextDisabled("Tools > Offline Data / Conversion > Terrain Texture Transfer...");
         }
     }
+
+    private void LoadRosettaManifestFromPath(string path)
+    {
+        try
+        {
+            string resolved = path;
+            if (!File.Exists(resolved) && !Directory.Exists(resolved))
+            {
+                string baseCandidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, path));
+                if (File.Exists(baseCandidate) || Directory.Exists(baseCandidate))
+                    resolved = baseCandidate;
+                else
+                {
+                    string repoCandidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", path));
+                    if (File.Exists(repoCandidate) || Directory.Exists(repoCandidate))
+                        resolved = repoCandidate;
+                }
+            }
+
+            if (!File.Exists(resolved) && !Directory.Exists(resolved))
+            {
+                _rosettaEditorStatus = $"Path not found: {path}";
+                return;
+            }
+
+            if (File.Exists(resolved))
+            {
+                if (resolved.EndsWith("rosetta-manifest.json", StringComparison.OrdinalIgnoreCase))
+                {
+                    var corpus = RosettaCorpusReader.ReadFromManifestFile(resolved);
+                    _rosettaEditorLibrary = RosettaCorpusReader.BuildReferenceLibrary(corpus, corpus.MapName);
+                    _rosettaEditorManifestPath = resolved;
+                    _rosettaEditorStatus = $"Loaded manifest '{corpus.MapName}': {_rosettaEditorLibrary.TotalAssets:N0} assets ({_rosettaEditorLibrary.ModelCount:N0} M2, {_rosettaEditorLibrary.WorldModelCount:N0} WMO)";
+                }
+                else if (resolved.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                {
+                    _rosettaEditorLibrary = RosettaReferenceLibrary.LoadFromJson(resolved);
+                    _rosettaEditorManifestPath = resolved;
+                    _rosettaEditorStatus = $"Loaded reference library: {_rosettaEditorLibrary.TotalAssets:N0} assets ({_rosettaEditorLibrary.ModelCount:N0} M2, {_rosettaEditorLibrary.WorldModelCount:N0} WMO)";
+                }
+            }
+            else if (Directory.Exists(resolved))
+            {
+                var corpus = RosettaCorpusReader.ReadFromDirectory(resolved);
+                _rosettaEditorLibrary = RosettaCorpusReader.BuildReferenceLibrary(corpus, corpus.MapName);
+                _rosettaEditorManifestPath = resolved;
+                _rosettaEditorStatus = $"Loaded directory corpus '{corpus.MapName}': {_rosettaEditorLibrary.TotalAssets:N0} assets ({_rosettaEditorLibrary.ModelCount:N0} M2, {_rosettaEditorLibrary.WorldModelCount:N0} WMO)";
+            }
+
+            _rosettaSelectedAsset = null;
+            _rosettaListPage = 0;
+        }
+        catch (Exception ex)
+        {
+            _rosettaEditorStatus = $"Error loading Rosetta manifest: {ex.Message}";
+        }
+    }
+
+    private void DrawRosettaObjectLibrarySubTab()
+    {
+        EnsureRosettaEditorLibraryLoaded();
+
+        ImGui.Text("Rosetta 3D Object Library");
+        ImGui.TextDisabled("Interactive 3D model and WMO catalog calibrated against authentic world corpora.");
+        ImGui.Separator();
+
+        // Source / Load controls
+        ImGui.InputText("Manifest / Library Path", ref _rosettaEditorManifestPath, 512);
+        ImGui.SameLine();
+        if (ImGui.Button("Load"))
+            LoadRosettaManifestFromPath(_rosettaEditorManifestPath);
+        ImGui.SameLine();
+        if (ImGui.Button("Scan Default"))
+        {
+            _rosettaEditorLibrary = null;
+            EnsureRosettaEditorLibraryLoaded();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Browse..."))
+        {
+            ImGuiPathPicker.Instance.Open(
+                "Select Rosetta Manifest or Library JSON",
+                pickFolder: false,
+                initialPath: "output",
+                filterExtension: ".json",
+                picked =>
+                {
+                    if (!string.IsNullOrEmpty(picked))
+                    {
+                        _rosettaEditorManifestPath = picked;
+                        LoadRosettaManifestFromPath(picked);
+                    }
+                });
+        }
+
+        if (!string.IsNullOrEmpty(_rosettaEditorStatus))
+        {
+            ImGui.TextColored(new Vector4(0.4f, 0.9f, 0.4f, 1f), _rosettaEditorStatus);
+        }
+
+        ImGui.Separator();
+
+        if (_rosettaEditorLibrary == null || _rosettaEditorLibrary.TotalAssets == 0)
+        {
+            ImGui.TextDisabled("No Rosetta Object Library is currently loaded.");
+            ImGui.TextDisabled("Load 'rosetta-manifest.json' or scan output to populate calibrated 3D models and WMOs.");
+            return;
+        }
+
+        // Filters and Search Bar
+        ImGui.InputText("Search", ref _rosettaSearchQuery, 128);
+        ImGui.SameLine();
+
+        string[] kindFilters = [$"All ({_rosettaEditorLibrary.TotalAssets:N0})", $"M2 ({_rosettaEditorLibrary.ModelCount:N0})", $"WMO ({_rosettaEditorLibrary.WorldModelCount:N0})"];
+        for (int k = 0; k < kindFilters.Length; k++)
+        {
+            if (k > 0) ImGui.SameLine();
+            bool isFilterActive = _rosettaKindFilter == k;
+            if (isFilterActive)
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.6f, 0.9f, 0.8f));
+            if (ImGui.Button(kindFilters[k]))
+            {
+                _rosettaKindFilter = k;
+                _rosettaListPage = 0;
+            }
+            if (isFilterActive)
+                ImGui.PopStyleColor();
+        }
+
+        ImGui.SameLine();
+        string[] sortOptions = ["Name", "Volume \u2193", "Footprint \u2193"];
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.Combo("Sort##rosetta_sort", ref _rosettaSizeSort, sortOptions, sortOptions.Length))
+        {
+            _rosettaListPage = 0;
+        }
+
+        // Filter asset list
+        IEnumerable<RosettaReferenceAsset> pool = _rosettaEditorLibrary.Assets;
+        if (_rosettaKindFilter == 1)
+            pool = pool.Where(static a => !string.Equals(a.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase) && !string.Equals(a.AssetKind, "worldmodel", StringComparison.OrdinalIgnoreCase));
+        else if (_rosettaKindFilter == 2)
+            pool = pool.Where(static a => string.Equals(a.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase) || string.Equals(a.AssetKind, "worldmodel", StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(_rosettaSearchQuery))
+        {
+            string q = _rosettaSearchQuery.Trim();
+            pool = pool.Where(a => a.AssetPath.Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (_rosettaSizeSort == 1)
+            pool = pool.OrderByDescending(static a => a.Volume);
+        else if (_rosettaSizeSort == 2)
+            pool = pool.OrderByDescending(static a => a.FootprintArea);
+        else
+            pool = pool.OrderBy(static a => a.AssetPath, StringComparer.OrdinalIgnoreCase);
+
+        var matching = pool.ToList();
+        int totalPages = Math.Max(1, (int)Math.Ceiling(matching.Count / (float)RosettaListPageSize));
+        _rosettaListPage = Math.Clamp(_rosettaListPage, 0, totalPages - 1);
+
+        ImGui.Separator();
+
+        // Split view: Left = Asset List, Right = Selected Asset Inspector
+        float leftPaneWidth = 380f;
+        if (ImGui.BeginChild("RosettaAssetListPane", new Vector2(leftPaneWidth, 0), true))
+        {
+            // Pagination header
+            if (ImGui.Button("< Prev") && _rosettaListPage > 0)
+                _rosettaListPage--;
+            ImGui.SameLine();
+            ImGui.Text($"Page {_rosettaListPage + 1}/{totalPages} ({matching.Count:N0})");
+            ImGui.SameLine();
+            if (ImGui.Button("Next >") && _rosettaListPage < totalPages - 1)
+                _rosettaListPage++;
+
+            ImGui.Separator();
+
+            int startIndex = _rosettaListPage * RosettaListPageSize;
+            int endIndex = Math.Min(startIndex + RosettaListPageSize, matching.Count);
+
+            for (int i = startIndex; i < endIndex; i++)
+            {
+                RosettaReferenceAsset asset = matching[i];
+                bool isWmo = string.Equals(asset.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(asset.AssetKind, "worldmodel", StringComparison.OrdinalIgnoreCase);
+
+                string badge = isWmo ? "[WMO]" : "[M2]";
+                string fileName = Path.GetFileName(asset.AssetPath);
+                if (string.IsNullOrEmpty(fileName))
+                    fileName = asset.AssetPath;
+
+                bool isSelected = _rosettaSelectedAsset != null && string.Equals(_rosettaSelectedAsset.AssetId, asset.AssetId, StringComparison.Ordinal);
+
+                Vector4 badgeColor = isWmo ? new Vector4(1f, 0.7f, 0.2f, 1f) : new Vector4(0.35f, 0.75f, 1f, 1f);
+                ImGui.TextColored(badgeColor, badge);
+                ImGui.SameLine();
+
+                if (ImGui.Selectable($"{fileName}##{asset.AssetId}", isSelected))
+                {
+                    _rosettaSelectedAsset = asset;
+                }
+
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip($"{asset.AssetPath}\nSpan: {asset.Span.X:F1} x {asset.Span.Y:F1} x {asset.Span.Z:F1}m\nVol: {asset.Volume:F1}m³ | Area: {asset.FootprintArea:F1}m²\nOccurrences: {asset.TileCoordinates.Count} tiles");
+                }
+            }
+
+            ImGui.EndChild();
+        }
+
+        ImGui.SameLine();
+
+        // Right pane: Asset details & actions
+        if (ImGui.BeginChild("RosettaAssetDetailPane", new Vector2(0, 0), true))
+        {
+            if (_rosettaSelectedAsset != null)
+            {
+                bool isWmo = string.Equals(_rosettaSelectedAsset.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(_rosettaSelectedAsset.AssetKind, "worldmodel", StringComparison.OrdinalIgnoreCase);
+
+                Vector4 badgeColor = isWmo ? new Vector4(1f, 0.7f, 0.2f, 1f) : new Vector4(0.35f, 0.75f, 1f, 1f);
+                ImGui.TextColored(badgeColor, isWmo ? "WORLD MODEL (WMO)" : "MODEL (M2 / MDX)");
+                ImGui.SameLine();
+                ImGui.TextDisabled($"ID: {_rosettaSelectedAsset.AssetId}");
+
+                ImGui.TextWrapped(_rosettaSelectedAsset.AssetPath);
+                ImGui.Separator();
+
+                // Actions
+                if (ImGui.Button("Inspect 3D Model in Viewport"))
+                {
+                    var entry = new Catalog.AssetCatalogEntry
+                    {
+                        ModelPath = _rosettaSelectedAsset.AssetPath,
+                        Name = Path.GetFileName(_rosettaSelectedAsset.AssetPath)
+                    };
+                    OnCatalogLoadModel(_rosettaSelectedAsset.AssetPath, isWmo, entry);
+                    _statusMessage = $"Inspecting 3D model: {_rosettaSelectedAsset.AssetPath}";
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Copy Model Path"))
+                {
+                    ImGui.SetClipboardText(_rosettaSelectedAsset.AssetPath);
+                    _statusMessage = $"Copied path: {_rosettaSelectedAsset.AssetPath}";
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Set as Active Placement Model"))
+                {
+                    _rosettaActivePlacementModelPath = _rosettaSelectedAsset.AssetPath;
+                    _statusMessage = $"Active placement model set: {_rosettaSelectedAsset.AssetPath}";
+                }
+
+                if (!string.IsNullOrEmpty(_rosettaActivePlacementModelPath))
+                {
+                    ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), $"Active for Authoring: {_rosettaActivePlacementModelPath}");
+                }
+
+                ImGui.Separator();
+
+                // Geometric metrics
+                ImGui.Text("Geometric Extents & Footprint:");
+                ImGui.TextDisabled($"  Span (X, Y, Z):  {_rosettaSelectedAsset.Span.X:F2}m x {_rosettaSelectedAsset.Span.Y:F2}m x {_rosettaSelectedAsset.Span.Z:F2}m");
+                ImGui.TextDisabled($"  Bounding Min:    ({_rosettaSelectedAsset.Bounds.Min.X:F2}, {_rosettaSelectedAsset.Bounds.Min.Y:F2}, {_rosettaSelectedAsset.Bounds.Min.Z:F2})");
+                ImGui.TextDisabled($"  Bounding Max:    ({_rosettaSelectedAsset.Bounds.Max.X:F2}, {_rosettaSelectedAsset.Bounds.Max.Y:F2}, {_rosettaSelectedAsset.Bounds.Max.Z:F2})");
+                ImGui.TextDisabled($"  Center:          ({_rosettaSelectedAsset.Center.X:F2}, {_rosettaSelectedAsset.Center.Y:F2}, {_rosettaSelectedAsset.Center.Z:F2})");
+                ImGui.TextDisabled($"  Volume:          {_rosettaSelectedAsset.Volume:F2} m³");
+                ImGui.TextDisabled($"  Footprint Area:  {_rosettaSelectedAsset.FootprintArea:F2} m²");
+                ImGui.TextDisabled($"  Aspect Ratio XY: {_rosettaSelectedAsset.AspectRatioXY:F2}  (Z/MaxXY: {_rosettaSelectedAsset.AspectRatioZMaxXY:F2})");
+
+                ImGui.Separator();
+
+                // Calibration occurrences
+                ImGui.Text($"Corpus Occurrences ({_rosettaSelectedAsset.TileCoordinates.Count} tiles):");
+                string tileList = string.Join(", ", _rosettaSelectedAsset.TileCoordinates.Take(24));
+                if (_rosettaSelectedAsset.TileCoordinates.Count > 24)
+                    tileList += $" ... (+{_rosettaSelectedAsset.TileCoordinates.Count - 24} more)";
+                ImGui.TextWrapped(tileList);
+            }
+            else
+            {
+                ImGui.TextDisabled("Select an asset from the list to view its geometric properties or load it in 3D.");
+            }
+
+            ImGui.EndChild();
+        }
+    }
+
+    // =========================================================================
+    // Editor Sub-Tab 3: First-Class Imports & Exports Dashboard
+    // =========================================================================
 
     private void DrawArchaeologyEditorImportsSubTab()
     {
         bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+        bool hasWorld = _worldScene != null;
 
-        ImGui.Text("Asset & Terrain Import / Export");
-        ImGui.TextDisabled("Import Alpha masks/heightmaps or export scene geometry and textures.");
+        ImGui.Text("Imports & Exports Dashboard");
+        ImGui.TextDisabled("First-class terrain layer data, synthesized minimap generation, and 3D GLB export.");
         ImGui.Separator();
 
-        if (ImGui.CollapsingHeader("Terrain Import", ImGuiTreeNodeFlags.DefaultOpen))
+        // Status banner
+        string mapSummary = hasTerrain
+            ? $"Active Map: '{_terrainManager?.MapName ?? "Unknown"}' ({_terrainManager?.LoadedTileCount ?? 0} tiles loaded)"
+            : "No terrain-backed map currently loaded.";
+        ImGui.TextColored(hasTerrain ? new Vector4(0.4f, 0.9f, 0.4f, 1f) : new Vector4(0.8f, 0.8f, 0.8f, 1f), mapSummary);
+
+        if (!string.IsNullOrEmpty(_statusMessage))
         {
+            ImGui.TextDisabled($"Status: {_statusMessage}");
+        }
+
+        ImGui.Separator();
+
+        // 1. Synthesized Terrain Minimap
+        if (ImGui.CollapsingHeader("Synthesized Terrain Minimap", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Generate authentic orthographic terrain minimaps from terrain geometry, lighting, and doodad footprints.");
+
             if (!hasTerrain)
                 ImGui.BeginDisabled();
 
-            if (ImGui.Button("Import Alpha Folder"))
+            if (ImGui.Button("Configure & Generate Synthesized Minimap..."))
             {
-                _wantTerrainImport = true;
-                _terrainImportKind = TerrainImportKind.AlphaFolder;
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Import Heightmaps Folder"))
-            {
-                _wantTerrainImport = true;
-                _terrainImportKind = TerrainImportKind.Heightmap257Folder;
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Import MCCV Folder"))
-            {
-                _wantTerrainImport = true;
-                _terrainImportKind = TerrainImportKind.MccvFolder;
+                PrepareSynthesizedMinimapExportDialogInputs();
+                _showSynthesizedMinimapExportDialog = true;
             }
 
             if (!hasTerrain)
             {
                 ImGui.EndDisabled();
-                ImGui.TextDisabled("Load a terrain-backed world or map to import terrain layers.");
+                ImGui.TextDisabled("Load a terrain-backed world or map to synthesize minimaps.");
             }
         }
 
-        if (ImGui.CollapsingHeader("Terrain Export", ImGuiTreeNodeFlags.DefaultOpen))
+        // 2. 3D Scene & Geometry Export (GLB)
+        if (ImGui.CollapsingHeader("3D Geometry & GLB Export", ImGuiTreeNodeFlags.DefaultOpen))
         {
+            ImGui.TextDisabled("Export 3D scene meshes, collision boundaries, and terrain tiles as portable GLB models.");
+
+            bool canExportGlb = _renderer != null;
+            if (!canExportGlb)
+                ImGui.BeginDisabled();
+
+            if (ImGui.Button("Export GLB Scene (Current Viewport)"))
+                _wantExportGlb = true;
+
+            ImGui.SameLine();
+            if (ImGui.Button("Export GLB Collision Mesh"))
+                _wantExportGlbCollision = true;
+
+            if (!canExportGlb)
+            {
+                ImGui.EndDisabled();
+                ImGui.TextDisabled("Renderer required for GLB export.");
+            }
+
+            ImGui.Separator();
+
+            bool canExportMapGlb = _terrainManager != null && _dataSource != null;
+            if (!canExportMapGlb)
+                ImGui.BeginDisabled();
+
+            ImGui.Text("Map Tiles GLB Export:");
+
+            int currentScopeIdx = (int)_mapGlbScope;
+            string[] scopeLabels = ["Current Tile", "Loaded Tiles Folder", "Whole Map Folder"];
+            for (int s = 0; s < scopeLabels.Length; s++)
+            {
+                if (s > 0) ImGui.SameLine();
+                bool isSelected = currentScopeIdx == s;
+                if (isSelected)
+                    ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.6f, 0.9f, 0.8f));
+                if (ImGui.Button(scopeLabels[s]))
+                {
+                    _mapGlbScope = (TerrainTileScope)s;
+                }
+                if (isSelected)
+                    ImGui.PopStyleColor();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Export Map Tiles GLB Now"))
+            {
+                _wantExportMapGlbTiles = true;
+            }
+
+            if (!canExportMapGlb)
+            {
+                ImGui.EndDisabled();
+                ImGui.TextDisabled("Terrain and active data source required for map GLB export.");
+            }
+        }
+
+        // 3. Terrain Data Export
+        if (ImGui.CollapsingHeader("Terrain Layer Export", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled("Export terrain alpha masks, heightmaps, and vertex colors (MCCV) across current, loaded, or whole map scopes.");
+
             if (!hasTerrain)
                 ImGui.BeginDisabled();
 
-            if (ImGui.Button("Export Alpha Current Tile Atlas"))
+            // Alpha Masks
+            ImGui.Text("Alpha Blending Masks:");
+            if (ImGui.Button("Tile Atlas PNG##alpha"))
             {
                 _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
                 _wantTerrainExport = true;
             }
             ImGui.SameLine();
-            if (ImGui.Button("Export Heightmap (Current Tile)"))
+            if (ImGui.Button("Chunks Folder##alpha"))
+            {
+                _terrainExportKind = TerrainExportKind.AlphaCurrentTileChunksFolder;
+                _wantTerrainExport = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Loaded Tiles Folder##alpha"))
+            {
+                _terrainExportKind = TerrainExportKind.AlphaLoadedTilesFolder;
+                _wantTerrainExport = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Whole Map Folder##alpha"))
+            {
+                _terrainExportKind = TerrainExportKind.AlphaWholeMapFolder;
+                _wantTerrainExport = true;
+            }
+
+            // Heightmaps
+            ImGui.Text("Heightmaps (257x257 L16 PNG + JSON):");
+            if (ImGui.Button("Current Tile##height"))
             {
                 _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
+                _wantTerrainExport = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Loaded Tiles Folder##height"))
+            {
+                _terrainExportKind = TerrainExportKind.Heightmap257LoadedTilesFolderPerTile;
+                _wantTerrainExport = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Whole Map Folder##height"))
+            {
+                _terrainExportKind = TerrainExportKind.Heightmap257WholeMapFolderPerMap;
+                _wantTerrainExport = true;
+            }
+
+            // MCCV
+            ImGui.Text("MCCV Vertex Colors:");
+            if (ImGui.Button("Current Tile PNG##mccv"))
+            {
+                _terrainExportKind = TerrainExportKind.MccvCurrentTilePng;
+                _wantTerrainExport = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Loaded Tiles Folder##mccv"))
+            {
+                _terrainExportKind = TerrainExportKind.MccvLoadedTilesFolder;
+                _wantTerrainExport = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Whole Map Folder##mccv"))
+            {
+                _terrainExportKind = TerrainExportKind.MccvWholeMapFolder;
                 _wantTerrainExport = true;
             }
 
@@ -1503,41 +1916,36 @@ public partial class ViewerApp
             }
         }
 
-        if (ImGui.CollapsingHeader("GLB Scene & Model Export", ImGuiTreeNodeFlags.DefaultOpen))
+        // 4. Terrain Data Import
+        if (ImGui.CollapsingHeader("Terrain Layer Import", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            if (ImGui.Button("Export GLB Scene"))
-                _wantExportGlb = true;
-            ImGui.SameLine();
-            if (ImGui.Button("Export GLB Collision"))
-                _wantExportGlbCollision = true;
+            ImGui.TextDisabled("Import authored or restored terrain layers back into the active map.");
 
-            bool canExportMapGlb = _terrainManager != null && _dataSource != null;
-            if (!canExportMapGlb)
+            if (!hasTerrain)
                 ImGui.BeginDisabled();
 
-            ImGui.Text("Export Map Tiles GLB:");
-            if (ImGui.Button("Current Tile GLB"))
+            if (ImGui.Button("Import Alpha Masks Folder..."))
             {
-                _mapGlbScope = TerrainTileScope.CurrentTile;
-                _wantExportMapGlbTiles = true;
+                _wantTerrainImport = true;
+                _terrainImportKind = TerrainImportKind.AlphaFolder;
             }
             ImGui.SameLine();
-            if (ImGui.Button("Loaded Tiles GLB"))
+            if (ImGui.Button("Import Heightmaps Folder..."))
             {
-                _mapGlbScope = TerrainTileScope.LoadedTiles;
-                _wantExportMapGlbTiles = true;
+                _wantTerrainImport = true;
+                _terrainImportKind = TerrainImportKind.Heightmap257Folder;
             }
             ImGui.SameLine();
-            if (ImGui.Button("Whole Map GLB"))
+            if (ImGui.Button("Import MCCV Folder..."))
             {
-                _mapGlbScope = TerrainTileScope.WholeMap;
-                _wantExportMapGlbTiles = true;
+                _wantTerrainImport = true;
+                _terrainImportKind = TerrainImportKind.MccvFolder;
             }
 
-            if (!canExportMapGlb)
+            if (!hasTerrain)
             {
                 ImGui.EndDisabled();
-                ImGui.TextDisabled("Terrain and active data source required for map GLB export.");
+                ImGui.TextDisabled("Load a terrain-backed world or map to import terrain layers.");
             }
         }
     }

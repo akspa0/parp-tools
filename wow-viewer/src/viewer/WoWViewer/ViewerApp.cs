@@ -1952,8 +1952,7 @@ void main() {
                 if (ImGui.MenuItem("Open Loose PM4 / PD4 File..."))
                     _wantOpenPm4File = true;
 
-                if (ImGui.MenuItem("Load from Rosetta Datastore..."))
-                    _showRosettaDatastoreDialog = true;
+                ImGui.Separator();
 
                 if (ImGui.MenuItem("Open Game Folder (MPQ)..."))
                 {
@@ -1991,6 +1990,8 @@ void main() {
 
                     ImGui.EndMenu();
                 }
+
+                ImGui.Separator();
 
                 if (ImGui.MenuItem("Save Current Game Folder As Known-Good Base", "", false, _dataSource is MpqDataSource))
                     SaveCurrentGameFolderAsKnownGoodBase();
@@ -2080,39 +2081,8 @@ void main() {
                 // 071: floating-window toggles removed. Every tool lives in a
                 // workbench tab under Tools > Panels or the relevant top tab.
 
-                if (ImGui.MenuItem("Settings..."))
-                    _showSettingsWindow = true;
-
-                ImGui.Separator();
-
-                if (ImGui.BeginMenu("Offline Data / Conversion"))
+                if (ImGui.BeginMenu("Converters"))
                 {
-                    if (ImGui.MenuItem("Open Zarr Dataset..."))
-                        _wantOpenZarrDataset = true;
-
-                    ImGui.Separator();
-
-                    if (ImGui.MenuItem("Build ML Dataset..."))
-                    {
-                        PrepareVlmExportDialogInputs();
-                        PrepareMkHarvestDialogInputs();
-                        _showVlmExportDialog = true;
-                    }
-
-                    if (ImGui.MenuItem("Train V7 Terrain Model..."))
-                    {
-                        PrepareMlTrainingDialogInputs();
-                        _showMlTrainingDialog = true;
-                    }
-
-                    if (ImGui.MenuItem("Terrain Texture Transfer..."))
-                    {
-                        PrepareTerrainTextureTransferDialogInputs();
-                        _showTerrainTextureTransferDialog = true;
-                    }
-
-                    ImGui.Separator();
-
                     if (ImGui.MenuItem("Map Converter..."))
                     {
                         PrepareMapConverterDialogInputs();
