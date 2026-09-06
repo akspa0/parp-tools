@@ -60,6 +60,11 @@ public partial class ViewerApp
 
     private ViewerKeyContext GetActiveKeyContext()
     {
+        if (IsWorkbenchUtilityVisible(Workbench.UtilitiesBottomTab.Capture))
+            return ViewerKeyContext.Capture;
+        if (IsWorkbenchUtilityVisible(Workbench.UtilitiesBottomTab.Audio))
+            return ViewerKeyContext.Audio;
+
         if (!_useTabUi)
             return (_showCaptureAutomationWindow || _showCameraPathWindow) ? ViewerKeyContext.Capture : ViewerKeyContext.Global;
 
@@ -80,7 +85,8 @@ public partial class ViewerApp
 
     private bool IsCaptureKeyboardContextActive()
     {
-        return GetActiveKeyContext() == ViewerKeyContext.Capture;
+        return GetActiveKeyContext() == ViewerKeyContext.Capture
+            && (_showCameraPathWindow || _activeCapturePanelTabIndex == (int)CapturePanelTab.CameraPath);
     }
 
     private void DrawKeyboardShortcutsWindow()

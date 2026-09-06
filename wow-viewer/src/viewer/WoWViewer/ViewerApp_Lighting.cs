@@ -241,24 +241,7 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Source: {scene.ActiveFogRangeSource}{(scene.ActiveFogRangeAdjusted ? " (normalized to stay visible)" : string.Empty)}");
 
         ImGui.SeparatorText("Active fog range");
-        ImGui.TextDisabled("This affects the loaded world now. Settings contains load defaults only.");
-
-        float fogStart = scene.HasUserFogRangeOverride ? scene.UserFogStart : scene.ActiveFogStart;
-        float fogEnd = scene.HasUserFogRangeOverride ? scene.UserFogEnd : scene.ActiveFogEnd;
-        bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f, "%.0f");
-        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 1f, MaxTerrainFogDistance, "%.0f");
-        if (fogStartChanged || fogEndChanged)
-        {
-            if (fogEnd <= fogStart)
-            {
-                if (fogEndChanged && !fogStartChanged)
-                    fogStart = Math.Max(0f, fogEnd - 1f);
-                else
-                    fogEnd = Math.Min(MaxTerrainFogDistance, fogStart + 1f);
-            }
-
-            scene.SetUserFogRangeOverride(fogStart, fogEnd);
-        }
+        DrawAuthoritativeFogControls(showDescription: true);
 
         if (scene.HasUserFogRangeOverride)
         {

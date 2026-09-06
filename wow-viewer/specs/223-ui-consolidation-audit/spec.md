@@ -2,7 +2,7 @@
 
 **Feature Branch**: `223-ui-consolidation-audit`
 **Created**: 2026-09-04
-**Status**: Draft
+**Status**: Implementing Phase 6; interactive acceptance pending
 **Input**: Operator directive — "audit all the sidebars, all the tab profiles, and make everything as concise as possible, so we have NO duplication of information panels. We currently have no less than 3 or 5 different ways to see details about the tile, and no way to easily change the doodadset for the WMO we have selected. It's all very murky waters that need to be audited carefully with a speckit plan at the top, to keep track of what is there, and then to allow us to come up with new epic UI overhauls that should not really require a lot of work, it's just a matter of cataloging all the things we have, and then deduplicating them into simple profiles for the viewer's intended use. The Editor tab is most under-organized, the Archeology tab is also meant to contain the Cartography features, but can exhibit Editor functionality in the way that we can save merged data from phase maps to new output files. If anything, we should merge Editor and Archeology features as a single profile first, then split off 'true' editor features to an Editor profile. The idea is to simplify the ui while retaining all the existing features and the Quick tab needs improving for every profile, to include the stuff we most want to fiddle with when we load into the viewer (Fog End is the first thing I set to 5000 or more, every time!)"
 
 ## User Scenarios & Testing *(mandatory)*
@@ -121,6 +121,30 @@ first surface they see, in every profile.
   guessed), and persists changes like the full panels do.
 - No control exists ONLY in Quick: Quick is a mirror of authoritative controls, never a second
   implementation (FR-6).
+
+### US6 — Reliable transport and a consistent four-tab workbench
+
+The operator can ride a taxi or play a camera path while the world streams, inspect and pin
+terrain chunks, and find the same four workbench tabs in every workspace profile.
+
+**Acceptance criteria**:
+- Active taxi route poses advance independently of route visibility, selection filters, and
+  mount asset readiness. Stopping or switching transport releases the active ride override.
+- Interactive camera playback starts without waiting for path warmup. Video/queued captures
+  retain their readiness gates. Equivalent map/build formatting is accepted; genuinely different
+  maps/builds remain protected, including changes during playback.
+- The terrain context resolves pinned chunk, hovered chunk, camera chunk, then active-world
+  overview. Pins cannot survive a change of terrain source or refer to stale cached chunk data.
+- Terrain Inspector exposes area names, MCNK flags and overlays (including diagonal weak corners),
+  holes, height range, textures/alpha, shadow/MCCV, liquids and tile placement counts, with frame,
+  copy-texture-summary, copy-coordinates and clear-pin actions.
+- Every profile shows **Quick / Inspector / Editor / Archaeology**. Inspector has **Context /
+  Placements / LOD & Budget** subtabs. Quick stays selected across profile changes and settings
+  continue to use their existing owners.
+- Scene and Utilities have no top-level buttons. Every former route has a named, reachable
+  replacement in the inventory, including keyboard/menu callers and legacy shell compatibility.
+- Shared UI widgets provide section/help, wrapping actions, status, labeled values and compact
+  sliders, and are used by the workbench. The user guide describes the resulting routes.
 
 ## Functional Requirements *(mandatory)*
 

@@ -63,22 +63,16 @@ public partial class ViewerApp
     }
 
     /// <summary>
-    /// Authoritative fog controls implementation (Spec 223 Phase 5 / US5 / FR-6).
-    /// Renders Fog End first per operator requirement ("Fog End is the first thing I set to 5000 or more, every time!").
-    /// Both Settings > Fog Defaults and Quick controls mirror this exact implementation.
+    /// The sole fog editor for the viewer. It reads and writes WorldScene's user
+    /// override when a scene exists; TerrainLighting is a derived render-time value.
     /// </summary>
     private void DrawAuthoritativeFogControls(bool showDescription = true)
     {
         if (showDescription)
-            ImGui.TextDisabled("Global fog defaults apply when terrain loads without an active user override, and update active terrain lighting immediately.");
+            ImGui.TextDisabled("Changes apply to the loaded world immediately and become the saved defaults for the next terrain load.");
 
         TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
-        float currentFogEnd = lighting != null
-            ? lighting.FogEnd
-            : _defaultFogEnd;
-        float currentFogStart = lighting != null
-            ? lighting.FogStart
-            : _defaultFogStart;
+        (float currentFogStart, float currentFogEnd) = GetAuthoritativeFogRange(lighting);
 
         float fogEnd = Math.Clamp(currentFogEnd, 100f, MaxTerrainFogDistance);
         float fogStart = Math.Clamp(currentFogStart, 0f, MaxTerrainFogDistance - 1f);
@@ -97,8 +91,27 @@ public partial class ViewerApp
             bool useLitFog = _worldScene.UseLitFogOverride;
             if (ImGui.Checkbox("Use LIT fog", ref useLitFog))
                 _worldScene.UseLitFogOverride = useLitFog;
-            ImGui.TextDisabled($"Fog/detail range: {lighting.FogStart:F0}–{lighting.FogEnd:F0}; WDL horizon clips at {ComputeSceneFarPlane(lighting.FogEnd):F0} (+2500).");
+            ImGui.TextDisabled($"Fog/detail range: {currentFogStart:F0}–{currentFogEnd:F0}; WDL horizon clips at {ComputeSceneFarPlane(currentFogEnd):F0} (+2500).");
         }
+    }
+
+    /// <summary>
+    /// Returns the range owned by the user-facing fog editor. WorldScene composes
+    /// lighting recommendations each frame, so its mutable TerrainLighting values
+    /// must not be used to repopulate a slider after writing an override.
+    /// </summary>
+    private (float FogStart, float FogEnd) GetAuthoritativeFogRange(TerrainLighting? lighting = null)
+    {
+        if (_worldScene is { HasUserFogRangeOverride: true } scene)
+            return (scene.UserFogStart, scene.UserFogEnd);
+
+        if (_worldScene != null)
+            return (_worldScene.ActiveFogStart, _worldScene.ActiveFogEnd);
+
+        if (lighting != null)
+            return (lighting.FogStart, lighting.FogEnd);
+
+        return (_defaultFogStart, _defaultFogEnd);
     }
 
     private void SetAuthoritativeFogRange(float start, float end, bool persistAsDefault = true)
@@ -224,32 +237,51 @@ public partial class ViewerApp
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Text("Camera-Rigged 3D HUD (OpenSCAD):");
+        ImGui.TextDisabled("Decorative camera HUD only; the interactive spatial workbench remains Spec 212 Phase 3+.");
 
-        if (_cameraHudRig3D != null)
+        if (_cameraHudRig != null)
         {
-            bool hudEnabled = _cameraHudRig3D.Enabled;
+            bool hudEnabled = _cameraHudRig.Enabled;
             if (ImGui.Checkbox("Enable 3D Camera HUD", ref hudEnabled))
             {
-                _cameraHudRig3D.Enabled = hudEnabled;
+                _cameraHudRig.Enabled = hudEnabled;
             }
 
             if (hudEnabled)
             {
-                bool showGimbal = _cameraHudRig3D.ShowGimbal;
+                bool showGimbal = _cameraHudRig.ShowGimbal;
                 if (ImGui.Checkbox("3D Attitude & Heading Gimbal", ref showGimbal))
                 {
-                    _cameraHudRig3D.ShowGimbal = showGimbal;
+                    _cameraHudRig.ShowGimbal = showGimbal;
                 }
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Renders an authored 3D OpenSCAD flight attitude & compass ring mounted to the camera entity.");
 
-                bool showBrackets = _cameraHudRig3D.ShowBrackets;
+                bool showBrackets = _cameraHudRig.ShowBrackets;
                 if (ImGui.Checkbox("3D Viewport Corner Brackets", ref showBrackets))
                 {
-                    _cameraHudRig3D.ShowBrackets = showBrackets;
+                    _cameraHudRig.ShowBrackets = showBrackets;
                 }
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Renders 3D geometric framing brackets at the camera viewport boundary.");
+
+                bool showReticle = _cameraHudRig.ShowReticle;
+                if (ImGui.Checkbox("3D Tactical Reticle", ref showReticle))
+                {
+                    _cameraHudRig.ShowReticle = showReticle;
+                }
+
+                bool showCompass = _cameraHudRig.ShowCompass;
+                if (ImGui.Checkbox("3D Compass Tape", ref showCompass))
+                {
+                    _cameraHudRig.ShowCompass = showCompass;
+                }
+
+                bool showBezel = _cameraHudRig.ShowBezel;
+                if (ImGui.Checkbox("3D Curved Visor Bezel", ref showBezel))
+                {
+                    _cameraHudRig.ShowBezel = showBezel;
+                }
             }
         }
     }

@@ -211,76 +211,22 @@ public partial class ViewerApp
         DrawTerrainChunkInvestigationContent();
     }
 
+    // Spec 223: all chunk detail and overlay controls have one Inspector owner.
     private void DrawTerrainChunkInvestigationContent()
     {
-        if (_terrainManager == null && _vlmTerrainManager == null)
-            return;
-
-        if (!TryGetTerrainChunkInspectionTarget(preferHoveredChunk: true, out TerrainRenderer.TerrainChunkInfo chunkInfo, out bool usingHoveredChunk))
+        if (_useTabUi)
         {
-            ImGui.TextDisabled("Hover a loaded terrain chunk, or move the camera onto one, to inspect its visual data.");
-            return;
-        }
-
-        if (!TryResolveTerrainChunkInspectionData(chunkInfo, out TerrainChunkData? chunkData, out IReadOnlyList<string>? tileTextures) || chunkData == null)
-        {
-            ImGui.TextDisabled("Chunk metadata is not available in the current tile cache.");
-            return;
-        }
-
-        ImGui.TextDisabled(usingHoveredChunk ? "Target: hovered chunk" : "Target: camera chunk");
-        ImGui.Text($"Tile ({chunkInfo.TileY}, {chunkInfo.TileX})  Chunk ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
-        ImGui.TextDisabled($"AreaId: {chunkData.AreaId}  Layers: {chunkData.Layers.Length}  Holes: 0x{chunkData.HoleMask:X4}");
-        ImGui.TextDisabled($"MCNK Flags: 0x{(uint)chunkData.McnkFlags:X8}  {DescribeMcnkFlags(chunkData.McnkFlags)}");
-        ImGui.TextDisabled($"Alpha maps: {chunkData.AlphaMaps.Count}  Shadow: {(chunkData.ShadowMap != null ? "yes" : "no")}  MCCV: {(chunkData.MccvColors != null ? "yes" : "no")}");
-        ImGui.TextDisabled($"World origin: ({chunkData.WorldPosition.X:F1}, {chunkData.WorldPosition.Y:F1}, {chunkData.WorldPosition.Z:F1})");
-
-        {
-            Vector3 chunkOrigin = chunkData.WorldPosition;
-            float cellSize = 2.0833125f;
-            float localX = (_camera.Position.X - chunkOrigin.X) / cellSize;
-            float localY = (_camera.Position.Y - chunkOrigin.Y) / cellSize;
-            int cellX = Math.Clamp((int)MathF.Floor(localX), 0, 15);
-            int cellY = Math.Clamp((int)MathF.Floor(localY), 0, 15);
-            ImGui.TextDisabled($"Camera cell ({cellX}, {cellY}) at local ({_camera.Position.X - chunkOrigin.X:F1}, {_camera.Position.Y - chunkOrigin.Y:F1})");
-        }
-
-        if (TryBuildTerrainWeakSignalTextureGuidance(chunkData, out var textureGuidance) && textureGuidance != null)
-        {
-            ImGui.TextDisabled($"Weak sub-cells: {textureGuidance.SelectedCellCount} ({textureGuidance.BorderSelectedCellCount} border cells)  range {textureGuidance.ObservedMinHeight:F1}..{textureGuidance.ObservedMaxHeight:F1}");
+            ImGui.TextDisabled("Chunk details and flag overlays are in Inspector > Context.");
+            if (ImGui.Button("Open Terrain Inspector##Investigation"))
+                OpenWorkbenchTab(WoWViewer.Workbench.WorkbenchTab.Inspect);
         }
         else
         {
-            ImGui.TextDisabled("Weak sub-cells: none detected for the current source Z band and alpha-driven texture grouping.");
-        }
-
-        string summary = BuildTerrainChunkTextureSummary(chunkInfo, chunkData, tileTextures);
-        if (ImGui.SmallButton("Copy Chunk Texture Summary"))
-            CopyTextToClipboard(summary, "chunk texture summary");
-
-        ImGui.Separator();
-        DrawMcnkFlagOverlayControls();
-
-        ImGui.Separator();
-        for (int layerIndex = 0; layerIndex < chunkData.Layers.Length; layerIndex++)
-        {
-            TerrainLayer layer = chunkData.Layers[layerIndex];
-            string textureName = ResolveTerrainTextureName(tileTextures, layer.TextureIndex);
-            bool hasAlpha = layerIndex > 0 && chunkData.AlphaMaps.ContainsKey(layerIndex);
-            string baseLayerLabel = layerIndex == 0 ? "base" : "blend";
-            ImGui.BulletText($"L{layerIndex} [{baseLayerLabel}] tex#{layer.TextureIndex}: {textureName}");
-            ImGui.TextDisabled($"flags=0x{layer.Flags:X8} effect={layer.EffectId} alpha={(hasAlpha ? "yes" : "no")}");
+            DrawUnifiedInspectorContent();
         }
     }
 
-    private void DrawMcnkExplorerContent()
-    {
-        ImGui.TextDisabled("Inspect the hovered or camera chunk, raw MCNK flags, layer stack, alpha usage, and weak-corner overlays.");
-        ImGui.TextDisabled("Uses the hovered chunk when available and falls back to the camera chunk.");
-        ImGui.Separator();
-        DrawTerrainChunkInvestigationContent();
-    }
-
+    private void DrawMcnkExplorerContent() => DrawTerrainChunkInvestigationContent();
     private void DrawWlLiquidInvestigationPanel(bool defaultOpen)
     {
         if (_worldScene == null)
@@ -835,35 +781,35 @@ public partial class ViewerApp
 
     private void DrawMcnkFlagOverlayControls()
     {
-        ImGui.Text("MCNK Flag Overlay");
-        ImGui.TextDisabled("Highlight loaded terrain chunks by raw MCNK header flags.");
+        if (!WoWViewer.UI.SharedUiWidgets.DrawSectionHeader("MCNK Flag Overlay",
+            "Highlight resident terrain chunks by raw MCNK header flags. Diagonal weak corners require the overlay and Impassable flag."))
+            return;
 
         bool showOverlay = _showMcnkFlagOverlay;
         if (ImGui.Checkbox("Show MCNK Flag Overlay", ref showOverlay))
             _showMcnkFlagOverlay = showOverlay;
 
-        ImGui.SameLine();
         bool showWeakCorners = _showMcnkWeakCorners;
         if (ImGui.Checkbox("Highlight Diagonal Weak Corners", ref showWeakCorners))
             _showMcnkWeakCorners = showWeakCorners;
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Marks loaded 2x2 chunk blocks where impassable chunks only touch diagonally and leave the shared corner exposed.");
 
-        DrawMcnkFlagToggle(McnkOverlayFlags.Impassable, "Impassable");
-        ImGui.SameLine();
-        DrawMcnkFlagToggle(McnkOverlayFlags.River, "River");
-        ImGui.SameLine();
-        DrawMcnkFlagToggle(McnkOverlayFlags.Ocean, "Ocean");
-        ImGui.SameLine();
-        DrawMcnkFlagToggle(McnkOverlayFlags.HasMagma, "Magma");
-
-        DrawMcnkFlagToggle(McnkOverlayFlags.HasSlime, "Slime");
-        ImGui.SameLine();
-        DrawMcnkFlagToggle(McnkOverlayFlags.HasShadows, "Shadows");
-        ImGui.SameLine();
-        DrawMcnkFlagToggle(McnkOverlayFlags.HasMccv, "MCCV");
-        ImGui.SameLine();
-        DrawMcnkFlagToggle(McnkOverlayFlags.HasBakedShadows, "BakedShadows");
+        if (ImGui.BeginTable("##McnkFlagChoices", 2, ImGuiTableFlags.SizingStretchSame))
+        {
+            foreach (var (flag, label) in new[]
+            {
+                (McnkOverlayFlags.Impassable, "Impassable"), (McnkOverlayFlags.River, "River"),
+                (McnkOverlayFlags.Ocean, "Ocean"), (McnkOverlayFlags.HasMagma, "Magma"),
+                (McnkOverlayFlags.HasSlime, "Slime"), (McnkOverlayFlags.HasShadows, "Shadows"),
+                (McnkOverlayFlags.HasMccv, "MCCV"), (McnkOverlayFlags.HasBakedShadows, "BakedShadows"),
+            })
+            {
+                ImGui.TableNextColumn();
+                DrawMcnkFlagToggle(flag, label);
+            }
+            ImGui.EndTable();
+        }
 
         ImGui.TextDisabled($"Loaded flagged chunks: {_lastMcnkOverlayChunkCount}  Weak corners: {_lastMcnkWeakCornerCount}");
     }

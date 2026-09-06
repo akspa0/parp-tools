@@ -721,7 +721,7 @@ public partial class ViewerApp : IDisposable
     private WorldScene? _worldScene;
     private SceneCursorRenderer? _sceneCursorRenderer;
     private SceneClusterSelector3D? _sceneClusterSelector3D;
-    private CameraHudRig3D? _cameraHudRig3D;
+    private CameraHudRig? _cameraHudRig;
     private float _uiFontScale = 1.0f;
     private bool _wantOpenVlmProject = false;
     private bool _wantOpenZarrDataset = false;
@@ -992,7 +992,7 @@ public partial class ViewerApp : IDisposable
         _loadingScreen = new Rendering.LoadingScreen(_gl);
         _sceneCursorRenderer = new SceneCursorRenderer(_gl, _dataSource, _texResolver);
         _sceneClusterSelector3D = new SceneClusterSelector3D(_gl);
-        _cameraHudRig3D = new CameraHudRig3D(_gl);
+        _cameraHudRig = new CameraHudRig(_gl);
 
         TryAutoPopulateAlphaCoreRoot();
         LoadViewerSettings();
@@ -1032,6 +1032,9 @@ public partial class ViewerApp : IDisposable
 
                     if (_worldScene != null)
                         PickObjectAtMouse(_lastMouseX, _lastMouseY, addPm4ToCollection: shift);
+                    else if (terrainRenderer != null && !shift && !_chunkToolEnabled
+                        && TryPickTerrainChunkUnderMouse(terrainRenderer, out var terrainChunk))
+                        SelectTerrainChunkFromClick(terrainChunk);
                 }
             };
             mouse.MouseUp += (_, btn) =>
@@ -1628,10 +1631,10 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
         if (hasSceneViewportRect)
         {
-            if (_cameraHudRig3D != null && _cameraHudRig3D.Enabled)
+            if (_cameraHudRig != null && _cameraHudRig.Enabled && !_hideUiChrome)
             {
                 float hudAspect = (float)sceneViewportWidth / Math.Max(1, sceneViewportHeight);
-                _cameraHudRig3D.Render(_camera, proj, _fovDegrees, hudAspect);
+                _cameraHudRig.Render(_camera, proj, _fovDegrees, hudAspect);
             }
 
             // World-space selection rings belong in the 3D pass: they are scene geometry and must
@@ -2054,6 +2057,21 @@ void main() {
 
                 ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
                 ImGui.MenuItem("Right Sidebar", "I", ref _showRightSidebar);
+                if (ImGui.MenuItem("Log Console..."))
+                {
+                    if (_useTabUi) OpenWorkbenchTab(UtilitiesBottomTab.Log);
+                    else _showLogViewer = true;
+                }
+                if (ImGui.MenuItem("Performance & Profiling..."))
+                {
+                    if (_useTabUi) OpenWorkbenchTab(UtilitiesBottomTab.Perf);
+                    else _showPerfWindow = true;
+                }
+                if (ImGui.MenuItem("Lighting Diagnostics..."))
+                {
+                    if (_useTabUi) OpenWorkbenchTab(UtilitiesBottomTab.Lighting);
+                    else OpenLegacyWorkbenchUtility(UtilitiesBottomTab.Lighting);
+                }
                 if (ImGui.MenuItem("Focus PM4 Tools", "P"))
                     OpenPm4Workbench(Pm4WorkbenchTab.Selection);
                 if (ImGui.MenuItem("Reset Shell Layout"))
@@ -2064,13 +2082,18 @@ void main() {
                 ImGui.Separator();
                 if (ImGui.MenuItem("Asset Catalog"))
                 {
-                    if (_catalogView == null)
+                    if (_useTabUi)
+                        OpenWorkbenchTab(UtilitiesBottomTab.AssetCatalog);
+                    else
                     {
-                        _catalogView = new AssetCatalogView(_gl);
-                        _catalogView.SetDataSource(_dataSource);
-                        _catalogView.OnLoadModelRequested = OnCatalogLoadModel;
+                        if (_catalogView == null)
+                        {
+                            _catalogView = new AssetCatalogView(_gl);
+                            _catalogView.SetDataSource(_dataSource);
+                            _catalogView.OnLoadModelRequested = OnCatalogLoadModel;
+                        }
+                        _catalogView.IsVisible = !_catalogView.IsVisible;
                     }
-                    _catalogView.IsVisible = !_catalogView.IsVisible;
                 }
 
                 ImGui.EndMenu();
@@ -2078,6 +2101,17 @@ void main() {
 
             if (ImGui.BeginMenu("Tools"))
             {
+                if (ImGui.MenuItem("Taxi Routes...", "", false, _worldScene != null))
+                {
+                    if (_useTabUi) OpenWorkbenchTab(UtilitiesBottomTab.Taxi);
+                    else OpenLegacyWorkbenchUtility(UtilitiesBottomTab.Taxi);
+                }
+                if (ImGui.MenuItem("Audio Settings..."))
+                {
+                    if (_useTabUi) OpenWorkbenchTab(UtilitiesBottomTab.Audio);
+                    else OpenLegacyWorkbenchUtility(UtilitiesBottomTab.Audio);
+                }
+                ImGui.Separator();
                 // 071: floating-window toggles removed. Every tool lives in a
                 // workbench tab under Tools > Panels or the relevant top tab.
 
@@ -15946,6 +15980,8 @@ void main() {
             _activeUtilitiesTabIndex = _activeTopTab == WorkbenchTab.Utilities
                 ? _activeBottomTabIndex
                 : 0;
+            if (_useTabUi)
+                NormalizeWorkbenchStateAfterLoad();
             _showLeftSidebar = settings.ShowLeftSidebar;
             _showRightSidebar = settings.ShowRightSidebar;
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
@@ -16383,8 +16419,8 @@ void main() {
         _sceneCursorRenderer = null;
         _sceneClusterSelector3D?.Dispose();
         _sceneClusterSelector3D = null;
-        _cameraHudRig3D?.Dispose();
-        _cameraHudRig3D = null;
+        _cameraHudRig?.Dispose();
+        _cameraHudRig = null;
         _wdlPreviewCacheService?.Dispose();
         _wdlPreviewRenderer?.Dispose();
         _editorOverlayBb?.Dispose();

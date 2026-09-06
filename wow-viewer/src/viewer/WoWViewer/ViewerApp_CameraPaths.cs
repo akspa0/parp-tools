@@ -41,7 +41,6 @@ public partial class ViewerApp
     private int _cameraPathPreloadTileRadius = 1;
     private int _cameraPathPreloadSampleSpacingMs = 500;
     private CameraPathPreloadState? _cameraPathPreload;
-    private bool _cameraPathPlaybackPending;
     private bool _cameraPathVideoCapturePending;
     private bool _cameraPathKeyboardAuthoring;
     private int _cameraPathKeyboardTimeStepMs = 100;
@@ -67,6 +66,8 @@ public partial class ViewerApp
     private sealed class CameraPathPreloadState
     {
         public required HashSet<(int tileX, int tileY)> Tiles { get; init; }
+        public required string MapName { get; init; }
+        public required string BuildVersion { get; init; }
         public int StableFrames { get; set; }
         public bool Ready { get; set; }
     }
@@ -520,8 +521,34 @@ public partial class ViewerApp
     }
 
     private bool IsCameraPathBoundToCurrentMap()
-        => string.Equals(_cameraPath.MapName, GetCurrentCaptureMapName(), StringComparison.OrdinalIgnoreCase)
-            && string.Equals(_cameraPath.BuildVersion, GetCurrentCaptureBuildVersion(), StringComparison.OrdinalIgnoreCase);
+        => CameraPathBindingPolicy.AreEquivalent(
+            _cameraPath.MapName,
+            _cameraPath.BuildVersion,
+            GetCurrentCaptureMapName(),
+            GetCurrentCaptureBuildVersion());
+
+    /// <summary>
+    /// Resolves imported/hand-authored path metadata at the moment the
+    /// operator starts an action. Formatting-only differences are rebound to
+    /// the active map/build, while a different map or build remains a hard
+    /// stop. Playback updates use <see cref="IsCameraPathBoundToCurrentMap"/>
+    /// directly so a provenance change during a run cannot be hidden.
+    /// </summary>
+    private bool TryBindCameraPathToCurrentMapForPlayback()
+    {
+        EnsureCameraPathBindingForCurrentMap();
+        string currentMap = GetCurrentCaptureMapName();
+        string currentBuild = GetCurrentCaptureBuildVersion();
+        if (!CameraPathBindingPolicy.AreEquivalentMapNames(_cameraPath.MapName, currentMap)
+            || !CameraPathBindingPolicy.AreEquivalentBuildVersions(_cameraPath.BuildVersion, currentBuild))
+        {
+            return false;
+        }
+
+        _cameraPath.MapName = currentMap;
+        _cameraPath.BuildVersion = currentBuild;
+        return true;
+    }
 
     private bool StartCameraPathPlayback()
     {
@@ -531,29 +558,23 @@ public partial class ViewerApp
             return false;
         }
 
-        EnsureCameraPathBindingForCurrentMap();
-        if (!IsCameraPathBoundToCurrentMap())
+        if (!TryBindCameraPathToCurrentMapForPlayback())
         {
             _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before playback.";
             return false;
         }
 
-        if (_cameraPathPreloadEnabled)
-        {
-            if (_cameraPathPreload == null && !BeginCameraPathPreload())
-                return false;
-            if (_cameraPathPreload is { Ready: false })
-            {
-                _cameraPathPlaybackPending = true;
-                _statusMessage = $"Warming {_cameraPathPreload.Tiles.Count} path tiles before playback.";
-                return false;
-            }
-        }
+        // A plain Play request supersedes a previously queued Play + Video
+        // warmup. Keep any resident tiles for progressive streaming, but do
+        // not let the stale video callback start a second playback.
+        _cameraPathVideoCapturePending = false;
+        if (_cameraPathPreloadEnabled && _cameraPathPreload == null)
+            _ = BeginCameraPathPreload();
 
-        _cameraPathPlaybackPending = false;
         _cameraPathTimeSeconds = 0;
         _cameraPathPlaying = true;
-        _taxiRideCameraEnabled = false;
+        if (_taxiRideCameraEnabled)
+            StopTaxiRideCamera();
         _statusMessage = $"Playing camera path '{_cameraPath.Name}'.";
         return true;
     }
@@ -599,8 +620,7 @@ public partial class ViewerApp
             return false;
         }
 
-        EnsureCameraPathBindingForCurrentMap();
-        if (!IsCameraPathBoundToCurrentMap())
+        if (!TryBindCameraPathToCurrentMapForPlayback())
         {
             _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before playback.";
             return false;
@@ -613,7 +633,6 @@ public partial class ViewerApp
     {
         _cameraPathPlaying = false;
         _cameraPathTimeSeconds = 0;
-        _cameraPathPlaybackPending = false;
         _cameraPathVideoCapturePending = false;
         if (_cameraPathVideoCaptureActive)
         {
@@ -696,7 +715,7 @@ public partial class ViewerApp
             return;
         }
 
-        if (!IsCameraPathBoundToCurrentMap())
+        if (!TryBindCameraPathToCurrentMapForPlayback())
         {
             _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before queuing captures.";
             return;
@@ -760,7 +779,7 @@ public partial class ViewerApp
             return false;
         }
 
-        if (!IsCameraPathBoundToCurrentMap())
+        if (!TryBindCameraPathToCurrentMapForPlayback())
         {
             _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before warming it.";
             return false;
@@ -783,7 +802,12 @@ public partial class ViewerApp
         _terrainManager.SetCapturePreloadTiles(tiles);
         _worldScene.CapturePreloadActive = true;
         _worldScene.QueueCapturePreloadAssets(tiles);
-        _cameraPathPreload = new CameraPathPreloadState { Tiles = tiles };
+        _cameraPathPreload = new CameraPathPreloadState
+        {
+            Tiles = tiles,
+            MapName = GetCurrentCaptureMapName(),
+            BuildVersion = GetCurrentCaptureBuildVersion(),
+        };
         return true;
     }
 
@@ -791,6 +815,17 @@ public partial class ViewerApp
     {
         if (_cameraPathPreload is not { } preload || _terrainManager == null || _worldScene == null)
             return;
+
+        if (!CameraPathBindingPolicy.AreEquivalent(
+                preload.MapName,
+                preload.BuildVersion,
+                GetCurrentCaptureMapName(),
+                GetCurrentCaptureBuildVersion()))
+        {
+            EndCameraPathPreload();
+            _statusMessage = "Path preload cancelled because the active map/build changed.";
+            return;
+        }
 
         bool tilesReady = preload.Tiles.All(tile => _terrainManager.IsTileLoaded(tile.tileX, tile.tileY));
         // Normal AOI streaming may still be loading unrelated tiles. The capture
@@ -816,17 +851,11 @@ public partial class ViewerApp
             _cameraPathVideoCapturePending = false;
             StartCameraPathVideoCaptureNow();
         }
-        else if (_cameraPathPlaybackPending && preload.Ready)
-        {
-            _cameraPathPlaybackPending = false;
-            StartCameraPathPlayback();
-        }
     }
 
     private void EndCameraPathPreload()
     {
         _cameraPathVideoCapturePending = false;
-        _cameraPathPlaybackPending = false;
         if (_worldScene != null)
             _worldScene.CapturePreloadActive = false;
         _terrainManager?.ClearCapturePreloadTiles();
@@ -1168,11 +1197,8 @@ public partial class ViewerApp
 
     private void EnsureCameraPathBindingForCurrentMap()
     {
-        bool missingMap = string.IsNullOrWhiteSpace(_cameraPath.MapName)
-            || string.Equals(_cameraPath.MapName, "unknown", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(_cameraPath.MapName, "standalone", StringComparison.OrdinalIgnoreCase);
-        bool missingBuild = string.IsNullOrWhiteSpace(_cameraPath.BuildVersion)
-            || string.Equals(_cameraPath.BuildVersion, "unknown_build", StringComparison.OrdinalIgnoreCase);
+        bool missingMap = CameraPathBindingPolicy.IsMissingMapName(_cameraPath.MapName);
+        bool missingBuild = CameraPathBindingPolicy.IsMissingBuildVersion(_cameraPath.BuildVersion);
         if (missingMap || missingBuild)
             BindCameraPathToCurrentMap();
     }

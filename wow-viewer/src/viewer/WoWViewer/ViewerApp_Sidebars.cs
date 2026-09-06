@@ -11,6 +11,7 @@ using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.Passes;
 using WowViewer.Core.Runtime.World.Visibility;
 using WoWViewer.Population;
+using WoWViewer.UI;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 
 namespace WoWViewer;
@@ -944,6 +945,28 @@ public partial class ViewerApp
     }
 
     private int _activeInspectorTab;
+
+    // T604: utility pages have one dispatcher and one active page index. The
+    // Quick destination hosts the page bodies in dedicated collapsible
+    // sections; the legacy UI uses the nullable route below as an in-sidebar
+    // compatibility adapter.
+    private bool _quickUtilitiesExpanded;
+    private UtilitiesBottomTab? _pendingQuickUtilityPage;
+    private UtilitiesBottomTab? _legacyUtilityPage;
+    private bool _legacyUtilityScrollPending;
+
+    private enum InspectorContextSection
+    {
+        None,
+        SceneInvestigation,
+        Mcnk,
+        WorldContext,
+        Archeology,
+        Animations,
+        Actions,
+    }
+
+    private InspectorContextSection _pendingInspectorContextSection;
 
     private void DrawUnifiedToolSidebar()
     {
@@ -3135,28 +3158,10 @@ public partial class ViewerApp
         ImGui.SameLine();
         ImGui.Text(timeLabel);
 
-        float fogStart = Math.Clamp(lighting.FogStart, 0f, MaxTerrainFogDistance - 1f);
-        float fogEnd = Math.Clamp(lighting.FogEnd, 100f, MaxTerrainFogDistance);
-        bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f);
-        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance);
-        if (fogStartChanged || fogEndChanged)
-        {
-            if (fogEnd <= fogStart)
-            {
-                if (fogEndChanged && !fogStartChanged)
-                    fogStart = Math.Max(0f, fogEnd - 1f);
-                else
-                    fogEnd = Math.Min(MaxTerrainFogDistance, fogStart + 1f);
-            }
-
-            if (_worldScene != null)
-                _worldScene.SetUserFogRangeOverride(fogStart, fogEnd);
-            else
-            {
-                lighting.FogStart = fogStart;
-                lighting.FogEnd = fogEnd;
-            }
-        }
+        // Keep every terrain route on the same fog state owner. Reading the
+        // renderer-facing TerrainLighting fields here would overwrite a drag on
+        // the following frame when WorldScene recomposes DBC/LIT lighting.
+        DrawAuthoritativeFogControls(showDescription: false);
 
         if (_worldScene != null)
         {
@@ -4319,6 +4324,15 @@ public partial class ViewerApp
             ImGui.SliderFloat("Video playback speed##archeology", ref _archeologyPlaybackSpeed, 1f, 5000f, "%.0f");
         }
 
+        if (ImGui.Button("Apply playback to next capture"))
+        {
+            _archeologyApplyToNextCapture = true;
+            SaveViewerSettings();
+            _statusMessage = "Archeology playback will apply to the next queued capture.";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Enables the same one-shot playback option used by Capture Automation.");
+
         ImGui.Spacing();
         ImGui.TextDisabled($"Next capture: {(_archeologyApplyToNextCapture ? "playback active" : "no playback")}");
         ImGui.TextDisabled($"Video recording: {(_archeologyApplyToVideoRecording ? $"playback @ {_archeologyPlaybackSpeed:F0}/s" : "no playback")}");
@@ -4360,6 +4374,9 @@ public partial class ViewerApp
                 DrawArcheologyPlaybackSubTab();
                 ImGui.Separator();
                 DrawArcheologyCaptureSubTab();
+                ImGui.Separator();
+                ImGui.SeparatorText("Camera Paths & Video Capture");
+                DrawCapturePanelContent();
                 break;
             case 4:
                 // PM4 Archaeological Analysis
@@ -4641,6 +4658,11 @@ public partial class ViewerApp
 
     private void DrawWorkbenchContent()
     {
+        // Settings written by the pre-223 shell can still contain Scene,
+        // Utilities, or Experimental. Migrate those values at the boundary
+        // so the running shell has exactly four visible destinations.
+        NormalizeWorkbenchStateAfterLoad();
+
         string modeLabel = _workspaceMode switch
         {
             WorkspaceMode.Editor => "Editor workspace",
@@ -4656,74 +4678,32 @@ public partial class ViewerApp
             else if (ImGui.IsKeyPressed(ImGuiKey.F2))
                 OpenWorkbenchTab(WorkbenchTab.Inspect);
             else if (ImGui.IsKeyPressed(ImGuiKey.F3))
-                OpenWorkbenchTab(WorkbenchTab.Scene);
-            else if (ImGui.IsKeyPressed(ImGuiKey.F4))
-                OpenWorkbenchTab(WorkbenchTab.Utilities);
-            else if (ImGui.IsKeyPressed(ImGuiKey.F5))
-                OpenWorkbenchTab(WorkbenchTab.Archaeology);
-            else if (ImGui.IsKeyPressed(ImGuiKey.F6))
                 OpenWorkbenchTab(WorkbenchTab.Editor);
+            else if (ImGui.IsKeyPressed(ImGuiKey.F4))
+                OpenWorkbenchTab(WorkbenchTab.Archaeology);
         }
 
-        if (_workspaceMode == WorkspaceMode.Editor)
-        {
-            DrawTopTabButton(WorkbenchTab.Quick, "Quick");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Editor, "Editor");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Inspect, "Inspector");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
-        }
-        else if (_workspaceMode == WorkspaceMode.Archaeology)
-        {
-            DrawTopTabButton(WorkbenchTab.Quick, "Quick");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Archaeology, "Archaeology");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Inspect, "Inspector");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
-        }
-        else
-        {
-            DrawTopTabButton(WorkbenchTab.Quick, "Quick");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Inspect, "Inspector");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Scene, "Scene");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Utilities, "Utilities");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Archaeology, "Archaeology");
-            ImGui.SameLine();
-            DrawTopTabButton(WorkbenchTab.Editor, "Editor");
-        }
+        // Canonical four-tab IA. Keep the strip compact enough for a narrow
+        // sidebar; Archaeology is intentionally the only long label.
+        DrawTopTabButton(WorkbenchTab.Quick, "Quick");
+        ImGui.SameLine(0f, ImGui.GetStyle().ItemSpacing.X);
+        DrawTopTabButton(WorkbenchTab.Inspect, "Inspector");
+        ImGui.SameLine(0f, ImGui.GetStyle().ItemSpacing.X);
+        DrawTopTabButton(WorkbenchTab.Editor, "Editor");
+        ImGui.SameLine(0f, ImGui.GetStyle().ItemSpacing.X);
+        DrawTopTabButton(WorkbenchTab.Archaeology, "Archaeology");
         ImGui.Separator();
 
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(_activeTopTab);
         if (labels.Length > 0)
         {
-            // Utilities owns its own page state. The other canonical routes
-            // continue to use the legacy shared field for compatibility with
-            // persisted settings and keyboard/menu callers.
-            int activePageIndex = _activeTopTab == WorkbenchTab.Utilities
-                ? _activeUtilitiesTabIndex
-                : _activeBottomTabIndex;
+            int activePageIndex = _activeBottomTabIndex;
             if (activePageIndex < 0 || activePageIndex >= labels.Length)
                 activePageIndex = 0;
 
             activePageIndex = DrawPageCombo(
                 "##WorkbenchPage", labels, activePageIndex);
-            if (_activeTopTab == WorkbenchTab.Utilities)
-            {
-                _activeUtilitiesTabIndex = activePageIndex;
-                _activeBottomTabIndex = activePageIndex;
-            }
-            else
-            {
-                _activeBottomTabIndex = activePageIndex;
-            }
+            _activeBottomTabIndex = activePageIndex;
             ImGui.Separator();
         }
 
@@ -4736,19 +4716,10 @@ public partial class ViewerApp
                     DrawQuickControlsContent();
                     break;
                 case WorkbenchTab.Inspect:
-                    DrawUnifiedInspectorContent();
-                    break;
-                case WorkbenchTab.Scene:
-                    DrawSceneSubTabContent();
-                    break;
-                case WorkbenchTab.Utilities:
-                    DrawUtilitiesSubTabContent();
+                    DrawInspectorWorkbenchSubTabContent();
                     break;
                 case WorkbenchTab.Archaeology:
                     DrawArchaeologyWorkbenchSubTabContent();
-                    break;
-                case WorkbenchTab.Experimental:
-                    DrawExperimentalSubTabContent();
                     break;
                 case WorkbenchTab.Editor:
                     DrawEditorWorkbenchSubTabContent();
@@ -4756,6 +4727,170 @@ public partial class ViewerApp
             }
         }
         ImGui.EndChild();
+    }
+
+    /// <summary>
+    /// Compatibility migration for pre-223 settings. This runs on the draw
+    /// boundary as well as being safe to call from the settings loader in a
+    /// future shell pass.
+    /// </summary>
+    private void NormalizeWorkbenchStateAfterLoad()
+    {
+        switch (_activeTopTab)
+        {
+            case WorkbenchTab.Scene:
+                _activeTopTab = WorkbenchTab.Inspect;
+                _activeBottomTabIndex = _activeBottomTabIndex == 1
+                    ? (int)InspectBottomTab.LodBudget
+                    : (int)InspectBottomTab.Placements;
+                break;
+
+            case WorkbenchTab.Utilities:
+                // Utility page indices remain authoritative in the single
+                // dispatcher; Quick simply hosts that dispatcher now.
+                _activeTopTab = WorkbenchTab.Quick;
+                _quickUtilitiesExpanded = true;
+                _activeBottomTabIndex = 0;
+                break;
+
+            case WorkbenchTab.Experimental:
+                // Preserve every old Experimental page by routing it to its
+                // canonical visible owner.
+                int experimentalPage = _activeBottomTabIndex;
+                switch (experimentalPage)
+                {
+                    case 1: // PM4
+                        _activeTopTab = WorkbenchTab.Archaeology;
+                        _activeBottomTabIndex = 4;
+                        break;
+                    case 2: // Converters
+                        _activeTopTab = WorkbenchTab.Editor;
+                        _activeBottomTabIndex = 1;
+                        break;
+                    case 3: // Population
+                        _activeTopTab = WorkbenchTab.Editor;
+                        _activeBottomTabIndex = 5;
+                        break;
+                    default: // Terrain Lab
+                        _activeTopTab = WorkbenchTab.Editor;
+                        _activeBottomTabIndex = 4;
+                        break;
+                }
+                break;
+        }
+
+        if (_activeTopTab is not (WorkbenchTab.Quick or WorkbenchTab.Inspect or WorkbenchTab.Editor or WorkbenchTab.Archaeology))
+            _activeTopTab = WorkbenchTab.Quick;
+
+        NormalizeInspectorPageState();
+    }
+
+    private void NormalizeInspectorPageState()
+    {
+        if (_activeTopTab != WorkbenchTab.Inspect)
+            return;
+
+        if (_activeBottomTabIndex < 0)
+            _activeBottomTabIndex = (int)InspectBottomTab.Context;
+
+        if (_activeBottomTabIndex <= (int)InspectBottomTab.LodBudget)
+            return;
+
+        _pendingInspectorContextSection = _activeBottomTabIndex switch
+        {
+            (int)InspectBottomTab.SceneInvestigation => InspectorContextSection.SceneInvestigation,
+            (int)InspectBottomTab.Mcnk => InspectorContextSection.Mcnk,
+            (int)InspectBottomTab.WorldContext => InspectorContextSection.WorldContext,
+            (int)InspectBottomTab.Archeology => InspectorContextSection.Archeology,
+            (int)InspectBottomTab.Animations => InspectorContextSection.Animations,
+            (int)InspectBottomTab.Actions => InspectorContextSection.Actions,
+            _ => InspectorContextSection.None,
+        };
+        _activeBottomTabIndex = (int)InspectBottomTab.Context;
+    }
+
+    private void DrawInspectorWorkbenchSubTabContent()
+    {
+        InspectBottomTab page = (InspectBottomTab)Math.Clamp(
+            _activeBottomTabIndex,
+            0,
+            WorkbenchNavigator.GetInspectBottomTabLabels().Length - 1);
+
+        switch (page)
+        {
+            case InspectBottomTab.Context:
+                DrawInspectorContextPage();
+                break;
+
+            case InspectBottomTab.Placements:
+                DrawWorldPlacementsSubTab();
+                break;
+
+            case InspectBottomTab.LodBudget:
+                DrawWorldLodSubTab();
+                break;
+
+            default:
+                // Hidden compatibility page identifiers are normalized into
+                // Context before the combo is drawn. Keep this fail-closed
+                // fallback for settings written by an older build.
+                DrawInspectorContextPage();
+                break;
+        }
+    }
+
+    private void DrawInspectorContextPage()
+    {
+        DrawUnifiedInspectorContent();
+
+        if ((_terrainManager != null || _vlmTerrainManager != null)
+            && SharedUiWidgets.SectionHeader(
+                "MCNK Flag Overlay",
+                "Filter and highlight raw MCNK flags in the loaded terrain. Diagonal weak-corner markers share this control.",
+                defaultOpen: false,
+                id: "InspectorMcnkFlags"))
+        {
+            DrawMcnkFlagOverlayControls();
+        }
+
+        InspectorContextSection requested = _pendingInspectorContextSection;
+        if (requested == InspectorContextSection.None)
+            return;
+
+        _pendingInspectorContextSection = InspectorContextSection.None;
+        switch (requested)
+        {
+            case InspectorContextSection.SceneInvestigation:
+                if (SharedUiWidgets.SectionHeader("Scene Investigation", defaultOpen: true, id: "InspectorSceneInvestigation"))
+                    DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null);
+                break;
+            case InspectorContextSection.Mcnk:
+                if ((_terrainManager != null || _vlmTerrainManager != null)
+                    && SharedUiWidgets.SectionHeader("MCNK Flag Overlay", defaultOpen: true, id: "InspectorMcnkFlagsLegacy"))
+                    DrawMcnkFlagOverlayControls();
+                break;
+            case InspectorContextSection.WorldContext:
+                if (SharedUiWidgets.SectionHeader("World Context", defaultOpen: true, id: "InspectorWorldContext"))
+                {
+                    if (_worldScene == null)
+                        SharedUiWidgets.CompactStatus("Load a world scene to inspect world context.");
+                    else
+                        DrawInspectorWorldContextContent();
+                }
+                break;
+            case InspectorContextSection.Archeology:
+                if (SharedUiWidgets.SectionHeader("Archeology", defaultOpen: true, id: "InspectorArcheology"))
+                    DrawArcheologySubTabContent();
+                break;
+            case InspectorContextSection.Animations:
+                if (SharedUiWidgets.SectionHeader("Animations", defaultOpen: true, id: "InspectorAnimations"))
+                    DrawModelAnimationsSubTab();
+                break;
+            case InspectorContextSection.Actions:
+                if (SharedUiWidgets.SectionHeader("Actions", defaultOpen: true, id: "InspectorActions"))
+                    DrawModelActionsSubTab();
+                break;
+        }
     }
 
     private void DrawEditorWorkbenchSubTabContent()
@@ -4774,6 +4909,16 @@ public partial class ViewerApp
                 break;
             case 3:
                 DrawArchaeologyEditorImportsSubTab();
+                break;
+            case 4:
+                // Experimental Terrain Lab remains reachable through the
+                // canonical Editor destination for legacy callers.
+                DrawTerrainLabSubTab();
+                break;
+            case 5:
+                // SQL population was historically an Experimental page; keep
+                // its route visible without reviving that top-level tab.
+                DrawPopulationSubTabContent();
                 break;
             default:
                 DrawArchaeologyEditorTasksSubTab();
@@ -4812,37 +4957,69 @@ public partial class ViewerApp
         {
             _activeTopTab = tab;
             _activeBottomTabIndex = 0;
-            if (tab == WorkbenchTab.Utilities)
-                _activeUtilitiesTabIndex = 0;
         }
     }
 
     private void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = 0)
     {
+        // Adapt legacy destinations at the call boundary. This keeps menu,
+        // keyboard, and saved-layout callers functional while exposing only
+        // Quick, Inspector, Editor, and Archaeology in the shell.
+        switch (topTab)
+        {
+            case WorkbenchTab.Scene:
+                OpenWorkbenchTab(
+                    WorkbenchTab.Inspect,
+                    bottomIndex == 1
+                        ? (int)InspectBottomTab.LodBudget
+                        : (int)InspectBottomTab.Placements);
+                return;
+
+            case WorkbenchTab.Utilities:
+                _activeUtilitiesTabIndex = Math.Clamp(
+                    bottomIndex,
+                    0,
+                    (int)UtilitiesBottomTab.Audio);
+                _quickUtilitiesExpanded = true;
+                OpenWorkbenchTab(WorkbenchTab.Quick);
+                return;
+
+            case WorkbenchTab.Experimental:
+                _activeTopTab = WorkbenchTab.Experimental;
+                _activeBottomTabIndex = bottomIndex;
+                NormalizeWorkbenchStateAfterLoad();
+                return;
+        }
+
         if (!_useTabUi)
             return;
 
         _activeTopTab = topTab;
+        if (topTab == WorkbenchTab.Inspect && bottomIndex > (int)InspectBottomTab.LodBudget)
+        {
+            _activeBottomTabIndex = bottomIndex;
+            NormalizeInspectorPageState();
+            bottomIndex = _activeBottomTabIndex;
+        }
+
         string[] labels = WorkbenchNavigator.GetBottomTabLabels(topTab);
         int pageIndex = labels.Length > 0
             ? Math.Clamp(bottomIndex, 0, labels.Length - 1)
             : 0;
         _activeBottomTabIndex = pageIndex;
-        if (topTab == WorkbenchTab.Utilities)
-            _activeUtilitiesTabIndex = pageIndex;
         _showRightSidebar = true;
         _workbenchOpen = true;
     }
 
     private void OpenWorkbenchTab(ModelBottomTab tab)
     {
-        int page = tab switch
+        _pendingInspectorContextSection = tab switch
         {
-            ModelBottomTab.Animations => (int)InspectBottomTab.Animations,
-            ModelBottomTab.Actions => (int)InspectBottomTab.Actions,
-            _ => (int)InspectBottomTab.Context,
+            ModelBottomTab.Animations => InspectorContextSection.Animations,
+            ModelBottomTab.Actions => InspectorContextSection.Actions,
+            _ => InspectorContextSection.None,
         };
-        OpenWorkbenchTab(WorkbenchTab.Inspect, page);
+        OpenWorkbenchTab(WorkbenchTab.Inspect, (int)InspectBottomTab.Context);
     }
 
     private void OpenWorkbenchTab(WorldBottomTab tab)
@@ -4855,17 +5032,17 @@ public partial class ViewerApp
 
         if (tab == WorldBottomTab.Tiles)
         {
-            OpenWorkbenchTab(WorkbenchTab.Experimental, 0);
+            OpenWorkbenchTab(WorkbenchTab.Editor, 4);
             return;
         }
 
         int page = tab switch
         {
-            WorldBottomTab.Placements => 0,
-            WorldBottomTab.Lod => 1,
-            _ => 0,
+            WorldBottomTab.Placements => (int)InspectBottomTab.Placements,
+            WorldBottomTab.Lod => (int)InspectBottomTab.LodBudget,
+            _ => (int)InspectBottomTab.Context,
         };
-        OpenWorkbenchTab(WorkbenchTab.Scene, page);
+        OpenWorkbenchTab(WorkbenchTab.Inspect, page);
     }
 
     private void OpenWorkbenchTab(ToolsBottomTab tab)
@@ -4888,11 +5065,11 @@ public partial class ViewerApp
                     (int)UtilitiesBottomTab.Audio));
                 break;
             case ToolsBottomTab.Converters:
-                OpenWorkbenchTab(WorkbenchTab.Experimental, 2);
+                OpenWorkbenchTab(WorkbenchTab.Editor, 1);
                 break;
             case ToolsBottomTab.Terrain:
             default:
-                OpenWorkbenchTab(WorkbenchTab.Archaeology, 0);
+                OpenWorkbenchTab(WorkbenchTab.Editor, 4);
                 break;
         }
     }
@@ -4900,7 +5077,31 @@ public partial class ViewerApp
     private void OpenWorkbenchTab(UtilitiesBottomTab tab)
     {
         _activeUtilitiesTabIndex = (int)tab;
-        OpenWorkbenchTab(WorkbenchTab.Utilities, (int)tab);
+        _quickUtilitiesExpanded = true;
+        OpenWorkbenchTab(WorkbenchTab.Quick);
+    }
+
+    /// <summary>
+    /// Legacy-sidebar adapter for View/Tools utility menu entries. It reveals
+    /// the same utility dispatcher inside the existing right sidebar instead
+    /// of creating a new floating window.
+    /// </summary>
+    private void OpenLegacyWorkbenchUtility(UtilitiesBottomTab tab)
+    {
+        _activeUtilitiesTabIndex = Math.Clamp((int)tab, 0, (int)UtilitiesBottomTab.Audio);
+        _legacyUtilityPage = tab;
+        _showRightSidebar = true;
+        _workbenchOpen = true;
+    }
+
+    /// <summary>Used by keyboard/capture routing to identify the visible utility page.</summary>
+    private bool IsWorkbenchUtilityVisible(UtilitiesBottomTab tab)
+    {
+        return _legacyUtilityPage == tab
+            || (_useTabUi
+                && _activeTopTab == WorkbenchTab.Quick
+                && _quickUtilitiesExpanded
+                && _activeUtilitiesTabIndex == (int)tab);
     }
 
     private void DrawModelSubTabContent()
@@ -5655,6 +5856,38 @@ public partial class ViewerApp
             default:
                 DrawViewerQuickSection();
                 break;
+        }
+
+        DrawQuickUtilitiesSection();
+    }
+
+    /// <summary>
+    /// T604 utility home. Every former Utilities page is still rendered by
+    /// <see cref="DrawUtilitiesSubTabContent"/>; this expandable group only
+    /// supplies its canonical Quick destination and never forks page logic.
+    /// </summary>
+    private void DrawQuickUtilitiesSection()
+    {
+        bool open = _quickUtilitiesExpanded;
+        if (SharedUiWidgets.SectionHeader(
+                "Utilities",
+                "Minimap, log, performance, render quality, taxi, capture, asset catalog, runtime stats, lighting, and audio.",
+                defaultOpen: open,
+                id: "QuickUtilities"))
+        {
+            _quickUtilitiesExpanded = true;
+            string[] labels = WorkbenchNavigator.GetUtilitiesBottomTabLabels();
+            int selected = Math.Clamp(_activeUtilitiesTabIndex, 0, labels.Length - 1);
+            selected = DrawPageCombo("##QuickUtilityPage", labels, selected);
+            _activeUtilitiesTabIndex = selected;
+            SharedUiWidgets.Divider();
+            DrawUtilitiesSubTabContent();
+        }
+        else if (open)
+        {
+            // ImGui remembers the open state, but retaining this bit lets a
+            // legacy caller explicitly reopen the group after profile changes.
+            _quickUtilitiesExpanded = false;
         }
     }
 

@@ -94,6 +94,25 @@ and sub-blocks) so the same payload can later render as the Spec 212 HUD object.
 
 ## Validation
 
+### Phase 6 implementation gates
+
+1. **Transport (T601)**: keep the scene's active-ride override separate from visibility and
+   selection; release it on stop, source change, or camera-path takeover. Normalize equivalent
+   map/build identities before comparison, without rebinding to an unrelated map. Interactive
+   playback streams progressively; video and queued captures keep their warmup gates.
+2. **Terrain context (T602/T605)**: retain a source-scoped pin, resolve current resident data at
+   draw/action time, and fall back when it expires. Move the old investigation capabilities to
+   the content payload before replacing duplicate panels with Inspector links.
+3. **Navigation and presentation (T603/T604/T606/T607)**: maintain old route identifiers as
+   adapters, including saved settings and keyboard context; expose only four top-level buttons.
+   Use existing draw/action owners for moved controls. Check every utility inventory row.
+4. **Integration (T608)**: build the solution, run focused transport/inspection tests and the
+   affected solution suites, record actual failures separately from interactive acceptance,
+   and update the inventory, guide, tasks and operational dashboard together.
+
+Real-client taxi motion, capture readiness, chunk picking and narrow-sidebar/profile walkthroughs
+remain operator-owned. Compilation or pure contract tests do not close those acceptance gates.
+
 - Build: `dotnet build wow-viewer/WowViewer.slnx -c Debug` per phase.
 - Focused tests: `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug`.
 - Operator walkthrough: verify taxi ride follows path, camera path plays smoothly, Inspector shows ADT/MCNK flags without selection, and Quick tab stays consistent across profiles.

@@ -5,11 +5,11 @@ Checklist order = execution order. Each phase ends at a verification gate before
 
 ## Phase 1 — Camera-Anchored 3D HUD Rig & Tab Visibility Toggle
 
-- [ ] 212-T101: Define camera-space transform contracts and projection structures in `WowViewer.Core.Runtime` (`CameraHudTransform`, `CameraSpaceProjection`).
-- [ ] 212-T102: Implement `CameraHudRig` in `WoWViewer.Rendering` (`src/viewer/WoWViewer/Rendering/CameraHudRig.cs`) with depth-clamped local projection and fog-bypass shader.
-- [ ] 212-T103: Wire `CameraHudRig.Render(...)` into `ViewerApp.OnRender()` immediately following world scene rendering and before ImGui chrome.
-- [ ] 212-T104: Synchronize HUD visibility directly with `!_hideUiChrome` (toggled by the `Tab` key) and add runtime enable toggle in `Settings > Interface`.
-- [ ] **Gate 1**: Camera moves/rotates in 3D scene while HUD anchor stays perfectly locked to viewport orientation; pressing `Tab` hides both 2D chrome and 3D HUD instantly; 0 build errors.
+- [x] 212-T101: Define camera-space transform contracts and projection structures in `WowViewer.Core.Runtime` (`CameraHudTransform`, `CameraSpaceProjection`).
+- [x] 212-T102: Implement `CameraHudRig` in `WoWViewer.Rendering` (`src/viewer/WoWViewer/Rendering/CameraHudRig.cs`) with depth-clamped local projection and fog-bypass shader.
+- [x] 212-T103: Wire `CameraHudRig.Render(...)` into `ViewerApp.OnRender()` immediately following world scene rendering and before ImGui chrome.
+- [x] 212-T104: Synchronize HUD visibility directly with `!_hideUiChrome` (toggled by the `Tab` key) and add runtime enable toggle in `Settings > Interface`.
+- [ ] **Gate 1**: Camera moves/rotates in 3D scene while HUD anchor stays perfectly locked to viewport orientation; pressing `Tab` hides both 2D chrome and 3D HUD instantly; 0 build errors. Source/test/build evidence passes; live visual/input verification is operator-owned.
 
 ---
 
@@ -20,11 +20,11 @@ Checklist order = execution order. Each phase ends at a verification gate before
   - `camera_hud_reticle_tactical.scad` / `.off` (multi-ring segmented reticle with elevation notches)
   - `camera_hud_compass_tape.scad` / `.off` (cylindrical graduated heading tape)
   - `camera_hud_gimbal.scad` / `.off` (attitude & heading spherical gimbal)
-- [ ] 212-T202: Wire `ProceduralMeshLoader.LoadFromOff` for all four HUD assets in `CameraHudRig` initialization with caching.
-- [ ] 212-T203: Render tactical crosshair reticle at center of viewport with pitch ladder response.
-- [ ] 212-T204: Render compass heading tape at top-center of HUD, dynamically rotated by `_camera.Yaw`.
-- [ ] 212-T205: Render curved visor bezel framing the viewport perimeter.
-- [ ] **Gate 2**: All four OpenSCAD HUD assets render crisp in viewport with authentic shader accents; heading tape rotates with camera yaw; reticle stays centered; build green.
+- [x] 212-T202: Wire `ProceduralMeshLoader.LoadFromOff` for all four HUD assets in `CameraHudRig` initialization with caching.
+- [x] 212-T203: Render tactical crosshair reticle at center of viewport with pitch ladder response.
+- [x] 212-T204: Render compass heading tape at top-center of HUD, dynamically rotated by `_camera.Yaw`.
+- [x] 212-T205: Render curved visor bezel framing the viewport perimeter.
+- [ ] **Gate 2**: All four OpenSCAD HUD assets render crisp in viewport with authentic shader accents; heading tape rotates with camera yaw; reticle stays centered; build green. Source/build evidence passes; real-client visual validation is operator-owned.
 
 ---
 

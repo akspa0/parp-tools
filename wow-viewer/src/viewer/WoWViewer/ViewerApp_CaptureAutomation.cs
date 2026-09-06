@@ -40,6 +40,7 @@ public partial class ViewerApp
     private int _videoCaptureContainerIndex;
     private bool _taxiRideCameraEnabled;
     private int _taxiRideCameraRouteId = -1;
+    private WorldScene? _taxiRideCameraScene;
     private TaxiRideCameraMode _taxiRideCameraMode = TaxiRideCameraMode.Cockpit;
     private float _taxiRideChaseDistance = 42f;
     private float _taxiRideChaseHeight = 16f;
@@ -47,7 +48,13 @@ public partial class ViewerApp
     private float _taxiRideCockpitHeight = 10f;
     private float _taxiRideFreeLookYawOffset;
     private float _taxiRideFreeLookPitchOffset;
+    private bool _taxiRideCameraPoseInitialized;
+    private Vector3 _taxiRideCameraSmoothedPosition;
+    private Vector3 _taxiRideCameraSmoothedForward;
+    private long _lastTaxiRideCameraTick;
     private ActiveVideoRecording? _activeVideoRecording;
+
+    private const float TaxiRideCameraSmoothingHz = 12f;
 
     private enum TaxiRideCameraMode
     {
@@ -220,6 +227,7 @@ public partial class ViewerApp
         public byte[] FrameBuffer { get; set; } = Array.Empty<byte>();
         // 069 Phase 7: archeology playback
         public bool ApplyArcheologyPlayback { get; set; }
+        public bool StartedArcheologyPlayback { get; init; }
     }
 
     private sealed class CameraShotPointDocument
@@ -271,6 +279,8 @@ public partial class ViewerApp
 
         ImGui.Combo("Video Container", ref _videoCaptureContainerIndex, VideoContainerLabels, VideoContainerLabels.Length);
         ImGui.Checkbox("Video Includes UI", ref _videoCaptureIncludeUi);
+        if (!_videoCaptureIncludeUi)
+            ImGui.TextDisabled("Scene-only recording captures the viewport before ImGui. Use Tab before starting only when a full-window scene is desired.");
 
         if (_activeVideoRecording == null)
         {
@@ -1582,13 +1592,6 @@ public partial class ViewerApp
             return false;
         }
 
-        if (!includeUi)
-            _hideUiChrome = true;
-
-        // 069 Phase 7: if archeology playback to video is enabled, start playback.
-        if (_archeologyApplyToVideoRecording && !_archeologyPlaybackActive)
-            StartArcheologyPlayback();
-
         if (!TryGetCaptureRegion(includeUi, out _, out _, out int width, out int height))
         {
             _statusMessage = includeUi
@@ -1601,6 +1604,16 @@ public partial class ViewerApp
         {
             _statusMessage = "Video capture dimensions were invalid.";
             return false;
+        }
+
+        // 069 Phase 7: if archeology playback to video is enabled, start playback.
+        // Track ownership so a failed recording start never stops a playback
+        // session the operator started independently.
+        bool startedArcheologyPlayback = false;
+        if (_archeologyApplyToVideoRecording && !_archeologyPlaybackActive)
+        {
+            StartArcheologyPlayback();
+            startedArcheologyPlayback = _archeologyPlaybackActive;
         }
 
         string encoderExecutable = string.IsNullOrWhiteSpace(_videoEncoderExecutable)
@@ -1676,6 +1689,7 @@ public partial class ViewerApp
                 FrameAccumulatorSeconds = 0.0,
                 FrameBuffer = new byte[width * height * 4],
                 ApplyArcheologyPlayback = _archeologyApplyToVideoRecording,
+                StartedArcheologyPlayback = startedArcheologyPlayback,
             };
 
             _statusMessage = $"Started video recording: {outputPath}";
@@ -1683,6 +1697,8 @@ public partial class ViewerApp
         }
         catch (Exception ex)
         {
+            if (startedArcheologyPlayback && _archeologyPlaybackActive)
+                StopArcheologyPlayback(restoreRange: true);
             _statusMessage = $"Failed to start video recording: {ex.Message}";
             return false;
         }
@@ -1694,15 +1710,11 @@ public partial class ViewerApp
             return;
 
         ActiveVideoRecording recording = _activeVideoRecording;
-        bool wasNoUi = !recording.IncludeUi;
         _activeVideoRecording = null;
 
         // 069 Phase 7: stop archeology playback if it was started for video.
-        if (recording.ApplyArcheologyPlayback && _archeologyPlaybackActive)
+        if (recording.StartedArcheologyPlayback && _archeologyPlaybackActive)
             StopArcheologyPlayback(restoreRange: true);
-
-        if (wasNoUi)
-            _hideUiChrome = false;
 
         bool success = false;
         string statusMessage = statusOverride ?? $"Saved video: {recording.OutputPath}";
@@ -1834,12 +1846,19 @@ public partial class ViewerApp
             return false;
         }
 
+        // A camera path and a taxi ride both own the camera. Cancel any
+        // pending path warmup/playback before attaching the ride route.
+        StopCameraPathPlayback();
         _worldScene.ShowTaxi = true;
         _worldScene.ShowTaxiActors = true;
         _taxiRideCameraRouteId = _worldScene.SelectedTaxiRouteId;
+        _taxiRideCameraScene = _worldScene;
+        _worldScene.ActiveTaxiRideRouteId = _taxiRideCameraRouteId;
         _taxiRideCameraEnabled = true;
         _taxiRideFreeLookYawOffset = 0f;
         _taxiRideFreeLookPitchOffset = 0f;
+        _taxiRideCameraPoseInitialized = false;
+        _lastTaxiRideCameraTick = Stopwatch.GetTimestamp();
         _statusMessage = $"Ride camera attached to {GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}.";
         return true;
     }
@@ -1848,8 +1867,14 @@ public partial class ViewerApp
     {
         _taxiRideCameraEnabled = false;
         _taxiRideCameraRouteId = -1;
+        _taxiRideCameraScene?.ActiveTaxiRideRouteId = -1;
+        if (_worldScene != null)
+            _worldScene.ActiveTaxiRideRouteId = -1;
+        _taxiRideCameraScene = null;
         _taxiRideFreeLookYawOffset = 0f;
         _taxiRideFreeLookPitchOffset = 0f;
+        _taxiRideCameraPoseInitialized = false;
+        _lastTaxiRideCameraTick = 0;
         if (!string.IsNullOrWhiteSpace(statusMessage))
             _statusMessage = statusMessage;
     }
@@ -1879,6 +1904,24 @@ public partial class ViewerApp
             return;
         }
 
+        if (!ReferenceEquals(_taxiRideCameraScene, _worldScene))
+        {
+            StopTaxiRideCamera("Ride camera detached because the world scene changed.");
+            return;
+        }
+
+        if (_worldScene.GetTaxiRoute(_taxiRideCameraRouteId) == null)
+        {
+            StopTaxiRideCamera("Ride camera detached because its taxi route is no longer loaded.");
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        float deltaSeconds = _lastTaxiRideCameraTick == 0
+            ? 0f
+            : (float)((now - _lastTaxiRideCameraTick) / (double)Stopwatch.Frequency);
+        _lastTaxiRideCameraTick = now;
+
         if (!_worldScene.TryGetTaxiActorPose(_taxiRideCameraRouteId, out TaxiActorPose pose))
             return;
 
@@ -1900,16 +1943,36 @@ public partial class ViewerApp
         Vector3 lookForward = GetDirectionFromYawPitch(desiredYawDegrees, _taxiRideFreeLookPitchOffset);
 
         float scale = Math.Max(0.25f, pose.Scale);
+        Vector3 desiredPosition;
         if (_taxiRideCameraMode == TaxiRideCameraMode.Cockpit)
         {
-            Vector3 eyePosition = pose.Position + Vector3.UnitZ * (_taxiRideCockpitHeight * scale);
-            ApplyDirectionalRideCamera(eyePosition, lookForward);
-            return;
+            desiredPosition = pose.Position + Vector3.UnitZ * (_taxiRideCockpitHeight * scale);
+        }
+        else
+        {
+            Vector3 chaseFocus = pose.Position + Vector3.UnitZ * Math.Max(6f, _taxiRideCockpitHeight * 0.65f * scale);
+            desiredPosition = chaseFocus - orbitForward * _taxiRideChaseDistance + Vector3.UnitZ * _taxiRideChaseHeight;
         }
 
-        Vector3 chaseFocus = pose.Position + Vector3.UnitZ * Math.Max(6f, _taxiRideCockpitHeight * 0.65f * scale);
-        Vector3 chasePosition = chaseFocus - orbitForward * _taxiRideChaseDistance + Vector3.UnitZ * _taxiRideChaseHeight;
-        ApplyDirectionalRideCamera(chasePosition, lookForward);
+        if (!_taxiRideCameraPoseInitialized)
+        {
+            // The model may become available several frames after the route
+            // starts. Begin from the current camera pose so that the first
+            // resolved actor does not teleport the view across the map.
+            _taxiRideCameraSmoothedPosition = _camera.Position;
+            _taxiRideCameraSmoothedForward = _camera.Forward;
+            _taxiRideCameraPoseInitialized = true;
+        }
+
+        float blend = 1f - MathF.Exp(-TaxiRideCameraSmoothingHz * Math.Clamp(deltaSeconds, 0f, 0.25f));
+        if (blend <= 0f)
+            blend = 0.2f;
+        _taxiRideCameraSmoothedPosition = Vector3.Lerp(_taxiRideCameraSmoothedPosition, desiredPosition, blend);
+        Vector3 blendedForward = Vector3.Lerp(_taxiRideCameraSmoothedForward, lookForward, blend);
+        if (blendedForward.LengthSquared() > 0.0001f)
+            _taxiRideCameraSmoothedForward = Vector3.Normalize(blendedForward);
+
+        ApplyDirectionalRideCamera(_taxiRideCameraSmoothedPosition, _taxiRideCameraSmoothedForward);
     }
 
     private void ApplyDirectionalRideCamera(Vector3 position, Vector3 forward)

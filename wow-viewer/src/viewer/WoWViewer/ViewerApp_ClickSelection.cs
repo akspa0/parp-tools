@@ -47,11 +47,13 @@ public partial class ViewerApp
         }
 
         (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey = null;
+        TerrainRenderer.TerrainChunkInfo? clickedTerrainChunk = null;
         Vector3? clickedWorldPoint = null;
-        TerrainRenderer? terrainRenderer = _terrainManager?.Renderer;
+        TerrainRenderer? terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (terrainRenderer != null
             && TryRaycastTerrain(terrainRenderer, rayOrigin, rayDir, GetSceneFarPlane(), out TerrainRenderer.TerrainChunkInfo terrainHit, out Vector3 terrainHitPoint))
         {
+            clickedTerrainChunk = terrainHit;
             clickedChunkKey = (terrainHit.TileX, terrainHit.TileY, terrainHit.ChunkX, terrainHit.ChunkY);
             clickedWorldPoint = terrainHitPoint;
         }
@@ -186,7 +188,18 @@ public partial class ViewerApp
         }
 
         if (_clickSelectionCandidates.Count == 0)
+        {
+            // A terrain click with no competing selectable target pins the MCNK for the Inspector.
+            // Object/taxi/PM4/POI candidates return above and retain their existing selection path.
+            if (clickedTerrainChunk is TerrainRenderer.TerrainChunkInfo terrainChunk)
+            {
+                SelectTerrainChunkFromClick(terrainChunk);
+                ClearPendingClickSelection();
+                return true;
+            }
+
             return false;
+        }
 
         if (_clickSelectionCandidates.Count == 1)
         {

@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-02
 
-**Status**: Draft
+**Status**: Phases 1–2 implemented in source; Gates 1–2 real-client visual verification open
 
 **Input**: User description: "3D spatial UI shell: render existing ImGui panels onto generated 3D geometry so the entire UI becomes objects composited over any loaded scene, with a context-morphing rig driven by the top bar"
 

@@ -2,7 +2,7 @@
 
 **Created**: 2026-09-04
 **Spec**: [spec.md](spec.md)
-**Status**: Ready for Implementation (Phases 1–4)
+**Status**: Phases 1–2 source implementation complete; visual Gates 1–2 open; Phases 3–4 planned
 
 ## Architecture Overview
 
@@ -71,6 +71,10 @@ flowchart TD
 - Render tactical reticle at crosshair center with smooth elevation/pitch response.
 - Render curved visor bezel around camera viewport perimeter.
 - Render compass heading tape at top of HUD driven by `_camera.Yaw`.
+
+**Source status (2026-09-06):** all four committed meshes are loaded once by `CameraHudRig`; the
+reticle, compass, bezel, existing gimbal, and brackets use the Phase 1 camera-space/depth contract.
+Settings exposes independent visibility toggles. Real-client visual verification remains required.
 
 ### Phase 3 — Spatial Ray-Casting & Surface Hit Testing
 - Implement `SpatialUiSurface` and `SpatialUiHitTestService` in `WowViewer.Core`.

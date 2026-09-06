@@ -27,12 +27,17 @@ public enum WorldBottomTab
 public enum InspectBottomTab
 {
     Context = 0,
-    SceneInvestigation = 1,
-    Mcnk = 2,
-    WorldContext = 3,
-    Archeology = 4,
-    Animations = 5,
-    Actions = 6,
+    Placements = 1,
+    LodBudget = 2,
+    // 3-8 are compatibility identifiers only. The canonical Inspector
+    // surface exposes the three pages above; legacy callers are redirected
+    // into expandable Context sections by ViewerApp.
+    SceneInvestigation = 3,
+    Mcnk = 4,
+    WorldContext = 5,
+    Archeology = 6,
+    Animations = 7,
+    Actions = 8,
 }
 
 /// <summary>
@@ -114,7 +119,7 @@ public static class WorkbenchNavigator
     public static string[] GetBottomTabLabels(WorkbenchTab tab) => tab switch
     {
         WorkbenchTab.Quick => [],
-        WorkbenchTab.Inspect => [],
+        WorkbenchTab.Inspect => GetInspectBottomTabLabels(),
         WorkbenchTab.Scene => ["Placements", "LOD"],
         WorkbenchTab.Utilities => GetUtilitiesBottomTabLabels(),
         WorkbenchTab.Experimental => ["Terrain Lab", "PM4", "Converters", "Population"],
@@ -125,7 +130,7 @@ public static class WorkbenchNavigator
 
     /// <summary>Labels for <see cref="InspectBottomTab"/>; order must match the enum.</summary>
     public static string[] GetInspectBottomTabLabels() =>
-        ["Context", "Scene Investigation", "MCNK / ADT", "World Context", "Archeology", "Animations", "Actions"];
+        ["Context", "Placements", "LOD & Budget"];
 
     public static string[] GetTerrainBottomTabLabels() => ["Clipboard", "Analysis", "MCNK", "Stratigraphy", "Export", "Tools"];
 
@@ -141,9 +146,22 @@ public static class WorkbenchNavigator
 
     /// <summary>Labels for <see cref="WorkbenchTab.Editor"/> destination.</summary>
     public static string[] GetEditorWorkbenchLabels() =>
-        ["Tasks & Workspace", "Converters", "3D Object Library", "Imports & Exports"];
+        ["Tasks & Workspace", "Converters", "3D Object Library", "Imports & Exports", "Terrain Lab", "Population"];
 
     /// <summary>Labels for <see cref="UtilitiesBottomTab"/>; order must match the enum.</summary>
     public static string[] GetUtilitiesBottomTabLabels() =>
         ["Minimap", "Log", "Perf", "Render Quality", "Taxi", "Capture", "Asset Catalog", "Runtime Stats", "Lighting", "Audio"];
+
+    /// <summary>
+    /// Returns the canonical visible destination for an older persisted or
+    /// menu-routed destination. Page-specific migration is handled by the
+    /// ViewerApp shell because it owns the active page indices.
+    /// </summary>
+    public static WorkbenchTab Canonicalize(WorkbenchTab tab) => tab switch
+    {
+        WorkbenchTab.Scene => WorkbenchTab.Inspect,
+        WorkbenchTab.Utilities => WorkbenchTab.Quick,
+        WorkbenchTab.Experimental => WorkbenchTab.Editor,
+        _ => tab,
+    };
 }

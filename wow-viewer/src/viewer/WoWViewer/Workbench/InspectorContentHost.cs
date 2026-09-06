@@ -1,5 +1,6 @@
 using ImGuiNET;
 using WowViewer.Core.Runtime.World.Inspection;
+using WoWViewer.UI;
 
 namespace WoWViewer.Workbench;
 
@@ -31,18 +32,10 @@ public static class InspectorContentHost
 
     private static void DrawSection(InspectorSection section, InspectorActionHandler? dispatch)
     {
-        if (ImGui.CollapsingHeader(section.Title, ImGuiTreeNodeFlags.DefaultOpen))
+        if (SharedUiWidgets.SectionHeader(section.Title, section.Note, defaultOpen: true, id: $"Inspector_{section.Title}"))
         {
-            if (!string.IsNullOrWhiteSpace(section.Note))
-                ImGui.TextWrapped(section.Note);
-
             foreach (InspectorRow row in section.Rows)
-            {
-                if (row.IsImportant)
-                    ImGui.TextColored(new System.Numerics.Vector4(1f, 0.85f, 0.4f, 1f), $"{row.Label}: {row.Value}");
-                else
-                    ImGui.TextDisabled($"{row.Label}: {row.Value}");
-            }
+                SharedUiWidgets.StatusReadout(row.Label, row.Value, row.IsImportant);
 
             foreach (InspectorTable table in section.Tables)
             {
@@ -50,14 +43,16 @@ public static class InspectorContentHost
                     continue;
 
                 foreach (InspectorRow row in table.Rows)
-                    ImGui.TextDisabled($"{row.Label}: {row.Value}");
+                    SharedUiWidgets.StatusReadout(row.Label, row.Value);
 
                 ImGui.TreePop();
             }
 
-            foreach (InspectorAction action in section.Actions)
+            for (int actionIndex = 0; actionIndex < section.Actions.Count; actionIndex++)
             {
-                if (ImGui.SmallButton(action.Label) && dispatch != null)
+                InspectorAction action = section.Actions[actionIndex];
+                string actionLabel = $"{action.Label}##InspectorAction_{action.Id}_{actionIndex}";
+                if (SharedUiWidgets.ActionButton(actionLabel, small: true) && dispatch != null)
                     dispatch(action);
             }
         }

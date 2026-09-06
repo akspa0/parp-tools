@@ -11,11 +11,11 @@ module cursor_pointer() {
         linear_extrude(height = 0.25, center = true, convexity = 10)
         polygon(points = [
             [0.0, 0.0],       // Tip
-            [0.9, -0.9],      // Bottom right edge
-            [0.45, -0.9],     // Inner notch right
-            [0.65, -1.8],     // Tail bottom right
-            [0.35, -1.9],     // Tail bottom left
-            [0.15, -1.0],     // Tail inner left
+            [0.7, -0.9],      // Bottom right edge
+            [0.43, -0.9],     // Inner notch right
+            [0.67, -1.5],     // Tail bottom right
+            [0.43, -1.6],     // Tail bottom left
+            [0.13, -1.0],     // Tail inner left
             [-0.1, -1.0]      // Far left wing
         ]);
 

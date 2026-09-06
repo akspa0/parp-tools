@@ -46,7 +46,7 @@ dotnet run --project src/viewer/WoWViewer/WoWViewer.csproj -c Debug
 ### Setting Up Client Data
 `WoWViewer` reads game archives directly from game folders containing MPQ files or loose directory structures:
 1. In the viewer, click **Open Client** in the top-left Navigator bar.
-2. Select your game root (e.g. `H:\CLIENTS\World of Warcraft 3.3.5a` or `H:\CLIENTS\WoW-0.5.3.3368-Client`).
+2. Select your client root containing the Data directory or loose game files.
 3. Select the detected client build from the **Build** dropdown.
 4. Expand **World Maps** in the Navigator to load any world (e.g. `Azeroth`, `Kalimdor`, `Development`).
 
@@ -58,7 +58,7 @@ You can pass command-line arguments to automate startup or load specific worlds 
 
 | Argument | Description | Example |
 |---|---|---|
-| `--game-path <path>` | Path to staged game directory or MPQ archive root | `--game-path "H:\CLIENTS\WoW 3.3.5a"` |
+| `--game-path <path>` | Path to staged game directory or MPQ archive root | `--game-path "C:\YourClients\WoW"` |
 | `--build <version>` | Pin the specific build version | `--build "3.3.5.12340"` |
 | `--world <path>` | Virtual path or file path to WDT/ADT map | `--world "World\Maps\Azeroth\Azeroth.wdt"` |
 | `--listfile <path>` | Supply an external custom listfile | `--listfile "listfile.csv"` |
@@ -74,71 +74,80 @@ You can pass command-line arguments to automate startup or load specific worlds 
 
 ## 3. User Interface Overview
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  WoWViewer                                                     [_][□][X]    │
-├──────────────┬───────────────────────────────────────────────┬──────────────┤
-│  NAVIGATOR   │                                               │  WORKBENCH   │
-│  (Left Bar)  │               3D VIEWPORT                     │  (Right Bar) │
-│              │                                               │              │
-│ • Sources    │  [WASD + Mouse Look Camera]                   │ Destinations:│
-│ • Build Pick │                                               │ • Quick      │
-│ • File Tree  │  [Bounded Terrain Residency Ring: Radius 2-3] │ • Inspect    │
-│ • World Maps │                                               │ • Scene      │
-│ • Phase Maps │  [Dynamic Lighting, Sky, Fog, Audio Emitters] │ • Utilities  │
-│              │                                               │ • Experiment │
-├──────────────┴───────────────────────────────────────────────┴──────────────┤
-│ [Scene Toggles]   [Subzone / Area Readout]   [Audio: ON/MUTED]   [FPS / ms] │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+The left **Navigator** loads clients, builds, files and maps. The center is the 3D viewport.
+The right **Workbench** always shows **Quick / Inspector / Editor / Archaeology**, whether the
+workspace profile at the top is Viewer, Editor or Archaeology. Switching profiles while Quick
+is selected keeps Quick open and retains the current controls' values.
 
-### 1. Left Navigator Sidebar
-- **Sources & Builds**: Switch active client archives and select build definitions.
-- **File Explorer**: Browse virtual paths inside MPQs (models, textures, sounds, databases).
-- **World Maps**: One-click loading of all terrain maps discovered in the client.
-- **Phase Map Selector**: Filter phased content for Cataclysm and later expansions.
+### Quick
 
-### 2. Bottom Status and Action Bar
-- **Scene Toggles**: Quick buttons for Terrain, WMOs, M2 Doodads, Liquids, Wireframe, Portals.
-- **Location Readout**: Displays the current `AreaTable` Zone and Subzone name.
-- **Master Audio Button**: Toggle master sound output (`AUDIO: ON` / `AUDIO: MUTED`).
-- **Performance Readout**: Real-time FPS, frame time (ms), and draw call statistics.
+**Fog End** is first, followed by the other fog controls, time of day, camera speed/FOV and ADT
+budget. Quick uses the same setting owners as the full panels. Render quality, lighting, audio,
+capture and performance tools are available here; expand the relevant section for detailed
+controls. Section **[?]** buttons provide help without filling the sidebar with instructions.
 
-### 3. Right Workbench Destinations
-The right sidebar contains five primary destinations, each with specialized tool pages:
+Direct menu shortcuts include **View > Log Console...**, **View > Performance & Profiling...**,
+**View > Lighting Diagnostics...**, **Tools > Taxi Routes...** and **Tools > Audio Settings...**.
+The former Scene and Utilities top-level tabs have been replaced; their tools remain reachable.
 
-#### **Quick**
-- Scene visibility switches, fast wireframe toggles, and performance summary.
+### Inspector
 
-#### **Inspect**
-- **Context**: Information about the currently hovered or selected terrain vertex, model, or WMO.
-- **Scene Investigation**: Deep hierarchy of resident ADT tiles, chunks, and submeshes.
-- **MCNK / ADT**: Raw chunk headers, layer masks, shadow maps, and vertex height grids.
-- **World Context**: Map properties, bounds, and global flags.
-- **Archeology / Animations**: M2 skeletal animation player with sequence selection, scrubbing, speed control, and bone transform displays.
-- **Actions**: Trigger manual garbage collection and reload current scene.
+- **Context** shows the selected WMO, WMO doodad, MDX/M2, PM4 object or WL liquid. A selected
+  WMO exposes its doodad sets here. When terrain is the target, it uses a pinned chunk first,
+  then the hovered chunk, then the chunk under the camera. With no resident chunk, it shows
+  an active-world overview.
+- **Placements** provides the searchable resident WMO/MDX hierarchy and camera framing.
+- **LOD & Budget** contains terrain/WDL budget and object visibility controls.
 
-#### **Scene**
-- **Placements**: Searchable list of all placed models (`MDDF`) and world models (`MODF`) on active tiles.
-- **LOD**: Level-of-detail thresholds and distance cull distances.
+To pin terrain, left-click a visible chunk when the click does not select a scene object or
+belong to an active editing tool. Context displays its area name/ID, MCNK flags, holes, height
+range, textures and alpha layers, shadow/MCCV presence, liquids and tile placement counts.
+Use **Frame Chunk**, **Copy Texture Summary**, **Copy Coordinates** or **Clear Chunk Selection**.
+Pins are scoped to the current terrain source and expire when their chunk is no longer resident.
 
-#### **Utilities**
-- **Minimap**: Interactive 2D map view with camera tracking and triple-click teleportation.
-- **Audio**: Resident emitter list, `SoundEntries` preview player, gain sliders, and 3D emitter pins.
-- **Capture**: Screenshot capture and Camera Path Authoring Studio.
-- **Log Viewer**: Filterable application log stream with export capability.
-- **Perf Profiler**: GPU and CPU frame breakdown.
-- **Asset Catalog**: Global index of all enumerated client assets.
-- **Taxi Paths**: Flight master trajectory visualization.
+The **MCNK Flag Overlay** controls are in the same Context surface: Impassable, River, Ocean,
+Magma, Slime, Shadows, MCCV and BakedShadows. Enable the overlay and Impassable to use
+**Highlight Diagonal Weak Corners**. Old ADT/MCNK investigation entry points lead here.
 
-#### **Experimental**
-- **PM4 Reconciliation**: Full Spec 176 PM4 guide matching, visual diffing, and ADT patching.
-- **Terrain Lab**: Tensor extraction and normal/heightmap experiment workbench.
-- **Converters**: On-the-fly Alpha $\leftrightarrow$ LK format converter.
-- **Population**: Procedural doodad scatter testing.
+### Editor
+
+The Editor contains **Tasks & Workspace**, **Converters**, **3D Object Library** and
+**Imports & Exports**, plus retained authoring tools.
+
+The **3D Object Library** reads a Rosetta manifest or library JSON. Enter **Manifest / Library
+Path** and choose **Load**, use **Browse...**, or choose **Scan Default**. Search or filter M2/WMO
+entries and sort by size or name. The selected entry shows bounds, span, volume, footprint and
+calibration occurrences. **Inspect 3D Model in Viewport** opens the asset through the active
+client; **Copy Model Path** and **Set as Active Placement Model** support placement workflows.
+The available entries depend on the loaded manifest and client assets.
+
+**Imports & Exports** groups synthesized minimap generation/export, GLB scene/collision/map-tile
+export, and terrain alpha/heightmap/MCCV import and export. Choose Current Tile, Loaded Tiles or
+Whole Map where the operation supports that scope. Opening this dashboard does not start a job.
+
+### Archaeology
+
+Analysis remains under **Weak Signal & Stratigraphy**, **UniqueId Timeline**, **Layers &
+Provenance**, **Playback & Capture**, **PM4 Analysis** and **Cartography**. Cartography includes
+its merged-data output actions; the UI consolidation does not itself implement additional map
+composition capabilities.
+
+**Playback & Capture** combines archaeology range playback with **Camera Paths & Video Capture**.
+Use **Apply playback to next capture** to arm the next queued capture with the configured
+archaeology playback range. In its Capture Automation selector, configure the `ffmpeg` executable,
+output folder, container and frame rate, then use **Start Video Recording** / **Stop Video
+Recording**. Switch the selector to Camera Path for **Play**, **Play + Video** and **Stop**. A
+scene-only recording samples the viewport before ImGui; use `Tab` before recording only when a
+full-window scene is desired. Verify the configured executable and output file on the active
+machine before relying on a recording.
+
+### Bottom bar and legacy layout
+
+The bottom bar retains scene toggles, location/area readout, master audio and frame statistics.
+The legacy non-tab layout remains supported through shared content; this guide describes the
+default tab layout.
 
 ---
-
 ## 4. Camera Controls and Shortcuts
 
 ### Global Navigation
@@ -169,7 +178,28 @@ To ensure smooth frame rates and bounded memory usage, `WoWViewer` streams terra
 
 ## 6. Camera Path Studio
 
-Located under **Utilities > Capture**, the Camera Path Studio lets you author smooth cinematic fly-throughs, record viewpoints, and export native WoW camera assets.
+Located under **Quick > Capture** and **Archaeology > Playback & Capture**, the Camera Path Studio
+lets you author smooth cinematic fly-throughs, record viewpoints, and export native WoW camera
+assets.
+
+Open **Tools > Panels > Camera Path** for a direct shortcut. Load the intended map, position the
+camera and click **Add Current Camera Key**. Move to another viewpoint and add a second key,
+then click **Play**. Interactive playback advances while terrain and objects stream. **Stop**
+ends playback; **Loop** repeats the path.
+
+**Preload path before capture** controls capture readiness. **Warm Path** prepares the route,
+**Release Warmup** releases its residency, and **Play + Video** waits for enabled warmup before
+recording. Paths retain their map/build binding; an unrelated map or build is rejected and
+changing the active map during playback stops it.
+
+### Taxi riding
+
+Open **Tools > Taxi Routes...**, use **Load Taxi Paths** if needed, select a route and click
+**Ride Selected Route**. Choose **Cockpit** or **Chase** in **Ride Camera Mode**. Starting
+a ride enables taxi display and mount actors. Once attached, the selected ride continues to
+advance even if route visibility or selection filters change; asset loading does not gate its
+route position. Use **Detach Ride Camera** to return to free flight. Starting a camera path detaches
+the taxi camera. A world-source change also detaches the ride.
 
 ### Camera Path Keybindings (Active when Capture page is open)
 | Key | Action |
@@ -189,7 +219,7 @@ Located under **Utilities > Capture**, the Camera Path Studio lets you author sm
 
 ## 7. Audio System and Positional Emitters
 
-Located under **Utilities > Audio**, the OpenAL audio engine renders true 3D spatialized sound:
+Located under **Quick > Audio**, the OpenAL audio engine renders true 3D spatialized sound:
 - **Positional Emitters**: As ADT tiles stream in, sound emitters declared in `MCSE` chunks and `MCNK` liquid flags are automatically registered.
 - **3D Emitter Pins**: Enable visual pins in the viewport to see emitter positions:
   - 🟡 **Amber**: Positional sound effect (`MCSE`).
@@ -202,14 +232,14 @@ Located under **Utilities > Audio**, the OpenAL audio engine renders true 3D spa
 ## 8. Lighting, Atmosphere, and Time of Day
 
 - **Alpha 0.5.3 World Clock**: The Alpha client advances on a 2,880-unit world cycle (24 real minutes). The lighting engine synchronizes terrain vertex lighting, ambient colors, directional sun/moon vectors, and skybox palettes.
-- **Time Slider**: Located in **Quick** and **Inspect > World Context**, dragging the slider freezes the clock at a specific time of day for photography and inspection.
+- **Time Slider**: Located in **Quick** and **Quick > Lighting**, dragging the slider freezes the clock at a specific time of day for photography and inspection.
 - **LIT & DBC Fallback**: Evaluates `.lit` lighting files when present, with automatic fallback to `Light.dbc` and `LightParams.dbc`.
 
 ---
 
 ## 9. PM4 Object Reconciliation Workbench (Spec 176)
 
-Located under **Experimental > PM4**:
+Located under **Archaeology > PM4 Analysis**:
 
 ```
  ┌────────────────────────────────────────────────────────┐
@@ -260,13 +290,10 @@ The Rosetta Datastore is a unified, version-agnostic interchange format stored i
   - When viewing an Alpha 0.5.3 map (`.mdx` doodad references) against a WotLK 3.3.5 client, models resolve seamlessly to `.m2`.
   - When viewing modern maps against older clients, `.m2` models resolve to `.mdx`/`.mdl` when available.
 
-### Loading from Datastore:
-1. Click **File > Load from Rosetta Datastore...**
-2. **Data Version**: Select the client build version whose map layout and object placements you wish to inspect (e.g. `0_5_3_3368`, `1_0_0_3980`, `3_3_5_12340`).
-3. **Map**: Select the target calibration map (e.g. `Rosetta053`, `Rosetta100`).
-4. **Base Game Version**: Select the asset/client source (Current Active Client or any saved known-good client base).
-5. **Cross-Build Diff Analysis**: Click **Compute Build Diff** to view real-time statistics comparing asset additions, removals, format migrations, and bounding box shifts across any two builds.
-6. Click **Load Map in 3D Viewer**.
+### Browsing the Rosetta library
+
+Open **Editor > 3D Object Library** and load a manifest or library JSON as described above.
+The former File > Load from Rosetta Datastore menu has been retired.
 
 ---
 
@@ -276,7 +303,7 @@ The Rosetta Datastore is a unified, version-agnostic interchange format stored i
 **A**: Ensure your client root points to the folder containing the `Data` directory (or loose `World\` folders). If the client uses MPQ archives, verify `ArchiveCatalog` has enumerated the listfiles.
 
 ### Q: Why are some dense city interiors slow?
-**A**: In release `v0.5.2.2`, large multi-district WMOs (such as Stormwind) submit all interior groups simultaneously. Optimize performance by reducing the view distance slider in **Quick > LOD**.
+**A**: In release `v0.5.2.2`, large multi-district WMOs (such as Stormwind) submit all interior groups simultaneously. Optimize performance by reducing the view distance slider in **Inspector > LOD & Budget**.
 
 ### Q: Audio reports "OpenAL soft library missing"?
 **A**: Ensure `soft_oal.dll` (Windows) or `libopenal.so` (Linux) / `libopenal.dylib` (macOS) is present in the application folder. The viewer continues normally with audio disabled if the library is not found.

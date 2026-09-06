@@ -4123,6 +4123,7 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<int, Vector3> _taxiActorSmoothedForwardByPath = new();
     private long _lastTaxiActorTick;
     private bool _taxiActorClockInitialized;
+    private int _activeTaxiRideRouteId = -1;
     private bool _showTaxiActors = true;
     private float _taxiActorSpeedMultiplier = TaxiActorNormalSpeedSetting;
     private float _taxiActorScaleMultiplier = 1.0f;
@@ -4131,6 +4132,17 @@ public class WorldScene : ISceneRenderer
     public int SelectedTaxiNodeId { get => _selectedTaxiNodeId; set { _selectedTaxiNodeId = value; _selectedTaxiRouteId = -1; } }
     public int SelectedTaxiRouteId { get => _selectedTaxiRouteId; set { _selectedTaxiRouteId = value; _selectedTaxiNodeId = -1; } }
     public void ClearTaxiSelection() { _selectedTaxiNodeId = -1; _selectedTaxiRouteId = -1; }
+    /// <summary>
+    /// Route currently carrying the ride camera. This is deliberately separate
+    /// from selection and visibility state: an active ride must keep its pose
+    /// alive while the operator browses or hides taxi presentation controls.
+    /// </summary>
+    public int ActiveTaxiRideRouteId
+    {
+        get => _activeTaxiRideRouteId;
+        set => _activeTaxiRideRouteId = value >= 0 ? value : -1;
+    }
+
     public bool ShowTaxiActors { get => _showTaxiActors; set => _showTaxiActors = value; }
     public float TaxiActorSpeedMultiplier
     {
@@ -7876,7 +7888,14 @@ public class WorldScene : ISceneRenderer
         _taxiActorInstances.Clear();
 
         bool hasTaxiSelection = _selectedTaxiNodeId >= 0 || _selectedTaxiRouteId >= 0;
-        if (!_showTaxi || !_showTaxiActors || _taxiLoader == null || !hasTaxiSelection)
+        if (_taxiLoader == null
+            || !TaxiRideSimulationPolicy.ShouldSimulateRoute(
+                _activeTaxiRideRouteId,
+                _activeTaxiRideRouteId,
+                _showTaxi,
+                _showTaxiActors,
+                hasTaxiSelection,
+                routeVisible: true))
         {
             _taxiActorPoseByPath.Clear();
             _taxiActorSmoothedForwardByPath.Clear();
@@ -7896,11 +7915,15 @@ public class WorldScene : ISceneRenderer
 
         foreach (var route in _taxiLoader.Routes)
         {
-            if (!IsTaxiRouteVisible(route) || route.Waypoints.Count < 2)
-                continue;
-
-            string? actorModelPath = GetResolvedTaxiActorModelPath(route.PathId);
-            if (string.IsNullOrWhiteSpace(actorModelPath))
+            bool routeVisible = IsTaxiRouteVisible(route);
+            if (!TaxiRideSimulationPolicy.ShouldSimulateRoute(
+                    route.PathId,
+                    _activeTaxiRideRouteId,
+                    _showTaxi,
+                    _showTaxiActors,
+                    hasTaxiSelection,
+                    routeVisible)
+                || route.Waypoints.Count < 2)
                 continue;
 
             TaxiPathLoader.TaxiNode? mountNode = ResolveTaxiActorNode(route);
@@ -7953,9 +7976,7 @@ public class WorldScene : ISceneRenderer
             _taxiActorSmoothedForwardByPath[route.PathId] = actorForward;
 
             float yawRadians = ComputeTaxiActorYawRadians(actorForward);
-            string modelPath = actorModelPath.Replace('/', '\\');
-            string key = WorldAssetManager.NormalizeKey(modelPath);
-            _assets.QueueMdxLoad(key);
+            string modelPath = GetResolvedTaxiActorModelPath(route.PathId)?.Replace('/', '\\') ?? string.Empty;
 
             _taxiActorPoseByPath[route.PathId] = new TaxiActorPose(
                 route.PathId,
@@ -7964,6 +7985,15 @@ public class WorldScene : ISceneRenderer
                 yawRadians,
                 scale,
                 modelPath);
+
+            // Pose simulation is independent of asset availability. A ride
+            // camera can follow a route while its model is still queued or
+            // unavailable; only the render instance needs a non-empty model key.
+            if (string.IsNullOrWhiteSpace(modelPath))
+                continue;
+
+            string key = WorldAssetManager.NormalizeKey(modelPath);
+            _assets.QueueMdxLoad(key);
 
             var transform = Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationZ(yawRadians)
@@ -8215,7 +8245,9 @@ public class WorldScene : ISceneRenderer
 
         if (adapter.ModfPlacements.Count > 0)
         {
-            // Pre-load WDT global WMO placements + models
+            // Register WDT-global placements before any visibility pass. Terrain
+            // maps will subsequently stream tile placements; WMO-only maps own
+            // their complete placement list here and must not rely on a tile gate.
             var manifest = _assets.BuildManifest(
                 adapter.MdxModelNames, adapter.WmoModelNames,
                 adapter.MddfPlacements, adapter.ModfPlacements);
@@ -8225,6 +8257,19 @@ public class WorldScene : ISceneRenderer
 
         if (adapter.IsWmoBased)
         {
+            // WMO-only maps have no resident ADT tile. Their global MODF
+            // placements therefore cannot enter the normal _tileWmoInstances
+            // collector (and used to remain in _wmoInstances only, which the
+            // render admission path never visits). Treat them as an explicit
+            // external scene source: still subject to the regular frustum and
+            // object filters, but never to terrain-tile residency.
+            if (adapter.ModfPlacements.Count > 0)
+            {
+                _externalWmoInstances.AddRange(_wmoInstances);
+                _wmoInstances.Clear();
+                _instancesDirty = true;
+            }
+
             if (adapter.ModfPlacements.Count > 0)
             {
                 var p = adapter.ModfPlacements[0];

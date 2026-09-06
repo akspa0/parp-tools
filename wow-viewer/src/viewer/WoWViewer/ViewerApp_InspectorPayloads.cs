@@ -61,7 +61,7 @@ public partial class ViewerApp
                 .Action("export_pm4_obj", "Export PM4 OBJ")
                 .Action("export_pm4_llm", "Export PM4 LLM Bundle");
 
-            AppendTerrainChunkInspection(builder);
+            AppendPinnedTerrainChunkInspection(builder);
             return builder.Build();
         }
 
@@ -89,7 +89,7 @@ public partial class ViewerApp
                 .Action("clear_wl_selection", "Clear Selection")
                 .Action("toggle_wl_liquids", "Toggle WL Liquids Visibility");
 
-            AppendTerrainChunkInspection(builder);
+            AppendPinnedTerrainChunkInspection(builder);
             return builder.Build();
         }
 
@@ -113,22 +113,33 @@ public partial class ViewerApp
                     break;
             }
 
-            AppendTerrainChunkInspection(builder);
+            AppendPinnedTerrainChunkInspection(builder);
             return builder.Build();
         }
 
         // 4. Standalone Model (no world object selected, but a standalone model is open)
-        if (_renderer != null)
+        // The world scene is also an ISceneRenderer, so checking only _renderer here makes
+        // terrain mode look like a standalone model and prevents the ADT/MCNK payload from
+        // being built. A standalone payload is valid only when no world/terrain owner exists.
+        if (_worldScene == null
+            && _terrainManager == null
+            && _vlmTerrainManager == null
+            && (_renderer is IModelRenderer || _renderer is WmoRenderer))
         {
             BuildStandaloneModelInspector(builder);
             return builder.Build();
         }
 
-        // 5. ADT / MCNK Chunk (Camera or Hovered)
-        if (AppendTerrainChunkInspection(builder, primary: true))
+        // 5. ADT / MCNK Chunk (Pinned, Hovered, or Camera)
+        if (AppendPinnedTerrainChunkInspection(builder, primary: true))
         {
             return builder.Build();
         }
+
+        // 6. Active world overview (for a loaded world with no resolved chunk under the
+        // cursor/camera, such as a WMO-only map or a streaming gap).
+        if (BuildWorldOverviewInspector(builder))
+            return builder.Build();
 
         return builder.Build();
     }
@@ -331,55 +342,6 @@ public partial class ViewerApp
             .Action("copy_asset_path", "Copy Model Path");
     }
 
-    private bool AppendTerrainChunkInspection(InspectorContentBuilder builder, bool primary = false)
-    {
-        if (_terrainManager == null && _vlmTerrainManager == null)
-            return false;
-
-        if (!TryGetTerrainChunkInspectionTarget(preferHoveredChunk: true, out TerrainRenderer.TerrainChunkInfo chunkInfo, out bool usingHoveredChunk))
-            return false;
-
-        if (!TryResolveTerrainChunkInspectionData(chunkInfo, out TerrainChunkData? chunkData, out IReadOnlyList<string>? tileTextures) || chunkData == null)
-            return false;
-
-        if (primary)
-        {
-            builder.ObjectType = "ADT";
-            builder.Headline = $"ADT Chunk ({chunkInfo.TileY}, {chunkInfo.TileX}) MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})";
-        }
-
-        string sectionTitle = primary ? "Chunk Metadata" : "ADT Terrain Context";
-        var meta = builder.AddSection(sectionTitle);
-        meta.Row("Target Source", usingHoveredChunk ? "Hovered Cursor Chunk" : "Camera Chunk", isImportant: true);
-        meta.Row("Tile (X, Y)", $"({chunkInfo.TileX}, {chunkInfo.TileY})");
-        meta.Row("MCNK (X, Y)", $"({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
-        meta.Row("Area ID", $"{chunkData.AreaId}", isImportant: true);
-        meta.Row("MCNK Flags", $"0x{(uint)chunkData.McnkFlags:X8} ({DescribeMcnkFlags(chunkData.McnkFlags)})");
-        meta.Row("Holes Mask", $"0x{chunkData.HoleMask:X4}");
-        meta.Row("World Position", $"({chunkData.WorldPosition.X:F2}, {chunkData.WorldPosition.Y:F2}, {chunkData.WorldPosition.Z:F2})");
-        meta.Row("Layers", $"{chunkData.Layers.Length}");
-        meta.Row("Alpha Maps", $"{chunkData.AlphaMaps.Count}");
-        meta.Row("Shadow Map", chunkData.ShadowMap != null ? "Present (64x64)" : "None");
-        meta.Row("MCCV Vertex Colors", chunkData.MccvColors != null ? "Present (145 verts)" : "None");
-
-        if (chunkData.Layers.Length > 0)
-        {
-            var layersSection = builder.AddSection(primary ? "Texture Layers (Stratigraphy)" : "Terrain Texture Layers");
-            for (int i = 0; i < chunkData.Layers.Length; i++)
-            {
-                var layer = chunkData.Layers[i];
-                string texName = ResolveTerrainTextureName(tileTextures, layer.TextureIndex);
-                bool hasAlpha = i > 0 && chunkData.AlphaMaps.ContainsKey(i);
-                layersSection.Row($"Layer {i}", $"{texName} (tex#{layer.TextureIndex}, flags=0x{layer.Flags:X8}, alpha={(hasAlpha ? "yes" : "no")})");
-            }
-        }
-
-        builder.AddSection(primary ? "Chunk Actions" : "Terrain Actions")
-            .Action("copy_chunk_texture_summary", "Copy Texture Summary to Clipboard");
-
-        return true;
-    }
-
     private void HandleInspectorAction(InspectorAction action)
     {
         switch (action.Id)
@@ -434,13 +396,27 @@ public partial class ViewerApp
                 break;
 
             case "copy_chunk_texture_summary":
-                if (TryGetTerrainChunkInspectionTarget(preferHoveredChunk: true, out var chunkInfo, out _)
-                    && TryResolveTerrainChunkInspectionData(chunkInfo, out var chunkData, out var tileTextures)
+                if (TryGetPinnedTerrainChunkInspectionTarget(out var chunkInfo, out _)
+                    && TryResolvePinnedTerrainChunkInspectionData(chunkInfo, out var chunkData, out var tileTextures, out _)
                     && chunkData != null)
                 {
                     string summary = BuildTerrainChunkTextureSummary(chunkInfo, chunkData, tileTextures);
                     CopyTextToClipboard(summary, "Chunk Texture Summary");
                 }
+                break;
+
+            case "frame_terrain_chunk":
+                if (TryGetPinnedTerrainChunkInspectionTarget(out var frameChunk, out _))
+                    FrameBounds(frameChunk.BoundsMin, frameChunk.BoundsMax, mdxMirrorX: false);
+                break;
+
+            case "copy_terrain_coordinates":
+                if (TryGetPinnedTerrainChunkInspectionTarget(out var coordinateChunk, out _))
+                    CopyTextToClipboard(BuildTerrainChunkCoordinates(coordinateChunk), "Chunk Coordinates");
+                break;
+
+            case "clear_terrain_chunk_selection":
+                ClearSelectedTerrainChunk();
                 break;
 
             case "clear_pm4_selection":

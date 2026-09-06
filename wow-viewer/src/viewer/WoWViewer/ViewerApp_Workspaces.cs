@@ -36,6 +36,10 @@ public partial class ViewerApp
 
     private void SetWorkspaceMode(WorkspaceMode mode)
     {
+        // Quick is the cross-profile high-frequency surface. Retain it when
+        // the operator switches workspace profiles so Fog and camera controls
+        // do not disappear just because the profile owner changed.
+        bool retainQuickTab = _useTabUi && _activeTopTab == WorkbenchTab.Quick;
         _workspaceMode = mode;
         _showLeftSidebar = true;
         _showRightSidebar = true;
@@ -47,17 +51,23 @@ public partial class ViewerApp
             {
                 case WorkspaceMode.Editor:
                     _workspaceMode = WorkspaceMode.Editor;
-                    OpenWorkbenchTab(WorkbenchTab.Editor);
                     EnsureEditorHost();
                     break;
                 case WorkspaceMode.Archaeology:
-                    OpenWorkbenchTab(WorkbenchTab.Archaeology);
                     break;
                 case WorkspaceMode.Viewer:
                 default:
-                    OpenWorkbenchTab(WorkbenchTab.Quick);
                     break;
             }
+
+            OpenWorkbenchTab(retainQuickTab
+                ? WorkbenchTab.Quick
+                : mode switch
+                {
+                    WorkspaceMode.Editor => WorkbenchTab.Editor,
+                    WorkspaceMode.Archaeology => WorkbenchTab.Archaeology,
+                    _ => WorkbenchTab.Quick,
+                });
         }
         else if (mode == WorkspaceMode.Editor && !HasWorldEditingContext())
         {
