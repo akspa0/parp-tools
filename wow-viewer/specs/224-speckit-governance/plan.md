@@ -32,7 +32,7 @@ code?) + (spec edited after last code change without amendment?). Anything faili
 flagged, never rationalized.
 
 ### D4 — Archival target
-Implemented/closed specs move under `wow-viewer/specs/archive/` (created on first use) and their
+Implemented/closed specs move under `wow-viewer/specs/archived/` (created on first use) and their
 STATUS.md rows move to a collapsed "Archived" table. Memory-bank landed narrative older than the
 current handoff moves to `memory-bank/archive/` per the existing README convention.
 

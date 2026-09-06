@@ -1,17 +1,19 @@
 # Spec Status Router
 
-**Consolidated 2026-09-06** (first full consolidation pass). The old per-spec detail table is
-archived at [archive/2026-09-06-status-pre-consolidation.md](archive/2026-09-06-status-pre-consolidation.md).
-Active work is organized as **epics**: [epics/active-epics.md](epics/active-epics.md). Supersession
-rule: **Specs 226–230 supersede any older spec that is not implemented or only partially
-implemented**; old specs are watch-list members of an epic, not independent plans.
+**Consolidated 2026-09-06** (first full consolidation pass; cleanup routing updated later that
+day). The old per-spec detail table is preserved at
+[archived/status-history/2026-09-06-status-pre-consolidation.md](archived/status-history/2026-09-06-status-pre-consolidation.md).
+Active work is organized as **epics**: [epics/active-epics.md](epics/active-epics.md). The
+[routing registry](registry.md) classifies cold and superseded records so this page remains the
+small fresh-chat entry point. Specs 226–230 supersede older unimplemented/partial work only where
+the current owner or registry names a forward pointer; do not infer closure from age alone.
 
 ## This week's implementation order
 
 | # | Spec | Task | Done when |
 |---|---|---|---|
 | 1 | [227 UI Re-Audit](227-ui-reaudit/spec.md) | Inventory v2 with screenshots; dropdown/collapsible sidebar standard; dedupe weak-signal amplifiers, minimaps, Inspector repetition; fix Archaeology styling; sane Editor tabs | Operator walks the build against inventory v2 and finds no duplicates |
-| 2 | [228 Source Decomposition](228-source-decomposition/spec.md) | First behavior-preserving extraction (hover/pick or capture service) under the god-class freeze | Build + focused tests green; no god-class members added; file budget respected |
+| 2 | [228 Source Decomposition](228-source-decomposition/spec.md) | Planned first behavior-preserving hover/click selection extraction, blocked by Spec 227 T004 | Core characterization + build/tests + operator smoke; no god-class members or partials added |
 | 3 | [226 Renderer Polish](226-renderer-polish/spec.md) | Verify the terrain-wireframe shader hypothesis (multi-textured tiles only) and the model-wireframe gating (dead on MDX/M2/WMO) | Captures name both root causes |
 | 4 | [229 WoW Shell + Keybind Profiles](229-wow-shell-keybind-profiles/spec.md) | speckit-plan from 227's per-context action inventory | Plan authored; first contextual keybind profile compiles |
 | 5 | [230 Reconstruction Editor](230-reconstruction-editor/spec.md) | speckit-plan (Rosetta placement, New Map Generator UI, Alpha/LK save targets) | Plan authored |
@@ -19,8 +21,9 @@ implemented**; old specs are watch-list members of an epic, not independent plan
 
 ## Standing gates (operator-owned)
 
-- **224 Gate 1**: approve [AGENTS.md](../AGENTS.md) §9–11 rules → unlocks the monthly
-  `speckit-cleanup` cadence (ledger: last 2026-09-06, next due 2026-10-01).
+- **224 cleanup**: the operator has directed the current context-reduction pass. The literal Gate 1
+  and the full task-receipt audit remain open until their own receipt says otherwise; this cleanup
+  does not silently close either gate.
 - **v0.5.2.3 runtime verification**: slider order, overlay balance, hover occlusion, About credits.
 - Interactive visual gates still owed on shipped specs (210, 211, 205, 203, 152-phase-6) — tracked
   in [epics/active-epics.md](epics/active-epics.md).
@@ -47,3 +50,5 @@ See [epics/active-epics.md](epics/active-epics.md) for members, supersessions an
 - New work: register the spec here AND in the epic, follow [AGENTS.md](../AGENTS.md) §9–11
   (receipts, inventory row, owned service class), and keep one authoritative plan per feature —
   the newest spec supersedes older unimplemented ones.
+- Old directories not named in the weekly order are **cold**, not default context; see
+  [registry.md](registry.md) before reviving or archiving one.

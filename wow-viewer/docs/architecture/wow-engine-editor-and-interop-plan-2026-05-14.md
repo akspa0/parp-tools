@@ -331,7 +331,7 @@ That is the correct bridge between today's WoW modding tool and tomorrow's promp
 
 Execution detail for those phases now lives in:
 
-- `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/README.md`
+- `wow-viewer/docs/archive/architecture/game-viewer-plan-pack-2026-05-14/README.md` (historical)
 
 ### Phase I0 — Editor/Interop Plan Reset
 

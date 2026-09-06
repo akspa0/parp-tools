@@ -151,10 +151,10 @@ This file is the Phase 0 research that the plan's Phase 0 step "lock the contrac
 |---|---|---|
 | `wow-engine-modernization-plan-2026-05-14.md` | viewer-first, UE bridge. Replaced 2026-06-14. | This spec supersedes the old engine-phases framing. OpenGL modernization is viewer-internal — no Vulkan, no UE backend here. |
 | `wow-engine-editor-and-interop-plan-2026-05-14.md` | Renderer Layer Model | Phase 1 (Contracts). |
-| `game-viewer-plan-pack-2026-05-14/gv-14-render-layer-contracts.md` | Render layer contracts | Phase 1 (Contracts). |
-| `game-viewer-plan-pack-2026-05-14/gv-15-terrain-and-liquid-render-packets.md` | Terrain + liquid render packets | Phase 2 + 4. |
-| `game-viewer-plan-pack-2026-05-14/gv-16-object-model-render-packets.md` | Object + model render packets | Phase 3. |
-| `game-viewer-plan-pack-2026-05-14/gv-17-backend-bridge-vulkan-opengl.md` | Vulkan/OpenGL backend bridge | Phase 1 (the OpenGL half; Vulkan half is follow-on). |
+| `docs/archive/architecture/game-viewer-plan-pack-2026-05-14/gv-14-render-layer-contracts.md` | Render layer contracts (historical) | Phase 1 (Contracts). |
+| `docs/archive/architecture/game-viewer-plan-pack-2026-05-14/gv-15-terrain-and-liquid-render-packets.md` | Terrain + liquid render packets (historical) | Phase 2 + 4. |
+| `docs/archive/architecture/game-viewer-plan-pack-2026-05-14/gv-16-object-model-render-packets.md` | Object + model render packets (historical) | Phase 3. |
+| `docs/archive/architecture/game-viewer-plan-pack-2026-05-14/gv-17-backend-bridge-vulkan-opengl.md` | Vulkan/OpenGL backend bridge (historical) | Phase 1 (the OpenGL half; Vulkan half is follow-on). |
 | `game-viewer-host-plan-2026-05-13.md` | Slice 3 (World Session Closure) | Phase 1, 2. |
 | `game-viewer-host-plan-2026-05-13.md` | Slice 4 (Terrain/Liquid Shader Baseline) | Phase 2, 4. |
 | `game-viewer-host-plan-2026-05-13.md` | Slice 5 (Skybox And Lighting Parity) | Phase 4. |

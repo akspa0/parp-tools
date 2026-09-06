@@ -2,7 +2,8 @@
 
 **Feature Branch**: `228-source-decomposition`
 **Created**: 2026-09-06
-**Status**: Draft — authored verbatim from operator directive; plan phases not started
+**Status**: Planned — 2026-09-06 design artifacts identify an evidence-gated first selection
+extraction; source implementation remains blocked by Spec 227 T004.
 **Input**: Operator directive 2026-09-06 (condensed verbatim): "WorldScene.cs and ViewerApp.cs need
 to be refactored and split up into smaller sets of source code, so the project can be worked on
 without fear of context window limits. This is an ever-evolving issue that we cannot seem to stamp

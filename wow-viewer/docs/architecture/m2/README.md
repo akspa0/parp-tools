@@ -26,7 +26,7 @@ These remain raw evidence or historical workflow inputs. They are still useful, 
 
 - `../m2-native-client-research-2026-03-31.md`
   - canonical raw native evidence log
-- `../ab-session-a-2026-04-01/*`
+- `../../archive/architecture/ab-session-a-2026-04-01/*` (historical evidence)
   - session-scoped runtime packet for the first Win32 Wrath pass
 - `../../../gillijimproject_refactor/plans/wow_viewer_m2_runtime_plan_2026-03-31.md`
   - staged migration plan and prompt-routing history

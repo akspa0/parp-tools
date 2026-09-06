@@ -5,12 +5,12 @@
 - status: active planning note
 - intent: define the first real audio-engine ownership lane for the game-engine side of `wow-viewer`
 - related micro-plans:
-  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-14A-audio-system-foundation.md`
-  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-14B-profile-audio-resolution-contracts.md`
-  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-14C-runtime-audio-scene-and-mixer.md`
-  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-14D-audio-asset-family-support-matrix.md`
-  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-17A-audio-backend-bridge.md`
-  - `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/GV-17B-midi-synth-and-instrument-bank-bridge.md`
+  - `wow-viewer/docs/archive/architecture/game-viewer-plan-pack-2026-05-14/GV-14A-audio-system-foundation.md`
+  - `wow-viewer/docs/archive/architecture/game-viewer-plan-pack-2026-05-14/GV-14B-profile-audio-resolution-contracts.md`
+  - `wow-viewer/docs/archive/architecture/game-viewer-plan-pack-2026-05-14/GV-14C-runtime-audio-scene-and-mixer.md`
+  - `wow-viewer/docs/archive/architecture/game-viewer-plan-pack-2026-05-14/GV-14D-audio-asset-family-support-matrix.md`
+  - `wow-viewer/docs/archive/architecture/game-viewer-plan-pack-2026-05-14/GV-17A-audio-backend-bridge.md`
+  - `wow-viewer/docs/archive/architecture/game-viewer-plan-pack-2026-05-14/GV-17B-midi-synth-and-instrument-bank-bridge.md`
 - immediate trigger:
   - user direction is to start planning `wow-viewer` as a game-engine host, with audio as one of the first missing runtime subsystems
   - the user then explicitly reprioritized this lane toward `0.5.x` Alpha support first, especially MIDI ambience plus DLS soundbanks

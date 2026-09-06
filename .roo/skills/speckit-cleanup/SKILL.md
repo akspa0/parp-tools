@@ -32,7 +32,7 @@ never rationalize a failed check. All work happens in `wow-viewer/`.
 
 3. **Archive closed specs.** A spec is closed when all tasks are checked with receipts AND the
    operator gate passed (or the operator closed it). Move its directory to
-   `wow-viewer/specs/archive/<spec-id>/` and move its `STATUS.md` row into an `## Archived` table.
+   `wow-viewer/specs/archived/<spec-id>/` and move its `STATUS.md` row into an `## Archived` table.
 
 4. **Compress memory banks.**
    - `memory-bank/activeContext.md`: keep only the current lane, next bounded action, proof owner,

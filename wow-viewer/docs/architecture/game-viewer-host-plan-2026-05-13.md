@@ -20,7 +20,7 @@ It should also be read as a temporary host plan inside the current repo shape. I
 The editor/import-export shell direction is now also constrained by:
 
 - `wow-viewer/docs/architecture/wow-engine-editor-and-interop-plan-2026-05-14.md`
-- `wow-viewer/docs/architecture/game-viewer-plan-pack-2026-05-14/README.md`
+- `wow-viewer/docs/archive/architecture/game-viewer-plan-pack-2026-05-14/README.md` (historical)
 
 The host direction should also leave room for future browser/embed output components layered on top of the same engine/runtime contracts, rather than assuming every output experience must stay desktop-only.
 

@@ -256,7 +256,9 @@ As a maintainer, I need the existing real-data validation surfaces (terrain alph
 - **Supersedes**: `specs/036-renderer-improvements` (archived by this spec).
 - **Replaces intent of**: `wow-viewer-library-completeness-plan-2026-05-06.md` Section 2.3 + Phase F (now this spec).
 - **Replaces intent of**: `game-viewer-host-plan-2026-05-13.md` slices 3-6 (now this spec).
-- **Reuses**: the `gv-14`-`gv-17` micro-plans in `docs/architecture/game-viewer-plan-pack-2026-05-14/`.
+- **Historical reference**: the `gv-14`-`gv-17` micro-plans are preserved in
+  `docs/archive/architecture/game-viewer-plan-pack-2026-05-14/`; they do not independently define
+  current execution.
 - **Must not regress**: `specs/020-renderer-culling-and-tile-capture` (P1 culling fix is prerequisite).
 - **Adjacent, not in this spec**: `specs/030-wmo-render-pass-architecture`, `specs/031-terrain-cell-awareness`, `specs/032-native-renderer-parity` (WMO / terrain / native-renderer sub-concerns; the new shared renderer MUST consume their contracts, not redefine them).
 - **Adjacent, not in this spec**: `specs/044-viewer-shell-usability`, `specs/045-scene-graph-workbench`, `specs/049-viewer-ui-consolidation` (viewer-app UX; not a renderer-library concern).

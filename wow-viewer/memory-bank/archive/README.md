@@ -14,3 +14,5 @@
 | `2026-08-01-progress-detail.md` | Pre-2026-08-01 per-spec progress detail (condensed out of `progress.md` at the feature-complete declaration + spec audit) |
 | `2026-09-06-pre-223-remediation-active-context.md` | Superseded long-form active context before Spec 223 acceptance-remediation compression |
 | `2026-09-06-pre-223-remediation-progress.md` | Superseded long-form progress ledger before Spec 223 acceptance-remediation compression |
+| `2026-09-06-pre-context-cleanup-active-context.md` | Superseded dashboard before the compact fresh-chat routing pass |
+| `2026-09-06-pre-context-cleanup-progress.md` | Preserved same-day narrative before the compact current ledger |

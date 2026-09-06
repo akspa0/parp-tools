@@ -30,6 +30,7 @@ No separate engine extraction. No Vulkan backend. No WebGL. No Museums profile.
 - `game-viewer-host-plan-2026-05-13.md` — remains active as the viewer migration sub-plan
 - `wow-engine-editor-and-interop-plan-2026-05-14.md` — remains active as the editor/import-export sub-plan
 - `wow-viewer-full-porting-roadmap.md` — remains active as the porting capability roadmap
-- `game-viewer-plan-pack-2026-05-14/` — remains active as execution micro-plans for viewer work
+- `../archive/architecture/game-viewer-plan-pack-2026-05-14/` — historical micro-plan pack;
+  current execution is selected only through `specs/STATUS.md`.
 - `specs/055-unreal-engine-bridge/` — correct backend strategy, supersedes Vulkan-first direction
 - `specs/056-viewerapp-gpu-lod-modernization/` — OpenGL modernization within the viewer, not a multi-backend effort

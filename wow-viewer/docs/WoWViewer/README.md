@@ -10,14 +10,16 @@ This folder is the viewer-facing guide layer for the current `wow-viewer` app.
 4. [CLI tooling README](../../tools/README.md)
 5. [Expanded CLI reference](../CLI-TOOLS.md)
 6. [Release notes — v0.5.2](../releases/v0.5.2.md)
-7. [Spec 080 — UI consolidation](../../specs/080-wow-ui-consolidation/spec.md)
+7. [Spec 227 — UI re-audit](../../specs/227-ui-reaudit/spec.md)
+8. [Spec 229 — WoW shell and keybind profiles](../../specs/229-wow-shell-keybind-profiles/spec.md)
 
 ## Current viewer truth
 
 - The viewer app lives at `src/viewer/WoWViewer/`.
 - Start with staged client roots only.
 - Legacy `MdxViewer` is a reference/compatibility lane, not the primary app.
-- The current UI doc lane is Spec 080; Spec 145 owns the surrounding shell work.
+- The current UI authority audit is Spec 227; the WoW-style shell and contextual keybind plan is
+  Spec 229. Specs 080 and 145 are preserved only as superseded historical context.
 - Command-line tooling is documented from `tools/README.md`; this folder stays viewer-facing.
 
 ## What this folder should contain

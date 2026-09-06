@@ -98,7 +98,7 @@ Use these older docs as targeted source material, not as the primary implementat
 ### Native evidence and session logs
 
 - `../m2-native-client-research-2026-03-31.md`
-- `../ab-session-a-2026-04-01/*`
+- `../../archive/architecture/ab-session-a-2026-04-01/*` (historical evidence)
 
 ### Historical migration and workflow docs
 

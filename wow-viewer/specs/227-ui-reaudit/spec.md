@@ -2,7 +2,8 @@
 
 **Feature Branch**: `227-ui-reaudit`
 **Created**: 2026-09-06
-**Status**: Draft — authored verbatim from operator directive; audit not started
+**Status**: Implementing — T001 source-audit baseline is receipted; full inventory reconciliation,
+operator screenshots, and all source consolidation remain open.
 **Input**: Operator directive 2026-09-06 (condensed verbatim): "Only the Viewer and Quick/Inspector
 tabs seem sane, the Editor tabs are insane and nonsensical, we have multiple weak terrain signal
 amplifiers for no reason, the Archeology option doesn't match the rest of the UI styling. We need to

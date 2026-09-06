@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: active
+- status: archived historical reference (moved 2026-09-06)
 - date: 2026-05-14
 - working-label: `museum-explorer`
 - parent: `wow-viewer/docs/architecture/wow-engine-modernization-plan-2026-05-14.md` (replaced 2026-06-14 — viewer-first, UE bridge)
@@ -11,7 +11,9 @@
 
 ## Purpose
 
-This folder is the execution skeleton for the next month of `game-viewer` work.
+This folder was the execution skeleton for a 2026-05 `game-viewer` proposal. It is retained as
+historical design context only; current execution is selected through `specs/STATUS.md` and the
+owning SpecKit artifacts.
 
 The goal is not one giant plan. The goal is many tiny plans that can be picked up in bounded slices over hours, with minimal ambiguity and minimal re-planning.
 
