@@ -77,12 +77,18 @@ public partial class ViewerApp
         float fogEnd = Math.Clamp(currentFogEnd, 100f, MaxTerrainFogDistance);
         float fogStart = Math.Clamp(currentFogStart, 0f, MaxTerrainFogDistance - 1f);
 
-        // Operator requirement: Fog End rendered FIRST in every profile
-        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance, "%.0f");
+        // Operator correction 2026-09-06: natural order - Fog Start first, Fog End
+        // after. This supersedes Spec 223 T501's "Fog End first in every profile"
+        // requirement, which caused the operator to adjust the wrong slider.
         bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f, "%.0f");
+        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance, "%.0f");
 
         if (fogEndChanged || fogStartChanged)
         {
+            // A crossing drag (Start >= End) must adjust Start, never snap both
+            // values to defaults; NormalizeFogRange's default fallback would
+            // otherwise rubberband both sliders back to 200/1500.
+            fogStart = Math.Clamp(fogStart, 0f, MathF.Max(0f, fogEnd - TerrainLightingMath.MinimumFogRangeSpan));
             SetAuthoritativeFogRange(fogStart, fogEnd, persistAsDefault: true);
         }
 
@@ -262,28 +268,10 @@ public partial class ViewerApp
                 {
                     _cameraHudRig.ShowBrackets = showBrackets;
                 }
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Renders 3D geometric framing brackets at the camera viewport boundary.");
-
-                bool showReticle = _cameraHudRig.ShowReticle;
-                if (ImGui.Checkbox("3D Tactical Reticle", ref showReticle))
-                {
-                    _cameraHudRig.ShowReticle = showReticle;
-                }
-
-                bool showCompass = _cameraHudRig.ShowCompass;
-                if (ImGui.Checkbox("3D Compass Tape", ref showCompass))
-                {
-                    _cameraHudRig.ShowCompass = showCompass;
-                }
-
-                bool showBezel = _cameraHudRig.ShowBezel;
-                if (ImGui.Checkbox("3D Curved Visor Bezel", ref showBezel))
-                {
-                    _cameraHudRig.ShowBezel = showBezel;
-                }
-            }
-        }
+               if (ImGui.IsItemHovered())
+                   ImGui.SetTooltip("Renders 3D geometric framing brackets at the camera viewport boundary.");
+           }
+       }
     }
 
     private void DrawCameraDefaultsContent()

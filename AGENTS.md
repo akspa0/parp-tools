@@ -149,3 +149,74 @@ Never claim runtime, visual, FPS, GPU, audible, or real-client proof from compil
 - **Lead with the result**: State what changed, what was validated, what remains user-owned, and the exact next bounded step.
 - Do not bury unresolved proof gaps under long retrospectives.
 - Format file and symbol references as clickable markdown links (`file:///...`).
+
+---
+
+## 9. Governance — Scope Fidelity, Receipts & Spec Hygiene (Spec 224; added 2026-09-06)
+
+Owner spec: `wow-viewer/specs/224-speckit-governance/spec.md`. These rules are **binding on every
+agent and harness**. Violating them is a process failure, not a style choice.
+
+### 9.1 Scope freeze
+- The named spec/task text is the complete implementation contract. Implement exactly what it states.
+- Believed omissions or "improvements" are **proposed** as a dated spec amendment and await operator
+  approval **before any code is written**. Never self-authorize additional scope.
+- Nothing enters a spec document without operator-originated wording or explicit operator approval.
+  Discovered fabricated scope is corrected in the same session with a dated operator-correction note.
+
+### 9.2 Receipts required
+A `tasks.md` checkbox may be set to `[x]` only with a receipt (inline or in the owning spec's
+`evidence/` directory) containing:
+1. Files changed, with paths.
+2. Exact verification commands run and their exit status.
+3. A criterion→evidence table mapping each spec acceptance criterion to **real output** (real data,
+   real client, real file). Build/test output alone never satisfies a criterion naming runtime,
+   visual, FPS, audible, or data behavior.
+
+### 9.3 Write containment
+All generated files — captures, exports, builds, datasets, temporaries — are written inside the
+repository, a project-managed output root, or an operator-supplied path. Never write to desktops,
+drive roots, OS temp directories, or other ad-hoc locations.
+
+### 9.4 Spec-sync
+When implementation diverges from its spec — including when the implementation is "better" — update
+the spec in the same change or add a dated amendment note. Code and spec agree at session end.
+
+### 9.5 Context discipline & monthly cleanup
+- **The code talks for itself.** Fully implemented and operator-closed specs are archived out of the
+  active registry; implemented-spec detail is not reloaded into session context.
+- Run the `speckit-cleanup` skill on the first session of each month (or on operator request): audit
+  tasks against real code, un-check receipt-less tasks, archive closed specs, compress memory banks,
+  update the ledger below, and write a dated report under `specs/224-speckit-governance/evidence/`.
+
+**Cleanup ledger**
+- Last cleanup: 2026-09-06 (initial rules authoring; full audit pending Phase 2)
+- Next cleanup due: 2026-10-01
+
+---
+
+## 10. Source Decomposition — God-Class Freeze (Spec 228; added 2026-09-06)
+
+Owner spec: `wow-viewer/specs/228-source-decomposition/spec.md`. The `ViewerApp_*` partial-class
+split FAILED to contain growth: partial classes share one state space, so every session still loads
+~33k lines of god-class context. Binding rules:
+
+- **No new members in `WorldScene` or `ViewerApp`.** New features live in owned service classes
+  that receive state via constructors/parameters — never in a new `ViewerApp_*.cs` partial file.
+- **File budget:** no source file grows past ~2,000 lines; a change that would exceed it splits the
+  file in the same change or opens a spec task for the split.
+- **Extraction pattern:** move a cohesive feature (state + methods) into a service class; the
+  god-class keeps one field + delegation; extracted classes never reach back into god-class
+  internals.
+- Extraction is behavior-preserving; receipts (§9.2) apply to every extraction phase.
+
+---
+
+## 11. UI Standardization (Spec 227; added 2026-09-06)
+
+- Every sidebar/workbench surface uses the `SharedUiWidgets` primitives — no bespoke section
+  styling. A styling mismatch (e.g., Archaeology) is a defect, not a theme.
+- Every data surface has exactly one authoritative home (Spec 223 FR-3); the
+  [UI re-audit](wow-viewer/specs/227-ui-reaudit/spec.md) inventory v2 is the enforcement artifact.
+- New UI features must register a row in the inventory (Spec 223 FR-9) AND follow §10 (owned
+  service class) in the same change.

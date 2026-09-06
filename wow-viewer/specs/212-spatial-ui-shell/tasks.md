@@ -13,18 +13,27 @@ Checklist order = execution order. Each phase ends at a verification gate before
 
 ---
 
-## Phase 2 — OpenSCAD HUD Geometry Integration
+## Phase 2 — ImGui Panels on Camera-Frame Surfaces (OPERATOR CORRECTION 2026-09-06)
 
-- [x] 212-T201: Author OpenSCAD HUD primitives and generate `.off` files via OpenSCAD MCP tool:
-  - `camera_hud_curved_bezel.scad` / `.off` (curved floating viewport bezel with chevrons)
-  - `camera_hud_reticle_tactical.scad` / `.off` (multi-ring segmented reticle with elevation notches)
-  - `camera_hud_compass_tape.scad` / `.off` (cylindrical graduated heading tape)
-  - `camera_hud_gimbal.scad` / `.off` (attitude & heading spherical gimbal)
-- [x] 212-T202: Wire `ProceduralMeshLoader.LoadFromOff` for all four HUD assets in `CameraHudRig` initialization with caching.
-- [x] 212-T203: Render tactical crosshair reticle at center of viewport with pitch ladder response.
-- [x] 212-T204: Render compass heading tape at top-center of HUD, dynamically rotated by `_camera.Yaw`.
-- [x] 212-T205: Render curved visor bezel framing the viewport perimeter.
-- [ ] **Gate 2**: All four OpenSCAD HUD assets render crisp in viewport with authentic shader accents; heading tape rotates with camera yaw; reticle stays centered; build green. Source/build evidence passes; real-client visual validation is operator-owned.
+**Operator correction 2026-09-06:** the original Phase 2 — rendering a tactical reticle, compass
+tape, and curved visor bezel as decorative meshes — was **rejected as unrequested scope** and is
+struck. Those meshes remain committed assets but are unused, and `CameraHudRig.Enabled` now
+defaults to `false`. The actual assignment is: **put the ImGui sidebars onto 3D objects that sit on
+the camera frame** — render ImGui panel content to an offscreen texture, map that texture onto a
+quad mounted in camera space, and interact with it in place (per Spec 212 US1/US2).
+
+- [x] 212-T201: OpenSCAD HUD primitive assets authored and committed (`.off` + `.scad`). *(kept;
+      assets are unused until a panel-surface design consumes them)*
+- [x] 212-T202: Camera-space transform contracts (`CameraHudTransform`, `CameraSpaceProjection`)
+      in Core.Runtime with focused tests. *(absorbed from struck Phase 1/2 geometry work — this is
+      the part of the delivered foundation that serves panels-on-surfaces)*
+- [ ] 212-T203: Render ImGui panel content to an offscreen framebuffer texture sized to the panel.
+- [ ] 212-T204: Map that texture onto a camera-frame quad via the camera-space contracts.
+- [ ] 212-T205: Composite the textured quad after world rendering and before fullscreen chrome;
+      `Tab` hides it with the rest of the chrome.
+- [ ] **Gate 2**: A real ImGui panel renders legibly on a camera-frame surface with pointer
+      accuracy matching Phase 3 hit testing; the 2D shell is unchanged when the mode is off; build
+      0 errors. Operator visual check owed.
 
 ---
 

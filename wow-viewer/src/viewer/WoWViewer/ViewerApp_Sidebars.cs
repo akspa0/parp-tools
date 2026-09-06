@@ -142,12 +142,12 @@ public partial class ViewerApp
 
             if (renderer != null)
             {
-                // Grid toggles
-                bool chunkGrid = renderer.ShowChunkGrid;
-                if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
-                ImGui.SameLine();
+                // Grid toggles (operator-specified order 2026-09-06: Tiles, Chunks, Cells)
                 bool tileGrid = renderer.ShowTileGrid;
                 if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+                ImGui.SameLine();
+                bool chunkGrid = renderer.ShowChunkGrid;
+                if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
                 ImGui.SameLine();
                 bool cellGrid = renderer.ShowCellGrid;
                 if (ImGui.Checkbox("Cells", ref cellGrid)) renderer.ShowCellGrid = cellGrid;

@@ -7,9 +7,11 @@ using WowViewer.Core.Runtime.World;
 namespace WoWViewer.Rendering;
 
 /// <summary>
-/// Camera-rigged HUD foundation. It owns only camera-space attachment, fog-independent rendering,
-/// and Tab-synchronized visibility; interactive panel surfaces and input routing are separate
-/// phases so decorative meshes cannot be mistaken for a usable spatial workbench.
+/// Camera-rigged 3D HUD foundation. Owns camera-space attachment, depth-clamped placement, and
+/// Tab-synchronized visibility only.
+/// Operator correction 2026-09-06: decorative instrumentation (reticle, compass tape, visor bezel)
+/// was never requested and has been removed. The rig defaults OFF until the actual assignment
+/// lands — ImGui panels composited onto 3D surfaces mounted to the camera frame (Spec 212).
 /// </summary>
 public sealed class CameraHudRig : IDisposable
 {
@@ -17,16 +19,12 @@ public sealed class CameraHudRig : IDisposable
     private ShaderProgram? _shader;
     private ProceduralMesh? _gimbalMesh;
     private ProceduralMesh? _bracketMesh;
-    private ProceduralMesh? _reticleMesh;
-    private ProceduralMesh? _compassMesh;
-    private ProceduralMesh? _bezelMesh;
 
-    public bool Enabled { get; set; } = true;
+    /// <summary>Defaults off: the operator rejected visible decorative HUD elements in the viewport.</summary>
+    public bool Enabled { get; set; } = false;
     public bool ShowGimbal { get; set; } = true;
     public bool ShowBrackets { get; set; } = true;
-    public bool ShowReticle { get; set; } = true;
-    public bool ShowCompass { get; set; } = true;
-    public bool ShowBezel { get; set; } = true;
+
     /// <summary>Requested local HUD depth; the projection volume clamps it before rendering.</summary>
     public float HudDepth { get; set; } = 1.0f;
     public float GimbalScale { get; set; } = 0.08f;
@@ -83,14 +81,10 @@ void main()
 
             _shader = ShaderProgram.Create(_gl, vertexShader, fragmentShader);
 
-            // Load authored OpenSCAD assets
             _gimbalMesh = OpenScadAssetResolver.TryLoadMesh(_gl, "camera_hud_gimbal.off")
                 ?? ProceduralMeshLoader.CreateTargetReticle(_gl, 0.5f);
 
             _bracketMesh = OpenScadAssetResolver.TryLoadMesh(_gl, "hud_frame_bracket.off");
-            _reticleMesh = OpenScadAssetResolver.TryLoadMesh(_gl, "camera_hud_reticle_tactical.off");
-            _compassMesh = OpenScadAssetResolver.TryLoadMesh(_gl, "camera_hud_compass_tape.off");
-            _bezelMesh = OpenScadAssetResolver.TryLoadMesh(_gl, "camera_hud_curved_bezel.off");
         }
         catch (Exception ex)
         {
@@ -123,7 +117,6 @@ void main()
         float halfWidth = halfExtents.X;
         float halfHeight = halfExtents.Y;
 
-        // Enforce always-visible HUD depth range
         _gl.DepthRange(0.0, 0.04);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
@@ -135,55 +128,9 @@ void main()
         _shader.SetMat4("uProj", proj);
         _shader.SetVec3("uLightDir", new Vector3(0.4f, 0.8f, 0.5f));
 
-        // 0. Tactical reticle remains camera-locked at the focal center. The
-        // pitch value produces a restrained pitch-ladder tilt without changing
-        // the camera's visual aim.
-        if (ShowReticle && _reticleMesh != null)
-        {
-            float pitchRadians = camera.Pitch * (MathF.PI / 180f);
-            Matrix4x4 model = transform.CreateModelMatrix(
-                new Vector3(0f, 0f, depth),
-                Quaternion.CreateFromAxisAngle(Vector3.UnitX, -pitchRadians * 0.20f),
-                0.12f * depth);
-            _shader.SetMat4("uModel", model);
-            _shader.SetVec4("uColor", new Vector4(0.40f, 0.92f, 1.00f, 0.78f));
-            _reticleMesh.Draw();
-        }
-
-        // 0.5. The compass is top-center and rotates against world north as
-        // the camera yaw changes. It is decorative until spatial panel input
-        // ships in Phase 3.
-        if (ShowCompass && _compassMesh != null)
-        {
-            float yawRadians = camera.Yaw * (MathF.PI / 180f);
-            Matrix4x4 model = transform.CreateModelMatrix(
-                new Vector3(0f, halfHeight * 0.86f, depth),
-                Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -yawRadians),
-                0.075f * depth);
-            _shader.SetMat4("uModel", model);
-            _shader.SetVec4("uColor", new Vector4(0.95f, 0.78f, 0.25f, 0.78f));
-            _compassMesh.Draw();
-        }
-
-        // 0.75. The authored bezel provides the optical-frame treatment. Its
-        // mesh size is authored independently, so scale it from the camera
-        // frustum rather than a fixed world unit.
-        if (ShowBezel && _bezelMesh != null)
-        {
-            float bezelScale = MathF.Max(halfWidth, halfHeight) * 1.85f;
-            Matrix4x4 model = transform.CreateModelMatrix(
-                new Vector3(0f, 0f, hudProjection.ClampDepth(depth * 1.01f)),
-                Quaternion.Identity,
-                bezelScale);
-            _shader.SetMat4("uModel", model);
-            _shader.SetVec4("uColor", new Vector4(0.24f, 0.68f, 0.95f, 0.28f));
-            _bezelMesh.Draw();
-        }
-
-        // 1. Render 3D Attitude & Heading Gimbal (mounted bottom-right of viewport)
+        // 1. Attitude & heading gimbal, bottom-right of the camera frame.
         if (ShowGimbal && _gimbalMesh != null)
         {
-            // The gimbal is mounted in camera space, with its compass body yawed toward world North.
             float yawAngle = MathF.Atan2(transform.Forward.X, transform.Forward.Y);
             Matrix4x4 model = transform.CreateModelMatrix(
                 new Vector3(halfWidth * 0.80f, -halfHeight * 0.75f, depth),
@@ -192,11 +139,10 @@ void main()
 
             _shader.SetMat4("uModel", model);
             _shader.SetVec4("uColor", new Vector4(0.95f, 0.78f, 0.25f, 0.88f)); // Warcraft brass gold
-
             _gimbalMesh.Draw();
         }
 
-        // 2. Render 3D Corner Framing Brackets
+        // 2. Corner framing brackets at the camera frame boundary.
         if (ShowBrackets && _bracketMesh != null)
         {
             float bracketDist = hudProjection.ClampDepth(depth * 1.02f);
@@ -204,15 +150,14 @@ void main()
             float cornerY = halfHeight * 0.92f;
             float bScale = BracketScale * bracketDist;
 
-            // (dx, dy, rotZ in degrees)
-            (float dx, float dy, float angleDeg)[] corners = {
+            (float dx, float dy, float rotDeg)[] corners = {
                 (-cornerX,  cornerY, 180.0f), // Top-Left
                 ( cornerX,  cornerY, 270.0f), // Top-Right
                 (-cornerX, -cornerY,  90.0f), // Bottom-Left
                 ( cornerX, -cornerY,   0.0f), // Bottom-Right
             };
 
-            _shader.SetVec4("uColor", new Vector4(0.35f, 0.75f, 0.95f, 0.65f)); // Holographic cyan glow
+            _shader.SetVec4("uColor", new Vector4(0.35f, 0.75f, 0.95f, 0.65f)); // Holographic cyan
 
             foreach (var (dx, dy, rotDeg) in corners)
             {
@@ -234,8 +179,5 @@ void main()
         _shader?.Dispose();
         _gimbalMesh?.Dispose();
         _bracketMesh?.Dispose();
-        _reticleMesh?.Dispose();
-        _compassMesh?.Dispose();
-        _bezelMesh?.Dispose();
     }
 }

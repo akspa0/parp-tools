@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-02
 
-**Status**: Phases 1–2 implemented in source; Gates 1–2 real-client visual verification open
+**Status**: Phase 1 source-complete; Phase 2 REWRITTEN per operator correction 2026-09-06 — decorative reticle/compass/bezel scope struck as unrequested; re-aimed at ImGui panels composited onto camera-frame surfaces
 
 **Input**: User description: "3D spatial UI shell: render existing ImGui panels onto generated 3D geometry so the entire UI becomes objects composited over any loaded scene, with a context-morphing rig driven by the top bar"
 

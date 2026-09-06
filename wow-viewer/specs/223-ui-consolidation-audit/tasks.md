@@ -45,8 +45,10 @@
 
 ## Phase 5 — Quick per profile (US5)
 
-- [x] 223-T501: Shared Quick mirror component; per-profile top controls from the inventory;
-      **Fog End first in every profile**.
+- [x] 223-T501: Shared Quick mirror component; per-profile top controls from the inventory.
+      **AMENDED 2026-09-06 (operator): "Fog End first" is superseded — sliders render in natural
+      order, Fog Start above Fog End, because the reversed order made the operator adjust the
+      wrong slider.**
 - [x] 223-T502: Settings>Fog Defaults is the single implementation; Quick mirrors it (FR-6).
 
 ## Phase 6 — Transport Fixes, MCNK Deep-Link, Shared UI Library & Documentation (US6)

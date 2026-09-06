@@ -138,7 +138,7 @@ public partial class ViewerApp : IDisposable
         public bool Deleted { get; set; }
     }
 
-    private const string ViewerProductName = "WoWViewer v0.5.2.2";
+    private const string ViewerProductName = "WoWViewer v0.5.2.3";
     private const string ViewerAboutPopupTitle = "About WoWViewer";
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
         typeof(ImGuiController).GetMethod("WindowResized", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -2439,6 +2439,12 @@ void main() {
             ImGui.Spacing();
             ImGui.TextUnformatted("In memory of Hayven Games");
             ImGui.TextWrapped("An inspiration for this project and a friend, whose short films explored World of Warcraft's secrets and little-known details through game footage.");
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.TextWrapped("Thanks to...");
+            ImGui.TextWrapped("Marlamin, schlumpf, Dovah, Pirate the Explorer, fean, implave, IS4, Adspartan (Noggit), and Skarn (Noggit-Red).");
+            ImGui.TextWrapped("Without the WoW Exploration community, this project would not exist. Everyone named here contributed inspiration to this project in some way.");
+            ImGui.TextDisabled("This tooling is about restoration, not touching up or polishing what we recover - it is the instrument for restoring what already exists. Noggit and Noggit-Red remain the preferred editors for fine-tuning the results this library and tooling produce.");
             ImGui.Spacing();
             ImGui.TextWrapped("Special thanks to WoWdev.wiki, Exploration Reboot, The Alpha Project, and everyone in the Pre-Alpha Restoration Project discord!");
             ImGui.Spacing();
@@ -14793,6 +14799,26 @@ void main() {
         float localX = _lastMouseX - vpX;
         float localY = _lastMouseY - vpY;
         _worldScene.UpdateHoveredAssetInfo(view, proj, localX, localY, vpW, vpH);
+
+        // Operator feedback 2026-09-06: the mouse picked objects many tiles away
+        // THROUGH the ground. The hover picker tests object distance but never
+        // terrain occlusion, so an object behind a hill was still hovered. If
+        // terrain is hit first along the same ray, the hover is invalid.
+        if (_worldScene.HoveredAssetInfo is { IsPreciseRayHit: true } hovered)
+        {
+            float ndcX = (localX / MathF.Max(vpW, 1f)) * 2f - 1f;
+            float ndcY = 1f - (localY / MathF.Max(vpH, 1f)) * 2f;
+            var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
+            TerrainRenderer? occlusionRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+            if (occlusionRenderer != null
+                && TryRaycastTerrain(occlusionRenderer, rayOrigin, rayDir, GetSceneFarPlane(), out _, out Vector3 terrainHit))
+            {
+                float terrainDistance = Vector3.Distance(rayOrigin, terrainHit);
+                float objectDistance = Vector3.Distance(rayOrigin, hovered.WorldPosition);
+                if (objectDistance > terrainDistance + 1f)
+                    _worldScene.ClearHoveredAssetInfo();
+            }
+        }
     }
 
     /// <summary>

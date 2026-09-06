@@ -1570,27 +1570,53 @@ void main() {
     if (uShowLayer0 == 1) {
         if (uShowChunkGrid == 1) {
             float chunkSize = 33.333;
-            vec2 chunkFrac = fract(vWorldPos.xy / chunkSize);
-            float chunkLine = step(chunkFrac.x, 0.005) + step(1.0 - chunkFrac.x, 0.005)
-                            + step(chunkFrac.y, 0.005) + step(1.0 - chunkFrac.y, 0.005);
-            chunkLine = clamp(chunkLine, 0.0, 1.0);
-            finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.6);
+            vec2 chunkUv = vWorldPos.xy / chunkSize;
+            vec2 chunkFrac = fract(chunkUv);
+            // Derivative-based width keeps chunk lines crisp and moire-free, and
+            // slightly stronger than before so they read beside the toned-down
+            // cell overlay (operator feedback 2026-09-06).
+            vec2 chunkGrad = max(fwidth(chunkUv), vec2(1e-4));
+            float d = min(min(chunkFrac.x, 1.0 - chunkFrac.x) / chunkGrad.x,
+                          min(chunkFrac.y, 1.0 - chunkFrac.y) / chunkGrad.y);
+            float core = 1.0 - smoothstep(0.0, 1.2, d);
+            float glow = 1.0 - smoothstep(1.2, 4.0, d);
+            float chunkLine = clamp(core + glow * 0.3, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.75);
         }
         if (uShowCellGrid == 1) {
             float cellSize = 2.0833125; // 33.333 / 16 (each chunk subdivided into 16x16 cells)
-            vec2 cellFrac = fract(vWorldPos.xy / cellSize);
-            float cellLine = step(cellFrac.x, 0.003) + step(1.0 - cellFrac.x, 0.003)
-                           + step(cellFrac.y, 0.003) + step(1.0 - cellFrac.y, 0.003);
-            cellLine = clamp(cellLine, 0.0, 1.0);
-            finalColor = mix(finalColor, vec3(0.3, 1.0, 0.3), cellLine * 0.85);
+            vec2 cellUv = vWorldPos.xy / cellSize;
+            vec2 cellFrac = fract(cellUv);
+            // Screen-space derivative width: the line stays ~1px at any distance
+            // and cannot alias into a moire pattern (the old fixed step()
+            // threshold was width-invariant and shimmered badly in the distance).
+            vec2 cellGrad = max(fwidth(cellUv), vec2(1e-4));
+            float dx = min(cellFrac.x, 1.0 - cellFrac.x) / cellGrad.x;
+            float dy = min(cellFrac.y, 1.0 - cellFrac.y) / cellGrad.y;
+            float d = min(dx, dy);                          // px distance to nearest cell line
+            float core = 1.0 - smoothstep(0.0, 1.0, d);     // crisp ~1px neon core
+            float glow = 1.0 - smoothstep(1.0, 5.0, d);     // soft halo so the neon reads from afar
+            // Fade cells out completely once they approach sub-pixel density.
+            float detailFade = clamp(1.0 - (max(cellGrad.x, cellGrad.y) - 0.35) * 2.0, 0.0, 1.0);
+            // Dissolve with fog like every other distant surface.
+            float fade = fogFactor * fogFactor * detailFade;
+            // Toned down 2026-09-06: the neon was far too opaque next to the
+            // other overlays; the glow now reads as an accent, not a flood.
+            float cellLine = clamp((core + glow * 0.3) * fade, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(0.35, 1.0, 0.35), cellLine * 0.45);
         }
         if (uShowTileGrid == 1) {
             float tileSize = 533.333;
-            vec2 tileFrac = fract(vWorldPos.xy / tileSize);
-            float tileLine = step(tileFrac.x, 0.001) + step(1.0 - tileFrac.x, 0.001)
-                           + step(tileFrac.y, 0.001) + step(1.0 - tileFrac.y, 0.001);
-            tileLine = clamp(tileLine, 0.0, 1.0);
-            finalColor = mix(finalColor, vec3(1.0, 0.3, 0.0), tileLine * 0.8);
+            vec2 tileUv = vWorldPos.xy / tileSize;
+            vec2 tileFrac = fract(tileUv);
+            // Derivative-based width keeps tile boundaries readable at range.
+            vec2 tileGrad = max(fwidth(tileUv), vec2(1e-4));
+            float d = min(min(tileFrac.x, 1.0 - tileFrac.x) / tileGrad.x,
+                          min(tileFrac.y, 1.0 - tileFrac.y) / tileGrad.y);
+            float core = 1.0 - smoothstep(0.0, 1.2, d);
+            float glow = 1.0 - smoothstep(1.2, 4.0, d);
+            float tileLine = clamp(core + glow * 0.3, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(1.0, 0.3, 0.0), tileLine * 0.9);
         }
     }
 
@@ -1794,27 +1820,53 @@ void main() {
     if (uShowLayer0 == 1) {
         if (uShowChunkGrid == 1) {
             float chunkSize = 33.333;
-            vec2 chunkFrac = fract(vWorldPos.xy / chunkSize);
-            float chunkLine = step(chunkFrac.x, 0.005) + step(1.0 - chunkFrac.x, 0.005)
-                            + step(chunkFrac.y, 0.005) + step(1.0 - chunkFrac.y, 0.005);
-            chunkLine = clamp(chunkLine, 0.0, 1.0);
-            finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.6);
+            vec2 chunkUv = vWorldPos.xy / chunkSize;
+            vec2 chunkFrac = fract(chunkUv);
+            // Derivative-based width keeps chunk lines crisp and moire-free, and
+            // slightly stronger than before so they read beside the toned-down
+            // cell overlay (operator feedback 2026-09-06).
+            vec2 chunkGrad = max(fwidth(chunkUv), vec2(1e-4));
+            float d = min(min(chunkFrac.x, 1.0 - chunkFrac.x) / chunkGrad.x,
+                          min(chunkFrac.y, 1.0 - chunkFrac.y) / chunkGrad.y);
+            float core = 1.0 - smoothstep(0.0, 1.2, d);
+            float glow = 1.0 - smoothstep(1.2, 4.0, d);
+            float chunkLine = clamp(core + glow * 0.3, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.75);
         }
         if (uShowCellGrid == 1) {
             float cellSize = 2.0833125; // 33.333 / 16 (each chunk subdivided into 16x16 cells)
-            vec2 cellFrac = fract(vWorldPos.xy / cellSize);
-            float cellLine = step(cellFrac.x, 0.003) + step(1.0 - cellFrac.x, 0.003)
-                           + step(cellFrac.y, 0.003) + step(1.0 - cellFrac.y, 0.003);
-            cellLine = clamp(cellLine, 0.0, 1.0);
-            finalColor = mix(finalColor, vec3(0.3, 1.0, 0.3), cellLine * 0.85);
+            vec2 cellUv = vWorldPos.xy / cellSize;
+            vec2 cellFrac = fract(cellUv);
+            // Screen-space derivative width: the line stays ~1px at any distance
+            // and cannot alias into a moire pattern (the old fixed step()
+            // threshold was width-invariant and shimmered badly in the distance).
+            vec2 cellGrad = max(fwidth(cellUv), vec2(1e-4));
+            float dx = min(cellFrac.x, 1.0 - cellFrac.x) / cellGrad.x;
+            float dy = min(cellFrac.y, 1.0 - cellFrac.y) / cellGrad.y;
+            float d = min(dx, dy);                          // px distance to nearest cell line
+            float core = 1.0 - smoothstep(0.0, 1.0, d);     // crisp ~1px neon core
+            float glow = 1.0 - smoothstep(1.0, 5.0, d);     // soft halo so the neon reads from afar
+            // Fade cells out completely once they approach sub-pixel density.
+            float detailFade = clamp(1.0 - (max(cellGrad.x, cellGrad.y) - 0.35) * 2.0, 0.0, 1.0);
+            // Dissolve with fog like every other distant surface.
+            float fade = fogFactor * fogFactor * detailFade;
+            // Toned down 2026-09-06: the neon was far too opaque next to the
+            // other overlays; the glow now reads as an accent, not a flood.
+            float cellLine = clamp((core + glow * 0.3) * fade, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(0.35, 1.0, 0.35), cellLine * 0.45);
         }
         if (uShowTileGrid == 1) {
             float tileSize = 533.333;
-            vec2 tileFrac = fract(vWorldPos.xy / tileSize);
-            float tileLine = step(tileFrac.x, 0.001) + step(1.0 - tileFrac.x, 0.001)
-                           + step(tileFrac.y, 0.001) + step(1.0 - tileFrac.y, 0.001);
-            tileLine = clamp(tileLine, 0.0, 1.0);
-            finalColor = mix(finalColor, vec3(1.0, 0.3, 0.0), tileLine * 0.8);
+            vec2 tileUv = vWorldPos.xy / tileSize;
+            vec2 tileFrac = fract(tileUv);
+            // Derivative-based width keeps tile boundaries readable at range.
+            vec2 tileGrad = max(fwidth(tileUv), vec2(1e-4));
+            float d = min(min(tileFrac.x, 1.0 - tileFrac.x) / tileGrad.x,
+                          min(tileFrac.y, 1.0 - tileFrac.y) / tileGrad.y);
+            float core = 1.0 - smoothstep(0.0, 1.2, d);
+            float glow = 1.0 - smoothstep(1.2, 4.0, d);
+            float tileLine = clamp(core + glow * 0.3, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(1.0, 0.3, 0.0), tileLine * 0.9);
         }
     }
 

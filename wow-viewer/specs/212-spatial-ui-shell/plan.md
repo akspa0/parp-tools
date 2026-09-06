@@ -2,7 +2,7 @@
 
 **Created**: 2026-09-04
 **Spec**: [spec.md](spec.md)
-**Status**: Phases 1–2 source implementation complete; visual Gates 1–2 open; Phases 3–4 planned
+**Status**: Phase 1 source-complete; Phase 2 rewritten per operator correction 2026-09-06 (panels on surfaces, not decorative meshes); Phases 3–4 planned
 
 ## Architecture Overview
 
@@ -66,15 +66,16 @@ flowchart TD
 - Bind HUD visibility to `!_hideUiChrome` (`Tab` key).
 - Add HUD toggle checkbox under `Settings > Interface` and `Quick > Camera`.
 
-### Phase 2 — OpenSCAD HUD Geometry Integration
-- Load committed OpenSCAD assets (`camera_hud_curved_bezel.off`, `camera_hud_reticle_tactical.off`, `camera_hud_compass_tape.off`, `camera_hud_gimbal.off`).
-- Render tactical reticle at crosshair center with smooth elevation/pitch response.
-- Render curved visor bezel around camera viewport perimeter.
-- Render compass heading tape at top of HUD driven by `_camera.Yaw`.
+### Phase 2 — ImGui Panels on Camera-Frame Surfaces (OPERATOR CORRECTION 2026-09-06)
 
-**Source status (2026-09-06):** all four committed meshes are loaded once by `CameraHudRig`; the
-reticle, compass, bezel, existing gimbal, and brackets use the Phase 1 camera-space/depth contract.
-Settings exposes independent visibility toggles. Real-client visual verification remains required.
+The original Phase 2 (decorative reticle/compass/bezel meshes) was **rejected by the operator as
+unrequested scope** and struck; those meshes are unused and `CameraHudRig.Enabled` defaults OFF.
+Phase 2 is now the core of the actual assignment:
+
+- Render ImGui panel content into an offscreen framebuffer texture sized to the panel.
+- Map the texture onto a camera-frame quad using `CameraHudTransform` / `CameraSpaceProjection`.
+- Composite after world rendering, before fullscreen chrome; `Tab` hides it with the chrome.
+- Phase 3 hit testing consumes pointer events on that quad before world picking.
 
 ### Phase 3 — Spatial Ray-Casting & Surface Hit Testing
 - Implement `SpatialUiSurface` and `SpatialUiHitTestService` in `WowViewer.Core`.
