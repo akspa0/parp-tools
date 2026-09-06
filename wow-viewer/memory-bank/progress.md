@@ -2,6 +2,19 @@
 
 Last updated: 2026-09-06
 
+## 2026-09-06 — Consolidation pass committed: specs 224–230 + epic registry (`c75a1666`)
+
+- **First consolidation pass complete and committed** (28 files, +1353/−240): Specs 224–230,
+  `epics/active-epics.md` (8 epics with supersession mapping), STATUS.md rewritten to a weekly
+  implementation order + epic watch-list, old per-spec detail table archived at
+  `specs/archive/2026-09-06-status-pre-consolidation.md`. AGENTS.md §9–11 governance in the commit.
+- **Supersession rule (operator):** Specs 226–230 supersede any older spec not/only-partially
+  implemented; 145 and 080 residue absorbed into Epic 1; 195 already superseded by 219/222.
+- **ML note recorded:** Epic 7 (139–141, 138, data-harvester) is "eventually continue" — revisited
+  after Epics 1–2 land.
+- **Unrelated dirty files deliberately left unstaged** (mcp.json, imgui.ini, asset-catalog fixture
+  deletions, SereniaBLPLib pointer) per worktree-safety rules.
+
 ## 2026-09-06 — WoW-style shell + keybind profiles + reconstruction editor specced (Specs 229/230)
 
 - **Spec 229** ([spec](../specs/229-wow-shell-keybind-profiles/spec.md)): the operator's REPEATEDLY
