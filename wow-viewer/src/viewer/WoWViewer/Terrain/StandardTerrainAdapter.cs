@@ -224,7 +224,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         foreach (PhaseLayerSettings layer in ActivePhaseLayers)
         {
-            if (OverlayTileExists(layer.MapName, tileX - layer.TileOffsetX, tileY - layer.TileOffsetY))
+            // Spec 231 Phase 7: admission goes through the shared policy so rotation/mirror
+            // layers stream exactly where the composition resolves them.
+            PhaseTileSource source = PhaseCompositionPolicy.ResolveTileSource(
+                layer, tileX, tileY, (sx, sy) => OverlayTileExists(layer.MapName, sx, sy));
+            if (source.HasSource)
                 return true;
         }
 

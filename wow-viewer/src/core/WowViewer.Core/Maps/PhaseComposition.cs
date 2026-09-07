@@ -344,6 +344,12 @@ public static class PhaseCompositionPolicy
         ArgumentNullException.ThrowIfNull(layer);
         ArgumentNullException.ThrowIfNull(hasDonorTile);
 
+        // Spec 231 Phase 7 (operator rule): a layer's composed content is confined to the base
+        // map's 64x64 tile grid. Targets outside it contribute nothing, no matter what the
+        // offset/rotation math computes.
+        if (targetX < 0 || targetX > 63 || targetY < 0 || targetY > 63)
+            return PhaseTileSource.Empty;
+
         // 1. Per-tile mappings: last one claiming this target wins. Count claims so the caller can
         // report a deterministic conflict rather than silently hiding an earlier mapping.
         int claimCount = 0;

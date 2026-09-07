@@ -36,6 +36,27 @@ in the panel) with yaw adjustment. Mirrors compose after rotation, matching
 - **T074 visual gate (operator)**: load a base map, add a phase layer, set 90° rotation, and
   verify terrain + textures + liquid + objects rotate together on the real map.
 
+## Fix round — T074 gate feedback (2026-09-07, same day)
+
+The operator's first visual pass failed: rotated layers rendered nothing, offsets acted
+inverted, and layers could land outside the grid. Root causes found and fixed:
+
+1. **Nothing rendered (root cause)**: the adapters' `TileExists` streaming-admission still used
+   the raw offset math (`tileX − TileOffsetX`), so rotated/mirrored target tiles were never
+   admitted for streaming. Both adapters now admit through `ResolveTileSource` — the same
+   resolution the composition uses, so streaming and rendering can no longer disagree.
+2. **Grid confinement (operator rule)**: `ResolveTileSource` now returns empty for any target
+   tile outside the 64×64 grid; footprint composition (WorldScene + panel overlap check) drops
+   out-of-grid targets. A layer can never extend past the map grid.
+3. **Origin fling**: a first rotation about origin (0,0) sent donor tiles to negative coordinates.
+   The rotation combo now auto-centers the origin on the donor footprint the first time a layer
+   is rotated, and resets it to (0,0) when rotation returns to none.
+4. **Minimap double-offset**: `RenderPhaseFootprints` added the layer offset on top of the already
+   composed footprints — removed.
+
+Verification: build **0 Errors**; Maps tests **157/157 passed**. Interactive re-check of the
+T074 visual gate returns to the operator.
+
 ## Known limits (recorded)
 
 1. Free-angle (non-90°) rotations are core-supported (`ResolveRotationApproximation.FreeRotate`)

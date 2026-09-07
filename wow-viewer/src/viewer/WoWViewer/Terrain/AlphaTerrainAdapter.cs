@@ -295,7 +295,12 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if (phaseAdapter == null || phaseAdapter.IsWmoBased)
                 continue;
 
-            if (phaseAdapter.TileExistsInOwnWdt(tileX - layer.TileOffsetX, tileY - layer.TileOffsetY))
+            // Spec 231 Phase 7: admission goes through the shared policy so rotation/mirror
+            // layers stream exactly where the composition resolves them (this was the bug that
+            // made rotated layers render nothing — TileExists still used the raw offset).
+            PhaseTileSource source = PhaseCompositionPolicy.ResolveTileSource(
+                layer, tileX, tileY, (sx, sy) => phaseAdapter.TileExistsInOwnWdt(sx, sy));
+            if (source.HasSource)
                 return true;
         }
 

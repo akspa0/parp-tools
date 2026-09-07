@@ -1657,12 +1657,17 @@ public class WorldScene : ISceneRenderer
 
             // Spec 231 Phase 7: compose the footprint through rotation/mirror + offset so
             // minimap rendering, click hit-tests, and drag logic all see where the layer's
-            // tiles actually land on the base map.
+            // tiles actually land on the base map. Targets outside the 64x64 grid are dropped
+            // (operator rule: a layer can never extend past the map grid).
             var composedTiles = new List<(int TileX, int TileY)>(donorTiles.Count);
             foreach ((int donorTileX, int donorTileY) in donorTiles)
             {
                 (int tx, int ty) = WowViewer.Core.Maps.PhaseCompositionPolicy.ForwardTransformTile(donorTileX, donorTileY, layer);
-                composedTiles.Add((tx + layer.TileOffsetX, ty + layer.TileOffsetY));
+                tx += layer.TileOffsetX;
+                ty += layer.TileOffsetY;
+                if (tx < 0 || tx > 63 || ty < 0 || ty > 63)
+                    continue;
+                composedTiles.Add((tx, ty));
             }
 
             result.Add((layer, composedTiles));

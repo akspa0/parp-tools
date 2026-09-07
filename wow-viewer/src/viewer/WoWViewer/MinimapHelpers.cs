@@ -273,11 +273,11 @@ internal static class MinimapHelpers
 
             foreach ((int tx, int ty) in tiles)
             {
-                // Target position = donor tile + the layer's offset. tx is the adapter's tileX
-                // (row → vertical) and ty its tileY (col → horizontal), matching the base-tile
-                // drawing above.
-                float targetTx = tx + layer.TileOffsetX;
-                float targetTy = ty + layer.TileOffsetY;
+                // Spec 231 Phase 7: GetLayerFootprints already composes rotation/mirror + offset,
+                // so (tx, ty) is the final target tile. tx is the adapter's tileX (row →
+                // vertical) and ty its tileY (col → horizontal), matching the base-tile drawing.
+                float targetTx = tx;
+                float targetTy = ty;
                 if (targetTx + 1 < viewMinTx || targetTx > viewMaxTx
                     || targetTy + 1 < viewMinTy || targetTy > viewMaxTy)
                 {
