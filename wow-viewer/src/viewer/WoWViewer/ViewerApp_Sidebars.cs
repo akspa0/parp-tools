@@ -275,7 +275,16 @@ public partial class ViewerApp
 
                     // Fast doodad-set switching for the WMO under the cursor, always visible
                     // in the editor toolbar (the Inspector's live-switch section is buried).
-                    if (_worldScene.HoveredAssetInfo is { } hoveredAsset
+                    // While the combo popup is open, the hovered WMO is frozen: moving the
+                    // mouse off the model to reach the dropdown would otherwise retarget or
+                    // collapse the combo mid-interaction (operator report 2026-09-07).
+                    bool doodadSetComboOpen = ImGui.IsPopupOpen("##HoveredWmoDoodadSet");
+                    if (doodadSetComboOpen && _hoveredWmoDoodadSetComboWmo is { DoodadSetCount: > 0 } frozenWmo)
+                    {
+                        ImGui.SameLine();
+                        DrawHoveredWmoDoodadSetCombo(frozenWmo, _hoveredWmoDoodadSetComboSourcePath);
+                    }
+                    else if (_worldScene.HoveredAssetInfo is { } hoveredAsset
                         && hoveredAsset.SceneObjectType == Terrain.ObjectType.Wmo
                         && hoveredAsset.SceneObjectIndex >= 0)
                     {
@@ -283,24 +292,19 @@ public partial class ViewerApp
                             WorldAssetManager.NormalizeKey(hoveredAsset.SourcePath));
                         if (hoveredWmo is { DoodadSetCount: > 0 })
                         {
+                            _hoveredWmoDoodadSetComboWmo = hoveredWmo;
+                            _hoveredWmoDoodadSetComboSourcePath = hoveredAsset.SourcePath;
                             ImGui.SameLine();
-                            ImGui.SetNextItemWidth(150f);
-                            int activeDoodadSet = hoveredWmo.ActiveDoodadSet;
-                            if (ImGui.BeginCombo("##HoveredWmoDoodadSet", hoveredWmo.GetDoodadSetName(activeDoodadSet)))
-                            {
-                                for (int setIndex = 0; setIndex < hoveredWmo.DoodadSetCount; setIndex++)
-                                {
-                                    bool isSetSelected = setIndex == activeDoodadSet;
-                                    if (ImGui.Selectable(hoveredWmo.GetDoodadSetName(setIndex), isSetSelected))
-                                        hoveredWmo.SetActiveDoodadSet(setIndex);
-                                    if (isSetSelected)
-                                        ImGui.SetItemDefaultFocus();
-                                }
-                                ImGui.EndCombo();
-                            }
-                            if (ImGui.IsItemHovered())
-                                ImGui.SetTooltip($"Doodad set for hovered WMO '{Path.GetFileName(hoveredAsset.SourcePath)}'.");
+                            DrawHoveredWmoDoodadSetCombo(hoveredWmo, hoveredAsset.SourcePath);
                         }
+                        else
+                        {
+                            _hoveredWmoDoodadSetComboWmo = null;
+                        }
+                    }
+                    else
+                    {
+                        _hoveredWmoDoodadSetComboWmo = null;
                     }
                 }
                 else
@@ -4689,6 +4693,32 @@ public partial class ViewerApp
         ImGui.TextDisabled(lighting.IsAutomaticTimeOfDay
             ? "Live Alpha 0.5.3 clock: one game day per 24 real minutes."
             : "Time frozen at the selected value; enable the cycle to resume.");
+    }
+
+    // Frozen hovered-WMO source for the toolbar doodad-set quick combo: while the
+    // combo popup is open the reference must not follow the mouse (operator bug
+    // report 2026-09-07 — the dropdown collapsed as soon as the cursor left the WMO).
+    private WmoRenderer? _hoveredWmoDoodadSetComboWmo;
+    private string _hoveredWmoDoodadSetComboSourcePath = string.Empty;
+
+    private void DrawHoveredWmoDoodadSetCombo(WmoRenderer hoveredWmo, string sourcePath)
+    {
+        ImGui.SetNextItemWidth(150f);
+        int activeDoodadSet = hoveredWmo.ActiveDoodadSet;
+        if (ImGui.BeginCombo("##HoveredWmoDoodadSet", hoveredWmo.GetDoodadSetName(activeDoodadSet)))
+        {
+            for (int setIndex = 0; setIndex < hoveredWmo.DoodadSetCount; setIndex++)
+            {
+                bool isSetSelected = setIndex == activeDoodadSet;
+                if (ImGui.Selectable(hoveredWmo.GetDoodadSetName(setIndex), isSetSelected))
+                    hoveredWmo.SetActiveDoodadSet(setIndex);
+                if (isSetSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"Doodad set for hovered WMO '{Path.GetFileName(sourcePath)}'.");
     }
 
     private void DrawTopTabButton(WorkbenchTab tab, string label)
