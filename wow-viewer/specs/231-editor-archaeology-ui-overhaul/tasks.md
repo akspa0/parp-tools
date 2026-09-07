@@ -83,6 +83,42 @@ directive, 2026-09-07).
       `ViewerApp_Sidebars.cs` 6,173 → 6,013; `ViewerApp_Pm4Utilities.cs` 4,451 → 4,368.
       Receipt: [evidence/t030-t043-phase3-4-receipt.md](evidence/t030-t043-phase3-4-receipt.md)
 
+## Phase 7 — Wire whole-layer rotation/mirror end-to-end (operator directive 2026-09-07)
+
+> Operator: "where the fuck is the ability to rotate the whole fucking map layer? you only
+> half-assed the tile/map rotation and never extended it to the layers like I fucking asked."
+
+**Audit finding (2026-09-07)**: the entire core engine already exists but was never wired:
+
+- `PhaseLayerSettings` carries `RotationDegrees`, `RotationOriginTileX/Y`, `MirrorHorizontal`,
+  `MirrorVertical` (`WowViewer.Core/Maps/PhaseComposition.cs:94-114`)
+- `PhaseComposition.ResolveTileSource` does the rotation/mirror-aware inverse donor-tile lookup;
+  `ComposeTileTransforms` + `ResolveRotationApproximation` classify exact-grid vs free-rotate
+  (`PhaseComposition.cs:296-400`)
+- `TileContentTransform` fully transforms chunk content — heightmap vertices, normals, holes,
+  alpha maps, liquid, chunk slots, placements, yaw (`WowViewer.Core/Maps/TileContentTransform.cs`)
+
+**Missing wiring** (the half-assed part):
+1. Layers panel UI exposes only offsets — no rotation/mirror controls (`ViewerApp_PhaseLayers.cs:294-337`)
+2. `AlphaTerrainAdapter` / `StandardTerrainAdapter` compute `source = target - offset` directly and
+   never call `ResolveTileSource` nor apply `TileContentTransform` to loaded donor tiles
+3. `TranslatePhasePlacements` (both adapters) translates only — no rotation/mirror
+4. `GetLayerFootprints` / `MapFootprint.OverlapsBase` and the minimap layer rendering ignore rotation
+5. `PhaseLayerSettings.Clone`-equivalent in `PhaseComposition.cs:159-170` does not copy the
+   rotation/mirror fields
+
+- [ ] T070 Layers panel: rotation combo (0/90/180/270 + free-angle input), mirror H/V checkboxes,
+      footprint-centered rotation origin; clone/persistence fix (missing field copies)
+- [ ] T071 Adapters: resolve donor tiles through `PhaseComposition.ResolveTileSource`; apply
+      `TileContentTransform.TransformChunks` with the returned `Transforms` for exact-grid layers;
+      free-angle layers surface the approximation warning
+- [ ] T072 Placements: route `TranslatePhasePlacements` through
+      `TileContentTransform.TransformMddf/Modf` with the layer transform
+- [ ] T073 Footprints + minimap: rotate layer footprints and minimap tile placement through the
+      same transform; `MapFootprint.OverlapsBase` rotation overload
+- [ ] T074 Gate: build/test clean; visual proof of a quarter-turn layer on a real map (operator);
+      receipt naming every wired consumer
+
 ## Phase 6 — Tools curation & removal pass (operator amendment 2026-09-07)
 
 Model surfaces: Editor → Data I/O page and the Quick panel (simple tools, one location,
