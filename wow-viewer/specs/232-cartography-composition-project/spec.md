@@ -89,8 +89,24 @@ passed. The remaining gap is alignment precision, persistence, and export.
   entirely from materials that should have them (smoke works); suspected regression from the
   lighting-effect work — audit the renderer's object-emissive/light-pipeline changes, find the
   break, and restore fire/water/light-casting effects.
+- FR-7 — **Force reload**: tiles do not always load everything after a placement change — provide
+  a "force reload" control that evicts and re-streams every tile affected by the current layer
+  stack (the existing `EvictAllTiles` path, scoped to affected tiles).
+- FR-8 — **Save / import settings buttons**: explicit save + import controls for the layer-stack
+  project data (alongside the FR-2 auto-load), so an alignment can be exported, shared, and
+  re-imported.
+- FR-9 — **Placements follow transforms**: doodads (MDDF) and world objects (MODF) must follow
+  the layer's tile offset, cell offset, rotation, and mirror with the SAME transforms as the
+  terrain — they are currently missing/misplaced under transformed layers.
+- FR-10 — **Texture restoration for stripped phase maps**: DeadminesInstance carries MCAL alpha
+  masks for all its MCLY layers but the MCLY texture references were stripped from the chunk.
+  Provide a texture-remapping tool that assigns base-map textures to texture-less MCLY layers
+  (matched per layer, per tile, against the terrain being overlaid), restoring the 25-year-lost
+  appearance of these maps. Persisted in the layer project data (FR-2).
 - Also recorded: cell-shift composition must move the layer as a RIGID map object (fixed in
   Phase 1's rigid `ResolveCellShiftedChunk` rework, same day).
+- Also recorded (UI): right-sidebar page dropdowns must be sticky per top tab — switching to
+  Quick and back must return to the page the operator was on, not snap to the first page.
 
 ## Out of scope
 

@@ -4721,6 +4721,11 @@ public partial class ViewerApp
             ImGui.SetTooltip($"Doodad set for hovered WMO '{Path.GetFileName(sourcePath)}'.");
     }
 
+    // Spec 232 (operator): per-top-tab page memory — switching workbench tabs returns the
+    // operator to the page (right-sidebar dropdown selection) they were on, instead of
+    // snapping back to the first page.
+    private readonly Dictionary<WorkbenchTab, int> _lastPageByTopTab = new();
+
     private void DrawTopTabButton(WorkbenchTab tab, string label)
     {
         bool selected = _activeTopTab == tab;
@@ -4730,10 +4735,13 @@ public partial class ViewerApp
         if (selected)
             ImGui.PopStyleColor();
 
-        if (clicked)
+        if (clicked && _activeTopTab != tab)
         {
+            _lastPageByTopTab[_activeTopTab] = _activeBottomTabIndex;
             _activeTopTab = tab;
-            _activeBottomTabIndex = 0;
+            _activeBottomTabIndex = _lastPageByTopTab.TryGetValue(tab, out int remembered)
+                ? Math.Clamp(remembered, 0, Math.Max(0, WorkbenchNavigator.GetBottomTabLabels(tab).Length - 1))
+                : 0;
         }
     }
 
