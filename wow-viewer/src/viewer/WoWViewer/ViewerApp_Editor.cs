@@ -71,6 +71,28 @@ public partial class ViewerApp
 
     private static readonly JsonSerializerOptions ReconciliationJsonOptions = new() { WriteIndented = true };
 
+    private Workbench.Pages.EditorWorkbenchPages? _editorPages;
+
+    /// <summary>
+    /// Spec 228 pattern: the shell keeps one aggregate field for the Spec 231
+    /// Editor workbench pages and delegates; the pages receive a narrow
+    /// <see cref="Workbench.Pages.ViewerAppContext"/> and never reach back into
+    /// god-class internals beyond the explicit draw contract.
+    /// </summary>
+    private Workbench.Pages.EditorWorkbenchPages EnsureEditorPages()
+    {
+        if (_editorPages == null)
+            _editorPages = new Workbench.Pages.EditorWorkbenchPages(new Workbench.Pages.ViewerAppContext(this));
+        return _editorPages;
+    }
+
+    void Workbench.Pages.IEditorPageHost.DrawTasksAndWorkspace() => DrawArchaeologyEditorTasksSubTab();
+    void Workbench.Pages.IEditorPageHost.DrawObjectLibrary() => DrawRosettaObjectLibrarySubTab();
+    void Workbench.Pages.IEditorPageHost.DrawPopulation() => DrawPopulationSubTabContent();
+    void Workbench.Pages.IEditorPageHost.DrawTerrainLab() => DrawTerrainLabSubTab();
+    void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => DrawArchaeologyEditorImportsSubTab();
+    void Workbench.Pages.IEditorPageHost.DrawConverters() => DrawConvertersSubTabContent();
+
     private void EnsureEditorHost()
     {
         if (_editorHost != null)
@@ -1320,19 +1342,19 @@ public partial class ViewerApp
 
         ImGui.Separator();
 
-        switch (_archaeologyEditorSubTab)
+        switch (Math.Clamp(_archaeologyEditorSubTab, 0, Workbench.Pages.EditorWorkbenchPages.PageCount - 1))
         {
-            case 0:
+            case 0: // Placement & Objects
                 DrawArchaeologyEditorTasksSubTab();
                 break;
-            case 1:
-                DrawConvertersSubTabContent();
+            case 1: // Terrain Tools
+                DrawTerrainLabSubTab();
                 break;
-            case 2:
-                DrawRosettaObjectLibrarySubTab();
-                break;
-            case 3:
+            case 2: // Data I/O
                 DrawArchaeologyEditorImportsSubTab();
+                break;
+            case 3: // Converters
+                DrawConvertersSubTabContent();
                 break;
         }
     }

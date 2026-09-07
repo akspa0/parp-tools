@@ -4816,15 +4816,15 @@ public partial class ViewerApp
                         break;
                     case 2: // Converters
                         _activeTopTab = WorkbenchTab.Editor;
-                        _activeBottomTabIndex = 1;
+                        _activeBottomTabIndex = 3;
                         break;
                     case 3: // Population
                         _activeTopTab = WorkbenchTab.Editor;
-                        _activeBottomTabIndex = 5;
+                        _activeBottomTabIndex = 0;
                         break;
                     default: // Terrain Lab
                         _activeTopTab = WorkbenchTab.Editor;
-                        _activeBottomTabIndex = 4;
+                        _activeBottomTabIndex = 1;
                         break;
                 }
                 break;
@@ -4947,34 +4947,9 @@ public partial class ViewerApp
     private void DrawEditorWorkbenchSubTabContent()
     {
         EnsureEditorHost();
-        switch (_activeBottomTabIndex)
-        {
-            case 0:
-                DrawArchaeologyEditorTasksSubTab();
-                break;
-            case 1:
-                DrawConvertersSubTabContent();
-                break;
-            case 2:
-                DrawRosettaObjectLibrarySubTab();
-                break;
-            case 3:
-                DrawArchaeologyEditorImportsSubTab();
-                break;
-            case 4:
-                // Experimental Terrain Lab remains reachable through the
-                // canonical Editor destination for legacy callers.
-                DrawTerrainLabSubTab();
-                break;
-            case 5:
-                // SQL population was historically an Experimental page; keep
-                // its route visible without reviving that top-level tab.
-                DrawPopulationSubTabContent();
-                break;
-            default:
-                DrawArchaeologyEditorTasksSubTab();
-                break;
-        }
+        // Spec 231: the Editor destination delegates to the four owned page
+        // classes; legacy content remains reachable through their sections.
+        EnsureEditorPages().Draw(_activeBottomTabIndex);
     }
 
     private static void DrawTimeOfDayControl(TerrainLighting lighting)
@@ -5083,7 +5058,7 @@ public partial class ViewerApp
 
         if (tab == WorldBottomTab.Tiles)
         {
-            OpenWorkbenchTab(WorkbenchTab.Editor, 4);
+            OpenWorkbenchTab(WorkbenchTab.Editor, 1); // Terrain Lab → Terrain Tools (Spec 231)
             return;
         }
 
@@ -5116,11 +5091,11 @@ public partial class ViewerApp
                     (int)UtilitiesBottomTab.Audio));
                 break;
             case ToolsBottomTab.Converters:
-                OpenWorkbenchTab(WorkbenchTab.Editor, 1);
+                OpenWorkbenchTab(WorkbenchTab.Editor, 3); // Converters (Spec 231)
                 break;
             case ToolsBottomTab.Terrain:
             default:
-                OpenWorkbenchTab(WorkbenchTab.Editor, 4);
+                OpenWorkbenchTab(WorkbenchTab.Editor, 1); // Terrain Lab → Terrain Tools (Spec 231)
                 break;
         }
     }

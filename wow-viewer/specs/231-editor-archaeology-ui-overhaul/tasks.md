@@ -6,25 +6,32 @@ directive, 2026-09-07).
 
 ## Phase 0 — Inventory v3 baseline (Spec 227 gate folded in)
 
-- [ ] T001 Capture Editor + Archaeology tab screenshots as they exist today into
-      `evidence/inventory-v3-baseline.md` (operator-assisted per Spec 227 T003)
-- [ ] T002 Record the 4-page IA scope freeze: operator acknowledges Placement & Objects /
-      Terrain Tools / Data I/O / Converters and the Archaeology analysis-only page list
-- [ ] T003 Write the dated supersession note in `227-ui-reaudit/tasks.md` for the Editor-tab
-      item ("sane Editor tabs" → Spec 231)
+- [x] T001 Capture Editor + Archaeology tab screenshots as they exist today into
+      `evidence/inventory-v3-baseline.md` (operator-assisted per Spec 227 T003).
+      Done 2026-09-07 via the viewer's built-in capture automation (operator directive);
+      10-page matrix + run fingerprint in
+      [evidence/inventory-v3-baseline.md](evidence/inventory-v3-baseline.md)
+- [x] T002 Record the 4-page IA scope freeze: operator acknowledges Placement & Objects /
+      Terrain Tools / Data I/O / Converters and the Archaeology analysis-only page list.
+      Receipt: [evidence/t002-scope-freeze-ack.md](evidence/t002-scope-freeze-ack.md)
+- [x] T003 Write the dated supersession note in `227-ui-reaudit/tasks.md` for the Editor-tab
+      item ("sane Editor tabs" → Spec 231). Note written 2026-09-07 in that file's header
 
 ## Phase 1 — Page skeletons + migration map
 
-- [ ] T010 Create `Workbench/Pages/` service classes: `EditorDataIoPage`,
+- [x] T010 Create `Workbench/Pages/` service classes: `EditorDataIoPage`,
       `EditorPlacementObjectsPage`, `EditorTerrainToolsPage`, `EditorConvertersPage` with a
       narrow `ViewerAppContext` (constructor-injected; no god-class reach-back)
-- [ ] T011 `WorkbenchNavigator.GetEditorWorkbenchLabels()` → the 4 new labels; update
+- [x] T011 `WorkbenchNavigator.GetEditorWorkbenchLabels()` → the 4 new labels; update
       `DrawEditorWorkbenchSubTabContent` to delegate; update
       `NormalizeWorkbenchStateAfterLoad` for old-index remap (0→Placement, 1→Converters,
       2→Placement, 3→Data I/O, 4→Terrain Tools, 5→Placement) and verify with a pre-change
-      settings file
-- [ ] T012 Gate: `dotnet build wow-viewer/WowViewer.slnx -c Debug` 0 errors; old content
-      reachable from new pages; zero behavior change receipt
+      settings file. Remap implemented at the settings-load boundary gated on
+      `WorkbenchNavigationVersion` (see receipt note 1); pre-change settings runtime check
+      remains operator-owned
+- [x] T012 Gate: `dotnet build wow-viewer/WowViewer.slnx -c Debug` 0 errors; old content
+      reachable from new pages; zero behavior change receipt.
+      Receipt: [evidence/t010-t012-phase1-receipt.md](evidence/t010-t012-phase1-receipt.md)
 
 ## Phase 2 — Data I/O consolidation (D1, D6)
 

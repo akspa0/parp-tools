@@ -144,9 +144,12 @@ public static class WorkbenchNavigator
     public static string[] GetArchaeologyWorkbenchLabels() =>
         ["Weak Signal & Stratigraphy", "UniqueId Timeline", "Layers & Provenance", "Playback & Capture", "PM4 Analysis", "Cartography"];
 
-    /// <summary>Labels for <see cref="WorkbenchTab.Editor"/> destination.</summary>
+    /// <summary>
+    /// Labels for <see cref="WorkbenchTab.Editor"/> destination (Spec 231 4-page IA).
+    /// Order must match <see cref="Pages.EditorWorkbenchPages.Draw(int)"/>.
+    /// </summary>
     public static string[] GetEditorWorkbenchLabels() =>
-        ["Tasks & Workspace", "Converters", "3D Object Library", "Imports & Exports", "Terrain Lab", "Population"];
+        ["Placement & Objects", "Terrain Tools", "Data I/O", "Converters"];
 
     /// <summary>Labels for <see cref="UtilitiesBottomTab"/>; order must match the enum.</summary>
     public static string[] GetUtilitiesBottomTabLabels() =>

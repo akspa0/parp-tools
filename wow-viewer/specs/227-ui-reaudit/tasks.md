@@ -3,6 +3,14 @@
 **Input**: [spec.md](spec.md), [plan.md](plan.md), [research.md](research.md),
 [data-model.md](data-model.md), [quickstart.md](quickstart.md)
 
+> **Supersession note (2026-09-07)**: The "sane Editor tabs" item (Phase 3 duplicate-family
+> scope, Editor-tab dedupe) is superseded by
+> [Spec 231 — Editor & Archaeology Workspace UI Overhaul](../231-editor-archaeology-ui-overhaul/spec.md),
+> which owns the 4-page Editor IA (Placement & Objects / Terrain Tools / Data I/O / Converters),
+> Archaeology de-hosting, and dedupe moves D1–D6. Spec 231 Phase 0 folds this item's baseline
+> work into its inventory v3. The remaining Spec 227 items (sidebar standardization, weak-signal,
+> minimap, Inspector dedupe) stay owned here.
+
 **Governing rule**: a checked task must link a receipt that names changed files, commands and exit
 status, and criterion-to-evidence mapping. Build/test output does not close visual, input, or
 teleport behavior. No source consolidation is authorized until the corresponding inventory v2 row

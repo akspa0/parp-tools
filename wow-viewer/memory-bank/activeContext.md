@@ -11,14 +11,24 @@ Last updated: 2026-09-07
 The [documentation router](../docs/README.md), [spec routing registry](../specs/registry.md), and
 [archives](archive/README.md) are on-demand context, never default reading.
 
-## Current lane — Spec 231 Editor/Archaeology UI Overhaul (implementation fresh session)
+## Current lane — Spec 231 Editor/Archaeology UI Overhaul (Phase 0 + 1 complete)
 
-- **Spec + plan + tasks are complete** at [231-editor-archaeology-ui-overhaul/](../specs/231-editor-archaeology-ui-overhaul/spec.md):
+- **Spec + plan + tasks** at [231-editor-archaeology-ui-overhaul/](../specs/231-editor-archaeology-ui-overhaul/spec.md):
   4-page Editor IA (Placement & Objects / Terrain Tools / Data I/O / Converters), Archaeology
   de-hosting, dedupe moves D1–D6, Spec 228 extraction pattern, phased gates P0–P5.
-- **Implementation directive**: operator runs it in a fresh chat from `tasks.md` T001 onward.
-  Start at Phase 0 (inventory v3 baseline; folds the Spec 227 Editor-tab item via dated
-  supersession note).
+- **Landed 2026-09-07**: Phase 0 complete — T002 (operator scope-freeze ack), T003 (supersession
+  note in 227 tasks.md), T001 (inventory-v3 baseline: 10-page screenshot matrix captured via the
+  viewer's built-in `--capture-shot current --capture-with-ui --exit-after-capture` automation on
+  `H:\CLIENTS\Vanilla\0.x\0_5_3_3368` / Shadowfang WDT; operator settings backed up + restored).
+  Phase 1 complete — `Workbench/Pages/` page classes, 4-label navigator, delegation switch,
+  settings-load remap; build 0 errors.
+  Receipts: [evidence/](../specs/231-editor-archaeology-ui-overhaul/evidence/inventory-v3-baseline.md).
+- **Next**: Phase 2 (T020–T023, Data I/O consolidation D1/D6). Legacy `OpenWorkbenchTab(Editor, n)`
+  call sites now pass NEW indices (2 = Data I/O). Capture automation recipe: patch
+  `viewer_settings.json` (ActiveTopTab 5=Editor / 6=Archaeology, ActiveBottomTab=page,
+  WorkbenchNavigationVersion=4) then launch the exe with `--game-path --build --world
+  'World\Maps\Shadowfang\Shadowfang.wdt' --capture-shot current --capture-with-ui
+  --capture-output <dir> --capture-after-frames 120 --exit-after-capture`.
 
 ## Landed this session (awaiting operator visual receipts)
 

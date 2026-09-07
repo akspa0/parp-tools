@@ -48,7 +48,7 @@ namespace WoWViewer;
 /// Main viewer application. Owns window, GL context, ImGui, camera, renderer.
 /// Provides menu bar, file browser, model info panel, and 3D viewport.
 /// </summary>
-public partial class ViewerApp : IDisposable
+public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost
 {
     private enum Pm4WorkbenchTab
     {
@@ -257,7 +257,7 @@ public partial class ViewerApp : IDisposable
     private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private const int CurrentShellPanelLayoutVersion = 4;
-    private const int CurrentWorkbenchNavigationVersion = 3;
+    private const int CurrentWorkbenchNavigationVersion = 4;
     private const int MinimapTeleportConfirmClicks = 3;
 
     // File browser state
@@ -16006,12 +16006,17 @@ void main() {
             _archeologyApplyToNextCapture = settings.ArcheologyApplyToNextCapture;
             _archeologyApplyToVideoRecording = settings.ArcheologyApplyToVideoRecording;
             _useTabUi = settings.UseTabUi;
-            if (settings.WorkbenchNavigationVersion >= CurrentWorkbenchNavigationVersion
-                && Enum.IsDefined(typeof(WorkbenchTab), settings.ActiveTopTab))
+            if (Enum.IsDefined(typeof(WorkbenchTab), settings.ActiveTopTab))
                 _activeTopTab = (WorkbenchTab)settings.ActiveTopTab;
             else
                 _activeTopTab = WorkbenchTab.Quick;
             _activeBottomTabIndex = Math.Max(0, settings.ActiveBottomTab);
+            if (_activeTopTab == WorkbenchTab.Editor
+                && settings.WorkbenchNavigationVersion < CurrentWorkbenchNavigationVersion)
+            {
+                // Spec 231: pre-231 Editor page indices remap onto the 4-page IA.
+                _activeBottomTabIndex = Workbench.Pages.EditorWorkbenchPages.MigrateLegacyEditorPageIndex(_activeBottomTabIndex);
+            }
             _activeUtilitiesTabIndex = _activeTopTab == WorkbenchTab.Utilities
                 ? _activeBottomTabIndex
                 : 0;
