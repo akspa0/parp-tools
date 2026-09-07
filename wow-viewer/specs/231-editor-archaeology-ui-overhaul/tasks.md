@@ -55,26 +55,33 @@ directive, 2026-09-07).
 
 ## Phase 3 — Placement & Objects (D2, D4, D5a)
 
-- [ ] T030 Diff the two PM4/WMO correlation panels (Sidebars ~801–901 vs Pm4Utilities
-      ~1863–2007); fold unique behavior into the survivor
-- [ ] T031 Consolidate transform/match/reconcile/collection/graph tools + surviving correlation
-      panel into `EditorPlacementObjectsPage`; delete both original correlation panels and the
-      5 duplicate button clusters' transform siblings
-- [ ] T032 Doodad-set: object page owns the full combo; toolbar keeps the hovered-WMO quick
-      combo (FR-6); delete the other two combos
-- [ ] T033 Gate: SC-1 receipts D2/D4; SC-5 proof that the duplicated correlation code block is
-      gone; build/test clean
+- [x] T030 Diff the two PM4/WMO correlation panels; fold unique behavior into the survivor.
+      Workbench copy was a strict subset of `DrawPm4WmoCorrelationContent` (no unique behavior;
+      shared state fields) — survivor kept
+- [x] T031 Consolidate transform/match/reconcile/collection/graph tools + surviving correlation
+      panel into `EditorPlacementObjectsPage` (new collapsed "PM4 Placement Tools" section);
+      delete the original workbench correlation panel (149 lines). The PM4 tab Correlation page
+      is the surviving full panel. Tasks-panel-internal terrain blocks still to relocate (see
+      receipt "Known remaining work" 1)
+- [x] T032 Doodad-set: object page owns the full combo; toolbar keeps the hovered-WMO quick
+      combo (FR-6); delete the other two combos (Model Info + Actions copies deleted)
+- [x] T033 Gate: SC-1 receipts D2/D4; SC-5 proof that the duplicated correlation code block is
+      gone; build/test clean. Receipt:
+      [evidence/t030-t043-phase3-4-receipt.md](evidence/t030-t043-phase3-4-receipt.md)
 
 ## Phase 4 — Terrain Tools, Converters, Archaeology de-hosting (D3, D5b)
 
-- [ ] T040 Terrain Tools page: template brushes, single "Clipboard + Save" copy (delete both
-      originals), stratigraphy/weak-signal editing entries, terrain lab
+- [x] T040 Terrain Tools page: single "Clipboard + Save" copy (both dead duplicate hosts
+      deleted — `DrawTerrainToolsWindow` was unreachable, `DrawTerrainToolsSubTab` had no
+      callers); terrain lab + stratigraphy/weak-signal entries already routed
 - [ ] T041 Converters page: map/WMO/M2-MDX converters, ADT utilities, round-trip validation,
-      Spec 221 harness
-- [ ] T042 Remove Archaeology editor hosting: delete `DrawArchaeologyEditorTasksSubTab` /
-      `DrawArchaeologyEditorImportsSubTab` routing; Archaeology = analysis pages only
-- [ ] T043 Gate: SC-1 receipts D3/D5; build/test clean; `ViewerApp_Sidebars.cs` and
-      `ViewerApp_Pm4Utilities.cs` line counts recorded (must shrink)
+      Spec 221 harness (converter content routed in Phase 1; Spec 221 harness surfaces unverified)
+- [x] T042 Remove Archaeology editor hosting: the dead `DrawArchaeologyEditorContent`
+      dispatcher and `_archaeologyEditorSubTab` field deleted (0 references remain); Archaeology
+      = analysis pages only. Content method renames deferred
+- [x] T043 Gate: SC-1 receipts D3/D5; build clean (0 errors); line counts recorded —
+      `ViewerApp_Sidebars.cs` 6,173 → 6,013; `ViewerApp_Pm4Utilities.cs` 4,451 → 4,368.
+      Receipt: [evidence/t030-t043-phase3-4-receipt.md](evidence/t030-t043-phase3-4-receipt.md)
 
 ## Phase 5 — Navigation test, inventory, closure
 

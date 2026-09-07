@@ -93,6 +93,7 @@ public partial class ViewerApp
     void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => DrawArchaeologyEditorImportsSubTab();
     void Workbench.Pages.IEditorPageHost.DrawConverters() => DrawConvertersSubTabContent();
     void Workbench.Pages.IEditorPageHost.DrawPm4Exports() => DrawPm4ExportCommandSet();
+    void Workbench.Pages.IEditorPageHost.DrawPm4Workbench() => DrawPm4WorkbenchInspector();
 
     private void EnsureEditorHost()
     {
@@ -1313,52 +1314,6 @@ public partial class ViewerApp
         ViewerLog.Info(ViewerLog.Category.General, $"[Chunk Manipulator] {plugin.Status}");
     }
 
-    private int _archaeologyEditorSubTab = 0;
-
-    /// <summary>
-    /// Editor workbench destination under Archaeology (Spec 223-T301 / US4).
-    /// Integrates editor task navigation, inspectors, converters, ML dataset & training,
-    /// and terrain/model import & export into the unified Archaeology profile.
-    /// </summary>
-    private void DrawArchaeologyEditorContent()
-    {
-        EnsureEditorHost();
-
-        string[] subTabs = Workbench.WorkbenchNavigator.GetEditorWorkbenchLabels();
-        for (int i = 0; i < subTabs.Length; i++)
-        {
-            if (i > 0)
-                ImGui.SameLine();
-
-            bool isSelected = _archaeologyEditorSubTab == i;
-            if (isSelected)
-                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.26f, 0.59f, 0.98f, 0.8f));
-
-            if (ImGui.Button(subTabs[i]))
-                _archaeologyEditorSubTab = i;
-
-            if (isSelected)
-                ImGui.PopStyleColor();
-        }
-
-        ImGui.Separator();
-
-        switch (Math.Clamp(_archaeologyEditorSubTab, 0, Workbench.Pages.EditorWorkbenchPages.PageCount - 1))
-        {
-            case 0: // Placement & Objects
-                DrawArchaeologyEditorTasksSubTab();
-                break;
-            case 1: // Terrain Tools
-                DrawTerrainLabSubTab();
-                break;
-            case 2: // Data I/O
-                DrawArchaeologyEditorImportsSubTab();
-                break;
-            case 3: // Converters
-                DrawConvertersSubTabContent();
-                break;
-        }
-    }
 
     private void DrawArchaeologyEditorTasksSubTab()
     {

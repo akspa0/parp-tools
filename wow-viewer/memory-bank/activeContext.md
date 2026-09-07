@@ -11,7 +11,7 @@ Last updated: 2026-09-07
 The [documentation router](../docs/README.md), [spec routing registry](../specs/registry.md), and
 [archives](archive/README.md) are on-demand context, never default reading.
 
-## Current lane — Spec 231 Editor/Archaeology UI Overhaul (Phase 0–2 complete)
+## Current lane — Spec 231 Editor/Archaeology UI Overhaul (Phase 0–4 complete, T041 open)
 
 - **Spec + plan + tasks** at [231-editor-archaeology-ui-overhaul/](../specs/231-editor-archaeology-ui-overhaul/spec.md):
   4-page Editor IA (Placement & Objects / Terrain Tools / Data I/O / Converters), Archaeology
@@ -23,15 +23,21 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
   Phase 1 complete — `Workbench/Pages/` page classes, 4-label navigator, delegation switch,
   settings-load remap; build 0 errors.
   Receipts: [evidence/](../specs/231-editor-archaeology-ui-overhaul/evidence/inventory-v3-baseline.md).
-- **Phase 2 landed 2026-09-07** (commit after ee223e78): D1 — `DrawPm4ExportCommandSet` is the
-  single draw site for the 5 PM4 export commands; 6 "Open Data I/O" links replace the duplicate
-  clusters; collapsed "PM4 Exports" section on the Data I/O page. D6 — PM4 objects-JSON and
-  PM4/WMO correlation-JSON dumps backgrounded with `_pm4JsonExportRunning` guard. Build 0 errors;
-  11 dotnet test failures are pre-existing Core/PM4-corpus failures (test projects do not
-  reference the changed viewer UI project). Receipt:
-  [evidence/t020-t023-phase2-receipt.md](../specs/231-editor-archaeology-ui-overhaul/evidence/t020-t023-phase2-receipt.md).
-- **Next**: Phase 3 (T030–T033, Placement & Objects: D2 correlation-panel diff + dedupe, D4
-  doodad-set combos, D5a). `ViewerApp_Pm4Utilities.cs` at 4,516 lines (shrink lands in P3/P4).
+- **Phase 2 landed 2026-09-07** (86394fb6): D1 single export draw site + "Open Data I/O" links;
+  D6 backgrounded JSON dumps. Receipt: [evidence/t020-t023-phase2-receipt.md](../specs/231-editor-archaeology-ui-overhaul/evidence/t020-t023-phase2-receipt.md).
+- **Phases 3+4 landed 2026-09-07** (operator pushed on visible mess): D2 — workbench correlation
+  subset deleted (149 lines), both routes draw the canonical correlation page; D4 — doodad-set
+  combos down to toolbar quick combo + Selected WMO Controls; D3 — both dead duplicate
+  Clipboard+Save hosts deleted (floating Terrain Workbench was unreachable); D5 — dead Archaeology
+  editor dispatcher deleted (0 refs). Placement & Objects page de-cluttered (Tasks open; PM4
+  Placement Tools / Library / Population collapsed). **Operator-directed**: PM4 Glossary rewritten
+  to the 2026-08-24 measured truths (0x18 = MSLK window, CK24 = placement-Z float, MSHD spans).
+  Sidebars 6,173→6,013; Pm4Utilities 4,451→4,368. Receipt:
+  [evidence/t030-t043-phase3-4-receipt.md](../specs/231-editor-archaeology-ui-overhaul/evidence/t030-t043-phase3-4-receipt.md).
+- **Open**: T041 (Spec 221 harness surfaces on Converters page); Tasks-panel interior still embeds
+  Chunk Clipboard + Terrain Import/Export blocks → relocate to Terrain Tools / Data I/O (next
+  visible de-clutter); Phase 5 (operator navigation smoke, inventory v3 final).
+- **Commit**: Phase 3+4 = the commit after 86394fb6.
   Capture automation recipe: patch `viewer_settings.json` (ActiveTopTab 5=Editor /
   6=Archaeology, ActiveBottomTab=page, WorkbenchNavigationVersion=4) then launch the exe with
   `--game-path --build --world 'World\Maps\Shadowfang\Shadowfang.wdt' --capture-shot current

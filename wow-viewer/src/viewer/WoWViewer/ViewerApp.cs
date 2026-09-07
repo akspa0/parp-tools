@@ -809,7 +809,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost
     private int _selectedPm4WmoCorrelationMatchIndex;
     private bool _pm4WmoCorrelationNearOnly = true;
     private string _pm4WmoCorrelationModelFilter = string.Empty;
-    private bool _showTerrainToolsWindow;
     private bool _showCaptureAutomationWindow = false;
     private bool _showCameraPathWindow;
     private bool _showUniqueIdArchaeologyWindow;
@@ -1882,9 +1881,6 @@ void main() {
                 if (_showPerfWindow && !_useTabUi)
                     DrawPerfWindow();
 
-                // Terrain Tools (floating window) - available in both modes; tabbed mode also has Terrain > Tools sub-tab
-                if (_showTerrainToolsWindow && (_terrainManager != null || _vlmTerrainManager != null))
-                    DrawTerrainToolsWindow();
 
                 if (_showCaptureAutomationWindow)
                     DrawCaptureAutomationWindow();

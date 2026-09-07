@@ -69,7 +69,9 @@ public partial class ViewerApp
         bool correlationTabOpen = true;
         if (ImGui.BeginTabItem("Correlation", ref correlationTabOpen, correlationFlags))
         {
-            DrawPm4CorrelationInspectorContent();
+            // Spec 231 D2: the workbench correlation copy was a strict subset of the
+            // canonical correlation page; both now draw the single survivor.
+            DrawPm4WmoCorrelationContent();
             ImGui.EndTabItem();
         }
 
@@ -82,22 +84,21 @@ public partial class ViewerApp
         if (!ImGui.CollapsingHeader("PM4 Glossary / Evidence"))
             return;
 
-        ImGui.TextWrapped("The PM4 file carries six interconnected streams that together describe a coarse, type-classified summary of the WMO/M2 walkable + structural topology. The cyan (MSCN) and magenta (MSPV) cubes you can toggle below are the visible projection of this data. See wow-viewer/docs/architecture/pm4-chunk-semantics.md for the full reading.");
-        ImGui.BulletText("MSUR — one polygon-fan surface record. IndexCount (>=3 = real polygon), Height (signed plane-distance term, not a Y-up height), MscnRefIndex (indexes MSCN), GroupKey/AttributeMask (local aliases, semantics open).");
-        ImGui.BulletText("MSCN — scene-graph connector anchors. One 3D point per entry. Referenced by MSUR.MscnRefIndex. Used by the client as a placement/connector anchor for that surface. Visible as the cyan cubes.");
-        ImGui.BulletText("MSLK — a link record. Says: 'surface at RefIndex connects to path-vertex chain MSPI[link.MspiFirstIndex..link.MspiFirstIndex+link.MspiIndexCount], and the connection has TypeFlags in {0x03 walkable M2-top, 0x10 walkable interior floor, 0x12 structural exterior solid}.' Subtype and SystemFlag semantics still open.");
-        ImGui.BulletText("MSPV — path-vertex positions. Reached via MSPI[indices] from MSLK. The 3D positions the client uses to draw the actual connection between two surfaces (wall-floor corner, roof ridge, buttress line). Visible as the magenta cubes. Only present when surfaces are connected.");
-        ImGui.BulletText("MSVI / MSVT — mesh-index stream into mesh vertex positions. The actual 3D positions of every vertex of every polygon the PM4 file describes. Walked as MSUR.MsviFirstIndex..MsviFirstIndex+IndexCount -> MSVI -> MSVT.");
-        ImGui.BulletText("MPRL — per-tile position reference. A 3D position + heading. Used by the client for spawn anchors. Linked from MSLK.RefIndex when the link is an MPRL reference (not all are).");
-        ImGui.Separator();
-        ImGui.BulletText("MSHD region: promoted from MSHD.Field04. Current research says it behaves like a reusable scene/group bucket across tiles, useful for grouping/coloring but not a packed tile coordinate or proven placement semantic.");
-        ImGui.BulletText("CK24: viewer alias for the packed MSUR field at 0x1C. Type = high byte, ObjId = low 16 bits.");
-        ImGui.BulletText("part / ObjectPartId: viewer-generated split id. WoWViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional MscnRef split, then optional connectivity split. It is not a raw PM4 field.");
+        ImGui.TextWrapped("PM4/PD4 are server-side navigation-mesh files (no renderable geometry): walkable surfaces, their adjacency, and what blocks movement. The cyan (MSCN) and magenta (MSPV) cubes you can toggle below are the visible projection of this data. Authoritative readings: docs/architecture/pm4-chunk-semantics.md (2026-06-09) and docs/wowdev-wiki/pm4-pd4-draft.md (2026-08-24, measured).");
+        ImGui.BulletText("MSUR — 32-byte surface record; a polygon fan over MSVI[0x14 .. 0x14+vertex count at 0x01]. 0x04 = normal; 0x10 = plane distance (NOT a Y-up height); 0x18 = start of the surface's MSLK adjacency window (length at 0x02) — measured 100.0000% against MSLK; the old 'indexes MSCN' reading is eliminated; 0x1C = IEEE float, see CK24 below.");
+        ImGui.BulletText("MSLK — the undirected surface-adjacency graph of the navmesh (98.76% reciprocity). RefIndex names a NEIGHBOURING surface, not the owner. ~47% of links carry an MSPI/MSPV vertical wall quad; the rest are open passage. Viewer TypeFlags: 0x03 = M2 top (walkable), 0x10 = interior floor (walkable), 0x12 = exterior solid (structural wall).");
+        ImGui.BulletText("MSCN — 3D connector/boundary node positions in the world frame (NOT normals, NOT per-surface indexed from MSUR). Objects share nodes (64.4%): node reuse is where objects meet. No in-file index consumer is known; the consumer is likely external. Visible as the cyan cubes.");
+        ImGui.BulletText("MSPV — wall-quad vertices on the blocked subset of MSLK links (0 of 598,790 path windows are Z-dominant = walls; MSUR normals are 91.7% Z-dominant = floors). Visible as the magenta cubes.");
+        ImGui.BulletText("MSVI / MSVT — mesh-index stream into mesh vertex positions: the actual 3D positions of every vertex of every polygon. Walked as MSUR.MsviFirstIndex..MsviFirstIndex+IndexCount -> MSVI -> MSVT. Polygon sizes are not triangles (77% quads in the measured corpus).");
+        ImGui.BulletText("MPRL — per-tile position reference: a 3D position + heading, used for spawn anchors. MPRL is the only permuted-axis chunk in the file.");
+        ImGui.BulletText("MSHD — 32-byte file header. 0x00/0x08 = clamped world-unit spans on the two axes (not counts); 0x04 == 1 marks a tile with no surfaces; 0x0C-0x1C are zero in all 502 measured files (reserved). The viewer's 'MSHD Region' grouping value (Field04) is a tile-level hint only — not a proven per-object grouping semantic.");
+        ImGui.BulletText("CK24: legacy viewer alias for MSUR field 0x1C. MEASURED 2026-08: it is an IEEE-754 float holding the Z coordinate of the ADT placement that produced the object (93.58% bit-exact vs MODF/MDDF). The old 'type' byte is the float's exponent band (why a tile shows only ~4 'types'); grouping by it collides for objects at equal height. 0x1C == 0.0f is the unattributed bucket (vertically stretched geometry), not an object id.");
+        ImGui.BulletText("part / ObjectPartId: viewer-generated split id. WoWViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional split, then optional connectivity split. It is not a raw PM4 field.");
         ImGui.BulletText("MSLK Group: dominant MSLK.GroupObjectId seen in the current viewer object. Strong grouping hint, not final proof of identity.");
         ImGui.BulletText("Linked MPRL refs: position-reference rows attached to the current viewer object or its dominant link family. Used as placement evidence.");
-        ImGui.BulletText("Group / Attr / MscnRef: dominant MSUR values across the currently selected viewer object. Useful for debugging, not guaranteed unique or authoritative.");
-        ImGui.BulletText("PM4 Graph: the viewer's current decomposition of the selected object, not a literal raw node graph stored in PM4.");
-        ImGui.BulletText("Match uid: nearby MODF/MDDF placement candidate id. It is not a PM4-native object id.");
+        ImGui.BulletText("Group / Attr / MscnRef: dominant MSUR values across the selected viewer object. NOTE: 'MscnRef' is a legacy alias for MSUR.0x18, now measured to be the surface's MSLK adjacency window start — not an MSCN index. Debugging aid, not authoritative.");
+        ImGui.BulletText("PM4 Graph: the viewer's current decomposition of the selected object, not a literal raw node graph stored in PM4. MSLK is an adjacency graph of surfaces, not a graph of 'navmesh nodes'.");
+        ImGui.BulletText("Match uid: nearby MODF/MDDF placement candidate id. It is not a PM4-native object id. Per-object placement is (placement.X, placement.Y, MSUR.0x1C): X/Y come from the joined MODF/MDDF record, 0x1C is the authored Z and the join key.");
         ImGui.BulletText("cyan:magenta ratio: per-object topology fingerprint. ~0 magenta = disjoint decoration (no MSLK links between surfaces). ~1:1 = connected WMO. >1:1 = contiguous M2 with a dense connection graph. Used by the spec 050/052 matcher as a pre-filter.");
     }
 
@@ -747,155 +748,6 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawPm4CorrelationInspectorContent()
-    {
-        if (_worldScene == null)
-            return;
-
-        EnsurePm4WmoCorrelationReportLoaded();
-
-        int requestedMatches = _pm4WmoCorrelationMaxMatchesPerPlacement;
-        ImGui.SetNextItemWidth(90f);
-        if (ImGui.InputInt("Max Matches", ref requestedMatches))
-        {
-            _pm4WmoCorrelationMaxMatchesPerPlacement = Math.Clamp(requestedMatches, 1, 32);
-            RefreshPm4WmoCorrelationReport();
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Refresh"))
-            RefreshPm4WmoCorrelationReport();
-
-        ImGui.SameLine();
-        if (ImGui.Button("Dump JSON"))
-            ExportPm4WmoCorrelationJson();
-
-        ImGui.SameLine();
-        if (ImGui.Checkbox("Only Near", ref _pm4WmoCorrelationNearOnly))
-        {
-            if (_selectedPm4WmoCorrelationPlacementIndex >= 0)
-                _selectedPm4WmoCorrelationMatchIndex = 0;
-        }
-
-        ImGui.SetNextItemWidth(-1f);
-        ImGui.InputTextWithHint("##Pm4WmoCorrelationFilterWorkbench", "Filter model name or path", ref _pm4WmoCorrelationModelFilter, 256);
-
-        if (_pm4WmoCorrelationReport == null)
-        {
-            ImGui.TextDisabled("No PM4/WMO correlation report is loaded.");
-            return;
-        }
-
-        Pm4WmoCorrelationReport report = _pm4WmoCorrelationReport;
-        ImGui.TextDisabled($"Generated {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss} UTC | placements {report.Summary.WmoPlacementCount}, resolved WMO meshes {report.Summary.WmoMeshResolvedCount}, PM4 objects {report.Summary.Pm4ObjectCount}");
-        ImGui.TextDisabled($"Candidates {report.Summary.PlacementsWithCandidates}/{report.Summary.WmoPlacementCount}, near {report.Summary.PlacementsWithNearCandidates}, PM4 status: {report.Pm4Status}");
-
-        string filter = _pm4WmoCorrelationModelFilter.Trim();
-        var filteredPlacements = report.Placements
-            .Select((placement, index) => new { placement, index })
-            .Where(entry => !_pm4WmoCorrelationNearOnly || entry.placement.Pm4NearCandidateCount > 0)
-            .Where(entry => string.IsNullOrWhiteSpace(filter)
-                || entry.placement.ModelName.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                || entry.placement.ModelPath.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                || entry.placement.ModelKey.Contains(filter, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(entry => entry.placement.Pm4Matches.Count > 0 ? entry.placement.Pm4Matches[0].FootprintOverlapRatio : 0f)
-            .ThenBy(entry => entry.placement.ModelName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (filteredPlacements.Count == 0)
-        {
-            ImGui.TextDisabled("No placements matched the current filter.");
-            return;
-        }
-
-        if (!filteredPlacements.Any(entry => entry.index == _selectedPm4WmoCorrelationPlacementIndex))
-        {
-            _selectedPm4WmoCorrelationPlacementIndex = filteredPlacements[0].index;
-            _selectedPm4WmoCorrelationMatchIndex = 0;
-        }
-
-        float leftWidth = MathF.Min(360f, ImGui.GetContentRegionAvail().X * 0.44f);
-        if (ImGui.BeginChild("##Pm4WmoPlacementListWorkbench", new Vector2(leftWidth, 360f), true))
-        {
-            for (int i = 0; i < filteredPlacements.Count; i++)
-            {
-                var entry = filteredPlacements[i];
-                Pm4WmoCorrelationPlacement placement = entry.placement;
-                bool selected = entry.index == _selectedPm4WmoCorrelationPlacementIndex;
-                string label = $"[{placement.TileX},{placement.TileY}] {placement.ModelName}##Pm4WmoPlacementWorkbench{entry.index}";
-                if (ImGui.Selectable(label, selected))
-                {
-                    _selectedPm4WmoCorrelationPlacementIndex = entry.index;
-                    _selectedPm4WmoCorrelationMatchIndex = 0;
-                }
-
-                if (placement.Pm4Matches.Count > 0)
-                {
-                    Pm4WmoCorrelationMatch best = placement.Pm4Matches[0];
-                    ImGui.TextDisabled($"best CK24=0x{best.Ck24:X6} part={best.ObjectPartId} overlap={best.FootprintOverlapRatio:F2} dist={best.FootprintDistance:F1}");
-                }
-                else
-                {
-                    ImGui.TextDisabled("No PM4 candidates in the current tile neighborhood.");
-                }
-
-                ImGui.Separator();
-            }
-        }
-        ImGui.EndChild();
-
-        ImGui.SameLine();
-
-        if (ImGui.BeginChild("##Pm4WmoPlacementDetailsWorkbench", Vector2.Zero, true))
-        {
-            Pm4WmoCorrelationPlacement placement = report.Placements[_selectedPm4WmoCorrelationPlacementIndex];
-            ImGui.TextWrapped($"{placement.ModelName} (tile {placement.TileX},{placement.TileY}, uid {placement.UniqueId})");
-            ImGui.TextDisabled(placement.ModelPath);
-
-            if (placement.Pm4Matches.Count > 0)
-            {
-                Pm4WmoCorrelationMatch selectedMatch = placement.Pm4Matches[Math.Clamp(_selectedPm4WmoCorrelationMatchIndex, 0, placement.Pm4Matches.Count - 1)];
-
-                if (ImGui.Button("Select PM4"))
-                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: false);
-
-                ImGui.SameLine();
-                if (ImGui.Button("Frame PM4"))
-                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: true);
-
-                ImGui.SameLine();
-                if (ImGui.Button("Frame Pair"))
-                {
-                    Vector3 boundsMin = Vector3.Min(placement.WorldBoundsMin, selectedMatch.BoundsMin);
-                    Vector3 boundsMax = Vector3.Max(placement.WorldBoundsMax, selectedMatch.BoundsMax);
-                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: false);
-                    FocusCameraOnBounds(boundsMin, boundsMax);
-                }
-            }
-
-            ImGui.Separator();
-            ImGui.TextDisabled($"Placement pos: ({placement.PlacementPosition.X:F2}, {placement.PlacementPosition.Y:F2}, {placement.PlacementPosition.Z:F2})");
-            ImGui.TextDisabled($"World bounds min: ({placement.WorldBoundsMin.X:F2}, {placement.WorldBoundsMin.Y:F2}, {placement.WorldBoundsMin.Z:F2})");
-            ImGui.TextDisabled($"World bounds max: ({placement.WorldBoundsMax.X:F2}, {placement.WorldBoundsMax.Y:F2}, {placement.WorldBoundsMax.Z:F2})");
-
-            ImGui.Separator();
-            ImGui.Text($"PM4 matches ({placement.Pm4Matches.Count}/{placement.Pm4CandidateCount} shown, near={placement.Pm4NearCandidateCount})");
-
-            for (int matchIndex = 0; matchIndex < placement.Pm4Matches.Count; matchIndex++)
-            {
-                Pm4WmoCorrelationMatch match = placement.Pm4Matches[matchIndex];
-                bool selected = matchIndex == _selectedPm4WmoCorrelationMatchIndex;
-                string label = $"CK24 0x{match.Ck24:X6} part {match.ObjectPartId}##Pm4WmoMatchWorkbench{matchIndex}";
-                if (ImGui.Selectable(label, selected))
-                    _selectedPm4WmoCorrelationMatchIndex = matchIndex;
-
-                ImGui.TextDisabled($"footprint overlap={match.FootprintOverlapRatio:F3} area={match.FootprintAreaRatio:F3} dist={match.FootprintDistance:F2}");
-                ImGui.TextDisabled($"planar gap={match.PlanarGap:F2} vertical gap={match.VerticalGap:F2} center={match.CenterDistance:F2}");
-                ImGui.Separator();
-            }
-        }
-        ImGui.EndChild();
-    }
 
     private void DrawPerfWindow()
     {

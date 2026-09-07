@@ -1821,68 +1821,6 @@ public partial class ViewerApp
         ImGui.TextDisabled("Open terrain editor windows from the Tools menu.");
     }
 
-    private void DrawTerrainToolsWindow()
-    {
-        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (renderer == null)
-        {
-            _showTerrainToolsWindow = false;
-            return;
-        }
-
-        ImGui.SetNextWindowSize(new Vector2(560f, 0f), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Terrain Workbench", ref _showTerrainToolsWindow, ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.End();
-            return;
-        }
-
-        ImGui.TextDisabled("Terrain workbench: tile targeting, chunk targeting, live restore tuning, and reusable heightmap saves in one place.");
-        ImGui.Separator();
-        DrawTerrainWorkbenchSelectionContent(renderer);
-        ImGui.Separator();
-        DrawTerrainControlsAdjustmentContent();
-
-        ImGui.Separator();
-        ImGui.Text("Terrain Export Scope");
-        DrawTerrainTileScopeSelector("TerrainToolsExport", includeCurrentTile: true);
-        var scopedTiles = GetTileScopeList(_terrainTileScope);
-        ImGui.TextDisabled($"Resolved export scope: {scopedTiles.Count} tile(s).");
-
-        ImGui.Separator();
-        ImGui.Text("Scoped Export");
-        ImGui.TextDisabled("Use Current tile, Loaded tiles, Whole map, Custom list, or a row/column rectangle before exporting partial ADT data.");
-        if (ImGui.Button("Export Alpha"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportAlphaCurrentTileChunksFolder();
-            else
-                ExportAlphaTilesFolder(_terrainTileScope);
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export Heightmap"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportHeightmap257CurrentTilePerTile();
-            else
-                ExportHeightmap257TilesFolderPerTile(_terrainTileScope);
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export MCCV"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportMccvCurrentTilePng();
-            else
-                ExportMccvTilesFolder(_terrainTileScope);
-        }
-
-        ImGui.Separator();
-        if (ImGui.CollapsingHeader("Clipboard + Save", ImGuiTreeNodeFlags.DefaultOpen))
-            DrawChunkClipboardContent(renderer);
-        ImGui.End();
-    }
 
     private void DrawTerrainWorkbenchSelectionContent(TerrainRenderer renderer)
     {
@@ -2330,25 +2268,8 @@ public partial class ViewerApp
             });
         }
 
-        if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
-        {
-            ImGui.Separator();
-            ImGui.Text("Doodad Set:");
-            int activeSet = wmoR.ActiveDoodadSet;
-            string currentSetName = wmoR.GetDoodadSetName(activeSet);
-            if (ImGui.BeginCombo("##DoodadSet", currentSetName))
-            {
-                for (int s = 0; s < wmoR.DoodadSetCount; s++)
-                {
-                    bool selected = s == activeSet;
-                    if (ImGui.Selectable(wmoR.GetDoodadSetName(s), selected))
-                        wmoR.SetActiveDoodadSet(s);
-                    if (selected) ImGui.SetItemDefaultFocus();
-                }
-                ImGui.EndCombo();
-            }
-        }
-
+        // Spec 231 D4: the model-info doodad-set combo was removed; the full combo
+        // lives in Selected WMO Controls and the toolbar keeps the hovered-WMO quick combo.
         if (_renderer is WmoRenderer)
         {
             ImGui.Separator();
@@ -5307,25 +5228,8 @@ public partial class ViewerApp
         if (ImGui.Button("Frame Model", new Vector2(120, 0)))
             FrameCurrentModel();
 
-        if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
-        {
-            ImGui.Separator();
-            ImGui.Text("Doodad Set:");
-            int activeSet = wmoR.ActiveDoodadSet;
-            string currentSetName = wmoR.GetDoodadSetName(activeSet);
-            ImGui.SetNextItemWidth(-1);
-            if (ImGui.BeginCombo("##ActionsDoodadSet", currentSetName))
-            {
-                for (int s = 0; s < wmoR.DoodadSetCount; s++)
-                {
-                    bool selected = s == activeSet;
-                    if (ImGui.Selectable(wmoR.GetDoodadSetName(s), selected))
-                        wmoR.SetActiveDoodadSet(s);
-                    if (selected) ImGui.SetItemDefaultFocus();
-                }
-                ImGui.EndCombo();
-            }
-        }
+        // Spec 231 D4: the Actions doodad-set combo was removed; the full combo
+        // lives in Selected WMO Controls and the toolbar keeps the hovered-WMO quick combo.
     }
 
     /// <summary>
@@ -5518,58 +5422,6 @@ public partial class ViewerApp
         DrawWeakSignalContent();
     }
 
-    private void DrawTerrainToolsSubTab(TerrainRenderer? renderer)
-    {
-        if (renderer == null)
-        {
-            ImGui.TextDisabled("Terrain renderer not available for tools.");
-            return;
-        }
-        ImGui.TextDisabled("Terrain workbench: tile targeting, chunk targeting, live restore tuning, and reusable heightmap saves in one place.");
-        ImGui.Separator();
-        DrawTerrainWorkbenchSelectionContent(renderer);
-        ImGui.Separator();
-        DrawTerrainControlsAdjustmentContent();
-
-        ImGui.Separator();
-        ImGui.Text("Terrain Export Scope");
-        DrawTerrainTileScopeSelector("TerrainToolsExport", includeCurrentTile: true);
-        var scopedTiles = GetTileScopeList(_terrainTileScope);
-        ImGui.TextDisabled($"Resolved export scope: {scopedTiles.Count} tile(s).");
-
-        ImGui.Separator();
-        ImGui.Text("Scoped Export");
-        ImGui.TextDisabled("Use Current tile, Loaded tiles, Whole map, Custom list, or a row/column rectangle before exporting partial ADT data.");
-        if (ImGui.Button("Export Alpha"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportAlphaCurrentTileChunksFolder();
-            else
-                ExportAlphaTilesFolder(_terrainTileScope);
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export Heightmap"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportHeightmap257CurrentTilePerTile();
-            else
-                ExportHeightmap257TilesFolderPerTile(_terrainTileScope);
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export MCCV"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportMccvCurrentTilePng();
-            else
-                ExportMccvTilesFolder(_terrainTileScope);
-        }
-
-        ImGui.Separator();
-        if (ImGui.CollapsingHeader("Clipboard + Save", ImGuiTreeNodeFlags.DefaultOpen))
-            DrawChunkClipboardContent(renderer);
-    }
 
     // ── PM4 sub-tab content ────────────────────────────────────────────────
     private void DrawPm4SubTabContent()

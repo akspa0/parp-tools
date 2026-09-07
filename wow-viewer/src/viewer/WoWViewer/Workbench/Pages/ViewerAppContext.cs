@@ -20,6 +20,14 @@ public interface IEditorPageHost
     /// All PM4 panels link here instead of drawing their own export buttons.
     /// </summary>
     void DrawPm4Exports();
+
+    /// <summary>
+    /// Spec 231 T031: the PM4 workbench inspector (overlay/selection/correlation
+    /// tabs — transform, match, reconcile, collection, and graph tools) hosted as
+    /// a Placement & Objects section. The correlation tab draws the single
+    /// surviving correlation page (D2).
+    /// </summary>
+    void DrawPm4Workbench();
 }
 
 /// <summary>
