@@ -34,16 +34,29 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
   to the 2026-08-24 measured truths (0x18 = MSLK window, CK24 = placement-Z float, MSHD spans).
   Sidebars 6,173→6,013; Pm4Utilities 4,451→4,368. Receipt:
   [evidence/t030-t043-phase3-4-receipt.md](../specs/231-editor-archaeology-ui-overhaul/evidence/t030-t043-phase3-4-receipt.md).
+- **Phase 7 landed + fix round 2026-09-07** (12cb1b82 + 4bd50b4d): layer rotation/mirror wired
+  end-to-end — panel controls, ResolveTileSource-driven donor lookup in BOTH adapters,
+  TileContentTransform content rotation, placement pose rotation, composed footprints/minimap.
+  Fix round: TileExists streaming admission routed through the policy (rotated layers previously
+  rendered nothing), 64x64 grid confinement enforced, rotation origin auto-centers on first
+  transform, minimap double-offset removed. **T074 visual gate PASSED** (operator screenshot:
+  DeadminesInstance rotated 90° CW on Azeroth). 157/157 Maps tests.
+  Receipt: [evidence/t070-t074-phase7-layer-rotation-receipt.md](../specs/231-editor-archaeology-ui-overhaul/evidence/t070-t074-phase7-layer-rotation-receipt.md).
+- **Spec 232 created** (operator verbatim directive): Cartography composition — cell-level layer
+  alignment fine-tune, layer-stack project persistence (save/lock/autoload), full-map
+  client-format export (complete ADT sets, not diffs). Registered in STATUS.md weekly order +
+  Reconstruction epic. Implementation in a fresh session.
 - **Phase 6 batch 1 landed 2026-09-07** (fbf600a1): operator amendment recorded verbatim in the
   spec — Data I/O + Quick are the UI model (SharedUiWidgets, no one-offs); non-working/never-wired
   tools get removed; ViewerApp size reduction. Wiring audit removed **27 dead draw methods**
   (entire legacy Model/Experimental/Scene/Terrain/Selection sub-tab family, old minimap, dead
   sidebar summaries) — Sidebars 6,013→5,648, Pm4Utilities 4,368→4,178, ViewerApp 16,750→16,556.
   Receipt: [evidence/p6-wiring-audit.md](../specs/231-editor-archaeology-ui-overhaul/evidence/p6-wiring-audit.md).
-- **Batch 2 pending (T061–T064)**: weak-signal amplifier removal (84 live refs — settings schema +
-  UI), terrain task blocks out of Tasks & Workspace, Quick-panel convergence of remaining pages.
-  Then T041, Phase 5 (operator smoke, inventory v3 final).
-- **Commits**: ee223e78 (P0+P1) → 86394fb6 (P2) → 18a49732 (P3+P4) → fbf600a1 (P6 batch 1).
+- **Open**: Spec 232 (fresh session); Phase 6 batch 2 (T061–T064: weak-signal amplifier removal,
+  terrain task blocks, Quick-panel convergence); 231 T041 (Spec 221 harness surfaces); Phase 5
+  (operator navigation smoke, inventory v3 final).
+- **Commits**: ee223e78 (P0+P1) → 86394fb6 (P2) → 18a49732 (P3+P4) → fbf600a1 (P6 batch 1) →
+  c4abc15e (doodad-set combo fix) → 12cb1b82 (P7 wiring) → 4bd50b4d (P7 fix round).
   Capture automation recipe: patch `viewer_settings.json` (ActiveTopTab 5=Editor /
   6=Archaeology, ActiveBottomTab=page, WorkbenchNavigationVersion=4) then launch the exe with
   `--game-path --build --world 'World\Maps\Shadowfang\Shadowfang.wdt' --capture-shot current

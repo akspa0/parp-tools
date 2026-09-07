@@ -19,6 +19,7 @@ the current owner or registry names a forward pointer; do not infer closure from
 | 5 | [229 WoW Shell + Keybind Profiles](229-wow-shell-keybind-profiles/spec.md) | speckit-plan from 227's per-context action inventory | Plan authored; first contextual keybind profile compiles |
 | 6 | [230 Reconstruction Editor](230-reconstruction-editor/spec.md) | speckit-plan (Rosetta placement, New Map Generator UI, Alpha/LK save targets) | Plan authored |
 | 7 | [223 residual](223-ui-consolidation-audit/tasks.md) | Operator gate retest (fog/overlays/capture) + T609/T610 | Operator acceptance recorded with receipts |
+| 8 | [232 Cartography Composition](232-cartography-composition-project/spec.md) | Cell-level layer alignment, layer-stack project persistence (save/lock/autoload), full-map client-format export | Operator: rotated layer alignment fine-tune works, saved project reloads, exported map loads in client |
 
 ## Standing gates (operator-owned)
 
@@ -34,7 +35,7 @@ the current owner or registry names a forward pointer; do not infer closure from
 See [epics/active-epics.md](epics/active-epics.md) for members, supersessions and next actions:
 
 1. **UI & Approachability** — 231 · 227 · 229 · 225 · 212 · 223 (145/080 superseded into it)
-2. **Reconstruction & Editing** — 230 · 222 · 219 · 220 · 208 · 203 · 196 · 194 · 192 (195 superseded)
+2. **Reconstruction & Editing** — 232 · 230 · 222 · 219 · 220 · 208 · 203 · 196 · 194 · 192 (195 superseded)
 3. **Renderer Performance & Correctness** — 226 · 153 · 152 · 151 · 150 · 204 · 207 · 206 · 202 · 201 · 200 · 199 · 198 · 160
 4. **Formats, Readers & Writers** — 197 · 221 · 220 · 193 · 105 · 205
 5. **World Simulation, Audio & Environment** — 214 · 215 · 216 · 217 · 218 · 148 · 147 · 146 · 144 · 143 · 142

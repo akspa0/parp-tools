@@ -121,10 +121,12 @@ directive, 2026-09-07).
       and cartography match), minimap textures resolve via `ResolveTileSource` with per-kind
       corner-UV rotation, overlap status composes, offset-drag disabled for transformed layers
       with a status hint
-- [ ] T074 Gate: build 0 errors + 157/157 map tests pass
-      ([receipt](evidence/t070-t074-phase7-layer-rotation-receipt.md)); **operator visual gate
-      open** — quarter-turn layer on a real map (terrain + textures + liquid + objects rotate
-      together)
+- [x] T074 Gate: build 0 errors + 157/157 map tests pass
+      ([receipt](evidence/t070-t074-phase7-layer-rotation-receipt.md)). Operator visual pass
+      2026-09-07: DeadminesInstance rendered rotated 90° CW on Azeroth (operator screenshot) —
+      gate passed; the follow-up alignment-precision + persistence + export request spun out to
+      [Spec 232](../232-cartography-composition-project/spec.md) (operator verbatim directive
+      recorded there)
 
 ## Phase 6 — Tools curation & removal pass (operator amendment 2026-09-07)
 
