@@ -381,9 +381,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private ParsedTileSource BuildCellShiftedTile(
         PhaseLayerSettings layer, int tileX, int tileY, int primaryDonorTileX, int primaryDonorTileY)
     {
+        // Spec 232 FR-1 (rigid): the cell fine-tune slides the layer's ALREADY-COMPOSED content
+        // — each composed chunk pulls the rotated content of the supplying target tile, so the
+        // layer moves as a single map object instead of re-picking donor chunks per cell.
         var chunks = new List<TerrainChunkData>(256);
+        var composedCache = new Dictionary<(int, int), IReadOnlyList<TerrainChunkData>>();
         var donorCache = new Dictionary<(int, int), ParsedTileSource>();
-        IReadOnlyList<TileTransformKind> kinds = PhaseCompositionPolicy.ComposeTileTransforms(layer);
         var mddf = new List<MddfPlacement>();
         var modf = new List<ModfPlacement>();
 
@@ -397,23 +400,40 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             for (int chunkX = 0; chunkX < 16; chunkX++)
             {
-                (bool hasSource, int donorTileX, int donorTileY, int donorChunkX, int donorChunkY) =
-                    PhaseCompositionPolicy.ResolveChunkSource(
-                        layer, tileX, tileY, chunkX, chunkY,
-                        (sx, sy) => OverlayTileExists(layer.MapName, sx, sy));
+                (bool hasSource, int supplyTileX, int supplyTileY, int supplyChunkX, int supplyChunkY) =
+                    PhaseCompositionPolicy.ResolveCellShiftedChunk(layer, tileX, tileY, chunkX, chunkY);
                 if (!hasSource)
                     continue;
 
-                if (!donorCache.TryGetValue((donorTileX, donorTileY), out ParsedTileSource? donor))
+                if (!composedCache.TryGetValue((supplyTileX, supplyTileY), out IReadOnlyList<TerrainChunkData>? composed))
                 {
-                    donor = LoadMapTile(layer.MapName, donorTileX, donorTileY);
-                    donorCache[(donorTileX, donorTileY)] = donor;
+                    PhaseTileSource supplySource = PhaseCompositionPolicy.ResolveTileSource(
+                        layer, supplyTileX, supplyTileY, (sx, sy) => OverlayTileExists(layer.MapName, sx, sy));
+                    if (!supplySource.HasSource)
+                    {
+                        composedCache[(supplyTileX, supplyTileY)] = Array.Empty<TerrainChunkData>();
+                        continue;
+                    }
+
+                    ParsedTileSource donor = LoadMapTile(layer.MapName, supplySource.SourceTileX, supplySource.SourceTileY);
+                    donorCache[(supplyTileX, supplyTileY)] = donor;
+                    composed = AlphaTerrainAdapter.AlphaChunkTransform.TransformChunksForTarget(
+                        donor.Result.Chunks, supplySource.Transforms, supplyTileX, supplyTileY);
+                    composedCache[(supplyTileX, supplyTileY)] = composed;
+
+                    // Placements ride with the PRIMARY supply tile only, so streamed neighbor
+                    // tiles cannot duplicate them.
+                    if (supplyTileX == primaryDonorTileX && supplyTileY == primaryDonorTileY)
+                    {
+                        mddf.AddRange(donor.Result.MddfPlacements);
+                        modf.AddRange(donor.Result.ModfPlacements);
+                    }
                 }
 
                 TerrainChunkData? donorChunk = null;
-                foreach (TerrainChunkData candidate in donor.Result.Chunks)
+                foreach (TerrainChunkData candidate in composed)
                 {
-                    if (candidate.ChunkX == donorChunkX && candidate.ChunkY == donorChunkY)
+                    if (candidate.ChunkX == supplyChunkX && candidate.ChunkY == supplyChunkY)
                     {
                         donorChunk = candidate;
                         break;
@@ -422,42 +442,32 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 if (donorChunk == null)
                     continue;
 
-                TerrainChunkData transformed = donorChunk;
-                foreach (TileTransformKind kind in kinds)
-                    transformed = AlphaTerrainAdapter.AlphaChunkTransform.TransformChunk(transformed, kind);
-
                 chunks.Add(new TerrainChunkData
                 {
-                    McinIndex = transformed.McinIndex,
+                    McinIndex = donorChunk.McinIndex,
                     TileX = tileX,
                     TileY = tileY,
                     ChunkX = chunkX,
                     ChunkY = chunkY,
-                    Heights = transformed.Heights,
-                    Normals = transformed.Normals,
-                    HoleMask = transformed.HoleMask,
-                    Layers = transformed.Layers,
-                    AlphaMaps = transformed.AlphaMaps,
-                    ShadowMap = transformed.ShadowMap,
-                    MccvColors = transformed.MccvColors,
-                    Liquid = transformed.Liquid,
+                    Heights = donorChunk.Heights,
+                    Normals = donorChunk.Normals,
+                    HoleMask = donorChunk.HoleMask,
+                    Layers = donorChunk.Layers,
+                    AlphaMaps = donorChunk.AlphaMaps,
+                    ShadowMap = donorChunk.ShadowMap,
+                    MccvColors = donorChunk.MccvColors,
+                    Liquid = donorChunk.Liquid,
                     WorldPosition = new Vector3(
                         tileWorldX - (chunkY * chunkSpan),
                         tileWorldY - (chunkX * chunkSpan),
                         0f),
-                    AreaId = transformed.AreaId,
-                    McnkFlags = transformed.McnkFlags,
-                    AlphaSourceFlags = transformed.AlphaSourceFlags,
-                    McrdReferences = transformed.McrdReferences,
-                    McrwReferences = transformed.McrwReferences,
+                    AreaId = donorChunk.AreaId,
+                    McnkFlags = donorChunk.McnkFlags,
+                    AlphaSourceFlags = donorChunk.AlphaSourceFlags,
+                    McrdReferences = donorChunk.McrdReferences,
+                    McrwReferences = donorChunk.McrwReferences,
                 });
             }
-        }
-
-        foreach (ParsedTileSource donor in donorCache.Values)
-        {
-            mddf.AddRange(donor.Result.MddfPlacements);
-            modf.AddRange(donor.Result.ModfPlacements);
         }
 
         ParsedTileSource? primary = donorCache.TryGetValue(

@@ -1,4 +1,4 @@
-# Spec 232 — Cartography Composition: Cell-Level Alignment, Project Persistence & Full-Map Export
+# Spec 232 — Cartography Composition: Cell-Level Alignment, Project Persistence, Full-Map Export & Layer UI
 
 Status: **Draft** (spec authored 2026-09-07 from operator directive; implementation pending —
 fresh session per the Spec 231 pattern)
@@ -66,6 +66,31 @@ passed. The remaining gap is alignment precision, persistence, and export.
 - SC-5: Composition parity: the exported tile for any (tx, ty) matches the live-rendered
   composition for the same tile (same policy code path — the exporter must consume
   `PhaseCompositionPolicy`, not a parallel implementation).
+
+## Operator follow-up directives (2026-09-07, after first render pass)
+
+> "the Archeology tab should default to the map layers feature, since it's a bigger feature than
+> simple uniqueID sedimentary layers (which, it would be cool if we could color-code the layers,
+> so all objects from a particular range of uniqueID's ends up tinted with a set color, or set
+> effect on the object textures, to designate the eras better than the text representation we use
+> right now. There's a lot of refinement and effects that we can improve on in the viewer's ui,
+> as well as -- MDX objects do not render their effects all the time. Water renders oddly dark,
+> and fire is missing almost entirely from materials that are meant to have fire effects applied.
+> Not sure why that is. Smoke seems to work fine. Most things are fine, it's just some animated
+> effects seem to be missing entirely. Anything that casts light, maybe? We were working on
+> improving that aspect and I think we broke the light effects that objects can give off in the
+> renderer."
+
+- FR-4 — **Archaeology default tab**: the Archaeology workbench defaults to the Map Layers page
+  (the composition feature) rather than the UniqueId sedimentary view.
+- FR-5 — **Era color-coding**: objects within a UniqueId range render tinted with a per-range
+  color (or texture effect) so sedimentary eras read visually instead of via text labels.
+- FR-6 — **MDX effect regression**: water renders oddly dark and fire effects are missing almost
+  entirely from materials that should have them (smoke works); suspected regression from the
+  lighting-effect work — audit the renderer's object-emissive/light-pipeline changes, find the
+  break, and restore fire/water/light-casting effects.
+- Also recorded: cell-shift composition must move the layer as a RIGID map object (fixed in
+  Phase 1's rigid `ResolveCellShiftedChunk` rework, same day).
 
 ## Out of scope
 
