@@ -11,7 +11,7 @@ Last updated: 2026-09-07
 The [documentation router](../docs/README.md), [spec routing registry](../specs/registry.md), and
 [archives](archive/README.md) are on-demand context, never default reading.
 
-## Current lane — Spec 231 Editor/Archaeology UI Overhaul (Phase 0–4 complete, T041 open)
+## Current lane — Spec 231 UI Overhaul: Phase 6 tools-curation pass (operator amendment)
 
 - **Spec + plan + tasks** at [231-editor-archaeology-ui-overhaul/](../specs/231-editor-archaeology-ui-overhaul/spec.md):
   4-page Editor IA (Placement & Objects / Terrain Tools / Data I/O / Converters), Archaeology
@@ -34,10 +34,16 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
   to the 2026-08-24 measured truths (0x18 = MSLK window, CK24 = placement-Z float, MSHD spans).
   Sidebars 6,173→6,013; Pm4Utilities 4,451→4,368. Receipt:
   [evidence/t030-t043-phase3-4-receipt.md](../specs/231-editor-archaeology-ui-overhaul/evidence/t030-t043-phase3-4-receipt.md).
-- **Open**: T041 (Spec 221 harness surfaces on Converters page); Tasks-panel interior still embeds
-  Chunk Clipboard + Terrain Import/Export blocks → relocate to Terrain Tools / Data I/O (next
-  visible de-clutter); Phase 5 (operator navigation smoke, inventory v3 final).
-- **Commit**: Phase 3+4 = the commit after 86394fb6.
+- **Phase 6 batch 1 landed 2026-09-07** (fbf600a1): operator amendment recorded verbatim in the
+  spec — Data I/O + Quick are the UI model (SharedUiWidgets, no one-offs); non-working/never-wired
+  tools get removed; ViewerApp size reduction. Wiring audit removed **27 dead draw methods**
+  (entire legacy Model/Experimental/Scene/Terrain/Selection sub-tab family, old minimap, dead
+  sidebar summaries) — Sidebars 6,013→5,648, Pm4Utilities 4,368→4,178, ViewerApp 16,750→16,556.
+  Receipt: [evidence/p6-wiring-audit.md](../specs/231-editor-archaeology-ui-overhaul/evidence/p6-wiring-audit.md).
+- **Batch 2 pending (T061–T064)**: weak-signal amplifier removal (84 live refs — settings schema +
+  UI), terrain task blocks out of Tasks & Workspace, Quick-panel convergence of remaining pages.
+  Then T041, Phase 5 (operator smoke, inventory v3 final).
+- **Commits**: ee223e78 (P0+P1) → 86394fb6 (P2) → 18a49732 (P3+P4) → fbf600a1 (P6 batch 1).
   Capture automation recipe: patch `viewer_settings.json` (ActiveTopTab 5=Editor /
   6=Archaeology, ActiveBottomTab=page, WorkbenchNavigationVersion=4) then launch the exe with
   `--game-path --build --world 'World\Maps\Shadowfang\Shadowfang.wdt' --capture-shot current
