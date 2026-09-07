@@ -414,20 +414,34 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 continue;
             }
 
-            TileLoadResult phase = phaseAdapter.LoadTileCore(source.SourceTileX, source.SourceTileY);
-            phaseAdapter.TileTextures.TryGetValue((source.SourceTileX, source.SourceTileY), out List<string>? phaseTextures);
-            if (source.Transforms.Count > 0)
+            TileLoadResult phase;
+            List<string>? phaseTextures;
+            if (layer.HasCellOffset)
             {
-                phase = new TileLoadResult
+                // Spec 232 FR-1: chunk-granularity composition — each composed chunk pulls its
+                // donor chunk through the continuous inverse map, so a cell-level fine-tune
+                // shifts content across donor tile borders correctly. Texture name tables come
+                // from the primary donor tile (same-map donor tables normally match).
+                phase = BuildCellShiftedTile(phaseAdapter, layer, tileX, tileY);
+                phaseAdapter.TileTextures.TryGetValue((source.SourceTileX, source.SourceTileY), out phaseTextures);
+            }
+            else
+            {
+                phase = phaseAdapter.LoadTileCore(source.SourceTileX, source.SourceTileY);
+                phaseAdapter.TileTextures.TryGetValue((source.SourceTileX, source.SourceTileY), out phaseTextures);
+                if (source.Transforms.Count > 0)
                 {
-                    Chunks = AlphaChunkTransform.TransformChunksForTarget(
-                        phase.Chunks, source.Transforms, tileX, tileY),
-                    MddfPlacements = AlphaChunkTransform.TransformPlacementPoses(
-                        phase.MddfPlacements, layer),
-                    ModfPlacements = AlphaChunkTransform.TransformModfPlacementPoses(
-                        phase.ModfPlacements, layer),
-                    SoundEmitters = phase.SoundEmitters,
-                };
+                    phase = new TileLoadResult
+                    {
+                        Chunks = AlphaChunkTransform.TransformChunksForTarget(
+                            phase.Chunks, source.Transforms, tileX, tileY),
+                        MddfPlacements = AlphaChunkTransform.TransformPlacementPoses(
+                            phase.MddfPlacements, layer),
+                        ModfPlacements = AlphaChunkTransform.TransformModfPlacementPoses(
+                            phase.ModfPlacements, layer),
+                        SoundEmitters = phase.SoundEmitters,
+                    };
+                }
             }
             RemapPhasePlacementNameIndices(phase, phaseAdapter);
             MergePhaseTile(
@@ -442,6 +456,98 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Spec 232 FR-1: composes the target tile chunk-by-chunk through
+    /// <see cref="PhaseCompositionPolicy.ResolveChunkSource"/> so a cell-level fine-tune shifts
+    /// content across donor tile borders correctly. Placements are the union of every donor tile
+    /// pulled (the merge applies the pose + offset transforms afterwards). Texture name tables
+    /// come from the primary donor tile.
+    /// </summary>
+    private TileLoadResult BuildCellShiftedTile(
+        AlphaTerrainAdapter phaseAdapter, PhaseLayerSettings layer, int tileX, int tileY)
+    {
+        var chunks = new List<TerrainChunkData>(256);
+        var donorCache = new Dictionary<(int, int), TileLoadResult>();
+        IReadOnlyList<TileTransformKind> kinds = PhaseCompositionPolicy.ComposeTileTransforms(layer);
+        var mddf = new List<MddfPlacement>();
+        var modf = new List<ModfPlacement>();
+
+        const float mapOrigin = 17066.666f;
+        const float tileSpan = 533.33333f;
+        const float chunkSpan = tileSpan / 16f;
+        float tileWorldX = mapOrigin - (tileX * tileSpan);
+        float tileWorldY = mapOrigin - (tileY * tileSpan);
+
+        for (int chunkY = 0; chunkY < 16; chunkY++)
+        {
+            for (int chunkX = 0; chunkX < 16; chunkX++)
+            {
+                (bool hasSource, int donorTileX, int donorTileY, int donorChunkX, int donorChunkY) =
+                    PhaseCompositionPolicy.ResolveChunkSource(
+                        layer, tileX, tileY, chunkX, chunkY,
+                        (sx, sy) => phaseAdapter.TileExistsInOwnWdt(sx, sy));
+                if (!hasSource)
+                    continue;
+
+                if (!donorCache.TryGetValue((donorTileX, donorTileY), out TileLoadResult? donor))
+                {
+                    donor = phaseAdapter.LoadTileCore(donorTileX, donorTileY);
+                    donorCache[(donorTileX, donorTileY)] = donor;
+                }
+
+                TerrainChunkData? donorChunk = null;
+                foreach (TerrainChunkData candidate in donor.Chunks)
+                {
+                    if (candidate.ChunkX == donorChunkX && candidate.ChunkY == donorChunkY)
+                    {
+                        donorChunk = candidate;
+                        break;
+                    }
+                }
+                if (donorChunk == null)
+                    continue;
+
+                TerrainChunkData transformed = donorChunk;
+                foreach (TileTransformKind kind in kinds)
+                    transformed = AlphaChunkTransform.TransformChunk(transformed, kind);
+
+                chunks.Add(new TerrainChunkData
+                {
+                    McinIndex = transformed.McinIndex,
+                    TileX = tileX,
+                    TileY = tileY,
+                    ChunkX = chunkX,
+                    ChunkY = chunkY,
+                    Heights = transformed.Heights,
+                    Normals = transformed.Normals,
+                    HoleMask = transformed.HoleMask,
+                    Layers = transformed.Layers,
+                    AlphaMaps = transformed.AlphaMaps,
+                    ShadowMap = transformed.ShadowMap,
+                    MccvColors = transformed.MccvColors,
+                    Liquid = transformed.Liquid,
+                    WorldPosition = new Vector3(
+                        tileWorldX - (chunkY * chunkSpan),
+                        tileWorldY - (chunkX * chunkSpan),
+                        0f),
+                    AreaId = transformed.AreaId,
+                    McnkFlags = transformed.McnkFlags,
+                    AlphaSourceFlags = transformed.AlphaSourceFlags,
+                    McrdReferences = transformed.McrdReferences,
+                    McrwReferences = transformed.McrwReferences,
+                });
+            }
+        }
+
+        foreach (TileLoadResult donor in donorCache.Values)
+        {
+            mddf.AddRange(donor.MddfPlacements);
+            modf.AddRange(donor.ModfPlacements);
+        }
+
+        return new TileLoadResult { Chunks = chunks, MddfPlacements = mddf, ModfPlacements = modf };
     }
 
     /// <summary>
@@ -506,7 +612,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             return result;
         }
 
-        private static TerrainChunkData TransformChunk(TerrainChunkData chunk, TileTransformKind kind)
+        internal static TerrainChunkData TransformChunk(TerrainChunkData chunk, TileTransformKind kind)
         {
             int[] indexMap = TileContentTransform.GetVertexIndexMap(kind);
             Func<Vector3, Vector3> normalTransform = TileContentTransform.GetNormalTransform(kind);
@@ -856,7 +962,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             contributed |= take;
         }
 
-        if (layer.HasTileOffset)
+        if (layer.HasTileOffset || layer.HasCellOffset)
             TranslatePhasePlacements(phase, layer);
 
         bool phaseReplacesDoodads = PhaseCompositionPolicy.PhaseOwnsPlacements(
@@ -904,6 +1010,13 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         // "TileSize fix" was a magnitude error and is reverted here; only the sign/label fix stands.
         (float dx, float dy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
             layer.TileOffsetX, layer.TileOffsetY, WoWConstants.ChunkSize);
+
+        // Spec 232 FR-1: the cell-level fine-tune shifts content by whole MCNKs in the composed
+        // frame — the same world translation convention at 1/16 tile granularity.
+        (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+            layer.CellOffsetX, layer.CellOffsetY, WoWConstants.ChunkSize / 16f);
+        dx += cellDx;
+        dy += cellDy;
 
         for (int i = 0; i < phase.MddfPlacements.Count; i++)
         {

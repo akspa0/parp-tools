@@ -152,6 +152,19 @@ public sealed class PhaseLayerSettings
     /// <summary>True when this layer is read from tile coordinates other than the base map's.</summary>
     public bool HasTileOffset => TileOffsetX != 0 || TileOffsetY != 0;
 
+    /// <summary>
+    /// Spec 232 FR-1: sub-tile alignment fine-tune in terrain cells (MCNKs, 1/16 tile), applied in
+    /// the composed (target) frame after rotation/mirror. Range −15..+15 cells; ±16 cells is one
+    /// whole tile — use <see cref="TileOffsetX"/> for that.
+    /// </summary>
+    public int CellOffsetX { get; set; }
+
+    /// <inheritdoc cref="CellOffsetX"/>
+    public int CellOffsetY { get; set; }
+
+    /// <summary>True when a cell-level fine-tune is active.</summary>
+    public bool HasCellOffset => CellOffsetX != 0 || CellOffsetY != 0;
+
     public PhaseLayerSettings Clone()
     {
         var clone = new PhaseLayerSettings
@@ -173,6 +186,9 @@ public sealed class PhaseLayerSettings
 
         foreach (PhaseTilePlacement placement in TilePlacements)
             clone.TilePlacements.Add(placement);
+
+        clone.CellOffsetX = CellOffsetX;
+        clone.CellOffsetY = CellOffsetY;
 
         return clone;
     }
@@ -481,6 +497,74 @@ public static class PhaseCompositionPolicy
         return (
             (int)Math.Round(originX + (dx * cos) - (dy * sin)),
             (int)Math.Round(originY + (dx * sin) + (dy * cos)));
+    }
+
+    /// <summary>
+    /// Spec 232 FR-1: chunk-granularity resolution — which donor chunk fills one composed chunk
+    /// <paramref name="chunkX"/>/<paramref name="chunkY"/> of target tile (targetTileX,
+    /// targetTileY). The donor TILE comes from <see cref="ResolveTileSource"/> (the discrete map
+    /// the streaming admission and minimap already use — one source of truth), and the cell-level
+    /// fine-tune (<see cref="PhaseLayerSettings.CellOffsetX"/>/<c>CellOffsetY</c>, composed frame)
+    /// re-indexes chunks within that donor tile, pulling from the adjacent donor tile when the
+    /// shift crosses a border (the cell delta is inverse-rotated into the donor frame for
+    /// rotated/mirrored layers).
+    /// </summary>
+    public static (bool HasSource, int TileX, int TileY, int ChunkX, int ChunkY) ResolveChunkSource(
+        PhaseLayerSettings layer,
+        int targetTileX,
+        int targetTileY,
+        int chunkX,
+        int chunkY,
+        Func<int, int, bool> hasDonorTile)
+    {
+        PhaseTileSource tileSource = ResolveTileSource(layer, targetTileX, targetTileY, hasDonorTile);
+        if (!tileSource.HasSource)
+            return (false, 0, 0, 0, 0);
+
+        // The composed-frame cell delta, rotated into the donor frame. Composed content at
+        // target chunk g shows donor chunk g − cell, so the composed-frame delta is −cell and
+        // the donor-frame delta is the inverse-map of that.
+        (int dCellX, int dCellY) = InverseRotateCellDelta(-layer.CellOffsetX, -layer.CellOffsetY, layer);
+
+        int globalX = (tileSource.SourceTileX * 16) + chunkX + dCellX;
+        int globalY = (tileSource.SourceTileY * 16) + chunkY + dCellY;
+        int donorTileX = (int)Math.Floor(globalX / 16.0);
+        int donorTileY = (int)Math.Floor(globalY / 16.0);
+        if (donorTileX < 0 || donorTileX > 63 || donorTileY < 0 || donorTileY > 63)
+            return (false, 0, 0, 0, 0);
+
+        if (!hasDonorTile(donorTileX, donorTileY))
+            return (false, 0, 0, 0, 0);
+
+        int donorChunkX = globalX - (donorTileX * 16);
+        int donorChunkY = globalY - (donorTileY * 16);
+        return (true, donorTileX, donorTileY, donorChunkX, donorChunkY);
+    }
+
+    /// <summary>
+    /// Inverses the layer's composed transform (rotation kinds first, then mirrors — the same
+    /// order as <see cref="ComposeTileTransforms"/>) for a cell-space delta, so a composed-frame
+    /// nudge re-indexes donor chunks along the donor frame's axes.
+    /// </summary>
+    private static (int X, int Y) InverseRotateCellDelta(int dx, int dy, PhaseLayerSettings layer)
+    {
+        int a = dx, b = dy;
+        if (TryGetQuarterTurn(layer.RotationDegrees, out int quarter))
+        {
+            // Inverse of the forward point maps: CW90 (b, −a) → donor; CCW90 (−b, a); 180 (−a, −b).
+            (a, b) = quarter switch
+            {
+                1 => (-b, a),
+                2 => (-a, -b),
+                3 => (b, -a),
+                _ => (a, b),
+            };
+        }
+        if (layer.MirrorVertical)
+            a = -a;
+        if (layer.MirrorHorizontal)
+            b = -b;
+        return (a, b);
     }
 
     /// <summary>
