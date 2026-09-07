@@ -103,6 +103,16 @@ passed. The remaining gap is alignment precision, persistence, and export.
   Provide a texture-remapping tool that assigns base-map textures to texture-less MCLY layers
   (matched per layer, per tile, against the terrain being overlaid), restoring the 25-year-lost
   appearance of these maps. Persisted in the layer project data (FR-2).
+- FR-11 — **Base-map channel gates**: the BASE map gets the same per-channel keep/discard gates
+  as phase layers — if the operator does not want the base map's liquids (or shadows, or doodads,
+  etc.) in the composition, they can drop them per channel rather than being forced to keep
+  everything the base map carries.
+- FR-12 — **Minimap synthesis from composed maps**: the synthesized-minimap pipeline must be able
+  to consume the COMPOSED, loaded map (base + locked layers, post-transform) as its input — not
+  only a folder or client map — so exported/synthesized minimaps show the restored composition.
+- FR-3 (restated emphasis) — **Output maps**: build real output maps from the experiments — full
+  tile sets written as proper LK ADTs or Alpha WDT/ADT output, in the correct map format for the
+  target client, not patches.
 - Also recorded: cell-shift composition must move the layer as a RIGID map object (fixed in
   Phase 1's rigid `ResolveCellShiftedChunk` rework, same day).
 - Also recorded (UI): right-sidebar page dropdowns must be sticky per top tab — switching to
