@@ -144,7 +144,8 @@ public sealed class M2CameraPathRenderer : IModelRenderer
         Vector3? cameraPos = null,
         Vector3? lightDir = null,
         Vector3? lightColor = null,
-        Vector3? ambientColor = null)
+        Vector3? ambientColor = null,
+        Vector3? wireframeColor = null)
     {
         bool previousWireframe = _wireframe;
         _wireframe = true;

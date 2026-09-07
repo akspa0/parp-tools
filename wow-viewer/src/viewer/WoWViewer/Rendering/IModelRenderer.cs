@@ -81,5 +81,6 @@ public interface IModelRenderer : ISceneRenderer
         Vector3? cameraPos = null,
         Vector3? lightDir = null,
         Vector3? lightColor = null,
-        Vector3? ambientColor = null);
+        Vector3? ambientColor = null,
+        Vector3? wireframeColor = null);
 }

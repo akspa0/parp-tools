@@ -1,5 +1,9 @@
 <Project>
-  <Import Project="eng\Version.props" Condition="Exists('eng\Version.props')" />
+  <!-- MSBuild evaluates Exists() relative to the importing project's directory, so a
+       bare relative path silently skips this import for every project under src/.
+       Anchor it to this file's directory so all projects share one version source. -->
+  <Import Project="$(MSBuildThisFileDirectory)eng\Version.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)eng\Version.props')" />
 
   <PropertyGroup>
     <Nullable>enable</Nullable>

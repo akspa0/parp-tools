@@ -512,6 +512,11 @@ public class TerrainRenderer : IDisposable
         Uniform1Counted(_uUseMccvLoc, UseMccv ? 1 : 0);
         Uniform1Counted(_uAlphaDebugChannelLoc, Math.Clamp(AlphaMaskChannel, 0, 3));
 
+        // Wireframe overlay default: flat-color line pass (uWireframe is flipped to 1
+        // only for the dedicated wireframe submission below).
+        _shader.SetInt("uWireframe", 0);
+        _shader.SetVec4("uWireframeColor", TerrainWireframeLineColor);
+
         float chunkCullDistance = _lighting.FogEnd + 200f;
         float chunkCullDistanceSq = chunkCullDistance * chunkCullDistance;
         ChunksRendered = 0;
@@ -548,10 +553,18 @@ public class TerrainRenderer : IDisposable
             _gl.PolygonOffset(-1.0f, -1.0f);
             _gl.LineWidth(1.5f);
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _shader.SetInt("uWireframe", 1);
+            _wireframePassActive = true;
             foreach (var chunk in wireframeChunks)
             {
                 RenderChunk(chunk);
             }
+            _wireframePassActive = false;
+            _shader.SetInt("uWireframe", 0);
+            _gl.Disable(EnableCap.Blend);
+            _gl.DepthMask(true);
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
             _gl.LineWidth(1.0f);
             _gl.Disable(EnableCap.PolygonOffsetLine);
@@ -712,6 +725,10 @@ public class TerrainRenderer : IDisposable
         Uniform1Counted(_uTileUseMccvLoc, UseMccv ? 1 : 0);
         Uniform1Counted(_uTileAlphaDebugChannelLoc, Math.Clamp(AlphaMaskChannel, 0, 3));
 
+        // Wireframe overlay default: flat-color line pass (see chunk-path note).
+        _tileShader.SetInt("uWireframe", 0);
+        _tileShader.SetVec4("uWireframeColor", TerrainWireframeLineColor);
+
         float cullDistance = _lighting.FogEnd + 200f;
         float cullDistanceSq = cullDistance * cullDistance;
         ChunksRendered = 0;
@@ -792,11 +809,18 @@ public class TerrainRenderer : IDisposable
             _gl.PolygonOffset(-1.0f, -1.0f);
             _gl.LineWidth(1.5f);
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _gl.DepthMask(false);
+            _tileShader.SetInt("uWireframe", 1);
             foreach (var tile in wireframeTiles)
             {
                 _gl.BindVertexArray(tile.Vao);
                 _gl.DrawElements(PrimitiveType.Triangles, tile.IndexCount, DrawElementsType.UnsignedShort, null);
             }
+            _tileShader.SetInt("uWireframe", 0);
+            _gl.Disable(EnableCap.Blend);
+            _gl.DepthMask(true);
             _gl.BindVertexArray(0);
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
             _gl.LineWidth(1.0f);
@@ -894,7 +918,15 @@ public class TerrainRenderer : IDisposable
         bool baseVisible = ShowLayer0;
         bool overlayVisible = (ShowLayer1 && chunk.Layers.Length > 1) || (ShowLayer2 && chunk.Layers.Length > 2) || (ShowLayer3 && chunk.Layers.Length > 3);
 
-        if (!baseVisible && overlayVisible)
+        if (_wireframePassActive)
+        {
+            // Wireframe overlay lines are semi-transparent; keep blending on no matter
+            // which layers this chunk would use in the fill pass.
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _gl.DepthMask(false);
+        }
+        else if (!baseVisible && overlayVisible)
         {
             _gl.Enable(EnableCap.Blend);
             _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
@@ -1180,6 +1212,16 @@ public class TerrainRenderer : IDisposable
 
         Uniform1Counted(_uHasShadowLoc, hasShadow ? 1 : 0);
     }
+
+    /// <summary>
+    /// Flat line color for the terrain wireframe overlay passes. Semi-transparent white:
+    /// the operator rejected the opaque amber as too bright and consuming.
+    /// </summary>
+    private static readonly Vector4 TerrainWireframeLineColor = new(1.0f, 1.0f, 1.0f, 0.35f);
+
+    /// <summary>True only during a wireframe overlay submission, so <see cref="RenderChunk"/>
+    /// keeps alpha blending on for the translucent lines regardless of layer visibility.</summary>
+    private bool _wireframePassActive;
 
     public bool IsWireframe => _wireframe;
 
@@ -1467,6 +1509,8 @@ uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
 uniform float uOpacity;
+uniform int uWireframe;
+uniform vec4 uWireframeColor;
 
 out vec4 FragColor;
 
@@ -1478,6 +1522,14 @@ vec4 SampleDiffuse(int hasTex, sampler2D s, vec2 uv)
 }
 
 void main() {
+    // Wireframe overlay pass: flat line color, no texturing. Re-drawing the textured
+    // fill shader in line mode produced lines identical in color to the surface beneath
+    // them, which made the terrain wireframe toggle appear to do nothing.
+    if (uWireframe == 1) {
+        FragColor = uWireframeColor;
+        return;
+    }
+
     float texScale = 8.0 / 33.333;
     vec2 diffuseUV = (uUseWorldUV == 1) ? (vec2(-vWorldPos.y, -vWorldPos.x) * texScale) : (vTexCoord * 8.0);
 
@@ -1715,6 +1767,8 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform int uWireframe;
+uniform vec4 uWireframeColor;
 
 out vec4 FragColor;
 
@@ -1723,6 +1777,12 @@ bool HasLayer(uint idx) {
 }
 
 void main() {
+    // Wireframe overlay pass: flat line color, no texturing (see chunk shader note).
+    if (uWireframe == 1) {
+        FragColor = uWireframeColor;
+        return;
+    }
+
     float texScale = 8.0 / 33.333;
     vec2 diffuseUV = (uUseWorldUV == 1) ? (vec2(-vWorldPos.y, -vWorldPos.x) * texScale) : (vTexCoord * 8.0);
 

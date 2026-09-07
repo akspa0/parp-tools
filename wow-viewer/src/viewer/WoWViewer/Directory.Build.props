@@ -1,4 +1,9 @@
 <Project>
+  <!-- Chain to the repository-level Directory.Build.props (which imports eng/Version.props).
+       MSBuild does not walk up past a nearer Directory.Build.props, so without this the
+       viewer would never inherit the shared version numbers. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..\'))" />
+
   <!-- Both viewer targets intentionally share this source directory. Keep their restore and
        intermediate assets separate so a solution build can materialize net10.0 and
        net10.0-windows together. This file is imported before Microsoft.Common.props, which is

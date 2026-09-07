@@ -182,6 +182,14 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
         RenderWithTransform(Matrix4x4.Identity, view, proj);
     }
 
+    /// <summary>Flat line color for wireframe passes (textured lines are invisible against
+    /// the fill pass and alpha-cutout foliage collapses into orange squiggles).</summary>
+    private static readonly Vector3 WireframeLineColor = new(1.0f, 0.85f, 0.3f);
+
+    /// <summary>Caller-supplied wireframe color override (e.g. selection red), active only
+    /// for the duration of a <see cref="RenderWireframeOverlay"/> call.</summary>
+    private Vector3? _wireframeColorOverride;
+
     public bool IsWireframe => _wireframe;
 
     public void ToggleWireframe()
@@ -445,7 +453,8 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         Vector3? cameraPos = null,
         Vector3? lightDir = null,
         Vector3? lightColor = null,
-        Vector3? ambientColor = null)
+        Vector3? ambientColor = null,
+        Vector3? wireframeColor = null)
     {
         if (_legacyRenderer != null)
         {
@@ -455,6 +464,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
         bool previousWireframe = _wireframe;
         _wireframe = true;
+        _wireframeColorOverride = wireframeColor;
         try
         {
             RenderWithTransform(modelMatrix, view, proj, RenderPass.Both, 1.0f, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
@@ -462,6 +472,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         finally
         {
             _wireframe = previousWireframe;
+            _wireframeColorOverride = null;
         }
     }
 
@@ -729,13 +740,18 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
                 _gl.DepthMask(!backdrop);
             }
 
-            Vector3 baseColor = ComputeSectionColor(section, fadeAlpha);
+            // Wireframe passes draw flat-colored untextured lines: with the textured fill
+            // shader the lines landed on identically-colored surfaces (invisible) and
+            // alpha-cutout foliage degraded into scattered orange fragments.
+            Vector3 baseColor = _wireframe
+                ? (_wireframeColorOverride ?? WireframeLineColor)
+                : ComputeSectionColor(section, fadeAlpha);
             _gl.Uniform3(_uBaseColor, baseColor.X, baseColor.Y, baseColor.Z);
             _gl.Uniform1(_uUnshaded, section.Material.IsUnshaded ? 1 : 0);
-            _gl.Uniform1(_uHasTexture, section.HasTexture ? 1 : 0);
+            _gl.Uniform1(_uHasTexture, (!_wireframe && section.HasTexture) ? 1 : 0);
             _gl.Uniform1(_uUvSet, section.UvSet);
             _gl.Uniform1(_uGeneratedTexCoord, section.GeneratedTexCoord ? 1 : 0);
-            _gl.Uniform1(_uAlphaCutout, section.AlphaCutout ? 1 : 0);
+            _gl.Uniform1(_uAlphaCutout, (!_wireframe && section.AlphaCutout) ? 1 : 0);
             _gl.Uniform1(_uAlpha, Math.Clamp(fadeAlpha * section.AnimatedAlpha, 0.0f, 1.0f));
             _gl.Uniform1(_uHasUvTransform, section.HasAnimatedUvTransform ? 1 : 0);
             _gl.Uniform2(_uUvTranslation, section.AnimatedUvTranslation.X, section.AnimatedUvTranslation.Y);
@@ -743,7 +759,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             _gl.Uniform2(_uUvRotation, section.AnimatedUvRotation.X, section.AnimatedUvRotation.Y);
 
             _gl.ActiveTexture(TextureUnit.Texture0);
-            _gl.BindTexture(TextureTarget.Texture2D, section.HasTexture ? section.TextureId : 0u);
+            _gl.BindTexture(TextureTarget.Texture2D, (!_wireframe && section.HasTexture) ? section.TextureId : 0u);
             _gl.Uniform1(_uTexture0, 0);
 
             _gl.BindVertexArray(section.Vao);

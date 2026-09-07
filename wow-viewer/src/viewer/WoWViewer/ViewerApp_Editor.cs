@@ -1756,7 +1756,7 @@ public partial class ViewerApp
         ImGui.Separator();
 
         // 1. Synthesized Terrain Minimap
-        if (ImGui.CollapsingHeader("Synthesized Terrain Minimap", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader("Synthesized Terrain Minimap", ImGuiTreeNodeFlags.None))
         {
             ImGui.TextDisabled("Generate authentic orthographic terrain minimaps from terrain geometry, lighting, and doodad footprints.");
 
@@ -1777,7 +1777,7 @@ public partial class ViewerApp
         }
 
         // 2. 3D Scene & Geometry Export (GLB)
-        if (ImGui.CollapsingHeader("3D Geometry & GLB Export", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader("3D Geometry & GLB Export", ImGuiTreeNodeFlags.None))
         {
             ImGui.TextDisabled("Export 3D scene meshes, collision boundaries, and terrain tiles as portable GLB models.");
 
@@ -1836,7 +1836,7 @@ public partial class ViewerApp
         }
 
         // 3. Terrain Data Export
-        if (ImGui.CollapsingHeader("Terrain Layer Export", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader("Terrain Layer Export", ImGuiTreeNodeFlags.None))
         {
             ImGui.TextDisabled("Export terrain alpha masks, heightmaps, and vertex colors (MCCV) across current, loaded, or whole map scopes.");
 
@@ -1917,7 +1917,7 @@ public partial class ViewerApp
         }
 
         // 4. Terrain Data Import
-        if (ImGui.CollapsingHeader("Terrain Layer Import", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.CollapsingHeader("Terrain Layer Import", ImGuiTreeNodeFlags.None))
         {
             ImGui.TextDisabled("Import authored or restored terrain layers back into the active map.");
 

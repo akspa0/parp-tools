@@ -12,12 +12,13 @@ the current owner or registry names a forward pointer; do not infer closure from
 
 | # | Spec | Task | Done when |
 |---|---|---|---|
-| 1 | [227 UI Re-Audit](227-ui-reaudit/spec.md) | Inventory v2 with screenshots; dropdown/collapsible sidebar standard; dedupe weak-signal amplifiers, minimaps, Inspector repetition; fix Archaeology styling; sane Editor tabs | Operator walks the build against inventory v2 and finds no duplicates |
-| 2 | [228 Source Decomposition](228-source-decomposition/spec.md) | Planned first behavior-preserving hover/click selection extraction, blocked by Spec 227 T004 | Core characterization + build/tests + operator smoke; no god-class members or partials added |
-| 3 | [226 Renderer Polish](226-renderer-polish/spec.md) | Verify the terrain-wireframe shader hypothesis (multi-textured tiles only) and the model-wireframe gating (dead on MDX/M2/WMO) | Captures name both root causes |
-| 4 | [229 WoW Shell + Keybind Profiles](229-wow-shell-keybind-profiles/spec.md) | speckit-plan from 227's per-context action inventory | Plan authored; first contextual keybind profile compiles |
-| 5 | [230 Reconstruction Editor](230-reconstruction-editor/spec.md) | speckit-plan (Rosetta placement, New Map Generator UI, Alpha/LK save targets) | Plan authored |
-| 6 | [223 residual](223-ui-consolidation-audit/tasks.md) | Operator gate retest (fog/overlays/capture) + T609/T610 | Operator acceptance recorded with receipts |
+| 1 | [231 Editor/Archaeology UI Overhaul](231-editor-archaeology-ui-overhaul/spec.md) | speckit spec+plan+tasks authored 2026-09-07 (operator-directed); 4-page Editor IA, Archaeology de-hosting, dedupe D1–D6 | Implemented in a fresh session per plan.md phases; operator navigation smoke |
+| 2 | [227 UI Re-Audit](227-ui-reaudit/spec.md) | Inventory v2 with screenshots; dropdown/collapsible sidebar standard; dedupe weak-signal amplifiers, minimaps, Inspector repetition; fix Archaeology styling; sane Editor tabs | Operator walks the build against inventory v2 and finds no duplicates |
+| 3 | [228 Source Decomposition](228-source-decomposition/spec.md) | Planned first behavior-preserving hover/click selection extraction, blocked by Spec 227 T004 | Core characterization + build/tests + operator smoke; no god-class members or partials added |
+| 4 | [226 Renderer Polish](226-renderer-polish/spec.md) | Verify the terrain-wireframe shader hypothesis (multi-textured tiles only) and the model-wireframe gating (dead on MDX/M2/WMO) | Captures name both root causes. UPDATE 2026-09-07: both root causes fixed (textured-line invisibility → flat-color passes); operator visual verification still owed |
+| 5 | [229 WoW Shell + Keybind Profiles](229-wow-shell-keybind-profiles/spec.md) | speckit-plan from 227's per-context action inventory | Plan authored; first contextual keybind profile compiles |
+| 6 | [230 Reconstruction Editor](230-reconstruction-editor/spec.md) | speckit-plan (Rosetta placement, New Map Generator UI, Alpha/LK save targets) | Plan authored |
+| 7 | [223 residual](223-ui-consolidation-audit/tasks.md) | Operator gate retest (fog/overlays/capture) + T609/T610 | Operator acceptance recorded with receipts |
 
 ## Standing gates (operator-owned)
 
@@ -32,7 +33,7 @@ the current owner or registry names a forward pointer; do not infer closure from
 
 See [epics/active-epics.md](epics/active-epics.md) for members, supersessions and next actions:
 
-1. **UI & Approachability** — 227 · 229 · 225 · 212 · 223 (145/080 superseded into it)
+1. **UI & Approachability** — 231 · 227 · 229 · 225 · 212 · 223 (145/080 superseded into it)
 2. **Reconstruction & Editing** — 230 · 222 · 219 · 220 · 208 · 203 · 196 · 194 · 192 (195 superseded)
 3. **Renderer Performance & Correctness** — 226 · 153 · 152 · 151 · 150 · 204 · 207 · 206 · 202 · 201 · 200 · 199 · 198 · 160
 4. **Formats, Readers & Writers** — 197 · 221 · 220 · 193 · 105 · 205

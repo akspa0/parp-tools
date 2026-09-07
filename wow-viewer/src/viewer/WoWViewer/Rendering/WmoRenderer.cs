@@ -718,7 +718,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
 
     public unsafe void RenderWireframeOverlay(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
-        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null,
+        Vector3? wireframeColor = null)
     {
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
@@ -748,7 +749,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
 
         _gl.Uniform1(_uHasTexture, 0);
         _gl.Uniform1(_uAlphaTest, 0.0f);
-        _gl.Uniform4(_uColor, 0.95f, 1.0f, 0.65f, 1.0f);
+        Vector3 lineColor = wireframeColor ?? new Vector3(0.95f, 1.0f, 0.65f);
+        _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, 1.0f);
 
         _gl.LineWidth(1.5f);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);

@@ -138,7 +138,9 @@ public partial class ViewerApp : IDisposable
         public bool Deleted { get; set; }
     }
 
-    private const string ViewerProductName = "WoWViewer v0.5.2.3";
+    private const string ViewerProductTitle = "WoWViewer";
+    private static readonly string ViewerDisplayVersion = GetViewerDisplayVersion();
+    private static string ViewerProductName => $"{ViewerProductTitle} v{ViewerDisplayVersion}";
     private const string ViewerAboutPopupTitle = "About WoWViewer";
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
         typeof(ImGuiController).GetMethod("WindowResized", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -284,11 +286,18 @@ public partial class ViewerApp : IDisposable
 
     private static string GetViewerDisplayVersion()
     {
-        return typeof(ViewerApp).Assembly
-                   .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-                   ?.InformationalVersion
-               ?? typeof(ViewerApp).Assembly.GetName().Version?.ToString(3)
-               ?? "unknown";
+        var informational = typeof(ViewerApp).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            // The .NET SDK appends "+<git-commit>" build metadata to
+            // InformationalVersion; display only the bare version number.
+            int metadataStart = informational.IndexOf('+');
+            return metadataStart >= 0 ? informational[..metadataStart] : informational;
+        }
+
+        return typeof(ViewerApp).Assembly.GetName().Version?.ToString(3) ?? "unknown";
     }
     private MdxFile? _loadedMdx;
     private M2StaticRenderModel? _loadedM2Runtime;
@@ -2364,7 +2373,7 @@ void main() {
                 if (ImGui.MenuItem("About"))
                 {
                     _openAboutPopup = true;
-                    _statusMessage = $"{ViewerProductName} {GetViewerDisplayVersion()}";
+                    _statusMessage = ViewerProductName;
                 }
                 ImGui.EndMenu();
             }

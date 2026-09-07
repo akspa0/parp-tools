@@ -601,10 +601,12 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
 
     public void RenderWireframeOverlay(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
-        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null,
+        Vector3? wireframeColor = null)
     {
         bool previousWireframe = _wireframe;
         _wireframe = true;
+        _wireframeLineColorOverride = wireframeColor;
         _gl.LineWidth(1.5f);
 
         try
@@ -617,6 +619,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         {
             _gl.LineWidth(1.0f);
             _wireframe = previousWireframe;
+            _wireframeLineColorOverride = null;
         }
     }
 
@@ -625,6 +628,17 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     /// WorldScene callers use RenderWithTransform directly (no mirror needed — camera handles it).
     /// </summary>
     private static readonly Matrix4x4 MirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
+
+    /// <summary>
+    /// When true, RenderGeosets draws every visible geoset as flat untextured wireframe
+    /// lines. Textured line passes are invisible against the fill pass (identical colors)
+    /// and alpha-cutout foliage degrades into scattered orange fragments.
+    /// </summary>
+    private bool _wireframeFlatLinePass;
+
+    /// <summary>Caller-supplied wireframe color override (e.g. selection red), active only
+    /// for the duration of a <see cref="RenderWireframeOverlay"/> call.</summary>
+    private Vector3? _wireframeLineColorOverride;
 
     private static (Vector3 min, Vector3 max) ComputeRenderableBounds(MdxFile mdx)
     {
@@ -1005,12 +1019,15 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
             _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
             RenderGeosets(pass, fadeAlpha * 0.33f);
 
-            // Pass 2: Prominent Wireframe Overlay
+            // Pass 2: Prominent Wireframe Overlay (flat color — see _wireframeFlatLinePass)
             _gl.Enable(EnableCap.PolygonOffsetLine);
             _gl.PolygonOffset(-1.0f, -1.0f);
             _gl.LineWidth(1.5f);
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+            _wireframeFlatLinePass = true;
             RenderGeosets(pass, fadeAlpha);
+            _wireframeFlatLinePass = false;
+            _wireframeLineColorOverride = null;
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
             _gl.LineWidth(1.0f);
             _gl.Disable(EnableCap.PolygonOffsetLine);
@@ -1174,6 +1191,12 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
             int geosetBufferIndex = geosetOrder?[orderIndex] ?? orderIndex;
             var gb = _geosets[geosetBufferIndex];
             if (!gb.Visible) continue;
+
+            if (_wireframeFlatLinePass)
+            {
+                DrawWireframeFlatGeoset(gb);
+                continue;
+            }
 
             if (_forceM2SolidDebug)
             {
@@ -1428,6 +1451,37 @@ if (isAlphaCutout)
             }
         }
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+    }
+
+    /// <summary>
+    /// Draws one geoset as flat-colored untextured lines for the wireframe overlay pass.
+    /// Modeled on <see cref="DrawForcedM2SolidGeoset"/>; depth-mask state is inherited from
+    /// the caller so world-overlay submissions keep their no-depth-write semantics.
+    /// </summary>
+    private unsafe void DrawWireframeFlatGeoset(GeosetBuffers gb)
+    {
+        _gl.Disable(EnableCap.CullFace);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.Disable(EnableCap.Blend);
+        _gl.Uniform1(_uHasTexture, 0);
+        _gl.Uniform1(_uAlphaTest, 0);
+        _gl.Uniform1(_uUseTextureAlpha, 0);
+        _gl.Uniform1(_uPremultiplyAlpha, 0);
+        _gl.Uniform1(_uEmissiveGain, 0.0f);
+        _gl.Uniform1(_uUnshaded, 1);
+        _gl.Uniform1(_uSphereEnvMap, 0);
+        _gl.Uniform1(_uUvSet, 0);
+        ResetLayerUvTransform();
+        Vector3 lineColor = _wireframeLineColorOverride ?? new Vector3(1.0f, 0.85f, 0.3f);
+        _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, 1.0f);
+
+        _gl.BindVertexArray(gb.Vao);
+        if (_gpuInstanceDrawActive)
+            _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null, _gpuInstanceCount);
+        else
+            _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+        ModelDrawCallCounter.Record();
+        _gl.BindVertexArray(0);
     }
 
     private unsafe void DrawForcedM2SolidGeoset(GeosetBuffers gb, bool forceBackdropState)

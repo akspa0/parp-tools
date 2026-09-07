@@ -265,6 +265,43 @@ public partial class ViewerApp
                     bool objectWireframe = _worldScene.ObjectWireframeEnabled;
                     if (ImGui.Checkbox("M2/WMO WF", ref objectWireframe))
                         _worldScene.SetObjectWireframeEnabled(objectWireframe);
+
+                    ImGui.SameLine();
+                    bool worldAnimations = _worldScene.WorldDoodadAnimationEnabled;
+                    if (ImGui.Checkbox("Anim", ref worldAnimations))
+                        _worldScene.WorldDoodadAnimationEnabled = worldAnimations;
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Advance animations on world doodad MDX/M2 models.");
+
+                    // Fast doodad-set switching for the WMO under the cursor, always visible
+                    // in the editor toolbar (the Inspector's live-switch section is buried).
+                    if (_worldScene.HoveredAssetInfo is { } hoveredAsset
+                        && hoveredAsset.SceneObjectType == Terrain.ObjectType.Wmo
+                        && hoveredAsset.SceneObjectIndex >= 0)
+                    {
+                        WmoRenderer? hoveredWmo = _worldScene.Assets.GetWmo(
+                            WorldAssetManager.NormalizeKey(hoveredAsset.SourcePath));
+                        if (hoveredWmo is { DoodadSetCount: > 0 })
+                        {
+                            ImGui.SameLine();
+                            ImGui.SetNextItemWidth(150f);
+                            int activeDoodadSet = hoveredWmo.ActiveDoodadSet;
+                            if (ImGui.BeginCombo("##HoveredWmoDoodadSet", hoveredWmo.GetDoodadSetName(activeDoodadSet)))
+                            {
+                                for (int setIndex = 0; setIndex < hoveredWmo.DoodadSetCount; setIndex++)
+                                {
+                                    bool isSetSelected = setIndex == activeDoodadSet;
+                                    if (ImGui.Selectable(hoveredWmo.GetDoodadSetName(setIndex), isSetSelected))
+                                        hoveredWmo.SetActiveDoodadSet(setIndex);
+                                    if (isSetSelected)
+                                        ImGui.SetItemDefaultFocus();
+                                }
+                                ImGui.EndCombo();
+                            }
+                            if (ImGui.IsItemHovered())
+                                ImGui.SetTooltip($"Doodad set for hovered WMO '{Path.GetFileName(hoveredAsset.SourcePath)}'.");
+                        }
+                    }
                 }
                 else
                 {
@@ -431,6 +468,20 @@ public partial class ViewerApp
         }
 
         ImGui.Spacing();
+
+        // These toggles are duplicated by the bottom display bar; keep the sidebar
+        // section collapsed by default so the navigator leads with scene context.
+        if (ImGui.CollapsingHeader("Layers, Grids & Overlays"))
+            DrawLayersGridsOverlaysContent(renderer, liquidRenderer);
+    }
+
+    /// <summary>
+    /// Terrain layer, grid, hole, and overlay toggles. Drawn collapsed inside the
+    /// workspace sidebar (the bottom bar exposes the same controls) and reusable
+    /// wherever the full toggle set is needed.
+    /// </summary>
+    private void DrawLayersGridsOverlaysContent(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
+    {
         ImGui.TextDisabled("Terrain Layers");
         bool l0 = renderer.ShowLayer0;
         if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;

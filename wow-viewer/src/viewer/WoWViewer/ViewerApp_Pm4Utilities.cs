@@ -2063,10 +2063,19 @@ public partial class ViewerApp
             defaultName);
     }
 
+    /// <summary>True while a background PM4 OBJ export is in flight; guards re-entrancy.</summary>
+    private bool _pm4ObjExportRunning;
+
     private void ExportPm4ObjectsObjSet()
     {
         if (_worldScene == null)
             return;
+
+        if (_pm4ObjExportRunning)
+        {
+            _statusMessage = "PM4 OBJ export is already running.";
+            return;
+        }
 
         Directory.CreateDirectory(ExportDir);
         ImGuiPathPicker.Instance.Open(
@@ -2079,17 +2088,34 @@ public partial class ViewerApp
                 if (string.IsNullOrWhiteSpace(picked))
                     return;
 
-                try
+                // The export re-reads and re-decodes every PM4 file on the map and writes one
+                // OBJ per object. Run it off the render thread — synchronously it stalled the
+                // frame loop for the whole export and the window appeared frozen. The MPQ data
+                // source is safe for concurrent reads: terrain streaming already reads it from
+                // background workers (MaxConcurrentMpqReads semaphore in TerrainManager).
+                WorldScene scene = _worldScene;
+                _pm4ObjExportRunning = true;
+                _statusMessage = "Exporting PM4 OBJ set… (running in background; the viewer stays responsive)";
+                _ = Task.Run(() =>
                 {
-                    Pm4OfflineObjExportSummary summary = _worldScene.ExportPm4ObjectsAsObjDirectory(picked);
-                    _statusMessage =
-                        $"Exported PM4 OBJ set: {summary.ExportedObjectCount} objects across {summary.ExportedTileCount} tiles to {summary.OutputDirectory} (manifest: {summary.ManifestPath}).";
-                }
-                catch (Exception ex)
-                {
-                    _statusMessage = $"PM4 OBJ export failed: {ex.Message}";
-                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] OBJ export failed: {ex}");
-                }
+                    try
+                    {
+                        Pm4OfflineObjExportSummary summary = scene.ExportPm4ObjectsAsObjDirectory(picked);
+                        _statusMessage =
+                            $"Exported PM4 OBJ set: {summary.ExportedObjectCount} objects across {summary.ExportedTileCount} tiles to {summary.OutputDirectory} (manifest: {summary.ManifestPath}).";
+                        ViewerLog.Info(ViewerLog.Category.Terrain,
+                            $"[PM4 Export] OBJ set finished: {summary.ExportedObjectCount} objects, {summary.ExportedTileCount} tiles -> {summary.OutputDirectory}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _statusMessage = $"PM4 OBJ export failed: {ex.Message}";
+                        ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] OBJ export failed: {ex}");
+                    }
+                    finally
+                    {
+                        _pm4ObjExportRunning = false;
+                    }
+                });
             });
     }
 

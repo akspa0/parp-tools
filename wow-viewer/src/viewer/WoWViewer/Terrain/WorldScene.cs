@@ -1438,7 +1438,7 @@ public class WorldScene : ISceneRenderer
     /// same thing, and that is a separate decision from whether the animation advances.
     /// </para>
     /// </remarks>
-    public bool WorldDoodadAnimationEnabled { get; set; }
+    public bool WorldDoodadAnimationEnabled { get; set; } = true;
 
     private Vector3 _frameHistoryPreviousCameraPosition = new(float.NaN, float.NaN, float.NaN);
     private Vector3 _frameHistoryPreviousCameraForward = new(float.NaN, float.NaN, float.NaN);
@@ -11734,26 +11734,64 @@ public class WorldScene : ISceneRenderer
                             bbMin = center - halfExtent;
                             bbMax = center + halfExtent;
 
-                            if (useOrientedBox)
+                            // Selection highlight: draw the model's own mesh as a red wireframe
+                            // overlay instead of a bounding box (operator request). Fall back to
+                            // the oriented box only when no renderer is available yet (model not
+                            // streamed in), and for WMO-doodad placement markers, whose mesh
+                            // belongs to the parent WMO's doodad cache.
+                            bool drewSelectionWireframe = false;
+                            if (!doodadPlaceholderBounds && selectedInstance.AssetKind != "WMO Doodad")
                             {
-                                _bbRenderer.BatchHighlightedBoxOriented(
-                                    bbMin,
-                                    bbMax,
-                                    selectedInstance.Transform,
-                                    selectedBoundsTime,
-                                    selectedBoundsInnerColor,
-                                    selectedBoundsAccentA,
-                                    selectedBoundsAccentBResolved);
+                                IModelRenderer? selectedMdxRenderer =
+                                    ResolveVisibleMdxRenderer(frame, selectedInstance.ModelKey);
+                                if (selectedMdxRenderer != null)
+                                {
+                                    selectedMdxRenderer.RenderWireframeOverlay(
+                                        selectedInstance.Transform, view, proj,
+                                        fogColor, fogStart, fogEnd, cameraPos,
+                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
+                                        Pm4ColorHighlight);
+                                    drewSelectionWireframe = true;
+                                }
+                                else
+                                {
+                                    WmoRenderer? selectedWmoRenderer =
+                                        ResolveVisibleWmoRenderer(frame, selectedInstance.ModelKey);
+                                    if (selectedWmoRenderer != null)
+                                    {
+                                        selectedWmoRenderer.RenderWireframeOverlay(
+                                            selectedInstance.Transform, view, proj,
+                                            fogColor, fogStart, fogEnd, cameraPos,
+                                            lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
+                                            Pm4ColorHighlight);
+                                        drewSelectionWireframe = true;
+                                    }
+                                }
                             }
-                            else
+
+                            if (!drewSelectionWireframe)
                             {
-                                _bbRenderer.BatchHighlightedBoxMinMax(
-                                    bbMin,
-                                    bbMax,
-                                    selectedBoundsTime,
-                                    selectedBoundsInnerColor,
-                                    selectedBoundsAccentA,
-                                    selectedBoundsAccentBResolved);
+                                if (useOrientedBox)
+                                {
+                                    _bbRenderer.BatchHighlightedBoxOriented(
+                                        bbMin,
+                                        bbMax,
+                                        selectedInstance.Transform,
+                                        selectedBoundsTime,
+                                        selectedBoundsInnerColor,
+                                        selectedBoundsAccentA,
+                                        selectedBoundsAccentBResolved);
+                                }
+                                else
+                                {
+                                    _bbRenderer.BatchHighlightedBoxMinMax(
+                                        bbMin,
+                                        bbMax,
+                                        selectedBoundsTime,
+                                        selectedBoundsInnerColor,
+                                        selectedBoundsAccentA,
+                                        selectedBoundsAccentBResolved);
+                                }
                             }
 
                             // 3D selection aids for WMO doodads: an origin jewel + gold position
