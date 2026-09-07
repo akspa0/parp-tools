@@ -35,17 +35,23 @@ directive, 2026-09-07).
 
 ## Phase 2 — Data I/O consolidation (D1, D6)
 
-- [ ] T020 Move all export/import content into `EditorDataIoPage` (PM4 JSON/OBJ, correlation
+- [x] T020 Move all export/import content into `EditorDataIoPage` (PM4 JSON/OBJ, correlation
       JSON, GLB scene/collision/map tiles, terrain layer export/import, synthesized minimap,
-      VLM/ML harvest launchers) — groups collapsed by default
-- [ ] T021 Delete the 5 duplicate export-button sites (ViewerApp_Pm4Utilities ~378/448/1201/
+      VLM/ML harvest launchers) — groups collapsed by default. PM4 export command set moved to a
+      collapsed "PM4 Exports" section; VLM/ML harvest launchers do not exist (retired workflow —
+      see receipt note 1)
+- [x] T021 Delete the 5 duplicate export-button sites (ViewerApp_Pm4Utilities ~378/448/1201/
       1782/3900) and the Archaeology-hosted imports page; replace with `Open Data I/O` links
-      carrying current selection
-- [ ] T022 Background-execution audit on the new page: every potentially >1s command uses the
+      carrying current selection (selection lives on WorldScene, preserved across navigation).
+      Archaeology-tab de-hosting of the imports route is T042 (receipt note 2)
+- [x] T022 Background-execution audit on the new page: every potentially >1s command uses the
       `ExportPm4ObjectsObjSet` pattern (minimum: correlation JSON build, object-match report
-      build, PM4 JSON dump)
-- [ ] T023 Gate: SC-1 grep receipt for D1 (each label = 1 draw site); build/test clean; export
-      smoke on a small map with the UI responsive
+      build, PM4 JSON dump). Both JSON dumps backgrounded; object-match report refresh is an
+      uncalled dead path (receipt D6 table)
+- [x] T023 Gate: SC-1 grep receipt for D1 (each label = 1 draw site); build/test clean; export
+      smoke on a small map with the UI responsive.
+      Receipt: [evidence/t020-t023-phase2-receipt.md](evidence/t020-t023-phase2-receipt.md).
+      Interactive export execution (path picker) remains operator-owned
 
 ## Phase 3 — Placement & Objects (D2, D4, D5a)
 

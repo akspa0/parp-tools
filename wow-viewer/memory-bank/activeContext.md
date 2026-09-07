@@ -11,7 +11,7 @@ Last updated: 2026-09-07
 The [documentation router](../docs/README.md), [spec routing registry](../specs/registry.md), and
 [archives](archive/README.md) are on-demand context, never default reading.
 
-## Current lane — Spec 231 Editor/Archaeology UI Overhaul (Phase 0 + 1 complete)
+## Current lane — Spec 231 Editor/Archaeology UI Overhaul (Phase 0–2 complete)
 
 - **Spec + plan + tasks** at [231-editor-archaeology-ui-overhaul/](../specs/231-editor-archaeology-ui-overhaul/spec.md):
   4-page Editor IA (Placement & Objects / Terrain Tools / Data I/O / Converters), Archaeology
@@ -23,12 +23,19 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
   Phase 1 complete — `Workbench/Pages/` page classes, 4-label navigator, delegation switch,
   settings-load remap; build 0 errors.
   Receipts: [evidence/](../specs/231-editor-archaeology-ui-overhaul/evidence/inventory-v3-baseline.md).
-- **Next**: Phase 2 (T020–T023, Data I/O consolidation D1/D6). Legacy `OpenWorkbenchTab(Editor, n)`
-  call sites now pass NEW indices (2 = Data I/O). Capture automation recipe: patch
-  `viewer_settings.json` (ActiveTopTab 5=Editor / 6=Archaeology, ActiveBottomTab=page,
-  WorkbenchNavigationVersion=4) then launch the exe with `--game-path --build --world
-  'World\Maps\Shadowfang\Shadowfang.wdt' --capture-shot current --capture-with-ui
-  --capture-output <dir> --capture-after-frames 120 --exit-after-capture`.
+- **Phase 2 landed 2026-09-07** (commit after ee223e78): D1 — `DrawPm4ExportCommandSet` is the
+  single draw site for the 5 PM4 export commands; 6 "Open Data I/O" links replace the duplicate
+  clusters; collapsed "PM4 Exports" section on the Data I/O page. D6 — PM4 objects-JSON and
+  PM4/WMO correlation-JSON dumps backgrounded with `_pm4JsonExportRunning` guard. Build 0 errors;
+  11 dotnet test failures are pre-existing Core/PM4-corpus failures (test projects do not
+  reference the changed viewer UI project). Receipt:
+  [evidence/t020-t023-phase2-receipt.md](../specs/231-editor-archaeology-ui-overhaul/evidence/t020-t023-phase2-receipt.md).
+- **Next**: Phase 3 (T030–T033, Placement & Objects: D2 correlation-panel diff + dedupe, D4
+  doodad-set combos, D5a). `ViewerApp_Pm4Utilities.cs` at 4,516 lines (shrink lands in P3/P4).
+  Capture automation recipe: patch `viewer_settings.json` (ActiveTopTab 5=Editor /
+  6=Archaeology, ActiveBottomTab=page, WorkbenchNavigationVersion=4) then launch the exe with
+  `--game-path --build --world 'World\Maps\Shadowfang\Shadowfang.wdt' --capture-shot current
+  --capture-with-ui --capture-output <dir> --capture-after-frames 120 --exit-after-capture`.
 
 ## Landed this session (awaiting operator visual receipts)
 

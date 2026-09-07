@@ -92,6 +92,7 @@ public partial class ViewerApp
     void Workbench.Pages.IEditorPageHost.DrawTerrainLab() => DrawTerrainLabSubTab();
     void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => DrawArchaeologyEditorImportsSubTab();
     void Workbench.Pages.IEditorPageHost.DrawConverters() => DrawConvertersSubTabContent();
+    void Workbench.Pages.IEditorPageHost.DrawPm4Exports() => DrawPm4ExportCommandSet();
 
     private void EnsureEditorHost()
     {

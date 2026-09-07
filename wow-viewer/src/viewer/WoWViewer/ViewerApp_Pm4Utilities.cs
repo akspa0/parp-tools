@@ -375,14 +375,8 @@ public partial class ViewerApp
         {
             ImGui.TextDisabled("No PM4 object selected. Left-click PM4 geometry to inspect one object at a time.");
             DrawPm4ObjectCollectionSummary("WorkbenchSelection");
-            if (ImGui.Button("Dump PM4 Objects JSON"))
-                ExportPm4ObjectsJson();
-            ImGui.SameLine();
-            if (ImGui.Button("Export PM4 OBJ Set"))
-                ExportPm4ObjectsObjSet();
-            ImGui.SameLine();
-            if (ImGui.Button("Export PM4 LLM Bundle"))
-                ExportPm4LlmEvidenceBundle();
+            if (ImGui.Button("Open Data I/O"))
+                OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
             return;
         }
 
@@ -445,14 +439,8 @@ public partial class ViewerApp
             if (ImGui.Button("Clear PM4 Selection"))
                 _worldScene.ClearPm4ObjectSelection();
             ImGui.SameLine();
-            if (ImGui.Button("Dump PM4 Objects JSON"))
-                ExportPm4ObjectsJson();
-            ImGui.SameLine();
-            if (ImGui.Button("Export PM4 OBJ Set"))
-                ExportPm4ObjectsObjSet();
-            ImGui.SameLine();
-            if (ImGui.Button("Export PM4 LLM Bundle"))
-                ExportPm4LlmEvidenceBundle();
+            if (ImGui.Button("Open Data I/O"))
+                OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
 
             // Inline WMO match button when a WMO-type object is selected
             if (debugInfo.Ck24Type is 0x42 or 0x43)
@@ -1201,11 +1189,8 @@ public partial class ViewerApp
             if (ImGui.Button("Clear PM4 Selection"))
                 _worldScene.ClearPm4ObjectSelection();
             ImGui.SameLine();
-            if (ImGui.Button("Dump PM4 Objects JSON"))
-                ExportPm4ObjectsJson();
-            ImGui.SameLine();
-            if (ImGui.Button("Export PM4 OBJ Set"))
-                ExportPm4ObjectsObjSet();
+            if (ImGui.Button("Open Data I/O"))
+                OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
             ImGui.SameLine();
             if (ImGui.Button("Reconcile Tile"))
             {
@@ -1213,9 +1198,6 @@ public partial class ViewerApp
                 // loads; the Reconcile tab runs the Spec 176 tile-scoped pipeline instead.
                 _activePm4TabIndex = (int)Pm4BottomTab.Reconcile;
             }
-            ImGui.SameLine();
-            if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
-                ExportPm4WmoCorrelationJson();
             ImGui.SameLine();
             if (ImGui.Button("PM4/WMO Panel"))
             {
@@ -1779,11 +1761,8 @@ public partial class ViewerApp
         if (pm4TransformChanged)
             InvalidatePm4DerivedReports();
 
-        if (ImGui.Button("Dump PM4 Objects JSON"))
-            ExportPm4ObjectsJson();
-        ImGui.SameLine();
-        if (ImGui.Button("Export PM4 OBJ Set"))
-            ExportPm4ObjectsObjSet();
+        if (ImGui.Button("Open Data I/O"))
+            OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
         ImGui.SameLine();
         if (ImGui.Button("Reconcile Tile"))
         {
@@ -1791,9 +1770,6 @@ public partial class ViewerApp
             // loads; the Reconcile tab runs the Spec 176 tile-scoped pipeline instead.
             _activePm4TabIndex = (int)Pm4BottomTab.Reconcile;
         }
-        ImGui.SameLine();
-        if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
-            ExportPm4WmoCorrelationJson();
         ImGui.SameLine();
         if (ImGui.Button("PM4/WMO Panel"))
         {
@@ -2032,10 +2008,46 @@ public partial class ViewerApp
         _statusMessage = $"Saved PM4 alignment: T=({_pm4SavedOverlayTranslation.X:F2}, {_pm4SavedOverlayTranslation.Y:F2}, {_pm4SavedOverlayTranslation.Z:F2}) Rot=({_pm4SavedOverlayRotationDegrees.X:F2}, {_pm4SavedOverlayRotationDegrees.Y:F2}, {_pm4SavedOverlayRotationDegrees.Z:F2})° S=({_pm4SavedOverlayScale.X:F3}, {_pm4SavedOverlayScale.Y:F3}, {_pm4SavedOverlayScale.Z:F3})";
     }
 
+    /// <summary>
+    /// Spec 231 D1: single authoritative draw site for the PM4 export command set.
+    /// The former duplicate clusters in the PM4 selection/transform/info panels are
+    /// now "Open Data I/O" links; the commands themselves are drawn only here, on
+    /// the Editor > Data I/O page.
+    /// </summary>
+    private void DrawPm4ExportCommandSet()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world with PM4 data to export.");
+            return;
+        }
+
+        if (ImGui.Button("Dump PM4 Objects JSON"))
+            ExportPm4ObjectsJson();
+        ImGui.SameLine();
+        if (ImGui.Button("Export PM4 OBJ Set"))
+            ExportPm4ObjectsObjSet();
+        ImGui.SameLine();
+        if (ImGui.Button("Export PM4 LLM Bundle"))
+            ExportPm4LlmEvidenceBundle();
+
+        if (ImGui.Button("Export Visible PM4 Report"))
+            ExportPm4OverlayReport();
+        ImGui.SameLine();
+        if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
+            ExportPm4WmoCorrelationJson();
+    }
+
     private void ExportPm4ObjectsJson()
     {
         if (_worldScene == null)
             return;
+
+        if (_pm4JsonExportRunning)
+        {
+            _statusMessage = "A PM4 JSON export is already running.";
+            return;
+        }
 
         string defaultName = $"pm4_objects_{DateTime.Now:yyyyMMdd_HHmmss}.json";
         ImGuiPathPicker.Instance.Open(
@@ -2048,23 +2060,42 @@ public partial class ViewerApp
                 if (string.IsNullOrWhiteSpace(picked))
                     return;
 
-                try
+                // Spec 231 D6: the interchange JSON includes full geometry, which walks
+                // every loaded PM4 file — run it off the render thread with a re-entrancy
+                // guard so the viewer stays responsive during the dump.
+                WorldScene scene = _worldScene;
+                _pm4JsonExportRunning = true;
+                _statusMessage = "Exporting PM4 objects JSON… (running in background; the viewer stays responsive)";
+                _ = Task.Run(() =>
                 {
-                    string json = _worldScene.BuildPm4OverlayInterchangeJson(includeGeometry: true);
-                    File.WriteAllText(picked, json, Encoding.UTF8);
-                    _statusMessage = $"Exported PM4 objects JSON: {picked}";
-                }
-                catch (Exception ex)
-                {
-                    _statusMessage = $"PM4 JSON export failed: {ex.Message}";
-                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] JSON export failed: {ex}");
-                }
+                    try
+                    {
+                        string json = scene.BuildPm4OverlayInterchangeJson(includeGeometry: true);
+                        File.WriteAllText(picked, json, Encoding.UTF8);
+                        _statusMessage = $"Exported PM4 objects JSON: {picked}";
+                    }
+                    catch (Exception ex)
+                    {
+                        _statusMessage = $"PM4 JSON export failed: {ex.Message}";
+                        ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] JSON export failed: {ex}");
+                    }
+                    finally
+                    {
+                        _pm4JsonExportRunning = false;
+                    }
+                });
             },
             defaultName);
     }
 
     /// <summary>True while a background PM4 OBJ export is in flight; guards re-entrancy.</summary>
     private bool _pm4ObjExportRunning;
+
+    /// <summary>
+    /// Spec 231 D6: true while a background PM4 JSON dump (objects JSON or PM4/WMO
+    /// correlation JSON) is in flight; guards re-entrancy like <see cref="_pm4ObjExportRunning"/>.
+    /// </summary>
+    private bool _pm4JsonExportRunning;
 
     private void ExportPm4ObjectsObjSet()
     {
@@ -2124,6 +2155,12 @@ public partial class ViewerApp
         if (_worldScene == null)
             return;
 
+        if (_pm4JsonExportRunning)
+        {
+            _statusMessage = "A PM4 JSON export is already running.";
+            return;
+        }
+
         string defaultName = $"pm4_wmo_correlation_{DateTime.Now:yyyyMMdd_HHmmss}.json";
         ImGuiPathPicker.Instance.Open(
             "Save PM4/WMO Correlation JSON",
@@ -2135,17 +2172,29 @@ public partial class ViewerApp
                 if (string.IsNullOrWhiteSpace(picked))
                     return;
 
-                try
+                // Spec 231 D6: the correlation build walks every placement in the loaded
+                // PM4 corpus — background it with a re-entrancy guard like the OBJ export.
+                WorldScene scene = _worldScene;
+                _pm4JsonExportRunning = true;
+                _statusMessage = "Exporting PM4/WMO correlation JSON… (running in background; the viewer stays responsive)";
+                _ = Task.Run(() =>
                 {
-                    string json = _worldScene.BuildPm4WmoPlacementCorrelationJson();
-                    File.WriteAllText(picked, json, Encoding.UTF8);
-                    _statusMessage = $"Exported PM4/WMO correlation JSON: {picked}";
-                }
-                catch (Exception ex)
-                {
-                    _statusMessage = $"PM4/WMO correlation export failed: {ex.Message}";
-                    ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] Correlation export failed: {ex}");
-                }
+                    try
+                    {
+                        string json = scene.BuildPm4WmoPlacementCorrelationJson();
+                        File.WriteAllText(picked, json, Encoding.UTF8);
+                        _statusMessage = $"Exported PM4/WMO correlation JSON: {picked}";
+                    }
+                    catch (Exception ex)
+                    {
+                        _statusMessage = $"PM4/WMO correlation export failed: {ex.Message}";
+                        ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] Correlation export failed: {ex}");
+                    }
+                    finally
+                    {
+                        _pm4JsonExportRunning = false;
+                    }
+                });
             },
             defaultName);
     }
@@ -3872,11 +3921,8 @@ public partial class ViewerApp
         {
             ImGui.TextDisabled("Select a PM4 object to inspect.");
             ImGui.Spacing();
-            if (ImGui.Button("Export Visible PM4 Report"))
-                ExportPm4OverlayReport();
-            ImGui.SameLine();
-            if (ImGui.Button("Export PM4 LLM Bundle"))
-                ExportPm4LlmEvidenceBundle();
+            if (ImGui.Button("Open Data I/O"))
+                OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
             ImGui.PopTextWrapPos();
             return;
         }
@@ -3917,14 +3963,8 @@ public partial class ViewerApp
 
         ImGui.Separator();
         ImGui.Spacing();
-        if (ImGui.Button("Export Visible PM4 Report"))
-            ExportPm4OverlayReport();
-        ImGui.SameLine();
-        if (ImGui.Button("Export PM4 LLM Bundle"))
-            ExportPm4LlmEvidenceBundle();
-        ImGui.SameLine();
-        if (ImGui.Button("Dump PM4 JSON"))
-            ExportPm4ObjectsJson();
+        if (ImGui.Button("Open Data I/O"))
+            OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
 
         ImGui.Separator();
         DrawPm4SceneGraph();

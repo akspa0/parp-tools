@@ -16,6 +16,15 @@ public sealed class EditorDataIoPage
     public void Draw()
     {
         if (SharedUiWidgets.SectionHeader(
+                "PM4 Exports",
+                "Single authoritative home for the PM4 export commands (Spec 231 D1): objects JSON dump, OBJ set, LLM evidence bundle, visible overlay report, and PM4/WMO correlation JSON.",
+                defaultOpen: false,
+                id: "EditorDataIoPm4Exports"))
+        {
+            _context.Host.DrawPm4Exports();
+        }
+
+        if (SharedUiWidgets.SectionHeader(
                 "Imports & Exports",
                 defaultOpen: true,
                 id: "EditorDataIoImportsExports"))
