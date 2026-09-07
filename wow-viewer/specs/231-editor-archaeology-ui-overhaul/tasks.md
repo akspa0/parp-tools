@@ -83,6 +83,27 @@ directive, 2026-09-07).
       `ViewerApp_Sidebars.cs` 6,173 → 6,013; `ViewerApp_Pm4Utilities.cs` 4,451 → 4,368.
       Receipt: [evidence/t030-t043-phase3-4-receipt.md](evidence/t030-t043-phase3-4-receipt.md)
 
+## Phase 6 — Tools curation & removal pass (operator amendment 2026-09-07)
+
+Model surfaces: Editor → Data I/O page and the Quick panel (simple tools, one location,
+SharedUiWidgets, no one-off styling). Everything below removes UI surfaces only — MPQ/ADT/WMO/M2
+readers stay untouched (AGENTS.md §4).
+
+- [x] T060 Wiring audit: enumerate every private draw/handler method in `ViewerApp*.cs` and its
+      reference count; classify each Editor/Archaeology surface as live / dead / operator-named
+      for removal. Output: [evidence/p6-wiring-audit.md](evidence/p6-wiring-audit.md).
+      Batch 1 executed: 27 dead draw methods removed (~880 lines), build 0 errors. T061–T064
+      scoped with wiring status, not yet executed
+- [ ] T061 Remove the old weak-signal amplifier UI (`_terrainWeakSignalRestore*` family and its
+      draw surfaces) — never fully wired per operator
+- [ ] T062 Remove "weird terrain tools" that do not work / do not fit (task-inspector terrain
+      blocks, one-off tool windows) after per-surface wiring check
+- [ ] T063 Remove stale selection-tools surfaces that duplicate Inspector/Placement functionality
+- [ ] T064 Converge remaining Editor/Archaeology pages on the Data I/O / Quick pattern
+      (SharedUiWidgets sections, collapsed groups, links between pages)
+- [ ] T065 Gate: build 0 errors; line-count delta recorded for every touched `ViewerApp_*.cs`;
+      removal receipt with per-surface evidence; no reader code touched
+
 ## Phase 5 — Navigation test, inventory, closure
 
 - [ ] T050 Operator navigation smoke: US1 (PM4 OBJ export), US2 (placement edit + reconcile),

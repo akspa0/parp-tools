@@ -458,29 +458,6 @@ public partial class ViewerApp
     }
 
     /// <summary>One path row: editable text plus an in-app Browse button (no native dialogs).</summary>
-    private void DrawReconciliationPathField(
-        string label,
-        Func<string> getPath,
-        Action<string> setPath,
-        string pickerTitle,
-        bool pickFolder,
-        string? filterExtension)
-    {
-        string path = getPath();
-        ImGui.InputText(label, ref path, 512);
-        setPath(path);
-
-        ImGui.SameLine();
-        if (ImGui.SmallButton($"Browse##{label}"))
-        {
-            ImGuiPathPicker.Instance.Open(
-                pickerTitle,
-                pickFolder,
-                path,
-                filterExtension,
-                picked => setPath(picked));
-        }
-    }
 
     private void RunReconciliationPreview()
     {

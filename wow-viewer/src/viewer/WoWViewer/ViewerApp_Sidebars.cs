@@ -343,35 +343,6 @@ public partial class ViewerApp
         ImGui.PopStyleVar(2);
     }
 
-    private void DrawCenteredTerrainToolbarWindow(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
-    {
-        float laneX = 0f;
-        float laneWidth = ImGui.GetIO().DisplaySize.X;
-        if (TryGetSceneViewportRect(out float viewportX, out _, out float viewportWidth, out _))
-        {
-            laneX = viewportX;
-            laneWidth = viewportWidth;
-        }
-
-        if (laneWidth <= 10f)
-            return;
-
-        ImGui.SetNextWindowPos(new Vector2(laneX, MenuBarHeight));
-        ImGui.SetNextWindowSize(new Vector2(laneWidth, ToolbarHeight));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 6));
-        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(6, 0));
-        if (ImGui.Begin("##CenteredTerrainToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
-            ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoBackground))
-        {
-            float contentWidth = GetDirectTerrainToolbarWidth(renderer, liquidRenderer);
-            float startX = MathF.Max(8f, (laneWidth - contentWidth) * 0.5f);
-            ImGui.SetCursorPosX(startX);
-            DrawDirectTerrainToolbarControls(renderer, liquidRenderer);
-        }
-        ImGui.End();
-        ImGui.PopStyleVar(2);
-    }
 
     private void DrawToolbar()
     {
@@ -1072,16 +1043,6 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawUnifiedSelectionSidebarContent()
-    {
-        DrawViewerSelectionSummary();
-
-        if (!string.IsNullOrWhiteSpace(_modelInfo))
-        {
-            ImGui.Separator();
-            DrawModelInfoPanelContent();
-        }
-    }
 
     /// <summary>
     /// Single inline owner for the current world/model context. Detail surfaces
@@ -1207,167 +1168,12 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawSelectedPm4ContextSummary()
-    {
-        if (_worldScene?.SelectedPm4ObjectKey is not { } key)
-            return;
 
-        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug))
-        {
-            // Lead with what identifies the object. "Type" and "Object" used to appear here as
-            // Ck24Type and Ck24ObjectId, which are the EXPONENT BAND and MANTISSA BYTES of the
-            // placement-Z float - they name nothing, and showing "Type 0x00" beside a real class
-            // byte invited reading 0x00 as a surface class. Surface classes are 0x03 and 0x10-0x15;
-            // 0x00 never occurs.
-            float z = BitConverter.UInt32BitsToSingle(debug.Ck24 << 8);
-            ImGui.TextUnformatted(debug.Ck24 == 0
-                ? $"PM4 object   tile ({key.tileX}, {key.tileY})   no placement height"
-                : $"PM4 object   tile ({key.tileX}, {key.tileY})   placement Z {z:F3}");
 
-            ImGui.TextDisabled($"Surface class 0x{debug.DominantGroupKey:X2} (dominant)   Region {debug.MshdRegionId}   MSCN {debug.DominantMscnRefIndex}");
-            ImGui.TextDisabled($"MSLK adjacency records: {debug.DominantAttributeMask}   MSLK group 0x{debug.LinkGroupObjectId:X8}   MPRL refs {debug.LinkedPositionRefCount}");
-            ImGui.TextDisabled($"Raw MSUR._0x1C slice 0x{debug.Ck24:X6}   viewer part {key.objectPart}");
-        }
-        else
-        {
-            ImGui.Text($"PM4 tile ({key.tileX}, {key.tileY})   part {key.objectPart}");
-        }
-    }
 
-    private bool DrawCompactTerrainContextSummary()
-    {
-        if (_terrainManager == null && _vlmTerrainManager == null)
-            return false;
 
-        if (!TryGetTerrainChunkInspectionTarget(preferHoveredChunk: true, out TerrainRenderer.TerrainChunkInfo chunkInfo, out bool usingHoveredChunk))
-        {
-            ImGui.TextDisabled("ADT/MCNK: no loaded camera or hovered chunk.");
-            return true;
-        }
 
-        if (!TryResolveTerrainChunkInspectionData(chunkInfo, out TerrainChunkData? chunkData, out _)
-            || chunkData == null)
-        {
-            ImGui.TextDisabled($"ADT ({chunkInfo.TileY}, {chunkInfo.TileX})  MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})  data unavailable");
-            return true;
-        }
 
-        ImGui.Separator();
-        ImGui.Text($"ADT ({chunkInfo.TileY}, {chunkInfo.TileX})  MCNK ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
-        ImGui.TextDisabled(usingHoveredChunk ? "Target: hovered chunk" : "Target: camera chunk");
-        ImGui.TextDisabled($"Area {chunkData.AreaId}  Flags 0x{(uint)chunkData.McnkFlags:X8}  {DescribeMcnkFlags(chunkData.McnkFlags)}");
-        ImGui.TextDisabled($"Layers {chunkData.Layers.Length}  Holes 0x{chunkData.HoleMask:X4}  Alpha {chunkData.AlphaMaps.Count}  Shadow {(chunkData.ShadowMap != null ? "yes" : "no")}  MCCV {(chunkData.MccvColors != null ? "yes" : "no")}");
-        ImGui.TextDisabled($"World ({chunkData.WorldPosition.X:F1}, {chunkData.WorldPosition.Y:F1}, {chunkData.WorldPosition.Z:F1})");
-        return true;
-    }
-
-    private void DrawUnifiedWorldToolsSidebarContent()
-    {
-        DrawWorldObjectsPanelContent();
-
-        if (_worldScene != null)
-        {
-            ImGui.Separator();
-            DrawPm4WorkbenchInspector();
-        }
-    }
-
-    private void DrawViewerSelectionSummary()
-    {
-        bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
-        bool hasSelectedObject = DrawSelectedObjectSummaryContent();
-        if (!hasSelectedObject)
-        {
-            if (hasSelectedPm4)
-            {
-                ImGui.TextDisabled("A PM4 object is selected. Use the PM4 section for evidence and correlation.");
-                if (ImGui.Button("Open PM4 Tools"))
-                    OpenPm4Workbench(Pm4WorkbenchTab.Selection);
-            }
-            else
-            {
-                ImGui.TextDisabled("Select a world object to inspect its identity here.");
-            }
-        }
-    }
-
-    private void DrawRightSidebarSection(FixedBottomDrawerTab section, string label, Action drawContent, bool enabled = true, bool defaultOpen = false)
-    {
-        if (!enabled)
-            return;
-
-        bool shouldForceOpen = _pendingRightSidebarSection == section;
-        ImGui.SetNextItemOpen(shouldForceOpen || defaultOpen, shouldForceOpen ? ImGuiCond.Always : ImGuiCond.Once);
-        if (ImGui.CollapsingHeader(label, defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
-        {
-            _activeBottomDrawerTab = section;
-            if (shouldForceOpen)
-                _pendingRightSidebarSection = null;
-            drawContent();
-        }
-    }
-
-    private void DrawViewerInspectSidebarContent()
-    {
-        DrawCameraControlsContent();
-
-        if (!string.IsNullOrWhiteSpace(_modelInfo))
-        {
-            ImGui.Separator();
-            DrawModelInfoPanelContent();
-        }
-    }
-
-    private void DrawViewerDiagnosticsSidebarContent()
-    {
-        if (_worldScene != null && !string.IsNullOrWhiteSpace(_worldScene.RendererOptimizationHint))
-            ImGui.TextWrapped(_worldScene.RendererOptimizationHint);
-
-        ImGui.Text("Utility Panels");
-        DrawToolbarPopupButton("Utility Windows", $"{CountEnabled(_showMinimapWindow, _showLogViewer, _showPerfWindow, _showSettingsWindow)} open", "##UtilityWindowsPopup", () =>
-        {
-            if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
-            {
-                _showMinimapWindow = !_showMinimapWindow;
-                ImGui.CloseCurrentPopup();
-            }
-
-            if (_useTabUi)
-            {
-                if (ImGui.Button("Log Viewer"))
-                {
-                    OpenWorkbenchTab(UtilitiesBottomTab.Log);
-                    ImGui.CloseCurrentPopup();
-                }
-
-                if (ImGui.Button("Perf"))
-                {
-                    OpenWorkbenchTab(UtilitiesBottomTab.Perf);
-                    ImGui.CloseCurrentPopup();
-                }
-            }
-            else
-            {
-                if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
-                {
-                    _showLogViewer = !_showLogViewer;
-                    ImGui.CloseCurrentPopup();
-                }
-
-                if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
-                {
-                    _showPerfWindow = !_showPerfWindow;
-                    ImGui.CloseCurrentPopup();
-                }
-            }
-
-            if (ImGui.Button("Settings..."))
-            {
-                _showSettingsWindow = true;
-                ImGui.CloseCurrentPopup();
-            }
-        });
-    }
 
     private void DrawDockedShellPanelsForLane(ShellPanelLane lane, float sidebarHeight)
     {
@@ -3914,12 +3720,6 @@ public partial class ViewerApp
             ImGui.TextWrapped(_chunkClipboardStatus);
     }
 
-    private void DrawWorldObjectsContent()
-    {
-        // Intentionally moved as-is into a partial file to keep ViewerApp.cs manageable.
-        // The implementation remains unchanged and still lives in this partial class.
-        DrawWorldObjectsContentCore();
-    }
 
     private static float GetUniformListRowHeight()
     {
@@ -5051,49 +4851,7 @@ public partial class ViewerApp
                 && _activeUtilitiesTabIndex == (int)tab);
     }
 
-    private void DrawModelSubTabContent()
-    {
-        switch ((ModelBottomTab)_activeBottomTabIndex)
-        {
-            case ModelBottomTab.Info:
-                DrawModelInfoSubTab();
-                break;
-            case ModelBottomTab.Animations:
-                DrawModelAnimationsSubTab();
-                break;
-            case ModelBottomTab.Actions:
-                DrawModelActionsSubTab();
-                break;
-        }
-    }
 
-    private void DrawModelInfoSubTab()
-    {
-        ImGui.TextDisabled("Model Viewer — Info");
-        ImGui.Separator();
-
-        // If a world model object is selected, show its details in the Inspect destination.
-        if (_worldScene?.SelectedInstance.HasValue == true
-            && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo
-            && !string.IsNullOrWhiteSpace(_selectedObjectInfo))
-        {
-            ImGui.TextWrapped(_selectedObjectInfo);
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_modelInfo))
-        {
-            ImGui.TextWrapped("No model loaded. Open a model file (M2/MDX/WMO) or select a world object to see details here.");
-            return;
-        }
-        DrawModelInfoCoreContent();
-
-        if (_renderer is IModelRenderer || _renderer is WmoRenderer)
-        {
-            ImGui.Separator();
-            DrawModelAnimationControls();
-        }
-    }
 
     private void DrawModelAnimationsSubTab()
     {
@@ -5270,24 +5028,6 @@ public partial class ViewerApp
         return selected;
     }
 
-    private void DrawExperimentalSubTabContent()
-    {
-        switch (_activeBottomTabIndex)
-        {
-            case 0:
-                DrawTerrainLabSubTab();
-                break;
-            case 1:
-                DrawPm4SubTabContent();
-                break;
-            case 2:
-                DrawConvertersSubTabContent();
-                break;
-            case 3:
-                DrawPopulationSubTabContent();
-                break;
-        }
-    }
 
     private void DrawPopulationSubTabContent()
     {
@@ -5382,45 +5122,9 @@ public partial class ViewerApp
 
     private bool HasTerrainOrWorldLoaded() => _terrainManager != null || _vlmTerrainManager != null || _worldScene != null;
 
-    private void DrawTerrainClipboardSubTab(TerrainRenderer? renderer)
-    {
-        ImGui.TextDisabled("Chunk copy/paste + heightmap save (moved from Chunk Clipboard window).");
-        ImGui.Separator();
-        DrawSharedChunkClipboardSection(renderer, withHeader: false);
-    }
 
-    private void DrawTerrainAnalysisSubTab()
-    {
-        // 069 Phase 16: call headless variant so no nested window opens
-        // inside the workbench. The legacy DrawTerrainAnalysisWindow
-        // wrapper still exists for users who toggle the old menu item.
-        if (_terrainManager == null && _vlmTerrainManager == null)
-        {
-            ImGui.TextDisabled("Load a terrain-backed world to use Terrain Analysis.");
-            return;
-        }
-        DrawTerrainAnalysisContent();
-    }
 
-    private void DrawTerrainMcnkSubTab()
-    {
-        if (_terrainManager == null && _vlmTerrainManager == null)
-        {
-            ImGui.TextDisabled("Load a terrain-backed world to use MCNK Explorer.");
-            return;
-        }
-        DrawMcnkExplorerContent();
-    }
 
-    private void DrawTerrainWeakSignalSubTab()
-    {
-        if (_terrainManager == null && _vlmTerrainManager == null)
-        {
-            ImGui.TextDisabled("Load a terrain-backed world to use Weak Signal.");
-            return;
-        }
-        DrawWeakSignalContent();
-    }
 
 
     // ── PM4 sub-tab content ────────────────────────────────────────────────
@@ -5501,18 +5205,6 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawSceneSubTabContent()
-    {
-        switch (_activeBottomTabIndex)
-        {
-            case 0:
-                DrawWorldPlacementsSubTab();
-                break;
-            case 1:
-                DrawWorldLodSubTab();
-                break;
-        }
-    }
 
     private void DrawWorldPlacementsSubTab()
     {
@@ -5526,65 +5218,8 @@ public partial class ViewerApp
         DrawPlacementListsContent();
     }
 
-    private void DrawWorldTilesSubTab()
-    {
-        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (renderer == null)
-        {
-            ImGui.TextDisabled("Load a terrain-backed world to target tiles and chunks in the Scene tab.");
-            return;
-        }
 
-        ImGui.TextDisabled("Selection map + chunk targeting + live restore tuning.");
-        ImGui.Separator();
-        DrawTerrainWorkbenchSelectionContent(renderer);
-        ImGui.Separator();
-        DrawTerrainControlsAdjustmentContent();
-    }
 
-    private void DrawTerrainExportSubTab(TerrainRenderer renderer)
-    {
-        ImGui.Text("Terrain Export Scope");
-        DrawTerrainTileScopeSelector("WorldTabExport", includeCurrentTile: true);
-        var scopedTiles = GetTileScopeList(_terrainTileScope);
-        ImGui.TextDisabled($"Resolved export scope: {scopedTiles.Count} tile(s).");
-
-        ImGui.Separator();
-        ImGui.Text("Scoped Export");
-        ImGui.TextDisabled("Use Current tile, Loaded tiles, Whole map, Custom list, or a row/column rectangle before exporting partial ADT data.");
-        if (ImGui.Button("Export Alpha"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportAlphaCurrentTileChunksFolder();
-            else
-                ExportAlphaTilesFolder(_terrainTileScope);
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export Heightmap"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportHeightmap257CurrentTilePerTile();
-            else
-                ExportHeightmap257TilesFolderPerTile(_terrainTileScope);
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export MCCV"))
-        {
-            if (_terrainTileScope == TerrainTileScope.CurrentTile)
-                ExportMccvCurrentTilePng();
-            else
-                ExportMccvTilesFolder(_terrainTileScope);
-        }
-    }
-
-    private void DrawWorldSelectionToolsSubTab()
-    {
-        ImGui.TextDisabled("Click selection, frame, asset path actions for world objects.");
-        ImGui.Separator();
-        DrawSelectedObjectSummaryContent();
-    }
 
     private void DrawWorldLodSubTab()
     {

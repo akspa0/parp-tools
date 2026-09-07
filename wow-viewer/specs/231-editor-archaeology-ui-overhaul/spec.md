@@ -7,6 +7,29 @@ Supersedes: the unimplemented workspace-reorganization portions of [227](../227-
 ("sane Editor tabs" remains unexecuted there); 227's inventory-gate process (T003/T004) still
 applies and is folded into Phase 0 of this spec's plan.
 
+## Operator-originated amendment (verbatim, 2026-09-07, later same session) — Tools curation & removal pass
+
+> "the whole editor panel is a mess. the data i/o page is probably the cleanest and best example,
+> along with the Quick panel, which is the best example of how the ui should have a good mix of
+> simple tools in one location, the rest of the ui should follow suit, and keep a shared ui
+> library in mind, no one-off weird things.
+> To that end, we have weird terrain tools and selection tools and the old weak signal amplifier
+> and various other things that should be removed that either do not work, never worked, were
+> never fully wired, or do not fit the current ui and need to be rewritten from the ground up.
+> This in turn is meant to act as a minor refactor of the ViewerApp *.cs files to get them under
+> control and ensure only the best functionality that works, is retained in the ui."
+
+Amendment scope (operator-directed, this session):
+1. **UI model**: Editor → Data I/O page and the Quick panel are the canonical pattern — simple
+   tools in one location, SharedUiWidgets primitives, no one-off styling. Remaining Editor/
+   Archaeology pages converge on this pattern.
+2. **Removal pass**: terrain tools, selection tools, the old weak-signal amplifier, and other
+   surfaces that do not work, never worked, or were never fully wired are **removed**, not
+   preserved. "Preserve working format readers" (AGENTS.md §4) still applies — this pass removes
+   UI surfaces, not MPQ/ADT/WMO/M2 readers.
+3. **ViewerApp refactor**: the removals act as a size/wiring reduction across the `ViewerApp_*.cs`
+   partials; dead state fields, handlers, and draw methods are deleted with their surfaces.
+
 ## Operator-originated requirement (verbatim, 2026-09-07)
 
 > "the ui is STILL atrocious and relaly not functional nor useful in anything other than the

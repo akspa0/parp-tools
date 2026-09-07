@@ -123,47 +123,6 @@ public partial class ViewerApp
         ImGui.TextDisabled(GetWorkspaceSaveStatusSummary());
     }
 
-    private void DrawEditorWorkspaceNavigator(bool hasWorldLoaded)
-    {
-        ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-        if (ImGui.CollapsingHeader("Editor Workspace", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            ImGui.TextDisabled("One app, shared services, explicit editor tasks.");
-            ImGui.TextDisabled($"Current task: {GetEditorWorkspaceTaskLabel(_editorWorkspaceTask)}");
-            ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
-            ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
-            ImGui.Separator();
-
-            foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
-            {
-                bool isAvailable = IsEditorTaskAvailable(task);
-                if (!isAvailable)
-                    ImGui.BeginDisabled();
-
-                bool isSelected = task == _editorWorkspaceTask;
-                if (ImGui.Selectable(GetEditorWorkspaceTaskLabel(task), isSelected))
-                    SetEditorWorkspaceTask(task);
-
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.TextDisabled(GetEditorWorkspaceTooltip(task));
-                    ImGui.EndTooltip();
-                }
-
-                if (!isAvailable)
-                    ImGui.EndDisabled();
-            }
-        }
-
-        DrawSharedWorldOverviewSection(inScrollableChild: false);
-
-        ImGui.SetNextItemOpen(!hasWorldLoaded || _editorWorkspaceTask == EditorWorkspaceTask.Inspect, ImGuiCond.Once);
-        if (_showFileBrowser && ImGui.CollapsingHeader("Map / Assets"))
-            DrawFileBrowserContent();
-
-        DrawSharedWorldMapsSection(defaultOpenWhenNoWorld: true);
-    }
 
     private void DrawEditorWorkspaceInspector()
     {
