@@ -1622,6 +1622,10 @@ public class WorldScene : ISceneRenderer
     public bool IsWmoBasedMap(string mapName)
         => _terrainManager != null && _terrainManager.IsMapWmoBased(mapName);
 
+    /// <summary>Spec 231 Phase 7: whether the named layer donor map has terrain content at this tile (own-grid coordinates).</summary>
+    public bool LayerHasTile(string mapName, int tileX, int tileY)
+        => _terrainManager != null && _terrainManager.LayerTileExists(mapName, tileX, tileY);
+
     /// <summary>
     /// Cartography (Spec 222): each enabled, resolved layer with its donor footprint in DONOR tile
     /// coordinates. The minimap overlay applies the layer's offset to show where the content will
@@ -1644,7 +1648,24 @@ public class WorldScene : ISceneRenderer
             if (_terrainManager.IsMapWmoBased(layer.MapName))
                 continue;
 
-            result.Add((layer, _terrainManager.GetLayerFootprint(layer)));
+            IReadOnlyList<(int TileX, int TileY)> donorTiles = _terrainManager.GetLayerFootprint(layer);
+            if (layer.RotationDegrees == 0f && !layer.MirrorHorizontal && !layer.MirrorVertical)
+            {
+                result.Add((layer, donorTiles));
+                continue;
+            }
+
+            // Spec 231 Phase 7: compose the footprint through rotation/mirror + offset so
+            // minimap rendering, click hit-tests, and drag logic all see where the layer's
+            // tiles actually land on the base map.
+            var composedTiles = new List<(int TileX, int TileY)>(donorTiles.Count);
+            foreach ((int donorTileX, int donorTileY) in donorTiles)
+            {
+                (int tx, int ty) = WowViewer.Core.Maps.PhaseCompositionPolicy.ForwardTransformTile(donorTileX, donorTileY, layer);
+                composedTiles.Add((tx + layer.TileOffsetX, ty + layer.TileOffsetY));
+            }
+
+            result.Add((layer, composedTiles));
         }
 
         return result;

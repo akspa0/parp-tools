@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
+using WowViewer.Core.Maps;
 
 namespace WoWViewer;
 
@@ -65,6 +66,7 @@ internal static class MinimapHelpers
                 // base map's coordinates, so an offset layer's minimap never moved with its terrain.
                 // Later layers win, matching the composition order the terrain adapters use.
                 uint tileTex = 0;
+                IReadOnlyList<TileTransformKind> layerTransforms = Array.Empty<TileTransformKind>();
                 IReadOnlyList<WowViewer.Core.Maps.PhaseLayerSettings>? phaseLayers = worldScene?.PhaseLayers;
                 if (phaseLayers != null)
                 {
@@ -80,15 +82,26 @@ internal static class MinimapHelpers
                         if (worldScene.IsWmoBasedMap(layer.MapName))
                             continue;
 
+                        // Spec 231 Phase 7: resolve through the shared policy so per-tile mappings
+                        // and whole-layer rotation/mirror route exactly like the terrain adapters.
                         // tx is the adapter's tileX (row) and ty its tileY (col); GetTileTexture
                         // takes them in the opposite order, which is why the offsets cross over.
+                        WowViewer.Core.Maps.PhaseTileSource source = WowViewer.Core.Maps.PhaseCompositionPolicy.ResolveTileSource(
+                            layer, tx, ty, (sx, sy) => worldScene.LayerHasTile(layer.MapName, sx, sy));
+                        if (!source.HasSource)
+                            continue;
+
                         tileTex = minimapRenderer.GetTileTexture(
-                            layer.MapName, ty - layer.TileOffsetY, tx - layer.TileOffsetX);
+                            layer.MapName, source.SourceTileY, source.SourceTileX);
+                        layerTransforms = source.Transforms;
                     }
                 }
 
                 if (tileTex == 0)
+                {
                     tileTex = minimapRenderer.GetTileTexture(mapName, ty, tx);
+                    layerTransforms = Array.Empty<TileTransformKind>();
+                }
                 if (tileTex != 0)
                 {
                     var texId = (IntPtr)tileTex;
@@ -96,10 +109,25 @@ internal static class MinimapHelpers
                     var p2 = new Vector2(x + cellSize, y);
                     var p3 = new Vector2(x + cellSize, y + cellSize);
                     var p4 = new Vector2(x, y + cellSize);
-                    drawList.AddImageQuad(texId, p1, p2, p3, p4,
-                        new Vector2(0, 0), new Vector2(1, 0),
-                        new Vector2(1, 1), new Vector2(0, 1),
-                        0xFFFFFFFF);
+                    Vector2 uv1 = new(0, 0);
+                    Vector2 uv2 = new(1, 0);
+                    Vector2 uv3 = new(1, 1);
+                    Vector2 uv4 = new(0, 1);
+                    foreach (TileTransformKind kind in layerTransforms)
+                    {
+                        // Corner uv permutation per kind (image rotated with the terrain content):
+                        // TL, TR, BR, BL each take the source corner the transform dictates.
+                        (uv1, uv2, uv3, uv4) = kind switch
+                        {
+                            TileTransformKind.Rotate90CW => (uv4, uv1, uv2, uv3),
+                            TileTransformKind.Rotate90CCW => (uv2, uv3, uv4, uv1),
+                            TileTransformKind.Rotate180 => (uv3, uv4, uv1, uv2),
+                            TileTransformKind.MirrorH => (uv2, uv1, uv4, uv3),
+                            TileTransformKind.MirrorV => (uv4, uv3, uv2, uv1),
+                            _ => (uv1, uv2, uv3, uv4),
+                        };
+                    }
+                    drawList.AddImageQuad(texId, p1, p2, p3, p4, uv1, uv2, uv3, uv4, 0xFFFFFFFF);
                     drewTexture = true;
                 }
             }

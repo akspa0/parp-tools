@@ -96,6 +96,95 @@ public static class TileContentTransform
         return result;
     }
 
+    /// <summary>
+    /// Spec 231 Phase 7 (T071): applies a composed transform sequence to every chunk of one donor
+    /// tile and re-homes the result onto the base-map target tile — chunk slots remapped like
+    /// <see cref="TransformTileChunks"/> AND each chunk's <c>WorldPosition</c> recomputed for the
+    /// target tile so renderers that place chunks by world corner land the rotated content in the
+    /// right place. Uses the adapters' chunk-corner convention: world X = mapOrigin −
+    /// targetTileX·tileSpan − chunkY·(tileSpan/16), world Y = mapOrigin − targetTileY·tileSpan −
+    /// chunkX·(tileSpan/16).
+    /// </summary>
+    public static List<TerrainChunkData> TransformTileChunksForTarget(
+        List<TerrainChunkData> chunks,
+        IReadOnlyList<TileTransformKind> kinds,
+        int targetTileX,
+        int targetTileY)
+    {
+        List<TerrainChunkData> transformed = TransformTileChunks(chunks, kinds);
+
+        const float mapOrigin = 17066.666f;
+        const float tileSpan = 533.33333f;
+        const float chunkSpan = tileSpan / 16f;
+        float tileWorldX = mapOrigin - targetTileX * tileSpan;
+        float tileWorldY = mapOrigin - targetTileY * tileSpan;
+
+        var rehomed = new List<TerrainChunkData>(transformed.Count);
+        foreach (TerrainChunkData chunk in transformed)
+        {
+            rehomed.Add(new TerrainChunkData
+            {
+                McinIndex = chunk.McinIndex,
+                TileX = targetTileX,
+                TileY = targetTileY,
+                ChunkX = chunk.ChunkX,
+                ChunkY = chunk.ChunkY,
+                Heights = chunk.Heights,
+                Normals = chunk.Normals,
+                HoleMask = chunk.HoleMask,
+                Layers = chunk.Layers,
+                AlphaMaps = chunk.AlphaMaps,
+                ShadowMap = chunk.ShadowMap,
+                MccvColors = chunk.MccvColors,
+                Liquid = chunk.Liquid,
+                WorldPosition = new Vector3(
+                    tileWorldX - chunk.ChunkY * chunkSpan,
+                    tileWorldY - chunk.ChunkX * chunkSpan,
+                    0f),
+                AreaId = chunk.AreaId,
+                McnkFlags = chunk.McnkFlags,
+                AlphaSourceFlags = chunk.AlphaSourceFlags,
+            });
+        }
+
+        return rehomed;
+    }
+
+    // Spec 231 Phase 7: raw-array surface for adapters whose chunk classes are structurally
+    // identical to TerrainChunkData but are distinct types (the Alpha WDT path keeps its own
+    // WoWViewer.Terrain.TerrainChunkData). These delegate to the same private math the core
+    // chunk transform uses, so the two shapes cannot drift.
+
+    /// <summary>The 145-entry lattice index map for a kind (<c>out[indexMap[i]] = in[i]</c>).</summary>
+    public static int[] GetVertexIndexMap(TileTransformKind kind) => BuildVertexIndexMap(kind);
+
+    /// <summary>Applies a lattice index map to interleaved 145 height values.</summary>
+    public static float[] TransformHeightsRaw(float[] heights, int[] indexMap) => TransformHeights(heights, indexMap);
+
+    /// <summary>Applies a lattice index map and a normal-direction transform to 145 normals.</summary>
+    public static Vector3[] TransformNormalsRaw(Vector3[] normals, int[] indexMap, Func<Vector3, Vector3> normalTransform)
+        => TransformNormals(normals, indexMap, normalTransform);
+
+    /// <summary>The world-frame normal-direction transform for a kind.</summary>
+    public static Func<Vector3, Vector3> GetNormalTransform(TileTransformKind kind) => kind switch
+    {
+        TileTransformKind.Rotate90CW => NormalCW,
+        TileTransformKind.Rotate90CCW => NormalCCW,
+        TileTransformKind.Rotate180 => Normal180,
+        TileTransformKind.MirrorH => NormalMirrorH,
+        TileTransformKind.MirrorV => NormalMirrorV,
+        _ => static n => n,
+    };
+
+    /// <summary>Transforms the 16-bit hole mask.</summary>
+    public static int TransformHoleMaskRaw(int holeMask, TileTransformKind kind) => TransformHoleMask(holeMask, kind);
+
+    /// <summary>Transforms a square byte grid (shadow 64x64, alpha 64x64).</summary>
+    public static byte[]? TransformSquareGridRaw(byte[]? grid, TileTransformKind kind) => TransformGrid64(grid, kind);
+
+    /// <summary>Transforms 145 BGRA MCCV values.</summary>
+    public static byte[]? TransformMccvRaw(byte[]? mccv, int[] indexMap) => TransformMccv(mccv, indexMap);
+ 
     /// <summary>Rebuilds a chunk with different 16x16 slot coordinates, preserving everything else.</summary>
     private static TerrainChunkData WithSlots(TerrainChunkData chunk, int chunkX, int chunkY)
         => new()

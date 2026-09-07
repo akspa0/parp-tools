@@ -388,24 +388,42 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if (phaseAdapter.IsWmoBased)
                 continue;
 
-            int sourceTileX = tileX - layer.TileOffsetX;
-            int sourceTileY = tileY - layer.TileOffsetY;
-            if (!phaseAdapter.TileExistsInOwnWdt(sourceTileX, sourceTileY))
+            // Spec 231 T071: resolve the donor tile through the shared policy so per-tile
+            // placements and whole-layer rotation/mirror all route, then apply the composed
+            // exact-grid content transform to the loaded chunks before the merge.
+            PhaseTileSource source = PhaseCompositionPolicy.ResolveTileSource(
+                layer, tileX, tileY, (sx, sy) => phaseAdapter.TileExistsInOwnWdt(sx, sy));
+            if (!source.HasSource)
             {
+                (int diagX, int diagY) = PhaseCompositionPolicy.InverseTransformTile(
+                    tileX - layer.TileOffsetX, tileY - layer.TileOffsetY, layer);
                 string missingTileKey = $"tile-miss:{layer.MapName}:{layer.TileOffsetX}:{layer.TileOffsetY}";
                 if (_phaseDiagnosticOnce.TryAdd(missingTileKey, 0))
                 {
                     ViewerLog.Important(ViewerLog.Category.Terrain,
                         $"[AlphaADT] Phase WDT opened but has no source tile for map='{layer.MapName}': "
-                        + $"target=({tileX},{tileY}) source=({sourceTileX},{sourceTileY}) "
+                        + $"target=({tileX},{tileY}) source=({diagX},{diagY}) "
                         + $"offset=({layer.TileOffsetX},{layer.TileOffsetY}) ownTiles={phaseAdapter._existingTiles.Count}. "
                         + "This is an overlap/offset issue, not a phase-stack propagation failure.");
                 }
                 continue;
             }
 
-            TileLoadResult phase = phaseAdapter.LoadTileCore(sourceTileX, sourceTileY);
-            phaseAdapter.TileTextures.TryGetValue((sourceTileX, sourceTileY), out List<string>? phaseTextures);
+            TileLoadResult phase = phaseAdapter.LoadTileCore(source.SourceTileX, source.SourceTileY);
+            phaseAdapter.TileTextures.TryGetValue((source.SourceTileX, source.SourceTileY), out List<string>? phaseTextures);
+            if (source.Transforms.Count > 0)
+            {
+                phase = new TileLoadResult
+                {
+                    Chunks = AlphaChunkTransform.TransformChunksForTarget(
+                        phase.Chunks, source.Transforms, tileX, tileY),
+                    MddfPlacements = AlphaChunkTransform.TransformPlacementPoses(
+                        phase.MddfPlacements, layer),
+                    ModfPlacements = AlphaChunkTransform.TransformModfPlacementPoses(
+                        phase.ModfPlacements, layer),
+                    SoundEmitters = phase.SoundEmitters,
+                };
+            }
             RemapPhasePlacementNameIndices(phase, phaseAdapter);
             MergePhaseTile(
                 result,
@@ -422,6 +440,206 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     }
 
     /// <summary>
+    /// Spec 231 Phase 7: exact-grid rotation/mirror for the Alpha adapter's chunk and placement
+    /// types. Delegates the per-kind math to <see cref="TileContentTransform"/>'s raw-array
+    /// surface so this local shape cannot drift from the core chunk transform.
+    /// </summary>
+    internal static class AlphaChunkTransform
+    {
+        private const float MapOrigin = 17066.666f;
+
+        public static List<TerrainChunkData> TransformChunksForTarget(
+            List<TerrainChunkData> chunks,
+            IReadOnlyList<TileTransformKind> kinds,
+            int targetTileX,
+            int targetTileY)
+        {
+            const float tileSpan = 533.33333f;
+            const float chunkSpan = tileSpan / 16f;
+            float tileWorldX = MapOrigin - targetTileX * tileSpan;
+            float tileWorldY = MapOrigin - targetTileY * tileSpan;
+
+            var result = new List<TerrainChunkData>(chunks.Count);
+            foreach (TerrainChunkData chunk in chunks)
+            {
+                TerrainChunkData transformed = chunk;
+                int slotX = chunk.ChunkX;
+                int slotY = chunk.ChunkY;
+                foreach (TileTransformKind kind in kinds)
+                {
+                    transformed = TransformChunk(transformed, kind);
+                    (slotX, slotY) = TileContentTransform.TransformChunkSlot(slotX, slotY, kind);
+                }
+
+                result.Add(new TerrainChunkData
+                {
+                    McinIndex = transformed.McinIndex,
+                    TileX = targetTileX,
+                    TileY = targetTileY,
+                    ChunkX = slotX,
+                    ChunkY = slotY,
+                    Heights = transformed.Heights,
+                    Normals = transformed.Normals,
+                    HoleMask = transformed.HoleMask,
+                    Layers = transformed.Layers,
+                    AlphaMaps = transformed.AlphaMaps,
+                    ShadowMap = transformed.ShadowMap,
+                    MccvColors = transformed.MccvColors,
+                    Liquid = transformed.Liquid,
+                    WorldPosition = new Vector3(
+                        tileWorldX - slotY * chunkSpan,
+                        tileWorldY - slotX * chunkSpan,
+                        0f),
+                    AreaId = transformed.AreaId,
+                    McnkFlags = transformed.McnkFlags,
+                    AlphaSourceFlags = transformed.AlphaSourceFlags,
+                    McrdReferences = transformed.McrdReferences,
+                    McrwReferences = transformed.McrwReferences,
+                });
+            }
+
+            return result;
+        }
+
+        private static TerrainChunkData TransformChunk(TerrainChunkData chunk, TileTransformKind kind)
+        {
+            int[] indexMap = TileContentTransform.GetVertexIndexMap(kind);
+            Func<Vector3, Vector3> normalTransform = TileContentTransform.GetNormalTransform(kind);
+            return new TerrainChunkData
+            {
+                McinIndex = chunk.McinIndex,
+                TileX = chunk.TileX,
+                TileY = chunk.TileY,
+                ChunkX = chunk.ChunkX,
+                ChunkY = chunk.ChunkY,
+                WorldPosition = chunk.WorldPosition,
+                Heights = TileContentTransform.TransformHeightsRaw(chunk.Heights, indexMap),
+                Normals = TileContentTransform.TransformNormalsRaw(chunk.Normals, indexMap, normalTransform),
+                HoleMask = TileContentTransform.TransformHoleMaskRaw(chunk.HoleMask, kind),
+                Layers = chunk.Layers,
+                AlphaMaps = TransformAlphaMaps(chunk.AlphaMaps, kind),
+                AlphaSourceFlags = chunk.AlphaSourceFlags,
+                ShadowMap = TileContentTransform.TransformSquareGridRaw(chunk.ShadowMap, kind),
+                MccvColors = TileContentTransform.TransformMccvRaw(chunk.MccvColors, indexMap),
+                Liquid = TransformLiquid(chunk.Liquid, kind),
+                AreaId = chunk.AreaId,
+                McnkFlags = chunk.McnkFlags,
+                McrdReferences = chunk.McrdReferences,
+                McrwReferences = chunk.McrwReferences,
+            };
+        }
+
+        private static Dictionary<int, byte[]> TransformAlphaMaps(Dictionary<int, byte[]> alphaMaps, TileTransformKind kind)
+        {
+            var transformed = new Dictionary<int, byte[]>(alphaMaps.Count);
+            foreach (KeyValuePair<int, byte[]> entry in alphaMaps)
+            {
+                byte[]? rotated = TileContentTransform.TransformSquareGridRaw(entry.Value, kind);
+                if (rotated != null)
+                    transformed[entry.Key] = rotated;
+            }
+
+            return transformed;
+        }
+
+        private static LiquidChunkData? TransformLiquid(LiquidChunkData? liquid, TileTransformKind kind)
+        {
+            if (liquid == null)
+                return null;
+
+            int slotX = liquid.ChunkX;
+            int slotY = liquid.ChunkY;
+            (slotX, slotY) = TileContentTransform.TransformChunkSlot(slotX, slotY, kind);
+            return new LiquidChunkData
+            {
+                MinHeight = liquid.MinHeight,
+                MaxHeight = liquid.MaxHeight,
+                Heights = RotateSquare(liquid.Heights, 9, 8, kind),
+                VertexData = RotateSquare(liquid.VertexData, 9, 8, kind),
+                TileGrid = RotateSquare(liquid.TileGrid, 4, 3, kind),
+                TileFlags = liquid.TileFlags == null ? null : RotateSquare(liquid.TileFlags, 8, 7, kind),
+                Type = liquid.Type,
+                WorldPosition = liquid.WorldPosition,
+                TileX = liquid.TileX,
+                TileY = liquid.TileY,
+                ChunkX = slotX,
+                ChunkY = slotY,
+            };
+        }
+
+        private static T[] RotateSquare<T>(T[] grid, int edge, int maxIndex, TileTransformKind kind)
+        {
+            if (grid == null || grid.Length != edge * edge)
+                return grid;
+
+            var rotated = new T[grid.Length];
+            for (int y = 0; y < edge; y++)
+            {
+                for (int x = 0; x < edge; x++)
+                {
+                    (int ox, int oy) = kind switch
+                    {
+                        TileTransformKind.Rotate90CW => (maxIndex - y, x),
+                        TileTransformKind.Rotate90CCW => (y, maxIndex - x),
+                        TileTransformKind.Rotate180 => (maxIndex - x, maxIndex - y),
+                        TileTransformKind.MirrorH => (maxIndex - x, y),
+                        TileTransformKind.MirrorV => (x, maxIndex - y),
+                        _ => (x, y),
+                    };
+                    rotated[(oy * edge) + ox] = grid[(y * edge) + x];
+                }
+            }
+
+            return rotated;
+        }
+
+        public static List<MddfPlacement> TransformPlacementPoses(List<MddfPlacement> placements, PhaseLayerSettings layer)
+        {
+            const float tileSize = 533.33333f;
+            var result = new List<MddfPlacement>(placements.Count);
+            foreach (MddfPlacement placement in placements)
+            {
+                (float px, float py) = PhaseCompositionPolicy.ForwardTransformWorldPoint(
+                    layer, placement.Position.X, placement.Position.Y, tileSize, MapOrigin);
+                float yaw = PhaseCompositionPolicy.ForwardTransformYawDegrees(layer, placement.Rotation.Z);
+                result.Add(new MddfPlacement
+                {
+                    NameIndex = placement.NameIndex,
+                    UniqueId = placement.UniqueId,
+                    Position = new Vector3(px, py, placement.Position.Z),
+                    Rotation = new Vector3(placement.Rotation.X, placement.Rotation.Y, yaw),
+                    Scale = placement.Scale,
+                });
+            }
+
+            return result;
+        }
+
+        public static List<ModfPlacement> TransformModfPlacementPoses(List<ModfPlacement> placements, PhaseLayerSettings layer)
+        {
+            const float tileSize = 533.33333f;
+            var result = new List<ModfPlacement>(placements.Count);
+            foreach (ModfPlacement placement in placements)
+            {
+                (float px, float py) = PhaseCompositionPolicy.ForwardTransformWorldPoint(
+                    layer, placement.Position.X, placement.Position.Y, tileSize, MapOrigin);
+                float yaw = PhaseCompositionPolicy.ForwardTransformYawDegrees(layer, placement.Rotation.Z);
+                result.Add(new ModfPlacement
+                {
+                    NameIndex = placement.NameIndex,
+                    UniqueId = placement.UniqueId,
+                    Position = new Vector3(px, py, placement.Position.Z),
+                    Rotation = new Vector3(placement.Rotation.X, placement.Rotation.Y, yaw),
+                    BoundsMin = placement.BoundsMin,
+                    BoundsMax = placement.BoundsMax,
+                    Flags = placement.Flags,
+                });
+            }
+
+            return result;
+        }
+    }
+
     /// <summary>
     /// Converts a phase WDT's local MDNM/MONM indices into this base adapter's combined name tables.
     /// </summary>

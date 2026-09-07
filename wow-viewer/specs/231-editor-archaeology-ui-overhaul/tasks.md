@@ -107,17 +107,24 @@ directive, 2026-09-07).
 5. `PhaseLayerSettings.Clone`-equivalent in `PhaseComposition.cs:159-170` does not copy the
    rotation/mirror fields
 
-- [ ] T070 Layers panel: rotation combo (0/90/180/270 + free-angle input), mirror H/V checkboxes,
-      footprint-centered rotation origin; clone/persistence fix (missing field copies)
-- [ ] T071 Adapters: resolve donor tiles through `PhaseComposition.ResolveTileSource`; apply
-      `TileContentTransform.TransformChunks` with the returned `Transforms` for exact-grid layers;
-      free-angle layers surface the approximation warning
-- [ ] T072 Placements: route `TranslatePhasePlacements` through
-      `TileContentTransform.TransformMddf/Modf` with the layer transform
-- [ ] T073 Footprints + minimap: rotate layer footprints and minimap tile placement through the
-      same transform; `MapFootprint.OverlapsBase` rotation overload
-- [ ] T074 Gate: build/test clean; visual proof of a quarter-turn layer on a real map (operator);
-      receipt naming every wired consumer
+- [x] T070 Layers panel: rotation combo (0/90/180/270 — quarter turns only; free angles remain
+      research R2 with no content transform), mirror H/V checkboxes, footprint-centered rotation
+      origin. Clone already copies the rotation fields (audit note corrected in receipt)
+- [x] T071 Adapters: both Alpha and Standard resolve donor tiles through
+      `PhaseComposition.ResolveTileSource` and apply exact-grid content transforms
+      (`TileContentTransform.TransformTileChunksForTarget` for core chunks;
+      `AlphaChunkTransform.TransformChunksForTarget` over the public raw-array surface for the
+      Alpha adapter's local chunk type), re-homed onto the target tile
+- [x] T072 Placements: poses rotate through `PhaseCompositionPolicy.ForwardTransformWorldPoint` +
+      `ForwardTransformYawDegrees` (new core API), alongside the existing offset translation
+- [x] T073 Footprints + minimap: `GetLayerFootprints` composes through the transform (so hit-tests
+      and cartography match), minimap textures resolve via `ResolveTileSource` with per-kind
+      corner-UV rotation, overlap status composes, offset-drag disabled for transformed layers
+      with a status hint
+- [ ] T074 Gate: build 0 errors + 157/157 map tests pass
+      ([receipt](evidence/t070-t074-phase7-layer-rotation-receipt.md)); **operator visual gate
+      open** — quarter-turn layer on a real map (terrain + textures + liquid + objects rotate
+      together)
 
 ## Phase 6 — Tools curation & removal pass (operator amendment 2026-09-07)
 

@@ -278,6 +278,48 @@ public static class PhaseCompositionPolicy
     public static (float X, float Y) TileOffsetToWorldTranslation(int tileOffsetX, int tileOffsetY, float tileSize)
         => (-tileOffsetX * tileSize, -tileOffsetY * tileSize);
 
+    /// <summary>
+    /// Spec 231 T072: transforms placement poses in place through a layer's rotation/mirror —
+    /// positions via <see cref="ForwardTransformWorldPoint"/>, headings via
+    /// <see cref="ForwardTransformYawDegrees"/>. Excludes the whole-layer offset translation;
+    /// callers apply <see cref="TileOffsetToWorldTranslation"/> alongside it.
+    /// </summary>
+    public static (IReadOnlyList<MddfPlacement> Mddf, IReadOnlyList<ModfPlacement> Modf) ForwardTransformPlacementPoses(
+        IReadOnlyList<MddfPlacement> mddfPlacements,
+        IReadOnlyList<ModfPlacement> modfPlacements,
+        PhaseLayerSettings layer,
+        float tileSize,
+        float mapOrigin)
+    {
+        var mddf = new MddfPlacement[mddfPlacements.Count];
+        for (int i = 0; i < mddfPlacements.Count; i++)
+        {
+            MddfPlacement placement = mddfPlacements[i];
+            (float px, float py) = ForwardTransformWorldPoint(layer, placement.Position.X, placement.Position.Y, tileSize, mapOrigin);
+            float yaw = ForwardTransformYawDegrees(layer, placement.Rotation.Z);
+            mddf[i] = placement with
+            {
+                Position = new System.Numerics.Vector3(px, py, placement.Position.Z),
+                Rotation = new System.Numerics.Vector3(placement.Rotation.X, placement.Rotation.Y, yaw),
+            };
+        }
+
+        var modf = new ModfPlacement[modfPlacements.Count];
+        for (int i = 0; i < modfPlacements.Count; i++)
+        {
+            ModfPlacement placement = modfPlacements[i];
+            (float px, float py) = ForwardTransformWorldPoint(layer, placement.Position.X, placement.Position.Y, tileSize, mapOrigin);
+            float yaw = ForwardTransformYawDegrees(layer, placement.Rotation.Z);
+            modf[i] = placement with
+            {
+                Position = new System.Numerics.Vector3(px, py, placement.Position.Z),
+                Rotation = new System.Numerics.Vector3(placement.Rotation.X, placement.Rotation.Y, yaw),
+            };
+        }
+
+        return (mddf, modf);
+    }
+
     /// <summary>Human-readable channel list, for logs and the layers panel.</summary>
     public static string Describe(PhaseDataChannel channels)
         => channels == PhaseDataChannel.None ? "none" : channels.ToString();
@@ -433,6 +475,87 @@ public static class PhaseCompositionPolicy
         return (
             (int)Math.Round(originX + (dx * cos) - (dy * sin)),
             (int)Math.Round(originY + (dx * sin) + (dy * cos)));
+    }
+
+    /// <summary>
+    /// Forward tile map (Spec 231 Phase 7): which base-map target tile the donor tile
+    /// <paramref name="donorX"/>/<paramref name="donorY"/> fills under this layer's rotation/mirror,
+    /// excluding the whole-layer offset (callers add
+    /// <see cref="PhaseLayerSettings.TileOffsetX"/>/<c>TileOffsetY</c> themselves). The exact
+    /// inverse of <see cref="InverseTransformTile"/>'s transform; free angles are the grid-snapped
+    /// approximation, matching <see cref="ResolveRotationApproximation"/>.
+    /// </summary>
+    public static (int X, int Y) ForwardTransformTile(int donorX, int donorY, PhaseLayerSettings layer)
+    {
+        (double x, double y) = ForwardTransformContinuous(donorX, donorY, layer);
+        return ((int)Math.Round(x), (int)Math.Round(y));
+    }
+
+    /// <summary>Continuous form of <see cref="ForwardTransformTile"/> for world-space consumers.</summary>
+    private static (double X, double Y) ForwardTransformContinuous(double donorX, double donorY, PhaseLayerSettings layer)
+    {
+        double originX = layer.RotationOriginTileX >= 0f ? layer.RotationOriginTileX : 0d;
+        double originY = layer.RotationOriginTileY >= 0f ? layer.RotationOriginTileY : 0d;
+        double dx = donorX - originX;
+        double dy = donorY - originY;
+
+        // Forward = MH ∘ MV ∘ Rcw — the exact inverse of InverseTransformTile = Rccw ∘ MV ∘ MH:
+        // clockwise rotation first, then the vertical-axis mirror, then the horizontal-axis mirror.
+        if (layer.RotationDegrees != 0f)
+        {
+            double rad = layer.RotationDegrees * Math.PI / 180.0;
+            double cos = Math.Cos(rad);
+            double sin = Math.Sin(rad);
+            (dx, dy) = (dx * cos + dy * sin, -dx * sin + dy * cos);
+        }
+        if (layer.MirrorVertical)
+            dx = -dx;
+        if (layer.MirrorHorizontal)
+            dy = -dy;
+
+        return (originX + dx, originY + dy);
+    }
+
+    /// <summary>
+    /// Forward world-space point map for a layer's rotation/mirror (Spec 231 T072): transforms a
+    /// donor-map world position into the composed frame, excluding the whole-layer offset
+    /// translation (callers add <see cref="TileOffsetToWorldTranslation"/> themselves). Uses the
+    /// adapters' chunk-corner convention: world X = mapOrigin − tileX·tileSize, world Y =
+    /// mapOrigin − tileY·tileSize (both axes negate, which conjugates as a 180° turn and
+    /// preserves the rotation/mirror directions).
+    /// </summary>
+    public static (float X, float Y) ForwardTransformWorldPoint(
+        PhaseLayerSettings layer, float worldX, float worldY, float tileSize, float mapOrigin)
+    {
+        double tx = (mapOrigin - worldX) / tileSize;
+        double ty = (mapOrigin - worldY) / tileSize;
+        (double rx, double ry) = ForwardTransformContinuous(tx, ty, layer);
+        return ((float)(mapOrigin - rx * tileSize), (float)(mapOrigin - ry * tileSize));
+    }
+
+    /// <summary>
+    /// Forward yaw map (Spec 231 T072): applies the layer's composed transforms to a placement
+    /// heading in degrees, in the same application order as <see cref="ComposeTileTransforms"/>
+    /// (rotation first, then mirrors) — matching <c>TileContentTransform.TransformYawDegrees</c>.
+    /// </summary>
+    public static float ForwardTransformYawDegrees(PhaseLayerSettings layer, float yawDegrees)
+    {
+        float yaw = yawDegrees;
+        if (TryGetQuarterTurn(layer.RotationDegrees, out int quarter))
+        {
+            yaw = quarter switch
+            {
+                1 => yaw - 90f,   // Rotate90CW
+                2 => yaw + 180f,  // Rotate180
+                3 => yaw + 90f,   // Rotate90CCW
+                _ => yaw,
+            };
+        }
+        if (layer.MirrorHorizontal)
+            yaw = -yaw;
+        if (layer.MirrorVertical)
+            yaw = 180f - yaw;
+        return yaw;
     }
 
     private static bool TryGetQuarterTurn(float degrees, out int normalizedQuarterTurn)

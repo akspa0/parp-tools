@@ -77,8 +77,10 @@ public partial class ViewerApp
         if (!layer.Enabled || layer.Resolution != PhaseLayerResolution.Resolved)
             return false;
 
-        int targetTx = (int)MathF.Floor(clickTileX) - layer.TileOffsetX;
-        int targetTy = (int)MathF.Floor(clickTileY) - layer.TileOffsetY;
+        // Spec 231 Phase 7: GetLayerFootprints already composes rotation/mirror + offset, so the
+        // click hit-test is a direct lookup in composed space.
+        int targetTx = (int)MathF.Floor(clickTileX);
+        int targetTy = (int)MathF.Floor(clickTileY);
         foreach ((PhaseLayerSettings footprintLayer, IReadOnlyList<(int TileX, int TileY)> tiles) in worldScene.GetLayerFootprints())
         {
             if (ReferenceEquals(footprintLayer, layer) && tiles.Contains((targetTx, targetTy)))
@@ -111,10 +113,21 @@ public partial class ViewerApp
                 && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float pressTx, out float pressTy)
                 && TryGetFootprintTileAt(_worldScene, _worldScene.SelectedPhaseLayerIndex, pressTx, pressTy))
             {
-                _footprintDragLayerIndex = _worldScene.SelectedPhaseLayerIndex;
-                _footprintDragStartTile = (pressTx, pressTy);
-                PhaseLayerSettings grabbed = _worldScene.PhaseLayers[_footprintDragLayerIndex];
-                _footprintDragBaseOffset = (grabbed.TileOffsetX, grabbed.TileOffsetY);
+                PhaseLayerSettings grabbed = _worldScene.PhaseLayers[_worldScene.SelectedPhaseLayerIndex];
+                if (grabbed.RotationDegrees != 0f || grabbed.MirrorHorizontal || grabbed.MirrorVertical)
+                {
+                    // Spec 231 Phase 7: a drag delta in composed space does not map to a simple
+                    // offset delta once the layer is rotated/mirrored — point the operator at
+                    // the panel controls instead of dragging the layer somewhere unintended.
+                    _statusMessage = $"Layer '{grabbed.MapName}' is rotated/mirrored — set its offset "
+                        + "in the Layers panel (minimap dragging applies to untransformed layers).";
+                }
+                else
+                {
+                    _footprintDragLayerIndex = _worldScene.SelectedPhaseLayerIndex;
+                    _footprintDragStartTile = (pressTx, pressTy);
+                    _footprintDragBaseOffset = (grabbed.TileOffsetX, grabbed.TileOffsetY);
+                }
             }
         }
         else if (pointerCaptured && ImGui.IsMouseDown(ImGuiMouseButton.Left)

@@ -317,13 +317,34 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             // A layer may be authored at different tile coordinates than the map it overlays --
             // instance and dungeon maps are often copies of an earlier revision of a zone stored
-            // elsewhere in the grid -- so read the shifted source tile.
-            int sourceTileX = tileX - layer.TileOffsetX;
-            int sourceTileY = tileY - layer.TileOffsetY;
-            if (!OverlayTileExists(layer.MapName, sourceTileX, sourceTileY))
+            // elsewhere in the grid -- so read the shifted source tile. Spec 231 T071: resolve
+            // through the shared policy so per-tile placements and whole-layer rotation/mirror
+            // all route, then apply the composed exact-grid content transform to the loaded
+            // chunks before the merge.
+            PhaseTileSource source = PhaseCompositionPolicy.ResolveTileSource(
+                layer, tileX, tileY, (sx, sy) => OverlayTileExists(layer.MapName, sx, sy));
+            if (!source.HasSource)
                 continue;
 
-            ParsedTileSource phase = LoadMapTile(layer.MapName, sourceTileX, sourceTileY);
+            ParsedTileSource phase = LoadMapTile(layer.MapName, source.SourceTileX, source.SourceTileY);
+            if (source.Transforms.Count > 0)
+            {
+                // Spec 231 T071: exact-grid rotation/mirror of the donor tile's chunk content
+                // (heights, normals, holes, alpha, liquid, chunk slots) and placement poses,
+                // re-homed onto the target tile, before the merge.
+                List<TerrainChunkData> transformedChunks = AlphaTerrainAdapter.AlphaChunkTransform.TransformChunksForTarget(
+                    phase.Result.Chunks.ToList(), source.Transforms, tileX, tileY);
+                List<MddfPlacement> transformedMddf = AlphaTerrainAdapter.AlphaChunkTransform.TransformPlacementPoses(
+                    phase.Result.MddfPlacements.ToList(), layer);
+                List<ModfPlacement> transformedModf = AlphaTerrainAdapter.AlphaChunkTransform.TransformModfPlacementPoses(
+                    phase.Result.ModfPlacements.ToList(), layer);
+                phase.Result.Chunks.Clear();
+                phase.Result.Chunks.AddRange(transformedChunks);
+                phase.Result.MddfPlacements.Clear();
+                phase.Result.MddfPlacements.AddRange(transformedMddf);
+                phase.Result.ModfPlacements.Clear();
+                phase.Result.ModfPlacements.AddRange(transformedModf);
+            }
             if (layer.HasTileOffset)
                 TranslatePhasePlacements(phase, layer);
 

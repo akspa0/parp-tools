@@ -566,6 +566,9 @@ public class TerrainManager : ISceneRenderer
     /// no terrain tiles, so layers sourced from it must not claim tiles or paint minimap textures.
     /// </summary>
     public bool IsMapWmoBased(string mapName) => _adapter.IsMapWmoBased(mapName);
+    /// <summary>Spec 231 Phase 7: whether a layer donor map occupies this tile in its own grid (drives minimap resolution through the composition policy).</summary>
+    public bool LayerTileExists(string mapName, int tileX, int tileY)
+        => _adapter.GetOccupiedTiles(mapName).Any(tile => tile.TileX == tileX && tile.TileY == tileY);
 
     /// <summary>
     /// Cartography (Spec 222): the base map's own occupied tiles — the alignment target for
