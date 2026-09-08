@@ -49,6 +49,12 @@ public class TileLoadResult
     public List<MddfPlacement> MddfPlacements { get; init; } = new();
     public List<ModfPlacement> ModfPlacements { get; init; } = new();
     public List<TerrainSoundEmitter> SoundEmitters { get; init; } = new();
+
+    /// <summary>
+    /// Spec 232 FR-9: true when placements already carry the full layer transform — the merge
+    /// must not translate them again.
+    /// </summary>
+    public bool PlacementsPreTransformed { get; init; }
 }
 
 public sealed record TerrainSoundEmitter(
@@ -509,12 +515,40 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                         donor.Chunks, supplySource.Transforms, supplyTileX, supplyTileY);
                     composedCache[(supplyTileX, supplyTileY)] = composed;
 
-                    // Placements ride with the PRIMARY supply tile only (the one this target tile
-                    // resolves to), so streamed neighbor tiles cannot duplicate them.
-                    if (supplyTileX == primaryDonorTileX && supplyTileY == primaryDonorTileY)
+                    // Spec 232 FR-9: EVERY pulled supply tile's placements get the pose transform
+                    // plus the full world translation (tile offset + cell delta); only those
+                    // landing inside THIS target tile are kept — streamed neighbor tiles cannot
+                    // duplicate them, and nothing goes missing.
+                    (float tileDx, float tileDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+                        layer.TileOffsetX, layer.TileOffsetY, 533.33333f);
+                    (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+                        layer.CellOffsetX, layer.CellOffsetY, 533.33333f / 16f);
+
+                    foreach (MddfPlacement source0 in AlphaChunkTransform.TransformPlacementPoses(donor.MddfPlacements, layer))
                     {
-                        mddf.AddRange(AlphaChunkTransform.TransformPlacementPoses(donor.MddfPlacements, layer));
-                        modf.AddRange(AlphaChunkTransform.TransformModfPlacementPoses(donor.ModfPlacements, layer));
+                        MddfPlacement placement = source0;
+                        placement.Position = new Vector3(
+                            placement.Position.X + tileDx + cellDx,
+                            placement.Position.Y + tileDy + cellDy,
+                            placement.Position.Z);
+                        if (placement.Position.X <= tileWorldX && placement.Position.X > tileWorldX - tileSpan
+                            && placement.Position.Y <= tileWorldY && placement.Position.Y > tileWorldY - tileSpan)
+                        {
+                            mddf.Add(placement);
+                        }
+                    }
+                    foreach (ModfPlacement source0 in AlphaChunkTransform.TransformModfPlacementPoses(donor.ModfPlacements, layer))
+                    {
+                        ModfPlacement placement = source0;
+                        placement.Position = new Vector3(
+                            placement.Position.X + tileDx + cellDx,
+                            placement.Position.Y + tileDy + cellDy,
+                            placement.Position.Z);
+                        if (placement.Position.X <= tileWorldX && placement.Position.X > tileWorldX - tileSpan
+                            && placement.Position.Y <= tileWorldY && placement.Position.Y > tileWorldY - tileSpan)
+                        {
+                            modf.Add(placement);
+                        }
                     }
                 }
 
@@ -558,7 +592,13 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             }
         }
 
-        return new TileLoadResult { Chunks = chunks, MddfPlacements = mddf, ModfPlacements = modf };
+        return new TileLoadResult
+        {
+            Chunks = chunks,
+            MddfPlacements = mddf,
+            ModfPlacements = modf,
+            PlacementsPreTransformed = true,
+        };
     }
 
     /// <summary>
@@ -973,7 +1013,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             contributed |= take;
         }
 
-        if (layer.HasTileOffset || layer.HasCellOffset)
+        if ((layer.HasTileOffset || layer.HasCellOffset) && !phase.PlacementsPreTransformed)
             TranslatePhasePlacements(phase, layer);
 
         bool phaseReplacesDoodads = PhaseCompositionPolicy.PhaseOwnsPlacements(

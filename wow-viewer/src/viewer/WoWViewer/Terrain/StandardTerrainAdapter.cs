@@ -361,7 +361,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     phase.Result.ModfPlacements.AddRange(transformedModf);
                 }
             }
-            if (layer.HasTileOffset || layer.HasCellOffset)
+            if ((layer.HasTileOffset || layer.HasCellOffset) && !phase.Result.PlacementsPreTransformed)
                 TranslatePhasePlacements(phase, layer);
 
             MergePhaseTile(parent, phase, layer, tileX, tileY);
@@ -421,12 +421,34 @@ public class StandardTerrainAdapter : ITerrainAdapter
                         donor.Result.Chunks, supplySource.Transforms, supplyTileX, supplyTileY);
                     composedCache[(supplyTileX, supplyTileY)] = composed;
 
-                    // Placements ride with the PRIMARY supply tile only, so streamed neighbor
-                    // tiles cannot duplicate them.
-                    if (supplyTileX == primaryDonorTileX && supplyTileY == primaryDonorTileY)
+                    // Spec 232 FR-9: EVERY pulled supply tile's placements get the pose transform
+                    // plus the full world translation (tile offset + cell delta); only those
+                    // landing inside THIS target tile are kept — streamed neighbor tiles cannot
+                    // duplicate them, and nothing goes missing.
+                    (float tileDx, float tileDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+                        layer.TileOffsetX, layer.TileOffsetY, WoWConstants.ChunkSize);
+                    (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+                        layer.CellOffsetX, layer.CellOffsetY, WoWConstants.ChunkSize / 16f);
+
+                    foreach (MddfPlacement placement in AlphaTerrainAdapter.AlphaChunkTransform.TransformPlacementPoses(
+                        donor.Result.MddfPlacements.ToList(), layer))
                     {
-                        mddf.AddRange(donor.Result.MddfPlacements);
-                        modf.AddRange(donor.Result.ModfPlacements);
+                        Vector3 p = new(
+                            placement.Position.X + tileDx + cellDx,
+                            placement.Position.Y + tileDy + cellDy,
+                            placement.Position.Z);
+                        if (p.X <= tileWorldX && p.X > tileWorldX - tileSpan && p.Y <= tileWorldY && p.Y > tileWorldY - tileSpan)
+                            mddf.Add(placement);
+                    }
+                    foreach (ModfPlacement placement in AlphaTerrainAdapter.AlphaChunkTransform.TransformModfPlacementPoses(
+                        donor.Result.ModfPlacements.ToList(), layer))
+                    {
+                        Vector3 p = new(
+                            placement.Position.X + tileDx + cellDx,
+                            placement.Position.Y + tileDy + cellDy,
+                            placement.Position.Z);
+                        if (p.X <= tileWorldX && p.X > tileWorldX - tileSpan && p.Y <= tileWorldY && p.Y > tileWorldY - tileSpan)
+                            modf.Add(placement);
                     }
                 }
 
@@ -476,7 +498,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
             : null;
         IReadOnlyList<string> textures = primary?.Textures ?? new List<string>();
         return new ParsedTileSource(
-            new TileLoadResult { Chunks = chunks, MddfPlacements = mddf, ModfPlacements = modf },
+            new TileLoadResult
+            {
+                Chunks = chunks,
+                MddfPlacements = mddf,
+                ModfPlacements = modf,
+                PlacementsPreTransformed = true,
+            },
             textures);
     }
 
