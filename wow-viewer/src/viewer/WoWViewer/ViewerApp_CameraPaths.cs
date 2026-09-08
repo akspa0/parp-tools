@@ -7,6 +7,7 @@ using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.Marketing;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using Silk.NET.Input;
@@ -70,6 +71,7 @@ public partial class ViewerApp
         public required string BuildVersion { get; init; }
         public int StableFrames { get; set; }
         public bool Ready { get; set; }
+        public MarketingTourAttempt? MarketingTourAttempt { get; set; }
     }
 
     private void OpenCapturePanelTab(CapturePanelTab tab)
@@ -223,6 +225,16 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Play + Video"))
             StartCameraPathVideoCapture();
+        ImGui.SameLine();
+        if (ImGui.Button("Feature Tour + Video"))
+        {
+            FeatureTourRecipe recipe = BuiltinFeatureTourRecipes.CreateCameraPathOverview(_cameraPath.Name, _videoCaptureFps);
+            MarketingTourAttemptStartResult tourStart = MarketingTourAttempt.TryStart(recipe, Math.Max(0.001, _cameraPath.DurationMs / 1000d));
+            if (!tourStart.IsStarted)
+                _statusMessage = $"Feature tour was not started: {tourStart.Error}";
+            else
+                StartCameraPathVideoCapture(tourStart.Attempt);
+        }
         ImGui.SameLine();
         if (ImGui.Button("Stop"))
             StopCameraPathPlayback();
@@ -579,7 +591,7 @@ public partial class ViewerApp
         return true;
     }
 
-    private void StartCameraPathVideoCapture()
+    private void StartCameraPathVideoCapture(MarketingTourAttempt? marketingTourAttempt = null)
     {
         if (!ValidateCameraPathForPlayback())
             return;
@@ -589,25 +601,39 @@ public partial class ViewerApp
             if (!BeginCameraPathPreload())
                 return;
 
+            _cameraPathPreload!.MarketingTourAttempt = marketingTourAttempt;
             _cameraPathVideoCapturePending = true;
             _statusMessage = $"Warming {_cameraPathPreload?.Tiles.Count ?? 0} path tiles and their objects before video capture.";
             return;
         }
 
-        StartCameraPathVideoCaptureNow();
+        StartCameraPathVideoCaptureNow(marketingTourAttempt);
     }
 
-    private void StartCameraPathVideoCaptureNow()
+    private void StartCameraPathVideoCaptureNow(MarketingTourAttempt? marketingTourAttempt = null)
     {
         if (!StartCameraPathPlayback())
             return;
 
-        if (TryStartCurrentViewVideoRecording(_videoCaptureIncludeUi, _cameraPath.Name))
+        bool previousHideUiChrome = _hideUiChrome;
+        bool includeUi = marketingTourAttempt is not null || _videoCaptureIncludeUi;
+        if (marketingTourAttempt is not null)
+            _hideUiChrome = true;
+
+        if (TryStartCurrentViewVideoRecording(includeUi, _cameraPath.Name))
         {
+            if (_activeVideoRecording is not null && marketingTourAttempt is not null)
+            {
+                _activeVideoRecording.MarketingTourAttempt = marketingTourAttempt;
+                _activeVideoRecording.RestoreUiChromeAfterMarketingTour = true;
+                _activeVideoRecording.PreviousHideUiChrome = previousHideUiChrome;
+                marketingTourAttempt.Advance(0);
+            }
             _cameraPathVideoCaptureActive = true;
             return;
         }
 
+        _hideUiChrome = previousHideUiChrome;
         _cameraPathPlaying = false;
         EndCameraPathPreload();
     }
@@ -634,8 +660,10 @@ public partial class ViewerApp
         _cameraPathPlaying = false;
         _cameraPathTimeSeconds = 0;
         _cameraPathVideoCapturePending = false;
+        _cameraPathPreload?.MarketingTourAttempt?.Cancel("camera-path-stopped");
         if (_cameraPathVideoCaptureActive)
         {
+            _activeVideoRecording?.MarketingTourAttempt?.Cancel("camera-path-stopped");
             StopVideoRecording("Camera path video capture stopped.");
             _cameraPathVideoCaptureActive = false;
         }
@@ -650,6 +678,7 @@ public partial class ViewerApp
             return;
         if (!IsCameraPathBoundToCurrentMap())
         {
+            _activeVideoRecording?.MarketingTourAttempt?.Cancel("active-map-changed");
             StopCameraPathPlayback();
             _statusMessage = "Camera path playback stopped because the active map/build changed.";
             return;
@@ -657,6 +686,7 @@ public partial class ViewerApp
 
         _cameraPathTimeSeconds += Math.Max(0, dt);
         double durationSeconds = Math.Max(0.001, _cameraPath.DurationMs / 1000.0);
+        _activeVideoRecording?.MarketingTourAttempt?.Advance(Math.Min(_cameraPathTimeSeconds, durationSeconds));
         if (_cameraPathTimeSeconds >= durationSeconds && !_cameraPathLoop)
         {
             _cameraPathTimeSeconds = durationSeconds;
@@ -848,8 +878,9 @@ public partial class ViewerApp
 
         if (_cameraPathVideoCapturePending && preload.Ready)
         {
+            MarketingTourAttempt? marketingTourAttempt = preload.MarketingTourAttempt;
             _cameraPathVideoCapturePending = false;
-            StartCameraPathVideoCaptureNow();
+            StartCameraPathVideoCaptureNow(marketingTourAttempt);
         }
     }
 

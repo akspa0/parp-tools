@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
@@ -12,7 +13,9 @@ using SixLabors.ImageSharp.Processing;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
+using WoWViewer.Capture;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Runtime.Marketing;
 using WoWViewer.Terrain.Vlm;
 
 namespace WoWViewer;
@@ -228,6 +231,9 @@ public partial class ViewerApp
         // 069 Phase 7: archeology playback
         public bool ApplyArcheologyPlayback { get; set; }
         public bool StartedArcheologyPlayback { get; init; }
+        public MarketingTourAttempt? MarketingTourAttempt { get; set; }
+        public bool RestoreUiChromeAfterMarketingTour { get; set; }
+        public bool PreviousHideUiChrome { get; set; }
     }
 
     private sealed class CameraShotPointDocument
@@ -270,6 +276,16 @@ public partial class ViewerApp
         string ffmpegExecutable = _videoEncoderExecutable;
         if (ImGui.InputText("ffmpeg Executable", ref ffmpegExecutable, 1024))
             _videoEncoderExecutable = ffmpegExecutable;
+
+        VideoEncoderResolution encoderResolution = VideoEncoderExecutableResolver.Resolve(_videoEncoderExecutable, AppContext.BaseDirectory);
+        ImGui.TextDisabled($"Encoder: {encoderResolution.DisplayName} ({encoderResolution.Executable})");
+        if (ImGui.Button("Verify ffmpeg"))
+        {
+            VideoEncoderProbeResult probe = VideoEncoderExecutableResolver.Probe(encoderResolution);
+            _statusMessage = probe.Message;
+        }
+        ImGui.SameLine();
+        ImGui.TextDisabled("Requires libx264");
 
         ImGui.Checkbox("Filter list to current map+build", ref _captureFilterCurrentMapAndBuild);
 
@@ -1616,9 +1632,7 @@ public partial class ViewerApp
             startedArcheologyPlayback = _archeologyPlaybackActive;
         }
 
-        string encoderExecutable = string.IsNullOrWhiteSpace(_videoEncoderExecutable)
-            ? "ffmpeg"
-            : _videoEncoderExecutable.Trim();
+        VideoEncoderResolution encoderResolution = VideoEncoderExecutableResolver.Resolve(_videoEncoderExecutable, AppContext.BaseDirectory);
 
         string extension = VideoContainerExtensions[Math.Clamp(_videoCaptureContainerIndex, 0, VideoContainerExtensions.Length - 1)];
         string safeMap = MakeSafePathSegment(GetCurrentCaptureMapName());
@@ -1631,15 +1645,15 @@ public partial class ViewerApp
             safeBuild,
             $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{safeLabel}_{captureMode}{extension}");
 
-        string? outputDirectory = Path.GetDirectoryName(outputPath);
-        if (!string.IsNullOrWhiteSpace(outputDirectory))
-            Directory.CreateDirectory(outputDirectory);
-
         try
         {
+            string? outputDirectory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(outputDirectory))
+                Directory.CreateDirectory(outputDirectory);
+
             var startInfo = new ProcessStartInfo
             {
-                FileName = encoderExecutable,
+                FileName = encoderResolution.Executable,
                 UseShellExecute = false,
                 RedirectStandardInput = true,
                 RedirectStandardError = true,
@@ -1692,8 +1706,15 @@ public partial class ViewerApp
                 StartedArcheologyPlayback = startedArcheologyPlayback,
             };
 
-            _statusMessage = $"Started video recording: {outputPath}";
+            _statusMessage = $"Started video recording with {encoderResolution.DisplayName}: {outputPath}";
             return true;
+        }
+        catch (Win32Exception ex)
+        {
+            if (startedArcheologyPlayback && _archeologyPlaybackActive)
+                StopArcheologyPlayback(restoreRange: true);
+            _statusMessage = VideoEncoderExecutableResolver.BuildUnavailableMessage(encoderResolution, ex.Message);
+            return false;
         }
         catch (Exception ex)
         {
@@ -1764,6 +1785,9 @@ public partial class ViewerApp
 
             recording.EncoderProcess.Dispose();
         }
+
+        if (recording.RestoreUiChromeAfterMarketingTour)
+            _hideUiChrome = recording.PreviousHideUiChrome;
 
         if (!success && statusOverride == null && File.Exists(recording.OutputPath))
         {

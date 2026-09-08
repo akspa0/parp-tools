@@ -74,6 +74,28 @@
     <Copy SourceFiles="@(OpenALSoftPublishedNative)" DestinationFiles="$(PublishDir)openal32.dll" SkipUnchangedFiles="true" Condition="Exists('%(OpenALSoftPublishedNative.Identity)')" />
   </Target>
 
+  <!-- Video capture is an optional external-process integration. A release operator may place a
+       suitably licensed Windows x64 ffmpeg.exe at the declared source location; when present it
+       is copied beside the viewer so end users do not need the developer's PATH configuration. -->
+  <Target Name="CopyOptionalVideoEncoderToAppRoot" AfterTargets="Build"
+          Condition="Exists('$(MSBuildProjectDirectory)\Capture\ffmpeg\win-x64\ffmpeg.exe')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Capture\ffmpeg\win-x64\ffmpeg.exe"
+          DestinationFiles="$(TargetDir)ffmpeg.exe"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyOptionalVideoEncoderToPublishRoot" AfterTargets="Publish"
+          Condition="Exists('$(MSBuildProjectDirectory)\Capture\ffmpeg\win-x64\ffmpeg.exe')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Capture\ffmpeg\win-x64\ffmpeg.exe"
+          DestinationFiles="$(PublishDir)ffmpeg.exe"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="WarnWhenReleaseVideoEncoderIsMissing" BeforeTargets="Publish"
+          Condition="'$(Configuration)' == 'Release' And !Exists('$(MSBuildProjectDirectory)\Capture\ffmpeg\win-x64\ffmpeg.exe')">
+    <Warning Text="Release publish will not include ffmpeg.exe, so video capture requires each user to configure an encoder on PATH. See Capture\ffmpeg\win-x64\README.md." />
+  </Target>
+
   <!-- Bundle WoWDBDefs definitions with the output (required for DBC parsing via DBCD) -->
   <ItemGroup>
     <Content Include="..\..\..\libs\wowdev\WoWDBDefs\definitions\**\*.dbd" Link="definitions\%(RecursiveDir)%(Filename)%(Extension)">

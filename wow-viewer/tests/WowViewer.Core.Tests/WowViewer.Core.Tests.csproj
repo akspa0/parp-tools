@@ -19,6 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\viewer\WoWViewer\Capture\VideoEncoderExecutableResolver.cs"
+             Link="Capture\VideoEncoderExecutableResolver.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\core\WowViewer.Core\WowViewer.Core.csproj" />
     <ProjectReference Include="..\..\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WoW Viewer Feature Tour Recipe",
+  "type": "object",
+  "required": ["schemaVersion", "id", "displayName", "version", "requiresWarmPath", "capture", "beats"],
+  "properties": {
+    "schemaVersion": { "const": "wow-viewer.feature-tour.v1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "displayName": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "requiresWarmPath": { "type": "boolean" },
+    "capture": { "type": "object", "required": ["fps", "fullFrameWithTourOverlay"], "properties": { "fps": { "type": "integer", "minimum": 12, "maximum": 60 }, "fullFrameWithTourOverlay": { "const": true } }, "additionalProperties": false },
+    "beats": { "type": "array", "items": { "type": "object", "required": ["atSeconds", "kind", "featureId", "title", "durationSeconds"], "properties": { "atSeconds": { "type": "number", "minimum": 0 }, "kind": { "enum": ["callout", "registered-control"] }, "featureId": { "type": "string", "minLength": 1 }, "title": { "type": "string", "minLength": 1 }, "body": { "type": "string" }, "durationSeconds": { "type": "number", "exclusiveMinimum": 0 } }, "additionalProperties": false } }
+  },
+  "additionalProperties": false
+}

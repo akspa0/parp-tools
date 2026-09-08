@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WoW Viewer Authoring Handoff",
+  "type": "object",
+  "required": ["schemaVersion", "attemptId", "captureRelativePath", "receiptRelativePath", "provenance"],
+  "properties": {
+    "schemaVersion": { "const": "wow-viewer.authoring-handoff.v1" },
+    "attemptId": { "type": "string", "minLength": 1 },
+    "captureRelativePath": { "type": "string", "minLength": 1 },
+    "receiptRelativePath": { "type": "string", "minLength": 1 },
+    "stillRelativePaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "provenance": { "type": "object", "required": ["recipeId", "recipeVersion", "mapName", "buildVersion", "terminalOutcome"], "properties": { "recipeId": { "type": "string", "minLength": 1 }, "recipeVersion": { "type": "string", "minLength": 1 }, "mapName": { "type": "string", "minLength": 1 }, "buildVersion": { "type": "string", "minLength": 1 }, "terminalOutcome": { "enum": ["completed", "degraded", "aborted", "rejected", "failed"] } }, "additionalProperties": true }
+  },
+  "additionalProperties": false
+}

@@ -72,6 +72,9 @@
       Camera Path plus **Apply playback to next capture** inside Archaeology > Playback & Capture.
       Verify: a live fog drag holds under lighting recomposition; a known WMO-only map draws its global
       WMO; the displayed capture controls start, stop, and produce a valid ffmpeg output.
+      2026-09-08 source/package hardening receipt:
+      [t609-video-capture-release-hardening-2026-09-08.md](evidence/t609-video-capture-release-hardening-2026-09-08.md).
+      This task remains unchecked pending the real-viewer recording and playback witness.
 - [ ] 223-T610: Record the operator's UI acceptance result separately from source/build evidence.
       The current decorative camera rig is not interactive spatial UI; do not close this task or
       represent the workbench as a 3D HUD until Spec 212's interactive phases and gates pass.

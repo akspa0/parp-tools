@@ -12,6 +12,7 @@ the current owner or registry names a forward pointer; do not infer closure from
 
 | # | Spec | Task | Done when |
 |---|---|---|---|
+| 0 | [233 Renderer Marketing Capture Automation](233-marketing-capture-automation/spec.md) | P1 source implementation landed: path warmup + direct framebuffer capture now has a Feature Tour action and timed clean-scene callouts; receipt/transport still open | Operator records a real Flyby tour/video and then verifies its benchmark receipt, handoff, and reviewed README assets |
 | 1 | [231 Editor/Archaeology UI Overhaul](231-editor-archaeology-ui-overhaul/spec.md) | speckit spec+plan+tasks authored 2026-09-07 (operator-directed); 4-page Editor IA, Archaeology de-hosting, dedupe D1–D6 | Implemented in a fresh session per plan.md phases; operator navigation smoke |
 | 2 | [227 UI Re-Audit](227-ui-reaudit/spec.md) | Inventory v2 with screenshots; dropdown/collapsible sidebar standard; dedupe weak-signal amplifiers, minimaps, Inspector repetition; fix Archaeology styling; sane Editor tabs | Operator walks the build against inventory v2 and finds no duplicates |
 | 3 | [228 Source Decomposition](228-source-decomposition/spec.md) | Planned first behavior-preserving hover/click selection extraction, blocked by Spec 227 T004 | Core characterization + build/tests + operator smoke; no god-class members or partials added |
