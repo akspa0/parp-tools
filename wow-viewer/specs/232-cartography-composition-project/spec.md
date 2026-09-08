@@ -115,6 +115,20 @@ passed. The remaining gap is alignment precision, persistence, and export.
   target client, not patches.
 - Also recorded: cell-shift composition must move the layer as a RIGID map object (fixed in
   Phase 1's rigid `ResolveCellShiftedChunk` rework, same day).
+- **KNOWN DEFECT (T074 re-gate 2026-09-07, operator screenshot)**: quarter-turn rotation renders
+  but the rotated terrain is a "screwed up patchwork of chunks" — per-chunk content rotation
+  breaks the shared-vertex seams (ADT chunks share edge vertices; rotating each chunk
+  independently scrambles the lattice across chunk boundaries). Cell-shifted layers inherit the
+  defect.
+  **Correct fix design**: rotate the donor tile's FULL-TILE lattices as single grids before
+  slicing into chunks — `AlphaTileData` already holds `Heightmap` (257×257), `McnrNormalXyz`,
+  `McshShadowMask1024`, `McalAlphaPack` (per layer), `MclyTextureIds`/`MclyLayerMask`/
+  `HoleMask`/`AreaIds`/`McnkFlags16` (16×16 chunk-index axes), and per-chunk liquid records;
+  add `AlphaTileData.RotateTileTransform(kinds)` that rotates every lattice with the same
+  index-transform family as `TileContentTransform.TransformChunkSlot`, then slice via the
+  existing `ToTileLoadResult` — seam-correct by construction. Apply in the Alpha adapter's
+  transformed path (replacing per-chunk `TransformChunksForTarget`); mirror the approach for the
+  Standard adapter's per-chunk parse.
 - Also recorded (UI): right-sidebar page dropdowns must be sticky per top tab — switching to
   Quick and back must return to the page the operator was on, not snap to the first page.
 
