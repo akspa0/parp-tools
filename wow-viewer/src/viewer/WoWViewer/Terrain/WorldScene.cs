@@ -1627,6 +1627,20 @@ public class WorldScene : ISceneRenderer
         => _terrainManager != null && _terrainManager.LayerTileExists(mapName, tileX, tileY);
 
     /// <summary>
+    /// Spec 232 FR-11: the channels the BASE map contributes to its own tiles — the operator can
+    /// drop the base map's liquids, shadows, objects, etc. per channel. Changing this re-streams.
+    /// </summary>
+    public PhaseDataChannel BaseChannelKeep
+    {
+        get => _terrainManager?.BaseChannelKeep ?? PhaseDataChannel.All;
+        set
+        {
+            if (_terrainManager != null)
+                _terrainManager.BaseChannelKeep = value;
+        }
+    }
+
+    /// <summary>
     /// Cartography (Spec 222): each enabled, resolved layer with its donor footprint in DONOR tile
     /// coordinates. The minimap overlay applies the layer's offset to show where the content will
     /// land; an unoffset layer's footprint therefore appears at its true coordinates — which is

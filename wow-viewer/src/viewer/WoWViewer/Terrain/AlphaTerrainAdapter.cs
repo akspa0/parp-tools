@@ -349,9 +349,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// <see cref="PhaseCompositionPolicy"/> rules as the split-ADT path, so the two eras cannot drift
     /// apart on what a channel means.
     /// </remarks>
+    /// <summary>Spec 232 FR-11: channels the base map keeps on its own tiles (default: all).</summary>
+    public PhaseDataChannel BaseChannelKeep { get; set; } = PhaseDataChannel.All;
+
     public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
     {
         TileLoadResult result = LoadTileCore(tileX, tileY);
+        if (BaseChannelKeep != PhaseDataChannel.All)
+            BaseChannelStrip.Apply(result, BaseChannelKeep);
 
         if (_phaseLayers.Count > 0)
         {

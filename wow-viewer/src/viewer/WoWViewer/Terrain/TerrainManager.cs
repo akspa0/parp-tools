@@ -519,6 +519,22 @@ public class TerrainManager : ISceneRenderer
     public IList<PhaseLayerSettings> PhaseLayers => _adapter.PhaseLayers;
 
     /// <summary>
+    /// Spec 232 FR-11: the channels the BASE map contributes to its own tiles. Changing this
+    /// re-streams every tile (the composition is built at tile parse time).
+    /// </summary>
+    public PhaseDataChannel BaseChannelKeep
+    {
+        get => _adapter.BaseChannelKeep;
+        set
+        {
+            if (_adapter.BaseChannelKeep == value)
+                return;
+            _adapter.BaseChannelKeep = value;
+            RefreshPhaseLayers();
+        }
+    }
+
+    /// <summary>
     /// Replace the phase overlay stack and re-stream every tile.
     /// </summary>
     public void SetPhaseLayers(IEnumerable<PhaseLayerSettings> layers)

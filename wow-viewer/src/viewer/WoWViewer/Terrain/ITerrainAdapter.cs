@@ -81,9 +81,60 @@ public interface ITerrainAdapter
 
     /// <summary>
     /// Cartography (Spec 222): true when the named map is WMO-based (a dungeon/global-WMO map).
-    /// Such maps carry no terrain tiles — their WDT MAIN entries are leftovers — so layers sourced
+    /// Such maps carry no terrain tiles - their WDT MAIN entries are leftovers - so layers sourced
     /// from them must not claim terrain tiles or draw footprints. Unresolvable maps return false;
     /// combine with <see cref="TryResolveMap"/> for the displayable state.
     /// </summary>
     bool IsMapWmoBased(string mapName);
+
+    /// <summary>
+    /// Spec 232 FR-11: the channels the BASE map contributes to its own tiles. Gates off the base
+    /// map's liquids, shadows, objects, etc. per channel so the operator controls exactly what
+    /// the base keeps. Defaults to everything.
+    /// </summary>
+    PhaseDataChannel BaseChannelKeep { get => PhaseDataChannel.All; set { } }
+}
+
+/// <summary>
+/// Spec 232 FR-11: strips base-map channels the operator gated off, operating on the viewer's
+/// local tile-result shape (both WDT adapters share it).
+/// </summary>
+internal static class BaseChannelStrip
+{
+    public static void Apply(TileLoadResult result, PhaseDataChannel keep)
+    {
+        var chunks = new List<TerrainChunkData>(result.Chunks.Count);
+        foreach (TerrainChunkData chunk in result.Chunks)
+        {
+            chunks.Add(new TerrainChunkData
+            {
+                McinIndex = chunk.McinIndex,
+                TileX = chunk.TileX,
+                TileY = chunk.TileY,
+                ChunkX = chunk.ChunkX,
+                ChunkY = chunk.ChunkY,
+                Heights = chunk.Heights,
+                Normals = chunk.Normals,
+                HoleMask = keep.HasFlag(PhaseDataChannel.Holes) ? chunk.HoleMask : 0,
+                Layers = keep.HasFlag(PhaseDataChannel.TextureLayers) ? chunk.Layers : Array.Empty<TerrainLayer>(),
+                AlphaMaps = keep.HasFlag(PhaseDataChannel.TextureLayers) ? chunk.AlphaMaps : new Dictionary<int, byte[]>(),
+                ShadowMap = keep.HasFlag(PhaseDataChannel.Shadows) ? chunk.ShadowMap : null,
+                MccvColors = keep.HasFlag(PhaseDataChannel.VertexColors) ? chunk.MccvColors : null,
+                Liquid = keep.HasFlag(PhaseDataChannel.Liquid) ? chunk.Liquid : null,
+                WorldPosition = chunk.WorldPosition,
+                AreaId = keep.HasFlag(PhaseDataChannel.AreaId) ? chunk.AreaId : 0,
+                McnkFlags = keep.HasFlag(PhaseDataChannel.Liquid) ? chunk.McnkFlags : (chunk.McnkFlags & ~0x3C),
+                AlphaSourceFlags = chunk.AlphaSourceFlags,
+                McrdReferences = keep.HasFlag(PhaseDataChannel.Doodads) ? chunk.McrdReferences : Array.Empty<int>(),
+                McrwReferences = keep.HasFlag(PhaseDataChannel.WorldObjects) ? chunk.McrwReferences : Array.Empty<int>(),
+            });
+        }
+
+        result.Chunks.Clear();
+        result.Chunks.AddRange(chunks);
+        if (!keep.HasFlag(PhaseDataChannel.Doodads))
+            result.MddfPlacements.Clear();
+        if (!keep.HasFlag(PhaseDataChannel.WorldObjects))
+            result.ModfPlacements.Clear();
+    }
 }

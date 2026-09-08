@@ -295,6 +295,54 @@ public static class PhaseCompositionPolicy
         => (-tileOffsetX * tileSize, -tileOffsetY * tileSize);
 
     /// <summary>
+    /// Spec 232 FR-11: strips every channel NOT in <paramref name="keep"/> from a base-map tile
+    /// result, so the operator can drop the base map's liquids, shadows, objects, etc. per
+    /// channel. Heightmap and normals are structural and always retained.
+    /// </summary>
+    public static TileLoadResult StripBaseChannels(TileLoadResult result, PhaseDataChannel keep)
+    {
+        var chunks = new List<TerrainChunkData>(result.Chunks.Count);
+        foreach (TerrainChunkData chunk in result.Chunks)
+        {
+            chunks.Add(new TerrainChunkData
+            {
+                McinIndex = chunk.McinIndex,
+                TileX = chunk.TileX,
+                TileY = chunk.TileY,
+                ChunkX = chunk.ChunkX,
+                ChunkY = chunk.ChunkY,
+                Heights = chunk.Heights,
+                Normals = chunk.Normals,
+                HoleMask = keep.HasFlag(PhaseDataChannel.Holes) ? chunk.HoleMask : 0,
+                Layers = keep.HasFlag(PhaseDataChannel.TextureLayers) ? chunk.Layers : Array.Empty<TerrainLayer>(),
+                AlphaMaps = keep.HasFlag(PhaseDataChannel.TextureLayers) ? chunk.AlphaMaps : new Dictionary<int, byte[]>(),
+                ShadowMap = keep.HasFlag(PhaseDataChannel.Shadows) ? chunk.ShadowMap : null,
+                MccvColors = keep.HasFlag(PhaseDataChannel.VertexColors) ? chunk.MccvColors : null,
+                Liquid = keep.HasFlag(PhaseDataChannel.Liquid) ? chunk.Liquid : null,
+                WorldPosition = chunk.WorldPosition,
+                AreaId = keep.HasFlag(PhaseDataChannel.AreaId) ? chunk.AreaId : 0,
+                McnkFlags = keep.HasFlag(PhaseDataChannel.Liquid) ? chunk.McnkFlags : (chunk.McnkFlags & ~0x3C),
+                AlphaSourceFlags = chunk.AlphaSourceFlags,
+            });
+        }
+
+        IReadOnlyList<MddfPlacement> mddf = keep.HasFlag(PhaseDataChannel.Doodads)
+            ? result.MddfPlacements
+            : Array.Empty<MddfPlacement>();
+        IReadOnlyList<ModfPlacement> modf = keep.HasFlag(PhaseDataChannel.WorldObjects)
+            ? result.ModfPlacements
+            : Array.Empty<ModfPlacement>();
+
+        return new TileLoadResult
+        {
+            Chunks = chunks,
+            MddfPlacements = mddf,
+            ModfPlacements = modf,
+            PlacementsPreTransformed = result.PlacementsPreTransformed,
+        };
+    }
+
+    /// <summary>
     /// Spec 231 T072: transforms placement poses in place through a layer's rotation/mirror —
     /// positions via <see cref="ForwardTransformWorldPoint"/>, headings via
     /// <see cref="ForwardTransformYawDegrees"/>. Excludes the whole-layer offset translation;

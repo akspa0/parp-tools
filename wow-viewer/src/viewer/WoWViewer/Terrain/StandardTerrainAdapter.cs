@@ -306,6 +306,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return result;
     }
 
+    /// <summary>Spec 232 FR-11: channels the base map keeps on its own tiles (default: all).</summary>
+    public PhaseDataChannel BaseChannelKeep { get; set; } = PhaseDataChannel.All;
+
     public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
     {
         var result = new TileLoadResult();
@@ -313,6 +316,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             return result;
 
         ParsedTileSource parent = LoadMapTile(_mapName, tileX, tileY);
+        if (BaseChannelKeep != PhaseDataChannel.All)
+            BaseChannelStrip.Apply(parent.Result, BaseChannelKeep);
 
         foreach (PhaseLayerSettings layer in ActivePhaseLayers)
         {
