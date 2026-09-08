@@ -82,7 +82,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     // Shared static shader program — prevents race condition when multiple WmoRenderers
     // exist and one is disposed (same fix as MdxRenderer)
     private static uint _shaderProgram;
-    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
+    private static int _uModel, _uView, _uProj, _uHasTexture, _uUnlit, _uColor, _uAlphaTest;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
     private static int _uUseInstanceModel;
@@ -748,6 +748,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
 
         _gl.Uniform1(_uHasTexture, 0);
+        _gl.Uniform1(_uUnlit, 1);
         _gl.Uniform1(_uAlphaTest, 0.0f);
         Vector3 lineColor = wireframeColor ?? new Vector3(0.95f, 1.0f, 0.65f);
         _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, 1.0f);
@@ -830,6 +831,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _gl.Uniform3(_uLightDir, ld.X, ld.Y, ld.Z);
         _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
         _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
+        _gl.Uniform1(_uUnlit, 0);
 
         UpdateRuntimeVisibility(modelMatrix, view, proj, cp);
 
@@ -845,12 +847,16 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
                 _gl.Enable(EnableCap.Blend);
                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 0.33f);
+                // Spec 232: ghost wireframe lines must not be blackened by baked MOCV vertex
+                // light (frequent on WMO interiors) — draw them unlit so they stay visible.
+                _gl.Uniform1(_uUnlit, 1);
             }
             else
             {
                 _gl.DepthMask(true);
                 _gl.Disable(EnableCap.Blend);
                 _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
+                _gl.Uniform1(_uUnlit, 0);
             }
             _gl.Uniform1(_uAlphaTest, 0.0f);
 
@@ -1708,6 +1714,7 @@ in float vBakedWeight;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
+uniform int uUnlit;
 uniform vec4 uColor;
 uniform float uAlphaTest;
 uniform vec3 uFogColor;
@@ -1736,6 +1743,14 @@ void main() {
         texColor = texture(uSampler, vTexCoord);
     } else {
         texColor = uColor;
+    }
+
+    // Spec 232: wireframe/selection passes emit flat unlit lines. WMO interior geometry
+    // carries baked MOCV vertex light that is frequently black, which previously rendered
+    // the selection outline invisible (black lines on dark terrain).
+    if (uUnlit == 1) {
+        FragColor = vec4(texColor.rgb, texColor.a);
+        return;
     }
 
     // Alpha test: discard fragments below threshold (for cutout/transparent materials)
@@ -1774,6 +1789,7 @@ void main() {
         _uUseInstanceModel = _gl.GetUniformLocation(_shaderProgram, "uUseInstanceModel");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
+        _uUnlit = _gl.GetUniformLocation(_shaderProgram, "uUnlit");
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
         _uFogColor = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
         _uFogStart = _gl.GetUniformLocation(_shaderProgram, "uFogStart");
