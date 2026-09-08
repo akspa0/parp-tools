@@ -129,8 +129,29 @@ passed. The remaining gap is alignment precision, persistence, and export.
   existing `ToTileLoadResult` — seam-correct by construction. Apply in the Alpha adapter's
   transformed path (replacing per-chunk `TransformChunksForTarget`); mirror the approach for the
   Standard adapter's per-chunk parse.
+- FR-13 — **Donor tile picker places only the requested tiles**: the donor-tile grid picker
+  (Spec 222-T108) currently composes a whole copy of the donor map — the whole-layer offset maps
+  every donor tile, so adding one requested tile still brings the entire map. Per-layer mode:
+  when the operator has placed tiles via the picker, the layer composes ONLY those placed tiles
+  (the whole-layer offset is ignored for unplaced targets), with a UI toggle to return to
+  offset mode.
+- FR-15 — **Project completeness + deletion protection**: the per-map saved project must include
+  ALL layers the operator set up (enabled, disabled, and unresolved — not just the ones currently
+  loaded), and previously set-up entries that are locked must be protected from deletion (Remove
+  and Clear-all skip locked layers with a status message instead of silently dropping them).
+- **REGRESSION (2026-09-07)**: clicking WL* liquid data no longer brings up its inspector when
+  maps are placed — the click-inspection path for WDL liquid data must work identically with and
+  without a layer stack active. Suspect the footprint hit-test/grab changes in
+  `ViewerApp_MinimapAndStatus.cs` and the composed-footprint changes in `GetLayerFootprints`
+  consuming clicks that should fall through to the data inspector; audit the minimap and
+  viewport click-pick flow against the pre-232 behavior.
+- FR-14 — **Per-tile locks**: the operator can lock individual composed tiles — a locked tile is
+  claimed exclusively by the layer that owns it, and later layers in the stack cannot override
+  it (composition skips locked targets for subsequent layers). Locks persist in the layer
+  project data (FR-2) and render a distinct minimap badge.
 - Also recorded (UI): right-sidebar page dropdowns must be sticky per top tab — switching to
-  Quick and back must return to the page the operator was on, not snap to the first page.
+  Quick and back must return to the page the operator was on, not snap to the first page
+  (fixed: per-top-tab page memory, `DrawTopTabButton`).
 
 ## Out of scope
 
