@@ -519,6 +519,41 @@ public class TerrainManager : ISceneRenderer
     public IList<PhaseLayerSettings> PhaseLayers => _adapter.PhaseLayers;
 
     /// <summary>
+    /// Spec 232 Phase 2 (FR-2): saves the current layer stack + base channel gates as this map's
+    /// layer project. Auto-loaded on map load; also the target of the panel's Save button (FR-8).
+    /// </summary>
+    public void SaveLayerProject()
+    {
+        PhaseLayerProjectFile project = PhaseLayerProjectFile.FromLayers(
+            MapName, _adapter.PhaseLayers, _adapter.BaseChannelKeep);
+        project.Save(CartographyProjectStore.ProjectPath(MapName));
+    }
+
+    /// <summary>
+    /// Spec 232 Phase 2 (FR-2): loads this map's layer project (if any) into the live stack and
+    /// re-streams. Returns false when no project exists.
+    /// </summary>
+    public bool LoadLayerProject()
+    {
+        string path = CartographyProjectStore.ProjectPath(MapName);
+        if (!File.Exists(path))
+            return false;
+
+        PhaseLayerProjectFile project = PhaseLayerProjectFile.Load(path);
+        if (!string.Equals(project.BaseMap, MapName, StringComparison.OrdinalIgnoreCase) && project.Layers.Count > 0)
+            return false;
+
+        _adapter.BaseChannelKeep = project.BaseChannelKeep;
+        _adapter.PhaseLayers.Clear();
+        foreach (PhaseLayerSettings layer in project.ToLayers())
+            _adapter.PhaseLayers.Add(layer);
+
+        RefreshLayerResolutionStates();
+        RefreshPhaseLayers();
+        return true;
+    }
+
+    /// <summary>
     /// Spec 232 FR-11: the channels the BASE map contributes to its own tiles. Changing this
     /// re-streams every tile (the composition is built at tile parse time).
     /// </summary>

@@ -165,6 +165,12 @@ public sealed class PhaseLayerSettings
     /// <summary>True when a cell-level fine-tune is active.</summary>
     public bool HasCellOffset => CellOffsetX != 0 || CellOffsetY != 0;
 
+    /// <summary>
+    /// Spec 232 FR-2: locked layers keep their alignment — the panel rejects accidental edits
+    /// until explicitly unlocked. Persisted with the layer project.
+    /// </summary>
+    public bool Locked { get; set; }
+
     public PhaseLayerSettings Clone()
     {
         var clone = new PhaseLayerSettings
@@ -189,6 +195,7 @@ public sealed class PhaseLayerSettings
 
         clone.CellOffsetX = CellOffsetX;
         clone.CellOffsetY = CellOffsetY;
+        clone.Locked = Locked;
 
         return clone;
     }

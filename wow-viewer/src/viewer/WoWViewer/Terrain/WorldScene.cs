@@ -8253,6 +8253,20 @@ public class WorldScene : ISceneRenderer
         onStatus?.Invoke("Loading WDT...");
         _terrainManager = new TerrainManager(gl, wdtPath, dataSource);
 
+        // Spec 232 Phase 2 (FR-2): auto-load this map's saved layer project, so a
+        // locked-in composition is live on every launch without manual re-entry.
+        try
+        {
+            if (_terrainManager.LoadLayerProject())
+                ViewerLog.Important(WoWViewer.Logging.ViewerLog.Category.Terrain,
+                    $"[Cartography] Loaded saved layer project for '{_terrainManager.MapName}'.");
+        }
+        catch (Exception projectEx)
+        {
+            ViewerLog.Important(WoWViewer.Logging.ViewerLog.Category.Terrain,
+                $"[Cartography] Layer project load failed: {projectEx.Message}");
+        }
+
         InitFromAdapter(onStatus);
     }
 
@@ -8274,6 +8288,19 @@ public class WorldScene : ISceneRenderer
         _bbRenderer = new BoundingBoxRenderer(gl);
         _skyDome = new SkyDomeRenderer(gl);
         _terrainManager = terrainManager;
+
+        // Spec 232 Phase 2 (FR-2): same auto-load for the pre-built-manager path (Standard WDT).
+        try
+        {
+            if (_terrainManager.LoadLayerProject())
+                ViewerLog.Important(WoWViewer.Logging.ViewerLog.Category.Terrain,
+                    $"[Cartography] Loaded saved layer project for '{_terrainManager.MapName}'.");
+        }
+        catch (Exception projectEx)
+        {
+            ViewerLog.Important(WoWViewer.Logging.ViewerLog.Category.Terrain,
+                $"[Cartography] Layer project load failed: {projectEx.Message}");
+        }
 
         InitFromAdapter(onStatus);
     }
