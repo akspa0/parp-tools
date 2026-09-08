@@ -145,6 +145,12 @@ passed. The remaining gap is alignment precision, persistence, and export.
   `ViewerApp_MinimapAndStatus.cs` and the composed-footprint changes in `GetLayerFootprints`
   consuming clicks that should fall through to the data inspector; audit the minimap and
   viewport click-pick flow against the pre-232 behavior.
+- **REGRESSION (2026-09-07)**: selecting WMOs no longer shows any outline at all, and the
+  M2/WMO wireframe toggle still does nothing for WMOs — same root bug. The Phase 7 selection
+  work landed flat-color terrain wireframe and model wireframe fixes, but the WMO selection
+  outline/wireframe draw pass is not executing for world-placed WMOs. Audit the WMO render
+  pass's selection-outline hook (WmoRenderer draw path vs the ModelRenderer wireframe path the
+  earlier fix touched) and restore the red selection wireframe for WMOs.
 - FR-14 — **Per-tile locks**: the operator can lock individual composed tiles — a locked tile is
   claimed exclusively by the layer that owns it, and later layers in the stack cannot override
   it (composition skips locked targets for subsequent layers). Locks persist in the layer
