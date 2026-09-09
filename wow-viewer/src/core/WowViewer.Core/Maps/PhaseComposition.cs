@@ -109,6 +109,13 @@ public sealed class PhaseLayerSettings
     /// <summary>Per-tile donor-to-target mappings; a mapping claims its target over the whole-layer offset.</summary>
     public IList<PhaseTilePlacement> TilePlacements { get; } = new List<PhaseTilePlacement>();
 
+    /// <summary>
+    /// Spec 232 FR-13: when true, this layer contributes only at targets explicitly named by a
+    /// valid <see cref="TilePlacements"/> entry. When false (the legacy default), an explicit
+    /// placement overrides its target and all other targets still use the whole-layer offset.
+    /// </summary>
+    public bool UsePlacedTilesOnly { get; set; }
+
     /// <summary>True when this layer carries any transform (rotation, mirror, or per-tile mapping).</summary>
     public bool HasTransform =>
         RotationDegrees != 0f || MirrorHorizontal || MirrorVertical || TilePlacements.Count > 0;
@@ -181,6 +188,7 @@ public sealed class PhaseLayerSettings
             RotationOriginTileY = RotationOriginTileY,
             MirrorHorizontal = MirrorHorizontal,
             MirrorVertical = MirrorVertical,
+            UsePlacedTilesOnly = UsePlacedTilesOnly,
             Enabled = Enabled,
             Channels = Channels,
             OnlyTakeWhatThePhaseCarries = OnlyTakeWhatThePhaseCarries,
@@ -453,6 +461,11 @@ public static class PhaseCompositionPolicy
                 claimCount);
         }
 
+        // Spec 232 FR-13: a picker-created layer is an explicit placement set, not a shifted
+        // copy of its donor map. Do not fall through to the layer offset for unplaced targets.
+        if (layer.UsePlacedTilesOnly)
+            return PhaseTileSource.Empty;
+
         // 2. Whole-layer offset, with rotation/mirror composed into the lookup.
         int sourceX = targetX - layer.TileOffsetX;
         int sourceY = targetY - layer.TileOffsetY;
@@ -473,6 +486,51 @@ public static class PhaseCompositionPolicy
             ComposeTileTransforms(layer),
             ResolveRotationApproximation(layer),
             0);
+    }
+
+    /// <summary>
+    /// Spec 232 FR-14: true when this layer explicitly claims the target against later layers.
+    /// Locks live on valid tile placements, so an offset-only layer cannot accidentally claim an
+    /// entire donor footprint.
+    /// </summary>
+    public static bool IsTargetLockedByLayer(PhaseLayerSettings layer, int targetX, int targetY)
+    {
+        ArgumentNullException.ThrowIfNull(layer);
+
+        return layer.TilePlacements.Any(placement =>
+            placement.IsValid && placement.Locked
+            && placement.TargetTileX == targetX && placement.TargetTileY == targetY);
+    }
+
+    /// <summary>
+    /// Spec 232 FR-14: reports whether an enabled, contributing layer before
+    /// <paramref name="laterLayerIndex"/> owns the target tile. Consumers render or merge in
+    /// stack order and use this to prevent a later layer from overriding the lock owner.
+    /// </summary>
+    public static bool IsTargetLockedByEarlierLayer(
+        IReadOnlyList<PhaseLayerSettings> layers,
+        int laterLayerIndex,
+        int targetX,
+        int targetY)
+    {
+        ArgumentNullException.ThrowIfNull(layers);
+        if (laterLayerIndex < 0 || laterLayerIndex > layers.Count)
+            throw new ArgumentOutOfRangeException(nameof(laterLayerIndex));
+
+        for (int index = 0; index < laterLayerIndex; index++)
+        {
+            PhaseLayerSettings earlierLayer = layers[index];
+            if (!earlierLayer.Enabled || earlierLayer.Channels == PhaseDataChannel.None
+                || string.IsNullOrWhiteSpace(earlierLayer.MapName))
+            {
+                continue;
+            }
+
+            if (IsTargetLockedByLayer(earlierLayer, targetX, targetY))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -689,7 +747,8 @@ public readonly record struct PhaseTilePlacement(
     int DonorTileX,
     int DonorTileY,
     int TargetTileX,
-    int TargetTileY)
+    int TargetTileY,
+    bool Locked = false)
 {
     public bool IsValid =>
         DonorTileX is >= 0 and < 64 && DonorTileY is >= 0 and < 64 &&

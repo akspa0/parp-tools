@@ -313,6 +313,23 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         return false;
     }
 
+    /// <summary>
+    /// Reads one complete Alpha tile through the core reader without first slicing it into MCNKs.
+    /// The legacy viewer adapter indexes Alpha MAIN as <c>tileX * 64 + tileY</c>, while the core
+    /// reader uses the canonical row-major <c>tileY * 64 + tileX</c> convention. Keep that swap
+    /// at this ownership boundary so phase composition continues to receive the same viewer tile
+    /// coordinates as the existing streaming path.
+    /// </summary>
+    public AlphaTileData? GetTileData(int tileX, int tileY)
+    {
+        if (!TileExistsInOwnWdt(tileX, tileY))
+            return null;
+
+        return AlphaWdtReader.TryReadTile(_wdtPath, tileY, tileX, out AlphaTileData? tileData)
+            ? tileData
+            : null;
+    }
+
     public bool TryGetPlacementSourceData(int tileX, int tileY, out string sourcePath, out byte[] sourceBytes)
     {
         sourcePath = string.Empty;
@@ -371,6 +388,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             }
         }
 
+        bool targetLockedByEarlierLayer = false;
         foreach (PhaseLayerSettings layer in _phaseLayers)
         {
             if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName) || layer.Channels == PhaseDataChannel.None)
@@ -384,6 +402,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 }
                 continue;
             }
+
+            if (targetLockedByEarlierLayer)
+                continue;
+
+            // Spec 232 FR-14: lock before resolution so an unavailable locked donor does not
+            // permit a later layer to replace its target with unrelated content.
+            if (PhaseCompositionPolicy.IsTargetLockedByLayer(layer, tileX, tileY))
+                targetLockedByEarlierLayer = true;
 
             AlphaTerrainAdapter? phaseAdapter = ResolvePhaseAdapter(layer.MapName);
             if (phaseAdapter == null)
@@ -442,14 +468,27 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 phaseAdapter.TileTextures.TryGetValue((source.SourceTileX, source.SourceTileY), out phaseTextures);
                 if (source.Transforms.Count > 0)
                 {
+                    TileLoadResult? fullTile = phaseAdapter.LoadTransformedFullTile(source, tileX, tileY);
+                    if (fullTile == null)
+                    {
+                        string failureKey = $"full-tile-read:{layer.MapName}:{source.SourceTileX}:{source.SourceTileY}";
+                        if (_phaseDiagnosticOnce.TryAdd(failureKey, 0))
+                        {
+                            ViewerLog.Important(ViewerLog.Category.Terrain,
+                                $"[AlphaADT] Phase map '{layer.MapName}' has no readable full-tile lattice for "
+                                + $"source=({source.SourceTileX},{source.SourceTileY}); transformed terrain is skipped "
+                                + "rather than falling back to known seam-producing per-chunk rotation.");
+                        }
+                        continue;
+                    }
+
                     phase = new TileLoadResult
                     {
-                        Chunks = AlphaChunkTransform.TransformChunksForTarget(
-                            phase.Chunks, source.Transforms, tileX, tileY),
+                        Chunks = fullTile.Chunks,
                         MddfPlacements = AlphaChunkTransform.TransformPlacementPoses(
-                            phase.MddfPlacements, layer),
+                            fullTile.MddfPlacements, layer),
                         ModfPlacements = AlphaChunkTransform.TransformModfPlacementPoses(
-                            phase.ModfPlacements, layer),
+                            fullTile.ModfPlacements, layer),
                         SoundEmitters = phase.SoundEmitters,
                     };
                 }
@@ -485,7 +524,6 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         // layer moves as a single map object instead of re-picking donor chunks per cell.
         var chunks = new List<TerrainChunkData>(256);
         var composedCache = new Dictionary<(int, int), IReadOnlyList<TerrainChunkData>>();
-        var donorCache = new Dictionary<(int, int), TileLoadResult>();
         var mddf = new List<MddfPlacement>();
         var modf = new List<ModfPlacement>();
 
@@ -515,9 +553,31 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                     }
 
                     TileLoadResult donor = phaseAdapter.LoadTileCore(supplySource.SourceTileX, supplySource.SourceTileY);
-                    donorCache[(supplyTileX, supplyTileY)] = donor;
-                    composed = AlphaChunkTransform.TransformChunksForTarget(
-                        donor.Chunks, supplySource.Transforms, supplyTileX, supplyTileY);
+                    if (supplySource.Transforms.Count > 0)
+                    {
+                        TileLoadResult? fullTile = phaseAdapter.LoadTransformedFullTile(
+                            supplySource, supplyTileX, supplyTileY);
+                        if (fullTile == null)
+                        {
+                            string failureKey = $"full-tile-read:{layer.MapName}:{supplySource.SourceTileX}:{supplySource.SourceTileY}";
+                            if (_phaseDiagnosticOnce.TryAdd(failureKey, 0))
+                            {
+                                ViewerLog.Important(ViewerLog.Category.Terrain,
+                                    $"[AlphaADT] Phase map '{layer.MapName}' has no readable full-tile lattice for "
+                                    + $"source=({supplySource.SourceTileX},{supplySource.SourceTileY}); transformed cell "
+                                    + "content is skipped rather than falling back to known seam-producing per-chunk rotation.");
+                            }
+                            composedCache[(supplyTileX, supplyTileY)] = Array.Empty<TerrainChunkData>();
+                            continue;
+                        }
+
+                        donor = fullTile;
+                    }
+
+                    // A no-transform donor already occupies the supplying tile's slot. Exact-grid
+                    // transforms above are sliced from the transformed 257x257 lattice, so neither
+                    // branch may call the legacy per-MCNK rotation helper here.
+                    composed = donor.Chunks;
                     composedCache[(supplyTileX, supplyTileY)] = composed;
 
                     // Spec 232 FR-9: EVERY pulled supply tile's placements get the pose transform
@@ -1221,6 +1281,158 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             MddfPlacements = tileMddf,
             ModfPlacements = tileModf,
             SoundEmitters = soundEmitters
+        };
+    }
+
+    /// <summary>
+    /// Spec 232 T015c: applies the exact-grid phase transform while the donor is still a complete
+    /// Alpha tile, then slices the transformed lattice into viewer chunks at the requested target
+    /// coordinates. This is deliberately separate from <see cref="LoadTileCore"/>, which remains
+    /// the proven untransformed Alpha streaming path.
+    /// </summary>
+    private TileLoadResult? LoadTransformedFullTile(PhaseTileSource source, int targetTileX, int targetTileY)
+    {
+        AlphaTileData? tileData = GetTileData(source.SourceTileX, source.SourceTileY);
+        if (tileData == null)
+            return null;
+
+        AlphaTileData transformed = ApplyFullTileTransforms(tileData, source.Transforms);
+        WowViewer.Core.Maps.TileLoadResult coreResult = transformed.ToTileLoadResult(targetTileX, targetTileY);
+        return ConvertFullTileResult(coreResult, transformed);
+    }
+
+    private static AlphaTileData ApplyFullTileTransforms(
+        AlphaTileData tileData,
+        IReadOnlyList<TileTransformKind> transforms)
+    {
+        int quarterTurns = 0;
+        bool mirrorHorizontal = false;
+        bool mirrorVertical = false;
+
+        // PhaseCompositionPolicy.ComposeTileTransforms fixes this order to a single rotation
+        // followed by mirrors. Collapse it to the AlphaTileData API rather than reimplementing
+        // an independent per-plane transform in the viewer.
+        foreach (TileTransformKind transform in transforms)
+        {
+            switch (transform)
+            {
+                case TileTransformKind.Rotate90CW:
+                    quarterTurns++;
+                    break;
+                case TileTransformKind.Rotate180:
+                    quarterTurns += 2;
+                    break;
+                case TileTransformKind.Rotate90CCW:
+                    quarterTurns--;
+                    break;
+                case TileTransformKind.MirrorH:
+                    mirrorHorizontal = !mirrorHorizontal;
+                    break;
+                case TileTransformKind.MirrorV:
+                    mirrorVertical = !mirrorVertical;
+                    break;
+            }
+        }
+
+        return tileData.RotateQuarterTurn(quarterTurns, mirrorHorizontal, mirrorVertical);
+    }
+
+    private static TileLoadResult ConvertFullTileResult(
+        WowViewer.Core.Maps.TileLoadResult source,
+        AlphaTileData transformedTile)
+    {
+        var liquids = transformedTile.LiquidChunks.ToDictionary(
+            static liquid => (liquid.IndexX, liquid.IndexY));
+        var chunks = new List<TerrainChunkData>(source.Chunks.Count);
+
+        foreach (WowViewer.Core.Maps.TerrainChunkData sourceChunk in source.Chunks)
+        {
+            liquids.TryGetValue((sourceChunk.ChunkX, sourceChunk.ChunkY), out AlphaLiquidChunk? latticeLiquid);
+            int mcnkFlags = sourceChunk.McnkFlags;
+            if (transformedTile.McnkFlags16 != null
+                && sourceChunk.ChunkY < transformedTile.McnkFlags16.GetLength(0)
+                && sourceChunk.ChunkX < transformedTile.McnkFlags16.GetLength(1))
+            {
+                mcnkFlags = transformedTile.McnkFlags16[sourceChunk.ChunkY, sourceChunk.ChunkX];
+            }
+
+            chunks.Add(new TerrainChunkData
+            {
+                McinIndex = sourceChunk.McinIndex,
+                TileX = sourceChunk.TileX,
+                TileY = sourceChunk.TileY,
+                ChunkX = sourceChunk.ChunkX,
+                ChunkY = sourceChunk.ChunkY,
+                Heights = sourceChunk.Heights,
+                Normals = sourceChunk.Normals,
+                HoleMask = sourceChunk.HoleMask,
+                Layers = sourceChunk.Layers.Select(static layer => new TerrainLayer
+                {
+                    TextureIndex = layer.TextureIndex,
+                    Flags = layer.Flags,
+                    AlphaOffset = layer.AlphaOffset,
+                    EffectId = layer.EffectId,
+                }).ToArray(),
+                AlphaMaps = sourceChunk.AlphaMaps,
+                ShadowMap = sourceChunk.ShadowMap,
+                MccvColors = sourceChunk.MccvColors,
+                Liquid = ConvertFullTileLiquid(sourceChunk, latticeLiquid),
+                WorldPosition = sourceChunk.WorldPosition,
+                AreaId = sourceChunk.AreaId,
+                McnkFlags = mcnkFlags,
+                AlphaSourceFlags = mcnkFlags,
+            });
+        }
+
+        return new TileLoadResult
+        {
+            Chunks = chunks,
+            MddfPlacements = source.MddfPlacements.Select(static placement => new MddfPlacement
+            {
+                NameIndex = placement.NameId,
+                UniqueId = placement.UniqueId,
+                Position = placement.Position,
+                Rotation = placement.Rotation,
+                Scale = placement.Scale,
+            }).ToList(),
+            ModfPlacements = source.ModfPlacements.Select(static placement => new ModfPlacement
+            {
+                NameIndex = placement.NameId,
+                UniqueId = placement.UniqueId,
+                Position = placement.Position,
+                Rotation = placement.Rotation,
+                BoundsMin = placement.BoundsMin,
+                BoundsMax = placement.BoundsMax,
+                Flags = placement.Flags,
+            }).ToList(),
+        };
+    }
+
+    private static LiquidChunkData? ConvertFullTileLiquid(
+        WowViewer.Core.Maps.TerrainChunkData sourceChunk,
+        AlphaLiquidChunk? latticeLiquid)
+    {
+        WowViewer.Core.Maps.LiquidChunkData? sourceLiquid = sourceChunk.Liquid;
+        if (sourceLiquid == null)
+            return null;
+
+        float averageHeight = (sourceLiquid.MinHeight + sourceLiquid.MaxHeight) * 0.5f;
+        return new LiquidChunkData
+        {
+            MinHeight = sourceLiquid.MinHeight,
+            MaxHeight = sourceLiquid.MaxHeight,
+            Heights = latticeLiquid?.Heights?.ToArray() ?? Enumerable.Repeat(averageHeight, 81).ToArray(),
+            VertexData = new uint[81],
+            // Alpha's parser contract has no authored 4x4 tile grid; the legacy adapter also
+            // constructs this compatibility surface empty after preserving the 9x9 and 8x8 grids.
+            TileGrid = new float[16],
+            TileFlags = sourceLiquid.TileFlags?.ToArray(),
+            Type = (LiquidType)Math.Clamp(sourceLiquid.LiquidType, (int)LiquidType.Water, (int)LiquidType.Slime),
+            WorldPosition = sourceChunk.WorldPosition,
+            TileX = sourceChunk.TileX,
+            TileY = sourceChunk.TileY,
+            ChunkX = sourceChunk.ChunkX,
+            ChunkY = sourceChunk.ChunkY,
         };
     }
 

@@ -81,6 +81,59 @@ public sealed class PhaseTileSourceTests
     }
 
     [Fact]
+    public void PlacedTileOnlyMode_UnmappedTarget_IsEmptyInsteadOfUsingOffset()
+    {
+        var layer = new PhaseLayerSettings
+        {
+            MapName = "Donor",
+            TileOffsetX = 1,
+            TileOffsetY = 1,
+            UsePlacedTilesOnly = true,
+        };
+        layer.TilePlacements.Add(new PhaseTilePlacement(5, 5, 10, 10));
+
+        PhaseTileSource source = PhaseCompositionPolicy.ResolveTileSource(layer, 20, 20, AllTilesExist);
+
+        Assert.False(source.HasSource);
+    }
+
+    [Fact]
+    public void PlacedTileOnlyMode_WithoutPlacements_IsEmpty()
+    {
+        var layer = new PhaseLayerSettings { MapName = "Donor", UsePlacedTilesOnly = true };
+
+        PhaseTileSource source = PhaseCompositionPolicy.ResolveTileSource(layer, 20, 20, AllTilesExist);
+
+        Assert.False(source.HasSource);
+    }
+
+    [Fact]
+    public void LockedPlacement_ClaimsOnlyItsExplicitTarget()
+    {
+        var layer = new PhaseLayerSettings { MapName = "Donor" };
+        layer.TilePlacements.Add(new PhaseTilePlacement(5, 5, 10, 10, Locked: true));
+
+        Assert.True(PhaseCompositionPolicy.IsTargetLockedByLayer(layer, 10, 10));
+        Assert.False(PhaseCompositionPolicy.IsTargetLockedByLayer(layer, 10, 11));
+    }
+
+    [Fact]
+    public void EarlierLockedPlacement_BlocksOnlyLaterContributingLayers()
+    {
+        var lockOwner = new PhaseLayerSettings { MapName = "Owner" };
+        lockOwner.TilePlacements.Add(new PhaseTilePlacement(5, 5, 10, 10, Locked: true));
+        var laterLayer = new PhaseLayerSettings { MapName = "Later" };
+
+        IReadOnlyList<PhaseLayerSettings> layers = [lockOwner, laterLayer];
+
+        Assert.True(PhaseCompositionPolicy.IsTargetLockedByEarlierLayer(layers, 1, 10, 10));
+        Assert.False(PhaseCompositionPolicy.IsTargetLockedByEarlierLayer(layers, 1, 11, 10));
+
+        lockOwner.Enabled = false;
+        Assert.False(PhaseCompositionPolicy.IsTargetLockedByEarlierLayer(layers, 1, 10, 10));
+    }
+
+    [Fact]
     public void Rotate90CW_InversesTheLookup()
     {
         // CW content rotation: target (tx, ty) is filled by rotating donor tile lookup. The exact
@@ -154,8 +207,9 @@ public sealed class PhaseTileSourceTests
             RotationOriginTileX = 12.5f,
             RotationOriginTileY = 13.5f,
             MirrorHorizontal = true,
+            UsePlacedTilesOnly = true,
         };
-        layer.TilePlacements.Add(new PhaseTilePlacement(1, 2, 3, 4));
+        layer.TilePlacements.Add(new PhaseTilePlacement(1, 2, 3, 4, Locked: true));
 
         PhaseLayerSettings clone = layer.Clone();
 
@@ -163,7 +217,9 @@ public sealed class PhaseTileSourceTests
         Assert.Equal(layer.RotationOriginTileX, clone.RotationOriginTileX);
         Assert.Equal(layer.RotationOriginTileY, clone.RotationOriginTileY);
         Assert.Equal(layer.MirrorHorizontal, clone.MirrorHorizontal);
+        Assert.Equal(layer.UsePlacedTilesOnly, clone.UsePlacedTilesOnly);
         Assert.Equal(layer.TilePlacements, clone.TilePlacements);
+        Assert.True(Assert.Single(clone.TilePlacements).Locked);
         Assert.NotSame(layer.TilePlacements, clone.TilePlacements);
     }
 

@@ -76,6 +76,8 @@ public partial class ViewerApp
         PhaseLayerSettings layer = worldScene.PhaseLayers[layerIndex];
         if (!layer.Enabled || layer.Resolution != PhaseLayerResolution.Resolved)
             return false;
+        if (layer.UsePlacedTilesOnly)
+            return false;
 
         // Spec 231 Phase 7: GetLayerFootprints already composes rotation/mirror + offset, so the
         // click hit-test is a direct lookup in composed space.

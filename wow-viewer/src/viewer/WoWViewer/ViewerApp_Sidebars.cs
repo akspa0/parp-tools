@@ -4741,12 +4741,20 @@ public partial class ViewerApp
             _activeTopTab = tab;
             _activeBottomTabIndex = _lastPageByTopTab.TryGetValue(tab, out int remembered)
                 ? Math.Clamp(remembered, 0, Math.Max(0, WorkbenchNavigator.GetBottomTabLabels(tab).Length - 1))
-                : 0;
+                : tab == WorkbenchTab.Archaeology
+                    ? 5 // Cartography opens on its Layers sub-tab.
+                    : 0;
         }
     }
 
-    private void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = 0)
+    private void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = -1)
     {
+        // Spec 232 FR-4: the default Archaeology destination is Cartography's Map Layers
+        // page. An explicit caller page (including Range/UniqueId) and remembered page remain
+        // authoritative; only no-page navigation takes this default.
+        if (bottomIndex < 0)
+            bottomIndex = topTab == WorkbenchTab.Archaeology ? 5 : 0;
+
         // Adapt legacy destinations at the call boundary. This keeps menu,
         // keyboard, and saved-layout callers functional while exposing only
         // Quick, Inspector, Editor, and Archaeology in the shell.

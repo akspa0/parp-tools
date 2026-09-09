@@ -75,6 +75,11 @@ internal static class MinimapHelpers
                         WowViewer.Core.Maps.PhaseLayerSettings layer = phaseLayers[layerIndex];
                         if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName))
                             continue;
+                        if (layer.Channels == PhaseDataChannel.None
+                            || PhaseCompositionPolicy.IsTargetLockedByEarlierLayer(phaseLayers, layerIndex, tx, ty))
+                        {
+                            continue;
+                        }
 
                         // Cartography (Spec 222): a WMO-based donor (dungeon) has no terrain tiles;
                         // querying its minimap textures returned garbage for leftover MAIN
@@ -258,9 +263,20 @@ internal static class MinimapHelpers
 
         float viewMaxTx = viewMinTx + mapSize / cellSize;
         float viewMaxTy = viewMinTy + mapSize / cellSize;
+        IReadOnlyList<PhaseLayerSettings> phaseLayers = worldScene.PhaseLayers;
 
         foreach ((var layer, var tiles) in worldScene.GetLayerFootprints())
         {
+            int layerIndex = -1;
+            for (int index = 0; index < phaseLayers.Count; index++)
+            {
+                if (ReferenceEquals(phaseLayers[index], layer))
+                {
+                    layerIndex = index;
+                    break;
+                }
+            }
+
             int paletteIndex = layer.FootprintColorIndex >= 0
                 ? layer.FootprintColorIndex % Terrain.TerrainManager.FootprintPalette.Count
                 : 0;
@@ -273,6 +289,14 @@ internal static class MinimapHelpers
 
             foreach ((int tx, int ty) in tiles)
             {
+                // A footprint means the tile can contribute. A preceding explicit lock makes a
+                // later layer ineligible at that target, so do not draw a misleading overlap.
+                if (layerIndex >= 0
+                    && PhaseCompositionPolicy.IsTargetLockedByEarlierLayer(phaseLayers, layerIndex, tx, ty))
+                {
+                    continue;
+                }
+
                 // Spec 231 Phase 7: GetLayerFootprints already composes rotation/mirror + offset,
                 // so (tx, ty) is the final target tile. tx is the adapter's tileX (row →
                 // vertical) and ty its tileY (col → horizontal), matching the base-tile drawing.
@@ -294,6 +318,15 @@ internal static class MinimapHelpers
                     0f,
                     ImDrawFlags.None,
                     selected ? 2.5f : 1.25f);
+
+                if (PhaseCompositionPolicy.IsTargetLockedByLayer(layer, tx, ty))
+                {
+                    float badgeSize = MathF.Max(8f, cellSize * 0.30f);
+                    Vector2 badgeMin = new(x + cellSize - badgeSize, y);
+                    Vector2 badgeMax = new(x + cellSize, y + badgeSize);
+                    drawList.AddRectFilled(badgeMin, badgeMax, 0xFF1F4B8Fu);
+                    drawList.AddText(badgeMin + new Vector2(1f, -1f), 0xFFFFFFFFu, "L");
+                }
             }
         }
     }

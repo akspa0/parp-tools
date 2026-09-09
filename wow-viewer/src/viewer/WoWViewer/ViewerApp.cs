@@ -12,6 +12,7 @@ using WoWViewer.Export;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using WoWViewer.Catalog;
+using WoWViewer.Capture;
 using WoWViewer.Population;
 using WoWViewer.Terrain;
 using Silk.NET.Input;
@@ -30,6 +31,7 @@ using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.M2;
 using WoWViewer.Terrain.Vlm;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.Marketing;
 using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;
@@ -1902,6 +1904,9 @@ void main() {
                 DrawWeakSignalWindow();
 
         }
+
+        if (_activeVideoRecording?.MarketingTourAttempt?.ActivePresentation is FeatureTourPresentation presentation)
+            MarketingTourOverlayRenderer.Draw(presentation);
 
         _forceApplyShellPanelLayout = false;
 
@@ -14615,7 +14620,12 @@ void main() {
         // THROUGH the ground. The hover picker tests object distance but never
         // terrain occlusion, so an object behind a hill was still hovered. If
         // terrain is hit first along the same ray, the hover is invalid.
-        if (_worldScene.HoveredAssetInfo is { IsPreciseRayHit: true } hovered)
+        // WL bodies are source-data inspection targets, not scene objects. A composed layer can
+        // legitimately put terrain in front of their original bounds, but that must not erase the
+        // WL hover identity that the click inspector consumes. Keep terrain occlusion for actual
+        // placed scene objects (WMO/M2/PM4) only.
+        if (_worldScene.HoveredAssetInfo is { IsPreciseRayHit: true } hovered
+            && !string.Equals(hovered.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase))
         {
             float ndcX = (localX / MathF.Max(vpW, 1f)) * 2f - 1f;
             float ndcY = 1f - (localY / MathF.Max(vpH, 1f)) * 2f;

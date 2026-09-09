@@ -26,10 +26,11 @@ public sealed class PhaseLayerProjectFileTests
             RotationOriginTileX = 32.5f,
             RotationOriginTileY = 32.5f,
             MirrorHorizontal = true,
+            UsePlacedTilesOnly = true,
             Locked = true,
             FootprintColorIndex = 3,
         };
-        layer.TilePlacements.Add(new PhaseTilePlacement(32, 32, 10, 12));
+        layer.TilePlacements.Add(new PhaseTilePlacement(32, 32, 10, 12, Locked: true));
 
         PhaseLayerProjectFile project = PhaseLayerProjectFile.FromLayers("Azeroth", [layer], PhaseDataChannel.Terrain);
         string path = Path.Combine(Path.GetTempPath(), $"carto-{Guid.NewGuid():N}.json");
@@ -52,10 +53,12 @@ public sealed class PhaseLayerProjectFileTests
             Assert.Equal((32.5f, 32.5f), (roundTripped.RotationOriginTileX, roundTripped.RotationOriginTileY));
             Assert.True(roundTripped.MirrorHorizontal);
             Assert.False(roundTripped.MirrorVertical);
+            Assert.True(roundTripped.UsePlacedTilesOnly);
             Assert.True(roundTripped.Locked);
             Assert.Equal(3, roundTripped.FootprintColorIndex);
             PhaseTilePlacement placement = Assert.Single(roundTripped.TilePlacements);
             Assert.Equal((32, 32, 10, 12), (placement.DonorTileX, placement.DonorTileY, placement.TargetTileX, placement.TargetTileY));
+            Assert.True(placement.Locked);
         }
         finally
         {

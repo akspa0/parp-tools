@@ -1662,6 +1662,17 @@ public class WorldScene : ISceneRenderer
             if (_terrainManager.IsMapWmoBased(layer.MapName))
                 continue;
 
+            if (layer.UsePlacedTilesOnly)
+            {
+                IReadOnlyList<(int TileX, int TileY)> placedTargets = layer.TilePlacements
+                    .Where(static placement => placement.IsValid)
+                    .Select(static placement => (placement.TargetTileX, placement.TargetTileY))
+                    .Distinct()
+                    .ToList();
+                result.Add((layer, placedTargets));
+                continue;
+            }
+
             IReadOnlyList<(int TileX, int TileY)> donorTiles = _terrainManager.GetLayerFootprint(layer);
             if (layer.RotationDegrees == 0f && !layer.MirrorHorizontal && !layer.MirrorVertical)
             {

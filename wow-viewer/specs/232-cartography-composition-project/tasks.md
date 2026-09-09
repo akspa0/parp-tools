@@ -41,7 +41,7 @@ The quarter-turn rotation re-slots chunks correctly but rotates each chunk's con
 independently — ADT chunks share edge vertices, so the seams scramble (operator screenshot
 2026-09-07). Fix: rotate the donor tile's FULL-TILE lattices as single grids, then slice.
 
-- [ ] T015a Add `AlphaTileData.RotateQuarterTurn(int quarterTurns, bool mirrorH, bool mirrorV)`
+- [x] T015a Add `AlphaTileData.RotateQuarterTurn(int quarterTurns, bool mirrorH, bool mirrorV)`
       rotating every full-tile lattice about the tile center with ONE consistent index map:
       `Heightmap` 257×257 `[py, px]`, `McnrNormalXyz[py, px, 0..2]` (positions rotated + normal
       components per the kind's normal map), `McshShadowMask1024` 1024×1024, `McshShadowMask256`,
@@ -51,34 +51,49 @@ independently — ADT chunks share edge vertices, so the seams scramble (operato
       (IndexX/IndexY via the 16×16 map; local Heights 9×9 / TileGrid 4×4 / TileFlags 8×8 rotated
       about their own centers). Mirrors: reflect after rotation, same axes as
       `InverseRotateCellDelta` documents.
-- [ ] T015b Verify direction consistency BEFORE rendering: unit test — rotate a synthetic
+- [x] T015b Verify direction consistency BEFORE rendering: unit test — rotate a synthetic
       257×257 heightmap 90°, slice via `ToTileLoadResult`, and assert chunk (0,0) heights equal
       the source lattice region that `TransformChunkSlot(Rotate90CW)` names for slot (0,0). If
       the direction disagrees with `ResolveTileSource`'s tile mapping, flip the rotation — the
       tile map and the content map MUST agree.
-- [ ] T015c Alpha adapter: in the transformed path, replace per-chunk
+- [x] T015c Alpha adapter: in the transformed path, replace per-chunk
       `TransformChunksForTarget` with tile-level rotation — expose
       `AlphaTerrainAdapter.GetTileData(tileX, tileY)` (parse without slicing), rotate via T015a,
       then `ToTileLoadResult(tileX, tileY)` (target tile coords → WorldPositions re-homed for
       free). Cell offsets still resolve the supplying tile via `ResolveCellShiftedChunk`.
+- [x] T015e MCAL alpha repair (operator defect report 2026-09-08: "MCLY layers on overlapped maps
+      broke; worked in the last build"): `ToTileLoadResult` sliced MCAL alpha from the 256×256
+      downsampled pack at a 64-px-per-chunk stride — chunks past (3,3) decoded silent zero alpha,
+      so every transformed overlapped tile rendered flat single-texture patches. The reader now
+      also carries the full-resolution 1024×1024 pack (`McalAlphaPackFull`), `ToTileLoadResult`
+      slices from it (256-pack 4× nearest-upsample fallback), and `RotateQuarterTurn` rotates the
+      full plane with the same index map. Synthetic tests cover chunk-level alpha slicing, the
+      packed fallback, and rotation equivalence with the proven per-chunk alpha transform.
+      Receipt: [t015e mcal alpha repair](evidence/t015e-mcal-alpha-repair-receipt.md).
 - [ ] T015d Gate: rotated DeadminesInstance renders seam-free (operator screenshot: coastline and
-      roadway continuous across chunk boundaries); cell fine-tune still works on the rotated
-      layer; build/test clean; receipt.
+      roadway continuous across chunk boundaries) AND its texture layers blend correctly (the
+      T015e witness); cell fine-tune still works on the rotated layer; build/test clean; receipt.
+      T015e is build/test-verified only — the visual MCLY witness remains operator-owned.
 
 ## Phase 5 — Composition UX completion
 
-- [ ] T050 FR-13: donor-tile picker places ONLY the requested tiles — per-layer mode where
+- [x] T050 FR-13: donor-tile picker places ONLY the requested tiles — per-layer mode where
       placed tiles compose exclusively (whole-layer offset ignored for unplaced targets), UI
-      toggle to return to offset mode.
+      toggle to return to offset mode. Receipt: [t050 placed tiles only](evidence/t050-placed-tiles-only-receipt.md).
 - [ ] T051 FR-14: per-tile locks — locked composed tiles are claimed exclusively by their owning
       layer; later layers skip locked targets; locks persist in the project and get a minimap
-      badge.
+      badge. Implementation receipt: [t051 per-tile locks](evidence/t051-per-tile-lock-implementation-receipt.md);
+      unchecked pending its operator minimap badge/override witness.
 - [ ] T052 FR-15: locked layers protected from deletion (DONE 2026-09-08 — Remove disabled for
       locked, Clear keeps locked with a status message; commit 82889edd).
-- [ ] T053 REGRESSION: WL* liquid click-inspector broken with maps placed — audit
-      `ViewerApp_MinimapAndStatus` footprint hit-test/grab and `GetLayerFootprints` composition
-      against pre-232 click flow.
-- [ ] T054 FR-4: Archaeology workbench defaults to the Map Layers page.
+- [ ] T053 REGRESSION: WL* liquid click-inspector broken with maps placed — audit and repair
+      recorded in [t053 WL inspector fall-through](evidence/t053-wl-inspector-fallthrough-receipt.md).
+      The minimap footprint path was not the click consumer; composed terrain occlusion cleared
+      the WL hover identity before viewport click selection. Unchecked pending the required
+      operator with/without-layer-stack inspector witness.
+- [ ] T054 FR-4: Archaeology workbench defaults to the Map Layers page. Implementation receipt:
+      [t054 Archaeology Map Layers default](evidence/t054-archaeology-map-layers-default-receipt.md).
+      Unchecked pending the operator's default-entry/remembered-page UI witness.
 - [ ] T055 FR-5: UniqueId era color-coding — objects in a UniqueId range tinted per-range.
 
 ## Phase 6 — Renderer + output

@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-07
+Last updated: 2026-09-09
 
 ## Fresh-chat route
 
@@ -11,7 +11,13 @@ Last updated: 2026-09-07
 The [documentation router](../docs/README.md), [spec routing registry](../specs/registry.md), and
 [archives](archive/README.md) are on-demand context, never default reading.
 
-## Current lane — Spec 231 UI Overhaul: Phase 6 tools-curation pass (operator amendment)
+## Current lane — Spec 233 Renderer Marketing Capture Automation: P1 operator tour gate
+
+- **Spec + plan + tasks** at [233-marketing-capture-automation/](../specs/233-marketing-capture-automation/spec.md): a built-in, versioned camera-path overview recipe, clean-scene timed callouts, direct renderer-frame capture, future receipt and safe authoring handoff contracts.
+- **P1 source implementation 2026-09-08**: **Feature Tour + Video** now starts from the existing Camera Path pane, carries the validated tour through the existing warmup gate and ffmpeg framebuffer route, hides ordinary chrome during recording, draws only timed callouts at the full-frame capture tap, and restores the prior chrome state. The Core Runtime model rejects invalid recipes and output traversal, while the handoff model emits only relative artifact references. Focused marketing tests: 12/12; Debug solution build: 0 errors. **Not runtime/visual proof**: T015 needs the operator's `FlybyUndead` warm-and-record witness. Receipts: [design](../specs/233-marketing-capture-automation/evidence/t001-design-receipt.md), [foundation](../specs/233-marketing-capture-automation/evidence/t003-t008-foundation-receipt.md), [P1 source](../specs/233-marketing-capture-automation/evidence/t009-t014-us1-source-receipt.md).
+- **Open next**: Phase 4 receipt serialization and actual named-control registry; a Comfy/MCP transport remains blocked until a callable contract is selected. Never claim a generated marketing video, benchmark result, Comfy authoring action, or README showcase asset before operator evidence.
+
+## Prior / parallel lane — Spec 231 UI Overhaul: Phase 6 tools-curation pass (operator amendment)
 
 - **Spec + plan + tasks** at [231-editor-archaeology-ui-overhaul/](../specs/231-editor-archaeology-ui-overhaul/spec.md):
   4-page Editor IA (Placement & Objects / Terrain Tools / Data I/O / Converters), Archaeology
@@ -42,10 +48,44 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
   transform, minimap double-offset removed. **T074 visual gate PASSED** (operator screenshot:
   DeadminesInstance rotated 90° CW on Azeroth). 157/157 Maps tests.
   Receipt: [evidence/t070-t074-phase7-layer-rotation-receipt.md](../specs/231-editor-archaeology-ui-overhaul/evidence/t070-t074-phase7-layer-rotation-receipt.md).
-- **Spec 232 created** (operator verbatim directive): Cartography composition — cell-level layer
-  alignment fine-tune, layer-stack project persistence (save/lock/autoload), full-map
-  client-format export (complete ADT sets, not diffs). Registered in STATUS.md weekly order +
-  Reconstruction epic. Implementation in a fresh session.
+- **Spec 232 T015e 2026-09-09 (MCAL alpha repair — fixes the operator's "MCLY layers on overlapped
+  maps broke" report)**: the T015c full-tile route sliced per-chunk MCAL alpha from the reader's
+  256×256 *downsampled* pack at a 64-px-per-chunk stride — chunks past (3,3) decoded silent zero
+  alpha, so transformed overlapped tiles rendered flat single-texture patches. The reader now also
+  carries the full-resolution 1024×1024 pack (`AlphaTileData.McalAlphaPackFull`), `ToTileLoadResult`
+  slices from it (256-pack upsample fallback), and `RotateQuarterTurn` moves it with the same index
+  map. Focused Maps: 174/174; solution build 0 errors. **Visual MCLY witness still operator-owned**
+  (folds into T015d). Receipt: [t015e MCAL alpha repair](../specs/232-cartography-composition-project/evidence/t015e-mcal-alpha-repair-receipt.md).
+- **Spec 232 T015a–c 2026-09-08**: the Alpha adapter now reads the full donor lattice, applies
+  `RotateQuarterTurn`, then slices/re-homes at the target in both ordinary and cell-shifted
+  transformed paths; it never falls back to the known seam-producing per-MCNK rotation.
+  33/33 focused tests and a solution build (0 errors) pass. **Still not visually accepted**:
+  T015d needs the operator's rotated DeadminesInstance seam screenshot and cell-nudge witness.
+  Receipts: [core lattice](../specs/232-cartography-composition-project/evidence/t015a-t015b-core-lattice-receipt.md),
+  [adapter route](../specs/232-cartography-composition-project/evidence/t015c-alpha-adapter-full-tile-receipt.md).
+- **Spec 232 T050 2026-09-08**: picker-created layers now compose only their explicit
+  donor-to-target placement by default. The persisted `UsePlacedTilesOnly` mode prevents offset
+  fallthrough at all unplaced targets; the Layers-panel toggle restores offset mode, and minimap
+  footprints show only placed targets. Focused maps: 37/37; full solution build: 0 errors.
+  Receipt: [t050 placed tiles only](../specs/232-cartography-composition-project/evidence/t050-placed-tiles-only-receipt.md).
+- **Spec 232 T051 implementation 2026-09-08**: explicit placement locks are persisted and
+  enforced in both terrain adapters and minimap composition; a per-placement panel toggle and
+  `L` minimap badge are built. The focused contract suite is 39/39 and the solution build has 0
+  errors. **Still unchecked** pending an operator capture proving the badge and that a later layer
+  cannot override the owner. Receipt:
+  [t051 per-tile locks](../specs/232-cartography-composition-project/evidence/t051-per-tile-lock-implementation-receipt.md).
+- **Spec 232 T053 implementation 2026-09-08**: the WL click-inspector failure was not caused by
+  minimap footprint drag/hit-testing. A terrain-occlusion guard was clearing the WL
+  source-data hover after a composed layer supplied terrain in front of its bounds, so the viewport
+  click path had no WL candidate to inspect. WL is now exempt from that physical-object-only
+  occlusion guard; the full solution build has 0 errors. **Still unchecked** pending an operator
+  with/without-layer-stack WL inspector witness. Receipt:
+  [t053 WL fall-through](../specs/232-cartography-composition-project/evidence/t053-wl-inspector-fallthrough-receipt.md).
+- **Spec 232 T054 implementation 2026-09-08**: a no-page entry to Archaeology now defaults to
+  Cartography page 5, whose initial tab is Map Layers. Explicit Range/UniqueId routes and the
+  per-tab remembered choice still override that default. The solution build has 0 errors.
+  **Still unchecked** pending a default-entry/remembered-page UI witness. Receipt:
+  [t054 Map Layers default](../specs/232-cartography-composition-project/evidence/t054-archaeology-map-layers-default-receipt.md).
 - **Phase 6 batch 1 landed 2026-09-07** (fbf600a1): operator amendment recorded verbatim in the
   spec — Data I/O + Quick are the UI model (SharedUiWidgets, no one-offs); non-working/never-wired
   tools get removed; ViewerApp size reduction. Wiring audit removed **27 dead draw methods**
@@ -83,6 +123,13 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
 
 - Spec 223 retest (fog, WMO-only global WMO, playback/capture, ffmpeg, spatial UI) with a real
   client.
+- Video-capture release hardening (2026-09-08): Capture Automation now resolves a licensed
+  `ffmpeg.exe` beside the viewer before configured/PATH fallback and probes `libx264`; publish
+  copies an operator-supplied binary from `src/viewer/WoWViewer/Capture/ffmpeg/win-x64/` when
+  present. The binary and its licence/notices are operator-owned. Do not ship until the published
+  viewer passes **Verify ffmpeg**, direct with-UI/no-UI recording + playback, and a camera-path
+  **Play + Video** witness. Receipt:
+  [t609-video-capture-release-hardening-2026-09-08.md](../specs/223-ui-consolidation-audit/evidence/t609-video-capture-release-hardening-2026-09-08.md).
 - v0.5.3-rc1: tag push + GitHub Actions release are operator-owned; visual pass on wireframe,
   selection, and toolbar changes.
 - Spec 226 wireframe items: root causes fixed; captures still owed.
@@ -97,7 +144,14 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
 
 ## Handoff
 
-**Current target:** Spec 231 Phase 0 (T001–T003) in a fresh session.
+**Current target:** Spec 233 T015 operator tour witness — import/load `FlybyUndead.mdx` or `.m2`, use **Warm Path**, then **Feature Tour + Video** and record the video/UI-timing observation. Capture/receipt authoring is not yet implemented, so no benchmark or Comfy handoff is claimed. Then proceed with Spec 233 Phase 4 receipt work.
 
-**Then:** phases P1–P5 per [231 tasks.md](../specs/231-editor-archaeology-ui-overhaul/tasks.md).
-**Do not claim:** UI acceptance, real-client acceptance, or Spec 224 audit completion.
+**Parallel target:** Spec 232 operator witnesses — (1) show an `L` minimap badge and prove a later
+layer cannot override the earlier locked placement (T051); (2) click the same WL body with and
+without a placed layer and capture its inspector identity/source path (T053); (3) enter
+Archaeology with no remembered page and confirm Cartography > Layers, then preserve an explicit
+UniqueId page selection across a return (T054). Then continue with T055, UniqueId-era color-coding.
+
+**Separate operator gate:** T015d — obtain the seam-free rotated DeadminesInstance screenshot
+(coastline/roadway continuous) and demonstrate a cell nudge still moves the rotated layer.
+**Do not claim:** T015 visual acceptance, real-client acceptance, or Spec 224 audit completion.

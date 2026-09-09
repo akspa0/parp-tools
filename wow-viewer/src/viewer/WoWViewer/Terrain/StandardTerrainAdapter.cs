@@ -319,10 +319,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (BaseChannelKeep != PhaseDataChannel.All)
             BaseChannelStrip.Apply(parent.Result, BaseChannelKeep);
 
+        bool targetLockedByEarlierLayer = false;
         foreach (PhaseLayerSettings layer in ActivePhaseLayers)
         {
+            if (targetLockedByEarlierLayer)
+                continue;
             if (layer.Channels == PhaseDataChannel.None)
                 continue;
+
+            // Spec 232 FR-14: a valid explicit tile lock claims this target for the layer even
+            // when its donor is absent, so a later layer cannot silently substitute different
+            // content in a tile the operator locked to this layer.
+            if (PhaseCompositionPolicy.IsTargetLockedByLayer(layer, tileX, tileY))
+                targetLockedByEarlierLayer = true;
 
             // A layer may be authored at different tile coordinates than the map it overlays --
             // instance and dungeon maps are often copies of an earlier revision of a zone stored

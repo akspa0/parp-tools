@@ -72,6 +72,7 @@ public sealed class PhaseLayerProjectEntry
     public float RotationOriginTileY { get; set; }
     public bool MirrorHorizontal { get; set; }
     public bool MirrorVertical { get; set; }
+    public bool UsePlacedTilesOnly { get; set; }
     public int FootprintColorIndex { get; set; }
 
     /// <summary>Spec 232 FR-2: locked layers reject accidental edits until explicitly unlocked.</summary>
@@ -94,6 +95,7 @@ public sealed class PhaseLayerProjectEntry
         RotationOriginTileY = layer.RotationOriginTileY,
         MirrorHorizontal = layer.MirrorHorizontal,
         MirrorVertical = layer.MirrorVertical,
+        UsePlacedTilesOnly = layer.UsePlacedTilesOnly,
         FootprintColorIndex = layer.FootprintColorIndex,
         Locked = layer.Locked,
         TilePlacements = layer.TilePlacements.Select(static placement => new PhaseTilePlacementDto
@@ -102,6 +104,7 @@ public sealed class PhaseLayerProjectEntry
             DonorTileY = placement.DonorTileY,
             TargetTileX = placement.TargetTileX,
             TargetTileY = placement.TargetTileY,
+            Locked = placement.Locked,
         }).ToList(),
     };
 
@@ -122,12 +125,13 @@ public sealed class PhaseLayerProjectEntry
             RotationOriginTileY = RotationOriginTileY,
             MirrorHorizontal = MirrorHorizontal,
             MirrorVertical = MirrorVertical,
+            UsePlacedTilesOnly = UsePlacedTilesOnly,
             FootprintColorIndex = FootprintColorIndex,
             Locked = Locked,
         };
         foreach (PhaseTilePlacementDto placement in TilePlacements)
             layer.TilePlacements.Add(new PhaseTilePlacement(
-                placement.DonorTileX, placement.DonorTileY, placement.TargetTileX, placement.TargetTileY));
+                placement.DonorTileX, placement.DonorTileY, placement.TargetTileX, placement.TargetTileY, placement.Locked));
         return layer;
     }
 }
@@ -138,4 +142,7 @@ public sealed class PhaseTilePlacementDto
     public int DonorTileY { get; set; }
     public int TargetTileX { get; set; }
     public int TargetTileY { get; set; }
+
+    /// <summary>Spec 232 FR-14: blocks later layers from replacing this target tile.</summary>
+    public bool Locked { get; set; }
 }

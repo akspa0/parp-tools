@@ -290,6 +290,7 @@ public static class AlphaWdtReader
             texIds, layerMask, holes,
             textureNameList, modelPlacements, worldModelPlacements, liquidChunks,
             diagnostics: diagnostics,
+            mcalAlphaPackFull: hasAlpha ? alphaPack : null,
             mcnrNormalXyz: hasNormals ? normalXyz : null,
             mcshShadowMask256: mcshShadowMask256,
             mclqSurfaceHeight: hasLiquid ? mclqSurface : null,

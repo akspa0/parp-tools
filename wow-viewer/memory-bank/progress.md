@@ -1,6 +1,108 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-06
+Last updated: 2026-09-09
+
+## 2026-09-09 — Spec 232 T015e MCAL alpha repair (MCLY regression on overlapped maps)
+
+- Root-caused the operator's report that texture layers broke on overlapped maps after the T015c
+  full-tile route: `AlphaTileData.ToTileLoadResult` sliced per-chunk MCAL alpha from the 256×256
+  downsampled pack with a 64-px-per-chunk stride, so chunks past (3,3) decoded silent zero alpha
+  and every transformed overlapped tile collapsed to a single flat texture. Repair: the reader now
+  also carries the full-resolution 1024×1024 pack (`McalAlphaPackFull`), `ToTileLoadResult` slices
+  from it with a 256-pack nearest-upsample fallback, and `RotateQuarterTurn` moves it with the same
+  index map. `McalAlphaPack` (256²) semantics unchanged for the dataset contract. Focused Maps:
+  174/174 passed; `dotnet build WowViewer.slnx -c Debug --no-restore`: 0 errors. **Visual MCLY
+  witness remains operator-owned** (folds into the T015d seam screenshot). Receipt:
+  [t015e-mcal-alpha-repair-receipt.md](../specs/232-cartography-composition-project/evidence/t015e-mcal-alpha-repair-receipt.md).
+- Flagged (not fixed, no live caller): `TerrainTileTensorPack.ToTileLoadResult` has the same
+  256-pack/64-stride mismatch.
+
+## 2026-09-08 — Spec 233 renderer marketing-capture automation P1
+
+- Created the full SpecKit contract (spec, plan, research, data model, task pack, JSON contracts,
+  quickstart) and completed the first two source phases. The shared Runtime marketing model now
+  validates versioned recipes/timed beats, rejects unsafe output traversal, produces a safe
+  relative-path authoring descriptor, and keeps tour advancement allocation-free on steady frames.
+  Viewer composition adds **Feature Tour + Video** beside **Play + Video**: it reuses Warm Path and
+  raw framebuffer/ffmpeg capture, hides ordinary chrome only while recording, renders timed
+  callouts in the with-UI capture tap, and restores prior chrome state afterward. Focused marketing
+  tests: 12/12; Debug solution build: 0 errors.
+- **Operator gate remains open**: this is not a recorded video, visual/UI timing, encoder playback,
+  FPS, hitch, receipt, ComfyUI, MCP, or README-media witness. The next real action is T015 with
+  `FlybyUndead` after the existing ffmpeg release-hardening gate. Receipts:
+  [design](../specs/233-marketing-capture-automation/evidence/t001-design-receipt.md),
+  [foundation](../specs/233-marketing-capture-automation/evidence/t003-t008-foundation-receipt.md),
+  [P1 source](../specs/233-marketing-capture-automation/evidence/t009-t014-us1-source-receipt.md).
+
+## 2026-09-08 — Spec 223 T609 video-capture release hardening
+
+- Repaired the hidden developer-PATH dependency: Capture Automation now resolves an optional,
+  operator-supplied `ffmpeg.exe` beside the viewer before configured/PATH fallback, validates
+  `libx264` through **Verify ffmpeg**, normalizes quoted paths, and reports missing encoder or
+  output-path errors safely. Build/publish copies `Capture/ffmpeg/win-x64/ffmpeg.exe` to the
+  viewer root when the release operator supplies it; the repository neither provides that binary
+  nor selects its licence. Focused resolver tests: 6/6 passed; full Debug solution build: 0 errors.
+- **T609 remains unchecked**: actual with-UI/no-UI and camera-path video recording, output playback,
+  binary provenance/licence notices, and a published-build witness are still operator-owned.
+  Receipt: [t609-video-capture-release-hardening-2026-09-08.md](../specs/223-ui-consolidation-audit/evidence/t609-video-capture-release-hardening-2026-09-08.md).
+
+## 2026-09-08 — Spec 232 T054 Archaeology Map Layers default
+
+- No-page Archaeology entry now opens Cartography page 5, whose existing default sub-tab is Map
+  Layers; explicit UniqueId/Range routes and remembered pages retain their existing authority.
+  `dotnet build WowViewer.slnx -c Debug --no-restore`: 0 errors.
+- **T054 remains unchecked** pending an operator UI witness for default entry and remembered
+  explicit selection. Receipt:
+  [t054-archaeology-map-layers-default-receipt.md](../specs/232-cartography-composition-project/evidence/t054-archaeology-map-layers-default-receipt.md).
+
+## 2026-09-08 — Spec 232 T053 WL inspector fall-through repair
+
+- Audited the suspected minimap route and repaired the actual viewport failure: minimap footprint
+  hit-testing does not invoke WL selection, but the terrain-occlusion guard cleared the WL
+  source-data hover as soon as a composed terrain layer lay in front of its bounds. WL hover is
+  now retained for the click-inspector while ordinary placed-scene-object occlusion stays active.
+  `dotnet build WowViewer.slnx -c Debug --no-restore`: 0 errors.
+- **T053 remains unchecked** pending an operator witness that opens the same WL inspector with
+  and without a placed phase layer. Receipt:
+  [t053-wl-inspector-fallthrough-receipt.md](../specs/232-cartography-composition-project/evidence/t053-wl-inspector-fallthrough-receipt.md).
+
+## 2026-09-08 — Spec 232 T050 placed-tiles-only composition
+
+- Completed and receipted **T050 / FR-13**: the donor tile picker now creates an explicit
+  donor-to-target placement in persisted `UsePlacedTilesOnly` mode, so a one-tile request cannot
+  compose the donor map at all other offset targets. The per-layer `Compose placed tiles only`
+  toggle restores the legacy whole-map offset route; minimap footprints follow the placed targets
+  and placed-only layers cannot be offset-dragged misleadingly. Focused Maps: 37/37 passed;
+  `dotnet build WowViewer.slnx -c Debug --no-restore`: 0 errors.
+- **Next implementation**: T051 per-tile locks. **Separate operator gate**: T015d seam-free
+  rotated DeadminesInstance + cell-nudge visual witness. Receipt:
+  [t050-placed-tiles-only-receipt.md](../specs/232-cartography-composition-project/evidence/t050-placed-tiles-only-receipt.md).
+
+## 2026-09-08 — Spec 232 T051 per-tile lock implementation
+
+- Implemented T051's structural path: `Locked` now belongs to an explicit donor-to-target
+  placement; both adapters prevent subsequent layers from composing that target, and the minimap
+  resolves texture/footprints in the same order and draws an `L` owner badge. Layer cards expose
+  a per-placement lock toggle, and project JSON round-trips the lock bit. Final focused Maps:
+  39/39 passed; `dotnet build WowViewer.slnx -c Debug --no-restore`: 0 errors.
+- **T051 remains unchecked** until the operator supplies a minimap capture that shows the badge
+  and a later layer being excluded. Then audit T053's WL* click-inspector regression. Receipt:
+  [t051-per-tile-lock-implementation-receipt.md](../specs/232-cartography-composition-project/evidence/t051-per-tile-lock-implementation-receipt.md).
+
+## 2026-09-08 — Spec 232 T015 full-tile seam-repair route
+
+- Restored the missing Spec Kit design set for [Spec 232](../specs/232-cartography-composition-project/spec.md):
+  plan, research, data model, internal composition contract, and real-data operator quickstart.
+- Completed and receipted **T015a–T015c**: `AlphaTileData.RotateQuarterTurn` moves full-tile
+  channel lattices before MCNK slicing; the synthetic 257×257 test proves the content reaching
+  target chunk (0,0) is exactly the source chunk selected by the established policy slot map.
+  The Alpha adapter's direct and cell-shift transformed routes now consume that full-tile result,
+  with an explicit typed skip if a donor cannot be read rather than a known-bad per-MCNK fallback.
+  Focused Maps suite: 33/33 passed; `dotnet build WowViewer.slnx -c Debug`: 0 errors.
+- **Next**: T015d's DeadminesInstance seam screenshot and cell-nudge witness remain operator-owned;
+  no runtime or visual repair is claimed. Receipts:
+  [t015a-t015b-core-lattice-receipt.md](../specs/232-cartography-composition-project/evidence/t015a-t015b-core-lattice-receipt.md),
+  [t015c-alpha-adapter-full-tile-receipt.md](../specs/232-cartography-composition-project/evidence/t015c-alpha-adapter-full-tile-receipt.md).
 
 ## 2026-09-07 — Wireframe/selection fixes, export freeze fix, Spec 231 UI overhaul planned
 
