@@ -2,6 +2,32 @@
 
 Last updated: 2026-09-09
 
+## 2026-09-09 — Spec 232 T066: tile-rigid cell fine-tune
+
+- Operator report: cell fine-tune "shifts the cells around instead of just moving the TILE", and
+  with heightmap + rotation + cell offset composed checkerboard garbage (white plates, wrong
+  elevations). Root cause: per-chunk supply-tile resolution (ResolveCellShiftedChunk +
+  ResolveTileSource per chunk) composed inconsistently under rotation and pulled border chunks
+  from unrelated donor tiles. Both adapters' `BuildCellShiftedTile` are now TILE-RIGID: one donor
+  tile resolved once (rotation included), chunk grid slid by the cell offset inside the target
+  tile, edge content dropped, placements translated rigidly. Maps: 177/177; build 0 errors.
+  Receipt: [t066](../specs/232-cartography-composition-project/evidence/t066-tile-rigid-cell-shift-receipt.md).
+  Visual witness operator-owned.
+
+## 2026-09-09 — Spec 232 T056–T059: placement coordinates, layer Z, minimap interaction
+
+- Operator directives landed: (T056) donor-tile picker now reads ADT-name order xx_yy — the old
+  (row, col) interpretation landed every placement on the diagonal mirror of the requested tile;
+  (T057) per-layer `ZOffset`/`ZScale` world-Z transform (terrain heights, liquids, placements)
+  with UI + project persistence via the new owned service `PhaseLayerZ`; (T058) minimap surfaces
+  now own their `MinimapInteractionState` — the shared instance made other surfaces consume click
+  sequences so triple-click teleport never fired; (T059) placed-only layers drag on the minimap,
+  moving each placement's target with the pointer and re-streaming on release. Maps: 177/177;
+  solution build 0 errors; full-suite has 10 pre-existing failures in unrelated subsystems.
+  Receipt: [t056-t059](../specs/232-cartography-composition-project/evidence/t056-t059-placement-z-minimap-receipt.md).
+  Operator witnesses owed for all four; T064 (magnetic WDL snapping) and T065 (chunk off-by-one
+  re-audit) recorded as follow-ups.
+
 ## 2026-09-09 — Spec 232 T015e MCAL alpha repair (MCLY regression on overlapped maps)
 
 - Root-caused the operator's report that texture layers broke on overlapped maps after the T015c

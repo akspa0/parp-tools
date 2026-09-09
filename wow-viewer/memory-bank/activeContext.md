@@ -11,7 +11,24 @@ Last updated: 2026-09-09
 The [documentation router](../docs/README.md), [spec routing registry](../specs/registry.md), and
 [archives](archive/README.md) are on-demand context, never default reading.
 
-## Current lane — Spec 233 Renderer Marketing Capture Automation: P1 operator tour gate
+## Current lane — Spec 232 Cartography: placement coordinates, Z transform, minimap, tile-rigid cells
+
+- **T056–T059 + T066 landed 2026-09-09** (operator directives): donor-tile picker now reads ADT-name
+  order (xx = column, yy = row — placements previously landed on the diagonal mirror; T056);
+  per-layer `ZOffset`/`ZScale` world-Z transform on terrain, liquids, and placements with layer-
+  card inputs + project persistence (T057); minimap surfaces got per-surface pointer states so
+  the 3-click teleport works (T058); placed-only layers are draggable on the minimap, moving each
+  placement's target (T059); **cell fine-tune is TILE-RIGID** — both adapters slide the tile's own
+  chunk grid by the cell offset and never re-pick border chunks from neighbor donor tiles (T066 —
+  fixes the "shifting a single chunk and the tile" report and the rotated+cell-offset
+  checkerboard/white-plate composition). Maps tests 177/177; solution build 0 errors. Receipts:
+  [t056-t059](../specs/232-cartography-composition-project/evidence/t056-t059-placement-z-minimap-receipt.md),
+  [t066](../specs/232-cartography-composition-project/evidence/t066-tile-rigid-cell-shift-receipt.md).
+  **All need operator interactive witnesses.** New operator directives recorded as T064
+  (magnetic WDL edge-snapping) and T065 (chunk-level MCAL/MCLY off-by-one + height smoothness
+  re-audit after T056).
+
+## Prior lane — Spec 233 Renderer Marketing Capture Automation: P1 operator tour gate
 
 - **Spec + plan + tasks** at [233-marketing-capture-automation/](../specs/233-marketing-capture-automation/spec.md): a built-in, versioned camera-path overview recipe, clean-scene timed callouts, direct renderer-frame capture, future receipt and safe authoring handoff contracts.
 - **P1 source implementation 2026-09-08**: **Feature Tour + Video** now starts from the existing Camera Path pane, carries the validated tour through the existing warmup gate and ffmpeg framebuffer route, hides ordinary chrome during recording, draws only timed callouts at the full-frame capture tap, and restores the prior chrome state. The Core Runtime model rejects invalid recipes and output traversal, while the handoff model emits only relative artifact references. Focused marketing tests: 12/12; Debug solution build: 0 errors. **Not runtime/visual proof**: T015 needs the operator's `FlybyUndead` warm-and-record witness. Receipts: [design](../specs/233-marketing-capture-automation/evidence/t001-design-receipt.md), [foundation](../specs/233-marketing-capture-automation/evidence/t003-t008-foundation-receipt.md), [P1 source](../specs/233-marketing-capture-automation/evidence/t009-t014-us1-source-receipt.md).

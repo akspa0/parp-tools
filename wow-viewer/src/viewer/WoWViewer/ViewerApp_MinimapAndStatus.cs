@@ -14,7 +14,10 @@ public partial class ViewerApp
 {
     private const float MinimapTileCount = 64f;
     private const float MinimapWorldTileSize = WoWConstants.ChunkSize;
-    private readonly MinimapInteractionState _minimapInteractionState = new();
+    // One pointer state per minimap surface id (sidebar / cartography / fullscreen). A shared
+    // instance let the other surfaces consume or clear click sequences, which permanently broke
+    // the 3-click teleport (2026-09-09 operator report).
+    private readonly Dictionary<string, MinimapInteractionState> _minimapInteractionStates = new();
 
     private enum MinimapTeleportMode
     {
@@ -65,6 +68,12 @@ public partial class ViewerApp
     private (int OffsetX, int OffsetY) _footprintDragBaseOffset;
 
     /// <summary>
+    /// Non-null while a placed-tile (placed-only) layer is grabbed: the snapshot of its placements
+    /// at press time. The drag rewrites each placement's target by the pointer delta.
+    /// </summary>
+    private List<(int DonorTileX, int DonorTileY, int TargetTileX, int TargetTileY, bool Locked)>? _footprintDragPlaced;
+
+    /// <summary>
     /// Cartography (Spec 222): true when the given tile coordinate hits the selected layer's
     /// footprint (donor tile + offset). Pure geometry over the layer's occupied tiles.
     /// </summary>
@@ -76,8 +85,10 @@ public partial class ViewerApp
         PhaseLayerSettings layer = worldScene.PhaseLayers[layerIndex];
         if (!layer.Enabled || layer.Resolution != PhaseLayerResolution.Resolved)
             return false;
+        // Placed-tile layers are draggable too (2026-09-09 operator request): dragging one slides
+        // every placement's target by the drag delta, then re-streams on release.
         if (layer.UsePlacedTilesOnly)
-            return false;
+            return layer.TilePlacements.Count > 0;
 
         // Spec 231 Phase 7: GetLayerFootprints already composes rotation/mirror + offset, so the
         // click hit-test is a direct lookup in composed space.
@@ -94,16 +105,27 @@ public partial class ViewerApp
 
     private void HandleMinimapInteraction(string interactionId, Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize, MinimapTeleportMode teleportMode)
     {
+        // 2026-09-09 operator report: "the full screen minimap's teleport (3 clicks) doesn't work
+        // at all." Every minimap surface (sidebar, cartography panel, fullscreen) ran through ONE
+        // shared MinimapInteractionState, so the other surfaces re-processed (and usually cleared)
+        // each press/release before the owning surface could accumulate three clicks. Each surface
+        // now owns its own pointer state.
+        if (!_minimapInteractionStates.TryGetValue(interactionId, out MinimapInteractionState? minimapState))
+        {
+            minimapState = new MinimapInteractionState();
+            _minimapInteractionStates[interactionId] = minimapState;
+        }
+
         ImGui.SetCursorScreenPos(cursorPos);
         ImGui.InvisibleButton(interactionId, new Vector2(mapSize, mapSize));
         bool isHovered = ImGui.IsItemHovered();
         bool isActive = ImGui.IsItemActive();
         Vector2 mousePos = ImGui.GetMousePos();
-        bool pointerCaptured = isHovered || isActive || _minimapInteractionState.PointerDown;
+        bool pointerCaptured = isHovered || isActive || minimapState.PointerDown;
 
         if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
-            _minimapInteractionState.Process(MinimapPointerPhase.Pressed, mousePos);
+            minimapState.Process(MinimapPointerPhase.Pressed, mousePos);
             _minimapDragging = false;
 
             // Cartography: a press on the selected layer's footprint grabs it for a drag. A click
@@ -129,13 +151,25 @@ public partial class ViewerApp
                     _footprintDragLayerIndex = _worldScene.SelectedPhaseLayerIndex;
                     _footprintDragStartTile = (pressTx, pressTy);
                     _footprintDragBaseOffset = (grabbed.TileOffsetX, grabbed.TileOffsetY);
+                    // Placed-tile layers: the drag delta moves the placements themselves (the
+                    // donor-to-target mapping), not a whole-layer offset.
+                    if (grabbed.UsePlacedTilesOnly)
+                    {
+                        _footprintDragPlaced = grabbed.TilePlacements
+                            .Select(static placement => (placement.DonorTileX, placement.DonorTileY, placement.TargetTileX, placement.TargetTileY, placement.Locked))
+                            .ToList();
+                    }
+                    else
+                    {
+                        _footprintDragPlaced = null;
+                    }
                 }
             }
         }
         else if (pointerCaptured && ImGui.IsMouseDown(ImGuiMouseButton.Left)
-            && _minimapInteractionState.PointerDown)
+            && minimapState.PointerDown)
         {
-            MinimapInteractionResult moved = _minimapInteractionState.Process(
+            MinimapInteractionResult moved = minimapState.Process(
                 MinimapPointerPhase.Moved,
                 mousePos);
             if (moved.WasDragging && _footprintDragLayerIndex >= 0
@@ -153,8 +187,30 @@ public partial class ViewerApp
                     _footprintDragStartTile.TileY,
                     curTx,
                     curTy);
-                layer.TileOffsetX = newOffsetX;
-                layer.TileOffsetY = newOffsetY;
+                if (_footprintDragPlaced is { Count: > 0 } placed)
+                {
+                    // Move every placement's TARGET by the pointer delta (donor slot fixed), then
+                    // keep the whole-layer offset in sync so channel/absence behavior is unchanged.
+                    int dx = newOffsetX - _footprintDragBaseOffset.OffsetX;
+                    int dy = newOffsetY - _footprintDragBaseOffset.OffsetY;
+                    layer.TilePlacements.Clear();
+                    foreach ((int donorX, int donorY, int targetX, int targetY, bool locked) in placed)
+                    {
+                        layer.TilePlacements.Add(new PhaseTilePlacement(
+                            donorX,
+                            donorY,
+                            Math.Clamp(targetX + dx, 0, 63),
+                            Math.Clamp(targetY + dy, 0, 63),
+                            locked));
+                    }
+                    layer.TileOffsetX = newOffsetX;
+                    layer.TileOffsetY = newOffsetY;
+                }
+                else
+                {
+                    layer.TileOffsetX = newOffsetX;
+                    layer.TileOffsetY = newOffsetY;
+                }
             }
             else if (moved.PanDeltaPixels != Vector2.Zero)
             {
@@ -165,7 +221,7 @@ public partial class ViewerApp
             _minimapDragging = moved.WasDragging;
         }
         else if (pointerCaptured && ImGui.IsMouseReleased(ImGuiMouseButton.Left)
-            && _minimapInteractionState.PointerDown)
+            && minimapState.PointerDown)
         {
             bool hasTarget = TryGetMinimapClickTarget(
                 mousePos,
@@ -186,7 +242,7 @@ public partial class ViewerApp
                     viewMinTy,
                     cellSize,
                     out litLightIndex);
-            MinimapInteractionResult released = _minimapInteractionState.Process(
+            MinimapInteractionResult released = minimapState.Process(
                 MinimapPointerPhase.Released,
                 mousePos,
                 hasTarget: hasTarget && !hitLitMarker,
@@ -202,16 +258,21 @@ public partial class ViewerApp
                 if (_footprintDragLayerIndex >= 0 && _terrainManager != null)
                 {
                     _terrainManager.RefreshPhaseLayers();
-                    _statusMessage = $"Layer '{_worldScene?.PhaseLayers[_footprintDragLayerIndex].MapName}' "
-                        + $"offset set to ({_worldScene?.PhaseLayers[_footprintDragLayerIndex].TileOffsetX},"
-                        + $"{_worldScene?.PhaseLayers[_footprintDragLayerIndex].TileOffsetY}) by minimap drag.";
+                    PhaseLayerSettings dragged = _worldScene?.PhaseLayers[_footprintDragLayerIndex];
+                    _statusMessage = _footprintDragPlaced is { Count: > 0 }
+                        ? $"Layer '{dragged?.MapName}' moved {_footprintDragPlaced!.Count} placed tile(s) to offset "
+                            + $"({dragged?.TileOffsetX},{dragged?.TileOffsetY}) by minimap drag."
+                        : $"Layer '{dragged?.MapName}' offset set to ({dragged?.TileOffsetX},"
+                            + $"{dragged?.TileOffsetY}) by minimap drag.";
                 }
 
                 _footprintDragLayerIndex = -1;
+                _footprintDragPlaced = null;
                 return;
             }
 
             _footprintDragLayerIndex = -1;
+            _footprintDragPlaced = null;
 
             if (hitLitMarker)
             {
@@ -354,7 +415,8 @@ public partial class ViewerApp
     private void PrepareFullscreenMinimapState()
     {
         _minimapDragging = false;
-        _minimapInteractionState.Reset();
+        foreach (MinimapInteractionState state in _minimapInteractionStates.Values)
+            state.Reset();
         ClampMinimapPanOffset();
     }
 
@@ -391,7 +453,8 @@ public partial class ViewerApp
         _pendingMinimapTeleportTile = null;
         _pendingMinimapTeleportClickCount = 0;
         _pendingMinimapTeleportLastClickUtc = DateTime.MinValue;
-        _minimapInteractionState.Reset();
+        foreach (MinimapInteractionState state in _minimapInteractionStates.Values)
+            state.Reset();
     }
 
     private void DrawStatusBar()

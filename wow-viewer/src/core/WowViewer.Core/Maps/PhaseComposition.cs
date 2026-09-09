@@ -116,6 +116,16 @@ public sealed class PhaseLayerSettings
     /// </summary>
     public bool UsePlacedTilesOnly { get; set; }
 
+    /// <summary>
+    /// Operator directive 2026-09-09: world-Z translation (yards) applied to every terrain height,
+    /// liquid surface, and placement this layer contributes. This is how a cut tile (e.g. Teldrassil
+    /// out of Kalidar) is raised or lowered to meet its new neighbors.
+    /// </summary>
+    public float ZOffset { get; set; }
+
+    /// <summary>Operator directive 2026-09-09: multiplier on contributed world-Z. 1 = unchanged.</summary>
+    public float ZScale { get; set; } = 1f;
+
     /// <summary>True when this layer carries any transform (rotation, mirror, or per-tile mapping).</summary>
     public bool HasTransform =>
         RotationDegrees != 0f || MirrorHorizontal || MirrorVertical || TilePlacements.Count > 0;
@@ -189,6 +199,8 @@ public sealed class PhaseLayerSettings
             MirrorHorizontal = MirrorHorizontal,
             MirrorVertical = MirrorVertical,
             UsePlacedTilesOnly = UsePlacedTilesOnly,
+            ZOffset = ZOffset,
+            ZScale = ZScale,
             Enabled = Enabled,
             Channels = Channels,
             OnlyTakeWhatThePhaseCarries = OnlyTakeWhatThePhaseCarries,

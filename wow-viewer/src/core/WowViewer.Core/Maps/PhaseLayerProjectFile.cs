@@ -73,6 +73,13 @@ public sealed class PhaseLayerProjectEntry
     public bool MirrorHorizontal { get; set; }
     public bool MirrorVertical { get; set; }
     public bool UsePlacedTilesOnly { get; set; }
+
+    /// <summary>Operator directive 2026-09-09: world-Z translation for contributed content.</summary>
+    public float ZOffset { get; set; }
+
+    /// <summary>Operator directive 2026-09-09: world-Z multiplier (1 = unchanged).</summary>
+    public float ZScale { get; set; } = 1f;
+
     public int FootprintColorIndex { get; set; }
 
     /// <summary>Spec 232 FR-2: locked layers reject accidental edits until explicitly unlocked.</summary>
@@ -96,6 +103,8 @@ public sealed class PhaseLayerProjectEntry
         MirrorHorizontal = layer.MirrorHorizontal,
         MirrorVertical = layer.MirrorVertical,
         UsePlacedTilesOnly = layer.UsePlacedTilesOnly,
+        ZOffset = layer.ZOffset,
+        ZScale = layer.ZScale,
         FootprintColorIndex = layer.FootprintColorIndex,
         Locked = layer.Locked,
         TilePlacements = layer.TilePlacements.Select(static placement => new PhaseTilePlacementDto
@@ -126,6 +135,8 @@ public sealed class PhaseLayerProjectEntry
             MirrorHorizontal = MirrorHorizontal,
             MirrorVertical = MirrorVertical,
             UsePlacedTilesOnly = UsePlacedTilesOnly,
+            ZOffset = ZOffset,
+            ZScale = ZScale,
             FootprintColorIndex = FootprintColorIndex,
             Locked = Locked,
         };

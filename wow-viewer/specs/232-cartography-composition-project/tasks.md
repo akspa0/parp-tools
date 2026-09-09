@@ -95,6 +95,43 @@ independently — ADT chunks share edge vertices, so the seams scramble (operato
       [t054 Archaeology Map Layers default](evidence/t054-archaeology-map-layers-default-receipt.md).
       Unchecked pending the operator's default-entry/remembered-page UI witness.
 - [ ] T055 FR-5: UniqueId era color-coding — objects in a UniqueId range tinted per-range.
+- [x] T056 OPERATOR DIRECTIVE 2026-09-09 ("donor tiles are not where they belong... it doesn't put
+      the tile at the target xx_yy location"): the donor-tile picker interpreted its X/Y inputs in
+      internal (row, column) order while the operator enters ADT-name order (xx = column, yy =
+      row — the status bar prints `{tileY}_{tileX}`). Every placement landed on the diagonal
+      mirror of the requested location. The picker now labels and reads xx/yy and maps them to
+      (tileX = yy, tileY = xx); the placed-lock labels print in xx_yy order. Receipt:
+      [t056 placement coordinate order](evidence/t056-placement-coordinate-order-receipt.md).
+- [x] T057 OPERATOR DIRECTIVE 2026-09-09 ("we need a way for phase maps to have their base Z
+      changed, or maybe even scaling up the Z"): per-layer `ZOffset` (world-Z translation, yards)
+      and `ZScale` (multiplier) applied as `z' = z * ZScale + ZOffset` to contributed terrain
+      heights, liquid surfaces, and placement Z in both adapters; layer-card inputs + project
+      persistence. Receipt: [t057 layer Z transform](evidence/t057-layer-z-transform-receipt.md).
+      Unchecked pending the operator's visual witness (e.g. Teldrassil raised onto Kalimdor).
+- [x] T058 OPERATOR DIRECTIVE 2026-09-09 ("the full screen minimap's teleport (3 clicks) didn't
+      work, at all"): every minimap surface shared one `MinimapInteractionState`, so the other
+      surfaces re-processed and cleared each press/release before three clicks could accumulate.
+      Each surface now owns its pointer state. Build-verified; interactive witness operator-owned.
+- [x] T059 OPERATOR DIRECTIVE 2026-09-09 ("let us drag and drop the tile on the full-screen
+      minimap, and place it/lock it to a region"): placed-only layers are now grabbable on the
+      minimap — dragging moves every placement's target by the pointer delta (donor slot fixed),
+      re-streams once on release, and the lock flags ride along. Interactive witness operator-owned.
+- [ ] T064 OPERATOR DIRECTIVE 2026-09-09: magnetic WDL microlattice edge-snapping — align a
+      composed tile's border heights to the adjacent tiles' WDL micro-lattices so cut tiles blend
+      without manual Z nudging. Design needed; pairs with T057.
+- [ ] T065 OPERATOR DIRECTIVE 2026-09-09: re-audit chunk-level MCAL/MCLY "off-by-one scrambling"
+      and cross-chunk height smoothness inside composed tiles after T056 (the transposed targets
+      made composed content appear scrambled); witness-driven.
+- [x] T066 OPERATOR DIRECTIVE 2026-09-09 ("cell finetuning shifts the cells around instead of
+      just moving the TILE to the cells... applying the heightmap still does this horrific shit"):
+      the cell-shifted path re-resolved a supply tile PER CHUNK (ResolveCellShiftedChunk +
+      ResolveTileSource), which under rotation/cell offset composed checkerboard garbage and
+      pulled border chunks from unrelated donor tiles. Both adapters' `BuildCellShiftedTile` are
+      now TILE-RIGID: one donor tile (resolved once through the layer's own tile map, rotation
+      included), its chunk grid slid by the cell offset inside the target tile, out-of-edge
+      content dropped, placements translated rigidly with the tile. Receipt:
+      [t066 tile-rigid cell shift](evidence/t066-tile-rigid-cell-shift-receipt.md). Visual
+      witness operator-owned.
 
 ## Phase 6 — Renderer + output
 
