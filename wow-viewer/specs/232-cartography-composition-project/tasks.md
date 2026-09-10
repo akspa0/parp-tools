@@ -116,20 +116,30 @@ independently — ADT chunks share edge vertices, so the seams scramble (operato
       minimap, and place it/lock it to a region"): placed-only layers are now grabbable on the
       minimap — dragging moves every placement's target by the pointer delta (donor slot fixed),
       re-streams once on release, and the lock flags ride along. Interactive witness operator-owned.
-- [ ] T064 OPERATOR DIRECTIVE 2026-09-09: magnetic WDL microlattice edge-snapping — align a
-      composed tile's border heights to the adjacent tiles' WDL micro-lattices so cut tiles blend
-      without manual Z nudging. Design needed; pairs with T057.
+- [x] T064 OPERATOR DIRECTIVE 2026-09-09: magnetic WDL microlattice edge-snapping — implemented
+      as a per-layer `EdgeBlendWdl` strength (0 = off): the tile-boundary outer vertices of
+      contributed heightmap chunks blend toward the base map's WDL 17×17 macro lattice
+      ([PhaseEdgeBlender](../../../src/core/WowViewer.Core.Runtime/World/Terrain/Stratigraphy/PhaseEdgeBlender.cs),
+      Core.Runtime beside WdlLatticeMagnetizer), applied in both adapters' `MergePhaseTile` after
+      the Z transform. Edges shared with a neighbor target tile that also receives the layer's
+      heights stay untouched — only footprint-boundary edges blend. Host wiring feeds the parsed
+      base WDL to the adapters (`BaseWdlTileLookup`, shared parse with the stratigraphy path);
+      layer-card slider + project persistence. Maps tests 181/181; build 0 errors. Receipt:
+      [t064 wdl edge snap](evidence/t064-wdl-edge-snap-receipt.md). Visual witness operator-owned
+      (e.g. Teldrassil on Kalimdor).
 - [ ] T065 OPERATOR DIRECTIVE 2026-09-09: re-audit chunk-level MCAL/MCLY "off-by-one scrambling"
       and cross-chunk height smoothness inside composed tiles after T056 (the transposed targets
       made composed content appear scrambled); witness-driven.
 - [x] T066 OPERATOR DIRECTIVE 2026-09-09 ("cell finetuning shifts the cells around instead of
-      just moving the TILE to the cells... applying the heightmap still does this horrific shit"):
+      just moving the TILE to the cells... applying the heightmap still does this horrific shit";
+      amended after the first pass: "it's aligned right, but we're missing stuff in between"):
       the cell-shifted path re-resolved a supply tile PER CHUNK (ResolveCellShiftedChunk +
       ResolveTileSource), which under rotation/cell offset composed checkerboard garbage and
       pulled border chunks from unrelated donor tiles. Both adapters' `BuildCellShiftedTile` are
-      now TILE-RIGID: one donor tile (resolved once through the layer's own tile map, rotation
-      included), its chunk grid slid by the cell offset inside the target tile, out-of-edge
-      content dropped, placements translated rigidly with the tile. Receipt:
+      now LAYER-RIGID: each target tile collects its own donor tile's retained content plus the
+      3×3-neighborhood spill (contributors resolve their own donor through the shared tile map,
+      rotation included; per-axis ranges disjoint at |offset| ≤ 15), so nothing drops between
+      tiles and no chunk is re-picked from an unrelated tile. Receipt:
       [t066 tile-rigid cell shift](evidence/t066-tile-rigid-cell-shift-receipt.md). Visual
       witness operator-owned.
 

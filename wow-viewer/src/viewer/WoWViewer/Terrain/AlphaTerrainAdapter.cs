@@ -6,6 +6,8 @@ using WoWViewer.Rendering;
 using WowViewer.Core.Audio;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Runtime.World.Terrain.Stratigraphy;
+using WoWViewer.Terrain.Vlm;
 
 namespace WoWViewer.Terrain;
 
@@ -150,6 +152,13 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// host supplies this so phase maps are resolved through the same source the base map came from.
     /// </remarks>
     public Func<string, string?>? PhaseWdtPathResolver { get; set; }
+
+    /// <summary>
+    /// Spec 232 T064: optional lookup of the BASE map's WDL 17×17 macro lattice per target tile.
+    /// Set by the host once the base WDL is parsed; powers the magnetic edge-snap for layers with
+    /// <see cref="PhaseLayerSettings.EdgeBlendWdl"/> > 0.
+    /// </summary>
+    public Func<int, int, WdlParser.WdlTile?>? BaseWdlTileLookup { get; set; }
 
     /// <inheritdoc />
     public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
@@ -1020,6 +1029,10 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         // Operator directive 2026-09-09: per-layer world-Z offset/scale on contributed content.
         PhaseLayerZ.Apply(layer, phase);
 
+        // Spec 232 T064: magnetic WDL edge-snap on footprint-boundary tile edges.
+        if (layer.EdgeBlendWdl > 0f && (layer.Channels & PhaseDataChannel.Heightmap) != 0)
+            ApplyEdgeBlend(layer, phase, tileX, tileY);
+
         int baseMddfCount = parent.MddfPlacements.Count;
         int baseModfCount = parent.ModfPlacements.Count;
         TileTextures.TryGetValue((tileX, tileY), out List<string>? baseTextures);
@@ -1109,6 +1122,33 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             + $"names=base(mdx:{MdxModelNames.Count},wmo:{WmoModelNames.Count})"
             + $"/phase(mdx:{phaseMdxNameCount},wmo:{phaseWmoNameCount})"
             + (layer.HasTileOffset ? $" tileOffset=({layer.TileOffsetX},{layer.TileOffsetY})" : string.Empty));
+    }
+
+    /// <summary>
+    /// Spec 232 T064: blends the tile-boundary outer vertices of contributed heightmap chunks
+    /// toward the base map's WDL macro lattice. Edges shared with a neighbor target tile that
+    /// also receives this layer's heights stay untouched — only footprint-boundary edges blend.
+    /// </summary>
+    private void ApplyEdgeBlend(PhaseLayerSettings layer, TileLoadResult phase, int tileX, int tileY)
+    {
+        if (BaseWdlTileLookup?.Invoke(tileX, tileY) is not { HasData: true } baseTile)
+            return;
+
+        foreach (TerrainChunkData chunk in phase.Chunks)
+        {
+            if (chunk.Heights is not { Length: >= 145 } heights)
+                continue;
+
+            PhaseEdgeBlender.BlendTileBoundary(
+                heights,
+                baseTile.Height17,
+                chunk.ChunkX,
+                chunk.ChunkY,
+                layer.EdgeBlendWdl,
+                (dx, dy) => PhaseCompositionPolicy.ResolveTileSource(
+                    layer, tileX + dx, tileY + dy,
+                    (sx, sy) => TileExistsInOwnWdt(sx, sy)).HasSource);
+        }
     }
 
     private static void TranslatePhasePlacements(TileLoadResult phase, PhaseLayerSettings layer)

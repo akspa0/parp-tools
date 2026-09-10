@@ -1,4 +1,4 @@
-# Receipt — Spec 232 T066: tile-rigid cell fine-tune
+# Receipt — Spec 232 T066: layer-rigid cell fine-tune
 
 **Date**: 2026-09-09 · **Spec**: [232](../spec.md) · **Task**: T066 (operator directive)
 
@@ -14,23 +14,25 @@ Root cause: both adapters' `BuildCellShiftedTile` resolved a **supply tile per c
 rotation/cell offset that per-chunk resolution composed inconsistently (rotation inverse applied
 at tile granularity only), pulled border chunks from unrelated donor tiles, and mixed texture
 tables — producing the scrambled tiles. It also made the cell shift move individual chunks
-relative to each other instead of moving the tile as one object.
+relative to each other instead of moving the layer as one object.
 
-## Fix
+## Fix (amended 2026-09-09 after the tile-rigid pass)
+
+First pass was TILE-rigid (one donor tile per target, edge content dropped) — the operator then
+verified alignment was right but "we're missing stuff in between": content slid out of a target
+tile was dropped instead of landing in the neighbor target tile. Final form is **LAYER-rigid**:
 
 Both `BuildCellShiftedTile` implementations ([AlphaTerrainAdapter.cs](../../../src/viewer/WoWViewer/Terrain/AlphaTerrainAdapter.cs),
 [StandardTerrainAdapter.cs](../../../src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs))
-are now **tile-rigid**:
-
-- The layer's own donor tile for the target is resolved ONCE through the shared tile map
-  (`ResolveTileSource`, rotation/mirror included).
-- The donor content (full-tile transformed where applicable) slides by the cell offset inside the
-  target tile: composed chunk (cx, cy) ← donor chunk (cx − CellOffsetX, cy − CellOffsetY);
-  content pushed past a tile edge is dropped.
-- Placements ride the same rigid move (pose transform + tile-offset + cell-delta translation);
-  the per-target-tile rect filter is gone (exactly one donor tile feeds each target).
-- `PhaseCompositionPolicy.ResolveCellShiftedChunk` is no longer used by the adapters (left in the
-  policy for reference).
+now collect content from the **3×3 target-tile neighborhood**: each contributor resolves its own
+donor tile through the shared tile map (`ResolveTileSource`, rotation/mirror included), and its
+chunk (sx, sy) lands at target slot (sx + CellOffsetX + 16·i, sy + CellOffsetY + 16·j). With
+|CellOffset| ≤ 15 the three per-axis contributor ranges are disjoint — no slot conflicts, no
+re-picking from unrelated tiles, nothing dropped between tiles. Placements ride their OWN donor
+tile only (they are world-positioned and render regardless of the owning tile). Texture name
+tables come from the center (primary) donor tile — same-map donor tables normally match.
+`PhaseCompositionPolicy.ResolveCellShiftedChunk` is no longer used by the adapters (left in the
+policy for reference).
 
 ## Verification
 

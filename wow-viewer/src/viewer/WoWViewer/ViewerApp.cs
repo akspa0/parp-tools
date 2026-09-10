@@ -5409,6 +5409,25 @@ void main() {
         return tile?.HasData == true;
     }
 
+    /// <summary>
+    /// Spec 232 T064: feeds the base map's parsed WDL to the terrain adapter so composed layers
+    /// with a magnetic edge-snap strength can blend their footprint-boundary heights toward it.
+    /// The parse is shared with the stratigraphy weak-signal path (same cache fields).
+    /// </summary>
+    private void WireBaseWdlEdgeBlendLookup()
+    {
+        if (_terrainManager?.Adapter is not Terrain.ITerrainAdapter adapter)
+            return;
+
+        if (adapter is Terrain.AlphaTerrainAdapter alphaAdapter)
+            alphaAdapter.BaseWdlTileLookup = ResolveBaseWdlTile;
+        else if (adapter is Terrain.StandardTerrainAdapter standardAdapter)
+            standardAdapter.BaseWdlTileLookup = ResolveBaseWdlTile;
+    }
+
+    private WdlParser.WdlTile? ResolveBaseWdlTile(int tileX, int tileY)
+        => TryGetTerrainWeakSignalWdlTile(tileX, tileY, out WdlParser.WdlTile? tile) ? tile : null;
+
     private bool TryGetTerrainWeakSignalWdlBounds(int tileX, int tileY, out float minHeight, out float maxHeight)
     {
         minHeight = 0f;
@@ -12767,6 +12786,7 @@ void main() {
             ApplyGlobalFogDefaults(_terrainManager.Lighting);
             RefreshTerrainWeakSignalRestoreHooks();
             RefreshTerrainWeakSignalRestoreForLoadedTiles();
+            WireBaseWdlEdgeBlendLookup();
             _renderer = _worldScene;
             ApplyLayoutObjectPreviewModeToScene();
             ApplySavedPm4AlignmentToScene();
@@ -12890,6 +12910,7 @@ void main() {
 
             _terrainManager = _worldScene.Terrain;
             _terrainManager.DetailedTileCountOverride = _savedDetailedAdtTileCountOverride;
+            WireBaseWdlEdgeBlendLookup();
             ApplyGlobalFogDefaults(_terrainManager.Lighting);
             RefreshTerrainWeakSignalRestoreHooks();
             RefreshTerrainWeakSignalRestoreForLoadedTiles();

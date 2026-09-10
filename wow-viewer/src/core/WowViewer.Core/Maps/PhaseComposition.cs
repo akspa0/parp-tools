@@ -123,8 +123,15 @@ public sealed class PhaseLayerSettings
     /// </summary>
     public float ZOffset { get; set; }
 
-    /// <summary>Operator directive 2026-09-09: multiplier on contributed world-Z. 1 = unchanged.</summary>
     public float ZScale { get; set; } = 1f;
+
+    /// <summary>
+    /// Operator directive 2026-09-09 (Spec 232 T064): magnetic WDL edge-snap strength (0 = off).
+    /// When > 0, the tile-boundary outer vertices of contributed heightmap chunks blend toward
+    /// the base map's WDL 17×17 macro lattice at footprint-boundary edges, so a cut tile meets the
+    /// surrounding terrain without a manual Z nudge. Interior seams are left alone.
+    /// </summary>
+    public float EdgeBlendWdl { get; set; }
 
     /// <summary>True when this layer carries any transform (rotation, mirror, or per-tile mapping).</summary>
     public bool HasTransform =>
@@ -201,6 +208,7 @@ public sealed class PhaseLayerSettings
             UsePlacedTilesOnly = UsePlacedTilesOnly,
             ZOffset = ZOffset,
             ZScale = ZScale,
+            EdgeBlendWdl = EdgeBlendWdl,
             Enabled = Enabled,
             Channels = Channels,
             OnlyTakeWhatThePhaseCarries = OnlyTakeWhatThePhaseCarries,

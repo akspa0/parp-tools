@@ -80,6 +80,9 @@ public sealed class PhaseLayerProjectEntry
     /// <summary>Operator directive 2026-09-09: world-Z multiplier (1 = unchanged).</summary>
     public float ZScale { get; set; } = 1f;
 
+    /// <summary>Operator directive 2026-09-09 (T064): WDL edge-blend strength (0 = off).</summary>
+    public float EdgeBlendWdl { get; set; }
+
     public int FootprintColorIndex { get; set; }
 
     /// <summary>Spec 232 FR-2: locked layers reject accidental edits until explicitly unlocked.</summary>
@@ -105,6 +108,7 @@ public sealed class PhaseLayerProjectEntry
         UsePlacedTilesOnly = layer.UsePlacedTilesOnly,
         ZOffset = layer.ZOffset,
         ZScale = layer.ZScale,
+        EdgeBlendWdl = layer.EdgeBlendWdl,
         FootprintColorIndex = layer.FootprintColorIndex,
         Locked = layer.Locked,
         TilePlacements = layer.TilePlacements.Select(static placement => new PhaseTilePlacementDto
@@ -137,6 +141,7 @@ public sealed class PhaseLayerProjectEntry
             UsePlacedTilesOnly = UsePlacedTilesOnly,
             ZOffset = ZOffset,
             ZScale = ZScale,
+            EdgeBlendWdl = EdgeBlendWdl,
             FootprintColorIndex = FootprintColorIndex,
             Locked = Locked,
         };

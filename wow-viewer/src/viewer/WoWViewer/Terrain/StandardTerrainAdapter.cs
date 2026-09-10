@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using WowViewer.Core.Runtime.World.Terrain.Stratigraphy;
 using System.Text;
 using DBCD;
 using DBCD.Providers;
@@ -308,6 +309,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
     /// <summary>Spec 232 FR-11: channels the base map keeps on its own tiles (default: all).</summary>
     public PhaseDataChannel BaseChannelKeep { get; set; } = PhaseDataChannel.All;
+
+    /// <summary>
+    /// Spec 232 T064: optional lookup of the BASE map's WDL 17×17 macro lattice per target tile.
+    /// Set by the host once the base WDL is parsed; powers the magnetic edge-snap for layers with
+    /// <see cref="PhaseLayerSettings.EdgeBlendWdl"/> > 0.
+    /// </summary>
+    public Func<int, int, WdlParser.WdlTile?>? BaseWdlTileLookup { get; set; }
 
     public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
     {
@@ -623,6 +631,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Operator directive 2026-09-09: per-layer world-Z offset/scale on contributed content.
         PhaseLayerZ.Apply(layer, phase.Result);
 
+        // Spec 232 T064: magnetic WDL edge-snap on footprint-boundary tile edges.
+        if (layer.EdgeBlendWdl > 0f && (layer.Channels & PhaseDataChannel.Heightmap) != 0)
+            ApplyEdgeBlend(layer, phase.Result, tileX, tileY);
+
         var mergedTextures = new List<string>(parent.Textures);
         var textureIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < mergedTextures.Count; i++)
@@ -697,6 +709,33 @@ public class StandardTerrainAdapter : ITerrainAdapter
     /// Placements do not: MDDF/MODF carry world coordinates, so without this an offset layer's
     /// terrain moves while its objects stay behind at the donor map's coordinates.
     /// </remarks>
+    /// <summary>
+    /// Spec 232 T064: blends the tile-boundary outer vertices of contributed heightmap chunks
+    /// toward the base map's WDL macro lattice. Edges shared with a neighbor target tile that
+    /// also receives this layer's heights stay untouched — only footprint-boundary edges blend.
+    /// </summary>
+    private void ApplyEdgeBlend(PhaseLayerSettings layer, TileLoadResult phase, int tileX, int tileY)
+    {
+        if (BaseWdlTileLookup?.Invoke(tileX, tileY) is not { HasData: true } baseTile)
+            return;
+
+        foreach (TerrainChunkData chunk in phase.Chunks)
+        {
+            if (chunk.Heights is not { Length: >= 145 } heights)
+                continue;
+
+            PhaseEdgeBlender.BlendTileBoundary(
+                heights,
+                baseTile.Height17,
+                chunk.ChunkX,
+                chunk.ChunkY,
+                layer.EdgeBlendWdl,
+                (dx, dy) => PhaseCompositionPolicy.ResolveTileSource(
+                    layer, tileX + dx, tileY + dy,
+                    (sx, sy) => OverlayTileExists(layer.MapName, sx, sy)).HasSource);
+        }
+    }
+
     private static void TranslatePhasePlacements(ParsedTileSource phase, PhaseLayerSettings layer)
     {
         // One tile of offset = one ADT in the 64x64 grid = 533.33 yds. Despite its name,

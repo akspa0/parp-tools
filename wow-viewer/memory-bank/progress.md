@@ -2,16 +2,33 @@
 
 Last updated: 2026-09-09
 
-## 2026-09-09 — Spec 232 T066: tile-rigid cell fine-tune
+## 2026-09-09 — Spec 232 T064: magnetic WDL edge-snap for composed layers
+
+- Operator directive: use the existing WDL magnetization mechanism to blend composed tile borders
+  into the surrounding terrain (Teldrassil-on-Kalimdor case). Implemented as a per-layer
+  `EdgeBlendWdl` strength (0 = off): the tile-boundary outer vertices of contributed heightmap
+  chunks blend toward the base map's WDL 17×17 macro lattice via the new pure-math
+  PhaseEdgeBlender (Core.Runtime, beside WdlLatticeMagnetizer). Edges shared with a neighbor
+  target tile that also receives the layer's heights stay untouched — only footprint-boundary
+  edges blend. Applied in both adapters' MergePhaseTile after the Z transform; host wiring feeds
+  the parsed base WDL to the adapters (shared parse with the stratigraphy path); layer-card
+  slider + project persistence. PhaseEdgeBlenderTests 4/4; Maps 181/181; build 0 errors.
+  Receipt: [t064](../specs/232-cartography-composition-project/evidence/t064-wdl-edge-snap-receipt.md).
+  Visual witness operator-owned.
+
+## 2026-09-09 — Spec 232 T066: layer-rigid cell fine-tune
 
 - Operator report: cell fine-tune "shifts the cells around instead of just moving the TILE", and
   with heightmap + rotation + cell offset composed checkerboard garbage (white plates, wrong
   elevations). Root cause: per-chunk supply-tile resolution (ResolveCellShiftedChunk +
   ResolveTileSource per chunk) composed inconsistently under rotation and pulled border chunks
-  from unrelated donor tiles. Both adapters' `BuildCellShiftedTile` are now TILE-RIGID: one donor
-  tile resolved once (rotation included), chunk grid slid by the cell offset inside the target
-  tile, edge content dropped, placements translated rigidly. Maps: 177/177; build 0 errors.
-  Receipt: [t066](../specs/232-cartography-composition-project/evidence/t066-tile-rigid-cell-shift-receipt.md).
+  from unrelated donor tiles. Both adapters' `BuildCellShiftedTile` are now LAYER-RIGID: each
+  target tile collects its own donor tile's content plus the 3×3-neighborhood spill (each
+  contributor resolves its own donor through the shared tile map, rotation included; chunk
+  (sx, sy) lands at (sx + cellDx + 16i, sy + cellDy + 16j); per-axis ranges disjoint at
+  |offset| ≤ 15). Amended after the first tile-rigid pass dropped slid-out content ("missing
+  stuff in between"). Maps: 177/177; build 0 errors. Receipt:
+  [t066](../specs/232-cartography-composition-project/evidence/t066-tile-rigid-cell-shift-receipt.md).
   Visual witness operator-owned.
 
 ## 2026-09-09 — Spec 232 T056–T059: placement coordinates, layer Z, minimap interaction
