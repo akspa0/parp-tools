@@ -3,6 +3,12 @@
 **Feature Branch**: `230-reconstruction-editor`
 **Created**: 2026-09-06
 **Status**: Draft — authored verbatim from operator directive; not planned
+
+> **Amendment 2026-09-09 (operator directive)**: US2 (New map generator) and US3 (multi-era save
+> targets) are **superseded by [Spec 234](../234-map-save-new-map/spec.md)** — Map Save (Merged
+> ADT / Alpha WDT) & New Map Creator — which refines both stories, adds the Archaeology-side save
+> path, and explicitly defers multi-map support. Spec 230 retains ownership of US1 (Rosetta-indexed
+> object placement).
 **Input**: Operator directive 2026-09-06 (verbatim intent): "My form of editing is more for
 reconstruction from existing data in the game, than it is about sculpting new terrain meshes or
 hand-painting chunks. Maybe one day, but not today. We should, though, start planning for object

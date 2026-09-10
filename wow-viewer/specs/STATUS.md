@@ -21,6 +21,7 @@ the current owner or registry names a forward pointer; do not infer closure from
 | 6 | [230 Reconstruction Editor](230-reconstruction-editor/spec.md) | speckit-plan (Rosetta placement, New Map Generator UI, Alpha/LK save targets) | Plan authored |
 | 7 | [223 residual](223-ui-consolidation-audit/tasks.md) | Operator gate retest (fog/overlays/capture) + T609/T610 | Operator acceptance recorded with receipts |
 | 8 | [232 Cartography Composition](232-cartography-composition-project/spec.md) | Cell-level layer alignment, layer-stack project persistence (save/lock/autoload), full-map client-format export | Operator: rotated layer alignment fine-tune works, saved project reloads, exported map loads in client |
+| 9 | [234 Map Save & New Map Creator](234-map-save-new-map/spec.md) | speckit spec authored 2026-09-09 (operator-directed): save merged/composed maps to Alpha WDT + LK ADT from Archaeology AND Editor Data I/O; New Map creator in Editor; multi-map explicitly out of scope | Plan authored; save pipeline round-trips both targets with receipts; operator client-load witness |
 
 ## Standing gates (operator-owned)
 

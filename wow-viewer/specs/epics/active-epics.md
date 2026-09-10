@@ -18,7 +18,9 @@ residue is absorbed by 227/229.
 
 ## Epic 2 — Reconstruction & Editing
 **Goal:** reconstruction-first editing: existing data → new maps, through the Editor tab.
-**Members:** 230 (reconstruction editor, OWNS composition), 222 (cartography workbench),
+**Members:** 234 (map save — merged ADT/alphaWDT from Archaeology + Editor — and New Map creator;
+OWNS save targets + map creation; supersedes 230 US2/US3), 232 (cartography composition, active),
+230 (reconstruction editor; retains Rosetta placement US1), 222 (cartography workbench),
 219 (transform seam), 220 (WMO doodad editing), 208 (cross-map transplant), 203 (multi-phase
 composition, implemented), 196 (WDL magnetizer, complete), 194 (stratigraphy, complete),
 192 (terrain generator, complete), 195 (superseded by 219/222).

@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
 
 ## Fresh-chat route
 
@@ -11,22 +11,35 @@ Last updated: 2026-09-09
 The [documentation router](../docs/README.md), [spec routing registry](../specs/registry.md), and
 [archives](archive/README.md) are on-demand context, never default reading.
 
-## Current lane — Spec 232 Cartography: placement coordinates, Z transform, minimap, tile-rigid cells
+## New lane — Spec 234 Map Save & New Map Creator (spec authored 2026-09-10)
 
-- **T056–T059 + T066 landed 2026-09-09** (operator directives): donor-tile picker now reads ADT-name
-  order (xx = column, yy = row — placements previously landed on the diagonal mirror; T056);
-  per-layer `ZOffset`/`ZScale` world-Z transform on terrain, liquids, and placements with layer-
-  card inputs + project persistence (T057); minimap surfaces got per-surface pointer states so
-  the 3-click teleport works (T058); placed-only layers are draggable on the minimap, moving each
-  placement's target (T059); **cell fine-tune is TILE-RIGID** — both adapters slide the tile's own
-  chunk grid by the cell offset and never re-pick border chunks from neighbor donor tiles (T066 —
-  fixes the "shifting a single chunk and the tile" report and the rotated+cell-offset
-  checkerboard/white-plate composition). Maps tests 177/177; solution build 0 errors. Receipts:
+- **Spec** at [234-map-save-new-map/spec.md](../specs/234-map-save-new-map/spec.md) (operator
+  directive 2026-09-09): save merged/composed maps to **Alpha 0.5.3 WDT** and **LK v18 ADT** from
+  BOTH the Archaeology cartography surface and the Editor's Data I/O page (one shared save
+  pipeline, no forks), plus a **New Map creator** in the Editor tab composing the Spec 192
+  generator. **Multi-map support is explicitly out of scope** (operator deferred it as a bigger
+  feature; the spec's save pipeline operates on named map identities so it is not foreclosed).
+  Supersedes Spec 230 US2/US3 (dated amendment added to 230; 230 retains US1 Rosetta placement).
+  Registered in [STATUS.md](../specs/STATUS.md) row 9 and Epic 2. Next: speckit-plan.
+
+## Prior lane — Spec 232 Cartography: placement coordinates, Z transform, minimap, tile-rigid cells, WDL edge-snap
+
+- **T056–T059 + T064 + T066 landed 2026-09-09** (operator directives): donor-tile picker now reads
+  ADT-name order (xx = column, yy = row — placements previously landed on the diagonal mirror;
+  T056); per-layer `ZOffset`/`ZScale` world-Z transform on terrain, liquids, and placements with
+  layer-card inputs + project persistence (T057); minimap surfaces got per-surface pointer states
+  so the 3-click teleport works (T058); placed-only layers are draggable on the minimap, moving
+  each placement's target (T059); **cell fine-tune is LAYER-RIGID** — each target tile collects
+  its own donor tile's retained content plus the 3×3-neighborhood spill, so nothing drops between
+  tiles (T066); **magnetic WDL edge-snap** — per-layer `EdgeBlendWdl` strength blends
+  footprint-boundary tile edges toward the base map's WDL macro lattice (PhaseEdgeBlender in
+  Core.Runtime), applied in both adapters after the Z transform, with host wiring from the shared
+  stratigraphy WDL parse (T064). Maps tests 181/181; solution build 0 errors. Receipts:
   [t056-t059](../specs/232-cartography-composition-project/evidence/t056-t059-placement-z-minimap-receipt.md),
-  [t066](../specs/232-cartography-composition-project/evidence/t066-tile-rigid-cell-shift-receipt.md).
-  **All need operator interactive witnesses.** New operator directives recorded as T064
-  (magnetic WDL edge-snapping) and T065 (chunk-level MCAL/MCLY off-by-one + height smoothness
-  re-audit after T056).
+  [t066](../specs/232-cartography-composition-project/evidence/t066-tile-rigid-cell-shift-receipt.md),
+  [t064](../specs/232-cartography-composition-project/evidence/t064-wdl-edge-snap-receipt.md).
+  **All need operator interactive witnesses.** Remaining operator directive: T065 (chunk-level
+  MCAL/MCLY off-by-one + height smoothness re-audit after T056).
 
 ## Prior lane — Spec 233 Renderer Marketing Capture Automation: P1 operator tour gate
 

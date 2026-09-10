@@ -15,6 +15,8 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **Positional Audio**: OpenAL runtime with resident MCSE / MCNK positional emitters and `SoundEntries` preview.
 - **Camera Path Authoring**: Full timeline keyframing, roll control, JSON project save/load, and native `.m2` camera export.
 - **PM4 Reconciliation Workbench**: Spec 176 reconciliation panel for matching real PM4 geometry segments to ADT placements with guarded preview, hash verification, and undoable apply operations.
+- **Cartography Composition (Spec 232)**: multi-layer map composition — donor tiles, placement locks, rotation/mirror, Z transform, WDL edge-snap — with project save/load.
+- **Map Save & New Map Creator (Spec 234, spec authored 2026-09-09)**: planned save of merged/composed maps to Alpha 0.5.3 WDT and LK v18 ADT from both Archaeology and the Editor's Data I/O page, plus a New Map creator in the Editor tab. Multi-map support is explicitly deferred to a future spec. See [specs/234-map-save-new-map/spec.md](specs/234-map-save-new-map/spec.md).
 
 ### 2. Shared Core Libraries (`src/core`)
 - **`WowViewer.Core`**: Data contracts, vertex/index buffers, terrain tensor layouts, and coordinate transformations.
