@@ -676,3 +676,11 @@ imgui.ini
 wow-viewer/data-harvester/tests/
 wow-viewer/src/core/WowViewer.Core.PM4/bin/
 wow-viewer/specs/231-editor-archaeology-ui-overhaul/evidence/screenshots/
+wow-viewer/scratch/changelog-521.txt
+wow-viewer/scratch/changelog-commits.txt
+wow-viewer/scratch/commit-msg-231.txt
+$null
+imgui.ini
+quiet
+.roo/mcp.json
+wow-viewer/asset_catalog_output/gameobjects/1_Abyssal_Maw_CameraFly_01/metadata.json
