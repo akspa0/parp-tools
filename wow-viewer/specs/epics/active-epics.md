@@ -39,9 +39,16 @@ specs stay as instruments, not active work.
 ## Epic 4 — Formats, Readers & Writers
 **Goal:** proven, era-faithful read/write for every format we touch.
 **Members:** 197 (split ADT/targets, active), 221 (converter validation harness, active),
-220 (WMO writing), 193 (1.x M2 parity), 105 (format profiles), 205 (MH2O, implemented — operator
-visual proof owed).
-**Next:** 221-T101 object corpus validator; 197 slot-aware MoP writer research (gates Spec 230 US3).
+220 (WMO writing), 235 (legacy MDX/M2 rendering 1.0.0-3.0.1 + fuckported-asset compatibility +
+light effects, Draft, not planned — supersedes 104 and 154's unimplemented residue), 193 (1.x M2
+parity, Benilla reference — prior art for 235), 105 (format profiles, prior art for 235's 1.0.0
+pillar), 205 (MH2O, implemented — operator visual proof owed).
+**Superseded:** 104 (legacy M2 rendering) and 154 (M2 reader era parity) → unimplemented residue
+absorbed into 235; both were previously missing from this epic's tracking entirely, which is how
+they went untracked despite 104 claiming "Status: Active."
+**Next:** speckit-plan for 235, starting with reconciling `FormatProfileRegistry` against whatever
+era-resolution mechanism 104/154 already built (235 FR-014); 221-T101 object corpus validator; 197
+slot-aware MoP writer research (gates Spec 230 US3).
 
 ## Epic 5 — World Simulation, Audio & Environment
 **Goal:** the world behaves: audio, weather, physics, lighting.

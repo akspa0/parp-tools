@@ -26,8 +26,15 @@
 
 - [ ] 224-T201: Execute `speckit-cleanup` across all active specs; produce the dated audit report
       under `specs/224-speckit-governance/evidence/`; un-check any checked task lacking a receipt.
+      **PARTIAL 2026-09-10**: 2 of 5 active specs with checked tasks audited (227 clean; 232 found
+      and corrected 8 stale checked tasks). 233/231/223 audits failed on a session rate limit —
+      still owed before this task can be checked. Receipt:
+      [cleanup-2026-09-10.md](evidence/cleanup-2026-09-10.md).
 - [ ] 224-T202: Archive implemented/closed specs and compress memory-bank landed narrative; update
       the AGENTS.md ledger timestamp.
+      **PARTIAL 2026-09-10**: `memory-bank/activeContext.md` recompressed (188→~65 lines, prior
+      version archived); AGENTS.md ledger updated. No spec was archived (none audited this pass
+      were fully closed). Remains open pending the rest of 224-T201.
 - [ ] **Gate 2**: Operator confirms `activeContext.md` + `STATUS.md` describe reality with no stale
       lanes.
 

@@ -1,3 +1,10 @@
+> **Superseded 2026-09-10**: this spec's unimplemented residue (20 of 27 tasks) is absorbed by
+> [Spec 235](../235-legacy-mdx-m2-rendering/spec.md) (operator directive: MDX/M2 rendering across
+> 1.0.0–3.0.1 plus fuckported-asset compatibility and light-emitter effects). This spec's content
+> is preserved as prior art, not archived — its embedded-skin-profile root-cause finding and
+> version-priority rollout order are reused directly in Spec 235. Its 7 already-checked tasks are
+> treated as **unverified** pending a receipt audit, not confirmed progress.
+
 # Feature Specification: Legacy M2 model rendering (client 1.0.0 – 2.4.3)
 
 **Feature Branch**: `104-legacy-m2-rendering` (work lands on `v0.5.0-prerelease`, per project convention)

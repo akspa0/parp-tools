@@ -16,3 +16,4 @@
 | `2026-09-06-pre-223-remediation-progress.md` | Superseded long-form progress ledger before Spec 223 acceptance-remediation compression |
 | `2026-09-06-pre-context-cleanup-active-context.md` | Superseded dashboard before the compact fresh-chat routing pass |
 | `2026-09-06-pre-context-cleanup-progress.md` | Preserved same-day narrative before the compact current ledger |
+| `2026-09-10-pre-cleanup-active-context.md` | Full dashboard before the first real Spec 224 `speckit-cleanup` audit pass; content duplicated `progress.md`'s dated entries |

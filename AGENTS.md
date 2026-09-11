@@ -190,8 +190,12 @@ the spec in the same change or add a dated amendment note. Code and spec agree a
   update the ledger below, and write a dated report under `specs/224-speckit-governance/evidence/`.
 
 **Cleanup ledger**
-- Last cleanup: 2026-09-06 (initial rules authoring; full audit pending Phase 2)
-- Next cleanup due: 2026-10-01
+- Last cleanup: 2026-09-10 (first real 224-T201 audit run — PARTIAL: 2 of 5 active specs with
+  checked tasks audited — 227 clean, 232 found 8 stale checked tasks and corrected them; 233/231/223
+  audits failed on a session rate limit and still need a retry. `activeContext.md` recompressed
+  188→~65 lines. See `specs/224-speckit-governance/evidence/cleanup-2026-09-10.md`.)
+- Next cleanup due: retry 233/231/223 audits as soon as feasible (do not wait for 2026-10-01 —
+  this pass is incomplete, not the monthly cadence)
 
 ---
 

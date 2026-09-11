@@ -77,15 +77,22 @@ independently — ADT chunks share edge vertices, so the seams scramble (operato
 
 ## Phase 5 — Composition UX completion
 
-- [x] T050 FR-13: donor-tile picker places ONLY the requested tiles — per-layer mode where
+- [ ] T050 FR-13: donor-tile picker places ONLY the requested tiles — per-layer mode where
       placed tiles compose exclusively (whole-layer offset ignored for unplaced targets), UI
       toggle to return to offset mode. Receipt: [t050 placed tiles only](evidence/t050-placed-tiles-only-receipt.md).
+      **Un-checked by 2026-09-10 governance audit (224-T201)**: receipt marks the minimap-visual
+      criterion "Pass" on source + full solution build alone, with no operator visual evidence —
+      routing/toggle logic is real and unit-tested, but the visual claim violates AGENTS.md §6.
 - [ ] T051 FR-14: per-tile locks — locked composed tiles are claimed exclusively by their owning
       layer; later layers skip locked targets; locks persist in the project and get a minimap
       badge. Implementation receipt: [t051 per-tile locks](evidence/t051-per-tile-lock-implementation-receipt.md);
       unchecked pending its operator minimap badge/override witness.
 - [ ] T052 FR-15: locked layers protected from deletion (DONE 2026-09-08 — Remove disabled for
       locked, Clear keeps locked with a status message; commit 82889edd).
+      **Governance audit 2026-09-10 (224-T201)**: no `evidence/` receipt exists for this task —
+      an inline commit reference with no files-changed list, verification commands, or criterion
+      table does not meet the AGENTS.md §9.2 receipt bar. Not a claim the guard logic is wrong,
+      only that it is unreceipted; already correctly unchecked.
 - [ ] T053 REGRESSION: WL* liquid click-inspector broken with maps placed — audit and repair
       recorded in [t053 WL inspector fall-through](evidence/t053-wl-inspector-fallthrough-receipt.md).
       The minimap footprint path was not the click consumer; composed terrain occlusion cleared
@@ -95,28 +102,40 @@ independently — ADT chunks share edge vertices, so the seams scramble (operato
       [t054 Archaeology Map Layers default](evidence/t054-archaeology-map-layers-default-receipt.md).
       Unchecked pending the operator's default-entry/remembered-page UI witness.
 - [ ] T055 FR-5: UniqueId era color-coding — objects in a UniqueId range tinted per-range.
-- [x] T056 OPERATOR DIRECTIVE 2026-09-09 ("donor tiles are not where they belong... it doesn't put
+- [ ] T056 OPERATOR DIRECTIVE 2026-09-09 ("donor tiles are not where they belong... it doesn't put
       the tile at the target xx_yy location"): the donor-tile picker interpreted its X/Y inputs in
       internal (row, column) order while the operator enters ADT-name order (xx = column, yy =
       row — the status bar prints `{tileY}_{tileX}`). Every placement landed on the diagonal
       mirror of the requested location. The picker now labels and reads xx/yy and maps them to
       (tileX = yy, tileY = xx); the placed-lock labels print in xx_yy order. Receipt:
       [t056 placement coordinate order](evidence/t056-placement-coordinate-order-receipt.md).
-- [x] T057 OPERATOR DIRECTIVE 2026-09-09 ("we need a way for phase maps to have their base Z
+      **Un-checked by 2026-09-10 governance audit (224-T201)**: the linked receipt filename does
+      not exist on disk (phantom link) — real content lives in the combined
+      `t056-t059-placement-z-minimap-receipt.md`, which itself marks the actual placement-lands-
+      correctly criterion "Open, operator-owned."
+- [ ] T057 OPERATOR DIRECTIVE 2026-09-09 ("we need a way for phase maps to have their base Z
       changed, or maybe even scaling up the Z"): per-layer `ZOffset` (world-Z translation, yards)
       and `ZScale` (multiplier) applied as `z' = z * ZScale + ZOffset` to contributed terrain
       heights, liquid surfaces, and placement Z in both adapters; layer-card inputs + project
       persistence. Receipt: [t057 layer Z transform](evidence/t057-layer-z-transform-receipt.md).
       Unchecked pending the operator's visual witness (e.g. Teldrassil raised onto Kalimdor).
-- [x] T058 OPERATOR DIRECTIVE 2026-09-09 ("the full screen minimap's teleport (3 clicks) didn't
+      **Governance audit 2026-09-10 (224-T201)**: the task's own text already said "Unchecked
+      pending..." while the checkbox read `[x]` — a literal self-contradiction. Corrected to `[ ]`.
+      Also: the linked receipt filename does not exist on disk (real content is in the combined
+      `t056-t059-placement-z-minimap-receipt.md`).
+- [ ] T058 OPERATOR DIRECTIVE 2026-09-09 ("the full screen minimap's teleport (3 clicks) didn't
       work, at all"): every minimap surface shared one `MinimapInteractionState`, so the other
       surfaces re-processed and cleared each press/release before three clicks could accumulate.
       Each surface now owns its pointer state. Build-verified; interactive witness operator-owned.
-- [x] T059 OPERATOR DIRECTIVE 2026-09-09 ("let us drag and drop the tile on the full-screen
+      **Governance audit 2026-09-10 (224-T201)**: checkbox read `[x]` while the task's own text
+      says "interactive witness operator-owned" — self-contradiction, corrected to `[ ]`.
+- [ ] T059 OPERATOR DIRECTIVE 2026-09-09 ("let us drag and drop the tile on the full-screen
       minimap, and place it/lock it to a region"): placed-only layers are now grabbable on the
       minimap — dragging moves every placement's target by the pointer delta (donor slot fixed),
       re-streams once on release, and the lock flags ride along. Interactive witness operator-owned.
-- [x] T064 OPERATOR DIRECTIVE 2026-09-09: magnetic WDL microlattice edge-snapping — implemented
+      **Governance audit 2026-09-10 (224-T201)**: checkbox read `[x]` while the task's own text
+      says "interactive witness operator-owned" — self-contradiction, corrected to `[ ]`.
+- [ ] T064 OPERATOR DIRECTIVE 2026-09-09: magnetic WDL microlattice edge-snapping — implemented
       as a per-layer `EdgeBlendWdl` strength (0 = off): the tile-boundary outer vertices of
       contributed heightmap chunks blend toward the base map's WDL 17×17 macro lattice
       ([PhaseEdgeBlender](../../../src/core/WowViewer.Core.Runtime/World/Terrain/Stratigraphy/PhaseEdgeBlender.cs),
@@ -127,10 +146,14 @@ independently — ADT chunks share edge vertices, so the seams scramble (operato
       layer-card slider + project persistence. Maps tests 181/181; build 0 errors. Receipt:
       [t064 wdl edge snap](evidence/t064-wdl-edge-snap-receipt.md). Visual witness operator-owned
       (e.g. Teldrassil on Kalimdor).
+      **Governance audit 2026-09-10 (224-T201)**: checkbox read `[x]` while the task's own text
+      says "Visual witness operator-owned" and the receipt's decisive criterion ("cut tile meets
+      surrounding terrain without manual Z nudge") is marked "Open, operator-owned" — only the
+      underlying blend-math sub-checks passed via unit test. Corrected to `[ ]`.
 - [ ] T065 OPERATOR DIRECTIVE 2026-09-09: re-audit chunk-level MCAL/MCLY "off-by-one scrambling"
       and cross-chunk height smoothness inside composed tiles after T056 (the transposed targets
       made composed content appear scrambled); witness-driven.
-- [x] T066 OPERATOR DIRECTIVE 2026-09-09 ("cell finetuning shifts the cells around instead of
+- [ ] T066 OPERATOR DIRECTIVE 2026-09-09 ("cell finetuning shifts the cells around instead of
       just moving the TILE to the cells... applying the heightmap still does this horrific shit";
       amended after the first pass: "it's aligned right, but we're missing stuff in between"):
       the cell-shifted path re-resolved a supply tile PER CHUNK (ResolveCellShiftedChunk +
@@ -142,6 +165,9 @@ independently — ADT chunks share edge vertices, so the seams scramble (operato
       tiles and no chunk is re-picked from an unrelated tile. Receipt:
       [t066 tile-rigid cell shift](evidence/t066-tile-rigid-cell-shift-receipt.md). Visual
       witness operator-owned.
+      **Governance audit 2026-09-10 (224-T201)**: checkbox read `[x]` while the task's own text
+      says "Visual witness operator-owned" and the receipt marks BOTH of its acceptance criteria
+      "Open, operator-owned" — 0 of 2 rows have evidence beyond code review. Corrected to `[ ]`.
 
 ## Phase 6 — Renderer + output
 
@@ -155,6 +181,43 @@ independently — ADT chunks share edge vertices, so the seams scramble (operato
       report; exported tiles must match live composition (SC-5).
 - [ ] T063 FR-10: texture restoration for stripped phase maps — per-layer/per-tile remapping of
       base-map textures onto texture-less MCLY layers, persisted in the project.
+
+## Phase 7 — Operator-reported gaps 2026-09-10
+
+Operator directive, verbatim intent preserved per item. None of these have been investigated yet
+— recorded here so they are not lost, per AGENTS.md §9.1 (operator-originated wording may enter a
+spec directly). No implementation claimed.
+
+- [ ] T067 OPERATOR DIRECTIVE 2026-09-10: remove the "Bake MCSH shadows" checkbox from the
+      synthesized-minimap export UI permanently
+      (`ViewerApp_SynthesizedMinimapExport.cs:115`, `_synthesizedMinimapBakeMcsh`). Operator:
+      "We should not ever have any option to bake MCSH shadows, as they have no use in minimaps,
+      ever." This matches prior measurement that MCSH is not encoded in real client minimaps
+      (near-zero correlation with minimap luminance) — the option produces misleading output by
+      construction, not just an unused feature. Remove the checkbox and the `bakeMcsh` parameter
+      path, not just default it off.
+- [ ] T068 OPERATOR DIRECTIVE 2026-09-10: "Include WMO geometry" checkbox
+      (`ViewerApp_SynthesizedMinimapExport.cs:111`, `_synthesizedMinimapIncludeWmos`) does not
+      work — operator report, not yet root-caused. Audit the `includeWmos` path from checkbox
+      through to the render/export call.
+- [ ] T069 OPERATOR DIRECTIVE 2026-09-10: "our no-water minimaps have weird shading glitches that
+      the normal minimaps render fine" — operator suspects terrain shading, unconfirmed. Not yet
+      root-caused; reproduce with `--no-water`-equivalent export path (`castShadows`/water toggle
+      interaction in `ViewerApp_SynthesizedMinimapExport.cs`) against a normal export on the same
+      tile.
+- [ ] T070 OPERATOR DIRECTIVE 2026-09-10: cell-level alignment fine-tune needs TRUE 1-cell (not
+      8-cell) granularity in both X and Y. Operator: "we currently seem to be batching the tile in
+      8x8 cell increments, which, while that's right for rendering, is not ample for perfectly
+      lining up the oddball copy/pasted map data." Concrete failing case: Hellfire Ramparts does
+      not perfectly overlap its Expansion01 tiles — off by 1–3 cells in one direction and 1–2 in
+      the other, and current tooling cannot close that gap. This overlaps Phase 1 (T010–T013,
+      `CellOffsetX/Y` 0–15 cells, not yet implemented) and the already-shipped-but-buggy cell
+      fine-tune referenced in T066 — reconcile which mechanism this is/should be before
+      implementing; do not assume they are the same code path without checking.
+- [ ] T071 OPERATOR DIRECTIVE 2026-09-10: numeric offset/transform counters (at minimum the cell
+      and Z-offset controls in the layers panel) are too small to display a two-digit value with
+      its sign at 100% UI zoom — operator cannot tell if a value is positive or negative. Controls
+      must scale with the UI text size, not stay a fixed pixel width.
 
 ## Dependencies
 

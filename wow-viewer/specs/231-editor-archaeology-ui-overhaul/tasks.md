@@ -149,6 +149,14 @@ readers stay untouched (AGENTS.md §4).
 - [ ] T065 Gate: build 0 errors; line-count delta recorded for every touched `ViewerApp_*.cs`;
       removal receipt with per-surface evidence; no reader code touched
 
+## Phase 8 — Operator-reported regression 2026-09-10
+
+- [ ] T080 REGRESSION: the toolbar's hovered-WMO doodad-set combo (landed T032/FR-6) disappears as
+      soon as the mouse moves away from the object/rendered window, making it unusable — operator
+      report, not yet root-caused. Likely the combo's visibility is gated on hover state that
+      clears before the dropdown can be interacted with; audit the popup/combo lifetime against
+      the hover-clear condition.
+
 ## Phase 5 — Navigation test, inventory, closure
 
 - [ ] T050 Operator navigation smoke: US1 (PM4 OBJ export), US2 (placement edit + reconcile),

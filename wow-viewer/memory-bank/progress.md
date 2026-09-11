@@ -1,6 +1,99 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-09
+Last updated: 2026-09-10
+
+## 2026-09-10 — Spec 235 Phase 0 reconciliation: real findings, and a process failure worth recording
+
+- **Findings (all code-evidenced, written up in
+  [235/research.md](../specs/235-legacy-mdx-m2-rendering/research.md))**: `ResolveMdxProfile` is dead
+  code (explains "MDX is fine"); `ResolveModelProfile`'s `major==1` null disables both
+  embedded-profile routes for all of Vanilla; **`WorldAssetManager`'s no-skin chain has no
+  `Md20_1X_V100_Era100` branch at all**, so the 1.0.0 reader is never reached from world placement —
+  fixing its bone bug alone would render nothing; **no bounding-box fallback exists anywhere in that
+  chain** (every failure returns `null`), which is precisely the "no bounding boxes either" symptom;
+  the `0x102`-`0x107` refusal is a hardcoded `NotSupportedException` citing a stale spec number;
+  **Warcraft.NET's `MD21` already reads the whole era generically and is already wrapped by our own
+  adapter**, missing only the embedded skin/view walk — the same single gap Spec 104 diagnosed;
+  and `M2Era100Constants`' Ghidra offsets are +8 shifted vs Warcraft.NET's layout with tests that are
+  self-admittedly synthetic and cannot detect a wrong offset.
+- **Consequence**: plan.md's six-phase per-era structure is the wrong shape and predates these
+  findings. The reframe (one generic reader + the embedded-skin walk + drop the version wall + a real
+  bbox fallback, bespoke readers only where a real file proves they're needed) is recorded at the end
+  of research.md but **not yet applied to plan.md**.
+- **Process failure, recorded deliberately**: no real client file was ever read this session. After
+  `m2 inspect --archive-root` failed, the response was to guess asset paths (three of them), then
+  guess flags, then propose writing new throwaway tooling — in a repo that already has complete
+  inspection tooling and a vendored listfile. The operator's correction was blunt and correct: *"we
+  have tooling to inspect anything, how the hell are we in unknown waters."* The failure was not
+  reading the existing tool's usage or the working invocations in specs 104/154/205 before
+  improvising. Next session starts there.
+- Also: `wowdev.wiki` 403s WebFetch (both `/M2` and `?action=raw`); use a browser or local copy.
+
+## 2026-09-10 — Spec 235 authored (legacy MDX/M2 1.0.0-3.0.1), found and reconciled duplicate specs
+
+- Operator directive: MDX/M2 rendering for the 1.0.0-3.0.1 client range is "very much
+  non-functional" (no objects render, no bounding boxes most of the time); fuckported
+  (non-standard chunk-rewritten) assets must render wherever Warcraft.NET can read them; MDX
+  torch/light-emitter effects are missing in some cases. Used `speckit-specify` to author
+  [235-legacy-mdx-m2-rendering](../specs/235-legacy-mdx-m2-rendering/spec.md) on new branch
+  `235-legacy-mdx-m2-rendering` (created off `234-map-save-new-map`'s tip).
+- **Grounded in a real code bug found this session**: `FormatProfileRegistry.ResolveMdxProfile`
+  has no case for any build with major version >= 1 and silently falls back to the 0.6.0/0.7.0 MDX
+  profile; `ResolveModelProfile` (M2) has no case for `major == 1` at all and returns `null` for
+  the entire Vanilla retail era.
+- **Caught and corrected a near-duplication mid-authoring**: before finalizing, checking
+  `specs/epics/active-epics.md` surfaced Spec 104 (legacy-m2-rendering, 1.0.0-2.4.3, full plan/
+  tasks/research kit, 7/27 tasks checked, header claims "Status: Active") and Spec 154
+  (m2-era-reader-parity, 1.x-3.0.1, planned but never task-broken) — both nearly identical in
+  scope, both invisible to default routing because neither was listed in any epic. 154's own
+  measured survey (2026-08-15, real staged clients) is far more precise than this session's
+  initial framing: the broken range is **exactly** `0x100` through `0x107`; `3.0.1` declares
+  `0x107` while `3.3.0.10958` declares `0x108` and reads cleanly (151 bones, 155 sequences) — the
+  real reference point is `0x108`/3.3.0, not "3.3.5 through 4.0.0" as casually assumed; a
+  `4.0.0.11927` beta also crashes (unhandled, reading camera records), contradicting "4.x already
+  works." Rewrote 235 to explicitly supersede 104 and 154's unimplemented residue, incorporate
+  their measured findings, and add dated amendment notes atop both (content preserved, not
+  archived). Spec 105 (1.0.0 texture/animation/lighting, one model) and Spec 193 (Benilla 1.12.1
+  reference client) remain valid, non-duplicated prior art. Updated `epics/active-epics.md` Epic 4
+  and `specs/STATUS.md` row 10 accordingly.
+- **No implementation. Not planned yet.** Next: `speckit-plan`, starting with FR-014 — reconcile
+  `FormatProfileRegistry` against whatever era-resolution mechanism 104/154 already built
+  (`M2ModelReader100` per Spec 193) before writing any new code.
+
+## 2026-09-10 — First real Spec 224 governance audit (224-T201) + operator bug batch
+
+- **Ran the actual `speckit-cleanup` audit for the first time** (Spec 224 Phase 2 had been open
+  since its own authoring — the 2026-09-06 pass only reorganized files, never checked receipts).
+  Audited via parallel read-only agents: **227 clean** (both checked tasks have real receipts,
+  T004 gate genuinely still open, correctly blocking Spec 228). **232 found real staleness: 8 of
+  12 checked tasks (T050, T052, T056, T057, T058, T059, T064, T066) were checked against
+  acceptance criteria their own linked receipts admit are still open** — several literally
+  contained "Unchecked pending operator witness" text while the checkbox read `[x]`. All 8
+  corrected to `[ ]` with an inline audit note; 4 (T015a/b/c/e) confirmed as genuine passes.
+  **233, 231, 223 audits failed on a session rate limit** (resets 6pm America/New_York) — not yet
+  re-run; do not treat those specs' checked tasks as verified.
+- Compacted `memory-bank/activeContext.md` (188 → ~65 lines; had re-grown from a 2026-09-06
+  cleanup's 48 lines back to 188 in 4 days by accumulating session narrative that already
+  duplicated this file). Full prior version archived at
+  [archive/2026-09-10-pre-cleanup-active-context.md](archive/2026-09-10-pre-cleanup-active-context.md).
+- **Operator bug/gap report, recorded verbatim-intent, not yet investigated**: (1) no-water
+  synthesized minimaps show shading glitches that normal ones don't (terrain shading suspected,
+  unconfirmed); (2) "Include WMO geometry" minimap export checkbox does not work; (3) the "Bake
+  MCSH shadows" minimap export checkbox must be removed permanently — MCSH is not encoded in real
+  minimaps, so the option is misleading by construction, not just unused; (4) the toolbar's
+  hovered-WMO doodad-set combo (Spec 231 T032) disappears as soon as the mouse leaves the render
+  window, making it unusable; (5) cell-level fine-tune needs true 1-cell (not ~8-cell) X/Y
+  granularity — current tooling could not align Hellfire Ramparts to its Expansion01 tiles closer
+  than 1–3 cells off in one axis and 1–2 in the other; (6) numeric offset/transform counters are
+  too small to show a signed two-digit value at 100% zoom and must scale with UI text size. Items
+  1–3 and 5–6 filed as new Phase 7 tasks (T067–T071) in
+  [232's tasks.md](../specs/232-cartography-composition-project/tasks.md); item 4 filed as Phase 8
+  T080 in [231's tasks.md](../specs/231-editor-archaeology-ui-overhaul/tasks.md). **Operator also
+  re-stated the top-priority gap directly**: "we still have no saving of the ADTs that we layer up
+  in the Archeology option, which is the whole point of this whole toolkit" — this is exactly
+  Spec 234 (current branch), still Draft/not-planned; speckit-plan is the next action once this
+  cleanup pass closes.
+- Cleanup report: [specs/224-speckit-governance/evidence/cleanup-2026-09-10.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-10.md).
 
 ## 2026-09-09 — Spec 232 T064: magnetic WDL edge-snap for composed layers
 

@@ -1,3 +1,12 @@
+> **Superseded 2026-09-10**: this spec (planned but never task-broken) is absorbed by
+> [Spec 235](../235-legacy-mdx-m2-rendering/spec.md) (operator directive: MDX/M2 rendering across
+> 1.0.0–3.0.1 plus fuckported-asset compatibility and light-emitter effects). This spec's measured
+> findings — the exact `0x100`–`0x107` broken range, the `0x108`/3.3.0 reference point, the D1/D2/D3
+> defects, and the survey-first methodology — are reused directly and are the most precise evidence
+> Spec 235 has. Content preserved as prior art, not archived. Its US4 (cross-era rig comparison) was
+> deliberately NOT carried into Spec 235's requirements — it remains valid but is not part of
+> today's operator directive; revisit as its own slice if asked for.
+
 # Feature Specification: M2 Reader Era Parity (1.x – 3.0.1)
 
 **Feature Branch**: `v0.5.3-dev` (this repository keeps specs on the active dev branch)
