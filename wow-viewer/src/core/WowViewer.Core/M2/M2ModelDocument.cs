@@ -120,6 +120,11 @@ public sealed class M2ModelDocument
     /// </summary>
     public M2Era100Geometry? InlineEra100Geometry { get; set; }
 
+    /// <summary>
+    /// Embedded skin documents parsed from legacy M2Division records (version &lt;= 263).
+    /// </summary>
+    public IReadOnlyList<M2SkinDocument> EmbeddedSkinDocuments { get; set; } = [];
+
     public int GlobalLoopCount => GlobalLoops.Count;
 
     public int SequenceCount => Sequences.Count;

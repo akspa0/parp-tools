@@ -126,7 +126,12 @@ directive, 2026-09-07).
       2026-09-07: DeadminesInstance rendered rotated 90° CW on Azeroth (operator screenshot) —
       gate passed; the follow-up alignment-precision + persistence + export request spun out to
       [Spec 232](../232-cartography-composition-project/spec.md) (operator verbatim directive
-      recorded there)
+      recorded there).
+      **Audit note 2026-09-11 (Spec 224 cleanup):** the §9.2 receipt returns the interactive
+      re-check to the operator after its same-day fix round and does not itself carry the passing
+      operator observation — that observation lives only in this task line. Kept checked (the
+      operator is the authority for a visual gate) but flagged "receipt not in evidence/"; see
+      [cleanup-2026-09-11.md](../224-speckit-governance/evidence/cleanup-2026-09-11.md).
 
 ## Phase 6 — Tools curation & removal pass (operator amendment 2026-09-07)
 

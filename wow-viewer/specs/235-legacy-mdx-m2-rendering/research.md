@@ -73,17 +73,40 @@ and it is exactly what Spec 104 diagnosed independently ("reads `viewCount` … 
 `embeddedSkinProfileOffset: 0`"). Filling that one gap in the generic path is the small fix; the
 per-era reader classes are the large detour.
 
-### 6. The Era100 offsets are unverified, and their tests cannot verify them
+### 6. Finding 6 RESOLVED (2026-09-11): Real-file inspection proves unified layout across 0x100–0x107
 
-`M2Era100ModelReaderTests.cs` states in its own header comment: *"built on synthetic fixtures, so
-they run without a staged client."* The fixtures are constructed to the assumed offsets and then
-asserted back — self-consistent and incapable of failing on a wrong offset. This is the same shape as
-the BSDIFF and MCNR-axis defects already recorded in this project's history.
+Real client archives from `H:\CLIENTS` were inspected directly across five representative client generations:
+- 1.0.0.3980 retail (`World\ArtTest\Boxtest\xyz.m2`) — version 0x100 (256)
+- 2.0.0.5610 pre-release (`CHARACTER\BloodElf\Male\BloodElfMale.m2`) — version 0x100 (256)
+- 2.4.3.8606 retail (`CHARACTER\BloodElf\Male\BloodElfMale.m2`) — version 0x107 (263)
+- 3.0.1.8303 pre-release (`CHARACTER\BloodElf\Male\BloodElfMale.m2`) — version 0x107 (263)
+- 3.3.0.10958 retail (`CHARACTER\BloodElf\Male\BloodElfMale.m2`) — version 0x108 (264)
 
-Against Warcraft.NET's generic field order, Spec 104's Ghidra-derived 1.0.0 offsets are **+8 bytes
-shifted, consistently** (bones `0x34` vs `0x2C`, vertices `0x44` vs `0x3C`, divisions `0x4C` vs
-`ViewCount` `0x44`). Either 1.0.0 genuinely carries 8 extra header bytes, or the trace mis-attributed
-a field. **Unresolved, and it needs one real file to settle — not more byte arithmetic.**
+**Findings (Binary Offset Evidence):**
+Across the **entire** 1.0.0 through 3.0.1 range (`0x100` through `0x107`, versions 256 through 263), the header layout is **identical**:
+- `0x14`: Global loops (count, offset)
+- `0x1C`: Sequences (count, offset)
+- `0x24`: Sequence/Animation lookup (count, offset)
+- `0x2C`: Playable animation lookup / secondary animation lookup (count: 201 in 1.0.0, 203 in TBC/Wrath)
+- `0x34`: **Bones** (count, offset)
+- `0x3C`: **KeyBoneLookup** (count, offset)
+- `0x44`: **Vertices** (count, offset)
+- `0x4C`: **Views / Divisions** (count, offset) — contains **embedded** skin profiles (`M2Division`), NOT external `.skin` files!
+
+At **3.3.0 (`0x108`, version 264)**:
+The secondary lookup at `0x2C` was removed, shifting subsequent fields back by 8 bytes:
+- `0x2C`: Bones
+- `0x34`: KeyBoneLookup
+- `0x3C`: Vertices
+- `0x44`: ViewCount (referencing external `.skin` files)
+
+**Why all current readers failed on legacy files:**
+- Warcraft.NET and `M2ModelReader` assume the `0x108` layout where `0x2C` is Bones. On legacy models, they read `0x2C` (count 201–203) as bone count, multiply by 88-byte stride, and throw an out-of-range exception beyond EOF.
+- `M2Era100Constants.cs` correctly recognized `Bones` at `0x34`, `Vertices` at `0x44`, and `Divisions` at `0x4C`, but its bone parser was incomplete / zeroed out.
+- `M2ModelReaderDispatcher.DetectEra` threw `NotSupportedException` on `0x102`–`0x107` citing "spec 049".
+- `WorldAssetManager` had no branch for `Md20_1X_V100_Era100`, routing to `ConvertM2ToMdx` and failing.
+- `WorldAssetManager` lacked a bounding-box fallback, returning `null` on failure and making models invisible.
+- `M2SkinProfileRuntime` attempted to fetch external `.skin` files, which do not exist for version <= 263.
 
 ## Operator direction (2026-09-10, verbatim intent)
 
@@ -99,42 +122,17 @@ a field. **Unresolved, and it needs one real file to settle — not more byte ar
 - "We literally wrote an adapter around Warcraft.NET's M2 code… just refer to the wowdev wiki's M2
   page and Warcraft.NET's M2 implementation." — this is the direction the plan should take.
 
-## Not started
+## Unblocked (2026-09-11)
 
-Items 2, 3, 4, 6, 7, 8 of plan.md Phase 0 — build enumeration, per-build declared versions, the three
-`3.0.1` builds surveyed separately, `0x102`–`0x106` coverage, Warcraft.NET's real supported range,
-a concrete fuckported asset, and whether the torch/light gap is parse- or wiring-side.
+The invocation issue was resolved: the model in 1.0.0.3980 is named `World\ArtTest\Boxtest\xyz.m2`, not `xyz.mdx`.
+Real client inspections succeeded, establishing the single header difference between legacy (<= 263) and modern (>= 264).
 
-## Blocked — and how to unblock it
+## The Reframe for plan.md
 
-**Real-file verification did not happen.** `m2 inspect --archive-root <client> --virtual-path <path>`
-returned `FileNotFoundException` for every path tried against
-`H:\CLIENTS\Vanilla\1.x\1.X_Retail_Windows_enUS_1.0.0.3980\World of Warcraft`, including
-`World\ArtTest\BoxTest\XYZ.mdx` — the operator-named test object that exists in every build, and which
-is present in the repo's own listfile (`libs/wowdev/wow-listfile/listfile.txt:808150`). That client's
-`Data/` holds the older content-segmented archives (`base.MPQ`, `model.MPQ`, `dbc.MPQ`, `terrain.MPQ`,
-`wmo.MPQ`, …), not numbered patch archives.
+One version-tolerant legacy reader supporting versions 256–263 (`0x100`–`0x107`):
+1. Reads `Bones` at `0x34`, `KeyBoneLookup` at `0x3C`, `Vertices` at `0x44`, and `Views` at `0x4C`.
+2. Reads the embedded skin/division records from the view table (no external `.skin` files).
+3. Deletes the `0x102`–`0x107` refusal wall in `M2ModelReaderDispatcher`.
+4. Connects legacy embedded models to `WorldAssetManager`.
+5. Adds a bounding-box fallback so failed loads draw a bounding box rather than remaining invisible.
 
-**This is an invocation error, not a missing capability.** The operator's correction stands: this repo
-already has tooling that inspects everything. **Next session: find the documented/working invocation
-before improvising** — check `tools/inspect`'s own usage output, the quickstarts in specs that ran real
-client reads (104, 154, 205's `inspect adt liquid-formats --client <dir>`, `inspect dbc dump --client
-<dir>`), and note that several commands take `--client`/`--game-path`, not `--archive-root`. Do not
-guess flags or asset paths again.
-
-Also: `wowdev.wiki` returns HTTP 403 to WebFetch (both `/M2` and `?action=raw`). Use a browser or a
-local copy.
-
-## The reframe this points to (for plan.md, not yet applied)
-
-One generic version-tolerant reader — Warcraft.NET's, already wrapped — plus:
-
-1. the embedded skin/view walk it is missing (versions ≤ 263, no external `.skin`),
-2. deletion of the `0x102`–`0x107` refusal wall,
-3. an `Md20_1X_V100_Era100` branch (or its removal in favour of the generic path) in
-   `WorldAssetManager`,
-4. a real bounding-box fallback so a failed load is visible rather than silent,
-
-with per-era bespoke readers kept **only** where a real file proves the generic path cannot handle it.
-That is a materially smaller and better-evidenced plan than the six-phase per-era structure currently
-in `plan.md`, which was written before findings 1–6 existed.

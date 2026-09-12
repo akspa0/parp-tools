@@ -420,14 +420,52 @@ static void RunM2Inspect(string[] args)
 		model = dispatch.Document;
 		detectedEra = dispatch.Era;
 
-		try
+		if (detectedEra == M2Era1121EraTag.Md20_1X_V100_Era100 && model.InlineEra100Geometry is { } era100Geom)
 		{
-			using MemoryStream geometryStream = new(modelBytes, writable: false);
-			geometry = M2GeometryReader.Read(geometryStream, sourceLabel);
+			List<M2GeometryVertex> geomVertices = era100Geom.GlobalVertices
+				.Select(v => new M2GeometryVertex(
+					v.Position,
+					v.Normal,
+					v.TexCoord0,
+					v.TexCoord1,
+					new Vector4(v.BoneIndex0, v.BoneIndex1, v.BoneIndex2, v.BoneIndex3),
+					new Vector4(v.BoneWeight0 / 255f, v.BoneWeight1 / 255f, v.BoneWeight2 / 255f, v.BoneWeight3 / 255f)))
+				.ToList();
+
+			List<M2GeometryTexture> geomTextures = era100Geom.Textures
+				.Select(t => new M2GeometryTexture(t.Filename, t.Type, t.Flags))
+				.ToList();
+
+			List<M2GeometryRenderFlag> geomFlags = era100Geom.Materials
+				.Select(m => new M2GeometryRenderFlag(m.Flags, m.BlendMode))
+				.ToList();
+
+			List<M2GeometryTextureLookup> geomTexLookup = new(geomTextures.Count);
+			for (int i = 0; i < geomTextures.Count; i++)
+				geomTexLookup.Add(new M2GeometryTextureLookup((ushort)i));
+
+			geometry = new M2GeometryDocument(
+				model,
+				geomVertices,
+				geomTextures,
+				geomFlags,
+				textureLookup: geomTexLookup,
+				textureUnitLookup: [],
+				transparencyLookup: [],
+				textureAnimationLookup: [],
+				boneLookup: []);
 		}
-		catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+		else
 		{
-			geometryError = ex.Message;
+			try
+			{
+				using MemoryStream geometryStream = new(modelBytes, writable: false);
+				geometry = M2GeometryReader.Read(geometryStream, sourceLabel);
+			}
+			catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or ArgumentException)
+			{
+				geometryError = ex.Message;
+			}
 		}
 	}
 

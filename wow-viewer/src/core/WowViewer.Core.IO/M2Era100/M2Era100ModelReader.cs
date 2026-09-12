@@ -39,13 +39,13 @@ public static class M2Era100ModelReader
             throw new InvalidDataException($"1.0.0 M2 file '{sourcePath}' is too small to contain a 1.0.0 MD20 header (≥ 0x144 bytes).");
 
         uint rawVersion = BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(M2Era100Constants.VersionOffset, sizeof(uint)));
-        if (rawVersion != 0x100u)
-            throw new NotSupportedException($"1.0.0 M2 file '{sourcePath}' has version 0x{rawVersion:X}. Expected 0x100.");
+        if (rawVersion < 0x100u || rawVersion > 0x107u)
+            throw new NotSupportedException($"Legacy M2 file '{sourcePath}' has version 0x{rawVersion:X}. Expected 0x100-0x107.");
 
-        return ParseM2(data, sourcePath);
+        return ParseM2(data, sourcePath, rawVersion);
     }
 
-    private static M2ModelDocument ParseM2(byte[] data, string sourcePath)
+    private static M2ModelDocument ParseM2(byte[] data, string sourcePath, uint rawVersion)
     {
         uint flags = ReadUInt32At(data, M2Era100Constants.FlagsOffset);
         uint viewCount = ReadUInt32At(data, M2Era100Constants.DivisionCountOffset); // divisions == views
@@ -63,9 +63,8 @@ public static class M2Era100ModelReader
         Vector3 boundsMax = ReadLenientVector3At(data, M2Era100Constants.BoundsOffset + 0x0C, sourcePath, "boundsMax");
         float boundsRadius = ReadLenientSingleAt(data, M2Era100Constants.BoundsRadiusOffset, sourcePath, "boundsRadius");
 
-        // --- Geometry: the core of the "empty bounding box" fix ---
-
-        M2Era100Geometry? geometry = ReadGeometry(data, sourcePath);
+        // --- Geometry & Embedded Skins ---
+        (M2Era100Geometry? geometry, List<M2SkinDocument> embeddedSkins) = ReadGeometry(data, sourcePath);
 
         // --- Textures ---
 
@@ -83,22 +82,22 @@ public static class M2Era100ModelReader
                 geometry.Batches,
                 textures,
                 textureLookup.Count > 0 ? textureLookup : geometry.TextureLookup,
-                materials);
+                materials,
+                geometry.GlobalVertices);
         }
 
-        // --- Build the document ---
-        // Camera tracks are the one early animation block needed by the camera-import
-        // path. Normalize their old flat arrays into the shared sampler's per-sequence
-        // reference tables; the later M2 reader is never involved in this route.
-        CameraReadResult cameraResult = ReadCameras(data, sequences.Count, globalLoops.Count, sourcePath);
+        // --- Animation & Tracks ---
+        M2Era100PayloadAppender appender = new(data);
+        List<M2BoneDefinition> bones = ReadBones(data, rawVersion, sequences.Count, globalLoops.Count, appender, sourcePath);
+        List<M2CameraDefinition> cameras = ReadCameras(data, sequences.Count, globalLoops.Count, appender, sourcePath);
 
         M2ModelIdentity identity = M2ModelIdentity.FromPath(sourcePath);
 
         M2ModelDocument document = new(
             identity,
-            cameraResult.Payload,
+            appender.ToPayload(),
             "MD20",
-            0x100u,
+            rawVersion,
             flags,
             viewCount,
             modelName,
@@ -109,28 +108,29 @@ public static class M2Era100ModelReader
             textureWeights: [],
             textureTransforms: [],
             lights: [],
-            cameras: cameraResult.Cameras,
+            cameras: cameras,
             boundsMin,
             boundsMax,
             boundsRadius,
             embeddedSkinProfileCount: viewCount,
             embeddedSkinProfileOffset: ReadUInt32At(data, M2Era100Constants.DivisionOffsetOffset),
-            bones: null,
+            bones: bones.Count > 0 ? bones : null,
             ribbons: null,
             particles: null);
 
+        document.EmbeddedSkinDocuments = embeddedSkins;
         if (geometry != null)
             document.InlineEra100Geometry = geometry;
 
         return document;
     }
 
-    private static CameraReadResult ReadCameras(byte[] data, int sequenceCount, int globalLoopCount, string sourcePath)
+    private static List<M2CameraDefinition> ReadCameras(byte[] data, int sequenceCount, int globalLoopCount, M2Era100PayloadAppender appender, string sourcePath)
     {
         uint count = ReadUInt32At(data, M2Era100Constants.CameraCountOffset);
         uint offset = ReadUInt32At(data, M2Era100Constants.CameraOffsetOffset);
         if (count == 0)
-            return new CameraReadResult(data, []);
+            return [];
 
         ValidateSpan(count, offset, M2Era100Constants.CameraStride, data.Length, sourcePath, "cameras");
 
@@ -140,7 +140,6 @@ public static class M2Era100ModelReader
         _ = ReadInt16Table(data, sourcePath, "cameraLookup",
             M2Era100Constants.CameraLookupCountOffset, M2Era100Constants.CameraLookupOffsetOffset);
 
-        CameraPayloadAppender appender = new(data);
         List<M2CameraDefinition> cameras = new(checked((int)count));
         for (int index = 0; index < count; index++)
         {
@@ -162,7 +161,72 @@ public static class M2Era100ModelReader
                 appender.NormalizeFloatTrack(rollTrack, sequenceCount)));
         }
 
-        return new CameraReadResult(appender.ToPayload(), cameras);
+        return cameras;
+    }
+
+    private static List<M2BoneDefinition> ReadBones(
+        byte[] data,
+        uint rawVersion,
+        int sequenceCount,
+        int globalLoopCount,
+        M2Era100PayloadAppender appender,
+        string sourcePath)
+    {
+        uint count = ReadUInt32At(data, M2Era100Constants.BoneCountOffset);
+        uint offset = ReadUInt32At(data, M2Era100Constants.BoneOffsetOffset);
+        if (count == 0 || offset == 0)
+            return [];
+
+        // Detect whether bones include boneNameCrc (0x70 / 112 bytes) or legacy (0x6C / 108 bytes).
+        // 0x100 uses 108 bytes (track at +0x0C). 0x104–0x107 uses 112 bytes (boneNameCrc at +0x0C, track at +0x10).
+        bool hasNameCrc = rawVersion >= 0x104;
+        if (count > 0 && checked((int)offset + 0x14) <= data.Length)
+        {
+            ushort interpAt0C = ReadUInt16At(data, (int)offset + 0x0C);
+            ushort interpAt10 = ReadUInt16At(data, (int)offset + 0x10);
+            if (interpAt10 <= (ushort)M2TrackInterpolation.Bezier && interpAt0C > (ushort)M2TrackInterpolation.Bezier)
+            {
+                hasNameCrc = true;
+            }
+            else if (interpAt0C <= (ushort)M2TrackInterpolation.Bezier && interpAt10 > (ushort)M2TrackInterpolation.Bezier)
+            {
+                hasNameCrc = false;
+            }
+        }
+
+        int boneStride = hasNameCrc ? M2Era100Constants.BoneStrideEra104 : M2Era100Constants.BoneStrideEra100;
+        ValidateSpan(count, offset, boneStride, data.Length, sourcePath, "bones");
+
+        List<M2BoneDefinition> bones = new(checked((int)count));
+        for (int index = 0; index < count; index++)
+        {
+            int entryOffset = checked((int)offset + (index * boneStride));
+            int keyBoneId = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(entryOffset + 0x00, sizeof(int)));
+            uint flags = ReadUInt32At(data, entryOffset + 0x04);
+            short parentBone = ReadInt16At(data, entryOffset + 0x08);
+            ushort submeshId = ReadUInt16At(data, entryOffset + 0x0A);
+            uint boneNameCrc = hasNameCrc ? ReadUInt32At(data, entryOffset + 0x0C) : 0u;
+
+            int trackOffset = hasNameCrc ? 0x10 : 0x0C;
+            OldTrack translationTrack = ReadOldTrack(data, entryOffset + trackOffset, 12, globalLoopCount, sourcePath, $"bones[{index}].translation");
+            OldTrack rotationTrack = ReadOldTrack(data, entryOffset + trackOffset + 0x1C, 8, globalLoopCount, sourcePath, $"bones[{index}].rotation");
+            OldTrack scalingTrack = ReadOldTrack(data, entryOffset + trackOffset + 0x38, 12, globalLoopCount, sourcePath, $"bones[{index}].scaling");
+            Vector3 pivot = ReadLenientVector3At(data, entryOffset + trackOffset + 0x54, sourcePath, $"bones[{index}].pivot");
+
+            bones.Add(new M2BoneDefinition(
+                index,
+                keyBoneId,
+                flags,
+                parentBone,
+                submeshId,
+                boneNameCrc,
+                appender.NormalizeVectorTrack(translationTrack, sequenceCount),
+                appender.NormalizeQuaternionTrack(rotationTrack, sequenceCount),
+                appender.NormalizeVectorTrack(scalingTrack, sequenceCount),
+                pivot));
+        }
+
+        return bones;
     }
 
     private static OldTrack ReadOldTrack(byte[] data, int offset, int scalarSize, int globalLoopCount, string sourcePath, string label)
@@ -172,7 +236,7 @@ public static class M2Era100ModelReader
         ushort interpolationValue = ReadUInt16At(data, offset + 0x00);
         ushort globalSequenceValue = ReadUInt16At(data, offset + 0x02);
         if (interpolationValue > (ushort)M2TrackInterpolation.Bezier)
-            throw new InvalidDataException($"1.0.0 M2 file '{sourcePath}' has unsupported interpolation {interpolationValue} in '{label}'.");
+            throw new InvalidDataException($"Legacy M2 file '{sourcePath}' has unsupported interpolation {interpolationValue} in '{label}'.");
 
         M2TrackInterpolation interpolation = (M2TrackInterpolation)interpolationValue;
         int globalSequence = globalSequenceValue == ushort.MaxValue || globalSequenceValue >= globalLoopCount
@@ -205,17 +269,18 @@ public static class M2Era100ModelReader
         uint ValueCount,
         uint ValueOffset);
 
-    private readonly record struct CameraReadResult(byte[] Payload, IReadOnlyList<M2CameraDefinition> Cameras);
-
-    private sealed class CameraPayloadAppender
+    private sealed class M2Era100PayloadAppender
     {
         private readonly byte[] _source;
         private readonly List<byte> _extension = [];
 
-        public CameraPayloadAppender(byte[] source) => _source = source;
+        public M2Era100PayloadAppender(byte[] source) => _source = source;
 
         public M2TrackDefinition<Vector3> NormalizeVectorTrack(OldTrack track, int sequenceCount)
             => Normalize<Vector3>(track, sequenceCount, 12, static normalized => new M2TrackDefinition<Vector3>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
+
+        public M2TrackDefinition<M2CompQuaternion> NormalizeQuaternionTrack(OldTrack track, int sequenceCount)
+            => Normalize<M2CompQuaternion>(track, sequenceCount, 8, static normalized => new M2TrackDefinition<M2CompQuaternion>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
 
         public M2TrackDefinition<float> NormalizeFloatTrack(OldTrack track, int sequenceCount)
             => Normalize<float>(track, sequenceCount, 4, static normalized => new M2TrackDefinition<float>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
@@ -231,14 +296,14 @@ public static class M2Era100ModelReader
             {
                 uint first = 0;
                 uint last = availableCount == 0 ? 0 : availableCount - 1;
-                if (track.RangeCount > 0)
+                if (track.RangeCount > 0 && availableCount > 0)
                 {
                     int rangeIndex = track.GlobalSequenceIndex >= 0 ? 0 : Math.Min(index, checked((int)track.RangeCount - 1));
                     int rangeOffset = checked((int)track.RangeOffset + (rangeIndex * 0x08));
                     first = ReadUInt32At(_source, rangeOffset + 0x00);
                     last = ReadUInt32At(_source, rangeOffset + 0x04);
                     if (first > last || last >= availableCount)
-                        throw new InvalidDataException($"1.0.0 M2 camera track range [{first}, {last}] is outside {availableCount} keys.");
+                        throw new InvalidDataException($"Legacy M2 track range [{first}, {last}] is outside {availableCount} keys.");
                 }
 
                 uint keyCount = availableCount == 0 ? 0 : last - first + 1;
@@ -301,13 +366,13 @@ public static class M2Era100ModelReader
 
     // ─── Geometry: M2Vertex + M2Division ─────────────────────────────────────
 
-    private static M2Era100Geometry? ReadGeometry(byte[] data, string sourcePath)
+    private static (M2Era100Geometry? Geometry, List<M2SkinDocument> EmbeddedSkins) ReadGeometry(byte[] data, string sourcePath)
     {
         // Read global M2Vertex[] from header 0x44.
         uint vertexCount = ReadUInt32At(data, M2Era100Constants.VertexCountOffset);
         uint vertexOffset = ReadUInt32At(data, M2Era100Constants.VertexOffsetOffset);
         if (vertexCount == 0 || vertexOffset == 0)
-            return null;
+            return (null, []);
 
         ValidateSpan(vertexCount, vertexOffset, M2Era100Constants.VertexStride, data.Length, sourcePath, "vertices");
         List<M2Era100Vertex> globalVertices = new(checked((int)vertexCount));
@@ -317,99 +382,201 @@ public static class M2Era100ModelReader
             globalVertices.Add(ReadM2Vertex(data, ofs, sourcePath, i));
         }
 
-        // Read divisions from header 0x4C. Pick division 0 (LOD 0).
+        // Read divisions from header 0x4C.
         uint divisionCount = ReadUInt32At(data, M2Era100Constants.DivisionCountOffset);
         uint divisionOffset = ReadUInt32At(data, M2Era100Constants.DivisionOffsetOffset);
         if (divisionCount == 0 || divisionOffset == 0)
-            return null;
+            return (null, []);
 
-        ValidateSpan(1, divisionOffset, M2Era100Constants.DivisionStride, data.Length, sourcePath, "divisions[0]");
+        ValidateSpan(divisionCount, divisionOffset, M2Era100Constants.DivisionStride, data.Length, sourcePath, "divisions");
 
-        // Read division 0's internal arrays.
-        int divBase = checked((int)divisionOffset);
-        uint vtxLookupCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionVertexLookupCountOffset);
-        uint vtxLookupOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionVertexLookupOffsetOffset);
-        uint indicesCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionIndicesCountOffset);
-        uint indicesOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionIndicesOffsetOffset);
-        uint sectionsCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionSectionsCountOffset);
-        uint sectionsOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionSectionsOffsetOffset);
-        uint batchesCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionBatchesCountOffset);
-        uint batchesOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionBatchesOffsetOffset);
+        List<M2SkinDocument> embeddedSkins = new(checked((int)divisionCount));
+        M2Era100Geometry? primaryGeometry = null;
 
-        // Read vertexLookup (int16[] — local → global vertex index).
-        List<ushort> vertexLookup = new();
-        if (vtxLookupCount > 0 && vtxLookupOfs > 0)
+        for (int divIndex = 0; divIndex < divisionCount; divIndex++)
         {
-            ValidateSpan(vtxLookupCount, vtxLookupOfs, sizeof(ushort), data.Length, sourcePath, "division.vertexLookup");
-            for (int i = 0; i < vtxLookupCount; i++)
+            int divBase = checked((int)divisionOffset + (divIndex * M2Era100Constants.DivisionStride));
+            uint vtxLookupCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionVertexLookupCountOffset);
+            uint vtxLookupOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionVertexLookupOffsetOffset);
+            uint indicesCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionIndicesCountOffset);
+            uint indicesOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionIndicesOffsetOffset);
+            uint boneEntriesCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionUint32ArrayCountOffset);
+            uint boneEntriesOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionUint32ArrayOffsetOffset);
+            uint sectionsCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionSectionsCountOffset);
+            uint sectionsOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionSectionsOffsetOffset);
+            uint batchesCount = ReadUInt32At(data, divBase + M2Era100Constants.DivisionBatchesCountOffset);
+            uint batchesOfs = ReadUInt32At(data, divBase + M2Era100Constants.DivisionBatchesOffsetOffset);
+
+            // Read vertexLookup (uint16[] — local → global vertex index).
+            List<ushort> vertexLookup = new();
+            if (vtxLookupCount > 0 && vtxLookupOfs > 0)
             {
-                int ofs = checked((int)vtxLookupOfs + (i * sizeof(ushort)));
-                vertexLookup.Add(ReadUInt16At(data, ofs));
+                ValidateSpan(vtxLookupCount, vtxLookupOfs, sizeof(ushort), data.Length, sourcePath, $"division[{divIndex}].vertexLookup");
+                for (int i = 0; i < vtxLookupCount; i++)
+                {
+                    int ofs = checked((int)vtxLookupOfs + (i * sizeof(ushort)));
+                    vertexLookup.Add(ReadUInt16At(data, ofs));
+                }
+            }
+
+            // Read triangle indices (uint16[]).
+            List<ushort> triangles = new();
+            if (indicesCount > 0 && indicesOfs > 0)
+            {
+                ValidateSpan(indicesCount, indicesOfs, sizeof(ushort), data.Length, sourcePath, $"division[{divIndex}].indices");
+                for (int i = 0; i < indicesCount; i++)
+                {
+                    int ofs = checked((int)indicesOfs + (i * sizeof(ushort)));
+                    triangles.Add(ReadUInt16At(data, ofs));
+                }
+            }
+
+            // Read bone entries (uint32 / 4-byte records).
+            List<M2SkinBoneEntry> boneEntries = new();
+            if (boneEntriesCount > 0 && boneEntriesOfs > 0)
+            {
+                ValidateSpan(boneEntriesCount, boneEntriesOfs, 4, data.Length, sourcePath, $"division[{divIndex}].boneEntries");
+                for (int i = 0; i < boneEntriesCount; i++)
+                {
+                    int ofs = checked((int)boneEntriesOfs + (i * 4));
+                    boneEntries.Add(new M2SkinBoneEntry(data[ofs], data[ofs + 1], data[ofs + 2], data[ofs + 3]));
+                }
+            }
+
+            // Read sections (0x20 B each).
+            List<M2Era100Section> eraSections = new();
+            List<M2SkinSubmesh> submeshes = new();
+            if (sectionsCount > 0 && sectionsOfs > 0)
+            {
+                ValidateSpan(sectionsCount, sectionsOfs, M2Era100Constants.SectionStride, data.Length, sourcePath, $"division[{divIndex}].sections");
+                for (int i = 0; i < sectionsCount; i++)
+                {
+                    int ofs = checked((int)sectionsOfs + (i * M2Era100Constants.SectionStride));
+                    ushort submeshId = ReadUInt16At(data, ofs + M2Era100Constants.SectionSubmeshIdOffset);
+                    ushort level = ReadUInt16At(data, ofs + M2Era100Constants.SectionLevelOffset);
+                    ushort vStart = ReadUInt16At(data, ofs + M2Era100Constants.SectionVertexStartOffset);
+                    ushort vCount = ReadUInt16At(data, ofs + M2Era100Constants.SectionVertexCountOffset);
+                    ushort iStart = ReadUInt16At(data, ofs + M2Era100Constants.SectionIndexStartOffset);
+                    ushort iCount = ReadUInt16At(data, ofs + M2Era100Constants.SectionIndexCountOffset);
+                    ushort bCount = ReadUInt16At(data, ofs + M2Era100Constants.SectionBoneCountOffset);
+                    ushort bCombo = ReadUInt16At(data, ofs + M2Era100Constants.SectionBoneComboIndexOffset);
+                    ushort bInfl = ReadUInt16At(data, ofs + M2Era100Constants.SectionBoneInfluencesOffset);
+                    ushort centerBone = ReadUInt16At(data, ofs + M2Era100Constants.SectionCenterBoneIndexOffset);
+
+                    uint levelHighBits = (uint)level << 16;
+                    eraSections.Add(new M2Era100Section(
+                        submeshId,
+                        level,
+                        vStart | levelHighBits,
+                        vCount,
+                        iStart | levelHighBits,
+                        iCount));
+
+                    submeshes.Add(new M2SkinSubmesh(
+                        submeshId,
+                        level,
+                        vStart,
+                        vCount,
+                        iStart,
+                        iCount,
+                        bCount,
+                        bCombo,
+                        bInfl,
+                        centerBone));
+                }
+            }
+
+            // Read batches (0x18 B each).
+            List<M2Era100Batch> eraBatches = new();
+            List<M2SkinBatch> skinBatches = new();
+            if (batchesCount > 0 && batchesOfs > 0)
+            {
+                ValidateSpan(batchesCount, batchesOfs, M2Era100Constants.BatchStride, data.Length, sourcePath, $"division[{divIndex}].batches");
+                for (int i = 0; i < batchesCount; i++)
+                {
+                    int ofs = checked((int)batchesOfs + (i * M2Era100Constants.BatchStride));
+                    eraBatches.Add(ReadM2Batch(data, ofs));
+
+                    byte bFlags = ReadByteAt(data, ofs + M2Era100Constants.BatchFlagsOffset);
+                    byte priorityPlane = ReadByteAt(data, ofs + M2Era100Constants.BatchPriorityPlaneOffset);
+                    ushort shaderId = ReadUInt16At(data, ofs + M2Era100Constants.BatchShaderIdOffset);
+                    ushort skinSectionIndex = ReadUInt16At(data, ofs + M2Era100Constants.BatchSkinSectionIndexOffset);
+                    ushort geosetIndex = ReadUInt16At(data, ofs + M2Era100Constants.BatchGeosetIndexOffset);
+                    short colorIndex = (short)ReadUInt16At(data, ofs + M2Era100Constants.BatchColorIndexOffset);
+                    ushort renderFlagsIndex = ReadUInt16At(data, ofs + M2Era100Constants.BatchMaterialIndexOffset);
+                    ushort materialLayer = ReadUInt16At(data, ofs + M2Era100Constants.BatchMaterialLayerOffset);
+                    ushort textureCount = ReadUInt16At(data, ofs + M2Era100Constants.BatchTextureCountOffset);
+                    ushort textureComboIndex = ReadUInt16At(data, ofs + M2Era100Constants.BatchTextureComboIndexOffset);
+                    ushort textureCoordComboIndex = ReadUInt16At(data, ofs + M2Era100Constants.BatchTextureCoordComboIndexOffset);
+                    ushort transparencyComboIndex = ReadUInt16At(data, ofs + M2Era100Constants.BatchTextureWeightComboIndexOffset);
+                    ushort textureTransformComboIndex = ReadUInt16At(data, ofs + M2Era100Constants.BatchTextureTransformComboIndexOffset);
+
+                    skinBatches.Add(new M2SkinBatch(
+                        bFlags,
+                        priorityPlane,
+                        shaderId,
+                        skinSectionIndex,
+                        geosetIndex,
+                        colorIndex,
+                        renderFlagsIndex,
+                        materialLayer,
+                        textureCount,
+                        textureComboIndex,
+                        textureCoordComboIndex,
+                        transparencyComboIndex,
+                        textureTransformComboIndex));
+                }
+            }
+
+            string skinSourcePath = divisionCount > 1
+                ? $"{sourcePath}#{divIndex:D2}"
+                : $"{sourcePath}#00";
+
+            M2SkinDocument skinDoc = new(
+                skinSourcePath,
+                "SKIN",
+                vertexLookup,
+                vtxLookupOfs,
+                triangles,
+                indicesOfs,
+                boneEntries,
+                boneEntriesOfs,
+                submeshes,
+                sectionsOfs,
+                skinBatches,
+                batchesOfs,
+                globalVertexOffset: 0,
+                shadowBatchCount: 0,
+                shadowBatchOffset: 0);
+
+            embeddedSkins.Add(skinDoc);
+
+            if (divIndex == 0)
+            {
+                // Resolve render vertices: walk vertexLookup → global M2Vertex.
+                List<M2Era100Vertex> renderVertices = new(vertexLookup.Count);
+                for (int i = 0; i < vertexLookup.Count; i++)
+                {
+                    ushort globalIndex = vertexLookup[i];
+                    M2Era100Vertex vertex = globalIndex < globalVertices.Count
+                        ? globalVertices[globalIndex]
+                        : default;
+                    renderVertices.Add(vertex);
+                }
+
+                primaryGeometry = new M2Era100Geometry(
+                    renderVertices,
+                    triangles,
+                    eraSections,
+                    eraBatches,
+                    textures: [],
+                    textureLookup: [],
+                    materials: null,
+                    globalVertices: globalVertices);
             }
         }
 
-        // Read triangle indices (int16[]).
-        List<ushort> triangles = new();
-        if (indicesCount > 0 && indicesOfs > 0)
-        {
-            ValidateSpan(indicesCount, indicesOfs, sizeof(ushort), data.Length, sourcePath, "division.indices");
-            for (int i = 0; i < indicesCount; i++)
-            {
-                int ofs = checked((int)indicesOfs + (i * sizeof(ushort)));
-                triangles.Add(ReadUInt16At(data, ofs));
-            }
-        }
-
-        // Read sections (0x20 B each).
-        List<M2Era100Section> sections = new();
-        if (sectionsCount > 0 && sectionsOfs > 0)
-        {
-            ValidateSpan(sectionsCount, sectionsOfs, M2Era100Constants.SectionStride, data.Length, sourcePath, "division.sections");
-            for (int i = 0; i < sectionsCount; i++)
-            {
-                int ofs = checked((int)sectionsOfs + (i * M2Era100Constants.SectionStride));
-                ushort level = ReadUInt16At(data, ofs + M2Era100Constants.SectionLevelOffset);
-                uint levelHighBits = (uint)level << 16;
-                sections.Add(new M2Era100Section(
-                    ReadUInt16At(data, ofs + M2Era100Constants.SectionSubmeshIdOffset),
-                    level,
-                    ReadUInt16At(data, ofs + M2Era100Constants.SectionVertexStartOffset) | levelHighBits,
-                    ReadUInt16At(data, ofs + M2Era100Constants.SectionVertexCountOffset),
-                    ReadUInt16At(data, ofs + M2Era100Constants.SectionIndexStartOffset) | levelHighBits,
-                    ReadUInt16At(data, ofs + M2Era100Constants.SectionIndexCountOffset)));
-            }
-        }
-
-        // Read batches (0x18 B each).
-        List<M2Era100Batch> batches = new();
-        if (batchesCount > 0 && batchesOfs > 0)
-        {
-            ValidateSpan(batchesCount, batchesOfs, M2Era100Constants.BatchStride, data.Length, sourcePath, "division.batches");
-            for (int i = 0; i < batchesCount; i++)
-            {
-                int ofs = checked((int)batchesOfs + (i * M2Era100Constants.BatchStride));
-                batches.Add(ReadM2Batch(data, ofs));
-            }
-        }
-
-        // Resolve render vertices: walk vertexLookup → global M2Vertex.
-        List<M2Era100Vertex> renderVertices = new(vertexLookup.Count);
-        for (int i = 0; i < vertexLookup.Count; i++)
-        {
-            ushort globalIndex = vertexLookup[i];
-            M2Era100Vertex vertex = globalIndex < globalVertices.Count
-                ? globalVertices[globalIndex]
-                : default;
-            renderVertices.Add(vertex);
-        }
-
-        return new M2Era100Geometry(
-            renderVertices,
-            triangles,
-            sections,
-            batches,
-            textures: [],
-            textureLookup: []);
+        return (primaryGeometry, embeddedSkins);
     }
 
     private static M2Era100Vertex ReadM2Vertex(byte[] data, int ofs, string sourcePath, int index)
@@ -706,6 +873,11 @@ public static class M2Era100ModelReader
     public static bool ValidateLayout(ReadOnlySpan<byte> data, string sourcePath)
     {
         if (data.Length < M2Era100Constants.MinimumHeaderSizeBytes)
+            return false;
+
+        // Check bones at 0x34 (count) / 0x38 (offset) — M2Bone stride 0x6C.
+        if (!TryValidateArray(data, M2Era100Constants.BoneCountOffset, M2Era100Constants.BoneOffsetOffset,
+            M2Era100Constants.BoneStride, "bones"))
             return false;
 
         // Check vertices at 0x44 (count) / 0x48 (offset) — M2Vertex stride 0x30.

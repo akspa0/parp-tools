@@ -16,7 +16,8 @@ public sealed class M2Era100Geometry
         IReadOnlyList<M2Era100Batch> batches,
         IReadOnlyList<M2Era100Texture> textures,
         IReadOnlyList<short> textureLookup,
-        IReadOnlyList<M2Era100Material>? materials = null)
+        IReadOnlyList<M2Era100Material>? materials = null,
+        IReadOnlyList<M2Era100Vertex>? globalVertices = null)
     {
         ArgumentNullException.ThrowIfNull(renderVertices);
         ArgumentNullException.ThrowIfNull(triangles);
@@ -32,10 +33,14 @@ public sealed class M2Era100Geometry
         Textures = textures;
         TextureLookup = textureLookup;
         Materials = materials ?? [];
+        GlobalVertices = globalVertices ?? renderVertices;
     }
 
     /// <summary>Vertices in division-local order (vertexLookup already applied).</summary>
     public IReadOnlyList<M2Era100Vertex> RenderVertices { get; }
+
+    /// <summary>Raw global vertices before division vertexLookup was applied.</summary>
+    public IReadOnlyList<M2Era100Vertex> GlobalVertices { get; }
 
     /// <summary>Triangle index buffer (indices into RenderVertices).</summary>
     public IReadOnlyList<ushort> Triangles { get; }

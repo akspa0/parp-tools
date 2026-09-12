@@ -262,4 +262,209 @@ public sealed class M2Era100ModelReaderTests
         BinaryPrimitives.WriteSingleLittleEndian(span.Slice(offset + 4, 4), y);
         BinaryPrimitives.WriteSingleLittleEndian(span.Slice(offset + 8, 4), z);
     }
+
+    [Fact]
+    public void Era100Reader_Reads108ByteBones_AndPopulatesDocumentBones()
+    {
+        byte[] m2 = CreateSyntheticEra100M2WithBone();
+
+        using MemoryStream stream = new(m2, writable: false);
+        M2ModelDocument document = M2Era100ModelReader.Read(stream, "Character\\Synthetic\\Era100Bone.m2");
+
+        M2BoneDefinition bone = Assert.Single(document.Bones);
+        Assert.Equal(5, bone.KeyBoneId);
+        Assert.Equal(8u, bone.Flags);
+        Assert.Equal(-1, bone.ParentBone);
+        Assert.Equal(0, bone.SubmeshId);
+        Assert.Equal(new Vector3(1f, 2f, 3f), bone.Pivot);
+        Assert.Equal(0u, bone.BoneNameCrc);
+        Assert.Equal(M2TrackInterpolation.Linear, bone.TranslationTrack.Interpolation);
+        Assert.Equal(M2TrackInterpolation.Linear, bone.RotationTrack.Interpolation);
+        Assert.Equal(M2TrackInterpolation.Linear, bone.ScalingTrack.Interpolation);
+    }
+
+    [Fact]
+    public void Era100Reader_Reads112ByteBones_WithBoneNameCrc()
+    {
+        byte[] m2 = CreateSyntheticEra104M2WithBone();
+
+        using MemoryStream stream = new(m2, writable: false);
+        M2ModelDocument document = M2Era100ModelReader.Read(stream, "Character\\Synthetic\\Era104Bone.m2");
+
+        M2BoneDefinition bone = Assert.Single(document.Bones);
+        Assert.Equal(7, bone.KeyBoneId);
+        Assert.Equal(16u, bone.Flags);
+        Assert.Equal(-1, bone.ParentBone);
+        Assert.Equal(0, bone.SubmeshId);
+        Assert.Equal(0x1F1A625Au, bone.BoneNameCrc);
+        Assert.Equal(new Vector3(4f, 5f, 6f), bone.Pivot);
+        Assert.Equal(M2TrackInterpolation.Linear, bone.TranslationTrack.Interpolation);
+        Assert.Equal(M2TrackInterpolation.Linear, bone.RotationTrack.Interpolation);
+        Assert.Equal(M2TrackInterpolation.Linear, bone.ScalingTrack.Interpolation);
+    }
+
+    [Fact]
+    public void Era100Reader_ExtractsEmbeddedSkinDocuments_AndPreservesGlobalVertices()
+    {
+        byte[] m2 = CreateSyntheticEra100M2(indexCount: 6, level: 0);
+
+        using MemoryStream stream = new(m2, writable: false);
+        M2ModelDocument document = M2Era100ModelReader.Read(stream, "Character\\Synthetic\\Era100Skin.m2");
+
+        M2SkinDocument skin = Assert.Single(document.EmbeddedSkinDocuments);
+        Assert.Single(skin.Submeshes);
+        Assert.Equal(6, skin.TriangleIndices.Count);
+        Assert.Single(skin.Batches);
+
+        Assert.NotNull(document.InlineEra100Geometry);
+        Assert.Equal(4, document.InlineEra100Geometry.GlobalVertices.Count);
+        Assert.Equal(4, document.InlineEra100Geometry.RenderVertices.Count);
+    }
+
+    [Theory]
+    [InlineData(0x100u)]
+    [InlineData(0x104u)]
+    [InlineData(0x107u)]
+    public void Era100Reader_AcceptsLegacyVersions_0x100_Through_0x107(uint version)
+    {
+        byte[] m2 = CreateSyntheticEra100MultiVersionM2(indexCount: 6, level: 0, version: version);
+
+        using MemoryStream stream = new(m2, writable: false);
+        M2DispatchResult result = M2ModelReaderDispatcher.ReadDetailed(stream, $"Character\\Synthetic\\Era100_{version:X}.m2");
+
+        Assert.Equal(M2Era1121EraTag.Md20_1X_V100_Era100, result.Era);
+        Assert.Equal(version, result.Document.Version);
+        Assert.NotNull(result.Document.InlineEra100Geometry);
+    }
+
+    private static byte[] CreateSyntheticEra100MultiVersionM2(ushort indexCount, ushort level, uint version)
+    {
+        byte[] data = CreateSyntheticEra100M2(indexCount, level);
+        BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(M2Era100Constants.VersionOffset, 4), version);
+        return data;
+    }
+
+    private static byte[] CreateSyntheticEra100M2WithBone()
+    {
+        const int headerSize = 0x144;
+        int boneOffset = headerSize;
+        int cursor = boneOffset + M2Era100Constants.BoneStride;
+
+        int transRanges = cursor; cursor += 8;
+        int transTimes = cursor; cursor += 4;
+        int transValues = cursor; cursor += 12;
+
+        int rotRanges = cursor; cursor += 8;
+        int rotTimes = cursor; cursor += 4;
+        int rotValues = cursor; cursor += 8;
+
+        int scaleRanges = cursor; cursor += 8;
+        int scaleTimes = cursor; cursor += 4;
+        int scaleValues = cursor; cursor += 12;
+
+        byte[] data = new byte[cursor];
+        Span<byte> span = data;
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span[..4], M2Era100Constants.Md20Magic);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(M2Era100Constants.VersionOffset, 4), 0x100u);
+
+        WriteArray(span, M2Era100Constants.BoneCountOffset, 1, boneOffset);
+
+        BinaryPrimitives.WriteInt32LittleEndian(span.Slice(boneOffset + 0x00, 4), 5);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(boneOffset + 0x04, 4), 8u);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(boneOffset + 0x08, 2), -1);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(boneOffset + 0x0A, 2), 0);
+
+        WriteOldTrackSingle(span, boneOffset + 0x0C, transRanges, transTimes, transValues, valueCount: 1);
+        WriteOldTrackSingle(span, boneOffset + 0x28, rotRanges, rotTimes, rotValues, valueCount: 1);
+        WriteOldTrackSingle(span, boneOffset + 0x44, scaleRanges, scaleTimes, scaleValues, valueCount: 1);
+        WriteVector3(span, boneOffset + 0x60, 1f, 2f, 3f);
+
+        WriteRangeSingle(span, transRanges);
+        WriteRangeSingle(span, rotRanges);
+        WriteRangeSingle(span, scaleRanges);
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(transTimes, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(rotTimes, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(scaleTimes, 4), 0);
+
+        WriteVector3(span, transValues, 10f, 20f, 30f);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(rotValues + 0, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(rotValues + 2, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(rotValues + 4, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(rotValues + 6, 2), short.MaxValue);
+        WriteVector3(span, scaleValues, 1f, 1f, 1f);
+
+        return data;
+    }
+
+    private static byte[] CreateSyntheticEra104M2WithBone()
+    {
+        const int headerSize = 0x144;
+        int boneOffset = headerSize;
+        int cursor = boneOffset + M2Era100Constants.BoneStrideEra104;
+
+        int transRanges = cursor; cursor += 8;
+        int transTimes = cursor; cursor += 4;
+        int transValues = cursor; cursor += 12;
+
+        int rotRanges = cursor; cursor += 8;
+        int rotTimes = cursor; cursor += 4;
+        int rotValues = cursor; cursor += 8;
+
+        int scaleRanges = cursor; cursor += 8;
+        int scaleTimes = cursor; cursor += 4;
+        int scaleValues = cursor; cursor += 12;
+
+        byte[] data = new byte[cursor];
+        Span<byte> span = data;
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span[..4], M2Era100Constants.Md20Magic);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(M2Era100Constants.VersionOffset, 4), 0x107u);
+
+        WriteArray(span, M2Era100Constants.BoneCountOffset, 1, boneOffset);
+
+        BinaryPrimitives.WriteInt32LittleEndian(span.Slice(boneOffset + 0x00, 4), 7);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(boneOffset + 0x04, 4), 16u);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(boneOffset + 0x08, 2), -1);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(boneOffset + 0x0A, 2), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(boneOffset + 0x0C, 4), 0x1F1A625Au);
+
+        WriteOldTrackSingle(span, boneOffset + 0x10, transRanges, transTimes, transValues, valueCount: 1);
+        WriteOldTrackSingle(span, boneOffset + 0x2C, rotRanges, rotTimes, rotValues, valueCount: 1);
+        WriteOldTrackSingle(span, boneOffset + 0x48, scaleRanges, scaleTimes, scaleValues, valueCount: 1);
+        WriteVector3(span, boneOffset + 0x64, 4f, 5f, 6f);
+
+        WriteRangeSingle(span, transRanges);
+        WriteRangeSingle(span, rotRanges);
+        WriteRangeSingle(span, scaleRanges);
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(transTimes, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(rotTimes, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(scaleTimes, 4), 0);
+
+        WriteVector3(span, transValues, 10f, 20f, 30f);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(rotValues + 0, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(rotValues + 2, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(rotValues + 4, 2), 0);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(rotValues + 6, 2), short.MaxValue);
+        WriteVector3(span, scaleValues, 1f, 1f, 1f);
+
+        return data;
+    }
+
+    private static void WriteRangeSingle(Span<byte> span, int offset)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(offset, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(offset + 4, 4), 0);
+    }
+
+    private static void WriteOldTrackSingle(Span<byte> span, int offset, int ranges, int times, int values, int valueCount)
+    {
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(offset + 0x00, 2), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(offset + 0x02, 2), ushort.MaxValue);
+        WriteArray(span, offset + 0x04, 1, ranges);
+        WriteArray(span, offset + 0x0C, 1, times);
+        WriteArray(span, offset + 0x14, valueCount, values);
+    }
 }

@@ -167,7 +167,9 @@ public static class M2Era100Constants
     // --- Element strides (differ from WotLK and 1.12.1!) ---
 
     public const int SequenceStride = 0x44;   // 68 B — same as 1.12.1 V100
-    public const int BoneStride = 0x6C;       // 108 B — WotLK is 0x58
+    public const int BoneStride = 0x6C;       // 108 B — legacy 1.0.0 layout (no boneNameCrc)
+    public const int BoneStrideEra100 = 0x6C; // 108 B — legacy 1.0.0 layout
+    public const int BoneStrideEra104 = 0x70; // 112 B — 2.x/3.0.1 layout (with boneNameCrc)
     public const int VertexStride = 0x30;     // 48 B — interleaved pos/normal/uv/bones
     public const int DivisionStride = 0x2C;   // 44 B — embedded skin profile
     public const int ColorStride = 0x38;      // 56 B — WotLK is 0x28, 1.12.1 is 0x1C

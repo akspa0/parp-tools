@@ -190,12 +190,14 @@ the spec in the same change or add a dated amendment note. Code and spec agree a
   update the ledger below, and write a dated report under `specs/224-speckit-governance/evidence/`.
 
 **Cleanup ledger**
-- Last cleanup: 2026-09-10 (first real 224-T201 audit run — PARTIAL: 2 of 5 active specs with
-  checked tasks audited — 227 clean, 232 found 8 stale checked tasks and corrected them; 233/231/223
-  audits failed on a session rate limit and still need a retry. `activeContext.md` recompressed
-  188→~65 lines. See `specs/224-speckit-governance/evidence/cleanup-2026-09-10.md`.)
-- Next cleanup due: retry 233/231/223 audits as soon as feasible (do not wait for 2026-10-01 —
-  this pass is incomplete, not the monthly cadence)
+- Last cleanup: 2026-09-11 (224-T201 receipt/symbol audit **COMPLETE** — all 5 active specs carrying
+  checked tasks audited). 227 clean (2026-09-10); 232 had 8 stale checks corrected to `[ ]`
+  (2026-09-10); 233 clean (3/3 receipts, 14 checks verified); 231 clean (0 un-checked — T001
+  contradiction resolved to PASS via `inventory-v3-baseline.md`, T074 flagged as
+  "receipt not in evidence/"); **223 had 16 receipt-less pre-§9.2 checks un-checked** (T101–T107,
+  Gate A, T201, T202, T301, T302, Gate B, T401, T501, T502) and listed for operator decision.
+  See `specs/224-speckit-governance/evidence/cleanup-2026-09-11.md`.
+- Next cleanup due: 2026-10-01 (monthly cadence)
 
 ---
 

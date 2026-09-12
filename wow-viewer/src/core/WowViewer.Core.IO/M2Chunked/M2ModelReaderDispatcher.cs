@@ -68,16 +68,20 @@ public static class M2ModelReaderDispatcher
 
             uint version = BinaryPrimitives.ReadUInt32LittleEndian(headerBytes.Slice(sizeof(uint), sizeof(uint)));
             M2Era1121Version eraVersion = M2Era1121VersionExtensions.FromUInt(version);
-            if (eraVersion.Is1121())
+            if (version <= 0x107u)
             {
-                // Both 1.0.0 and 1.12.1 use version 0x100, but they have completely
-                // different header layouts. Validate the 1.0.0 layout first; if the
-                // vertices/divisions/textures fields at the 1.0.0 header positions
-                // produce sane offsets, it's a 1.0.0 file. Otherwise fall back to 1.12.1.
-                if (version == 0x100u && M2Era100ModelReader.ValidateLayout(headerBytes, sourcePath))
+                // Versions 0x100 through 0x107 (versions 256..263) use the legacy classic
+                // layout with embedded divisions/skin profiles. Validate the embedded layout
+                // first; if valid, route to the unified legacy reader.
+                if (M2Era100ModelReader.ValidateLayout(headerBytes, sourcePath))
                     return M2Era1121EraTag.Md20_1X_V100_Era100;
 
-                return eraVersion == M2Era1121Version.V101 ? M2Era1121EraTag.Md20_1X_V101 : M2Era1121EraTag.Md20_1X_V100;
+                // 1.12.1 retail layout uses flat parallel arrays.
+                if (eraVersion.Is1121())
+                    return eraVersion == M2Era1121Version.V101 ? M2Era1121EraTag.Md20_1X_V101 : M2Era1121EraTag.Md20_1X_V100;
+
+                // Default fallback for legacy 0x100-0x107 models.
+                return M2Era1121EraTag.Md20_1X_V100_Era100;
             }
 
             if (version == 0x108u)
@@ -87,7 +91,7 @@ public static class M2ModelReaderDispatcher
                 return M2Era1121EraTag.Md20_4X_V109;
 
             throw new NotSupportedException(
-                $"MD20 v0x{version:X} is the 2.x TBC era, which is not yet supported. Tracked under spec 049.");
+                $"MD20 v0x{version:X} is outside the supported range (0x100-0x109).");
         }
 
         throw new InvalidDataException(

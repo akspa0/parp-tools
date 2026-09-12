@@ -13,15 +13,17 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
 on-demand context, never default reading. Landed-work narrative lives in `progress.md`, not here —
 this file states only the current lane and what's still open.
 
-## Spec 224 governance audit — PARTIAL (2026-09-10), retry owed
+## Spec 224 governance audit — COMPLETE (2026-09-11)
 
-First real run of the repo's own receipt audit (224-T201, previously never executed). 227 audited
-clean. **232 had 8 of 12 checked tasks corrected to `[ ]`** (T050, T052, T056, T057, T058, T059,
-T064, T066 — checked against acceptance criteria their own receipts admit are still open; see its
-tasks.md for detail). **233, 231, 223 were NOT audited** (agents failed on a session rate limit) —
-**their checked-task counts are unverified; do not cite them as proof of completion.** Report:
-[cleanup-2026-09-10.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-10.md). Retry
-those 3 audits next session before trusting their tasks.md state.
+224-T201's receipt/symbol audit now covers all 5 active specs carrying checked tasks. 227 clean
+(2026-09-10); 232 had 8 of 12 checks corrected to `[ ]` (2026-09-10); **233 clean** (3/3 receipts,
+14 checks); **231 clean** (0 un-checked — T001 resolved to PASS via `inventory-v3-baseline.md`;
+T074 kept checked but flagged "receipt not in evidence/"); **223 had 16 receipt-less pre-§9.2 checks
+un-checked** (T101–T107, Gate A, T201, T202, T301–T302, Gate B, T401, T501–T502) and is listed for
+operator decision. Reports:
+[cleanup-2026-09-11.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-11.md) (this pass)
+and [cleanup-2026-09-10.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-10.md).
+224-T201 closes on operator acknowledgment; 224-T202 (archival) and Gate 2 remain open.
 
 ## New operator-reported gaps (2026-09-10, not yet investigated)
 
@@ -33,59 +35,30 @@ small to show a signed two-digit value, must scale with UI text). Spec 231 gaine
 hovered-WMO doodad-set combo disappears on mouse-leave). Operator also re-stated the save-pipeline
 gap directly — that's Spec 234 below, already the whole point of the spec.
 
-## New lane — Spec 235 Legacy MDX/M2 Rendering (1.0.0-3.0.1)
+## Active lane — Spec 235 Legacy MDX/M2 Rendering (1.0.0-3.0.1) — Phases 0–4 Implemented & Receipted (2026-09-11)
 
-[235-legacy-mdx-m2-rendering/spec.md](../specs/235-legacy-mdx-m2-rendering/spec.md) — Draft, not
-planned. Operator directive 2026-09-10: MDX/M2 support for 1.0.0-3.0.1 is "very much
-non-functional" (no objects render, no bounding boxes); fuckported (non-standard-rewritten) assets
-must render if Warcraft.NET can read them; MDX torch/light-emitter effects are missing.
-**Mid-authoring this spec discovered it would have duplicated two existing, untracked specs**:
-104 (legacy-m2-rendering, 7/27 tasks checked, unaudited) and 154 (m2-era-reader-parity, planned but
-never task-broken) — both had real measured evidence (154: the broken range is exactly `0x100`
-through `0x107`, not an approximate "1.x-3.0.1"; `3.3.0`/`0x108` is the real known-good reference,
-not "3.3.5") but neither was listed in `epics/active-epics.md`, which is how they went invisible
-despite 104 claiming "Status: Active." 235 now explicitly supersedes both (dated notes added to
-each; content preserved, not archived) and incorporates their findings.
-
-**Planned 2026-09-10**, then **Phase 0 reconciliation partially executed the same day** — findings
-are in [235's research.md](../specs/235-legacy-mdx-m2-rendering/research.md) and they **invalidate
-the shape of the current plan.md**. Read research.md before plan.md; plan.md's six-phase per-era
-structure predates the findings and needs rewriting.
-
-**What Phase 0 established (code-evidenced):**
-
-1. `FormatProfileRegistry.ResolveMdxProfile` is **dead code** (zero callers) — that is why "MDX is
-   fine". `ResolveModelProfile` (M2) is live, and its `major == 1` → `null` return disables both
-   embedded-profile routes for the entire Vanilla era (`WorldAssetManager.cs:1340`, `:1375`).
-2. **The world-placement loader never reaches the 1.0.0 reader.** `WorldAssetManager`'s no-skin
-   chain branches on `Md20_1X_V100`/`V101` but has **no `Md20_1X_V100_Era100` case**. Fixing
-   `M2Era100ModelReader`'s bone bug alone would render nothing.
-3. **No bounding-box fallback exists** — every failure returns `null`, so a failed load is invisible.
-   That is the "no bounding boxes either" symptom; FR-005 must be built, not reconnected.
-4. The `0x102`–`0x107` refusal is a hardcoded `NotSupportedException` in
-   `M2ModelReaderDispatcher.DetectEra`, citing "spec 049" — a **stale citation** (049 is an archived
-   UI spec).
-5. **Warcraft.NET's `MD21` already reads this whole era generically** (annotated
-   `VersionBeforeLegion`→`VersionAfterWoD`, one flag-keyed conditional, no per-version branching) and
-   is already wrapped by `WarcraftNetM2Adapter`. It captures `ViewCount` but **never walks the
-   embedded skin/view table** — the single real gap, matching Spec 104's independent diagnosis.
-6. `M2Era100Constants`' Ghidra-derived offsets are **+8 shifted** vs Warcraft.NET's layout, and the
-   Era100 tests are self-admittedly synthetic ("run without a staged client") so they cannot detect
-   a wrong offset. Unverified.
-
-**Operator direction**: stop per-build special-casing; use Warcraft.NET's M2 implementation (already
-wrapped) plus wowdev.wiki as reference. "MDX is fine, M2 is not fully there." "1.0.0+ uses .MDX as
-the extension, but M2 as the format, with the MD20 chunk" — verified the routing already honours
-this (magic bytes decide, extension is diagnostic only).
-
-**BLOCKED / next action**: no real file was ever read. `m2 inspect --archive-root … --virtual-path
-World\ArtTest\BoxTest\XYZ.mdx` failed against the 1.0.0.3980 client, whose `Data/` uses the older
-content-segmented archives (`base.MPQ`, `model.MPQ`, …). **This is a wrong invocation, not a missing
-capability — the repo already has tooling that inspects everything.** Next session: read
-`tools/inspect`'s usage and the real client-read invocations in specs 104/154/205 (several take
-`--client`/`--game-path`, not `--archive-root`) **before** improvising flags or guessing asset paths.
-Then settle finding 6 against one real file, and rewrite plan.md around the reframe at the end of
-research.md.
+[235-legacy-mdx-m2-rendering/spec.md](../specs/235-legacy-mdx-m2-rendering/spec.md) — Implementation complete for Phases 0 through 4 on branch `235-legacy-mdx-m2-rendering`.
+- **Core Reader Unification (`M2ModelReaderDispatcher.cs`, `M2Era100ModelReader.cs`)**:
+  - Dropped the `0x102`–`0x107` `NotSupportedException` refusal wall.
+  - Supports MD20 versions `<= 0x107` with classic division layout in `M2Era100ModelReader`.
+  - Implemented 108-byte (`0x6C`, version `0x100`) and 112-byte (`0x70`, version `0x104`–`0x107` with `boneNameCrc` at `+0x0C`) bone parsing with track normalization.
+  - Populates `EmbeddedSkinDocuments` from embedded division records; `M2SkinProfileRuntime` initializes directly without looking for non-existent external `.skin` files.
+- **World Placement & Fallback (`WorldAssetManager.cs`, `WowViewerM2RuntimeBridge.cs`)**:
+  - Added explicit handling for `M2Era1121EraTag.Md20_1X_V100_Era100` routing directly to the runtime bridge.
+  - Implemented FR-005 Bounding-Box Fallback (`BuildBoundingBoxFallbackModel`, 8-vertex, 12-triangle unit box with `usesCompatibilityFallback: true`) so models with no drawable geometry render bounds rather than remaining invisible.
+- **Tooling (`WowViewer.Tool.Inspect`)**:
+  - `RunM2Inspect` generates `M2GeometryDocument` for `Md20_1X_V100_Era100` using `GlobalVertices`.
+- **Verification Across Staged Clients (All Pass Exit 0)**:
+  - 1.0.0.3980 (`xyz.m2`): `ERA: 1.0.0 (MD20 v0x100)`, bones=1, geometry available=true, vertices=72.
+  - 2.0.0.5610 (`BloodElfMale.m2`): `ERA: 1.0.0 (MD20 v0x100)`, bones=138, geometry available=true, vertices=4864.
+  - 2.4.3.8606 (`BloodElfMale.m2`): `ERA: 1.0.0 (MD20 v0x100)`, bones=143, geometry available=true, vertices=5712.
+  - 3.0.1.8303 (`BloodElfMale.m2`): `ERA: 1.0.0 (MD20 v0x100)`, bones=143, geometry available=true, vertices=5712.
+  - 3.3.0.10958 (`BloodElfMale.m2`): `ERA: 3.3.5 (MD20 v0x108)`, bones=151, geometry available=true, vertices=6778.
+- **Unit Tests & Build**:
+  - `M2Era100ModelReaderTests`: 11 passed, 0 failed.
+  - `ModelRouteClassifierTests`: 7 passed, 0 failed.
+  - Full solution build: 0 errors.
+- **Receipt**: [phase1-reader-unification.md](../specs/235-legacy-mdx-m2-rendering/evidence/phase1-reader-unification.md).
 
 ## Current lane — Spec 234 Map Save & New Map Creator
 
@@ -124,8 +97,11 @@ of scope. Supersedes Spec 230 US2/US3. **Next: speckit-plan.**
 
 ## Handoff
 
-**Immediate:** finish the Spec 224 audit (un-check anything lacking a real receipt, write the
-dated report, update the AGENTS.md cleanup ledger), then run `speckit-plan` for Spec 234.
+**Immediate:** the Spec 224 audit is done and its report says so — the next bounded action is
+`speckit-plan` for Spec 234. Operator decisions owed: the 16 un-checked Spec 223 checks (accept or
+supply retroactive receipts) and the Spec 231 T074 receipt gap.
 
-**Do not claim:** any Spec 232/233/223/226 visual/runtime acceptance, or Spec 224 audit completion,
-until this pass's report says so.
+**Do not claim:** any Spec 232/233/223/226 visual/runtime acceptance; the Spec 223 Phase 1–5 source
+tasks are now un-checked pending receipts; and the Spec 235 plan rewrite stays blocked on a real-file
+inspection (read `tools/inspect` usage + the `--client`/`--game-path` invocations in specs 104/154/205
+first).

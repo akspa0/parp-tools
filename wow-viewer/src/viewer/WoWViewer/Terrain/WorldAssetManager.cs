@@ -1398,7 +1398,38 @@ private int _mdxLoadFailCount = 0;
                     }
 
                     M2Era1121EraTag detectedEra = M2ModelReaderDispatcher.DetectEra(data.AsSpan(), resolvedModelPath);
-                    if (detectedEra is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
+                    if (detectedEra is M2Era1121EraTag.Md20_1X_V100_Era100)
+                    {
+                        try
+                        {
+                            M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildEra100StaticRenderModel(data, resolvedModelPath);
+                            string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+
+                            var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterEmbeddedProfile, M2RouteType.AdapterEmbeddedProfile, fallbackReason: $"1.0.0-era MD20 model (era={detectedEra.ToDisplayString()}), embedded division");
+                            _mdxRouteDecisions[normalizedKey] = route;
+                            M2RouteDiagnostics.LogRouteDecision(route);
+
+                            ViewerLog.Info(ViewerLog.Category.Mdx,
+                                $"[M2] Loaded embedded 1.0.0 geometry for {Path.GetFileName(normalizedKey)} (era={detectedEra.ToDisplayString()})");
+                            return WowViewerM2RuntimeBridge.CreateRenderer(
+                                _gl,
+                                runtimeModel,
+                                adaptedMdx: null,
+                                adaptedModelDir,
+                                _dataSource,
+                                _texResolver,
+                                _buildVersion,
+                                resolvedModelPath,
+                                deferInitialTextureLoads: true);
+                        }
+                        catch (Exception ex)
+                        {
+                            lastSkinError = ex;
+                            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                                $"[M2] Embedded 1.0.0 world fallback failed for {Path.GetFileName(normalizedKey)}: {ex.Message}");
+                        }
+                    }
+                    else if (detectedEra is M2Era1121EraTag.Md20_1X_V100 or M2Era1121EraTag.Md20_1X_V101)
                     {
                         try
                         {

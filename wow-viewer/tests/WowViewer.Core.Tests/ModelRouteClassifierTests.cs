@@ -31,14 +31,13 @@ public sealed class ModelRouteClassifierTests
     [Theory]
     [InlineData(0x102u)]
     [InlineData(0x107u)]
-    public void Md20TbcEraRange_ClassifiesAsBlocked(uint version)
+    public void Md20TbcEraRange_ClassifiesAsReadable(uint version)
     {
-        // 0x107 is the version actually measured at 3.0.1.8303 (Spec 154). 0x102 pins the range's
-        // lower boundary the dispatcher itself refuses via NotSupportedException.
+        // 0x100 through 0x107 are now supported via the unified legacy reader (Spec 235).
         ModelRouteClassification result = ModelRouteClassifier.Classify(Md20Header(version), "test.m2");
 
-        Assert.Equal(ModelRouteStatus.Blocked, result.Status);
-        Assert.Contains("0x102-0x107", result.RouteLabel);
+        Assert.Equal(ModelRouteStatus.Readable, result.Status);
+        Assert.Contains("0x100-0x107", result.RouteLabel);
     }
 
     [Fact]
@@ -54,7 +53,7 @@ public sealed class ModelRouteClassifierTests
     [Fact]
     public void BlockedRoute_CarriesANonEmptyReason()
     {
-        ModelRouteClassification result = ModelRouteClassifier.Classify(Md20Header(0x107), "test.m2");
+        ModelRouteClassification result = ModelRouteClassifier.Classify(Md20Header(0x109), "test.m2");
 
         Assert.False(string.IsNullOrWhiteSpace(result.Reason));
     }

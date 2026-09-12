@@ -9,6 +9,14 @@ public static class M2SkinProfileRuntime
         ArgumentNullException.ThrowIfNull(model);
 
         M2SkinProfileSelection selection = new(profileIndex, model.Identity.BuildSkinPath(profileIndex));
+        if (model.EmbeddedSkinDocuments is { Count: > 0 })
+        {
+            int index = Math.Clamp(profileIndex, 0, model.EmbeddedSkinDocuments.Count - 1);
+            M2SkinDocument embeddedSkin = model.EmbeddedSkinDocuments[index];
+            M2ActiveSkinProfile activeProfile = new(model, selection, embeddedSkin, usesCompatibilityFallback: false);
+            return new M2SkinProfileRuntimeState(model, selection, M2SkinProfileStage.Initialized, embeddedSkin, activeProfile);
+        }
+
         return new M2SkinProfileRuntimeState(model, selection, M2SkinProfileStage.Chosen, loadedSkin: null, activeSkinProfile: null);
     }
 
@@ -16,6 +24,9 @@ public static class M2SkinProfileRuntime
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(skin);
+
+        if (state.Stage == M2SkinProfileStage.Initialized && state.LoadedSkin is not null)
+            return state;
 
         if (state.Stage != M2SkinProfileStage.Chosen)
             throw new InvalidOperationException($"Cannot load a skin profile from stage '{state.Stage}'. Expected '{M2SkinProfileStage.Chosen}'.");
@@ -32,6 +43,9 @@ public static class M2SkinProfileRuntime
     public static M2SkinProfileRuntimeState Initialize(M2SkinProfileRuntimeState state)
     {
         ArgumentNullException.ThrowIfNull(state);
+
+        if (state.Stage == M2SkinProfileStage.Initialized && state.ActiveSkinProfile is not null)
+            return state;
 
         if (state.Stage != M2SkinProfileStage.Loaded || state.LoadedSkin is null)
             throw new InvalidOperationException("Cannot initialize a skin profile before the exact numbered .skin companion is loaded.");

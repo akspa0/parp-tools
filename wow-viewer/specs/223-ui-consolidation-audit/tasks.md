@@ -2,54 +2,67 @@
 
 **Spec**: [spec.md](spec.md) · **Plan**: [plan.md](plan.md) · **Inventory**: [surface-inventory.md](surface-inventory.md)
 
+> **Audit note (2026-09-11, Spec 224 `speckit-cleanup` retry pass).** The Phase 1–5 work below
+> predates the AGENTS.md §9.2 receipt requirement (added 2026-09-06), and none of the checked
+> tasks in Phases 1–5 carry a receipt — there is no `evidence/` artifact for T101–T502 (the spec's
+> `evidence/` directory contains only `phase6-validation.md` and the T609 hardening note). Per the
+> cleanup skill's mechanical receipt rule those 16 checks + the two operator gates were un-checked
+> on 2026-09-11. **This is a receipt-discipline correction, not a claim the work is undone** — the
+> consolidation is referenced as shipped across `memory-bank/` and `specs/STATUS.md`. All 16 are
+> listed under "needs operator decision" in
+> [cleanup-2026-09-11.md](../224-speckit-governance/evidence/cleanup-2026-09-11.md); re-check with
+> retroactive receipts or leave unchecked. T601–T608 and the Phase 6 source gate keep their
+> `phase6-validation.md` receipt (that receipt gives commands/results and an evidence boundary but
+> no explicit files-changed list — noted as a §9.2 format gap, not corrected).
+
 ## Phase 1 — Unified Object Inspector (US2a, US3)
 
-- [x] 223-T101: Inspector host + HUD-ready content model. New right-sidebar destination
+- [ ] 223-T101: Inspector host + HUD-ready content model. New right-sidebar destination
       "Inspector" (replaces legacy `##InspectorTabs`); content model (sections of rows, actions,
       sub-blocks) in `WowViewer.Core.Runtime.World.Inspection` so it can render as the 212 HUD
       object later. Consumes the existing selection pipeline. Verify: build green; selecting each
       object type routes to the right section.
-- [x] 223-T102: ADT section — absorb MCNK Explorer, ADT Chunk Investigation,
+- [ ] 223-T102: ADT section — absorb MCNK Explorer, ADT Chunk Investigation,
       TerrainChunkHoverOverlay, Terrain Lab MCNK page. Capability checklist from inventory §5
       before removal.
-- [x] 223-T103: WMO section — absorb WMO details; **doodad-set switching** (MODS list, active
+- [ ] 223-T103: WMO section — absorb WMO details; **doodad-set switching** (MODS list, active
       set, re-render without map reload, selection/camera preserved). Core-side set-resolution
       model + focused tests.
-- [x] 223-T104: MDX/M2 section — absorb Model Info + Inspect Animations/Context.
-- [x] 223-T105: PM4 section — absorb Selected PM4 / Match details / Scene measurements.
-- [x] 223-T106: WL\* liquid section — absorb WL Liquid Investigation.
-- [x] 223-T107: Hover overlays become compact summaries deep-linking into the Inspector.
-- [x] **Gate A**: capability walkthrough — every absorbed surface's features present; old
+- [ ] 223-T104: MDX/M2 section — absorb Model Info + Inspect Animations/Context.
+- [ ] 223-T105: PM4 section — absorb Selected PM4 / Match details / Scene measurements.
+- [ ] 223-T106: WL\* liquid section — absorb WL Liquid Investigation.
+- [ ] 223-T107: Hover overlays become compact summaries deep-linking into the Inspector.
+- [ ] **Gate A**: capability walkthrough — every absorbed surface's features present; old
       surfaces removed in the same change (FR-2/FR-3). Operator verifies.
 
 ## Phase 2 — Duplicate retirement (US2)
 
-- [x] 223-T201: Retire floating windows absorbed by the Inspector; Log/Perf/RenderQuality
+- [ ] 223-T201: Retire floating windows absorbed by the Inspector; Log/Perf/RenderQuality
       floaters → Utilities pages (single implementation each).
-- [x] 223-T202: Merge ×2 implementations (World Overview, World Maps, Chunk Clipboard) into one
+- [ ] 223-T202: Merge ×2 implementations (World Overview, World Maps, Chunk Clipboard) into one
       shared draw method used by both tab UI and legacy UI.
 - [ ] 223-T203: Retire Terrain Workbench floating window after the 222-T111 parity checklist.
 
 ## Phase 3 — Editor + Archaeology merge (US4 step 1)
 
-- [x] 223-T301: Editor content (converters, ML dataset, imports, editor task nav) into
+- [ ] 223-T301: Editor content (converters, ML dataset, imports, editor task nav) into
       Archaeology as an "Editor" page group; top-bar Editor mode routes to Archaeology.
-- [x] 223-T302: Cartography under Archaeology (222-T108/T109/T109a/T110): layer panel in right
+- [ ] 223-T302: Cartography under Archaeology (222-T108/T109/T109a/T110): layer panel in right
       sidebar, synthesized minimap tab, save-merged-output; delete left-sidebar panel.
-- [x] **Gate B**: feature-parity walkthrough against the inventory — nothing lost (SC-4).
+- [ ] **Gate B**: feature-parity walkthrough against the inventory — nothing lost (SC-4).
 
 ## Phase 4 — True-editor split (US4 step 2)
 
-- [x] 223-T401: Dedicated Editor profile with authoring/writing features; Archaeology keeps
+- [ ] 223-T401: Dedicated Editor profile with authoring/writing features; Archaeology keeps
       analysis/inspection; old separate tabs removed.
 
 ## Phase 5 — Quick per profile (US5)
 
-- [x] 223-T501: Shared Quick mirror component; per-profile top controls from the inventory.
+- [ ] 223-T501: Shared Quick mirror component; per-profile top controls from the inventory.
       **AMENDED 2026-09-06 (operator): "Fog End first" is superseded — sliders render in natural
       order, Fog Start above Fog End, because the reversed order made the operator adjust the
       wrong slider.**
-- [x] 223-T502: Settings>Fog Defaults is the single implementation; Quick mirrors it (FR-6).
+- [ ] 223-T502: Settings>Fog Defaults is the single implementation; Quick mirrors it (FR-6).
 
 ## Phase 6 — Transport Fixes, MCNK Deep-Link, Shared UI Library & Documentation (US6)
 

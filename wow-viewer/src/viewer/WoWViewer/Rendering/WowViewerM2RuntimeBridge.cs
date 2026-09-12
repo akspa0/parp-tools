@@ -1,3 +1,4 @@
+using System.Numerics;
 using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using Silk.NET.OpenGL;
@@ -49,8 +50,9 @@ internal static class WowViewerM2RuntimeBridge
         if (dispatch.Era != M2Era1121EraTag.Md20_1X_V100_Era100)
             throw new InvalidDataException($"M2 '{modelPath}' did not classify as the 1.0.0-era 0x100 layout.");
 
-        M2Era100Geometry geometry = dispatch.Document.InlineEra100Geometry
-            ?? throw new InvalidDataException($"1.0.0 M2 '{modelPath}' did not contain an embedded render division.");
+        M2Era100Geometry? geometry = dispatch.Document.InlineEra100Geometry;
+        if (geometry == null || geometry.Sections.Count == 0)
+            return BuildBoundingBoxFallbackModel(dispatch.Document);
 
         List<M2StaticRenderSection> sections = [];
         List<M2StructuredRenderSection> structuredSections = [];
@@ -97,9 +99,121 @@ internal static class WowViewerM2RuntimeBridge
         }
 
         if (sections.Count == 0)
-            throw new InvalidDataException($"1.0.0 M2 '{modelPath}' contained no drawable embedded sections.");
+            return BuildBoundingBoxFallbackModel(dispatch.Document);
 
         return new M2StaticRenderModel(dispatch.Document, sections, structuredSections, [], usesCompatibilityFallback: false);
+    }
+
+    /// <summary>
+    /// Bounding Box Fallback Rendering (FR-005): If geometry decoding fails or contains no drawable
+    /// sections on a valid MD20 header, build an 8-vertex 12-triangle cube using boundsMin and boundsMax
+    /// (or default [-1, 1] unit cube if degenerate) as an M2StaticRenderModel with usesCompatibilityFallback: true.
+    /// </summary>
+    public static M2StaticRenderModel BuildBoundingBoxFallbackModel(M2ModelDocument model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        Vector3 min = model.BoundsMin;
+        Vector3 max = model.BoundsMax;
+        if (!float.IsFinite(min.X) || !float.IsFinite(min.Y) || !float.IsFinite(min.Z)
+            || !float.IsFinite(max.X) || !float.IsFinite(max.Y) || !float.IsFinite(max.Z)
+            || (min == max) || (min == Vector3.Zero && max == Vector3.Zero))
+        {
+            min = new Vector3(-1f, -1f, -1f);
+            max = new Vector3(1f, 1f, 1f);
+        }
+
+        Vector3[] corners =
+        [
+            new(min.X, min.Y, min.Z), // 0
+            new(max.X, min.Y, min.Z), // 1
+            new(max.X, max.Y, min.Z), // 2
+            new(min.X, max.Y, min.Z), // 3
+            new(min.X, min.Y, max.Z), // 4
+            new(max.X, min.Y, max.Z), // 5
+            new(max.X, max.Y, max.Z), // 6
+            new(min.X, max.Y, max.Z), // 7
+        ];
+
+        List<M2StaticRenderVertex> vertices = new(8);
+        for (int i = 0; i < corners.Length; i++)
+        {
+            vertices.Add(new M2StaticRenderVertex(
+                corners[i],
+                Vector3.UnitZ,
+                Vector2.Zero,
+                Vector2.Zero,
+                Vector4.Zero,
+                Vector4.UnitX));
+        }
+
+        uint[] indices =
+        [
+            0, 2, 1,  0, 3, 2, // bottom (-Z)
+            4, 5, 6,  4, 6, 7, // top (+Z)
+            0, 1, 5,  0, 5, 4, // front (-Y)
+            2, 3, 7,  2, 7, 6, // back (+Y)
+            0, 4, 7,  0, 7, 3, // left (-X)
+            1, 2, 6,  1, 6, 5  // right (+X)
+        ];
+
+        M2EffectRecipe recipe = new(
+            M2DiffuseEffectFamily.None,
+            M2CombinerEffectFamily.Opaque,
+            isProjected: false,
+            usesColorAnimation: false,
+            usesTransparencyAnimation: false,
+            usesTextureTransformAnimation: false,
+            suppressCombinedTransparency: false,
+            isHeuristic: true);
+
+        M2StaticRenderMaterial material = new(
+            batchIndex: 0,
+            batchFlags: 0,
+            priorityPlane: 0,
+            shaderId: 0,
+            geosetIndex: 0,
+            colorIndex: 0,
+            renderFlagsIndex: 0,
+            materialLayer: 0,
+            textureCount: 0,
+            textureComboIndex: 0,
+            textureCoordComboIndex: 0,
+            transparencyComboIndex: 0,
+            textureAnimationLookupIndex: 0,
+            renderFlags: 0,
+            rawBlendMode: 0,
+            blendMode: M2BlendMode.Opaque,
+            texturePath: null,
+            replaceableId: 0,
+            textureFlags: 0,
+            textureBindings: [],
+            effectRecipe: recipe);
+
+        M2StaticRenderSection section = new(
+            sectionIndex: 0,
+            skinSectionId: 0,
+            boneComboIndex: 0,
+            boneCount: 0,
+            boneInfluences: 0,
+            centerBoneIndex: 0,
+            vertices,
+            indices,
+            material);
+
+        M2StructuredRenderPass pass = new(0, material);
+        M2StructuredRenderSection structuredSection = new(
+            sectionIndex: 0,
+            skinSectionId: 0,
+            boneComboIndex: 0,
+            boneCount: 0,
+            boneInfluences: 0,
+            centerBoneIndex: 0,
+            vertices,
+            indices,
+            [pass]);
+
+        return new M2StaticRenderModel(model, [section], [structuredSection], [], usesCompatibilityFallback: true);
     }
 
     public static bool PreferNativeStaticRenderer

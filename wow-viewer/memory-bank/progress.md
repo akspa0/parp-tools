@@ -1,6 +1,37 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
+
+## 2026-09-11 — Spec 235: Unified Legacy MDX/M2 Reader & World Placement Implemented (Phases 0–4)
+
+- **Completed Phases 0–4**:
+  - Unlocked MD20 versions `0x100` through `0x107` in `M2ModelReaderDispatcher.cs`, dropping the legacy `0x102`–`0x107` `NotSupportedException` refusal wall.
+  - Implemented 108-byte (`0x6C`) legacy bone layout for 1.0.0/2.0.0 (`0x100`) and 112-byte (`0x70`) bone layout with `boneNameCrc` at `+0x0C` for 2.4.3/3.0.1 (`0x107`) in `M2Era100ModelReader.cs`.
+  - Added embedded skin extraction (`M2Division` -> `EmbeddedSkinDocuments`) and direct runtime binding in `M2SkinProfileRuntime.cs` without external `.skin` file lookup.
+  - Added FR-005 Bounding-Box Fallback model generation (`BuildBoundingBoxFallbackModel`) in `WowViewerM2RuntimeBridge.cs` ensuring models with no drawable geometry render bounds rather than disappearing invisibly.
+  - Wired `M2Era1121EraTag.Md20_1X_V100_Era100` handling in `WorldAssetManager.cs` for world placement loading.
+  - Updated `WowViewer.Tool.Inspect` to populate `M2GeometryDocument` for legacy models.
+  - Updated `ModelRouteClassifier.cs` and tests to mark `0x100-0x107` classic layout as `Readable`.
+- **Validation**:
+  - All 5 staged clients tested across 1.0.0, 2.0.0, 2.4.3, 3.0.1, and 3.3.0 (`xyz.m2`, `BloodElfMale.m2`) — all 5 pass with exit 0, `available=true`, and correct bone counts.
+  - 11 unit tests in `M2Era100ModelReaderTests` passing (100% pass).
+  - 7 unit tests in `ModelRouteClassifierTests` passing (100% pass).
+  - Solution build `WowViewer.slnx` compiles with 0 errors.
+  - Governance receipt written: `specs/235-legacy-mdx-m2-rendering/evidence/phase1-reader-unification.md`.
+
+## 2026-09-11 — Spec 224 audit completed (233/231/223 retried)
+
+- Completed the 224-T201 receipt audit that failed on a rate limit on 2026-09-10. **233 clean**
+  (T001–T014 backed by three receipts with commands/exit codes and honest proof boundaries).
+  **231 clean** (0 un-checked): T001's "still open" notes in two receipts were superseded by
+  `inventory-v3-baseline.md`; T074 kept checked but flagged — its receipt returns the visual gate to
+  the operator without carrying the passing observation. **223: 16 receipt-less pre-§9.2 checks
+  un-checked** (T101–T107, Gate A, T201, T202, T301, T302, Gate B, T401, T501, T502) — no
+  `evidence/` artifact exists for them; `phase6-validation.md` covers only T601–T608 + the source
+  gate. Listed for operator decision (accept or supply retroactive receipts). 227/232 unchanged.
+  Ledger updated; report:
+  [cleanup-2026-09-11.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-11.md).
+- Next bounded action: `speckit-plan` for Spec 234.
 
 ## 2026-09-10 — Spec 235 Phase 0 reconciliation: real findings, and a process failure worth recording
 

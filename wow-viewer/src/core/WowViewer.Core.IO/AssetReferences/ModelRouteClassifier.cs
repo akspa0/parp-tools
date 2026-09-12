@@ -44,9 +44,8 @@ public static class ModelRouteClassifier
                     Readable("MDLX"),
                 M2Era1121EraTag.Md20_3X_V108 =>
                     Readable("MD20 0x108"),
-                M2Era1121EraTag.Md20_1X_V100_Era100 => Blocked(
-                    "MD20 0x100 (1.0.0 Era100 layout)",
-                    "Spec 154: M2Era100ModelReader uses the wrong fallback bone-read constants; bones=0."),
+                M2Era1121EraTag.Md20_1X_V100_Era100 =>
+                    Readable("MD20 0x100-0x107 (legacy classic layout)"),
                 M2Era1121EraTag.Md20_4X_V109 => Blocked(
                     "MD20 0x109+ (4.x)",
                     "Spec 154: unhandled camera-parsing exception measured at 4.0.0.11927; also beyond " +
