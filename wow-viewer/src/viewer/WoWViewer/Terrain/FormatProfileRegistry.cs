@@ -369,7 +369,7 @@ public static class FormatProfileRegistry
         ProfileId = "M2Profile_20x_Unknown",
         RequiredRootMagic = ModelRootMagic.MD20,
         AllowMd21Container = false,
-        MinSupportedVersion = 0x104,
+        MinSupportedVersion = 0x100,
         MaxSupportedVersion = 0x107,
         UseTypedOffsetCountTable = true,
         StrictSpanValidation = true,

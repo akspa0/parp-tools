@@ -2985,6 +2985,21 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
             }
         }
 
+        if (resolvedPath.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase) && _dataSource != null)
+        {
+            if (!_dataSource.FileExists(normalizedPath))
+            {
+                foreach (string alternatePath in EnumerateAlternateDoodadPaths(normalizedPath))
+                {
+                    if (_dataSource.FileExists(alternatePath))
+                    {
+                        resolvedPath = NormalizeDoodadPath(alternatePath);
+                        break;
+                    }
+                }
+            }
+        }
+
         _canonicalDoodadPathCache[normalizedPath] = resolvedPath;
         return resolvedPath;
     }

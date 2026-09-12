@@ -1,6 +1,19 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
+
+## 2026-09-12 — 2.0.0 .mdx -> .m2 Doodad Rendering Correctness
+
+- **Defects Fixed**:
+  - `FormatProfileRegistry.M2Profile20xUnknown` had `MinSupportedVersion = 0x104`. In 2.0.0.5610, MD20 models declare version `0x100`. `ValidateModelProfile` threw `InvalidDataException`, causing `LoadMdxModel` to catch the exception, abort, and return null (which displayed yellow bounding-box wireframe fallback). Lowered `MinSupportedVersion` to `0x100`.
+  - In `WorldAssetManager.cs` and `WmoRenderer.cs`, `ResolveCanonicalModelPath` and `ResolveCanonicalDoodadPath` fell back to `_dataSource.FileExists` for alternate model extensions (`.m2`, `.mdl`) when listfile resolution missed.
+  - In `WorldAssetManager.LoadMdxModel`, updated `resolvedModelPath` from `_resolvedReadPathCache` after reading file data so subsequent skin candidate construction and caching operate on the resolved `.m2` path.
+- **Verification**:
+  - `dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`: 0 errors.
+  - `dotnet test` (M2Era100 & ModelRouteClassifier): 18 passed, 0 failed.
+  - `dotnet test` (M2EmbeddedProfileRealDataTests): 2 passed, 0 failed.
+  - `m2 inspect` on `wallshield03.m2` and `BloodElfMale.m2` in 2.0.0.5610: exit 0, valid geometry and skin passes.
+  - Evidence receipt written: `specs/235-legacy-mdx-m2-rendering/evidence/2.0.0-mdx-m2-rendering-fix.md`.
 
 ## 2026-09-11 — Spec 235: Unified Legacy MDX/M2 Reader & World Placement Implemented (Phases 0–4)
 

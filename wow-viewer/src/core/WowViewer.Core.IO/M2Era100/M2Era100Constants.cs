@@ -211,13 +211,20 @@ public static class M2Era100Constants
     public const int BatchStride = 0x18;
 
     // --- M2Vertex internal layout (0x30 = 48 bytes) ---
+    // Matches the standard WoW M2 vertex binary layout:
+    // 0x00: Position (C3Vector, 12 B)
+    // 0x0C: BoneWeights (uint8[4], 4 B)
+    // 0x10: BoneIndices (uint8[4], 4 B)
+    // 0x14: Normal (C3Vector, 12 B)
+    // 0x20: TexCoords0 (C2Vector, 8 B)
+    // 0x28: TexCoords1 (C2Vector, 8 B)
 
-    public const int VertexPositionOffset = 0x00;  // C3Vector (12 B)
-    public const int VertexNormalOffset = 0x0C;     // C3Vector (12 B)
-    public const int VertexTexCoords0Offset = 0x18; // C2Vector (8 B)
-    public const int VertexTexCoords1Offset = 0x20; // C2Vector (8 B)
-    public const int VertexBoneWeightsOffset = 0x28; // 4 B (packed)
-    public const int VertexBoneIndicesOffset = 0x2C; // 4 B (packed)
+    public const int VertexPositionOffset = 0x00;    // C3Vector (12 B)
+    public const int VertexBoneWeightsOffset = 0x0C; // 4 B (packed uint8[4])
+    public const int VertexBoneIndicesOffset = 0x10; // 4 B (packed uint8[4])
+    public const int VertexNormalOffset = 0x14;      // C3Vector (12 B)
+    public const int VertexTexCoords0Offset = 0x20;  // C2Vector (8 B)
+    public const int VertexTexCoords1Offset = 0x28;  // C2Vector (8 B)
 
     // --- M2Texture internal layout (0x10 = 16 bytes) ---
 

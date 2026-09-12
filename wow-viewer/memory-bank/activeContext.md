@@ -59,6 +59,12 @@ gap directly — that's Spec 234 below, already the whole point of the spec.
   - `ModelRouteClassifierTests`: 7 passed, 0 failed.
   - Full solution build: 0 errors.
 - **Receipt**: [phase1-reader-unification.md](../specs/235-legacy-mdx-m2-rendering/evidence/phase1-reader-unification.md).
+- **2.0.0 .mdx -> .m2 Resolution & UV/Vertex Layout Fix (2026-09-12)**:
+  - Fixed `FormatProfileRegistry.M2Profile20xUnknown` by lowering `MinSupportedVersion` from `0x104` to `0x100` so 2.0.0 MD20 version `0x100` models pass profile validation without throwing `InvalidDataException`.
+  - Added `_dataSource.FileExists` fallback to `WorldAssetManager.ResolveCanonicalModelPath` and `WmoRenderer.ResolveCanonicalDoodadPath` for alternate extensions (`.m2`, `.mdl`) when listfile resolution misses.
+  - Updated `resolvedModelPath` from `_resolvedReadPathCache` in `WorldAssetManager.LoadMdxModel` so skin resolution operates on the true `.m2` asset.
+  - Fixed `M2Era100Constants.cs` vertex layout offsets: corrected inverted offsets so Normal (`0x14`), UV0 (`0x20`), UV1 (`0x28`), BoneWeights (`0x0C`), and BoneIndices (`0x10`) match the standard WoW 48-byte M2Vertex binary layout, fixing flat/stretched distorted textures and broken UVs. Added unit test `Era100Reader_ReadsVertexAttributes_WithStandardM2LayoutOffsets` (12/12 tests pass).
+  - Evidence receipt: [2.0.0-mdx-m2-rendering-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/2.0.0-mdx-m2-rendering-fix.md).
 
 ## Current lane — Spec 234 Map Save & New Map Creator
 

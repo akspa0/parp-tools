@@ -52,6 +52,33 @@ public sealed class M2Era100ModelReaderTests
     }
 
     [Fact]
+    public void Era100Reader_ReadsVertexAttributes_WithStandardM2LayoutOffsets()
+    {
+        byte[] m2 = CreateSyntheticEra100M2(indexCount: 6, level: 0);
+
+        using MemoryStream stream = new(m2, writable: false);
+        M2ModelDocument document = M2Era100ModelReader.Read(stream, "Character\\Synthetic\\Era100.m2");
+
+        M2Era100Geometry geometry = Assert.IsType<M2Era100Geometry>(document.InlineEra100Geometry);
+        Assert.NotEmpty(geometry.RenderVertices);
+
+        M2Era100Vertex v0 = geometry.RenderVertices[0];
+        Assert.Equal(Vector3.Zero, v0.Position);
+        Assert.Equal(new Vector3(0f, 0f, 1f), v0.Normal);
+        Assert.Equal(new Vector2(0f, 0f), v0.TexCoord0);
+        Assert.Equal(255, v0.BoneWeight0);
+        Assert.Equal(0, v0.BoneIndex0);
+
+        M2Era100Vertex v1 = geometry.RenderVertices[1];
+        Assert.Equal(new Vector3(1f, 1f, 0f), v1.Position);
+        Assert.Equal(new Vector3(0f, 0f, 1f), v1.Normal);
+        Assert.Equal(new Vector2(0.25f, 0.75f), v1.TexCoord0);
+        Assert.Equal(new Vector2(0.1f, 0.2f), v1.TexCoord1);
+        Assert.Equal(255, v1.BoneWeight0);
+        Assert.Equal(1, v1.BoneIndex0);
+    }
+
+    [Fact]
     public void Era100Reader_AppliesLevelHighBits_ToVertexAndIndexStart()
     {
         // Level carries the high 16 bits of vertexStart/indexStart so a division may exceed
@@ -138,8 +165,11 @@ public sealed class M2Era100ModelReaderTests
         {
             int ofs = verticesOfs + (i * M2Era100Constants.VertexStride);
             WriteVector3(span, ofs + M2Era100Constants.VertexPositionOffset, i, i % 2, 0f);
-            WriteVector3(span, ofs + M2Era100Constants.VertexNormalOffset, 0f, 0f, 1f);
             span[ofs + M2Era100Constants.VertexBoneWeightsOffset] = 255;
+            span[ofs + M2Era100Constants.VertexBoneIndicesOffset] = (byte)i;
+            WriteVector3(span, ofs + M2Era100Constants.VertexNormalOffset, 0f, 0f, 1f);
+            WriteVector2(span, ofs + M2Era100Constants.VertexTexCoords0Offset, 0.25f * i, 0.75f * i);
+            WriteVector2(span, ofs + M2Era100Constants.VertexTexCoords1Offset, 0.1f * i, 0.2f * i);
         }
 
         for (int i = 0; i < lookup.Length; i++)
@@ -261,6 +291,12 @@ public sealed class M2Era100ModelReaderTests
         BinaryPrimitives.WriteSingleLittleEndian(span.Slice(offset, 4), x);
         BinaryPrimitives.WriteSingleLittleEndian(span.Slice(offset + 4, 4), y);
         BinaryPrimitives.WriteSingleLittleEndian(span.Slice(offset + 8, 4), z);
+    }
+
+    private static void WriteVector2(Span<byte> span, int offset, float x, float y)
+    {
+        BinaryPrimitives.WriteSingleLittleEndian(span.Slice(offset, 4), x);
+        BinaryPrimitives.WriteSingleLittleEndian(span.Slice(offset + 4, 4), y);
     }
 
     [Fact]

@@ -1260,6 +1260,14 @@ private int _mdxLoadFailCount = 0;
                 resolvedModelPath = preferredClassicPath;
             }
 
+            if (data != null && data.Length > 0)
+            {
+                if (_resolvedReadPathCache.TryGetValue(resolvedModelPath, out string? cachedResolved) && !string.IsNullOrWhiteSpace(cachedResolved))
+                    resolvedModelPath = cachedResolved;
+                else if (_resolvedReadPathCache.TryGetValue(normalizedKey, out string? cachedKeyResolved) && !string.IsNullOrWhiteSpace(cachedKeyResolved))
+                    resolvedModelPath = cachedKeyResolved;
+            }
+
             if (data == null || data.Length == 0)
             {
                 if (_mdxLoadFailCount++ < 5)
@@ -1566,6 +1574,18 @@ private int _mdxLoadFailCount = 0;
             resolved = TryResolveFromFileSet(alternatePath);
             if (!string.IsNullOrWhiteSpace(resolved))
                 return NormalizeKey(resolved);
+        }
+
+        if (_dataSource != null)
+        {
+            if (_dataSource.FileExists(normalizedKey))
+                return normalizedKey;
+
+            foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
+            {
+                if (_dataSource.FileExists(alternatePath))
+                    return NormalizeKey(alternatePath);
+            }
         }
 
         return normalizedKey;
