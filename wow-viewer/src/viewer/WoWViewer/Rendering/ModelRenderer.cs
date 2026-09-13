@@ -2870,11 +2870,11 @@ void main()
         {
             var texFlags = (MdlGeoFlags)tex.Flags;
             bool clampS = _isM2AdapterModel
-                ? !texFlags.HasFlag(MdlGeoFlags.WrapWidth)
-                : texFlags.HasFlag(MdlGeoFlags.WrapWidth);
+                ? texFlags.HasFlag(MdlGeoFlags.WrapWidth)
+                : !texFlags.HasFlag(MdlGeoFlags.WrapWidth);
             bool clampT = _isM2AdapterModel
-                ? !texFlags.HasFlag(MdlGeoFlags.WrapHeight)
-                : texFlags.HasFlag(MdlGeoFlags.WrapHeight);
+                ? texFlags.HasFlag(MdlGeoFlags.WrapHeight)
+                : !texFlags.HasFlag(MdlGeoFlags.WrapHeight);
 
             MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
             MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");
@@ -2933,21 +2933,8 @@ void main()
 
     private void NormalizeAdaptedM2TextureSampling(SharedTextureEntry textureEntry)
     {
-        if (!_isM2AdapterModel)
-            return;
-
-        if (textureEntry.AlphaKind == TextureAlphaKind.Opaque)
-            return;
-
-        if (textureEntry.WrapS == TextureWrapMode.ClampToEdge && textureEntry.WrapT == TextureWrapMode.ClampToEdge)
-            return;
-
-        _gl.BindTexture(TextureTarget.Texture2D, textureEntry.TextureId);
-        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
-            TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
-        _gl.BindTexture(TextureTarget.Texture2D, 0);
-        textureEntry.WrapS = TextureWrapMode.ClampToEdge;
-        textureEntry.WrapT = TextureWrapMode.ClampToEdge;
+        // Wrap/clamp sampling is already determined by model texture flags and applied during texture upload.
+        // Forcibly overriding WrapS/WrapT to ClampToEdge for non-opaque textures breaks repeating UV meshes.
     }
 
     private static bool ShouldSkipLayerWhenTextureIsMissing(int layerIndex, bool needsBlend)

@@ -30,6 +30,7 @@
 - [x] T021 [P] [US2] Implement FR-005 Bounding-Box Fallback in `WorldAssetManager.cs`:
   - When a model load fails or returns no renderable geometry, synthesize a bounding-box wireframe / box mesh from the model bounds rather than returning `null`.
 - [x] T022 [P] [US2] Phase 2 Verification Gate: Compilation and clean build of `WowViewer.slnx`.
+- [x] T023 [P] [US2] Remediation: Exempt 0-vertex FX/emitter doodads from bounding-box fallback in `WowViewerM2RuntimeBridge.cs` and correct texture UV clamp/repeat inversion in `M2Renderer.cs` / `ModelRenderer.cs`. Receipt: [phase2-uv-and-fx-bounds-fix.md](evidence/phase2-uv-and-fx-bounds-fix.md).
 
 ## Phase 3 — Tooling & Multi-Era Client Inspection
 

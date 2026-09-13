@@ -1,9 +1,11 @@
+using System.Buffers.Binary;
 using System.Numerics;
 using WowViewer.Core.IO.Mdx;
 using WoWViewer.DataSources;
 using Silk.NET.OpenGL;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
+using WowViewer.Core.IO.M2Era100;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
@@ -49,6 +51,15 @@ internal static class WowViewerM2RuntimeBridge
         M2DispatchResult dispatch = M2ModelReaderDispatcher.ReadDetailed(stream, modelPath);
         if (dispatch.Era != M2Era1121EraTag.Md20_1X_V100_Era100)
             throw new InvalidDataException($"M2 '{modelPath}' did not classify as the 1.0.0-era 0x100 layout.");
+
+        uint rawVertexCount = modelBytes.Length >= (int)M2Era100Constants.VertexCountOffset + sizeof(uint)
+            ? BinaryPrimitives.ReadUInt32LittleEndian(modelBytes.AsSpan((int)M2Era100Constants.VertexCountOffset, sizeof(uint)))
+            : 0;
+
+        // Particle/ribbon/sound/emitter doodads have 0 raw vertices by design.
+        // Return an empty model without fallback geometry (FR-005 bounding box is only for mesh decoding failures).
+        if (rawVertexCount == 0)
+            return new M2StaticRenderModel(dispatch.Document, [], [], [], usesCompatibilityFallback: false);
 
         M2Era100Geometry? geometry = dispatch.Document.InlineEra100Geometry;
         if (geometry == null || geometry.Sections.Count == 0)

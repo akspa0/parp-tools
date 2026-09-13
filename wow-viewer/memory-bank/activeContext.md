@@ -65,6 +65,11 @@ gap directly — that's Spec 234 below, already the whole point of the spec.
   - Updated `resolvedModelPath` from `_resolvedReadPathCache` in `WorldAssetManager.LoadMdxModel` so skin resolution operates on the true `.m2` asset.
   - Fixed `M2Era100Constants.cs` vertex layout offsets: corrected inverted offsets so Normal (`0x14`), UV0 (`0x20`), UV1 (`0x28`), BoneWeights (`0x0C`), and BoneIndices (`0x10`) match the standard WoW 48-byte M2Vertex binary layout, fixing flat/stretched distorted textures and broken UVs. Added unit test `Era100Reader_ReadsVertexAttributes_WithStandardM2LayoutOffsets` (12/12 tests pass).
   - Evidence receipt: [2.0.0-mdx-m2-rendering-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/2.0.0-mdx-m2-rendering-fix.md).
+- **FX Emitter Bounds Fallback & Texture UV Clamping Corrections (2026-09-12)**:
+  - Fixed giant solid opaque white bounding-box cubes covering scenes: particle/sound/emitter doodads (`stratholmefloatingembers.m2`, `hellfire_fireparticle.m2`) have `rawVertexCount == 0` on disk by design. In `WowViewerM2RuntimeBridge.cs`, early-return an empty `M2StaticRenderModel` with 0 sections rather than generating an FR-005 bounding box cube.
+  - Fixed flat untextured surfaces and single-color streaks on complex 3D meshes (`ballistaruined.m2`, wood, arrows, wheels): in `M2Renderer.cs`, corrected texture clamping flags from `(flags & 0x1u) == 0` to `!= 0`, ensuring textures repeat by default (`TextureWrapMode.Repeat`) and only clamp when bit 0x1 (S) or 0x2 (T) is set. In `ModelRenderer.cs`, corrected adapter clamp deriving and disabled aggressive `ClampToEdge` override on non-opaque textures in `NormalizeAdaptedM2TextureSampling`.
+  - Added unit test `Era100Reader_ZeroVertexModel_HasNullInlineGeometry` (13/13 tests pass).
+  - Evidence receipt: [phase2-uv-and-fx-bounds-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/phase2-uv-and-fx-bounds-fix.md).
 
 ## Current lane — Spec 234 Map Save & New Map Creator
 

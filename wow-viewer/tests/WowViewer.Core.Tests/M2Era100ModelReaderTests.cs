@@ -373,6 +373,17 @@ public sealed class M2Era100ModelReaderTests
         Assert.NotNull(result.Document.InlineEra100Geometry);
     }
 
+    [Fact]
+    public void Era100Reader_ZeroVertexModel_HasNullInlineGeometry()
+    {
+        byte[] m2 = CreateSyntheticEra100CameraM2();
+        using MemoryStream stream = new(m2, writable: false);
+        M2DispatchResult result = M2ModelReaderDispatcher.ReadDetailed(stream, @"Cameras\TestCamera.m2");
+
+        Assert.Equal(M2Era1121EraTag.Md20_1X_V100_Era100, result.Era);
+        Assert.Null(result.Document.InlineEra100Geometry);
+    }
+
     private static byte[] CreateSyntheticEra100MultiVersionM2(ushort indexCount, ushort level, uint version)
     {
         byte[] data = CreateSyntheticEra100M2(indexCount, level);

@@ -1083,8 +1083,9 @@ void main()
             if (string.IsNullOrWhiteSpace(resolvedPath))
                 continue;
 
-            bool clampS = (candidate.TextureFlags & 0x1u) == 0;
-            bool clampT = (candidate.TextureFlags & 0x2u) == 0;
+            // In WoW M2 files, textures repeat by default. Flags 0x1 and 0x2 request clamp-to-edge on S and T.
+            bool clampS = (candidate.TextureFlags & 0x1u) != 0;
+            bool clampT = (candidate.TextureFlags & 0x2u) != 0;
             if (TryGetOrLoadTexture(resolvedPath, clampS, clampT, out textureId))
             {
                 uvSet = candidate.UvSet;
