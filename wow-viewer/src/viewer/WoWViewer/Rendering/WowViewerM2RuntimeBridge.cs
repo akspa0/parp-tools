@@ -345,18 +345,14 @@ internal static class WowViewerM2RuntimeBridge
     private static M2StaticRenderMaterial BuildEra100Material(M2Era100Geometry geometry, M2Era100Batch batch)
     {
         List<M2StaticRenderTextureBinding> bindings = [];
-        for (int stage = 0; stage < batch.TextureCount; stage++)
+        int stageCount = Math.Max(1, (int)batch.TextureCount);
+        for (int stage = 0; stage < stageCount; stage++)
         {
             int lookupIndex = batch.TextureComboIndex + stage;
             short lookupValue = lookupIndex >= 0 && lookupIndex < geometry.TextureLookup.Count
                 ? geometry.TextureLookup[lookupIndex]
                 : (short)-1;
 
-            // A negative textureCombos entry is a replaceable texture supplied at runtime
-            // (character/creature skin), not an index into the model's texture array — the client
-            // resolves slot ~value through its own table (FUN_0071a540). We have no runtime skin to
-            // bind, so carry the slot as the replaceable id and leave the path unresolved rather
-            // than letting the out-of-range index collapse every batch onto one fallback texture.
             M2Era100Texture? texture = null;
             ushort? textureId = null;
             uint replaceableId;
@@ -366,13 +362,30 @@ internal static class WowViewerM2RuntimeBridge
                 texture = lookupValue < geometry.Textures.Count ? geometry.Textures[lookupValue] : null;
                 replaceableId = texture?.Type ?? 0;
             }
-            else
+            else if (lookupIndex >= 0 && lookupIndex < geometry.Textures.Count)
+            {
+                textureId = (ushort)lookupIndex;
+                texture = geometry.Textures[lookupIndex];
+                replaceableId = texture.Type;
+            }
+            else if (lookupValue < 0 && lookupValue != -1)
             {
                 replaceableId = (uint)~lookupValue + 1;
             }
+            else
+            {
+                replaceableId = 1;
+            }
+
+            if (texture != null && string.IsNullOrWhiteSpace(texture.Filename) && replaceableId == 0)
+            {
+                replaceableId = 11;
+            }
+
+            string? texturePath = !string.IsNullOrWhiteSpace(texture?.Filename) ? texture.Filename : null;
 
             bindings.Add(new M2StaticRenderTextureBinding(
-                stage, lookupIndex, textureId, texture?.Filename, replaceableId, texture?.Flags ?? 0,
+                stage, lookupIndex, textureId, texturePath, replaceableId, texture?.Flags ?? 0,
                 null, null, null, null, null, null));
         }
 

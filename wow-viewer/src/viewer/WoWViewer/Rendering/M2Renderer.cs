@@ -1099,6 +1099,19 @@ void main()
             }
         }
 
+        // Safety fallback: if no candidate texture was loaded (e.g. directory/name mismatch, or missing
+        // replaceableId metadata on untextured mesh passes), attempt resolving creature skin slots (11, then 1).
+        uint[] fallbackSlots = { 11, 1 };
+        foreach (uint slot in fallbackSlots)
+        {
+            string? fallbackPath = ResolveReplaceableTexture(slot);
+            if (!string.IsNullOrWhiteSpace(fallbackPath) && TryGetOrLoadTexture(fallbackPath, false, false, out textureId))
+            {
+                ViewerLog.Info(ViewerLog.Category.Mdx, $"[M2] Applied fallback texture {Path.GetFileName(fallbackPath)} (slot #{slot}) for section in {Path.GetFileName(SourceModelPath)}");
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -1130,17 +1143,239 @@ void main()
         return textureCoordLookupValue == ushort.MaxValue;
     }
 
-    private string? ResolveReplaceableTexture(uint replaceableId)
+    private static readonly Dictionary<uint, string> DefaultReplaceableTextures = new()
     {
-        if (_texResolver == null)
+        { 1,  @"Textures\ReplaceableTextures\CreatureSkin\CreatureSkin01.blp" },
+        { 2,  @"Textures\ReplaceableTextures\ObjectSkin\ObjectSkin01.blp" },
+        { 3,  @"Textures\ReplaceableTextures\WeaponBlade\WeaponBlade01.blp" },
+        { 4,  @"Textures\ReplaceableTextures\WeaponHandle\WeaponHandle01.blp" },
+        { 5,  @"Textures\ReplaceableTextures\Environment\Environment01.blp" },
+        { 6,  @"Textures\ReplaceableTextures\CharHair\CharHair00_00.blp" },
+        { 7,  @"Textures\ReplaceableTextures\CharFacialHair\CharFacialHair00_00.blp" },
+        { 8,  @"Textures\ReplaceableTextures\SkinExtra\SkinExtra01.blp" },
+        { 9,  @"Textures\ReplaceableTextures\UISkin\UISkin01.blp" },
+        { 10, @"Textures\ReplaceableTextures\TaurenMane\TaurenMane00_00.blp" },
+        { 11, @"Textures\ReplaceableTextures\Monster\Monster01_01.blp" },
+        { 12, @"Textures\ReplaceableTextures\Monster\Monster01_02.blp" },
+        { 13, @"Textures\ReplaceableTextures\Monster\Monster01_03.blp" },
+    };
+
+    private static readonly string[] CreatureVariantSuffixes = new[]
+    {
+        "Armored", "Armor", "Caster", "Overlord", "Rider", "Boss", "Ghost",
+        "Dire", "Giant", "Elder", "Young", "Pet", "Spawn", "Small", "Large",
+        "Warrior", "Mage", "Shaman", "Warlock", "Hunter", "Priest", "Rogue",
+        "Variant", "Red", "Blue", "Green", "Black", "Bronze", "White", "Dark"
+    };
+
+    private static string StripVariantSuffix(string name)
+    {
+        foreach (string suffix in CreatureVariantSuffixes)
+        {
+            if (name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return name[..^suffix.Length];
+            }
+        }
+        return name;
+    }
+
+    private string? FindExistingTexturePath(string candidatePath)
+    {
+        if (string.IsNullOrWhiteSpace(candidatePath))
             return null;
 
-        return _texResolver.Resolve(
-            SourceModelPath,
-            replaceableId,
-            _selectedReplaceableDisplayIndex ?? 0,
-            _characterHairVariationId,
-            _characterFacialHairVariationId);
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            string? actual = mpqDataSource.FindInFileSet(candidatePath)
+                ?? mpqDataSource.FindInFileSet(candidatePath.Replace('\\', '/'));
+            if (!string.IsNullOrWhiteSpace(actual))
+                return actual.Replace('/', '\\');
+        }
+
+        if (_dataSource != null)
+        {
+            byte[]? data = _dataSource.ReadFile(candidatePath)
+                ?? _dataSource.ReadFile(candidatePath.Replace('\\', '/'));
+            if (data != null && data.Length > 0)
+                return candidatePath.Replace('/', '\\');
+        }
+
+        if (File.Exists(candidatePath))
+            return Path.GetFullPath(candidatePath);
+
+        return null;
+    }
+
+    private string? ResolveReplaceableTexture(uint replaceableId)
+    {
+        // Strategy 1: DBC-based resolver
+        if (_texResolver != null)
+        {
+            string? resolved = _texResolver.Resolve(
+                SourceModelPath,
+                replaceableId,
+                _selectedReplaceableDisplayIndex ?? 0,
+                _characterHairVariationId,
+                _characterFacialHairVariationId);
+            if (!string.IsNullOrWhiteSpace(resolved))
+                return resolved;
+        }
+
+        // Strategy 2: Search model's directory for BLPs matching naming conventions
+        if (!string.IsNullOrEmpty(_modelDir))
+        {
+            string modelBase = Path.GetFileNameWithoutExtension(SourceModelPath);
+            string folderBase = Path.GetFileName(_modelDir);
+            string strippedBase = StripVariantSuffix(modelBase);
+
+            List<string> candidateBases = new() { modelBase };
+            if (!string.IsNullOrEmpty(folderBase) && !candidateBases.Contains(folderBase, StringComparer.OrdinalIgnoreCase))
+                candidateBases.Add(folderBase);
+            if (!string.IsNullOrEmpty(strippedBase) && !candidateBases.Contains(strippedBase, StringComparer.OrdinalIgnoreCase))
+                candidateBases.Add(strippedBase);
+
+            string[] suffixes = replaceableId switch
+            {
+                1 or 11 or 12 or 13 => new[] { "Skin", "_Skin", "Body", "_Body", "Bark", "_Bark", "Trunk", "_Trunk", "" },
+                2 => new[] { "Leaf", "_Leaf", "Leaves", "_Leaves", "Detail", "_Detail", "Foliage", "_Foliage", "NakedPelvisSkin00_00", "NakedPelvisSkin", "Pelvis", "Underwear", "" },
+                8 => new[] { "NakedPelvisSkin00_00", "NakedPelvisSkin", "NakedTorsoSkin00_00", "PelvisSkin00_00", "Pelvis", "Underwear", "SkinExtra", "_Extra", "" },
+                6 => new[] { "Hair", "_Hair", "" },
+                7 => new[] { "FacialHair", "_FacialHair", "Facial", "" },
+                10 => new[] { "Mane", "_Mane", "Hair", "" },
+                _ => new[] { "" }
+            };
+
+            foreach (string basePrefix in candidateBases)
+            {
+                foreach (string suffix in suffixes)
+                {
+                    string baseName = string.IsNullOrEmpty(suffix) ? basePrefix : (suffix.StartsWith('_') ? basePrefix + suffix : basePrefix + suffix);
+                    string candidate = Path.Combine(_modelDir, baseName + ".blp");
+                    string? found = FindExistingTexturePath(candidate);
+                    if (found != null)
+                    {
+                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (naming convention)");
+                        return found;
+                    }
+
+                    for (int n = 0; n <= 3; n++)
+                    {
+                        candidate = Path.Combine(_modelDir, $"{baseName}{n:D2}.blp");
+                        found = FindExistingTexturePath(candidate);
+                        if (found != null)
+                        {
+                            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (naming+num)");
+                            return found;
+                        }
+                    }
+                }
+            }
+
+            // Strategy 3: Scan all BLPs in model directory for fuzzy match
+            if (_dataSource != null)
+            {
+                var files = _dataSource.GetFileList(".blp");
+                string modelDirLower = _modelDir.ToLowerInvariant();
+                string modelBaseLower = modelBase.ToLowerInvariant();
+                string folderBaseLower = folderBase.ToLowerInvariant();
+                string strippedBaseLower = strippedBase.ToLowerInvariant();
+
+                var dirCandidates = files
+                    .Where(f =>
+                    {
+                        string fLower = f.ToLowerInvariant();
+                        string fDir = Path.GetDirectoryName(fLower)?.Replace('/', '\\') ?? "";
+                        return fDir == modelDirLower;
+                    })
+                    .OrderBy(f => f.Length)
+                    .ToList();
+
+                if (dirCandidates.Count > 0)
+                {
+                    var scoredCandidates = dirCandidates
+                        .Select(c =>
+                        {
+                            string fname = Path.GetFileNameWithoutExtension(c).ToLowerInvariant();
+                            int score = 0;
+
+                            if (replaceableId == 1 || replaceableId >= 11)
+                            {
+                                if (fname.Contains("skin")) score += 100;
+                                if (fname.Contains("body") || fname.Contains("bark") || fname.Contains("trunk")) score += 80;
+                                if (fname.StartsWith(modelBaseLower)) score += 60;
+                                else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 40;
+                                if (fname.Contains("detail") || fname.Contains("extra") || fname.Contains("hair") || fname.Contains("facial")) score -= 60;
+                            }
+                            else if (replaceableId == 2 || replaceableId == 8)
+                            {
+                                if (fname.Contains("pelvis") || fname.Contains("naked") || fname.Contains("underwear")) score += 100;
+                                if (fname.Contains("extra") || fname.Contains("detail") || fname.Contains("leaf") || fname.Contains("leaves")) score += 80;
+                                if (fname.StartsWith(modelBaseLower)) score += 50;
+                                else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 30;
+                            }
+                            else if (replaceableId == 6 || replaceableId == 10)
+                            {
+                                if (fname.Contains("hair") || fname.Contains("mane")) score += 100;
+                                if (fname.StartsWith(modelBaseLower)) score += 50;
+                            }
+                            else if (replaceableId == 7)
+                            {
+                                if (fname.Contains("facial") || fname.Contains("beard")) score += 100;
+                                if (fname.StartsWith(modelBaseLower)) score += 50;
+                            }
+                            else
+                            {
+                                if (fname.StartsWith(modelBaseLower)) score += 50;
+                                else if (fname.StartsWith(folderBaseLower)) score += 30;
+                            }
+
+                            return new { Path = c, Score = score };
+                        })
+                        .OrderByDescending(c => c.Score)
+                        .ThenBy(c => c.Path.Length)
+                        .ToList();
+
+                    foreach (var candidate in scoredCandidates)
+                    {
+                        if (candidate.Score <= 0 && scoredCandidates[0].Score > 0)
+                            break;
+
+                        string? found = FindExistingTexturePath(candidate.Path);
+                        if (found != null)
+                        {
+                            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (dir scan, score {candidate.Score})");
+                            return found;
+                        }
+                    }
+
+                    // Fallback to first existing BLP in directory if no positive match
+                    foreach (var c in dirCandidates)
+                    {
+                        string? found = FindExistingTexturePath(c);
+                        if (found != null)
+                        {
+                            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (dir first fallback)");
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Strategy 4: Hardcoded default replaceable texture paths
+        if (DefaultReplaceableTextures.TryGetValue(replaceableId, out string? defaultPath))
+        {
+            string? found = FindExistingTexturePath(defaultPath);
+            if (found != null)
+            {
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (hardcoded default)");
+                return found;
+            }
+        }
+
+        ViewerLog.Info(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} UNRESOLVED for {Path.GetFileName(SourceModelPath)}");
+        return null;
     }
 
     private bool TryGetOrLoadTexture(string texturePath, bool clampS, bool clampT, out uint textureId)

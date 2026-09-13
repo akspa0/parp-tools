@@ -78,6 +78,12 @@ gap directly — that's Spec 234 below, already the whole point of the spec.
   - Fixed 0x100 foliage and canopies rendering with solid black/white margins (`terokkartreelarge.mdx`, `razorfen_canopy01_hole.mdx`): in `WarcraftNetM2Adapter.ParseEra100Model`, replaced placeholder loop that hardcoded all render flags to `Opaque` (0), propagating `geometry.Materials[i].Flags` and `geometry.Materials[i].BlendMode`. In `M2Renderer.cs`, initialized `buffers.AlphaCutout = section.Material.BlendMode == M2BlendMode.AlphaKey`.
   - Added unit tests `Era100_Synthetic_UncompressedQuaternion_NormalizedAndSampled`, `Era100_Synthetic_MaterialsWithAlphaKey_ParsedCorrectly`, and `BuildEmbeddedStaticRenderModel_SyntheticEra100_TransfersAlphaKeyBlendMode` (17/17 Era100 tests pass, 3/3 embedded profile tests pass).
   - Evidence receipt: [quaternion-normalization-and-alphakey-transfer-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/quaternion-normalization-and-alphakey-transfer-fix.md).
+- **Creature Variant & Replaceable Texture Resolution Corrections (2026-09-13)**:
+  - Fixed 0x100 creature variants (`DragonSpawnArmored.mdx`) rendering completely untextured / flat white: in `WowViewerM2RuntimeBridge.cs:BuildEra100Material`, enforced `stageCount = Math.Max(1, (int)batch.TextureCount)`, added direct texture indexing fallback (`geometry.Textures[lookupIndex]`) when `lookupIndex >= geometry.TextureLookup.Count`, and defaulted empty-filename passes to creature skin slot 11.
+  - In `M2Renderer.cs`, `ReplaceableTextureResolver.cs`, and `ModelRenderer.cs`: added creature variant suffix stripping (`StripVariantSuffix`), candidate base searching (`[ modelBase, folderBase, strippedBase ]`), scored directory scan for `.blp` textures in `_modelDir`, and safety-net fallback in `TryLoadMaterialTexture` so untextured passes attempt creature skin resolution before rendering.
+  - In `ReplaceableTextureResolver.cs`: added `baseSection: 5` (Underwear) prioritization and real client underwear filenames (`NakedPelvisSkin`, `NakedTorsoSkin`); pruned robe skirts (`1201`), cloaks (`1101`), tabards (`1301`), and shoulders (`1401`/`1501`) from `DefaultCharacterSelectionGroups`.
+  - Added unit test `BuildEra100StaticRenderModel_TransfersTextureBindingsAndFallbackSlots` (18/18 Era100 tests pass).
+  - Evidence receipt: [creature-variant-and-replaceable-texture-resolution-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/creature-variant-and-replaceable-texture-resolution-fix.md).
 
 ## Current lane — Spec 234 Map Save & New Map Creator
 

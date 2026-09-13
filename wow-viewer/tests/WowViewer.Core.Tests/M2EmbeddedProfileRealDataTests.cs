@@ -207,6 +207,60 @@ public sealed class M2EmbeddedProfileRealDataTests
         Assert.False(isTransparent, "AlphaKey is alpha cutout (depth-tested), not back-to-front blended transparent pass.");
     }
 
+    [Fact]
+    public void BuildEra100StaticRenderModel_TransfersTextureBindingsAndFallbackSlots()
+    {
+        byte[] modelBytes = M2Era100ModelReaderTests.CreateSyntheticEra100M2WithMaterial(blendMode: 0);
+
+        string viewerAssemblyPath = Path.Combine(
+            GetWowViewerRoot(),
+            "src",
+            "viewer",
+            "WoWViewer",
+            "bin",
+            "Debug",
+            "net10.0-windows",
+            "ParpToolsWoWViewer.dll");
+        if (!File.Exists(viewerAssemblyPath))
+        {
+            viewerAssemblyPath = Path.Combine(
+                GetWowViewerRoot(),
+                "src",
+                "viewer",
+                "WoWViewer",
+                "bin",
+                "Debug",
+                "net10.0",
+                "ParpToolsWoWViewer.dll");
+        }
+        Assert.True(File.Exists(viewerAssemblyPath), $"Expected built viewer assembly at '{viewerAssemblyPath}'.");
+
+        Assembly viewerAssembly = LoadViewerAssembly(viewerAssemblyPath);
+        Type bridgeType = viewerAssembly.GetType("WoWViewer.Rendering.WowViewerM2RuntimeBridge", throwOnError: true)!;
+        MethodInfo buildEra100 = bridgeType.GetMethod(
+            "BuildEra100StaticRenderModel",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        object renderModel = buildEra100.Invoke(null, [modelBytes, "Creature\\DragonSpawn\\DragonSpawnArmored.mdx"])!;
+        Assert.NotNull(renderModel);
+
+        PropertyInfo sectionsProp = renderModel.GetType().GetProperty("Sections")!;
+        System.Collections.IList sections = (System.Collections.IList)sectionsProp.GetValue(renderModel)!;
+        Assert.NotEmpty(sections);
+
+        object section0 = sections[0]!;
+        PropertyInfo materialProp = section0.GetType().GetProperty("Material")!;
+        object material0 = materialProp.GetValue(section0)!;
+
+        PropertyInfo textureBindingsProp = material0.GetType().GetProperty("TextureBindings")!;
+        System.Collections.IList bindings = (System.Collections.IList)textureBindingsProp.GetValue(material0)!;
+        Assert.NotEmpty(bindings);
+
+        PropertyInfo texturePathProp = material0.GetType().GetProperty("TexturePath")!;
+        string? texturePath = (string?)texturePathProp.GetValue(material0);
+        Assert.False(string.IsNullOrWhiteSpace(texturePath));
+    }
+
     private static string GetWowViewerRoot()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);

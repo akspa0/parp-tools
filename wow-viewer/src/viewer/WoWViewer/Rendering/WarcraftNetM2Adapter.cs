@@ -837,6 +837,9 @@ internal static class WarcraftNetM2Adapter
                 return textureId;
         }
 
+        if (lookupIndex >= 0 && lookupIndex < model.Textures.Count)
+            return lookupIndex;
+
         return model.Textures.Count > 0 ? 0 : -1;
     }
 
