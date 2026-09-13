@@ -153,6 +153,60 @@ public sealed class M2EmbeddedProfileRealDataTests
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
     }
 
+    [Fact]
+    public void BuildEmbeddedStaticRenderModel_SyntheticEra100_TransfersAlphaKeyBlendMode()
+    {
+        byte[] modelBytes = M2Era100ModelReaderTests.CreateSyntheticEra100M2WithMaterial(blendMode: 1);
+
+        string viewerAssemblyPath = Path.Combine(
+            GetWowViewerRoot(),
+            "src",
+            "viewer",
+            "WoWViewer",
+            "bin",
+            "Debug",
+            "net10.0-windows",
+            "ParpToolsWoWViewer.dll");
+        if (!File.Exists(viewerAssemblyPath))
+        {
+            viewerAssemblyPath = Path.Combine(
+                GetWowViewerRoot(),
+                "src",
+                "viewer",
+                "WoWViewer",
+                "bin",
+                "Debug",
+                "net10.0",
+                "ParpToolsWoWViewer.dll");
+        }
+        Assert.True(File.Exists(viewerAssemblyPath), $"Expected built viewer assembly at '{viewerAssemblyPath}'.");
+
+        Assembly viewerAssembly = LoadViewerAssembly(viewerAssemblyPath);
+        Type adapterType = viewerAssembly.GetType("WoWViewer.Rendering.WarcraftNetM2Adapter", throwOnError: true)!;
+        MethodInfo buildEmbedded = adapterType.GetMethod(
+            "BuildEmbeddedStaticRenderModel",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        object renderModel = buildEmbedded.Invoke(null, [modelBytes, "SyntheticAlphaKey.m2", "2.0.0.5610"])!;
+        Assert.NotNull(renderModel);
+
+        PropertyInfo sectionsProp = renderModel.GetType().GetProperty("Sections")!;
+        System.Collections.IList sections = (System.Collections.IList)sectionsProp.GetValue(renderModel)!;
+        Assert.NotEmpty(sections);
+
+        object section0 = sections[0]!;
+        PropertyInfo materialProp = section0.GetType().GetProperty("Material")!;
+        object material0 = materialProp.GetValue(section0)!;
+
+        PropertyInfo blendModeProp = material0.GetType().GetProperty("BlendMode")!;
+        object blendModeVal = blendModeProp.GetValue(material0)!;
+        Assert.Equal("AlphaKey", blendModeVal.ToString());
+
+        PropertyInfo isTransparentProp = material0.GetType().GetProperty("IsTransparent")!;
+        bool isTransparent = (bool)isTransparentProp.GetValue(material0)!;
+        Assert.False(isTransparent, "AlphaKey is alpha cutout (depth-tested), not back-to-front blended transparent pass.");
+    }
+
     private static string GetWowViewerRoot()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);

@@ -64,7 +64,7 @@ public static class M2Era100ModelReader
         float boundsRadius = ReadLenientSingleAt(data, M2Era100Constants.BoundsRadiusOffset, sourcePath, "boundsRadius");
 
         // --- Geometry & Embedded Skins ---
-        (M2Era100Geometry? geometry, List<M2SkinDocument> embeddedSkins) = ReadGeometry(data, sourcePath);
+        (M2Era100Geometry? geometry, List<M2SkinDocument> embeddedSkins) = ReadGeometry(data, sourcePath, rawVersion);
 
         // --- Textures ---
 
@@ -209,7 +209,9 @@ public static class M2Era100ModelReader
 
             int trackOffset = hasNameCrc ? 0x10 : 0x0C;
             OldTrack translationTrack = ReadOldTrack(data, entryOffset + trackOffset, 12, globalLoopCount, sourcePath, $"bones[{index}].translation");
-            OldTrack rotationTrack = ReadOldTrack(data, entryOffset + trackOffset + 0x1C, 8, globalLoopCount, sourcePath, $"bones[{index}].rotation");
+            int rotTrackOffset = entryOffset + trackOffset + 0x1C;
+            bool isUncompressedRot = IsUncompressedQuaternionTrack(data, rotTrackOffset);
+            OldTrack rotationTrack = ReadOldTrack(data, rotTrackOffset, isUncompressedRot ? 16 : 8, globalLoopCount, sourcePath, $"bones[{index}].rotation", isUncompressedRot);
             OldTrack scalingTrack = ReadOldTrack(data, entryOffset + trackOffset + 0x38, 12, globalLoopCount, sourcePath, $"bones[{index}].scaling");
             Vector3 pivot = ReadLenientVector3At(data, entryOffset + trackOffset + 0x54, sourcePath, $"bones[{index}].pivot");
 
@@ -229,7 +231,39 @@ public static class M2Era100ModelReader
         return bones;
     }
 
-    private static OldTrack ReadOldTrack(byte[] data, int offset, int scalarSize, int globalLoopCount, string sourcePath, string label)
+    private static bool IsUncompressedQuaternionTrack(byte[] data, int offset)
+    {
+        if (offset + M2Era100Constants.TrackStride > data.Length)
+            return false;
+
+        ushort interpolationValue = ReadUInt16At(data, offset + 0x00);
+        if (interpolationValue > (ushort)M2TrackInterpolation.Bezier)
+            return false;
+
+        M2TrackInterpolation interpolation = (M2TrackInterpolation)interpolationValue;
+        uint valueCount = ReadUInt32At(data, offset + 0x14);
+        uint valueOffset = ReadUInt32At(data, offset + 0x18);
+        if (valueCount == 0 || valueOffset == 0)
+            return false;
+
+        int stride = interpolation is M2TrackInterpolation.Hermite or M2TrackInterpolation.Bezier ? 48 : 16;
+        long requiredBytes = (long)valueOffset + ((long)valueCount * stride);
+        if (requiredBytes > data.Length)
+            return false;
+
+        float x = BinaryPrimitives.ReadSingleLittleEndian(data.AsSpan((int)valueOffset + 0, 4));
+        float y = BinaryPrimitives.ReadSingleLittleEndian(data.AsSpan((int)valueOffset + 4, 4));
+        float z = BinaryPrimitives.ReadSingleLittleEndian(data.AsSpan((int)valueOffset + 8, 4));
+        float w = BinaryPrimitives.ReadSingleLittleEndian(data.AsSpan((int)valueOffset + 12, 4));
+
+        if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z) || !float.IsFinite(w))
+            return false;
+
+        float lenSq = (x * x) + (y * y) + (z * z) + (w * w);
+        return MathF.Abs(lenSq - 1.0f) < 0.15f;
+    }
+
+    private static OldTrack ReadOldTrack(byte[] data, int offset, int scalarSize, int globalLoopCount, string sourcePath, string label, bool isUncompressed = false)
     {
         EnsureReadable(data, offset, M2Era100Constants.TrackStride, sourcePath, label);
 
@@ -256,7 +290,7 @@ public static class M2Era100ModelReader
             : scalarSize;
         ValidateSpan(valueCount, valueOffset, valueStride, data.Length, sourcePath, $"{label}.values");
 
-        return new OldTrack(interpolation, globalSequence, rangeCount, rangeOffset, timestampCount, timestampOffset, valueCount, valueOffset);
+        return new OldTrack(interpolation, globalSequence, rangeCount, rangeOffset, timestampCount, timestampOffset, valueCount, valueOffset, isUncompressed);
     }
 
     private readonly record struct OldTrack(
@@ -267,7 +301,8 @@ public static class M2Era100ModelReader
         uint TimestampCount,
         uint TimestampOffset,
         uint ValueCount,
-        uint ValueOffset);
+        uint ValueOffset,
+        bool IsUncompressed = false);
 
     private sealed class M2Era100PayloadAppender
     {
@@ -280,7 +315,105 @@ public static class M2Era100ModelReader
             => Normalize<Vector3>(track, sequenceCount, 12, static normalized => new M2TrackDefinition<Vector3>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
 
         public M2TrackDefinition<M2CompQuaternion> NormalizeQuaternionTrack(OldTrack track, int sequenceCount)
-            => Normalize<M2CompQuaternion>(track, sequenceCount, 8, static normalized => new M2TrackDefinition<M2CompQuaternion>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
+        {
+            if (!track.IsUncompressed || track.ValueCount == 0 || track.ValueOffset == 0)
+            {
+                return Normalize<M2CompQuaternion>(track, sequenceCount, 8, static normalized => new M2TrackDefinition<M2CompQuaternion>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
+            }
+
+            while ((_extension.Count & 3) != 0)
+                _extension.Add(0);
+
+            uint convertedValuesBaseOffset = checked((uint)(_source.Length + _extension.Count));
+            int quatsPerKey = track.Interpolation is M2TrackInterpolation.Hermite or M2TrackInterpolation.Bezier ? 3 : 1;
+            int totalQuats = checked((int)track.ValueCount * quatsPerKey);
+
+            for (int i = 0; i < totalQuats; i++)
+            {
+                int srcOffset = checked((int)track.ValueOffset + (i * 16));
+                float x = BinaryPrimitives.ReadSingleLittleEndian(_source.AsSpan(srcOffset + 0, 4));
+                float y = BinaryPrimitives.ReadSingleLittleEndian(_source.AsSpan(srcOffset + 4, 4));
+                float z = BinaryPrimitives.ReadSingleLittleEndian(_source.AsSpan(srcOffset + 8, 4));
+                float w = BinaryPrimitives.ReadSingleLittleEndian(_source.AsSpan(srcOffset + 12, 4));
+
+                AppendCompQuaternion(x, y, z, w);
+            }
+
+            int referenceCount = track.GlobalSequenceIndex >= 0 ? 1 : Math.Max(sequenceCount, 1);
+            List<M2TrackArrayReference> timestamps = new(referenceCount);
+            List<M2TrackArrayReference> values = new(referenceCount);
+            uint availableCount = Math.Min(track.TimestampCount, track.ValueCount);
+            int compStride = quatsPerKey * 8;
+
+            for (int index = 0; index < referenceCount; index++)
+            {
+                uint first = 0;
+                uint last = availableCount == 0 ? 0 : availableCount - 1;
+                if (track.RangeCount > 0 && availableCount > 0)
+                {
+                    int rangeIndex = track.GlobalSequenceIndex >= 0 ? 0 : Math.Min(index, checked((int)track.RangeCount - 1));
+                    int rangeOffset = checked((int)track.RangeOffset + (rangeIndex * 0x08));
+                    first = ReadUInt32At(_source, rangeOffset + 0x00);
+                    last = ReadUInt32At(_source, rangeOffset + 0x04);
+                    if (first > last || last >= availableCount)
+                        throw new InvalidDataException($"Legacy M2 track range [{first}, {last}] is outside {availableCount} keys.");
+                }
+
+                uint keyCount = availableCount == 0 ? 0 : last - first + 1;
+                timestamps.Add(new M2TrackArrayReference(
+                    keyCount,
+                    keyCount == 0 ? 0 : checked(track.TimestampOffset + (first * sizeof(uint)))));
+                values.Add(new M2TrackArrayReference(
+                    keyCount,
+                    keyCount == 0 ? 0 : checked(convertedValuesBaseOffset + (first * (uint)compStride))));
+            }
+
+            uint timestampReferencesOffset = AppendReferences(timestamps);
+            uint valueReferencesOffset = AppendReferences(values);
+            return new M2TrackDefinition<M2CompQuaternion>(
+                track.Interpolation,
+                track.GlobalSequenceIndex,
+                new M2TrackArrayReference((uint)referenceCount, timestampReferencesOffset),
+                new M2TrackArrayReference((uint)referenceCount, valueReferencesOffset));
+        }
+
+        private void AppendCompQuaternion(float x, float y, float z, float w)
+        {
+            float lenSq = (x * x) + (y * y) + (z * z) + (w * w);
+            if (lenSq > 0.000001f)
+            {
+                float invLen = 1.0f / MathF.Sqrt(lenSq);
+                x *= invLen;
+                y *= invLen;
+                z *= invLen;
+                w *= invLen;
+            }
+            else
+            {
+                x = 0f; y = 0f; z = 0f; w = 1f;
+            }
+
+            AppendInt16(ToCompComponent(x));
+            AppendInt16(ToCompComponent(y));
+            AppendInt16(ToCompComponent(z));
+            AppendInt16(ToCompComponent(w));
+        }
+
+        private void AppendInt16(short value)
+        {
+            Span<byte> bytes = stackalloc byte[sizeof(short)];
+            BinaryPrimitives.WriteInt16LittleEndian(bytes, value);
+            _extension.AddRange(bytes.ToArray());
+        }
+
+        private static short ToCompComponent(float value)
+        {
+            float clamped = Math.Clamp(value, -1.0f, 1.0f);
+            float encoded = clamped <= 0.0f
+                ? (clamped + 1.0f) * 32767.0f
+                : (clamped * 32767.0f) - 32768.0f;
+            return (short)Math.Clamp(MathF.Round(encoded), short.MinValue, short.MaxValue);
+        }
 
         public M2TrackDefinition<float> NormalizeFloatTrack(OldTrack track, int sequenceCount)
             => Normalize<float>(track, sequenceCount, 4, static normalized => new M2TrackDefinition<float>(normalized.Interpolation, normalized.GlobalSequenceIndex, normalized.TimestampReferences, normalized.ValueReferences));
@@ -366,7 +499,7 @@ public static class M2Era100ModelReader
 
     // ─── Geometry: M2Vertex + M2Division ─────────────────────────────────────
 
-    private static (M2Era100Geometry? Geometry, List<M2SkinDocument> EmbeddedSkins) ReadGeometry(byte[] data, string sourcePath)
+    private static (M2Era100Geometry? Geometry, List<M2SkinDocument> EmbeddedSkins) ReadGeometry(byte[] data, string sourcePath, uint rawVersion)
     {
         // Read global M2Vertex[] from header 0x44.
         uint vertexCount = ReadUInt32At(data, M2Era100Constants.VertexCountOffset);
@@ -443,15 +576,29 @@ public static class M2Era100ModelReader
                 }
             }
 
-            // Read sections (0x20 B each).
+            // Read sections (0x20 B in 1.0.0, 0x30 B in 0x104+ / with sort center/radius).
             List<M2Era100Section> eraSections = new();
             List<M2SkinSubmesh> submeshes = new();
             if (sectionsCount > 0 && sectionsOfs > 0)
             {
-                ValidateSpan(sectionsCount, sectionsOfs, M2Era100Constants.SectionStride, data.Length, sourcePath, $"division[{divIndex}].sections");
+                int sectionStride = rawVersion >= 0x104u
+                    ? M2Era100Constants.SectionStrideEra104
+                    : M2Era100Constants.SectionStride;
+                if (batchesOfs > sectionsOfs)
+                {
+                    uint diff = batchesOfs - sectionsOfs;
+                    if (diff % sectionsCount == 0)
+                    {
+                        uint candidate = diff / sectionsCount;
+                        if (candidate is M2Era100Constants.SectionStride or M2Era100Constants.SectionStrideEra104)
+                            sectionStride = (int)candidate;
+                    }
+                }
+
+                ValidateSpan(sectionsCount, sectionsOfs, sectionStride, data.Length, sourcePath, $"division[{divIndex}].sections");
                 for (int i = 0; i < sectionsCount; i++)
                 {
-                    int ofs = checked((int)sectionsOfs + (i * M2Era100Constants.SectionStride));
+                    int ofs = checked((int)sectionsOfs + (i * sectionStride));
                     ushort submeshId = ReadUInt16At(data, ofs + M2Era100Constants.SectionSubmeshIdOffset);
                     ushort level = ReadUInt16At(data, ofs + M2Era100Constants.SectionLevelOffset);
                     ushort vStart = ReadUInt16At(data, ofs + M2Era100Constants.SectionVertexStartOffset);

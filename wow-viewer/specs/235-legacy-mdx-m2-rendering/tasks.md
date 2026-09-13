@@ -31,6 +31,8 @@
   - When a model load fails or returns no renderable geometry, synthesize a bounding-box wireframe / box mesh from the model bounds rather than returning `null`.
 - [x] T022 [P] [US2] Phase 2 Verification Gate: Compilation and clean build of `WowViewer.slnx`.
 - [x] T023 [P] [US2] Remediation: Exempt 0-vertex FX/emitter doodads from bounding-box fallback in `WowViewerM2RuntimeBridge.cs` and correct texture UV clamp/repeat inversion in `M2Renderer.cs` / `ModelRenderer.cs`. Receipt: [phase2-uv-and-fx-bounds-fix.md](evidence/phase2-uv-and-fx-bounds-fix.md).
+- [x] T024 [P] [US2] Remediation: Enable blending for backdrop / skybox transparent passes in `M2Renderer.cs`, correct embedded division 48-byte section stride in `M2Era100ModelReader.cs`, harden profiled render flag discovery in `WarcraftNetM2Adapter.cs`, and remove invalid `GeosetIndex & 0x2` projection flag in `M2StaticRenderModelBuilder.cs`. Receipt: [skybox-blending-and-transparent-materials-fix.md](evidence/skybox-blending-and-transparent-materials-fix.md).
+- [x] T025 [P] [US2] Remediation: Support 16-byte uncompressed float quaternions in `M2Era100ModelReader.cs` for classic 0x100 bone rotation tracks (resolving skeleton crumple on `TrollFemale.m2`), propagate `geometry.Materials` blend modes to `RenderFlags` in `WarcraftNetM2Adapter.cs` for 0x100 models, and initialize `SectionBuffers.AlphaCutout` in `M2Renderer.cs`. Receipt: [quaternion-normalization-and-alphakey-transfer-fix.md](evidence/quaternion-normalization-and-alphakey-transfer-fix.md).
 
 ## Phase 3 — Tooling & Multi-Era Client Inspection
 

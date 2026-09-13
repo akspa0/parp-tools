@@ -1024,9 +1024,35 @@ public partial class ViewerApp
                 ImGui.EndTabBar();
             }
         }
+        else if (_renderer is IModelRenderer || _renderer is WmoRenderer)
+        {
+            string[] tabs = ["Model", "Inspector", "Settings"];
+            int current = _activeInspectorTab;
+            if (current < 0 || current >= tabs.Length)
+                current = 0;
+
+            if (ImGui.BeginTabBar("##StandaloneModelTabs"))
+            {
+                for (int i = 0; i < tabs.Length; i++)
+                {
+                    if (ImGui.BeginTabItem(tabs[i]))
+                    {
+                        _activeInspectorTab = i;
+                        switch (tabs[i])
+                        {
+                            case "Model": DrawModelInfoPanelContent(); break;
+                            case "Inspector": DrawUnifiedInspectorContent(); break;
+                            case "Settings": DrawUnifiedViewerSettingsSidebarContent(); break;
+                        }
+                        ImGui.EndTabItem();
+                    }
+                }
+                ImGui.EndTabBar();
+            }
+        }
         else
         {
-            // No scene loaded — just show settings
+            // No scene or model loaded — just show settings
             DrawUnifiedViewerSettingsSidebarContent();
         }
     }
@@ -1063,6 +1089,12 @@ public partial class ViewerApp
         {
             ImGui.TextDisabled("Current context");
             ImGui.TextDisabled("Move the camera over a loaded ADT/MCNK or select a model, world object, or PM4 surface.");
+        }
+
+        if (_worldScene == null && (_renderer is IModelRenderer || _renderer is WmoRenderer))
+        {
+            ImGui.Separator();
+            DrawModelInfoContent();
         }
     }
 
@@ -1895,7 +1927,7 @@ public partial class ViewerApp
 
     private void DrawModelInfoPanelContent()
     {
-        if (string.IsNullOrWhiteSpace(_modelInfo))
+        if (string.IsNullOrWhiteSpace(_modelInfo) && _renderer is not IModelRenderer && _renderer is not WmoRenderer)
         {
             ImGui.TextDisabled("No model info is available for the current selection or loaded asset.");
             return;
@@ -2104,9 +2136,9 @@ public partial class ViewerApp
                 ref _standaloneWmoDoodadGroupFilter);
         }
 
-        if (_renderer is MdxRenderer standaloneMdxRenderer)
+        if (_renderer is IModelRenderer standaloneModelRenderer)
         {
-            DrawStandaloneCharacterVariationControls(standaloneMdxRenderer);
+            DrawStandaloneCharacterVariationControls(standaloneModelRenderer);
         }
     }
 
@@ -2329,15 +2361,20 @@ public partial class ViewerApp
             defaultFileName);
     }
 
-    private void DrawStandaloneCharacterVariationControls(MdxRenderer renderer)
+    private void DrawStandaloneCharacterVariationControls(IModelRenderer renderer)
     {
-        string? modelPath = renderer.ModelVirtualPath ?? _standaloneCharacterCustomizationModelPath;
+        string? modelPath = (renderer as MdxRenderer)?.ModelVirtualPath
+            ?? (renderer as M2Renderer)?.SourceModelPath
+            ?? _standaloneCharacterCustomizationModelPath;
         if (string.IsNullOrWhiteSpace(modelPath) || _texResolver == null)
             return;
 
         string normalizedPath = modelPath.Replace('/', '\\');
         if (!string.Equals(_standaloneCharacterCustomizationModelPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
-            RefreshStandaloneCharacterCustomizationState(normalizedPath, isM2AdapterModel: false);
+        {
+            bool isM2 = renderer is M2Renderer || (renderer as MdxRenderer)?.IsM2AdapterModel == true;
+            RefreshStandaloneCharacterCustomizationState(normalizedPath, isM2AdapterModel: isM2);
+        }
 
         if (string.IsNullOrWhiteSpace(_standaloneCharacterCustomizationModelPath))
             return;
@@ -5402,6 +5439,14 @@ public partial class ViewerApp
         ImGui.SameLine();
         if (ImGui.Button("Toggle Wireframe"))
             _renderer?.ToggleWireframe();
+
+        if (_worldScene == null && (_renderer is IModelRenderer || _renderer is WmoRenderer))
+        {
+            ImGui.Spacing();
+            ImGui.Text("Model & Animations");
+            ImGui.Separator();
+            DrawModelInfoContent();
+        }
 
         // 3. Profile-tailored Quick controls (US5, 223-T501)
         switch (_workspaceMode)

@@ -1,6 +1,42 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
+
+## 2026-09-13 — Standalone Model Sidebar Controls & M2 Submesh / Replaceable Texture Fixes
+
+- **Defects Fixed**:
+  - **No animation or model controls when viewing standalone models**: In `ViewerApp_Sidebars.cs`, `DrawUnifiedToolSidebar()` dropped into `else { DrawUnifiedViewerSettingsSidebarContent(); }` when `_worldScene == null`, hiding all model tabs. Added `["Model", "Inspector", "Settings"]` tabs for standalone models, rendered `DrawModelInfoContent()` in both the Quick tab and the Inspector tab, and updated `DrawStandaloneCharacterVariationControls()` to accept `IModelRenderer` so both `MdxRenderer` and `M2Renderer` expose full animation sequence selection, scrubbers, playback, geosets, and character customization.
+  - **Missing clothes / underwear and broken geoset mappings on 0x100 M2 models**: In `WarcraftNetM2Adapter.cs` `ParseEra100Model`, `skin.Submeshes.Add` was called inside `foreach (var batch in geometry.Batches)`, duplicating submeshes whenever a section had multiple batches and causing complete desynchronization between `SkinSectionIndex` and `Submeshes`. Populated `skin.Submeshes` 1:1 from `geometry.Sections`, then populated `skin.TextureUnits` from `geometry.Batches`.
+  - **Replaceable textures bypassed when static filename present**: In `ModelRenderer.cs` and `M2Renderer.cs`, `ResolveReplaceableTexture` was only called when `string.IsNullOrEmpty(texPath)`. Updated to attempt replaceable resolution first whenever `ReplaceableId > 0`, falling back to static path if resolution yields null. In `ReplaceableTextureResolver.cs`, added support for replaceable ID 2 (`ComponentObjectSkin`) and underwear/pelvis texture patterns.
+- **Verification**:
+  - `dotnet build WowViewer.slnx -c Debug`: 0 errors.
+  - `dotnet test` (`M2Era100ModelReaderTests`): 17 passed, 0 failed.
+
+## 2026-09-13 — Bone Quaternion Normalization & AlphaKey Cutout Material Transfer Corrections
+
+- **Defects Fixed**:
+  - 0x100 character models crumple into a mangled ball of limbs when animated (`TrollFemale.m2`): classic 0x100 models store bone rotation tracks as 16-byte uncompressed IEEE 754 float quaternions (`C4Quaternion`: X, Y, Z, W) rather than 8-byte `M2CompQuaternion` (4 int16 values). Reading as 8-byte shorts caused `(0, 0, 0, 1.0f)` to decode to `(-0.5, -0.5, -0.5, -0.5)`, distorting bones by 120° and collapsing the skeleton. In `M2Era100ModelReader.cs`, added `IsUncompressedQuaternionTrack` detection and converted 16-byte float quaternions into canonical 8-byte `M2CompQuaternion` in `_extension`, enabling `M2TrackSampler` to sample identity and animation rotations accurately without engine-wide special casing.
+  - 0x100 foliage and canopies render with solid black/white margins (`terokkartreelarge.mdx`, `razorfen_canopy01_hole.mdx`): in `WarcraftNetM2Adapter.ParseEra100Model`, replaced placeholder loop that hardcoded all render flags to `Opaque` (0), propagating `geometry.Materials[i].Flags` and `geometry.Materials[i].BlendMode`. In `M2Renderer.cs`, initialized `buffers.AlphaCutout = section.Material.BlendMode == M2BlendMode.AlphaKey;`.
+- **Verification**:
+  - `dotnet test` (`M2Era100ModelReaderTests`): 17 passed, 0 failed (added synthetic tests `Era100_Synthetic_UncompressedQuaternion_NormalizedAndSampled` and `Era100_Synthetic_MaterialsWithAlphaKey_ParsedCorrectly`, plus real TrollFemale sampling test).
+  - `dotnet test` (`M2EmbeddedProfileRealDataTests`): 3 passed, 0 failed (added unit test `BuildEmbeddedStaticRenderModel_SyntheticEra100_TransfersAlphaKeyBlendMode`).
+  - `dotnet build WowViewer.slnx -c Debug`: 0 errors.
+  - Evidence receipt written: `specs/235-legacy-mdx-m2-rendering/evidence/quaternion-normalization-and-alphakey-transfer-fix.md`.
+
+## 2026-09-12 — Skybox Blending & Transparent Cutout Materials Corrections
+
+- **Defects Fixed**:
+  - Skybox rendered as solid opaque "N64 polygonal blobs": in `M2Renderer.cs` line 731, `if (!backdrop && transparent)` evaluated to `false` whenever `backdrop` was true, calling `_gl.Disable(EnableCap.Blend)` on all skybox transparent passes (clouds, sun, celestial domes, atmospheric glows). Changed condition to `if (transparent)` so blending is enabled for transparent sections regardless of `backdrop`.
+  - Transparent cutout foliage (`zangarplantgroup05.m2`) and spiderwebs rendered as solid opaque geometric planes:
+    1. In `M2Era100Constants.cs` and `M2Era100ModelReader.cs`, embedded division section stride was hardcoded to 32 bytes (1.0.0 layout); in 2.x/0x104+ models, sections are 48 bytes with sort center/radius fields. Dynamically compute `sectionStride` from `(batchesOfs - sectionsOfs) / sectionsCount`, preventing Section[1] offset corruption.
+    2. In `WarcraftNetM2Adapter.cs`, `DiscoverProfiledRenderFlags` read a 1408-element garbage array at offset 0x48 and scored 5,552 points due to unbounded `+ renderFlags.Count`, replacing genuine 3-element render flags with all 0s (`blendMode = 0 Opaque`). Capped counts to 128, capped score contribution, and prevented overwriting when `current` already has valid blend modes.
+    3. In `M2StaticRenderModelBuilder.cs`, removed invalid `((batch.GeosetIndex & 0x2) != 0)` check from `isProjected`.
+    4. In `WowViewerM2RuntimeBridge.cs`, preserved full `M2BlendMode` -> `M2CombinerEffectFamily` mapping including `AlphaKey`.
+- **Verification**:
+  - `dotnet test` (`M2Era100ModelReaderTests`): 14 passed, 0 failed (added permanent regression test `ReadDetailed_ZangarPlantGroup05_ParsesMaterialsAndEmbeddedSectionsCorrectly`).
+  - `dotnet test` (`M2Runtime`): 26 passed, 0 failed.
+  - `dotnet build WowViewer.slnx -c Debug`: 0 errors.
+  - Evidence receipt written: `specs/235-legacy-mdx-m2-rendering/evidence/skybox-blending-and-transparent-materials-fix.md`.
 
 ## 2026-09-12 — 2.0.0 .mdx -> .m2 Doodad Rendering Correctness
 

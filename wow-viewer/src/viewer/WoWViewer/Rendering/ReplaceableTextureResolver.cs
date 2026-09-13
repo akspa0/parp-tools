@@ -986,7 +986,10 @@ public class ReplaceableTextureResolver
                 return replaceableId switch
                 {
                     1 => fileName.StartsWith(modelBaseLower + "skin", StringComparison.Ordinal) && !fileName.Contains("extra", StringComparison.Ordinal),
-                    8 => fileName.StartsWith(modelBaseLower + "skin", StringComparison.Ordinal) && fileName.Contains("extra", StringComparison.Ordinal),
+                    2 or 8 => (fileName.StartsWith(modelBaseLower + "skin", StringComparison.Ordinal) && fileName.Contains("extra", StringComparison.Ordinal))
+                        || fileName.Contains("pelvis", StringComparison.Ordinal)
+                        || fileName.Contains("naked", StringComparison.Ordinal)
+                        || fileName.Contains("underwear", StringComparison.Ordinal),
                     6 => fileName.StartsWith(modelBaseLower, StringComparison.Ordinal) && fileName.Contains("hair", StringComparison.Ordinal) && !fileName.Contains("facial", StringComparison.Ordinal) && !fileName.Contains("skin", StringComparison.Ordinal),
                     7 => fileName.StartsWith(modelBaseLower, StringComparison.Ordinal) && (fileName.Contains("facial", StringComparison.Ordinal) || fileName.Contains("beard", StringComparison.Ordinal) || fileName.Contains("moustache", StringComparison.Ordinal) || fileName.Contains("mustache", StringComparison.Ordinal) || fileName.Contains("sideburn", StringComparison.Ordinal)),
                     10 => fileName.StartsWith(modelBaseLower, StringComparison.Ordinal) && (fileName.Contains("mane", StringComparison.Ordinal) || (fileName.Contains("hair", StringComparison.Ordinal) && !fileName.Contains("facial", StringComparison.Ordinal))),
@@ -1023,6 +1026,8 @@ public class ReplaceableTextureResolver
             score += 20;
         if (replaceableId == 7 && (fileName.Contains("facial", StringComparison.Ordinal) || fileName.Contains("beard", StringComparison.Ordinal) || fileName.Contains("moustache", StringComparison.Ordinal) || fileName.Contains("mustache", StringComparison.Ordinal) || fileName.Contains("sideburn", StringComparison.Ordinal)))
             score += 20;
+        if ((replaceableId == 2 || replaceableId == 8) && (fileName.Contains("extra", StringComparison.Ordinal) || fileName.Contains("pelvis", StringComparison.Ordinal) || fileName.Contains("naked", StringComparison.Ordinal) || fileName.Contains("underwear", StringComparison.Ordinal)))
+            score += 20;
 
         if (requestedVariationId.HasValue)
         {
@@ -1049,10 +1054,14 @@ public class ReplaceableTextureResolver
                 yield return Path.Combine(modelDir, modelBase + "Skin.blp");
                 break;
 
+            case 2:
             case 8:
                 yield return Path.Combine(modelDir, modelBase + "Skin00_00_Extra.blp");
                 yield return Path.Combine(modelDir, modelBase + "Skin_Extra.blp");
                 yield return Path.Combine(modelDir, modelBase + "SkinExtra.blp");
+                yield return Path.Combine(modelDir, modelBase + "NakedPelvis.blp");
+                yield return Path.Combine(modelDir, modelBase + "Pelvis.blp");
+                yield return Path.Combine(modelDir, modelBase + "Underwear.blp");
                 break;
 
             case 6:

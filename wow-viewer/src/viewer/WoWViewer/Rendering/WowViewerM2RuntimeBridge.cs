@@ -381,10 +381,23 @@ internal static class WowViewerM2RuntimeBridge
             : default;
         M2BlendMode blendMode = MapEra100BlendMode(material.BlendMode);
 
+        M2CombinerEffectFamily combinerFamily = blendMode switch
+        {
+            M2BlendMode.Opaque => M2CombinerEffectFamily.Opaque,
+            M2BlendMode.AlphaKey => M2CombinerEffectFamily.AlphaKey,
+            M2BlendMode.AlphaBlend => M2CombinerEffectFamily.Decal,
+            M2BlendMode.NoAlphaAdd => M2CombinerEffectFamily.Add,
+            M2BlendMode.Add => M2CombinerEffectFamily.Add,
+            M2BlendMode.Mod => M2CombinerEffectFamily.Mod,
+            M2BlendMode.Mod2X => M2CombinerEffectFamily.Mod2X,
+            M2BlendMode.BlendAdd => M2CombinerEffectFamily.Fade,
+            _ => M2CombinerEffectFamily.Mod,
+        };
+
         M2StaticRenderTextureBinding? primary = bindings.FirstOrDefault();
         M2EffectRecipe recipe = new(
             bindings.Count > 0 ? M2DiffuseEffectFamily.T1 : M2DiffuseEffectFamily.None,
-            blendMode == M2BlendMode.Opaque ? M2CombinerEffectFamily.Opaque : M2CombinerEffectFamily.Mod,
+            combinerFamily,
             isProjected: false,
             usesColorAnimation: false,
             usesTransparencyAnimation: false,

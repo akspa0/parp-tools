@@ -266,6 +266,16 @@ static void RunBlpInspect(string[] args)
 		summary = BlpSummaryReader.Read(stream, sourceLabel);
 
 	PrintBlpSummary(summary);
+
+	string? output = GetOption(args, "--output", "-o");
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		using Stream stream = OpenInputStream();
+		using var blp = new SereniaBLPLib.BlpFile(stream);
+		using var image = blp.GetImage(0);
+		image.SaveAsPng(output);
+		Console.WriteLine($"Saved decoded BLP to {output}");
+	}
 }
 
 static void RunM2(string[] args)
@@ -4621,6 +4631,12 @@ static void RunWmoInspect(string[] args)
 		{
 			WmoMaterialSummary materialSummary = ReadInput(WmoMaterialSummaryReader.Read);
 			PrintWmoMaterialSummary(materialSummary);
+			var materialDetails = ReadInput(WmoMaterialDetailReader.Read);
+			for (int m = 0; m < materialDetails.Count; m++)
+			{
+				var md = materialDetails[m];
+				Console.WriteLine($"  [MAT {m}] shader={md.Shader} blend={md.BlendMode} flags=0x{md.Flags:X} tex1='{md.Texture1Name}' tex2='{md.Texture2Name}' tex3='{md.Texture3Name}'");
+			}
 		}
 		if (summary.GroupInfoCount > 0)
 		{

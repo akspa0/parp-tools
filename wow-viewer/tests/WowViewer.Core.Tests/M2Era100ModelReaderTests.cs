@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Numerics;
+using System.Text;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era100;
 using WowViewer.Core.IO.M2Era1121;
@@ -384,6 +385,120 @@ public sealed class M2Era100ModelReaderTests
         Assert.Null(result.Document.InlineEra100Geometry);
     }
 
+    [Fact]
+    public void ReadDetailed_ZangarPlantGroup05_ParsesMaterialsAndEmbeddedSectionsCorrectly()
+    {
+        string clientPath = @"H:\CLIENTS\TBC\2.X_Retail_Windows_enUS_2.4.3.8606\World of Warcraft\Data";
+        if (!Directory.Exists(clientPath)) return;
+        byte[] m2Bytes = WowViewer.Core.IO.Files.ArchiveVirtualFileReader.ReadVirtualFile(
+            @"world\expansion01\doodads\zangar\plantgroups\zangarplantgroup05.m2",
+            [clientPath],
+            (string?)null);
+
+        using MemoryStream stream = new(m2Bytes, writable: false);
+        var dispatch = M2ModelReaderDispatcher.ReadDetailed(stream, @"world\expansion01\doodads\zangar\plantgroups\zangarplantgroup05.m2");
+        var geom = dispatch.Document.InlineEra100Geometry;
+        Assert.NotNull(geom);
+
+        // Verify material blend modes: material 0 must be AlphaKey (1) for transparent cutout foliage
+        Assert.Equal(3, geom.Materials.Count);
+        Assert.Equal(1, geom.Materials[0].BlendMode); // AlphaKey
+        Assert.Equal(0, geom.Materials[1].BlendMode); // Opaque
+        Assert.Equal(4, geom.Materials[2].BlendMode); // Add
+
+        // Verify embedded division sections parsed with 48-byte stride (not 32-byte stride)
+        Assert.Equal(2, geom.Sections.Count);
+        Assert.Equal(0u, geom.Sections[0].VertexStart);
+        Assert.Equal(233u, geom.Sections[0].VertexCount);
+        Assert.Equal(0u, geom.Sections[0].IndexStart);
+        Assert.Equal(960u, geom.Sections[0].IndexCount);
+
+        Assert.Equal(233u, geom.Sections[1].VertexStart);
+        Assert.Equal(417u, geom.Sections[1].VertexCount);
+        Assert.Equal(960u, geom.Sections[1].IndexStart);
+        Assert.Equal(1908u, geom.Sections[1].IndexCount);
+
+        // Total vertices across both sections must match global vertex count
+        Assert.Equal(650, geom.RenderVertices.Count);
+
+        // Batches mapping
+        Assert.Equal(3, geom.Batches.Count);
+        Assert.Equal(0, geom.Batches[0].SkinSectionIndex);
+        Assert.Equal(0, geom.Batches[0].MaterialIndex);
+        Assert.Equal(1, geom.Batches[1].SkinSectionIndex);
+        Assert.Equal(1, geom.Batches[1].MaterialIndex);
+        Assert.Equal(1, geom.Batches[2].SkinSectionIndex);
+        Assert.Equal(2, geom.Batches[2].MaterialIndex);
+    }
+
+    [Fact]
+    public void Era100_TrollFemale_QuaternionNormalizationAndSampling()
+    {
+        string path = @"I:\parp\parp-tools\wow-viewer\src\viewer\WoWViewer\bin\Debug\net10.0\output\cache\3391d25045a9cd6dbad6f7bd1c4487d2a68e8704\TrollFemale.m2";
+        if (!File.Exists(path)) return;
+
+        byte[] bytes = File.ReadAllBytes(path);
+        using MemoryStream ms = new(bytes, writable: false);
+        var dispatch = M2ModelReaderDispatcher.ReadDetailed(ms, path);
+        var model = dispatch.Document;
+
+        Assert.Equal(M2Era1121EraTag.Md20_1X_V100_Era100, dispatch.Era);
+        Assert.True(model.Bones.Count > 0);
+
+        var b0 = model.Bones[0];
+        var rot0 = WowViewer.Core.Runtime.M2.M2TrackSampler.SampleCompressedQuaternion(model.RawBytes, model, 0, 0, b0.RotationTrack, Quaternion.Identity);
+        Assert.InRange(rot0.X, -0.05f, 0.05f);
+        Assert.InRange(rot0.Y, -0.05f, 0.05f);
+        Assert.InRange(rot0.Z, -0.05f, 0.05f);
+        Assert.InRange(rot0.W, 0.95f, 1.05f);
+
+        var b66 = model.Bones[66];
+        var rot66 = WowViewer.Core.Runtime.M2.M2TrackSampler.SampleCompressedQuaternion(model.RawBytes, model, 1, 0, b66.RotationTrack, Quaternion.Identity);
+        float lenSq66 = (rot66.X * rot66.X) + (rot66.Y * rot66.Y) + (rot66.Z * rot66.Z) + (rot66.W * rot66.W);
+        Assert.InRange(lenSq66, 0.95f, 1.05f);
+    }
+
+    [Fact]
+    public void Era100_Synthetic_UncompressedQuaternion_NormalizedAndSampled()
+    {
+        byte[] data = CreateSyntheticEra100M2WithUncompressedBone();
+
+        using MemoryStream stream = new(data, writable: false);
+        var dispatch = M2ModelReaderDispatcher.ReadDetailed(stream, "SyntheticUncompressed.m2");
+        var model = dispatch.Document;
+
+        Assert.Equal(M2Era1121EraTag.Md20_1X_V100_Era100, dispatch.Era);
+        Assert.NotNull(model.Bones);
+        Assert.Single(model.Bones);
+
+        var b0 = model.Bones[0];
+        var rot0 = WowViewer.Core.Runtime.M2.M2TrackSampler.SampleCompressedQuaternion(
+            model.RawBytes, model, 0, 0, b0.RotationTrack, Quaternion.Identity);
+
+        Assert.InRange(rot0.X, 0.70f, 0.71f);
+        Assert.InRange(rot0.Y, -0.01f, 0.01f);
+        Assert.InRange(rot0.Z, -0.01f, 0.01f);
+        Assert.InRange(rot0.W, 0.70f, 0.71f);
+        float lenSq = (rot0.X * rot0.X) + (rot0.Y * rot0.Y) + (rot0.Z * rot0.Z) + (rot0.W * rot0.W);
+        Assert.InRange(lenSq, 0.99f, 1.01f);
+    }
+
+    [Fact]
+    public void Era100_Synthetic_MaterialsWithAlphaKey_ParsedCorrectly()
+    {
+        byte[] data = CreateSyntheticEra100M2WithMaterial(blendMode: 1);
+
+        using MemoryStream stream = new(data, writable: false);
+        var dispatch = M2ModelReaderDispatcher.ReadDetailed(stream, "SyntheticAlphaKey.m2");
+        var geom = dispatch.Document.InlineEra100Geometry;
+
+        Assert.NotNull(geom);
+        Assert.Single(geom.Materials);
+        Assert.Equal(1, geom.Materials[0].BlendMode);
+        Assert.Single(geom.Batches);
+        Assert.Equal(0, geom.Batches[0].MaterialIndex);
+    }
+
     private static byte[] CreateSyntheticEra100MultiVersionM2(ushort indexCount, ushort level, uint version)
     {
         byte[] data = CreateSyntheticEra100M2(indexCount, level);
@@ -513,5 +628,144 @@ public sealed class M2Era100ModelReaderTests
         WriteArray(span, offset + 0x04, 1, ranges);
         WriteArray(span, offset + 0x0C, 1, times);
         WriteArray(span, offset + 0x14, valueCount, values);
+    }
+
+    private static byte[] CreateSyntheticEra100M2WithUncompressedBone()
+    {
+        const int headerSize = 0x144;
+        const int sequenceOffset = headerSize;
+        int boneOffset = sequenceOffset + M2Era100Constants.SequenceStride;
+        int cursor = boneOffset + M2Era100Constants.BoneStride;
+
+        int transRanges = cursor; cursor += 8;
+        int transTimes = cursor; cursor += 4;
+        int transValues = cursor; cursor += 12;
+
+        int rotRanges = cursor; cursor += 8;
+        int rotTimes = cursor; cursor += 4;
+        int rotValues = cursor; cursor += 16;
+
+        int scaleRanges = cursor; cursor += 8;
+        int scaleTimes = cursor; cursor += 4;
+        int scaleValues = cursor; cursor += 12;
+
+        byte[] data = new byte[cursor];
+        Span<byte> span = data;
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span[..4], M2Era100Constants.Md20Magic);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(M2Era100Constants.VersionOffset, 4), 0x100u);
+
+        WriteArray(span, M2Era100Constants.SequenceCountOffset, 1, sequenceOffset);
+        WriteArray(span, M2Era100Constants.BoneCountOffset, 1, boneOffset);
+
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sequenceOffset + 0x00, 2), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(sequenceOffset + 0x04, 4), 1000);
+
+        BinaryPrimitives.WriteInt32LittleEndian(span.Slice(boneOffset + 0x00, 4), 5);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(boneOffset + 0x04, 4), 8u);
+        BinaryPrimitives.WriteInt16LittleEndian(span.Slice(boneOffset + 0x08, 2), -1);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(boneOffset + 0x0A, 2), 0);
+
+        WriteOldTrackSingle(span, boneOffset + 0x0C, transRanges, transTimes, transValues, valueCount: 1);
+        WriteOldTrackSingle(span, boneOffset + 0x28, rotRanges, rotTimes, rotValues, valueCount: 1);
+        WriteOldTrackSingle(span, boneOffset + 0x44, scaleRanges, scaleTimes, scaleValues, valueCount: 1);
+        WriteVector3(span, boneOffset + 0x60, 1f, 2f, 3f);
+
+        WriteRangeSingle(span, transRanges);
+        WriteRangeSingle(span, rotRanges);
+        WriteRangeSingle(span, scaleRanges);
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(transTimes, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(rotTimes, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(scaleTimes, 4), 0);
+
+        WriteVector3(span, transValues, 10f, 20f, 30f);
+        WriteSingle(span, rotValues + 0, 0.70710678f);
+        WriteSingle(span, rotValues + 4, 0f);
+        WriteSingle(span, rotValues + 8, 0f);
+        WriteSingle(span, rotValues + 12, 0.70710678f);
+        WriteVector3(span, scaleValues, 1f, 1f, 1f);
+
+        return data;
+    }
+
+    public static byte[] CreateSyntheticEra100M2WithMaterial(ushort blendMode)
+    {
+        const int headerSize = 0x144;
+        const int vertexCount = 4;
+        ushort[] lookup = [0, 1, 2, 3];
+        ushort[] indices = [0, 1, 2, 0, 2, 3];
+
+        int verticesOfs = headerSize;
+        int lookupOfs = verticesOfs + (vertexCount * M2Era100Constants.VertexStride);
+        int indicesOfs = lookupOfs + (lookup.Length * sizeof(ushort));
+        int sectionsOfs = indicesOfs + (indices.Length * sizeof(ushort));
+        int batchesOfs = sectionsOfs + M2Era100Constants.SectionStride;
+        int divisionOfs = batchesOfs + M2Era100Constants.BatchStride;
+        int materialsOfs = divisionOfs + M2Era100Constants.DivisionStride;
+        int texturesOfs = materialsOfs + 4;
+        int textureFileNameOfs = texturesOfs + 16;
+        int total = textureFileNameOfs + 16;
+
+        byte[] data = new byte[total];
+        Span<byte> span = data;
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span[..4], M2Era100Constants.Md20Magic);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(M2Era100Constants.VersionOffset, 4), 0x100u);
+
+        WriteArray(span, M2Era100Constants.VertexCountOffset, vertexCount, verticesOfs);
+        WriteArray(span, M2Era100Constants.DivisionCountOffset, 1, divisionOfs);
+        WriteArray(span, M2Era100Constants.MaterialCountOffset, 1, materialsOfs);
+        WriteArray(span, M2Era100Constants.TextureCountOffset, 1, texturesOfs);
+
+        for (int i = 0; i < vertexCount; i++)
+        {
+            int ofs = verticesOfs + (i * M2Era100Constants.VertexStride);
+            WriteVector3(span, ofs + M2Era100Constants.VertexPositionOffset, i, i % 2, 0f);
+            span[ofs + M2Era100Constants.VertexBoneWeightsOffset] = 255;
+            span[ofs + M2Era100Constants.VertexBoneIndicesOffset] = (byte)i;
+            WriteVector3(span, ofs + M2Era100Constants.VertexNormalOffset, 0f, 0f, 1f);
+            WriteVector2(span, ofs + M2Era100Constants.VertexTexCoords0Offset, 0.25f * i, 0.75f * i);
+            WriteVector2(span, ofs + M2Era100Constants.VertexTexCoords1Offset, 0.1f * i, 0.2f * i);
+        }
+
+        for (int i = 0; i < lookup.Length; i++)
+            BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(lookupOfs + (i * sizeof(ushort)), 2), lookup[i]);
+
+        for (int i = 0; i < indices.Length; i++)
+            BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(indicesOfs + (i * sizeof(ushort)), 2), indices[i]);
+
+        // Section
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sectionsOfs + M2Era100Constants.SectionSubmeshIdOffset, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sectionsOfs + M2Era100Constants.SectionLevelOffset, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sectionsOfs + M2Era100Constants.SectionVertexStartOffset, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sectionsOfs + M2Era100Constants.SectionVertexCountOffset, 2), vertexCount);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sectionsOfs + M2Era100Constants.SectionIndexStartOffset, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sectionsOfs + M2Era100Constants.SectionIndexCountOffset, 2), (ushort)indices.Length);
+
+        // Batch: bind section 0, material 0
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(batchesOfs + M2Era100Constants.BatchSkinSectionIndexOffset, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(batchesOfs + M2Era100Constants.BatchMaterialIndexOffset, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(batchesOfs + M2Era100Constants.BatchTextureCountOffset, 2), 1);
+
+        // Division
+        WriteArray(span, divisionOfs + M2Era100Constants.DivisionVertexLookupCountOffset, lookup.Length, lookupOfs);
+        WriteArray(span, divisionOfs + M2Era100Constants.DivisionIndicesCountOffset, indices.Length, indicesOfs);
+        WriteArray(span, divisionOfs + M2Era100Constants.DivisionUint32ArrayCountOffset, 0, 0);
+        WriteArray(span, divisionOfs + M2Era100Constants.DivisionSectionsCountOffset, 1, sectionsOfs);
+        WriteArray(span, divisionOfs + M2Era100Constants.DivisionBatchesCountOffset, 1, batchesOfs);
+
+        // Material at materialsOfs: {uint16 flags, uint16 blendMode}
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(materialsOfs + 0, 2), 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(materialsOfs + 2, 2), blendMode);
+
+        // Texture at texturesOfs: {uint32 type, uint32 flags, uint32 nameLen, uint32 nameOfs}
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(texturesOfs + 0, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(texturesOfs + 4, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(texturesOfs + 8, 4), 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(texturesOfs + 12, 4), (uint)textureFileNameOfs);
+        Encoding.ASCII.GetBytes("test").CopyTo(span.Slice(textureFileNameOfs, 4));
+
+        return data;
     }
 }

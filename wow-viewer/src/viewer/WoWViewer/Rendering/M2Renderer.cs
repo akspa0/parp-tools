@@ -564,7 +564,10 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
             _gl.BindVertexArray(0);
 
-            var buffers = new SectionBuffers(section.SectionIndex, section.SkinSectionId, vao, vbo, ebo, section.Vertices.Count, (uint)indices.Length, section.Material);
+            var buffers = new SectionBuffers(section.SectionIndex, section.SkinSectionId, vao, vbo, ebo, section.Vertices.Count, (uint)indices.Length, section.Material)
+            {
+                AlphaCutout = section.Material.BlendMode == WowViewer.Core.M2.M2BlendMode.AlphaKey,
+            };
             _sections.Add(buffers);
             _sectionsByIndex[section.SectionIndex] = buffers;
         }
@@ -728,7 +731,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             // pure runtime renderer has proven stable winding or projected-pass rules.
             _gl.Disable(EnableCap.CullFace);
 
-            if (!backdrop && transparent)
+            if (transparent)
             {
                 _gl.Enable(EnableCap.Blend);
                 ConfigureBlendMode(section.Material.BlendMode);
@@ -1076,9 +1079,11 @@ void main()
 
         foreach ((string? TexturePath, uint ReplaceableId, uint TextureFlags, int UvSet, bool GeneratedTexCoord) candidate in EnumerateTextureCandidates(material))
         {
-            string? resolvedPath = candidate.TexturePath;
-            if (string.IsNullOrWhiteSpace(resolvedPath) && candidate.ReplaceableId != 0)
+            string? resolvedPath = null;
+            if (candidate.ReplaceableId != 0)
                 resolvedPath = ResolveReplaceableTexture(candidate.ReplaceableId);
+            if (string.IsNullOrWhiteSpace(resolvedPath))
+                resolvedPath = candidate.TexturePath;
 
             if (string.IsNullOrWhiteSpace(resolvedPath))
                 continue;

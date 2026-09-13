@@ -204,8 +204,10 @@ public static class M2Era100Constants
     public const int DivisionBatchesCountOffset = 0x20;
     public const int DivisionBatchesOffsetOffset = 0x24;
 
-    /// <summary>Render section / geometry group record (0x20 = 32 bytes).</summary>
+    /// <summary>Render section / geometry group record in 1.0.0 (0x20 = 32 bytes).</summary>
     public const int SectionStride = 0x20;
+    /// <summary>Render section / geometry group record in 2.x/0x104+ (0x30 = 48 bytes with sort center/radius).</summary>
+    public const int SectionStrideEra104 = 0x30;
 
     /// <summary>Material/texture binding record (0x18 = 24 bytes).</summary>
     public const int BatchStride = 0x18;

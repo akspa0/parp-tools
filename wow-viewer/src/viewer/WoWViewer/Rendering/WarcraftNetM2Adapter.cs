@@ -1267,13 +1267,12 @@ internal static class WarcraftNetM2Adapter
                 skin.TriangleIndices.Add(tri);
 
             // Build submeshes from sections and texture units from batches.
-            // Each batch references a section via SkinSectionIndex.
-            foreach (var batch in geometry.Batches)
+            // In Era 100, geometry.Sections defines the submeshes (geosets),
+            // and each batch in geometry.Batches references a section via SkinSectionIndex.
+            if (geometry.Sections.Count > 0)
             {
-                int sectionIdx = batch.SkinSectionIndex;
-                if (sectionIdx >= 0 && sectionIdx < geometry.Sections.Count)
+                foreach (var section in geometry.Sections)
                 {
-                    var section = geometry.Sections[sectionIdx];
                     skin.Submeshes.Add(new SkinSubmeshData
                     {
                         SkinSectionId = section.SubmeshId,
@@ -1285,7 +1284,26 @@ internal static class WarcraftNetM2Adapter
                         BoneComboIndex = 0,
                     });
                 }
+            }
+            else
+            {
+                foreach (var batch in geometry.Batches)
+                {
+                    skin.Submeshes.Add(new SkinSubmeshData
+                    {
+                        SkinSectionId = batch.SkinSectionIndex,
+                        Level = 0,
+                        VertexStart = 0,
+                        VertexCount = (ushort)Math.Min(geometry.RenderVertices.Count, ushort.MaxValue),
+                        IndexStart = 0,
+                        IndexCount = (ushort)Math.Min(geometry.Triangles.Count, ushort.MaxValue),
+                        BoneComboIndex = 0,
+                    });
+                }
+            }
 
+            foreach (var batch in geometry.Batches)
+            {
                 skin.TextureUnits.Add(new SkinTextureUnitData
                 {
                     PriorityPlane = batch.PriorityPlane,
@@ -1314,16 +1332,28 @@ internal static class WarcraftNetM2Adapter
                 });
             }
 
-            // 1.0.0 does not have a separate render-flags array like 1.12.1.
-            // The blend mode is encoded in the batch's materialIndex/shaderId fields.
-            // For now, default to opaque (flags=0, blendMode=0) per batch.
-            for (int i = 0; i < geometry.Batches.Count; i++)
+            // 1.0.0 encodes render flags and blending mode in geometry.Materials,
+            // which each batch references via batch.MaterialIndex.
+            int maxMaterialIndex = geometry.Batches.Count > 0 ? geometry.Batches.Max(static b => (int)b.MaterialIndex) : -1;
+            int renderFlagCount = Math.Max(geometry.Materials.Count, maxMaterialIndex + 1);
+            for (int i = 0; i < renderFlagCount; i++)
             {
-                data.RenderFlags.Add(new ParsedRenderFlagData
+                if (i < geometry.Materials.Count)
                 {
-                    Flags = 0,
-                    BlendingMode = 0,
-                });
+                    data.RenderFlags.Add(new ParsedRenderFlagData
+                    {
+                        Flags = geometry.Materials[i].Flags,
+                        BlendingMode = geometry.Materials[i].BlendMode,
+                    });
+                }
+                else
+                {
+                    data.RenderFlags.Add(new ParsedRenderFlagData
+                    {
+                        Flags = 0,
+                        BlendingMode = 0,
+                    });
+                }
             }
 
             foreach (var lookup in geometry.TextureLookup)
@@ -1728,6 +1758,10 @@ internal static class WarcraftNetM2Adapter
         if (current.Count == 0)
             return true;
 
+        // If current already has valid flags with plausible blend modes, do not overwrite with speculative header scans
+        if (current.All(f => f.BlendingMode <= 6))
+            return false;
+
         return EvaluateRenderFlagQuality(candidate) > EvaluateRenderFlagQuality(current);
     }
 
@@ -1740,7 +1774,7 @@ internal static class WarcraftNetM2Adapter
                 plausibleBlendModes++;
         }
 
-        return (plausibleBlendModes * 8) + renderFlags.Count;
+        return (plausibleBlendModes * 8) + Math.Min(renderFlags.Count, 32);
     }
 
     private static bool ShouldPreferProfiledTextureLookup(
@@ -1877,7 +1911,7 @@ internal static class WarcraftNetM2Adapter
         renderFlags = null;
         score = 0;
 
-        if (count == 0 || count > 2048 || dataOffset == 0)
+        if (count == 0 || count > 128 || dataOffset == 0)
             return false;
 
         if (!TryValidateOptionalSpan(count, dataOffset, 0x04, modelBytes.Length, fileName, "profiled.renderFlags"))

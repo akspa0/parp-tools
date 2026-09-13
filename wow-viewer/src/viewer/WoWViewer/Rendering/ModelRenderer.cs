@@ -2630,24 +2630,21 @@ void main()
         string? texPath = tex.Path;
         string? replaceablePath = null;
 
-        if (string.IsNullOrEmpty(texPath) && tex.ReplaceableId > 0)
+        if (tex.ReplaceableId > 0)
         {
             replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
-            texPath = replaceablePath;
-            if (texPath != null)
+            if (!string.IsNullOrEmpty(replaceablePath))
             {
+                texPath = replaceablePath;
                 ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} -> {texPath}");
                 replaceableResolved++;
             }
-            else
+            else if (string.IsNullOrEmpty(texPath))
             {
                 ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} (unresolved)");
                 replaceableFailed++;
             }
         }
-
-        if (replaceablePath == null && tex.ReplaceableId > 0)
-            replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
 
         if (string.IsNullOrEmpty(texPath))
         {

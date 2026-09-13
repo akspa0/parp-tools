@@ -1,5 +1,7 @@
 using WowViewer.Core.Files;
 using System.Buffers.Binary;
+using System.Numerics;
+using SixLabors.ImageSharp;
 using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Wmo;
@@ -444,6 +446,182 @@ public sealed class WmoRealDataTests
             .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(version)),
             .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOGP", mogpPayload),
         ];
+    }
+
+    [Fact]
+    public void Read_NagrandFloatingRock_TBC_Inspect()
+    {
+        string clientRoot = @"H:\CLIENTS\TBC\2.X_Retail_Windows_enUS_2.4.3.8606\World of Warcraft";
+        if (!Directory.Exists(clientRoot))
+            return;
+
+        using MpqArchiveCatalog catalog = new();
+        var bootstrap = ArchiveCatalogBootstrapper.Bootstrap(catalog, [clientRoot], WmoTestPaths.ListfilePath);
+
+        var matches = bootstrap.InternalFiles.Where(f => f.Contains("NAGRAND", StringComparison.OrdinalIgnoreCase) && f.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase)).Take(20).ToList();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"InternalFiles total={bootstrap.InternalFiles.Count}, KnownFiles={bootstrap.KnownFiles.Count}");
+        sb.AppendLine($"Matches with NAGRAND & .wmo: {matches.Count}");
+        foreach (var m in matches)
+            sb.AppendLine("  " + m);
+
+        string rootPath = @"World\wmo\Outland\FloatingRocks\Nagrand_RockFloating_01.wmo";
+        byte[]? rootBytes = catalog.ReadFile(rootPath);
+        sb.AppendLine($"Root '{rootPath}': bytes={(rootBytes != null ? rootBytes.Length : -1)}");
+
+        string[] texNames = [
+            @"WORLD\ENVIRONMENT\DOODAD\NAGRAND\ROCKSFLOATING\NAGRAND_ROCKFLOATING_BOTTOM.BLP",
+            @"TILESET\EXPANSION01\NAGRAND\NAGRANDROCKSOLID.BLP",
+            @"WORLD\ENVIRONMENT\DOODAD\NAGRAND\ROCKSFLOATING\NAGRAND_ROCKFLOATING_EDGE.BLP",
+            @"WORLD\ENVIRONMENT\DOODAD\NAGRAND\ROCKSFLOATING\NAGRAND_ROCKFLOATING_GRASSCENTER.BLP"
+        ];
+        string[] outNames = ["bottom.png", "rocksolid.png", "edge.png", "grasscenter.png"];
+        for (int ti = 0; ti < texNames.Length; ti++)
+        {
+            byte[]? b = catalog.ReadFile(texNames[ti]);
+            if (b != null)
+            {
+                using var ms = new MemoryStream(b);
+                using var blp = new SereniaBLPLib.BlpFile(ms);
+                using var img = blp.GetImage(0);
+                img.SaveAsPng($@"C:\Users\akspa\.gemini\antigravity-ide\brain\d464bb6e-1bdb-482e-b49e-5441dbb8d94d\scratch\{outNames[ti]}");
+                
+                // Inspect row 0 (y=0) and row H-1 (y=H-1)
+                float r0R = 0, r0G = 0, r0B = 0;
+                float r1R = 0, r1G = 0, r1B = 0;
+                for (int x = 0; x < img.Width; x++)
+                {
+                    var c0 = img[x, 0];
+                    r0R += c0.R; r0G += c0.G; r0B += c0.B;
+                    var c1 = img[x, img.Height - 1];
+                    r1R += c1.R; r1G += c1.G; r1B += c1.B;
+                }
+                sb.AppendLine($"Saved {outNames[ti]}: {img.Width}x{img.Height}");
+                sb.AppendLine($"  y=0: avg RGB=({r0R/img.Width:F1}, {r0G/img.Width:F1}, {r0B/img.Width:F1})");
+                sb.AppendLine($"  y={img.Height-1}: avg RGB=({r1R/img.Width:F1}, {r1G/img.Width:F1}, {r1B/img.Width:F1})");
+            }
+        }
+
+        if (rootBytes != null)
+        {
+            var groups = new List<byte[]>();
+            for (int gi = 0; ; gi++)
+            {
+                string gPath = $@"World\wmo\Outland\FloatingRocks\Nagrand_RockFloating_01_{gi:D3}.wmo";
+                byte[]? gBytes = catalog.ReadFile(gPath);
+                if (gBytes == null) break;
+                groups.Add(gBytes);
+            }
+
+            var v17Parser = new WowViewer.Core.IO.Converters.WmoV17ToV14Converter();
+            var wmo = v17Parser.ParseV17ToModel(rootBytes, groups);
+
+            sb.AppendLine($"WMO: Groups={wmo.Groups.Count}, Materials={wmo.Materials.Count}");
+            for (int i = 0; i < wmo.Materials.Count; i++)
+            {
+                var m = wmo.Materials[i];
+                sb.AppendLine($"Mat {i}: Shader={m.Shader}, Blend={m.BlendMode}, Flags=0x{m.Flags:X}, Tex1='{m.Texture1Name}', Tex2='{m.Texture2Name}', Tex3='{m.Texture3Name}'");
+            }
+            for (int gi = 0; gi < wmo.Groups.Count; gi++)
+            {
+                var g = wmo.Groups[gi];
+                sb.AppendLine($"Group {gi} '{g.Name}': Flags=0x{g.Flags:X}, Verts={g.Vertices.Count}, UVs={g.UVs.Count}, Colors={g.VertexColors.Count}, Batches={g.Batches.Count}");
+                for (int bi = 0; bi < g.Batches.Count; bi++)
+                {
+                    var b = g.Batches[bi];
+                    sb.AppendLine($"  Batch {bi}: FirstIdx={b.FirstIndex}, Count={b.IndexCount}, MatId={b.MaterialId}");
+                    float minU = float.MaxValue, maxU = float.MinValue, minV = float.MaxValue, maxV = float.MinValue;
+                    for (int ii = (int)b.FirstIndex; ii < (int)b.FirstIndex + (int)b.IndexCount && ii < g.Indices.Count; ii++)
+                    {
+                        int vi = g.Indices[ii];
+                        if (vi < g.UVs.Count)
+                        {
+                            var uv = g.UVs[vi];
+                            minU = Math.Min(minU, uv.X); maxU = Math.Max(maxU, uv.X);
+                            minV = Math.Min(minV, uv.Y); maxV = Math.Max(maxV, uv.Y);
+                        }
+                    }
+                    sb.AppendLine($"    Batch {bi} UV range: U=[{minU:F4}, {maxU:F4}], V=[{minV:F4}, {maxV:F4}]");
+
+                    var batchVerts = new HashSet<int>();
+                    for (int ii = (int)b.FirstIndex; ii < (int)b.FirstIndex + (int)b.IndexCount; ii++)
+                        batchVerts.Add(g.Indices[ii]);
+
+                    var lowZ = batchVerts.OrderBy(vi => g.Vertices[vi].Z).Take(2);
+                    var highZ = batchVerts.OrderByDescending(vi => g.Vertices[vi].Z).Take(2);
+                    foreach (int vi in lowZ)
+                        sb.AppendLine($"      [min Z] v{vi}: Z={g.Vertices[vi].Z:F3}, uv=({g.UVs[vi].X:F4}, {g.UVs[vi].Y:F4})");
+                    foreach (int vi in highZ)
+                        sb.AppendLine($"      [max Z] v{vi}: Z={g.Vertices[vi].Z:F3}, uv=({g.UVs[vi].X:F4}, {g.UVs[vi].Y:F4})");
+
+                    if (bi == 2)
+                    {
+                        var b1Verts = new HashSet<int>();
+                        for (int ii = (int)g.Batches[1].FirstIndex; ii < (int)g.Batches[1].FirstIndex + (int)g.Batches[1].IndexCount; ii++)
+                            b1Verts.Add(g.Indices[ii]);
+
+                        var b2Verts = new HashSet<int>();
+                        for (int ii = (int)b.FirstIndex; ii < (int)b.FirstIndex + (int)b.IndexCount; ii++)
+                            b2Verts.Add(g.Indices[ii]);
+
+                        var b3Verts = new HashSet<int>();
+                        for (int ii = (int)g.Batches[3].FirstIndex; ii < (int)g.Batches[3].FirstIndex + (int)g.Batches[3].IndexCount; ii++)
+                            b3Verts.Add(g.Indices[ii]);
+
+                        var v132Pos = g.Vertices[132];
+                        float bestDist = float.MaxValue;
+                        int bestV = -1;
+                        foreach (int vi in b1Verts)
+                        {
+                            float d = Vector3.Distance(g.Vertices[vi], v132Pos);
+                            if (d < bestDist)
+                            {
+                                bestDist = d;
+                                bestV = vi;
+                            }
+                        }
+                        sb.AppendLine($"    v132 pos={v132Pos}, uv=({g.UVs[132].X:F4}, {g.UVs[132].Y:F4})");
+                        if (bestV >= 0)
+                        {
+                            var bestPos = g.Vertices[bestV];
+                            var bestUv = g.UVs[bestV];
+                            sb.AppendLine($"    Closest Batch 1 vertex to v132 is v{bestV}: dist={bestDist:F5}, pos={bestPos}, uv=({bestUv.X:F4}, {bestUv.Y:F4})");
+                        }
+
+                        sb.AppendLine("    Batch 2 samples (Z vs UV):");
+                        foreach (int vi in b2Verts.OrderBy(vi => g.Vertices[vi].Z).Take(5))
+                        {
+                            var pos = g.Vertices[vi];
+                            var uv = g.UVs[vi];
+                            sb.AppendLine($"      bottom v{vi}: Z={pos.Z:F3}, U={uv.X:F4}, V={uv.Y:F4}");
+                        }
+                        foreach (int vi in b2Verts.OrderByDescending(vi => g.Vertices[vi].Z).Take(5))
+                        {
+                            var pos = g.Vertices[vi];
+                            var uv = g.UVs[vi];
+                            sb.AppendLine($"      top v{vi}: Z={pos.Z:F3}, U={uv.X:F4}, V={uv.Y:F4}");
+                        }
+                    }
+
+                    if (bi == 3)
+                    {
+                        sb.AppendLine("    Batch 3 samples (X, Y, Z vs UV):");
+                        var b3Verts = new HashSet<int>();
+                        for (int ii = (int)b.FirstIndex; ii < (int)b.FirstIndex + (int)b.IndexCount; ii++)
+                            b3Verts.Add(g.Indices[ii]);
+
+                        foreach (int vi in b3Verts.Take(10))
+                        {
+                            var pos = g.Vertices[vi];
+                            var uv = g.UVs[vi];
+                            sb.AppendLine($"      v{vi}: pos=({pos.X:F2}, {pos.Y:F2}, {pos.Z:F2}), uv=({uv.X:F4}, {uv.Y:F4})");
+                        }
+                    }
+                }
+            }
+        }
+
+        File.WriteAllText(@"C:\Users\akspa\.gemini\antigravity-ide\brain\d464bb6e-1bdb-482e-b49e-5441dbb8d94d\scratch\wmo_inspect.txt", sb.ToString());
     }
 }
 

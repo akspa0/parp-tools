@@ -298,7 +298,7 @@ public static class M2StaticRenderModelBuilder
     {
         int textureStageCount = Math.Max(textureBindings.Count, batch?.TextureCount ?? 0);
         bool isProjected = batch is not null
-            && (((batch.Flags & 0x4) != 0) || ((batch.GeosetIndex & 0x2) != 0));
+            && ((batch.Flags & 0x4) != 0);
         M2DiffuseEffectFamily diffuseFamily = isProjected
             ? M2DiffuseEffectFamily.Projected
             : textureStageCount switch
