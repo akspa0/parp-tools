@@ -32,7 +32,9 @@ public sealed class M2SequenceDefinition
         Vector3 boundsMax,
         float boundsRadius,
         short variationNext,
-        ushort aliasNext)
+        ushort aliasNext,
+        uint startTimestamp = 0,
+        uint endTimestamp = 0)
     {
         Index = index;
         AnimationId = animationId;
@@ -50,6 +52,8 @@ public sealed class M2SequenceDefinition
         BoundsRadius = boundsRadius;
         VariationNext = variationNext;
         AliasNext = aliasNext;
+        StartTimestamp = startTimestamp;
+        EndTimestamp = endTimestamp != 0 ? endTimestamp : (startTimestamp + duration);
     }
 
     public int Index { get; }
@@ -85,6 +89,10 @@ public sealed class M2SequenceDefinition
     public short VariationNext { get; }
 
     public ushort AliasNext { get; }
+ 
+    public uint StartTimestamp { get; }
+
+    public uint EndTimestamp { get; }
 
     public bool HasRuntimeLoadedFlag => (Flags & (uint)M2SequenceFlags.RuntimeLoaded) != 0;
 

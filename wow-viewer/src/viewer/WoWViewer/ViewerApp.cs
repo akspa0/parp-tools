@@ -13002,8 +13002,7 @@ void main() {
         NormalizeStandaloneCharacterCustomizationSelection();
         _preserveStandaloneCharacterCustomizationOnNextLoad = false;
 
-        if (_standaloneCharacterHairVariationOverride >= 0 || _standaloneCharacterFacialHairVariationOverride >= 0)
-            ApplyStandaloneCharacterCustomizationOverrides();
+        ApplyStandaloneCharacterCustomizationOverrides();
     }
 
     private void ClearStandaloneCharacterCustomizationState(bool resetOverrides)

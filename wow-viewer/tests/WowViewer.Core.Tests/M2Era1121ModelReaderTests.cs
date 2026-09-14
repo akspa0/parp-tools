@@ -97,15 +97,27 @@ public sealed class M2Era1121ModelReaderTests
     }
 
     [Fact]
-    public void Dispatcher_2X_Version_Throws_WithSpec049Message()
+    public void Dispatcher_2X_Version_GoesToLegacyEra100Tag()
     {
         byte[] md20_2x = CreateSyntheticMd20_2X("Synthetic2X");
 
         using MemoryStream stream = new(md20_2x, writable: false);
-        NotSupportedException ex = Assert.Throws<NotSupportedException>(() =>
-            M2ModelReaderDispatcher.ReadDetailed(stream, "Creature\\Synthetic2X\\Synthetic2X.m2"));
+        M2DispatchResult result = M2ModelReaderDispatcher.ReadDetailed(stream, "Creature\\Synthetic2X\\Synthetic2X.m2");
 
-        Assert.Contains("049", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(M2Era1121EraTag.Md20_1X_V100_Era100, result.Era);
+    }
+
+    [Fact]
+    public void Dispatcher_UnsupportedVersion_Throws_WithOutsideRangeMessage()
+    {
+        byte[] md20_bad = CreateSyntheticMd20_2X("SyntheticBad");
+        BinaryPrimitives.WriteUInt32LittleEndian(md20_bad.AsSpan(0x04, 4), 0x050u);
+
+        using MemoryStream stream = new(md20_bad, writable: false);
+        NotSupportedException ex = Assert.Throws<NotSupportedException>(() =>
+            M2ModelReaderDispatcher.ReadDetailed(stream, "Creature\\SyntheticBad\\SyntheticBad.m2"));
+
+        Assert.Contains("outside the supported range", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

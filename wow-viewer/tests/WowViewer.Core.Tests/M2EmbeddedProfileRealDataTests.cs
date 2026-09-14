@@ -261,6 +261,67 @@ public sealed class M2EmbeddedProfileRealDataTests
         Assert.False(string.IsNullOrWhiteSpace(texturePath));
     }
 
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+    public M2EmbeddedProfileRealDataTests(Xunit.Abstractions.ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    [Fact]
+    public void Inspect200OrcFemaleSequencesAndBones()
+    {
+        string[] candidates = [
+            @"H:\CLIENTS\TBC\2.X_Pre-Release_Windows_enUS_2.0.0.5610\World of Warcraft\Data",
+            @"H:\CLIENTS\TBC\2.X_Retail_Windows_enUS_2.4.3.8606\World of Warcraft\Data",
+        ];
+        string? dataDir = candidates.FirstOrDefault(Directory.Exists);
+        if (dataDir == null)
+            return;
+
+        using MpqArchiveCatalog catalog = new();
+        catalog.LoadArchives([dataDir]);
+        byte[]? modelBytes = catalog.ReadFile(@"Character\Orc\Female\OrcFemale.m2");
+        Assert.NotNull(modelBytes);
+
+        using MemoryStream stream = new(modelBytes, writable: false);
+        var dispatch = WowViewer.Core.IO.M2Chunked.M2ModelReaderDispatcher.ReadDetailed(stream, @"Character\Orc\Female\OrcFemale.m2");
+        var doc = dispatch.Document;
+
+        _output.WriteLine($"TOTAL SEQUENCES: {doc.Sequences.Count}");
+        for (int i = 0; i < doc.Sequences.Count; i++)
+        {
+            var seq = doc.Sequences[i];
+            var name = WowViewer.Core.M2.M2AnimationNameResolver.GetSequenceDisplayName(seq.AnimationId, seq.VariationIndex);
+            _output.WriteLine($"SEQ[{i:D3}]: id={seq.AnimationId} var={seq.VariationIndex} name={name}");
+        }
+
+        // Check an animated bone with multiple keyframes in sequence 0
+        Assert.True(doc.Sequences.Count > 0);
+
+        var standSeq = doc.Sequences[0];
+        Assert.Equal(0, standSeq.AnimationId);
+        Assert.Equal(3333u, standSeq.StartTimestamp);
+        Assert.Equal(5800u, standSeq.EndTimestamp);
+        Assert.Equal(2467u, standSeq.Duration);
+
+        // Verify animation name resolution
+        Assert.Equal("Stand", WowViewer.Core.M2.M2AnimationNameResolver.GetSequenceDisplayName(standSeq.AnimationId, standSeq.VariationIndex));
+        var lootSeq = doc.Sequences[27];
+        Assert.Equal(50, lootSeq.AnimationId);
+        Assert.Equal("Loot", WowViewer.Core.M2.M2AnimationNameResolver.GetSequenceDisplayName(lootSeq.AnimationId, lootSeq.VariationIndex));
+        var thrownSeq = doc.Sequences[24];
+        Assert.Equal(107, thrownSeq.AnimationId);
+        Assert.Equal("AttackThrown", WowViewer.Core.M2.M2AnimationNameResolver.GetSequenceDisplayName(thrownSeq.AnimationId, thrownSeq.VariationIndex));
+
+        // Verify animated bone sampling actually advances through timeline and changes values
+        var animatedBone = doc.Bones[22];
+        var rot0 = WowViewer.Core.Runtime.M2.M2TrackSampler.SampleCompressedQuaternion(doc.RawBytes, doc, 0, 0, animatedBone.RotationTrack, System.Numerics.Quaternion.Identity);
+        var rot1 = WowViewer.Core.Runtime.M2.M2TrackSampler.SampleCompressedQuaternion(doc.RawBytes, doc, 0, 1200, animatedBone.RotationTrack, System.Numerics.Quaternion.Identity);
+        Assert.NotEqual(rot0, rot1);
+    }
+
+
     private static string GetWowViewerRoot()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);

@@ -511,7 +511,10 @@ public static class M2ToMdxConverter
             if (sequencePayload is null)
                 continue;
 
-            AppendVector3TrackKeyframes(sequencePayload, track, sourceSequenceIndex, baseTime, keyframes);
+            uint startTimestamp = sourceSequenceIndex >= 0 && sourceSequenceIndex < model.Sequences.Count
+                ? model.Sequences[sourceSequenceIndex].StartTimestamp
+                : 0u;
+            AppendVector3TrackKeyframes(sequencePayload, track, sourceSequenceIndex, baseTime, keyframes, startTimestamp);
         }
 
         return keyframes;
@@ -543,7 +546,10 @@ public static class M2ToMdxConverter
             if (sequencePayload is null)
                 continue;
 
-            AppendQuaternionTrackKeyframes(sequencePayload, track, sourceSequenceIndex, baseTime, keyframes);
+            uint startTimestamp = sourceSequenceIndex >= 0 && sourceSequenceIndex < model.Sequences.Count
+                ? model.Sequences[sourceSequenceIndex].StartTimestamp
+                : 0u;
+            AppendQuaternionTrackKeyframes(sequencePayload, track, sourceSequenceIndex, baseTime, keyframes, startTimestamp);
         }
 
         return keyframes;
@@ -597,7 +603,8 @@ public static class M2ToMdxConverter
         M2TrackDefinition<Vector3> track,
         int sequenceIndex,
         int baseTime,
-        List<Vector3TrackKeyframe> destination)
+        List<Vector3TrackKeyframe> destination,
+        uint startTimestamp = 0)
     {
         if (!TryReadSequenceSlice(payload, track.TimestampArray, track.ValueArray, sequenceIndex, out M2TrackSequenceSlice slice) || !slice.HasData)
             return;
@@ -617,7 +624,9 @@ public static class M2ToMdxConverter
         {
             uint timeOffset = checked(slice.TimestampOffset + (uint)(keyIndex * sizeof(uint)));
             uint valueOffset = checked(slice.ValueOffset + (uint)(keyIndex * valueStride));
-            int time = checked(baseTime + (int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan((int)timeOffset, sizeof(uint))));
+            uint rawTime = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan((int)timeOffset, sizeof(uint)));
+            int relativeTime = startTimestamp > 0 && rawTime >= startTimestamp ? (int)(rawTime - startTimestamp) : (int)rawTime;
+            int time = checked(baseTime + relativeTime);
             Vector3 value = ReadVector3Value(payload, valueOffset);
             Vector3 inTangent = value;
             Vector3 outTangent = value;
@@ -636,7 +645,8 @@ public static class M2ToMdxConverter
         M2TrackDefinition<M2CompQuaternion> track,
         int sequenceIndex,
         int baseTime,
-        List<QuaternionTrackKeyframe> destination)
+        List<QuaternionTrackKeyframe> destination,
+        uint startTimestamp = 0)
     {
         if (!TryReadSequenceSlice(payload, track.TimestampArray, track.ValueArray, sequenceIndex, out M2TrackSequenceSlice slice) || !slice.HasData)
             return;
@@ -656,7 +666,9 @@ public static class M2ToMdxConverter
         {
             uint timeOffset = checked(slice.TimestampOffset + (uint)(keyIndex * sizeof(uint)));
             uint valueOffset = checked(slice.ValueOffset + (uint)(keyIndex * valueStride));
-            int time = checked(baseTime + (int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan((int)timeOffset, sizeof(uint))));
+            uint rawTime = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan((int)timeOffset, sizeof(uint)));
+            int relativeTime = startTimestamp > 0 && rawTime >= startTimestamp ? (int)(rawTime - startTimestamp) : (int)rawTime;
+            int time = checked(baseTime + relativeTime);
             Quaternion value = ReadCompQuaternionValue(payload, valueOffset);
             Quaternion inTangent = value;
             Quaternion outTangent = value;
@@ -807,60 +819,7 @@ public static class M2ToMdxConverter
     }
 
     private static string GetAnimationSequenceName(ushort animationId, ushort variationIndex)
-    {
-        string baseName = animationId switch
-        {
-            0 => "Stand",
-            1 => "Death",
-            2 => "Spell",
-            3 => "Stop",
-            4 => "Walk",
-            5 => "Run",
-            6 => "Dead",
-            7 => "Rise",
-            8 => "StandWound",
-            9 => "CombatWound",
-            10 => "CombatCritical",
-            11 => "ShuffleLeft",
-            12 => "ShuffleRight",
-            13 => "WalkBackwards",
-            14 => "Stun",
-            15 => "HandsClosed",
-            16 => "AttackUnarmed",
-            17 => "Attack1H",
-            18 => "Attack2H",
-            19 => "Attack2HL",
-            20 => "ParryUnarmed",
-            21 => "Parry1H",
-            22 => "Parry2H",
-            23 => "Parry2HL",
-            24 => "ShieldBlock",
-            25 => "ReadyUnarmed",
-            26 => "Ready1H",
-            27 => "Ready2H",
-            28 => "Ready2HL",
-            29 => "ReadyBow",
-            30 => "Dodge",
-            31 => "SpellPrecast",
-            32 => "SpellCast",
-            33 => "SpellCastArea",
-            34 => "NPCWelcome",
-            35 => "NPCGoodbye",
-            36 => "Block",
-            37 => "JumpStart",
-            38 => "Jump",
-            39 => "JumpEnd",
-            40 => "Fall",
-            41 => "SwimIdle",
-            42 => "Swim",
-            43 => "SwimLeft",
-            44 => "SwimRight",
-            45 => "SwimBackwards",
-            _ => $"Anim{animationId}",
-        };
-
-        return variationIndex == 0 ? baseName : $"{baseName}_{variationIndex}";
-    }
+        => M2AnimationNameResolver.GetSequenceDisplayName(animationId, variationIndex);
 
     private readonly record struct MaterialLayerInfo(
         int PriorityPlane,

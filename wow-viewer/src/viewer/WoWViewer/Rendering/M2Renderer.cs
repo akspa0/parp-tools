@@ -120,6 +120,13 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
         InitBuffers();
         LoadSectionTextures();
 
+        if (_texResolver != null)
+        {
+            IReadOnlyCollection<uint>? defaultGroups = _texResolver.GetDefaultCharacterSelectionGroups(SourceModelPath);
+            if (defaultGroups != null && defaultGroups.Count > 0)
+                ApplyCharacterSelectionGroups(defaultGroups, "initial character geosets");
+        }
+
         ViewerLog.Info(
             ViewerLog.Category.Mdx,
             $"[M2] wow-viewer static runtime ready for {Path.GetFileName(SourceModelPath)}: sections={_sections.Count}, compatibilityFallback={runtimeModel.UsesCompatibilityFallback}");
@@ -1012,10 +1019,13 @@ void main()
         HashSet<uint> wantedGroupSet = wantedGroups as HashSet<uint> ?? new HashSet<uint>(wantedGroups);
         int hiddenCount = 0;
 
-        foreach (SectionBuffers section in _sections)
+        for (int i = 0; i < _sections.Count; i++)
         {
+            SectionBuffers section = _sections[i];
             bool visible = wantedGroupSet.Contains(section.SkinSectionId);
             section.Visible = visible;
+            if (i < _sectionVisibility.Count)
+                _sectionVisibility[i] = visible;
             if (section.SectionIndex >= 0 && section.SectionIndex < _sectionVisibility.Count)
                 _sectionVisibility[section.SectionIndex] = visible;
             if (!visible)

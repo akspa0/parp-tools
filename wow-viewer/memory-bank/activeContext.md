@@ -84,6 +84,13 @@ gap directly — that's Spec 234 below, already the whole point of the spec.
   - In `ReplaceableTextureResolver.cs`: added `baseSection: 5` (Underwear) prioritization and real client underwear filenames (`NakedPelvisSkin`, `NakedTorsoSkin`); pruned robe skirts (`1201`), cloaks (`1101`), tabards (`1301`), and shoulders (`1401`/`1501`) from `DefaultCharacterSelectionGroups`.
   - Added unit test `BuildEra100StaticRenderModel_TransfersTextureBindingsAndFallbackSlots` (18/18 Era100 tests pass).
   - Evidence receipt: [creature-variant-and-replaceable-texture-resolution-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/creature-variant-and-replaceable-texture-resolution-fix.md).
+- **2.0.0 M2 Animation Playback, Sequence Resolution, and Character Geoset/Texture Fix (2026-09-13)**:
+  - Fixed frozen animations where only eyes blinked: in 0x100 models, keyframes in `OldTrack` use global timeline timestamps `[startTimestamp, endTimestamp]`. Normalized sampling in `M2TrackSampler.cs` with `sampleTime = checked((int)start) + ResolveSampleTime(timeMs, duration)`, maintaining 100% regression freedom on 3.x/4.x models (`StartTimestamp = 0`).
+  - Fixed 0x44 sequence stride reading offsets in `M2Era100ModelReader.cs` and `M2Era1121ModelReader.cs` (`startTimestamp` at `+0x04`, `endTimestamp` at `+0x08`, derived duration `end - start`).
+  - Added complete AnimationData.dbc mapping (IDs 0..248) in `M2AnimationNameResolver.cs`, resolving names like 50 (`Loot`) and 107 (`AttackThrown`).
+  - Fixed character models missing midsections and loading with all 51 geosets enabled: added basic body submeshes `0..8` to `DefaultCharacterSelectionGroups`, corrected `_sectionVisibility[i] = visible` loop indexing in `M2Renderer.cs`, and unconditionally applied default customization on model load in `ViewerApp.cs`.
+  - Added regression test `Inspect200OrcFemaleSequencesAndBones` verifying continuous bone rotation across time.
+  - Evidence receipt: [2.0.0-animation-and-character-geoset-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/2.0.0-animation-and-character-geoset-fix.md).
 
 ## Current lane — Spec 234 Map Save & New Map Creator
 

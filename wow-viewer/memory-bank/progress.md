@@ -2,6 +2,18 @@
 
 Last updated: 2026-09-13
 
+## 2026-09-13 — 2.0.0 M2 Animation Playback, Sequence Resolution, and Character Geoset/Texture Fix
+
+- **Defects Fixed**:
+  - **Animation Stagnation on 2.0.0 (0x100) M2 Models**: In 0x100 models, track keyframe timestamps in `OldTrack` are absolute timestamps in `[startTimestamp, endTimestamp]` (e.g. 3333..5800 for Stand). `M2TrackSampler` previously computed `sampleTime = timeMs % duration` (0..2467), which always fell before `keyFrames[0].Time`, locking bones at keyframe 0 while only global sequence tracks (eye blinks) moved. Added `StartTimestamp` to `M2SequenceDefinition` and normalized sampling with `sampleTime = checked((int)start) + ResolveSampleTime(timeMs, duration)`.
+  - **M2 Sequence Reading Offset & Animation Names**: In `M2Era100ModelReader.cs` and `M2Era1121ModelReader.cs`, corrected 0x44 sequence stride offsets (`+0x04` startTimestamp, `+0x08` endTimestamp, duration derived from `end - start`). Expanded `M2AnimationNameResolver.cs` with full AnimationData.dbc mapping (IDs 0..248), resolving sequence names like 50 (`Loot`) and 107 (`AttackThrown`) instead of falling back to `Anim{id}`.
+  - **Character Model Missing Midsections & Geoset Explosion**: Added basic body submeshes `0..8` (naked torso, pelvis, hands, limbs) to `ReplaceableTextureResolver.DefaultCharacterSelectionGroups`. Fixed `M2Renderer.ApplyCharacterSelectionGroups` indexing into `_sectionVisibility[i] = visible` by loop index `i` matching `_sections[i]`. Unconditionally applied default character customization on model load in `ViewerApp.cs`.
+- **Verification**:
+  - `dotnet build WowViewer.slnx -c Debug`: 0 errors.
+  - `dotnet test` (`M2Era100ModelReaderTests`): 17 passed, 0 failed.
+  - `dotnet test` (`Inspect200OrcFemale`): passed, verified animated bone rotation changing across time (`rot0 != rot1`).
+  - Evidence receipt: `specs/235-legacy-mdx-m2-rendering/evidence/2.0.0-animation-and-character-geoset-fix.md`.
+
 ## 2026-09-13 — Standalone Model Sidebar Controls & M2 Submesh / Replaceable Texture Fixes
 
 - **Defects Fixed**:

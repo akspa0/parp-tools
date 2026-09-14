@@ -60,11 +60,21 @@ public static class M2TrackSampler
         if (!TryReadTrackKeyFrames(payload, track, sequenceIndex, readSample, out List<TrackKeyFrame<TValue>> keyFrames) || keyFrames.Count == 0)
             return fallback;
 
-        uint duration = track.UsesGlobalSequence
-            ? (track.GlobalSequenceIndex >= 0 && track.GlobalSequenceIndex < model.GlobalLoops.Count ? model.GlobalLoops[track.GlobalSequenceIndex] : 0u)
-            : model.Sequences[sequenceIndex].Duration;
+        uint duration = 0u;
+        uint start = 0u;
+        if (track.UsesGlobalSequence)
+        {
+            duration = track.GlobalSequenceIndex >= 0 && track.GlobalSequenceIndex < model.GlobalLoops.Count
+                ? model.GlobalLoops[track.GlobalSequenceIndex]
+                : 0u;
+        }
+        else if (sequenceIndex >= 0 && sequenceIndex < model.Sequences.Count)
+        {
+            duration = model.Sequences[sequenceIndex].Duration;
+            start = model.Sequences[sequenceIndex].StartTimestamp;
+        }
 
-        int sampleTime = ResolveSampleTime(timeMs, duration);
+        int sampleTime = checked((int)start) + ResolveSampleTime(timeMs, duration);
         if (track.Interpolation == M2TrackInterpolation.None || keyFrames.Count == 1)
             return SampleStep(keyFrames, sampleTime);
 

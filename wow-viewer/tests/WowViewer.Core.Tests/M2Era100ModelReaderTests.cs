@@ -226,7 +226,8 @@ public sealed class M2Era100ModelReaderTests
         WriteArray(span, M2Era100Constants.CameraCountOffset, 1, cameraOffset);
         WriteArray(span, M2Era100Constants.CameraLookupCountOffset, 1, cameraLookup);
         BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sequenceOffset + 0x00, 2), 0);
-        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(sequenceOffset + 0x04, 4), 1000);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(sequenceOffset + 0x04, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(sequenceOffset + 0x08, 4), 1000);
 
         BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(cameraOffset + 0x00, 4), 1);
         WriteSingle(span, cameraOffset + 0x04, 1f);
@@ -659,7 +660,8 @@ public sealed class M2Era100ModelReaderTests
         WriteArray(span, M2Era100Constants.BoneCountOffset, 1, boneOffset);
 
         BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(sequenceOffset + 0x00, 2), 0);
-        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(sequenceOffset + 0x04, 4), 1000);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(sequenceOffset + 0x04, 4), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(sequenceOffset + 0x08, 4), 1000);
 
         BinaryPrimitives.WriteInt32LittleEndian(span.Slice(boneOffset + 0x00, 4), 5);
         BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(boneOffset + 0x04, 4), 8u);

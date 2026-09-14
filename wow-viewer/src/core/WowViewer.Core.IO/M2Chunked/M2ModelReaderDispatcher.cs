@@ -68,6 +68,12 @@ public static class M2ModelReaderDispatcher
 
             uint version = BinaryPrimitives.ReadUInt32LittleEndian(headerBytes.Slice(sizeof(uint), sizeof(uint)));
             M2Era1121Version eraVersion = M2Era1121VersionExtensions.FromUInt(version);
+            if (version < 0x100u)
+            {
+                throw new NotSupportedException(
+                    $"MD20 v0x{version:X} is outside the supported range (0x100-0x109).");
+            }
+
             if (version <= 0x107u)
             {
                 // Versions 0x100 through 0x107 (versions 256..263) use the legacy classic

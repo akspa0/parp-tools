@@ -810,23 +810,29 @@ public static class M2Era100ModelReader
         for (int i = 0; i < count; i++)
         {
             int ofs = checked((int)offset + (i * M2Era100Constants.SequenceStride));
+            uint start = ReadUInt32At(data, ofs + 0x04);
+            uint end = ReadUInt32At(data, ofs + 0x08);
+            uint duration = end >= start ? end - start : start;
+
             values.Add(new M2SequenceDefinition(
                 i,
                 ReadUInt16At(data, ofs + 0x00),
                 ReadUInt16At(data, ofs + 0x02),
-                ReadUInt32At(data, ofs + 0x04),
-                ReadLenientSingleAt(data, ofs + 0x08, sourcePath, $"sequences[{i}].moveSpeed"),
-                ReadUInt32At(data, ofs + 0x0C),
-                ReadInt16At(data, ofs + 0x10),
-                ReadUInt32At(data, ofs + 0x14),
+                duration,
+                ReadLenientSingleAt(data, ofs + 0x0C, sourcePath, $"sequences[{i}].moveSpeed"),
+                ReadUInt32At(data, ofs + 0x10),
+                ReadInt16At(data, ofs + 0x14),
                 ReadUInt32At(data, ofs + 0x18),
-                ReadUInt16At(data, ofs + 0x1C),
-                ReadUInt16At(data, ofs + 0x1E),
-                ReadLenientVector3At(data, ofs + 0x20, sourcePath, $"sequences[{i}].boundsMin"),
-                ReadLenientVector3At(data, ofs + 0x2C, sourcePath, $"sequences[{i}].boundsMax"),
-                ReadLenientSingleAt(data, ofs + 0x38, sourcePath, $"sequences[{i}].boundsRadius"),
-                ReadInt16At(data, ofs + 0x3C),
-                ReadUInt16At(data, ofs + 0x3E)));
+                ReadUInt32At(data, ofs + 0x1C),
+                ReadUInt16At(data, ofs + 0x20),
+                ReadUInt16At(data, ofs + 0x22),
+                ReadLenientVector3At(data, ofs + 0x24, sourcePath, $"sequences[{i}].boundsMin"),
+                ReadLenientVector3At(data, ofs + 0x30, sourcePath, $"sequences[{i}].boundsMax"),
+                ReadLenientSingleAt(data, ofs + 0x3C, sourcePath, $"sequences[{i}].boundsRadius"),
+                ReadInt16At(data, ofs + 0x40),
+                ReadUInt16At(data, ofs + 0x42),
+                start,
+                end));
         }
 
         return values;
