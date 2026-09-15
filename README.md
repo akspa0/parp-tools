@@ -2,7 +2,7 @@
 
 Preservation, conversion, reverse engineering, analysis, and 3D visualization tooling for World of Warcraft client data.
 
-**Current Release Line**: `v0.5.2.2`  
+**Current Release Line**: `v0.5.3`  
 **Primary Project Directory**: `wow-viewer/`  
 **Target Runtime**: .NET 10 (`net10.0`) & Python 3.12+ (`uv`)
 

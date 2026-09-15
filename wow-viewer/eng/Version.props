@@ -6,6 +6,6 @@
     <VersionPrefix>0.5.3</VersionPrefix>
     <AssemblyVersion>0.5.3.0</AssemblyVersion>
     <FileVersion>0.5.3.0</FileVersion>
-    <InformationalVersion>0.5.3-rc1</InformationalVersion>
+    <InformationalVersion>0.5.3</InformationalVersion>
   </PropertyGroup>
 </Project>

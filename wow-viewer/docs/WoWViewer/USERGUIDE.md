@@ -1,6 +1,6 @@
 # WoWViewer Comprehensive User Guide
 
-**Application Version**: `v0.5.2.2`  
+**Application Version**: `v0.5.3`  
 **Platform Support**: Windows x64, Linux x64, macOS (Apple Silicon arm64 / Intel x64)
 
 `WoWViewer` is an interactive 3D desktop application for inspecting, analyzing, rendering, and reconciling World of Warcraft client data from pre-release Alpha 0.5.3 through Cataclysm 4.0.x.
@@ -303,7 +303,7 @@ The former File > Load from Rosetta Datastore menu has been retired.
 **A**: Ensure your client root points to the folder containing the `Data` directory (or loose `World\` folders). If the client uses MPQ archives, verify `ArchiveCatalog` has enumerated the listfiles.
 
 ### Q: Why are some dense city interiors slow?
-**A**: In release `v0.5.2.2`, large multi-district WMOs (such as Stormwind) submit all interior groups simultaneously. Optimize performance by reducing the view distance slider in **Inspector > LOD & Budget**.
+**A**: In large multi-district WMOs (such as Stormwind), interior groups can be budget-intensive. Optimize performance by reducing the view distance slider in **Inspector > LOD & Budget**.
 
 ### Q: Audio reports "OpenAL soft library missing"?
 **A**: Ensure `soft_oal.dll` (Windows) or `libopenal.so` (Linux) / `libopenal.dylib` (macOS) is present in the application folder. The viewer continues normally with audio disabled if the library is not found.

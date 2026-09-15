@@ -3,6 +3,27 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.5.3 — 2026-09-15
+
+Feature release: Legacy MDX/M2 model rendering & bone animation, Cartography composition with rigid cell shifting, in-viewer New Map Creator, Editor IA overhaul, marketing capture automation, and 5.0.1 era groundwork.
+
+Full notes: [`docs/releases/v0.5.3.md`](docs/releases/v0.5.3.md)
+
+### Added
+- **1.x M2 Bone Animation Playback**: Full-body skeletal movement evaluation for 1.x M2 models with zero start timestamps and proper duration/speed decoding.
+- **In-Viewer New Map Creator (`NewMapCreatorService`)**: Interactive map creation dialog in Editor > Data I/O for generating LK ADT/WDT terrain maps with selectable themes, grid dimensions, and elevation.
+- **Cartography Composition & Rigid Cell Shift**: Intact donor map cell alignment, project file persistence (JSON transforms/visibility/locks), and WDL edge-snapping.
+- **Editor IA Overhaul (Spec 231)**: 4-page workspace (Terrain, Placement, Cartography, Data I/O), persistent top toolbar with world doodad animation toggle and WMO doodad-set selector.
+- **Marketing Capture Automation (Spec 233)**: Automated sequence camera recording and video encoding support.
+- **Cross-Platform Release Builds**: CI/CD matrix build for Windows x64, Linux x64, macOS arm64, and macOS x64.
+
+### Fixed
+- **Tree Foliage Alpha Cutout**: Adjusted cutout threshold to 0.15f to preserve antialiased pine needles and leaf geometry across distance.
+- **MDX Texture Wrapping**: Restored standard bitwise decoding for `WrapWidth` (0x1) and `WrapHeight` (0x2).
+- **Two-Sided Surface Illumination**: Surface normal flipped on back-faces in `M2Renderer` fragment shader to properly illuminate leaves and foliage.
+- **Character Naked Geosets**: Pruned default 3D armor attachment geosets and added Goblin race ID mapping.
+- **Wireframe Rendering**: Untextured flat-color line passes across terrain and models.
+
 ## v0.5.2.2 — 2026-08-27
 
 Maintenance, Calibration, and Spec Kit release.

@@ -90,7 +90,7 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.T
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  WoWViewer v0.5.2.2                                            [_][□][X]    │
+│  WoWViewer v0.5.3                                              [_][□][X]    │
 ├──────────────┬───────────────────────────────────────────────┬──────────────┤
 │  NAVIGATOR   │                                               │  WORKBENCH   │
 │  (Left Bar)  │               3D VIEWPORT                     │  (Right Bar) │
