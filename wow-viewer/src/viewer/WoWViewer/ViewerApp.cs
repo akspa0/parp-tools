@@ -12523,9 +12523,8 @@ void main() {
         _modelInfo += "\nRuntime Notes:\n" +
                       "  Geometry is submitted from wow-viewer active skin sections.\n" +
                       (usesNativeStaticRenderer
-                          ? "  Draw path is the wow-viewer runtime renderer in WoWViewer.\n  This is now the default route for successful runtime-backed M2 loads; set PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=0 to force the legacy compatibility draw backend.\n  Skeletal sequence playback now advances through wow-viewer pose evaluation inside the runtime renderer. Current shading still uses primary-stage runtime textures and simple lighting, not full native material parity.\n"
-                          : "  Draw path still uses the legacy MDX backend for textured compatibility while the wow-viewer runtime supplies geometry/state.\n") +
-                      "  Full material/effect parity is still pending.\n";
+                          ? "  Draw path: Native wow-viewer runtime renderer in WoWViewer.\n  Skeletal sequence playback advances through wow-viewer pose evaluation.\n  Shading: Native runtime material pipeline (textured diffuse, directional + ambient lighting, alpha cutout & blending).\n"
+                          : "  Draw path: Legacy MDX backend compatibility pipeline.\n");
 
         _statusMessage = $"Loaded M2: {_loadedFileName} ({sectionCount} sections, {vertexCount:N0} verts, {triangleCount:N0} tris)";
     }

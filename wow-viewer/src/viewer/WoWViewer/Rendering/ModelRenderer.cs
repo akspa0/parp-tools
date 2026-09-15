@@ -1293,11 +1293,9 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
 
 if (isAlphaCutout)
                     {
-                        // Alpha-tested cutout: opaque pass, depth writes ON, high discard threshold
-                        // Adapted M2 foliage textures often encode antialiased edge coverage below
-                        // the historical 0.75 threshold; keep a lower gate there to avoid dropping
-                        // entire canopies while preserving strict MDX cutout behavior elsewhere.
-                        float alphaCutoutThreshold = _isM2AdapterModel ? 0.15f : 0.75f;
+                        // Alpha-tested cutout: opaque pass, depth writes ON, threshold at 0.15f to preserve
+                        // antialiased foliage edges and needle canopies for both native MDX and adapted M2 models.
+                        float alphaCutoutThreshold = 0.15f;
                         _gl.Disable(EnableCap.Blend);
                         _gl.DepthMask(!forceBackdropState);
                         _gl.Uniform1(_uAlphaTest, 1);
@@ -2865,9 +2863,11 @@ void main()
 
         if (blpData != null && blpData.Length > 0)
         {
-            var texFlags = (MdlGeoFlags)tex.Flags;
-            bool clampS = texFlags.HasFlag(MdlGeoFlags.WrapWidth);
-            bool clampT = texFlags.HasFlag(MdlGeoFlags.WrapHeight);
+            // MDX TEXS flags: 0x1 = WrapWidth, 0x2 = WrapHeight. Adapted M2 may set MdlGeoFlags.WrapWidth (0x4) / WrapHeight (0x8).
+            bool wrapS = (tex.Flags & 0x1) != 0 || (tex.Flags & (uint)MdlGeoFlags.WrapWidth) != 0;
+            bool wrapT = (tex.Flags & 0x2) != 0 || (tex.Flags & (uint)MdlGeoFlags.WrapHeight) != 0;
+            bool clampS = !wrapS;
+            bool clampT = !wrapT;
 
             MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
             MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");

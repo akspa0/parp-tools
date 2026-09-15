@@ -915,7 +915,10 @@ void main()
     if (uAlphaCutout == 1 && textureSample.a < 0.5)
         discard;
 
-    float diffuseStrength = uUnshaded == 1 ? 1.0 : max(dot(normalize(vNormal), normalize(uLightDir)), 0.0);
+    vec3 surfaceNormal = normalize(vNormal);
+    if (!gl_FrontFacing)
+        surfaceNormal = -surfaceNormal;
+    float diffuseStrength = uUnshaded == 1 ? 1.0 : max(dot(surfaceNormal, normalize(uLightDir)), 0.0);
     vec3 litColor = (uBaseColor * textureSample.rgb) * (uAmbientColor + (uLightColor * diffuseStrength));
     float distanceToCamera = distance(vWorldPos, uCameraPos);
     float fogRange = max(uFogEnd - uFogStart, 0.001);
