@@ -130,10 +130,10 @@ public static class TemplatedTerrainGenerator
 
         if (template.Theme == BiomeTheme.GardenMuseum)
         {
-            modelNames.Add(@"Doodads\Terrain\Fountain\HumanFountain.mdx");
-            modelNames.Add(@"Doodads\City\StreetLight\StormwindStreetLight.mdx");
-            modelNames.Add(@"Doodads\Terrain\Benches\ParkBench.mdx");
-            modelNames.Add(@"Doodads\Trees\Elwynn\ElwynnBush01.mdx");
+            modelNames.Add(@"World\Generic\Human\Passive Doodads\Fountains\StormwindFountain01.m2");
+            modelNames.Add(@"World\Generic\Human\Passive Doodads\Lamps\StormwindStreetlamp01.m2");
+            modelNames.Add(@"World\Generic\Human\Passive Doodads\Benches\StormWindBench01.m2");
+            modelNames.Add(@"World\Azeroth\ELWYNN\PASSIVEDOODADS\TREES\ElwynnFirTree01.m2");
 
             uint uniqueId = (uint)((tileX * 1000 + tileY) * 10000);
             for (int cy = 0; cy < ChunksPerTileAxis; cy++)

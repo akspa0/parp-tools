@@ -3,6 +3,22 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.5.3.1 — 2026-09-15
+
+Hotfix release: Mjollna community credit, authentic asset mappings in New Map Creator, GLB exports for active terrain & M2 models, cartography phase tile alignment, console window suppression, and startup resilience.
+
+Full notes: [`docs/releases/v0.5.3.1.md`](docs/releases/v0.5.3.1.md)
+
+### Added
+- **About Box Credits**: Added Mjollna to the list of community research, exploration, and development acknowledgments.
+
+### Fixed
+- **Authentic New Map Creator Assets**: Mapped all biome themes strictly to verified community listfile textures and models, eliminating fictitious fallback paths.
+- **Editor Data I/O GLB Exports**: Added GLB scene and collision mesh export support for loaded terrain tiles; enabled M2 doodad model conversion to MDX mesh for GLB inclusion.
+- **Phase Map Alignment**: Fixed donor tile world coordinate leaking and co-location tearing in `PhaseChunkMerger` and terrain adapters; corrected donor placement translation offsets.
+- **Windows Console Suppression**: Switched executable output to `WinExe` to prevent spawning an empty command prompt behind the GUI window.
+- **Startup Crash Logging & Resilience**: Global exception handlers logging to `crash.log` and bounded non-blocking listfile fetching.
+
 ## v0.5.3 — 2026-09-15
 
 Feature release: Legacy MDX/M2 model rendering & bone animation, Cartography composition with rigid cell shifting, in-viewer New Map Creator, Editor IA overhaul, marketing capture automation, and 5.0.1 era groundwork.

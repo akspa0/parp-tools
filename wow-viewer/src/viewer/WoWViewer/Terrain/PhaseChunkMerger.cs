@@ -1,4 +1,5 @@
 using WowViewer.Core.Maps;
+using WoWViewer.Rendering;
 
 namespace WoWViewer.Terrain;
 
@@ -54,7 +55,9 @@ internal static class PhaseChunkMerger
             TileY = baseChunk.TileY,
             ChunkX = baseChunk.ChunkX,
             ChunkY = baseChunk.ChunkY,
-            WorldPosition = (phaseChunk.WorldPosition != baseChunk.WorldPosition || TakeChannel(PhaseDataChannel.Heightmap))
+            WorldPosition = (TakeChannel(PhaseDataChannel.Heightmap) &&
+                             MathF.Abs(phaseChunk.WorldPosition.X - baseChunk.WorldPosition.X) < WoWConstants.ChunkSize &&
+                             MathF.Abs(phaseChunk.WorldPosition.Y - baseChunk.WorldPosition.Y) < WoWConstants.ChunkSize)
                 ? phaseChunk.WorldPosition
                 : baseChunk.WorldPosition,
 

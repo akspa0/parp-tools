@@ -56,7 +56,7 @@ public class TileLoadResult
     /// Spec 232 FR-9: true when placements already carry the full layer transform — the merge
     /// must not translate them again.
     /// </summary>
-    public bool PlacementsPreTransformed { get; init; }
+    public bool PlacementsPreTransformed { get; set; }
 }
 
 public sealed record TerrainSoundEmitter(
@@ -500,7 +500,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                         SoundEmitters = phase.SoundEmitters,
                     };
                 }
+                else
+                {
+                    RehomeChunksForTarget(phase.Chunks, tileX, tileY);
+                }
             }
+            if ((source.SourceTileX != tileX || source.SourceTileY != tileY || layer.HasTileOffset || layer.HasCellOffset) && !phase.PlacementsPreTransformed)
+                TranslatePhasePlacements(phase, source.SourceTileX, source.SourceTileY, tileX, tileY, layer);
+
             RemapPhasePlacementNameIndices(phase, phaseAdapter);
             MergePhaseTile(
                 result,
@@ -514,6 +521,23 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
 
         return result;
+    }
+
+    private static void RehomeChunksForTarget(List<TerrainChunkData> chunks, int tileX, int tileY, float cellDx = 0f, float cellDy = 0f)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        const float chunkSpan = tileSpan / 16f;
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            TerrainChunkData chunk = chunks[i];
+            chunk.TileX = tileX;
+            chunk.TileY = tileY;
+            chunk.WorldPosition = new Vector3(
+                17066.666f - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx,
+                17066.666f - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy,
+                chunk.WorldPosition.Z);
+            chunks[i] = chunk;
+        }
     }
 
     /// <summary>
@@ -531,25 +555,24 @@ public class AlphaTerrainAdapter : ITerrainAdapter
 
         const float tileSpan = 533.33333f;
         const float chunkSpan = tileSpan / 16f;
-        (float tileDx, float tileDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
-            layer.TileOffsetX, layer.TileOffsetY, tileSpan);
+        float tileDx = -(tileX - source.SourceTileX) * tileSpan;
+        float tileDy = -(tileY - source.SourceTileY) * tileSpan;
         (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
             layer.CellOffsetX, layer.CellOffsetY, chunkSpan);
         float totalDx = tileDx + cellDx;
         float totalDy = tileDy + cellDy;
 
-        float chunkDx = source.Transforms.Count > 0 ? cellDx : totalDx;
-        float chunkDy = source.Transforms.Count > 0 ? cellDy : totalDy;
-
         var shiftedChunks = new List<TerrainChunkData>(donor.Chunks.Count);
         for (int i = 0; i < donor.Chunks.Count; i++)
         {
             TerrainChunkData chunk = donor.Chunks[i];
+            float wx = 17066.666f - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx;
+            float wy = 17066.666f - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy;
             shiftedChunks.Add(new TerrainChunkData
             {
                 McinIndex = chunk.McinIndex,
-                TileX = chunk.TileX,
-                TileY = chunk.TileY,
+                TileX = tileX,
+                TileY = tileY,
                 ChunkX = chunk.ChunkX,
                 ChunkY = chunk.ChunkY,
                 Heights = chunk.Heights,
@@ -560,10 +583,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 ShadowMap = chunk.ShadowMap,
                 MccvColors = chunk.MccvColors,
                 Liquid = chunk.Liquid,
-                WorldPosition = new Vector3(
-                    chunk.WorldPosition.X + chunkDx,
-                    chunk.WorldPosition.Y + chunkDy,
-                    chunk.WorldPosition.Z),
+                WorldPosition = new Vector3(wx, wy, chunk.WorldPosition.Z),
                 AreaId = chunk.AreaId,
                 McnkFlags = chunk.McnkFlags,
                 AlphaSourceFlags = chunk.AlphaSourceFlags,
@@ -1114,6 +1134,35 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
     }
 
+    private static void TranslatePhasePlacements(
+        TileLoadResult phase, int sourceTileX, int sourceTileY, int tileX, int tileY, PhaseLayerSettings layer)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        const float chunkSpan = tileSpan / 16f;
+        float tileDx = -(tileX - sourceTileX) * tileSpan;
+        float tileDy = -(tileY - sourceTileY) * tileSpan;
+        (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+            layer.CellOffsetX, layer.CellOffsetY, chunkSpan);
+        float dx = tileDx + cellDx;
+        float dy = tileDy + cellDy;
+
+        for (int i = 0; i < phase.MddfPlacements.Count; i++)
+        {
+            MddfPlacement placement = phase.MddfPlacements[i];
+            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            phase.MddfPlacements[i] = placement;
+        }
+
+        for (int i = 0; i < phase.ModfPlacements.Count; i++)
+        {
+            ModfPlacement placement = phase.ModfPlacements[i];
+            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            phase.ModfPlacements[i] = placement;
+        }
+
+        phase.PlacementsPreTransformed = true;
+    }
+
     private static void TranslatePhasePlacements(TileLoadResult phase, PhaseLayerSettings layer)
     {
         // One tile of offset = one ADT in the 64x64 grid = 533.33 yds. Despite its name,
@@ -1143,6 +1192,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
             phase.ModfPlacements[i] = placement;
         }
+
+        phase.PlacementsPreTransformed = true;
     }
 
     private static void RemapPhaseTextureIndices(

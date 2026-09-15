@@ -2452,7 +2452,7 @@ void main() {
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.TextWrapped("Thanks to...");
-            ImGui.TextWrapped("Marlamin, schlumpf, Dovah, Pirate the Explorer, fean, implave, IS4, Adspartan (Noggit), and Skarn (Noggit-Red).");
+            ImGui.TextWrapped("Marlamin, schlumpf, Dovah, Pirate the Explorer, fean, implave, IS4, Mjollna, Adspartan (Noggit), and Skarn (Noggit-Red).");
             ImGui.TextWrapped("Without the WoW Exploration community, this project would not exist. Everyone named here contributed inspiration to this project in some way.");
             ImGui.TextDisabled("This tooling is about restoration, not touching up or polishing what we recover - it is the instrument for restoring what already exists. Noggit and Noggit-Red remain the preferred editors for fine-tuning the results this library and tooling produce.");
             ImGui.Spacing();
@@ -2719,7 +2719,7 @@ void main() {
                         }
                         else
                         {
-                            throw new InvalidOperationException("Collision-only GLB export is currently supported for WMO only.");
+                            throw new InvalidOperationException("Collision-only GLB export is currently supported for WMO and Terrain only.");
                         }
                     }
                     _statusMessage = $"Exported: {glbPath}";
@@ -2728,6 +2728,33 @@ void main() {
                 {
                     _statusMessage = $"Export failed: {ex.Message}";
                 }
+            }
+            else if (_terrainManager != null && _dataSource != null)
+            {
+                Directory.CreateDirectory(ExportDir);
+                int curTx = _terrainManager.CameraTileX;
+                int curTy = _terrainManager.CameraTileY;
+                if (curTx >= 0 && curTy >= 0)
+                {
+                    string glbPath = Path.Combine(ExportDir, $"{_terrainManager.MapName}_{curTx:D2}_{curTy:D2}.collision.glb");
+                    try
+                    {
+                        MapGlbExporter.ExportTile(_terrainManager, _dataSource, _md5Index, curTx, curTy, glbPath, includePlacements: false);
+                        _statusMessage = $"Exported GLB Collision Mesh for Tile ({curTx},{curTy}) to: {glbPath}";
+                    }
+                    catch (Exception ex)
+                    {
+                        _statusMessage = $"GLB Collision export failed: {ex.Message}";
+                    }
+                }
+                else
+                {
+                    _statusMessage = "Camera tile out of range for collision export.";
+                }
+            }
+            else
+            {
+                _statusMessage = "No model or terrain loaded for GLB collision export.";
             }
         }
 
@@ -2758,6 +2785,23 @@ void main() {
                             var mdx = MdxFile.Load(_loadedFilePath);
                             GlbExporter.ExportMdx(mdx, dir, glbPath, _dataSource);
                         }
+                        else if (ext == ".m2")
+                        {
+                            byte[] m2Bytes = File.ReadAllBytes(_loadedFilePath);
+                            byte[]? skinBytes = null;
+                            foreach (var skinPath in WarcraftNetM2Adapter.BuildSkinCandidates(_loadedFilePath))
+                            {
+                                if (File.Exists(skinPath)) { skinBytes = File.ReadAllBytes(skinPath); break; }
+                            }
+                            var converter = new WoWViewer.Transfer.M2ToMdxConverter();
+                            byte[]? mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes, null);
+                            if (mdxBytes != null)
+                            {
+                                using var ms = new MemoryStream(mdxBytes);
+                                var mdx = MdxFile.Load(ms);
+                                GlbExporter.ExportMdx(mdx, dir, glbPath, _dataSource);
+                            }
+                        }
                         else if (ext == ".wmo")
                         {
                             var converter = new WmoV14ToV17Converter();
@@ -2771,6 +2815,33 @@ void main() {
                 {
                     _statusMessage = $"Export failed: {ex.Message}";
                 }
+            }
+            else if (_terrainManager != null && _dataSource != null)
+            {
+                Directory.CreateDirectory(ExportDir);
+                int curTx = _terrainManager.CameraTileX;
+                int curTy = _terrainManager.CameraTileY;
+                if (curTx >= 0 && curTy >= 0)
+                {
+                    string glbPath = Path.Combine(ExportDir, $"{_terrainManager.MapName}_{curTx:D2}_{curTy:D2}.glb");
+                    try
+                    {
+                        MapGlbExporter.ExportTile(_terrainManager, _dataSource, _md5Index, curTx, curTy, glbPath, includePlacements: true);
+                        _statusMessage = $"Exported GLB Scene for Tile ({curTx},{curTy}) to: {glbPath}";
+                    }
+                    catch (Exception ex)
+                    {
+                        _statusMessage = $"GLB Scene export failed: {ex.Message}";
+                    }
+                }
+                else
+                {
+                    _statusMessage = "Camera tile out of range for GLB export.";
+                }
+            }
+            else
+            {
+                _statusMessage = "No model or terrain loaded for GLB export.";
             }
         }
 

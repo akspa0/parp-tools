@@ -98,4 +98,53 @@ public class TemplatedTerrainGeneratorTests
         Assert.Equal(257, alphaTile.Heightmap.GetLength(1));
         Assert.True(alphaTile.TextureNames.Count >= 3);
     }
+
+    [Fact]
+    public void BiomePalette_AllThemes_UseAuthenticBlpPaths()
+    {
+        foreach (BiomeTheme theme in Enum.GetValues<BiomeTheme>())
+        {
+            BiomePalette palette = BiomePalette.ForTheme(theme);
+            Assert.False(string.IsNullOrWhiteSpace(palette.BaseGroundTexture));
+            Assert.False(string.IsNullOrWhiteSpace(palette.PathTexture));
+            Assert.False(string.IsNullOrWhiteSpace(palette.PlazaFloorTexture));
+            Assert.False(string.IsNullOrWhiteSpace(palette.AccentTexture));
+
+            string[] paths = [palette.BaseGroundTexture, palette.PathTexture, palette.PlazaFloorTexture, palette.AccentTexture];
+            foreach (string path in paths)
+            {
+                Assert.EndsWith(".blp", path, StringComparison.OrdinalIgnoreCase);
+                Assert.StartsWith("TILESET\\", path, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("whitemarble", path, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("elwynngrass.blp", path, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    [Fact]
+    public void GenerateMap_UsesAuthenticModelPaths()
+    {
+        var template = new TerrainMapTemplate
+        {
+            MapName = "AuthenticModelTest",
+            Theme = BiomeTheme.GardenMuseum,
+            TileRows = 1,
+            TileCols = 1,
+            BaseTileX = 32,
+            BaseTileY = 32,
+            PlazaSpacingChunks = 2
+        };
+
+        TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template);
+        LkAdtData tile = result.Tiles[(32, 32)];
+
+        Assert.NotEmpty(tile.ModelNames);
+        foreach (string model in tile.ModelNames)
+        {
+            Assert.True(model.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) ||
+                        model.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase));
+            Assert.StartsWith("World\\", model, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("HumanFountain", model, StringComparison.OrdinalIgnoreCase);
+        }
+    }
 }

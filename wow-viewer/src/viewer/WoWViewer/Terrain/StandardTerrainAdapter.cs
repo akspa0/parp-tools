@@ -91,6 +91,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly object _placementLock = new();
     private readonly Dictionary<string, int> _mdxNameIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _wmoNameIndex = new(StringComparer.OrdinalIgnoreCase);
+    private string? _currentLoadingMapName;
 
     public StandardTerrainAdapter(
         byte[] wdtBytes,
@@ -380,9 +381,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     phase.Result.ModfPlacements.Clear();
                     phase.Result.ModfPlacements.AddRange(transformedModf);
                 }
+                else
+                {
+                    RehomeChunksForTarget(phase.Result.Chunks, tileX, tileY);
+                }
             }
-            if ((layer.HasTileOffset || layer.HasCellOffset) && !phase.Result.PlacementsPreTransformed)
-                TranslatePhasePlacements(phase, layer);
+            if ((source.SourceTileX != tileX || source.SourceTileY != tileY || layer.HasTileOffset || layer.HasCellOffset) && !phase.Result.PlacementsPreTransformed)
+                TranslatePhasePlacements(phase, source.SourceTileX, source.SourceTileY, tileX, tileY, layer);
 
             MergePhaseTile(parent, phase, layer, tileX, tileY);
         }
@@ -390,6 +395,23 @@ public class StandardTerrainAdapter : ITerrainAdapter
         PublishTileTextures(tileX, tileY, parent.Textures);
         PostProcessTileAlpha(parent.Result.Chunks);
         return parent.Result;
+    }
+
+    private static void RehomeChunksForTarget(List<TerrainChunkData> chunks, int tileX, int tileY, float cellDx = 0f, float cellDy = 0f)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        const float chunkSpan = tileSpan / 16f;
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            TerrainChunkData chunk = chunks[i];
+            chunk.TileX = tileX;
+            chunk.TileY = tileY;
+            chunk.WorldPosition = new Vector3(
+                WoWConstants.MapOrigin - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx,
+                WoWConstants.MapOrigin - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy,
+                chunk.WorldPosition.Z);
+            chunks[i] = chunk;
+        }
     }
 
     /// <summary>
@@ -419,25 +441,24 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         const float tileSpan = WoWConstants.ChunkSize;
         const float chunkSpan = tileSpan / 16f;
-        (float tileDx, float tileDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
-            layer.TileOffsetX, layer.TileOffsetY, tileSpan);
+        float tileDx = -(tileX - source.SourceTileX) * tileSpan;
+        float tileDy = -(tileY - source.SourceTileY) * tileSpan;
         (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
             layer.CellOffsetX, layer.CellOffsetY, chunkSpan);
         float totalDx = tileDx + cellDx;
         float totalDy = tileDy + cellDy;
 
-        float chunkDx = source.Transforms.Count > 0 ? cellDx : totalDx;
-        float chunkDy = source.Transforms.Count > 0 ? cellDy : totalDy;
-
         var shiftedChunks = new List<TerrainChunkData>(donor.Result.Chunks.Count);
         for (int i = 0; i < donor.Result.Chunks.Count; i++)
         {
             TerrainChunkData chunk = donor.Result.Chunks[i];
+            float wx = WoWConstants.MapOrigin - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx;
+            float wy = WoWConstants.MapOrigin - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy;
             shiftedChunks.Add(new TerrainChunkData
             {
                 McinIndex = chunk.McinIndex,
-                TileX = chunk.TileX,
-                TileY = chunk.TileY,
+                TileX = tileX,
+                TileY = tileY,
                 ChunkX = chunk.ChunkX,
                 ChunkY = chunk.ChunkY,
                 Heights = chunk.Heights,
@@ -448,10 +469,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 ShadowMap = chunk.ShadowMap,
                 MccvColors = chunk.MccvColors,
                 Liquid = chunk.Liquid,
-                WorldPosition = new Vector3(
-                    chunk.WorldPosition.X + chunkDx,
-                    chunk.WorldPosition.Y + chunkDy,
-                    chunk.WorldPosition.Z),
+                WorldPosition = new Vector3(wx, wy, chunk.WorldPosition.Z),
                 AreaId = chunk.AreaId,
                 McnkFlags = chunk.McnkFlags,
                 AlphaSourceFlags = chunk.AlphaSourceFlags,
@@ -496,70 +514,79 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
     private ParsedTileSource LoadMapTile(string mapName, int tileX, int tileY)
     {
-        var result = new TileLoadResult();
-        string mapDir = $"World\\Maps\\{mapName}";
-        string basePath = $"{mapDir}\\{mapName}_{tileY}_{tileX}";
-        string rootPath = $"{basePath}.adt";
-        CompanionPaths companions = ResolveCompanionPaths(basePath);
-
-        string? texPath = companions.TexturePath;
-        string? objPath = companions.ObjectPath;
-
-        byte[]? texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
-        byte[]? objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
-        byte[]? adtBytes = _dataSource.ReadFile(rootPath);
-
-        // MPQ-era clients (Cata+ / MoP) ship patched ADTs as PTCH/BSDIFF artifacts; the native
-        // resource layer hands MapArea already-reconstructed bytes (MapAdtFileData.cpp). The
-        // viewer must apply the same reconstruction before parsing, otherwise the artifact bytes
-        // reach ParseAdt and the tile silently produces zero chunks.
-        adtBytes = ResolvePatchArtifactBytes(adtBytes, rootPath);
-        if (texPath != null)
-            texBytes = ResolvePatchArtifactBytes(texBytes, texPath);
-        if (objPath != null)
-            objBytes = ResolvePatchArtifactBytes(objBytes, objPath);
-
-        if (adtBytes == null || adtBytes.Length == 0)
-        {
-            bool rootIsEmptyPlaceholder = adtBytes != null && adtBytes.Length == 0;
-            if (objBytes != null && objBytes.Length >= 16)
-            {
-                ViewerLog.Important(ViewerLog.Category.Terrain,
-                    rootIsEmptyPlaceholder
-                        ? $"[StandardADT] Root ADT is a zero-byte placeholder for tile ({tileX},{tileY}); loading placements from {objPath} only."
-                        : $"[StandardADT] Root ADT missing for tile ({tileX},{tileY}); loading placements from {objPath} only.");
-                if (TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr) && objMhdr != null)
-                    CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
-                else
-                    CollectPlacementsFlat(objBytes, tileX, tileY, result);
-            }
-            else
-            {
-                ViewerLog.Trace(rootIsEmptyPlaceholder
-                    ? $"[StandardADT] ADT is a zero-byte placeholder: {rootPath}"
-                    : $"[StandardADT] ADT not found or empty: {rootPath}");
-            }
-
-            return new ParsedTileSource(result, []);
-        }
-
-        ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}', companionBand={FormatCompanionBand(companions.SelectedBand)}");
+        string? prevLoadingMap = _currentLoadingMapName;
+        _currentLoadingMapName = mapName;
         try
         {
-            List<string> textures = ParseAdt(
-                adtBytes,
-                texBytes,
-                objBytes,
-                tileX,
-                tileY,
-                result,
-                companions.SelectedBand);
-            return new ParsedTileSource(result, textures);
+            var result = new TileLoadResult();
+            string mapDir = $"World\\Maps\\{mapName}";
+            string basePath = $"{mapDir}\\{mapName}_{tileY}_{tileX}";
+            string rootPath = $"{basePath}.adt";
+            CompanionPaths companions = ResolveCompanionPaths(basePath);
+
+            string? texPath = companions.TexturePath;
+            string? objPath = companions.ObjectPath;
+
+            byte[]? texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
+            byte[]? objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
+            byte[]? adtBytes = _dataSource.ReadFile(rootPath);
+
+            // MPQ-era clients (Cata+ / MoP) ship patched ADTs as PTCH/BSDIFF artifacts; the native
+            // resource layer hands MapArea already-reconstructed bytes (MapAdtFileData.cpp). The
+            // viewer must apply the same reconstruction before parsing, otherwise the artifact bytes
+            // reach ParseAdt and the tile silently produces zero chunks.
+            adtBytes = ResolvePatchArtifactBytes(adtBytes, rootPath);
+            if (texPath != null)
+                texBytes = ResolvePatchArtifactBytes(texBytes, texPath);
+            if (objPath != null)
+                objBytes = ResolvePatchArtifactBytes(objBytes, objPath);
+
+            if (adtBytes == null || adtBytes.Length == 0)
+            {
+                bool rootIsEmptyPlaceholder = adtBytes != null && adtBytes.Length == 0;
+                if (objBytes != null && objBytes.Length >= 16)
+                {
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        rootIsEmptyPlaceholder
+                            ? $"[StandardADT] Root ADT is a zero-byte placeholder for tile ({tileX},{tileY}); loading placements from {objPath} only."
+                            : $"[StandardADT] Root ADT missing for tile ({tileX},{tileY}); loading placements from {objPath} only.");
+                    if (TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr) && objMhdr != null)
+                        CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
+                    else
+                        CollectPlacementsFlat(objBytes, tileX, tileY, result);
+                }
+                else
+                {
+                    ViewerLog.Trace(rootIsEmptyPlaceholder
+                        ? $"[StandardADT] ADT is a zero-byte placeholder: {rootPath}"
+                        : $"[StandardADT] ADT not found or empty: {rootPath}");
+                }
+
+                return new ParsedTileSource(result, []);
+            }
+
+            ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}', companionBand={FormatCompanionBand(companions.SelectedBand)}");
+            try
+            {
+                List<string> textures = ParseAdt(
+                    adtBytes,
+                    texBytes,
+                    objBytes,
+                    tileX,
+                    tileY,
+                    result,
+                    companions.SelectedBand);
+                return new ParsedTileSource(result, textures);
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Error(ViewerLog.Category.Terrain, $"Failed to parse ADT ({tileX},{tileY}) from '{mapName}': {ex.Message}");
+                return new ParsedTileSource(result, []);
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"Failed to parse ADT ({tileX},{tileY}) from '{mapName}': {ex.Message}");
-            return new ParsedTileSource(result, []);
+            _currentLoadingMapName = prevLoadingMap;
         }
     }
 
@@ -691,6 +718,35 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
     }
 
+    private static void TranslatePhasePlacements(
+        ParsedTileSource phase, int sourceTileX, int sourceTileY, int tileX, int tileY, PhaseLayerSettings layer)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        const float chunkSpan = tileSpan / 16f;
+        float tileDx = -(tileX - sourceTileX) * tileSpan;
+        float tileDy = -(tileY - sourceTileY) * tileSpan;
+        (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+            layer.CellOffsetX, layer.CellOffsetY, chunkSpan);
+        float dx = tileDx + cellDx;
+        float dy = tileDy + cellDy;
+
+        for (int i = 0; i < phase.Result.MddfPlacements.Count; i++)
+        {
+            MddfPlacement placement = phase.Result.MddfPlacements[i];
+            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            phase.Result.MddfPlacements[i] = placement;
+        }
+
+        for (int i = 0; i < phase.Result.ModfPlacements.Count; i++)
+        {
+            ModfPlacement placement = phase.Result.ModfPlacements[i];
+            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            phase.Result.ModfPlacements[i] = placement;
+        }
+
+        phase.Result.PlacementsPreTransformed = true;
+    }
+
     private static void TranslatePhasePlacements(ParsedTileSource phase, PhaseLayerSettings layer)
     {
         // One tile of offset = one ADT in the 64x64 grid = 533.33 yds. Despite its name,
@@ -720,6 +776,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
             phase.Result.ModfPlacements[i] = placement;
         }
+
+        phase.Result.PlacementsPreTransformed = true;
     }
 
     /// <summary>
@@ -3011,7 +3069,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Scale = scale / 1024f
                 };
 
-                MddfPlacements.Add(placement);
+                if (string.Equals(_currentLoadingMapName ?? _mapName, _mapName, StringComparison.OrdinalIgnoreCase))
+                {
+                    MddfPlacements.Add(placement);
+                }
                 result.MddfPlacements.Add(placement);
             }
         }
@@ -3075,7 +3136,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Flags = flags
                 };
 
-                ModfPlacements.Add(placement);
+                if (string.Equals(_currentLoadingMapName ?? _mapName, _mapName, StringComparison.OrdinalIgnoreCase))
+                {
+                    ModfPlacements.Add(placement);
+                }
                 result.ModfPlacements.Add(placement);
             }
         }

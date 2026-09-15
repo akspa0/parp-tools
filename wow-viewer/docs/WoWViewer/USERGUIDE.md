@@ -1,6 +1,6 @@
 # WoWViewer Comprehensive User Guide
 
-**Application Version**: `v0.5.3`  
+**Application Version**: `v0.5.3.1`  
 **Platform Support**: Windows x64, Linux x64, macOS (Apple Silicon arm64 / Intel x64)
 
 `WoWViewer` is an interactive 3D desktop application for inspecting, analyzing, rendering, and reconciling World of Warcraft client data from pre-release Alpha 0.5.3 through Cataclysm 4.0.x.

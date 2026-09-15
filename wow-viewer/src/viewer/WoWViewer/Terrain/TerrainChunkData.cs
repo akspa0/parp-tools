@@ -11,10 +11,10 @@ public class TerrainChunkData
     public int McinIndex { get; init; } = -1;
 
     /// <summary>Tile X in the 64×64 grid.</summary>
-    public int TileX { get; init; }
+    public int TileX { get; set; }
 
     /// <summary>Tile Y in the 64×64 grid.</summary>
-    public int TileY { get; init; }
+    public int TileY { get; set; }
 
     /// <summary>Chunk X within the tile (0-15).</summary>
     public int ChunkX { get; init; }
@@ -47,7 +47,7 @@ public class TerrainChunkData
     public LiquidChunkData? Liquid { get; set; }
 
     /// <summary>World-space position of this chunk's corner.</summary>
-    public Vector3 WorldPosition { get; init; }
+    public Vector3 WorldPosition { get; set; }
 
     /// <summary>AreaID from MCNK header (Alpha: Unknown3 at offset 0x38). Used for AreaTable DBC lookup.</summary>
     public int AreaId { get; init; }

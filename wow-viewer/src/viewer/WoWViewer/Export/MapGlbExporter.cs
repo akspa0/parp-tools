@@ -308,8 +308,30 @@ public static class MapGlbExporter
 
             if (mdxData == null || mdxData.Length == 0) return null;
 
-            using var ms = new MemoryStream(mdxData);
-            var mdx = MdxFile.Load(ms);
+            MdxFile mdx;
+            if (WarcraftNetM2Adapter.IsMd20(mdxData) || WarcraftNetM2Adapter.IsMd21(mdxData))
+            {
+                byte[]? skinBytes = null;
+                foreach (var skinPath in WarcraftNetM2Adapter.BuildSkinCandidates(modelPath))
+                {
+                    skinBytes = dataSource.ReadFile(skinPath);
+                    if (skinBytes != null && skinBytes.Length > 0)
+                        break;
+                }
+
+                var converter = new WoWViewer.Transfer.M2ToMdxConverter();
+                byte[]? convertedBytes = converter.ConvertToBytes(mdxData, skinBytes, null);
+                if (convertedBytes == null || convertedBytes.Length == 0)
+                    return null;
+
+                using var ms = new MemoryStream(convertedBytes);
+                mdx = MdxFile.Load(ms);
+            }
+            else
+            {
+                using var ms = new MemoryStream(mdxData);
+                mdx = MdxFile.Load(ms);
+            }
 
             var mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>($"mdx_{Path.GetFileNameWithoutExtension(modelPath)}");
 
@@ -374,7 +396,12 @@ public static class MapGlbExporter
         var tex = mdx.Textures[texId];
         if (string.IsNullOrEmpty(tex.Path)) return null;
 
-        byte[]? blpData = dataSource.ReadFile(tex.Path) ?? dataSource.ReadFile(tex.Path.Replace('/', '\\'));
+        string p = tex.Path;
+        byte[]? blpData = dataSource.ReadFile(p)
+            ?? dataSource.ReadFile(p.Replace('/', '\\'))
+            ?? dataSource.ReadFile(Path.ChangeExtension(p, ".blp"))
+            ?? dataSource.ReadFile(Path.ChangeExtension(p, ".blp").Replace('/', '\\'));
+
         if (blpData == null || blpData.Length == 0)
             return null;
 

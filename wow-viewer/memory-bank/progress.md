@@ -1,6 +1,32 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-13
+Last updated: 2026-09-15
+
+## 2026-09-15 — v0.5.3 Remediation: Phase Tile Alignment, Authentic Map Creator Assets, GLB Exporters, and Startup Stability
+
+- **Defects Remediated**:
+  - **Phase Maps & Donor Tiles Misalignment / Floating Doodads**:
+    - In `StandardTerrainAdapter.cs` and `AlphaTerrainAdapter.cs`, raw donor tiles loaded via `LoadMapTile` retained donor coordinates (e.g. tile 45, 30). In `PhaseChunkMerger.cs`, when `TakeChannel(PhaseDataChannel.Heightmap)` was true, `PhaseChunkMerger` copied that raw world position, tearing the terrain 8 tiles away into the distance while doodads remained at base ground level. Added `RehomeChunksForTarget` to re-home donor chunks directly onto the target tile slot `(tileX, tileY)`.
+    - In `BuildCellShiftedTile`, calculated exact donor-to-target tile delta `tileDx = -(tileX - source.SourceTileX) * tileSpan` and adjusted chunk coordinates accordingly.
+    - Updated `TranslatePhasePlacements` to support `(phase, sourceTileX, sourceTileY, tileX, tileY, layer)` using `tileDx = -(tileX - sourceTileX) * tileSpan` + `cellDx, cellDy`, marking `PlacementsPreTransformed = true`.
+    - Wrapped `LoadMapTile` with `try/finally` tracking `_currentLoadingMapName`, gating `MddfPlacements.Add` and `ModfPlacements.Add` so donor map placements do not pollute the base adapter's placement collection.
+  - **Authentic Assets in New Map Creator**:
+    - Replaced all fictitious hardcoded asset paths in `BiomePalette.ForTheme` (`whitemarble`, `elwynngrass.blp`, etc.) with authentic paths verified against cached listfiles: Elwynn grass/cobble/dirt, Stormwind cobblestone, Dragonblight snow, Alterac dirt/grass, and Barrens/Ashenvale terrain tilesets.
+    - Replaced fictitious doodad model paths in `TemplatedTerrainGenerator.cs` (`HumanFountain.mdx`) with verified listfile models (`StormwindFountain01.m2`, `StormwindStreetlamp01.m2`, `StormWindBench01.m2`, `ElwynnFirTree01.m2`).
+    - Added comprehensive unit tests in `TemplatedTerrainGeneratorTests.cs` validating all themes and model paths.
+  - **Broken GLB Scene & Collision Mesh Exports in Editor Data I/O**:
+    - In `ViewerApp.cs`, `_wantExportGlb` and `_wantExportGlbCollision` checked `if (_loadedFilePath != null)`, which was null when a map was loaded. Added branches for `else if (_terrainManager != null && _dataSource != null)` to export the active camera tile GLB via `MapGlbExporter.ExportTile` with clear status reporting.
+    - In `MapGlbExporter.cs`, updated `TryLoadMdxMesh` to detect M2 files (`WarcraftNetM2Adapter.IsMd20` / `IsMd21`), load skin candidates, and convert via `M2ToMdxConverter` before passing to `MdxFile.Load`, enabling doodads to export into GLB scenes without throwing.
+    - In `ViewerApp.cs`, added M2 model conversion in `_wantExportGlb` when loose models are loaded.
+  - **Console Window Behind GUI**:
+    - In `WoWViewer.csproj`, switched `<OutputType>Exe</OutputType>` to `<OutputType>WinExe</OutputType>` to suppress the unwanted background console window on Windows.
+  - **Fresh Folder Crash on Game Client Load**:
+    - In `Program.cs`, registered global `AppDomain.CurrentDomain.UnhandledException` and `TaskScheduler.UnobservedTaskException` handlers writing to `crash.log` in both the current directory and `%LOCALAPPDATA%\WoWViewer\crash.log`.
+    - In `ListfileDownloader.cs`, updated `GetListfilePath` to return cached file immediately, fetch in background without blocking UI thread, or bound wait to 2.5 seconds max on fresh install before gracefully falling back.
+- **Verification**:
+  - `dotnet build WowViewer.slnx -c Debug`: 0 errors.
+  - `dotnet test` (`TemplatedTerrainGeneratorTests`): 5 passed, 0 failed.
+  - `dotnet test` (Core terrain & phase tests): 246 passed.
 
 ## 2026-09-13 — 2.0.0 M2 Animation Playback, Sequence Resolution, and Character Geoset/Texture Fix
 

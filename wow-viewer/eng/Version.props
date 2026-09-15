@@ -3,9 +3,9 @@
     <!-- Single source of truth for all wow-viewer assembly versions.
          InformationalVersion may carry a prerelease tag (e.g. -rc1); the
          .NET SDK appends "+<git-commit>" build metadata automatically. -->
-    <VersionPrefix>0.5.3</VersionPrefix>
-    <AssemblyVersion>0.5.3.0</AssemblyVersion>
-    <FileVersion>0.5.3.0</FileVersion>
-    <InformationalVersion>0.5.3</InformationalVersion>
+    <VersionPrefix>0.5.3.1</VersionPrefix>
+    <AssemblyVersion>0.5.3.1</AssemblyVersion>
+    <FileVersion>0.5.3.1</FileVersion>
+    <InformationalVersion>0.5.3.1</InformationalVersion>
   </PropertyGroup>
 </Project>

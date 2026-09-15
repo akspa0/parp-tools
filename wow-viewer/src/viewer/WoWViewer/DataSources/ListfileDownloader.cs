@@ -94,9 +94,37 @@ public static class ListfileDownloader
 
     /// <summary>
     /// Synchronous wrapper for use in non-async contexts.
+    /// Never blocks UI startup indefinitely on fresh installs.
     /// </summary>
     public static string? GetListfilePath(bool forceDownload = false)
     {
-        return GetListfilePathAsync(forceDownload).GetAwaiter().GetResult();
+        if (File.Exists(CachedPath))
+        {
+            var age = DateTime.UtcNow - File.GetLastWriteTimeUtc(CachedPath);
+            if (age.TotalDays > 7 || forceDownload)
+            {
+                // Refresh asynchronously in background without blocking UI startup
+                Task.Run(() => GetListfilePathAsync(forceDownload: true));
+            }
+            return CachedPath;
+        }
+
+        // Fresh install without cached listfile: try bounded wait (max 2.5 seconds)
+        // If slow/offline, continue in background and allow client load to proceed with archive-internal names.
+        try
+        {
+            var downloadTask = Task.Run(() => GetListfilePathAsync(forceDownload: false));
+            if (downloadTask.Wait(TimeSpan.FromSeconds(2.5)))
+                return downloadTask.Result;
+
+            ViewerLog.Info(ViewerLog.Category.MpqData,
+                "[Listfile] Initial download in progress in background. Proceeding with archive-internal file discovery.");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[Listfile] Initial download check: {ex.Message}");
+            return null;
+        }
     }
 }
