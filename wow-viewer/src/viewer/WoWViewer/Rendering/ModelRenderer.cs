@@ -1952,14 +1952,14 @@ void main()
         discard;
 
     vec3 surfaceNormal = safeNormalize(vNormal);
-    if (!gl_FrontFacing)
-        surfaceNormal = -surfaceNormal;
 
+    // Half-Lambert diffuse wrapping: matches WmoRenderer and prevents harsh unlit black artifacts
     float diffuseStrength = 1.0;
     if (uUnshaded == 0)
     {
         float nDotL = dot(surfaceNormal, safeNormalize(uLightDir));
-        diffuseStrength = max(nDotL, 0.0);
+        float diff = nDotL * 0.5 + 0.5;
+        diffuseStrength = diff * diff;
     }
 
     vec3 localLight = max(uLocalAmbientColor, vec3(0.0));

@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
+using WoWViewer.UI;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.World.Minimap;
 
@@ -18,6 +19,7 @@ public partial class ViewerApp
     // instance let the other surfaces consume or clear click sequences, which permanently broke
     // the 3-click teleport (2026-09-09 operator report).
     private readonly Dictionary<string, MinimapInteractionState> _minimapInteractionStates = new();
+    private readonly MinimapDonorToolService _donorToolService = new();
 
     private enum MinimapTeleportMode
     {
@@ -123,32 +125,67 @@ public partial class ViewerApp
         Vector2 mousePos = ImGui.GetMousePos();
         bool pointerCaptured = isHovered || isActive || minimapState.PointerDown;
 
+        if (isHovered && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float hovTx, out float hovTy))
+        {
+            _donorToolService.HoveredTile = ((int)MathF.Floor(hovTx), (int)MathF.Floor(hovTy));
+        }
+        else
+        {
+            _donorToolService.HoveredTile = null;
+        }
+
+        if (isHovered && _donorToolService.Mode == FullscreenMinimapMode.DonorTileTool && _worldScene != null)
+        {
+            if (TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float clickTx, out float clickTy))
+            {
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                {
+                    _donorToolService.HandleClick(_worldScene, _terrainManager, clickTx, clickTy, isRightClick: false);
+                    return;
+                }
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                {
+                    _donorToolService.HandleClick(_worldScene, _terrainManager, clickTx, clickTy, isRightClick: true);
+                    return;
+                }
+            }
+        }
+
         if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
             minimapState.Process(MinimapPointerPhase.Pressed, mousePos);
             _minimapDragging = false;
 
-            // Cartography: a press on the selected layer's footprint grabs it for a drag. A click
+            // Cartography: a press on any layer's footprint grabs it for a drag. A click
             // (no drag) still falls through to teleport — the grab only matters once the pointer
             // crosses the drag threshold.
             _footprintDragLayerIndex = -1;
             if (_worldScene != null
-                && _worldScene.SelectedPhaseLayerIndex >= 0
-                && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float pressTx, out float pressTy)
-                && TryGetFootprintTileAt(_worldScene, _worldScene.SelectedPhaseLayerIndex, pressTx, pressTy))
+                && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float pressTx, out float pressTy))
             {
-                PhaseLayerSettings grabbed = _worldScene.PhaseLayers[_worldScene.SelectedPhaseLayerIndex];
-                if (grabbed.RotationDegrees != 0f || grabbed.MirrorHorizontal || grabbed.MirrorVertical)
+                int hitLayerIndex = -1;
+                if (_worldScene.SelectedPhaseLayerIndex >= 0
+                    && TryGetFootprintTileAt(_worldScene, _worldScene.SelectedPhaseLayerIndex, pressTx, pressTy))
                 {
-                    // Spec 231 Phase 7: a drag delta in composed space does not map to a simple
-                    // offset delta once the layer is rotated/mirrored — point the operator at
-                    // the panel controls instead of dragging the layer somewhere unintended.
-                    _statusMessage = $"Layer '{grabbed.MapName}' is rotated/mirrored — set its offset "
-                        + "in the Layers panel (minimap dragging applies to untransformed layers).";
+                    hitLayerIndex = _worldScene.SelectedPhaseLayerIndex;
                 }
                 else
                 {
-                    _footprintDragLayerIndex = _worldScene.SelectedPhaseLayerIndex;
+                    for (int i = _worldScene.PhaseLayers.Count - 1; i >= 0; i--)
+                    {
+                        if (TryGetFootprintTileAt(_worldScene, i, pressTx, pressTy))
+                        {
+                            hitLayerIndex = i;
+                            _worldScene.SelectedPhaseLayerIndex = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (hitLayerIndex >= 0)
+                {
+                    PhaseLayerSettings grabbed = _worldScene.PhaseLayers[hitLayerIndex];
+                    _footprintDragLayerIndex = hitLayerIndex;
                     _footprintDragStartTile = (pressTx, pressTy);
                     _footprintDragBaseOffset = (grabbed.TileOffsetX, grabbed.TileOffsetY);
                     // Placed-tile layers: the drag delta moves the placements themselves (the
@@ -709,14 +746,15 @@ public partial class ViewerApp
 
         var io = ImGui.GetIO();
         const float horizontalMargin = 24f;
-        const float verticalMargin = 24f;
+        const float verticalMargin = 16f;
+        const float headerHeight = 36f;
         const float footerHeight = 60f;
         float mapSize = ComputeMinimapSquareSize(
             io.DisplaySize.X - horizontalMargin * 2f,
-            io.DisplaySize.Y - verticalMargin * 2f - footerHeight,
+            io.DisplaySize.Y - verticalMargin * 2f - footerHeight - headerHeight,
             minimumSize: 128f);
         float padding = MathF.Max(horizontalMargin, (io.DisplaySize.X - mapSize) * 0.5f);
-        float topPadding = MathF.Max(verticalMargin, (io.DisplaySize.Y - footerHeight - mapSize) * 0.5f);
+        float topPadding = MathF.Max(verticalMargin, (io.DisplaySize.Y - footerHeight - headerHeight - mapSize) * 0.5f);
 
         ImGui.SetNextWindowPos(Vector2.Zero);
         ImGui.SetNextWindowSize(io.DisplaySize);
@@ -727,7 +765,21 @@ public partial class ViewerApp
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
             ImGuiWindowFlags.NoScrollbar))
         {
+            // Keyboard shortcut 'T' toggles tool mode when not typing in text input
+            if (!io.WantTextInput && ImGui.IsKeyPressed(ImGuiKey.T, false))
+            {
+                _donorToolService.ToggleMode();
+            }
+
+            // Top Toolbar for Donor Tile Tool
             ImGui.SetCursorPos(new Vector2(padding, topPadding));
+            if (_worldScene != null)
+            {
+                _donorToolService.DrawToolbar(_worldScene, _terrainManager);
+            }
+
+            // Minimap Surface
+            ImGui.SetCursorPos(new Vector2(padding, topPadding + headerHeight));
             var cursorPos = ImGui.GetCursorScreenPos();
 
             float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / MinimapWorldTileSize;
@@ -741,11 +793,23 @@ public partial class ViewerApp
                 isTileLoaded,
                 mapName,
                 MinimapTeleportMode.Armed,
-                out _,
-                out _,
-                out _);
+                out float viewMinTx,
+                out float viewMinTy,
+                out float cellSize);
 
-            ImGui.SetCursorPos(new Vector2(padding, topPadding + mapSize + 10));
+            if (_worldScene != null)
+            {
+                _donorToolService.RenderOverlays(
+                    ImGui.GetWindowDrawList(),
+                    cursorPos,
+                    viewMinTx,
+                    viewMinTy,
+                    cellSize,
+                    mapSize,
+                    _worldScene);
+            }
+
+            ImGui.SetCursorPos(new Vector2(padding, topPadding + headerHeight + mapSize + 10));
             int ctX = (int)MathF.Floor(camTileX);
             int ctY = (int)MathF.Floor(camTileY);
             ImGui.TextColored(new Vector4(1, 1, 1, 1), $"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x  Loaded: {loadedTileCount}");
@@ -758,7 +822,7 @@ public partial class ViewerApp
                         : "Minimap ready");
             }
             ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Triple-click tile to teleport");
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Press T for Donor Tool  |  Scroll to zoom  |  Drag to pan");
 
             if (_minimapPanOffset != Vector2.Zero)
             {

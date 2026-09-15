@@ -50,6 +50,37 @@ public class LiquidChunkData
 
     /// <summary>Chunk Y within the tile (0-15).</summary>
     public int ChunkY { get; init; }
+
+    /// <summary>
+    /// Creates a clone of this liquid chunk re-homed to target tile coordinates and world position,
+    /// with optional Z offset and Z scale applied to heights and bounding range.
+    /// </summary>
+    public LiquidChunkData WithRehoming(int newTileX, int newTileY, Vector3 newWorldPos, float zOffset = 0f, float zScale = 1f)
+    {
+        float[] newHeights = Heights;
+        if ((zOffset != 0f || zScale != 1f) && Heights.Length > 0)
+        {
+            newHeights = new float[Heights.Length];
+            for (int i = 0; i < Heights.Length; i++)
+                newHeights[i] = (Heights[i] * zScale) + zOffset;
+        }
+
+        return new LiquidChunkData
+        {
+            MinHeight = (MinHeight * zScale) + zOffset,
+            MaxHeight = (MaxHeight * zScale) + zOffset,
+            Heights = newHeights,
+            VertexData = VertexData,
+            TileGrid = TileGrid,
+            TileFlags = TileFlags,
+            Type = Type,
+            WorldPosition = newWorldPos,
+            TileX = newTileX,
+            TileY = newTileY,
+            ChunkX = ChunkX,
+            ChunkY = ChunkY,
+        };
+    }
 }
 
 /// <summary>

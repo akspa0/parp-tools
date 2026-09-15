@@ -29,12 +29,11 @@ composition, implemented), 196 (WDL magnetizer, complete), 194 (stratigraphy, co
 
 ## Epic 3 — Renderer Performance & Correctness
 **Goal:** correct images at high FPS with measured, attributable improvements.
-**Members:** 226 (wireframe + MDX lighting defects, OWNS current diagnosis), 153/152/151 (hitch,
+**Members:** 236 (v0.5.4-dev: unified scene lighting, multi-surface light casting, doodad batching performance, OWNS active execution), 226 (wireframe + MDX lighting defects, absorbed into 236), 153/152/151 (hitch,
 stability, admission — mostly shipped/measuring), 204 (off-thread decode), 207 (draw-call
 reduction), 206 (Zarr residency), 202 (batching), 201 (metric attribution), 200 (portal fallback),
 199 (MCAL decode), 198 (shader permutations), 160 (skybox).
-**Next:** 226 wireframe diagnosis (terrain WF shader hypothesis; model WF gating); the measurement
-specs stay as instruments, not active work.
+**Next:** 236 Phase 1 dark MDX shading fix & Half-Lambert diffuse, followed by Phase 2 multi-surface lighting (torches/WMO MOLT lights) and Phase 3 doodad instancing.
 
 ## Epic 4 — Formats, Readers & Writers
 **Goal:** proven, era-faithful read/write for every format we touch.

@@ -49,8 +49,22 @@ internal static class MinimapHelpers
         // Clip to minimap area
         drawList.PushClipRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), true);
 
-        // Draw existing tiles
-        foreach (var (tx, ty) in existingTiles)
+        // Draw existing tiles and phase layer tiles
+        var baseTileSet = new HashSet<(int tx, int ty)>(existingTiles);
+        var allTiles = new HashSet<(int tx, int ty)>(existingTiles);
+        if (worldScene != null)
+        {
+            foreach (var (_, footprint) in worldScene.GetLayerFootprints())
+            {
+                foreach ((int ftx, int fty) in footprint)
+                {
+                    if (ftx >= 0 && ftx < 64 && fty >= 0 && fty < 64)
+                        allTiles.Add((ftx, fty));
+                }
+            }
+        }
+
+        foreach (var (tx, ty) in allTiles)
         {
             if (tx + 1 < viewMinTx || tx > viewMaxTx || ty + 1 < viewMinTy || ty > viewMaxTy)
                 continue;
@@ -137,7 +151,7 @@ internal static class MinimapHelpers
                 }
             }
 
-            if (!drewTexture)
+            if (!drewTexture && baseTileSet.Contains((tx, ty)))
             {
                 bool loaded = isTileLoaded(tx, ty);
                 uint color = loaded ? 0xFF00AA00 : 0xFF004400;

@@ -1674,11 +1674,6 @@ public class WorldScene : ISceneRenderer
             }
 
             IReadOnlyList<(int TileX, int TileY)> donorTiles = _terrainManager.GetLayerFootprint(layer);
-            if (layer.RotationDegrees == 0f && !layer.MirrorHorizontal && !layer.MirrorVertical)
-            {
-                result.Add((layer, donorTiles));
-                continue;
-            }
 
             // Spec 231 Phase 7: compose the footprint through rotation/mirror + offset so
             // minimap rendering, click hit-tests, and drag logic all see where the layer's
@@ -1687,7 +1682,12 @@ public class WorldScene : ISceneRenderer
             var composedTiles = new List<(int TileX, int TileY)>(donorTiles.Count);
             foreach ((int donorTileX, int donorTileY) in donorTiles)
             {
-                (int tx, int ty) = WowViewer.Core.Maps.PhaseCompositionPolicy.ForwardTransformTile(donorTileX, donorTileY, layer);
+                int tx = donorTileX;
+                int ty = donorTileY;
+                if (layer.RotationDegrees != 0f || layer.MirrorHorizontal || layer.MirrorVertical)
+                {
+                    (tx, ty) = WowViewer.Core.Maps.PhaseCompositionPolicy.ForwardTransformTile(donorTileX, donorTileY, layer);
+                }
                 tx += layer.TileOffsetX;
                 ty += layer.TileOffsetY;
                 if (tx < 0 || tx > 63 || ty < 0 || ty > 63)

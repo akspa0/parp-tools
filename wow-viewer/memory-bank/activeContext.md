@@ -35,7 +35,34 @@ small to show a signed two-digit value, must scale with UI text). Spec 231 gaine
 hovered-WMO doodad-set combo disappears on mouse-leave). Operator also re-stated the save-pipeline
 gap directly — that's Spec 234 below, already the whole point of the spec.
 
-## Active lane — Spec 235 Legacy MDX/M2 Rendering (1.0.0-3.0.1) — Phases 0–4 Implemented & Receipted (2026-09-11)
+## Active lane — Spec 236 Scene Lighting, Doodad Performance & Phase Map Tooling — Phase 1 & Minimap Defect Fixes Implemented (2026-09-15)
+
+[236-scene-lighting-doodad-performance/spec.md](../specs/236-scene-lighting-doodad-performance/spec.md) — Implementation active on branch `v0.5.4-dev`.
+- **Phase Map Liquid & Doodad Elevation**:
+  - Added `LiquidChunkData.WithRehoming` method.
+  - Synchronized liquid chunks, doodads (`mddf`), and WMOs (`modf`) with `ZOffset` and `ZScale` in `StandardTerrainAdapter` and `AlphaTerrainAdapter`.
+  - Prevented double-transformation on rotated alpha phase layers (`PlacementsPreTransformed = true`).
+  - Elevated preserved base doodads and WMOs when overlay changes heightmap elevation.
+- **Minimap Live Dragging & Footprint Rendering**:
+  - Fixed `WorldScene.GetLayerFootprints()`: removed unrotated guard that stripped `TileOffsetX`/`TileOffsetY`.
+  - Expanded `MinimapHelpers.RenderMinimapContent` to include all active phase layer footprints outside base map bounds.
+  - Enabled auto-selection of any clicked phase layer footprint and allowed dragging of rotated/mirrored layers.
+- **Interactive Fullscreen Minimap Donor Tile Tool**:
+  - Implemented `MinimapDonorToolService.cs` (Spec 228 God-Class freeze compliant).
+  - Mode switcher (`Navigate` vs `DonorTileTool`, toggle via key `T` or top toolbar).
+  - Left-click tile: sets donor source `(sx, sy)` with green border and `[SRC]` badge.
+  - Hover target: cyan preview outline and connector line.
+  - Left-click target: places donor tile, activates `UsePlacedTilesOnly`, and auto-refreshes terrain.
+  - Right-click: cancels source or removes target placement.
+- **MDX & M2 Shading Corrections**:
+  - Removed `!gl_FrontFacing` normal inversion in `ModelRenderer.cs` and `M2Renderer.cs`.
+  - Implemented Half-Lambert diffuse wrapping (`(N·L * 0.5 + 0.5)^2`) matching `WmoRenderer.cs`.
+- **Verification**:
+  - Full solution build: 0 errors.
+  - Phase unit tests: 76 passed, 0 failed.
+  - Receipt: `specs/236-scene-lighting-doodad-performance/evidence/phase1-shading-fix.md`.
+
+## Prior lane — Spec 235 Legacy MDX/M2 Rendering (1.0.0-3.0.1) — Phases 0–4 Implemented & Receipted (2026-09-11)
 
 [235-legacy-mdx-m2-rendering/spec.md](../specs/235-legacy-mdx-m2-rendering/spec.md) — Implementation complete for Phases 0 through 4 on branch `235-legacy-mdx-m2-rendering`.
 - **Core Reader Unification (`M2ModelReaderDispatcher.cs`, `M2Era100ModelReader.cs`)**:
@@ -92,12 +119,11 @@ gap directly — that's Spec 234 below, already the whole point of the spec.
   - Added regression test `Inspect200OrcFemaleSequencesAndBones` verifying continuous bone rotation across time.
   - Evidence receipt: [2.0.0-animation-and-character-geoset-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/2.0.0-animation-and-character-geoset-fix.md).
 
-## Current lane — Spec 234 Map Save & New Map Creator
+## Current lane — Spec 236 Unified Scene Lighting, Doodad Performance & Client-Constrained World Pipeline (v0.5.4-dev)
 
-[234-map-save-new-map/spec.md](../specs/234-map-save-new-map/spec.md) — Draft, **not planned**.
-Save merged/composed maps to Alpha 0.5.3 WDT and LK v18 ADT from both Archaeology and the Editor's
-Data I/O page (one shared pipeline), plus a New Map creator in the Editor. Multi-map explicitly out
-of scope. Supersedes Spec 230 US2/US3. **Next: speckit-plan.**
+[236-scene-lighting-doodad-performance/spec.md](../specs/236-scene-lighting-doodad-performance/spec.md) — Authored on branch `v0.5.4-dev`.
+Overhaul dark MDX shading bug, add Half-Lambert model diffuse, implement multi-surface scene light casting (torches/WMO MOLT lights onto terrain and WMO surfaces), optimize doodad rendering performance via unified GPU instancing, constrain custom map generator to loaded client listfile assets, and fix GLB export / map merge save pipeline (incorporating Spec 234). **Next: Phase 1 Shading & Normal Fix (T001–T003).**
+
 
 ## Other open lanes (all implemented-with-operator-gates; see each spec's tasks.md for detail)
 

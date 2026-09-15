@@ -498,11 +498,12 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                         ModfPlacements = AlphaChunkTransform.TransformModfPlacementPoses(
                             fullTile.ModfPlacements, layer),
                         SoundEmitters = phase.SoundEmitters,
+                        PlacementsPreTransformed = true,
                     };
                 }
                 else
                 {
-                    RehomeChunksForTarget(phase.Chunks, tileX, tileY);
+                    RehomeChunksForTarget(phase.Chunks, tileX, tileY, 0f, 0f, layer.ZOffset, layer.ZScale);
                 }
             }
             if ((source.SourceTileX != tileX || source.SourceTileY != tileY || layer.HasTileOffset || layer.HasCellOffset) && !phase.PlacementsPreTransformed)
@@ -523,7 +524,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         return result;
     }
 
-    private static void RehomeChunksForTarget(List<TerrainChunkData> chunks, int tileX, int tileY, float cellDx = 0f, float cellDy = 0f)
+    private static void RehomeChunksForTarget(
+        List<TerrainChunkData> chunks,
+        int tileX,
+        int tileY,
+        float cellDx = 0f,
+        float cellDy = 0f,
+        float zOffset = 0f,
+        float zScale = 1f)
     {
         const float tileSpan = WoWConstants.ChunkSize;
         const float chunkSpan = tileSpan / 16f;
@@ -532,10 +540,15 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             TerrainChunkData chunk = chunks[i];
             chunk.TileX = tileX;
             chunk.TileY = tileY;
-            chunk.WorldPosition = new Vector3(
+            Vector3 worldPos = new Vector3(
                 17066.666f - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx,
                 17066.666f - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy,
-                chunk.WorldPosition.Z);
+                chunk.WorldPosition.Z + zOffset);
+            chunk.WorldPosition = worldPos;
+            if (chunk.Liquid != null)
+            {
+                chunk.Liquid = chunk.Liquid.WithRehoming(tileX, tileY, worldPos, zOffset, zScale);
+            }
             chunks[i] = chunk;
         }
     }
@@ -568,6 +581,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             TerrainChunkData chunk = donor.Chunks[i];
             float wx = 17066.666f - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx;
             float wy = 17066.666f - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy;
+            Vector3 worldPos = new Vector3(wx, wy, (chunk.WorldPosition.Z * layer.ZScale) + layer.ZOffset);
             shiftedChunks.Add(new TerrainChunkData
             {
                 McinIndex = chunk.McinIndex,
@@ -582,8 +596,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 AlphaMaps = chunk.AlphaMaps,
                 ShadowMap = chunk.ShadowMap,
                 MccvColors = chunk.MccvColors,
-                Liquid = chunk.Liquid,
-                WorldPosition = new Vector3(wx, wy, chunk.WorldPosition.Z),
+                Liquid = chunk.Liquid?.WithRehoming(tileX, tileY, worldPos, layer.ZOffset, layer.ZScale),
+                WorldPosition = worldPos,
                 AreaId = chunk.AreaId,
                 McnkFlags = chunk.McnkFlags,
                 AlphaSourceFlags = chunk.AlphaSourceFlags,
@@ -599,7 +613,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             placement.Position = new Vector3(
                 placement.Position.X + totalDx,
                 placement.Position.Y + totalDy,
-                placement.Position.Z);
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             mddf.Add(placement);
         }
 
@@ -610,7 +624,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             placement.Position = new Vector3(
                 placement.Position.X + totalDx,
                 placement.Position.Y + totalDy,
-                placement.Position.Z);
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             modf.Add(placement);
         }
 
@@ -1080,6 +1094,16 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             parent.MddfPlacements.AddRange(phase.MddfPlacements);
             contributed |= PhaseDataChannel.Doodads;
         }
+        else if ((contributed & PhaseDataChannel.Heightmap) != 0 && layer.ZOffset != 0f)
+        {
+            // Heightmap shifted by ZOffset but doodads were preserved from base: shift them to match the new elevation.
+            for (int i = 0; i < parent.MddfPlacements.Count; i++)
+            {
+                var p = parent.MddfPlacements[i];
+                p.Position = new Vector3(p.Position.X, p.Position.Y, (p.Position.Z * layer.ZScale) + layer.ZOffset);
+                parent.MddfPlacements[i] = p;
+            }
+        }
 
         bool phaseReplacesWorldObjects = PhaseCompositionPolicy.PhaseOwnsPlacements(
             layer.Channels,
@@ -1090,6 +1114,16 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             parent.ModfPlacements.Clear();
             parent.ModfPlacements.AddRange(phase.ModfPlacements);
             contributed |= PhaseDataChannel.WorldObjects;
+        }
+        else if ((contributed & PhaseDataChannel.Heightmap) != 0 && layer.ZOffset != 0f)
+        {
+            // Heightmap shifted by ZOffset but WMOs were preserved from base: shift them to match the new elevation.
+            for (int i = 0; i < parent.ModfPlacements.Count; i++)
+            {
+                var p = parent.ModfPlacements[i];
+                p.Position = new Vector3(p.Position.X, p.Position.Y, (p.Position.Z * layer.ZScale) + layer.ZOffset);
+                parent.ModfPlacements[i] = p;
+            }
         }
 
         TileTextures[(tileX, tileY)] = mergedTextures;
@@ -1149,14 +1183,20 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         for (int i = 0; i < phase.MddfPlacements.Count; i++)
         {
             MddfPlacement placement = phase.MddfPlacements[i];
-            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             phase.MddfPlacements[i] = placement;
         }
 
         for (int i = 0; i < phase.ModfPlacements.Count; i++)
         {
             ModfPlacement placement = phase.ModfPlacements[i];
-            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             phase.ModfPlacements[i] = placement;
         }
 
@@ -1182,14 +1222,20 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         for (int i = 0; i < phase.MddfPlacements.Count; i++)
         {
             MddfPlacement placement = phase.MddfPlacements[i];
-            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             phase.MddfPlacements[i] = placement;
         }
 
         for (int i = 0; i < phase.ModfPlacements.Count; i++)
         {
             ModfPlacement placement = phase.ModfPlacements[i];
-            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             phase.ModfPlacements[i] = placement;
         }
 
