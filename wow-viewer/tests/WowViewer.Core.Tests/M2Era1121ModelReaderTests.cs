@@ -60,6 +60,45 @@ public sealed class M2Era1121ModelReaderTests
     }
 
     [Fact]
+    public void M2Era1121ModelReader_Sequences_HaveZeroStartTimestamp_AndSampleAnimatedBones()
+    {
+        if (!TryReadStagedVirtualFile(
+                "1.X_Retail_Windows_enUS_1.12.1.5875",
+                "creature\\bear\\bear.mdx",
+                out byte[] bytes,
+                out string sourcePath,
+                out _))
+        {
+            return;
+        }
+
+        using MemoryStream stream = new(bytes, writable: false);
+        M2ModelDocument document = M2Era1121ModelReader.Read(stream, sourcePath);
+
+        Assert.True(document.Sequences.Count > 0, "Bear model must have sequences.");
+        var seq0 = document.Sequences[0];
+        Assert.Equal(0u, seq0.StartTimestamp);
+        Assert.True(seq0.Duration > 0, "Sequence duration must be greater than zero.");
+
+        // Verify animated bone rotation samples change across time
+        bool foundAnimatedBone = false;
+        foreach (var bone in document.Bones)
+        {
+            if (bone.RotationTrack.TimestampArray.HasData)
+            {
+                var rot0 = WowViewer.Core.Runtime.M2.M2TrackSampler.SampleCompressedQuaternion(document.RawBytes, document, 0, 0, bone.RotationTrack, Quaternion.Identity);
+                var rot1 = WowViewer.Core.Runtime.M2.M2TrackSampler.SampleCompressedQuaternion(document.RawBytes, document, 0, (int)(seq0.Duration / 2), bone.RotationTrack, Quaternion.Identity);
+                if (rot0 != rot1)
+                {
+                    foundAnimatedBone = true;
+                    break;
+                }
+            }
+        }
+        Assert.True(foundAnimatedBone, "At least one bone must animate (change rotation) across the sequence timeline.");
+    }
+
+    [Fact]
     public void Dispatcher_3X_Model_GoesTo3X_Reader_NotTo1121Reader()
     {
         byte[] md20 = CreateSyntheticMd20_3X("Synthetic3X");

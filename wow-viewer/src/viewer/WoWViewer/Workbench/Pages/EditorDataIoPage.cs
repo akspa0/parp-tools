@@ -25,6 +25,15 @@ public sealed class EditorDataIoPage
         }
 
         if (SharedUiWidgets.SectionHeader(
+                "New Map Creator",
+                "Create a new templated procedural or flat map (Spec 234 US3) and load it directly into the viewer for editing.",
+                defaultOpen: true,
+                id: "EditorDataIoNewMapCreator"))
+        {
+            _context.Host.DrawNewMapCreator();
+        }
+
+        if (SharedUiWidgets.SectionHeader(
                 "Imports & Exports",
                 defaultOpen: true,
                 id: "EditorDataIoImportsExports"))

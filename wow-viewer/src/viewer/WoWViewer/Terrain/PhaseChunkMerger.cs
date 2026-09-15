@@ -54,7 +54,9 @@ internal static class PhaseChunkMerger
             TileY = baseChunk.TileY,
             ChunkX = baseChunk.ChunkX,
             ChunkY = baseChunk.ChunkY,
-            WorldPosition = baseChunk.WorldPosition,
+            WorldPosition = (phaseChunk.WorldPosition != baseChunk.WorldPosition || TakeChannel(PhaseDataChannel.Heightmap))
+                ? phaseChunk.WorldPosition
+                : baseChunk.WorldPosition,
 
             Heights = TakeChannel(PhaseDataChannel.Heightmap) ? phaseChunk.Heights : baseChunk.Heights,
             Normals = TakeChannel(PhaseDataChannel.Normals) ? phaseChunk.Normals : baseChunk.Normals,

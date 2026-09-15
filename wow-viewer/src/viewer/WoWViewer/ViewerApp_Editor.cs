@@ -94,6 +94,27 @@ public partial class ViewerApp
     void Workbench.Pages.IEditorPageHost.DrawConverters() => DrawConvertersSubTabContent();
     void Workbench.Pages.IEditorPageHost.DrawPm4Exports() => DrawPm4ExportCommandSet();
     void Workbench.Pages.IEditorPageHost.DrawPm4Workbench() => DrawPm4WorkbenchInspector();
+    void Workbench.Pages.IEditorPageHost.DrawNewMapCreator() => _newMapCreatorService.Draw(LoadGeneratedNewMap);
+
+    private readonly Workbench.Services.NewMapCreatorService _newMapCreatorService = new();
+
+    private void LoadGeneratedNewMap(string outputDir, string mapName, int baseTileX, int baseTileY, int tileRows, int tileCols)
+    {
+        if (_dataSource is WoWViewer.DataSources.MpqDataSource mpq)
+        {
+            mpq.AddOverlayRoot(outputDir, out _, out _);
+        }
+
+        string virtualPath = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+        LoadFileFromDataSource(virtualPath);
+
+        float camX = WoWViewer.Rendering.WoWConstants.MapOrigin - (baseTileX + tileCols / 2f) * WoWViewer.Rendering.WoWConstants.ChunkSize;
+        float camY = WoWViewer.Rendering.WoWConstants.MapOrigin - (baseTileY + tileRows / 2f) * WoWViewer.Rendering.WoWConstants.ChunkSize;
+        _camera.Position = new Vector3(camX, camY, 150f);
+        _camera.Pitch = -45f;
+        _camera.Yaw = 0f;
+        _statusMessage = $"Loaded new map '{mapName}'.";
+    }
 
     private void EnsureEditorHost()
     {

@@ -28,6 +28,11 @@ public interface IEditorPageHost
     /// surviving correlation page (D2).
     /// </summary>
     void DrawPm4Workbench();
+
+    /// <summary>
+    /// Spec 234 US3: New Map creator in the Editor tab.
+    /// </summary>
+    void DrawNewMapCreator();
 }
 
 /// <summary>

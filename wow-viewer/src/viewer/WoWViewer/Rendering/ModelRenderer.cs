@@ -2866,12 +2866,8 @@ void main()
         if (blpData != null && blpData.Length > 0)
         {
             var texFlags = (MdlGeoFlags)tex.Flags;
-            bool clampS = _isM2AdapterModel
-                ? texFlags.HasFlag(MdlGeoFlags.WrapWidth)
-                : !texFlags.HasFlag(MdlGeoFlags.WrapWidth);
-            bool clampT = _isM2AdapterModel
-                ? texFlags.HasFlag(MdlGeoFlags.WrapHeight)
-                : !texFlags.HasFlag(MdlGeoFlags.WrapHeight);
+            bool clampS = texFlags.HasFlag(MdlGeoFlags.WrapWidth);
+            bool clampT = texFlags.HasFlag(MdlGeoFlags.WrapHeight);
 
             MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
             MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");

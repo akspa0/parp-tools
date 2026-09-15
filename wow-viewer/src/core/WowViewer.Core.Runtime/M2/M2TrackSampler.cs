@@ -74,7 +74,13 @@ public static class M2TrackSampler
             start = model.Sequences[sequenceIndex].StartTimestamp;
         }
 
-        int sampleTime = checked((int)start) + ResolveSampleTime(timeMs, duration);
+        int resolvedOffset = 0;
+        if (start > 0 && keyFrames[0].Time >= start)
+        {
+            resolvedOffset = checked((int)start);
+        }
+
+        int sampleTime = resolvedOffset + ResolveSampleTime(timeMs, duration);
         if (track.Interpolation == M2TrackInterpolation.None || keyFrames.Count == 1)
             return SampleStep(keyFrames, sampleTime);
 

@@ -161,52 +161,23 @@ public static class M2Era1121ModelReader
         for (int index = 0; index < count; index++)
         {
             int entryOffset = checked((int)offset + (index * layout.SequenceStride));
-            if (layout.SequenceStride == 0x44)
-            {
-                uint start = ReadUInt32At(data, entryOffset + 0x04);
-                uint end = ReadUInt32At(data, entryOffset + 0x08);
-                uint duration = end >= start ? end - start : start;
-
-                values.Add(new M2SequenceDefinition(
-                    index,
-                    ReadUInt16At(data, entryOffset + 0x00),
-                    ReadUInt16At(data, entryOffset + 0x02),
-                    duration,
-                    ReadLenientSingleAt(data, entryOffset + 0x0C, sourcePath, $"sequence[{index}].moveSpeed"),
-                    ReadUInt32At(data, entryOffset + 0x10),
-                    ReadInt16At(data, entryOffset + 0x14),
-                    ReadUInt32At(data, entryOffset + 0x18),
-                    ReadUInt32At(data, entryOffset + 0x1C),
-                    ReadUInt16At(data, entryOffset + 0x20),
-                    ReadUInt16At(data, entryOffset + 0x22),
-                    ReadLenientVector3At(data, entryOffset + 0x24, sourcePath, $"sequence[{index}].boundsMin"),
-                    ReadLenientVector3At(data, entryOffset + 0x30, sourcePath, $"sequence[{index}].boundsMax"),
-                    ReadLenientSingleAt(data, entryOffset + 0x3C, sourcePath, $"sequence[{index}].boundsRadius"),
-                    ReadInt16At(data, entryOffset + 0x40),
-                    ReadUInt16At(data, entryOffset + 0x42),
-                    start,
-                    end));
-            }
-            else
-            {
-                values.Add(new M2SequenceDefinition(
-                    index,
-                    ReadUInt16At(data, entryOffset + 0x00),
-                    ReadUInt16At(data, entryOffset + 0x02),
-                    ReadUInt32At(data, entryOffset + 0x04),
-                    ReadLenientSingleAt(data, entryOffset + 0x08, sourcePath, $"sequence[{index}].moveSpeed"),
-                    ReadUInt32At(data, entryOffset + 0x0C),
-                    ReadInt16At(data, entryOffset + 0x10),
-                    ReadUInt32At(data, entryOffset + 0x14),
-                    ReadUInt32At(data, entryOffset + 0x18),
-                    ReadUInt16At(data, entryOffset + 0x1C),
-                    ReadUInt16At(data, entryOffset + 0x1E),
-                    ReadLenientVector3At(data, entryOffset + 0x20, sourcePath, $"sequence[{index}].boundsMin"),
-                    ReadLenientVector3At(data, entryOffset + 0x2C, sourcePath, $"sequence[{index}].boundsMax"),
-                    ReadLenientSingleAt(data, entryOffset + 0x38, sourcePath, $"sequence[{index}].boundsRadius"),
-                    ReadInt16At(data, entryOffset + 0x3C),
-                    ReadUInt16At(data, entryOffset + 0x3E)));
-            }
+            values.Add(new M2SequenceDefinition(
+                index,
+                ReadUInt16At(data, entryOffset + 0x00),
+                ReadUInt16At(data, entryOffset + 0x02),
+                ReadUInt32At(data, entryOffset + 0x04),
+                ReadLenientSingleAt(data, entryOffset + 0x08, sourcePath, $"sequence[{index}].moveSpeed"),
+                ReadUInt32At(data, entryOffset + 0x0C),
+                ReadInt16At(data, entryOffset + 0x10),
+                ReadUInt32At(data, entryOffset + 0x14),
+                ReadUInt32At(data, entryOffset + 0x18),
+                ReadUInt16At(data, entryOffset + 0x1C),
+                ReadUInt16At(data, entryOffset + 0x1E),
+                ReadLenientVector3At(data, entryOffset + 0x20, sourcePath, $"sequence[{index}].boundsMin"),
+                ReadLenientVector3At(data, entryOffset + 0x2C, sourcePath, $"sequence[{index}].boundsMax"),
+                ReadLenientSingleAt(data, entryOffset + 0x38, sourcePath, $"sequence[{index}].boundsRadius"),
+                ReadInt16At(data, entryOffset + 0x3C),
+                ReadUInt16At(data, entryOffset + 0x3E)));
         }
 
         return values;
