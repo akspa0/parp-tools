@@ -25,3 +25,4 @@ Current drafts:
 - Alpha page refresh: `alpha-draft.md`
 - ADT/v18 cross-page follow-ups: `adt-v18-followups.md`
 - PM4/PD4 page refresh: `pm4-pd4-draft.md`
+- **New page ADT/v26** (MediaWiki markup, ready to paste): `adt-v26.wiki`, first documentation of the format first seen 2026-09-16 in `wow_classic_beta`. Backed by `specs/237-adt-v26-terrain/evidence/` (scripts reproduce every number). Fill in the build number before submitting.

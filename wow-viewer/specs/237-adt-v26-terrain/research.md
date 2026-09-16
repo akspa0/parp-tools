@@ -55,7 +55,7 @@ chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decis
 
 ### R5: Height frame
 
-- **Question**: Absolute world heights, or relative to something? v18 MCVT is relative to MCNK `position.z`, but the wiki v22 ACNK header documents no position, and in v26 the ACNK index fields are 0.
+- **Question**: Absolute world heights, or relative to something? v18 MCVT is relative to MCNK `position.z`, but the wiki v22 ACNK header documents no position; in v26 the ACNK index fields are chunk-local (0–15).
 - **Partially ANSWERED (revision 26)**: heights are continuous across tile edges with no per-tile offset, so they are absolute at least at tile level. Within-tile chunk-boundary behaviour is still to measure.
 - **Decision**: Measure. Seam continuity in absolute terms settles it, since relative heights would produce steps at chunk boundaries inside a tile. The chunk-boundary step statistic inside a tile is the detector.
 
@@ -90,7 +90,7 @@ chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decis
 
 ### R11: Tile coordinates
 
-- **ANSWERED (revision 26)**: `ALOC` = 5×uint32 `(2869, X, Y, X, Y)`. X = `ALOC[1]` (18–45), Y = `ALOC[2]` (16–40), and 699 distinct tiles. Proven by seam agreement (see R4). Filenames are FileDataIDs with no positional meaning. ACNK index fields are 0 in the corpus, so they are not usable.
+- **ANSWERED (revision 26)**: `ALOC` = 5×uint32 `(2869, X, Y, X, Y)`. X = `ALOC[1]` (18–45), Y = `ALOC[2]` (16–40), and 699 distinct tiles. Proven by seam agreement (see R4). Filenames are FileDataIDs with no positional meaning. ACNK index fields are chunk-local (i % 16, i / 16 in file order; all 178,944 chunks), not tile position.
 - **Open**: `ALOC[0]` = 2869 (constant; unexplained, do not name it); why fields 3/4 duplicate 1/2.
 
 ### R12: Real-data tests
@@ -103,7 +103,7 @@ chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decis
 |---|---|---|---|
 | `ALOC` | 20 | every file | tile location, measured (R11) |
 | `AOCH` | 2048 | every file, **all bytes zero** | unexplained. 2048 = 64×32, so possibly a per-chunk occlusion/horizon table unused here; don't name it until non-zero data appears |
-| `ADST` | 12 | 321/699 files | e.g. `(63420377, 190719, 1)`; unexplained |
+| `ADST` | 12 | 321 chunks in 7/699 files, as a run after the last `ACNK` | e.g. `(63420377, 190719, 1)`; unexplained |
 | `AHDR`+0x14 | 4 | `8396383` in every file | unexplained; do not name it |
 
 ### R13: Liquid

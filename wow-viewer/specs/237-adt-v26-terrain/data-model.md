@@ -20,7 +20,7 @@ Phase 0/1 evidence settles it, and the final layout is recorded in
 | TileX, TileY | int | ALOC +0x04, +0x08 | **measured** tile position |
 | AlocTail | uint[2] | ALOC +0x0C, +0x10 | equal to TileX/TileY in corpus; meaning open |
 | Aoch | byte[2048]? | AOCH | all zero in corpus; kept raw |
-| Adst | uint[3]? | ADST | 321/699 files; kept raw |
+| Adst | uint[3][] | ADST ×n | 7/699 files (321 chunks); first field in ACDO uniqueId range; kept raw |
 | OuterHeights | float[VX×VY] | AVTX first block | order *(measure R4)*, frame *(measure R5)* |
 | InnerHeights | float[(VX−1)×(VY−1)] | AVTX second block | |
 | OuterNormals / InnerNormals | Vector3[] | ANRM, sbyte/127 | component order *(measure R6)*; raw bytes retained |
@@ -36,7 +36,7 @@ Phase 0/1 evidence settles it, and the final layout is recorded in
 
 | Field | Type | Source | Notes |
 |---|---|---|---|
-| IndexX, IndexY | int | ACNK +0x00, +0x04 | **0 in revision-26 corpus**; not a position source |
+| IndexX, IndexY | int | ACNK +0x00, +0x04 | **chunk-local**: i % 16, i / 16 in file order (measured, all chunks) |
 | Flags | uint | v23 ACNK +0x08 | v22: reserved DWORD; v26 *(measure)*; kept raw |
 | AreaId | int | ACNK +0x0C | |
 | HolesLowRes | ushort | v23 +0x10 | v22: reserved; v26 *(measure)* |

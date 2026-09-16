@@ -184,7 +184,7 @@ detection change at the `AHDR` branch must not leak into them.
 - `ACDO` model id beyond the `ADOO` table: flag it and skip the placement.
 - The `ACDO` trailing "name/doodadsets" field is undocumented in size: measure the actual record size across the corpus before fixing a layout.
 - Normal-vector triples don't normalize (magnitude far from 1): report the rate; don't silently renormalize away evidence of a wrong component order.
-- A file lacks `ALOC`, or two files claim the same `ALOC` tile: flag it, and do not place that tile silently. (In the current corpus the ACNK index fields are 0, so they are not a fallback.)
+- A file lacks `ALOC`, or two files claim the same `ALOC` tile: flag it, and do not place that tile silently. (ACNK index fields are chunk-local 0–15, so they cannot stand in for tile position.)
 
 ## Requirements *(mandatory)*
 

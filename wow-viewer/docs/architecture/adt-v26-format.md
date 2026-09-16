@@ -30,14 +30,14 @@ below comes from the tile files alone.
 Standard little-endian IFF-style chunks: a 4-byte id (stored reversed on disk, e.g. `REVM`), a uint32 size and the payload,
 **unpadded**. 700/700 files walk with 0 unaccounted bytes. **MEASURED**
 
-Top-level order, identical in every file:
+Top-level order (the same in every file; the bracketed chunks are optional):
 
 ```text
-MVER  AHDR  ALOC  AOCH  AVTX  ANRM  [ATEX × n]  ADOO × n  ACNK × 256  ACVT
-                                   (optional; 0 in 484 files)
+MVER  AHDR  ALOC  AOCH  AVTX  ANRM  [ATEX × n]  ADOO × n  ACNK × 256  [ADST × n]  ACVT
+                                     30 files                          7 files
 ```
 
-`ADST` (12 bytes) additionally appears in 321 files (its position in the order is to be recorded by the inventory tool).
+`ADST` (12 bytes) appears in 7 files as a run of 2–139 chunks between the last `ACNK` and `ACVT`. **MEASURED**
 
 ## Relationship to ADT v22/v23
 
@@ -50,7 +50,7 @@ v26 reuses the chunk vocabulary of the pre-Cataclysm experimental ADT v22/v23 on
 | Tile location | not in file (filename convention) | **`ALOC` chunk** |
 | `ACVT` | v23 only | every file |
 | `AOCH`, `ADST` | absent | present (unexplained) |
-| `ACNK` index fields | chunk position | **0** (not a position source) |
+| `ACNK` index fields | chunk position | chunk-local 0–15, row-major (tile position is in `ALOC`) |
 
 ## Chunks
 
@@ -64,8 +64,9 @@ v26 reuses the chunk vocabulary of the pre-Cataclysm experimental ADT v22/v23 on
 | `ANRM` | 99075 | int8 × 3 × (129² + 128²), outer then inner | size **MEASURED**; component order and scale *hypothesis* |
 | `ATEX` | variable | one NUL-terminated texture path per chunk | **MEASURED** |
 | `ADOO` | variable | one NUL-terminated model path per chunk (225 or 285 per file, near-identical across tiles, so it looks map-global) | **MEASURED** |
-| `ADST` | 12 | e.g. `(63420377, 190719, 1)` | *open* |
-| `ACNK` | 64 or more | 64-byte header (index fields 0), then sub-chunks (`ALYR`/`AMAP`/`ASHD`/`ACDO` per wiki) | header size **MEASURED**; sub-chunks *hypothesis* |
+| `ADST` | 12 | 3×uint32, e.g. `(63420377, 190719, 1)`; the first field falls in the `ACDO` uniqueId range | *open* |
+| `ACNK` | 64 or more | 64-byte header (+0x00/+0x04 chunk index, +0x08 = `0xD000`, +0x0C = 0), then `ALYR × 0..4`, `ASHD` (512), optional `ACDO` (56 or 60) | order and sizes **MEASURED**; most header fields *open* |
+| `ALYR` | 4136 | 0x20 fixed part (flags `0x100` always) + nested `AMAP` (4096 = 8-bit 64×64) | **MEASURED** |
 | `ACVT` | 132100 | 4 bytes × (129² + 128²), presumably RGBA per vertex, outer then inner | size **MEASURED**; channel order *hypothesis* |
 
 ## Tile placement and heights (MEASURED)

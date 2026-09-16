@@ -1,0 +1,144 @@
+__TOC__
+'''ADT v26''' is a terrain tile format first seen in the <tt>wow_classic_beta</tt> build published on 2026-09-16 (build number: TODO), the first WoW: Forever build on Battle.net. It shares most chunk names with [[ADT/v22]] and [[ADT/v23]], but it is a distinct version: <tt>MVER</tt> comes before <tt>AHDR</tt>, the version is 26, and it adds new chunks (<tt>ALOC</tt>, <tt>AOCH</tt>, <tt>ADST</tt>). The [[ADT/v22]] page also lists version 26 in its <tt>AHDR</tt> version comment.
+
+Everything below was observed in 699 files from that build. Where a field's meaning is not yet known, the page gives the observed values instead of guessing. Field names carried over from [[ADT/v22]] / [[ADT/v23]] are marked ''(v22 name)'' when they have not been verified for v26.
+
+== Files ==
+* The files ship without names: they are known only by FileDataID (observed range 6893600–6894299), with no extension. No WDT or listfile entry has been observed for them.
+* A file's tile coordinates are '''not''' derived from its name; they are stored in the file itself (see [[#ALOC|ALOC]]).
+* Chunks are standard little-endian IFF chunks (<tt>uint32 magic; uint32 size;</tt> payload) with no padding. All 699 files parse with no bytes left over.
+* Of the 699 files, 30 have varying heights and 669 are completely flat; in 640 files every <tt>ACNK</tt> is header-only.
+
+== Chunk order ==
+ MVER AHDR ALOC AOCH AVTX ANRM [ATEX × n] ADOO × n ACNK × 256 [ADST × n] ACVT
+* <tt>ATEX</tt> is present in 30 files and absent in the other 669.
+* <tt>ADST</tt> is present in 7 files, as a run of 2–139 chunks between the last <tt>ACNK</tt> and <tt>ACVT</tt>.
+
+== MVER ==
+ uint32_t version; // 26
+
+== AHDR: HeaDeR ==
+size: 0x40
+ struct
+ {
+ /*0x00*/ uint32_t version;     // 26
+ /*0x04*/ uint32_t vertices_x;  // 129
+ /*0x08*/ uint32_t vertices_y;  // 129
+ /*0x0C*/ uint32_t chunks_x;    // 16
+ /*0x10*/ uint32_t chunks_y;    // 16
+ /*0x14*/ uint32_t unknown;     // 8396383 (0x801E5F) in every observed file
+ /*0x18*/ uint32_t unused[10];  // always 0
+ } ahdr;
+
+== ALOC ==
+<span id="ALOC"></span>
+New in v26. size: 0x14
+ struct
+ {
+ /*0x00*/ uint32_t unknown;  // 2869 in every observed file
+ /*0x04*/ uint32_t tile_x;   // observed 18..45
+ /*0x08*/ uint32_t tile_y;   // observed 16..40
+ /*0x0C*/ uint32_t tile_x2;  // equal to tile_x in every observed file
+ /*0x10*/ uint32_t tile_y2;  // equal to tile_y in every observed file
+ } aloc;
+* Each file has a unique (<tt>tile_x</tt>, <tt>tile_y</tt>) pair.
+* Checked with heights: for tiles whose <tt>tile_x</tt> differs by 1, the last column of one tile's outer <tt>AVTX</tt> grid is identical to the first column of the neighbour's. For <tt>tile_y</tt>, the same holds for rows (35 and 36 neighbour pairs, all exact matches; every other edge combination differs by hundreds of units).
+* Why <tt>tile_x</tt>/<tt>tile_y</tt> are stored twice is unknown; possibly a min/max tile range.
+
+== AOCH ==
+New in v26. size: 0x800 (2048)
+* All bytes are 0 in every observed file. Its meaning is unknown.
+
+== AVTX: VerTeX ==
+size: (vertices_x × vertices_y + (vertices_x − 1) × (vertices_y − 1)) × 4 = 132100
+ float outer[ahdr.vertices_y][ahdr.vertices_x]; // 129 × 129, row-major
+ float inner[ahdr.vertices_y - 1][ahdr.vertices_x - 1]; // 128 × 128
+* In the outer grid, rows run along <tt>ALOC.tile_y</tt> and columns along <tt>ALOC.tile_x</tt> (from the shared edges described under [[#ALOC|ALOC]]).
+* Heights match exactly across tile edges with no per-tile base height, so they are absolute at least at tile level (chunk edges inside a tile not yet checked).
+* The inner grid order is assumed to match the outer grid but has not been verified.
+
+== ANRM: NoRMals ==
+size: (129 × 129 + 128 × 128) × 3 = 99075
+ using Vec3c = int8_t[3];
+ Vec3c outer[ahdr.vertices_y][ahdr.vertices_x];
+ Vec3c inner[ahdr.vertices_y - 1][ahdr.vertices_x - 1];
+* The size matches. Component order and scale (127 = 1.0 in [[ADT/v22]]) have not been verified for v26.
+
+== ATEX: TEXtures ==
+* One chunk per texture filename (a zero-terminated string), not a single string block.
+* 33 distinct textures across the files; for example <tt>Tileset\TirisFall\TirisFallRockyMudGrass.BLP</tt>.
+
+== ADOO: DOOdad ==
+* One chunk per model filename (a zero-terminated string), 225 or 285 per file.
+* The list is nearly identical in every file, including the flat ones. For example: <tt>WORLD\LORDAERON\SILVERPINE\PASSIVEDOODADS\TREES\SILVERPINETREE03.M2</tt>.
+
+== ACNK: ChuNK ==
+256 per file, in row-major order.
+* 163840 of the observed <tt>ACNK</tt>s are exactly 0x40 bytes (header only). The rest continue with sub-chunks.
+ struct
+ {
+ /*0x00*/ uint32_t index_x;   // i % 16 for the i-th ACNK in the file
+ /*0x04*/ uint32_t index_y;   // i / 16
+ /*0x08*/ uint32_t flags;     // 0xD000 in every observed chunk
+ /*0x0C*/ uint32_t areaId;    // (v22 name) 0 in every observed chunk
+ /*0x10*/ uint16_t holes_low_res;               // (v22 name)
+ /*0x12*/ uint32_t lowdetailtextureingmap[4];   // (v22 name) values such as 0x55555555 / 0xAAAAAAAA fit a 2-bit-per-cell map
+ /*0x22*/ uint8_t  unknown[0x0A];               // mostly 0
+ /*0x2C*/ uint32_t unknown2;                    // 0 in every observed chunk
+ /*0x30*/ uint8_t  unknown3[0x0C];              // almost always 0
+ /*0x3C*/ uint32_t unknown4;                    // 0 in every observed chunk
+ } acnk_header;
+Sub-chunk order after the header:
+ ALYR × 0..4, ASHD, [ACDO]
+
+=== ALYR: LaYeR ===
+size: 0x1028 (4136) for every observed layer: a 0x20 header followed by a nested <tt>AMAP</tt>.
+ struct
+ {
+ /*0x00*/ int32_t  textureID;  // index into ATEX
+ /*0x04*/ uint32_t flags;      // 0x100 on every observed layer, including the first
+ /*0x08*/ uint32_t unused[6];  // always 0
+ } alyr;
+
+==== AMAP: alpha MAP ====
+size: 0x1000 (4096) in every observed layer, i.e. an uncompressed 8-bit 64 × 64 alpha map. Every layer has one, including the first.
+
+=== ASHD: SHaDow map ===
+size: 0x200 (512). Present in every <tt>ACNK</tt> that has sub-chunks. Presumably 64 × 64 bits; not yet verified.
+
+=== ACDO: Chunk - Definitions of Objects ===
+size: 0x38 (5298 observed), or 0x3C (11 observed). One object per chunk.
+ struct
+ {
+ /*0x00*/ int32_t  modelid;      // index into ADOO
+ /*0x04*/ float    position[3];  // (v22 name) observed: [0] and [2] within ±600, [1] within ±1407
+ /*0x10*/ float    rotation[3];  // (v22 name) e.g. (0, 280.5, 0)
+ /*0x1C*/ float    scale[3];     // (v22 name) observed e.g. (0.72, 1.0, 0.0); meaning not verified
+ /*0x28*/ float    unknown;      // e.g. -0.0029
+ /*0x2C*/ uint32_t uniqueId;     // observed around 63.42 million
+ /*0x30*/ uint32_t unknown2;     // 0 in the samples
+ /*0x34*/ uint32_t unknown3;     // 0x00010000 in the samples
+ } acdo;
+* The ranges of <tt>position[0]</tt> and <tt>position[2]</tt> (about ±600) suggest coordinates relative to the tile, with <tt>position[1]</tt> as height. This is not yet verified.
+
+== ADST ==
+New in v26. size: 0x0C. It appears only in some files, as a run after the last <tt>ACNK</tt>.
+ struct
+ {
+ uint32_t unknown0; // e.g. 63420377; falls in the same range as ACDO.uniqueId
+ uint32_t unknown1; // e.g. 190719
+ uint32_t unknown2; // e.g. 1
+ } adst;
+
+== ACVT: VerTex shading ==
+size: (129 × 129 + 128 × 128) × 4 = 132100. Present in every observed file.
+* Presumably one 4-byte colour per vertex, outer grid then inner grid, as in [[ADT/v23]]. Channel order not verified.
+
+== Open questions ==
+* <tt>AHDR</tt> +0x14 (8396383), <tt>ALOC.unknown</tt> (2869), and why <tt>ALOC</tt> repeats the tile coordinates.
+* <tt>AOCH</tt> (all zero) and <tt>ADST</tt>.
+* The inner <tt>AVTX</tt>/<tt>ANRM</tt> grid order, the <tt>ANRM</tt> encoding, and the <tt>ACVT</tt> channel order.
+* The <tt>ACNK</tt> header fields from 0x10 on, and the <tt>ASHD</tt> bit layout.
+* The <tt>ACDO</tt> coordinate frame, rotation units and the "scale" fields.
+
+[[Category:Format]]

@@ -57,10 +57,18 @@ The layout matches the wiki's first five fields; one reserved slot is non-zero.
 - File sizes: 640 files are 400,141 bytes, and those files' `ACNK`s are all header-only (64 bytes). 25 are 533,261 bytes, 5 are 537,881 bytes, and the rest are unique sizes (larger, non-flat tiles).
 - Chunk sizes all match the header dimensions: `AVTX` 132100 = (129²+128²)×4, `ANRM` 99075 = (129²+128²)×3, `ACVT` 132100 = (129²+128²)×4 RGBA. The wiki's v23-only `ACVT` is present in every file.
 - `AOCH` (new, 2048 bytes): **all zero in all 700 files**.
-- `ADST` (new, 12 bytes): present in 321 files, with values like `(63420377, 190719, 1)`. Unexplained.
-- `ATEX`: **one chunk per name**. 33 distinct names; 484 files have none. Tilesets are TirisFall, SilverPine and Wetlands (Lordaeron/Eastern Kingdoms content).
+- `ADST` (new, 12 bytes): **321 chunks in 7 files** (corrected 2026-09-16; the first pass counted chunks as files). They form a run between the last `ACNK` and `ACVT` (2, 2, 18, 31, 59, 70 and 139 per file). Values look like `(63420377, 190719, 1)`, and the first field falls in the `ACDO` uniqueId range (~63.42M). Unexplained.
+- `ATEX`: **one chunk per name**. 33 distinct names; **669 files have none** (corrected: the first pass said 484), and only 30 files carry `ATEX`. Tilesets are TirisFall, SilverPine and Wetlands (Lordaeron/Eastern Kingdoms content).
 - `ADOO`: **one chunk per name**, 225 or 285 per file. The same model names repeat in (almost) every file, so this looks like a map-global model table copied per tile. Examples: `WORLD\LORDAERON\SILVERPINE\...\SILVERPINETREE03.M2`, `...\TIRISFALLGLADECANOPYTREE07.M2`.
-- The first non-empty `ACNK` header ints `(0, 0, 53248, 0)`: **the index fields are 0**, so ACNK does not carry tile/chunk position here. Tile position comes from `ALOC` only.
+- **Corrected**: the first pass sampled only each file's first `ACNK` and wrongly reported the index fields as 0. Across all 178,944 `ACNK`s, `+0x00` = i % 16 and `+0x04` = i / 16 for the i-th `ACNK` in file order, so they are **chunk-local** indices (row-major). **Tile** position still comes only from `ALOC`.
+
+## Finding 5: ACNK contents (`scripts/acnk_v26.py`, `scripts/acnk_index_v26.py`)
+
+- 163,840 `ACNK`s are the 64-byte header only; 15,104 carry sub-chunks. Walking the sub-chunks after the header leaves 0 gaps.
+- Sub-chunk order: `ALYR × 0..4`, then `ASHD` (always, 512 bytes), then an optional `ACDO` (5,298 × 56 bytes, 11 × 60 bytes).
+- `ALYR`: 4,136 bytes = 0x20 fixed part + a nested `AMAP` of **4,096 bytes** (uncompressed 8-bit 64×64). Flags are `0x100` on **every** layer, including the first; bytes 0x08–0x1F are always zero.
+- Header: `+0x08` = `0xD000` in every chunk; `+0x0C` = 0 in every chunk (the wiki's areaId). Bytes `0x10..0x2B` vary, with `0x55555555` / `0xAAAAAAAA` patterns consistent with the wiki's 2-bit `lowdetailtextureingmap` at 0x12. `+0x2C` and `+0x3C` are always 0.
+- `ACDO` (56 bytes) samples, read as the wiki struct: modelid 5/16/7; "position" component 0 and 2 within ±600, component 1 within ±1406; "rotation" e.g. (0, 280.5, 0); the wiki's "scale[3], float" read as e.g. (0.72, 1.0, 0.0, −0.0029); uniqueId ~63.42M; trailing 8 bytes `00000000 00000100`. Field meanings beyond modelid/uniqueId are **not yet tested**.
 
 ## Spec consequences (applied in the same pass)
 
