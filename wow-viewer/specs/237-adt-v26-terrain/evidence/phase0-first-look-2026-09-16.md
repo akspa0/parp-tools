@@ -12,7 +12,7 @@ tooling must reproduce.
 | Files | 700 = 699 extensionless + `6893600.adt` (a byte-identical copy of `6893600`; SHA-256 `AC99569C…F199`) |
 | Filenames | FileDataIDs 6893600–6894299. **They encode no tile position** (operator-confirmed) and are absent from the vendored listfile (`parts/world-maps.csv` max id 7936286) |
 | File-list hash | SHA-256 of sorted `name:size` lines = `54AF5D58…E128E` |
-| Provenance | **Public**: shipped in the 2026-09-16 `wow_classic_beta` build (the first WoW: Forever build on Battle.net). Passed on by Marlamin, who identified them at a glance as "v22". They are **ADT v26, a completely new format**: first shipped publicly ~8 hours before this analysis, tip-off ~1 hour before. This is the first analysis of the format anywhere. **No WDT, map table entry or listfile names exist for them** (operator-confirmed) |
+| Provenance | **Public**: shipped in the 2026-09-16 `wow_classic_beta` build (the first WoW: Forever build on Battle.net). Identified at a glance as "v22" before measurement. They are **ADT v26, a completely new format**: first shipped publicly ~8 hours before this analysis, tip-off ~1 hour before. This is the first analysis of the format anywhere. **No WDT, map table entry or listfile names exist for them** (operator-confirmed) |
 
 Commands (PowerShell, from repo root):
 

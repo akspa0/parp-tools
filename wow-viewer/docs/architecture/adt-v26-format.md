@@ -1,8 +1,7 @@
 # DAT v26 Terrain Format (raw ADT project files)
 
 **Naming (2026-09-16)**: these are **DAT files**: the raw terrain project files that the client's ADTs are built from (the
-wiki's ADT/v22 page now also describes versions 22/23/26 as DAT files). The operator proposed years earlier that these loose
-files were the raw ADT project files; version 26 is the first corpus large enough to show it. The repo paths
+wiki's ADT/v22 page now also describes versions 22/23/26 as DAT files). The repo paths
 (`adt-v26-format.md`, `specs/237-adt-v26-terrain/`, and code names such as `AdtV26`) keep "ADT" to avoid churn. The format
 name is **DAT v26**.
 
@@ -18,8 +17,8 @@ exists.
 | When (2026-09-16) | Event |
 |---|---|
 | ~8 hours before first analysis | The format first appears publicly in the `wow_classic_beta` build: the first WoW: Forever build on Battle.net servers, and the first build of the final WoW remaster on a new engine |
-| ~1 hour before first analysis | Marlamin glances at the files, takes them for ADT "v22", and passes them to this project's operator |
-| First analysis | This project (operator + Claude) measures the files, identifies them as version 26, decodes tile placement from the new `ALOC` chunk, and plans the first visualizer, a wireframe in wow-viewer |
+| ~1 hour before first analysis | The files are identified at a glance as ADT "v22" and passed to this project |
+| First analysis | The files are measured, identified as version 26, and tile placement is decoded from the new `ALOC` chunk |
 
 **No companions exist**: no WDT, map table entry, listfile names or CDN-side metadata accompany these files. Everything
 below comes from the tile files alone.

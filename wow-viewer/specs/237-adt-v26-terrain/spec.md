@@ -14,18 +14,16 @@
 
 These tiles are **DAT version 26** (referred to as "ADT v26" in repo paths and code names): a completely new version of the
 DAT raw terrain project files, the source files the client's ADTs are built from. It had never been seen before 2026-09-16.
-The operator proposed years earlier that these loose files were the raw ADT project files; the wiki's ADT/v22 page now
-describes the family as DAT files as well.
+The wiki's ADT/v22 page describes the family as DAT files.
 
 | When (2026-09-16) | Event |
 |---|---|
 | ~8 hours before this record | The format first appears publicly, shipped in the `wow_classic_beta` build: the first WoW: Forever build on Battle.net servers, and the first build of the final WoW remaster on a **new WoW engine** |
-| ~1 hour before this record | Tip-off: Marlamin glanced at the files, thought they were "v22", and passed them to the operator as the right person to look at them |
-| This session | **First analysis anywhere**, by the operator with Claude. The files are measured, the format is identified as version 26, tile placement is decoded from the new `ALOC` chunk and proven by exact height seams, and a wireframe viewer path is planned in this repo's tooling ([evidence](evidence/phase0-first-look-2026-09-16.md)) |
+| ~1 hour before this record | The files are identified at a glance as "v22" and passed to this project |
+| First analysis | The files are measured, the format is identified as version 26, and tile placement is decoded from the new `ALOC` chunk and proven by exact height seams ([evidence](evidence/phase0-first-look-2026-09-16.md)) |
 
 **Why it matters**: nothing documents this format. No wiki page, no WDT, no map table entry, no listfile names and no CDN
-companions exist for these files. **The tile files are the only source of truth**, and this project's viewer is the tool
-positioned to visualize them first. Every fact in this spec is either measured from the files (with the evidence linked)
+companions exist for these files. **The tile files are the only source of truth.** Every fact in this spec is either measured from the files (with the evidence linked)
 or explicitly marked as open. The permanent format write-up is [`docs/architecture/adt-v26-format.md`](../../docs/architecture/adt-v26-format.md).
 
 This spec is **standalone**: it does not depend on Specs 238/239.
