@@ -1,4 +1,4 @@
-# Phase 0 first look: the real corpus (2026-09-16)
+# Phase 0 first look: ADT v26, the first analysis of a brand-new format (2026-09-16)
 
 **Status**: preliminary measurement ahead of the Phase 0 inventory tooling (T011–T017). The Python
 probes in [scripts/](scripts/) will be replaced by the C# inventory; the numbers below are what that
@@ -12,14 +12,14 @@ tooling must reproduce.
 | Files | 700 = 699 extensionless + `6893600.adt` (a byte-identical copy of `6893600`; SHA-256 `AC99569C…F199`) |
 | Filenames | FileDataIDs 6893600–6894299. **They encode no tile position** (operator-confirmed) and are absent from the vendored listfile (`parts/world-maps.csv` max id 7936286) |
 | File-list hash | SHA-256 of sorted `name:size` lines = `54AF5D58…E128E` |
-| Provenance | **Public**: shipped in the 2026-09-16 `wow_classic_beta` build (the first WoW: Forever build on Battle.net). Passed on by Marlamin, who identified them at a glance as "v22". They are a **previously undocumented revision** (see the MVER finding below). **No WDT, map table entry or listfile names exist for them** (operator-confirmed) |
+| Provenance | **Public**: shipped in the 2026-09-16 `wow_classic_beta` build (the first WoW: Forever build on Battle.net). Passed on by Marlamin, who identified them at a glance as "v22". They are **ADT v26, a completely new format**: first shipped publicly ~8 hours before this analysis, tip-off ~1 hour before. This is the first analysis of the format anywhere. **No WDT, map table entry or listfile names exist for them** (operator-confirmed) |
 
 Commands (PowerShell, from repo root):
 
 ```powershell
-python wow-viewer\specs\237-adt-v22-terrain\evidence\scripts\walk_v22.py
-python wow-viewer\specs\237-adt-v22-terrain\evidence\scripts\dump_v22.py
-python wow-viewer\specs\237-adt-v22-terrain\evidence\scripts\seam_probe.py
+python wow-viewer\specs\237-adt-v26-terrain\evidence\scripts\walk_v26.py
+python wow-viewer\specs\237-adt-v26-terrain\evidence\scripts\dump_v26.py
+python wow-viewer\specs\237-adt-v26-terrain\evidence\scripts\seam_probe.py
 ```
 
 ## Finding 1: the files are MVER 26 + AHDR, not AHDR-first
@@ -64,7 +64,7 @@ The layout matches the wiki's first five fields; one reserved slot is non-zero.
 
 ## Spec consequences (applied in the same pass)
 
-1. Detection: `MVER` + `AHDR` second, with the version read from `AHDR` (26 observed). The "v22/v23 by AHDR.version" split is generalized to "AHDR-family revision".
+1. Detection: `MVER` + `AHDR` second, with the version read from `AHDR` (26 observed). The spec is retitled to ADT v26; wiki v22/v23 remain detected relatives only.
 2. Tile coordinates come from `ALOC` (measured), not filenames or ACNK indices.
 3. New chunks `ALOC`, `AOCH`, `ADST` join the known set; `ACVT` is not v23-only.
 4. Name tables are chunk-per-name.

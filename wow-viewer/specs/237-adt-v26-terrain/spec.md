@@ -1,50 +1,55 @@
-# Feature Specification: ADT/v22 Terrain Reading and Rendering
+# Feature Specification: ADT v26 — First Reader and Renderer for a Brand-New Terrain Format
 
 **Feature Branch**: `v0.5.4-dev` (v0.6 release line; no per-spec branch)
 
 **Release**: v0.6
 
-**What this is (operator, 2026-09-16)**: a **never-before-seen ADT version from a new WoW engine**, the first build of the
-final WoW remaster. Nothing external documents or companions it: no WDT, no map table, no listfile names, and nothing to
-look up on a CDN. **The tile files are the only source of truth**, and this spec is standalone: it does not depend on
-Specs 238/239.
+**Created**: 2026-09-16 (retitled the same day from "ADT/v22" once the files were measured)
 
-**Created**: 2026-09-16
+**Status**: Draft (fast-path wireframe next)
 
-**Status**: Draft
+**Input**: User description (original, before the files were measured): "Add support for reading and rendering the data from ADT/v22 files, because data just became available in that format for no apparent reason, and I have no tooling to read or render them, currently, but I really ought to. https://wowdev.wiki/ADT/v22"
 
-**Input**: User description: "Add support for reading and rendering the data from ADT/v22 files, because data just became available in that format for no apparent reason, and I have no tooling to read or render them, currently, but I really ought to. https://wowdev.wiki/ADT/v22"
+## Discovery record
+
+These tiles are an **ADT version 26**: a completely new terrain format that had never been seen before 2026-09-16.
+
+| When (2026-09-16) | Event |
+|---|---|
+| ~8 hours before this record | The format first appears publicly, shipped in the `wow_classic_beta` build: the first WoW: Forever build on Battle.net servers, and the first build of the final WoW remaster on a **new WoW engine** |
+| ~1 hour before this record | Tip-off: Marlamin glanced at the files, thought they were "v22", and passed them to the operator as the right person to look at them |
+| This session | **First analysis anywhere**, by the operator with Claude. The files are measured, the format is identified as version 26, tile placement is decoded from the new `ALOC` chunk and proven by exact height seams, and a wireframe viewer path is planned in this repo's tooling ([evidence](evidence/phase0-first-look-2026-09-16.md)) |
+
+**Why it matters**: nothing documents this format. No wiki page, no WDT, no map table entry, no listfile names and no CDN
+companions exist for these files. **The tile files are the only source of truth**, and this project's viewer is the tool
+positioned to visualize them first. Every fact in this spec is either measured from the files (with the evidence linked)
+or explicitly marked as open. The permanent format write-up is [`docs/architecture/adt-v26-format.md`](../../docs/architecture/adt-v26-format.md).
+
+This spec is **standalone**: it does not depend on Specs 238/239.
 
 ## Context
 
-ADT/v22 (and its sibling v23) is the experimental pre-Cataclysm terrain tile format that opens with
-an `AHDR` chunk instead of `MVER`. It stores the full 129x129 outer / 128x128 inner vertex grid once
-per tile (`AVTX`, `ANRM`), holds texture and model name tables per tile (`ATEX`, `ADOO`), and nests
-layers, alpha maps, shadows and object placements inside per-chunk `ACNK` containers
-(`ALYR`/`AMAP`/`ASHD`/`ACDO`). v23 adds whole-tile flight bounds (`AFBO`) and vertex shading (`ACVT`).
+**What v26 is (measured)**: every file is `MVER` 26 then `AHDR` 26, followed by `ALOC AOCH AVTX ANRM [ATEX…] ADOO… ACNK×256 ACVT`.
+It shares chunk names with the pre-Cataclysm experimental **ADT v22/v23** documented on wowdev.wiki (`AHDR`, `AVTX`, `ANRM`,
+`ATEX`, `ADOO`, `ACNK` with nested `ALYR`/`AMAP`/`ASHD`/`ACDO`, `ACVT`). That family resemblance is why it was first taken for v22.
+It differs in ways that make it a new format:
 
-Real v22 files have just become available. The toolchain can't do anything useful with them:
+- `MVER` precedes `AHDR` (v22/v23 start with `AHDR`), and the version is **26**.
+- New chunks `ALOC` (tile location, measured), `AOCH` (all zero so far) and `ADST` (unexplained).
+- `ACVT` is in every file (the wiki calls it v23-only); `ATEX`/`ADOO` hold one name per chunk.
+- Filenames are bare FileDataIDs that encode no position. Tile X/Y come from `ALOC[1]`/`ALOC[2]`, proven by exact height seams between neighbouring tiles.
 
-- File detection recognizes `AHDR`-leading files but labels **every** one `AdtV23`, ignoring the
-  `AHDR.version` field. A v22 file is currently reported as v23.
+**The toolchain before this spec** could do nothing with these files:
+
+- File detection only recognizes `AHDR` as the *first* chunk, so v26 files (MVER first) are never recognized, and every AHDR-first file is labelled `AdtV23` regardless of version.
 - The only reader reads the `AHDR` header and counts chunks. No chunk payload is decoded.
-- Every existing test fixture is a synthetic buffer; no real `AHDR` file has ever been parsed.
+- Every existing test fixture is a synthetic buffer; no real AHDR-family file had ever been parsed.
 - There is no terrain adapter, so the viewer can't display the terrain at all.
 
-**First look at the real corpus (2026-09-16, [evidence/phase0-first-look-2026-09-16.md](evidence/phase0-first-look-2026-09-16.md))**: the 700 files Marlamin passed on are a
-**previously undocumented revision** of this family, not the wiki's v22. Every file is `MVER` 26 followed by `AHDR`
-(version 26), so the current detector's AHDR-first check never sees them. They add three chunks the wiki doesn't list
-(`ALOC`, `AOCH`, `ADST`). Filenames are bare FileDataIDs that encode no position. Tile coordinates are **measured**
-to come from `ALOC`: fields 1 and 2 are tile X and Y, and neighbouring tiles' height edges match exactly.
-
-**Provenance (operator, 2026-09-16)**: these files are **public**. They ship in today's `wow_classic_beta` build, the first
-WoW: Forever build on Battle.net servers and only hours old. **There is no WDT, map table entry or listfile name for
-them (operator-confirmed)**, so everything must come from the tile files themselves.
-
-The wowdev.wiki pages describe themselves as incomplete ("may not list all chunks", "do not bother
-implementing until final version"). Per the project's standing rule that a named field is
-unexamined until measured, every wiki layout in this spec is a **hypothesis to verify against the
-real files**, not an established fact.
+**How the wiki is used**: the v22/v23 pages are the nearest relatives, so their layouts are **starting hypotheses only**.
+Per the project's standing rule that a named field is unexamined until measured, nothing from them is trusted for v26 until
+the corpus confirms it. Wiki v22/v23 detection is kept (it is cheap and correct), but **v26 is the target** of every
+decode and render requirement.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -99,7 +104,7 @@ unexplained bytes.
 
 ### User Story 2 - Decode a tile into usable terrain data (Priority: P1)
 
-The operator can decode any v22 tile into structured terrain data: heights, normals, texture
+The operator can decode any v26 tile into structured terrain data: heights, normals, texture
 names and per-chunk texture layers with alpha, shadow maps, model names with object placements, and
 per-chunk area ids. Each decoded value can be dumped for examination.
 
@@ -112,7 +117,7 @@ for any tile.
 
 **Acceptance Scenarios**:
 
-1. **Given** a real v22 tile, **When** it is decoded, **Then** the outer 129x129 and inner 128x128
+1. **Given** a real v26 tile, **When** it is decoded, **Then** the outer 129x129 and inner 128x128
    height grids are produced in the correct order, and adjacent tiles agree along shared edges.
 2. **Given** a chunk with texture layers, **When** it is decoded, **Then** each layer resolves to a
    texture name from the tile's texture table, and each alpha map decodes to a full-resolution mask
@@ -127,7 +132,7 @@ for any tile.
 
 ### User Story 3 - See the terrain in the viewer (Priority: P2)
 
-The operator opens a folder of v22 tiles in the viewer and flies over the terrain with its textures
+The operator opens a folder of v26 tiles in the viewer and flies over the terrain with its textures
 blended, its shadows, and its doodads and world objects placed, the same way a standard map is
 viewed.
 
@@ -139,7 +144,7 @@ with seamless edges, recognizable texture blending, and objects standing on the 
 
 **Acceptance Scenarios**:
 
-1. **Given** a folder of v22 tiles, **When** the operator opens it, **Then** every tile present is
+1. **Given** a folder of v26 tiles, **When** the operator opens it, **Then** every tile present is
    listed and loads at its grid position.
 2. **Given** a loaded tile, **When** it is rendered, **Then** terrain height, lighting normals,
    texture layers, alpha blending and shadows all display.
@@ -153,7 +158,7 @@ with seamless edges, recognizable texture blending, and objects standing on the 
 
 ### User Story 4 - Existing formats keep working (Priority: P2)
 
-Adding v22 support does not change how any existing map format is detected, read or rendered.
+Adding v26 support does not change how any existing map format is detected, read or rendered.
 
 **Why this priority**: The viewer has a wide set of supported eras (0.5.3 through MoP); a
 detection change at the `AHDR` branch must not leak into them.
@@ -200,7 +205,7 @@ detection change at the `AHDR` branch must not leak into them.
 - **FR-013**: The viewer MUST render decoded terrain with heights, normals, texture layers, alpha blending and shadows, using the same terrain rendering path as other formats.
 - **FR-014**: The viewer MUST place decoded object placements using names from the tile's own model table. Where no model can be loaded, it MUST draw a marker at the placement (bounding marker or point) so placement correctness is visible without any external assets.
 - **FR-015**: Existing map format detection, reading and rendering MUST be unchanged.
-- **FR-016**: Writing or converting to v22/v23 is out of scope.
+- **FR-016**: Writing or converting to v26 (or v22/v23) is out of scope.
 - **FR-017**: A fast-path wireframe (US0) MUST render using only measured layout facts, and MUST be labelled in the UI as provisional (no textures/objects; inner-grid order unproven).
 
 ### Key Entities
@@ -230,10 +235,10 @@ detection change at the `AHDR` branch must not leak into them.
 ## Assumptions
 
 - **Corpus on hand (2026-09-16)**: 700 files (699 unique) in `test_data/v22_adts/unknown/`, passed on by Marlamin. First measurements are in [evidence/phase0-first-look-2026-09-16.md](evidence/phase0-first-look-2026-09-16.md).
-- **Corpus location**: `wow-viewer/test_data/v22_adts/` (operator-decided 2026-09-16). This folder is already git-ignored (`wow-viewer/test_data/*`), so the files are never committed (Data Policy). Tooling still accepts any root as an argument.
+- **Corpus location**: `wow-viewer/test_data/v22_adts/` (operator-decided 2026-09-16; the folder name predates identifying the files as v26 and is kept as-is). This folder is already git-ignored (`wow-viewer/test_data/*`), so the files are never committed (Data Policy). Tooling still accepts any root as an argument.
 - The files are loose files on local disk. **No WDT, map table entry or listfile names exist for them** (operator-confirmed). Container/archive extraction is not part of this spec.
-- The corpus is primarily v22. v23 support comes through the same reader because the formats are near-identical, but v23 is only validated as far as real v23 files are available.
-- The viewer's existing terrain chunk/tile representation can carry v22 data. Whole-tile heights and normals are sliced into per-chunk grids, and whole-tile names are mapped to the existing per-tile tables.
+- The corpus is entirely v26 (699 unique files). Wiki v22/v23 files are only detected; their decode paths are tested synthetically and validated only if real v22/v23 files ever appear.
+- The viewer's existing terrain chunk/tile representation can carry v26 data. Whole-tile heights and normals are sliced into per-chunk grids, and whole-tile names are mapped to the existing per-tile tables.
 - Referenced textures and models resolve through the viewer's normal data-source configuration. Missing assets degrade to placeholders; they do not block rendering.
 - Tile grid coordinates come from `ALOC` (measured, see evidence). Filenames are FileDataIDs with no positional meaning (operator-confirmed), and the map identity is unknown. `ALOC[0]` = 2869 is unexplained and must not be named without evidence from the files themselves.
-- Liquid is not documented for v22 and is out of scope unless the corpus inventory reveals a liquid chunk, in which case it becomes a follow-up.
+- No liquid chunk has been seen in v26 so far; liquid is out of scope unless the corpus inventory reveals a liquid chunk, in which case it becomes a follow-up.

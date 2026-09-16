@@ -1,8 +1,8 @@
-# Data Model: ADT/v22 Terrain Reading and Rendering
+# Data Model: ADT v26 (AHDR family)
 
-Field layouts below are the **wiki hypotheses**. Anything marked *(measure)* is not final until
+Field layouts are **v26 measurements** where marked, otherwise **hypotheses carried over from the wiki v22/v23 relatives**. Anything marked *(measure)* is not final until
 Phase 0/1 evidence settles it, and the final layout is recorded in
-`docs/architecture/adt-v22-format.md`.
+`docs/architecture/adt-v26-format.md`.
 
 ## Core model (`WowViewer.Core/Maps/AdtAhdr/`)
 
@@ -37,9 +37,9 @@ Phase 0/1 evidence settles it, and the final layout is recorded in
 | Field | Type | Source | Notes |
 |---|---|---|---|
 | IndexX, IndexY | int | ACNK +0x00, +0x04 | **0 in revision-26 corpus**; not a position source |
-| Flags | uint | v23 ACNK +0x08 | v22: reserved DWORD, kept raw |
+| Flags | uint | v23 ACNK +0x08 | v22: reserved DWORD; v26 *(measure)*; kept raw |
 | AreaId | int | ACNK +0x0C | |
-| HolesLowRes | ushort | v23 +0x10 | v22: reserved |
+| HolesLowRes | ushort | v23 +0x10 | v22: reserved; v26 *(measure)* |
 | LowDetailTextureMap | uint[4] | +0x12 | |
 | HighResHoles | ulong? | v23, flags & 0x10000 | |
 | HeaderRaw | byte[0x40] | | kept for unexplained fields |
@@ -96,9 +96,9 @@ Phase 0/1 evidence settles it, and the final layout is recorded in
 | Layers | ALYR → TerrainLayer { TextureIndex, Flags } |
 | AlphaMaps | layer index → decoded 64×64 alpha (layer 0 none) |
 | ShadowMap | ASHD expanded |
-| MccvColors | v23 ACVT sliced to 145 (BGRA conversion *(measure)*); null for v22 |
+| MccvColors | v23 ACVT sliced to 145 (BGRA conversion *(measure)*); present in v26 and v23; null for v22 |
 | AreaId | ACNK AreaId |
-| HoleMask | v23 HolesLowRes; 0 for v22 |
+| HoleMask | HolesLowRes where the revision has it *(v26: measure)*; else 0 |
 | WorldPosition | tile/chunk grid math shared with StandardTerrainAdapter |
 | Liquid | null (R13) |
 

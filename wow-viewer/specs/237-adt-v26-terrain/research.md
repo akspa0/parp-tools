@@ -1,7 +1,8 @@
-# Research: ADT/v22 Terrain Reading and Rendering
+# Research: ADT v26 — a Brand-New Terrain Format
 
-Sources: <https://wowdev.wiki/ADT/v22>, <https://wowdev.wiki/ADT/v23> (both self-described as
-incomplete), and a repo survey on 2026-09-16.
+Primary source: **the 699 v26 tile files themselves**, first seen publicly on 2026-09-16 and first analysed here.
+Reference relatives only: <https://wowdev.wiki/ADT/v22>, <https://wowdev.wiki/ADT/v23> (both self-described as incomplete; neither
+documents v26). Repo survey on 2026-09-16.
 
 **Standing rule for this spec:** a wiki field name is a hypothesis. Each decision below records what
 must be *measured* to confirm it, and how that measurement is shown to have the power to reject a
@@ -30,11 +31,12 @@ chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decis
 - **Rationale**: FR-001. The current "every AHDR file is v23" behavior mislabels exactly the files that just arrived.
 - **Alternatives**: a single `AdtAhdr` kind plus a version property. Rejected because every consumer already switches on kind, and a hidden version would be silently ignored the way it is now.
 
-### R2: One reader for v22 and v23
+### R2: One reader for the AHDR family (v26 target; v22/v23 relatives)
 
 - **Decision**: A single `AdtAhdrReader`, with version-gated `ACNK` header layout and v23-only `AFBO`/`ACVT`.
 - **Rationale**: The wiki layouts match apart from the ACNK header and the two extra chunks.
-- **Measure**: the inventory confirms that v22 files contain no `AFBO`/`ACVT`, and that the ACNK header size matches per version.
+- **v26 measured**: no `AFBO`; `ACVT` in every file. The v22/v23 claims ("v22 has no `AFBO`/`ACVT`") stay unverified because no real v22/v23 files exist.
+- **Measure**: the inventory confirms per revision and that the ACNK header size matches per version.
 
 ### R3: Nested chunk walk and padding
 
@@ -53,7 +55,7 @@ chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decis
 
 ### R5: Height frame
 
-- **Question**: Absolute world heights, or relative to something? v18 MCVT is relative to MCNK `position.z`, but the v22 ACNK header documents no position.
+- **Question**: Absolute world heights, or relative to something? v18 MCVT is relative to MCNK `position.z`, but the wiki v22 ACNK header documents no position, and in v26 the ACNK index fields are 0.
 - **Partially ANSWERED (revision 26)**: heights are continuous across tile edges with no per-tile offset, so they are absolute at least at tile level. Within-tile chunk-boundary behaviour is still to measure.
 - **Decision**: Measure. Seam continuity in absolute terms settles it, since relative heights would produce steps at chunk boundaries inside a tile. The chunk-boundary step statistic inside a tile is the detector.
 

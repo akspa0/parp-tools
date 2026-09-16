@@ -1,4 +1,4 @@
-# Specification Quality Checklist: ADT/v22 Terrain Reading and Rendering
+# Specification Quality Checklist: ADT v26 — First Reader and Renderer
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-09-16

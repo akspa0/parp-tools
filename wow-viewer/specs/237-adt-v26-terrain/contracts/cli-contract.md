@@ -36,4 +36,4 @@ inspect adt-ahdr layout-probe --root <dir> [--json <out.json>]
 
 ## Existing surface change
 
-`inspect map <file>` on an AHDR file prints `ADT/v22 semantics:` or `ADT/v23 semantics:` according to the detected version (currently always `v23`).
+`inspect map <file>` on an AHDR file prints `ADT/v22 semantics:`, `ADT/v23 semantics:` or `ADT/v26 semantics:` according to the detected version (currently AHDR-first files always say `v23`, and v26 files are not recognized at all).

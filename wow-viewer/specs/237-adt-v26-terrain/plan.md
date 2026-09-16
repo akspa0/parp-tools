@@ -1,17 +1,20 @@
-# Implementation Plan: ADT/v22 Terrain Reading and Rendering
+# Implementation Plan: ADT v26 — First Reader and Renderer for a Brand-New Terrain Format
 
 **Branch**: `v0.5.4-dev` (v0.6 release line) | **Release**: v0.6 | **Date**: 2026-09-16 | **Spec**: [spec.md](spec.md)
 
-**Input**: Feature specification from `specs/237-adt-v22-terrain/spec.md`
+**Input**: Feature specification from `specs/237-adt-v26-terrain/spec.md`
 
 > The `setup-plan.ps1` script refuses non-numbered branches, so this plan was authored from the
 > template by hand. To run speckit scripts against this spec without touching `.specify/feature.json`,
-> set `$env:SPECIFY_FEATURE_DIRECTORY = 'specs/237-adt-v22-terrain'`.
+> set `$env:SPECIFY_FEATURE_DIRECTORY = 'specs/237-adt-v26-terrain'`.
 
 ## Summary
 
-Add a measured, evidence-first reader for the `AHDR`-family terrain tiles (ADT/v22, and v23 through the
-same code), expose it through the inspect CLI, and render it in the viewer via a new `ITerrainAdapter`.
+Build the **first reader and renderer anywhere** for **ADT v26**, a terrain format that appeared publicly for the first time on
+2026-09-16 in the first WoW: Forever (`wow_classic_beta`) build and had never been analysed before this project (see spec
+"Discovery record"). It is measured and evidence-first, exposed through the inspect CLI, and rendered in the viewer via a new
+`ITerrainAdapter`, starting with a wireframe. Wiki v22/v23 (the AHDR-family relatives) are detected by the same code but are
+not the target.
 
 The work is ordered so nothing is built on unverified layout. **Phase 0** fixes version detection and
 builds a byte-accounting inventory of the real corpus. **Phase 1** decodes each channel, and every
@@ -26,7 +29,7 @@ candidates apart. **Phase 2** maps the decoded tile into the viewer's existing `
 
 **Primary Dependencies**: existing `WowViewer.Core.IO` chunk infrastructure (`ChunkedFileReader`, `MapFileSummaryReader`, `MapSummaryReaderCommon`), `AdtMcalDecoder` (called, not modified), viewer `ITerrainAdapter` / `TerrainChunkData` / `TerrainRenderer`, Silk.NET.OpenGL
 
-**Storage**: Loose files on disk (read-only), in `wow-viewer/test_data/v22_adts/` by repo convention (like `test_data/0.5.3/`). The CLI takes `--root`. Tests resolve `GetWowViewerRoot()/test_data/v22_adts`, which `WOWVIEWER_AHDR_CORPUS` can override, and skip when it is absent.
+**Storage**: Loose files on disk (read-only), in `wow-viewer/test_data/v22_adts/` by repo convention (like `test_data/0.5.3/`; the folder name predates identifying the files as v26). The CLI takes `--root`. Tests resolve `GetWowViewerRoot()/test_data/v22_adts`, which `WOWVIEWER_AHDR_CORPUS` can override, and skip when it is absent.
 
 **Testing**: xUnit in `tests/WowViewer.Core.Tests`: synthetic-buffer unit tests, plus real-corpus tests that skip when the corpus root is not configured
 
@@ -62,7 +65,7 @@ candidates apart. **Phase 2** maps the decoded tile into the viewer's existing `
 | Format reader ownership | PASS | No existing reader decodes AHDR payloads (verified: `AdtV23SummaryReader` reads the header only). |
 | Terrain alpha risk area | PASS | `AdtMcalDecoder` is called with the encoding inferred per map; no MCAL, edge-fix or shader-blend code is modified. |
 | One phase at a time / bite-sized | PASS | 3 phases, each 10 steps or fewer, each ending in a real-data gate. |
-| Spec docs source of truth | PASS | The measured format layout is written to `docs/architecture/adt-v22-format.md` in Phase 1. |
+| Spec docs source of truth | PASS | The measured format layout is written to `docs/architecture/adt-v26-format.md` in Phase 1. |
 
 **Post-design re-check**: PASS. The design adds no project, no new dependency and no container or
 writer surface.
@@ -72,7 +75,7 @@ writer surface.
 ### Documentation (this feature)
 
 ```text
-specs/237-adt-v22-terrain/
+specs/237-adt-v26-terrain/
 ├── spec.md
 ├── plan.md              # this file
 ├── research.md          # decisions + the measurement each one needs
@@ -109,7 +112,7 @@ src/core/WowViewer.Core.IO/
 
 tools/inspect/WowViewer.Tool.Inspect/Program.cs   # adt-ahdr inventory|dump|layout-probe
 docs/CLI-TOOLS.md                                 # document the above (diffed against the real parser)
-docs/architecture/adt-v22-format.md               # NEW: measured layout, the source of truth
+docs/architecture/adt-v26-format.md               # NEW: measured layout, the source of truth
 
 src/viewer/WoWViewer/Terrain/
 ├── AhdrTerrainAdapter.cs                 # NEW: ITerrainAdapter over a loose folder
@@ -123,8 +126,8 @@ tests/WowViewer.Core.Tests/
 └── AdtAhdrRealDataTests.cs               # uses test_data/v22_adts (or WOWVIEWER_AHDR_CORPUS); skips when absent
 ```
 
-**Structure Decision**: The code is named for the `AHDR` family rather than "V22", because the repo
-already overloads "V22" for an unrelated dataset lane (`V22Enrich`, `V22ModelPayload`, specs 086–088).
+**Structure Decision**: The code is named for the `AHDR` family (shared by v22, v23 and v26) rather than any one version.
+The repo also already overloads "V22" for an unrelated dataset lane (`V22Enrich`, `V22ModelPayload`, specs 086–088).
 `AdtV23SummaryReader` keeps its name to avoid churning its callers; its guard widens to accept all
 `AHDR` kinds.
 
@@ -149,7 +152,7 @@ not started until the previous gate passes.
 1. Add `AdtV22`, `AdtV22Error`, `AdtV26`, `AdtAhdrUnknownVersion` to `WowFileKind` and `MapFileKind`. Grep every `AdtV23` switch/predicate site and extend each explicitly.
 2. `WowFileDetector`: recognize `AHDR` as the first chunk **or** the chunk right after `MVER` (observed revision 26), content-only with no filename or extension reliance. Pick the kind from `AHDR.version` (22, 23, 26, else unknown), keeping the `.error` split.
 3. Replace the synthetic detector/summary tests that assert v23 for every AHDR file with version-parametrized tests (22, 23, 99).
-4. Widen `AdtV23SummaryReader`'s guard to all AHDR kinds; add v22 to the inspect `map` output.
+4. Widen `AdtV23SummaryReader`'s guard to all AHDR kinds; print the real revision (v22/v23/v26) in the inspect `map` output.
 5. `AdtAhdrInventoryReader`: recursive chunk walk that accounts for every byte. Top-level chunks, `ACNK` header plus nested chunks, `ALYR` fixed part plus nested `AMAP`. Record id, offset, size, parent, and gaps/overruns. Probe both padded and unpadded sub-chunk walks, and report which one accounts for all bytes.
 6. Documented-size table (AHDR 0x40, ALYR ≥0x20, ASHD 0x200, ACDO 0x38, AFBO 0x48, AVTX/ANRM derived from header) with per-chunk disagreement reporting.
 7. CLI `adt-ahdr inventory <root>`: per-file line plus corpus aggregate (versions, chunk-occurrence table, unknown chunks, size disagreements, unaccounted bytes, failed files), with JSON output.
@@ -162,11 +165,11 @@ not started until the previous gate passes.
 2. Name tables: `ATEX` and `ADOO`. Measure first whether each is one chunk of NUL-separated names or one chunk per name, since the existing summary counts ATEX *chunks*.
 3. `AVTX` and `ANRM` raw decode into outer/inner arrays sized from the header.
 4. **Layout probe** (`adt-ahdr layout-probe`): score each candidate vertex order (row/column transpose × flip) by cross-tile seam agreement, and each ANRM component permutation × sign by agreement with height-derived normals. **Detector power check first**: deliberately permute a correct-candidate grid and show the score separates it. Record the winner with its margin.
-5. `ACNK` header decode (v22 layout vs v23 layout, gated by version), plus `ALYR`, `ASHD` (reuse MCSH 1-bit expansion semantics) and `ACDO` raw records. Measure `ACDO` record size across the corpus before fixing the trailing fields.
+5. `ACNK` header decode (v26 measured first; wiki v22/v23 layouts as synthetic-only alternatives, gated by version), plus `ALYR`, `ASHD` (reuse MCSH 1-bit expansion semantics) and `ACDO` raw records. Measure `ACDO` record size across the corpus before fixing the trailing fields.
 6. Alpha: infer each map's encoding from payload size and layer flags. Decode through `AdtMcalDecoder`, then validate that layer weights stay in range and that non-base alpha masks are not all zero or all 255 at implausible rates.
 7. Placement frame probe: for each candidate position frame (raw, origin-minus as MDDF, axis swaps), measure placement Z against decoded terrain height at the placement XY. The winner is the frame where doodads sit on the ground. Rotation units are checked the same way against WMO bounds where available.
 8. v23-only `AFBO` and `ACVT` decode (validated only if real v23 files exist; otherwise synthetic only and marked so).
-9. `adt-ahdr dump <file>`: human and JSON dump (FR-011). Write `docs/architecture/adt-v22-format.md` from the measured results; update `docs/CLI-TOOLS.md` and diff it against the real argument parser.
+9. `adt-ahdr dump <file>`: human and JSON dump (FR-011). Write `docs/architecture/adt-v26-format.md` from the measured results; update `docs/CLI-TOOLS.md` and diff it against the real argument parser.
 10. **Gate**: `evidence/phase1-decode.md` must show **SC-002–SC-006** met, with every probe's candidate scores and margins.
 
 ### Phase 2: Viewer rendering (US3; FR-012–014)
@@ -176,7 +179,7 @@ not started until the previous gate passes.
 3. `AhdrTerrainAdapter` tile discovery: content-sniff every file in the folder (any name or extension), and place each tile by `ALOC[1]` = X, `ALOC[2]` = Y (measured). Flag missing `ALOC` and duplicate tiles. There is no WDT; the folder of tiles is the whole map.
 4. `LoadTileWithPlacements`: fill `TerrainChunkData` (heights, normals, layers → `TileTextures` indices, 64x64 alpha, shadow, area id). Map `ACDO` to `MddfPlacement` or `ModfPlacement` by the referenced name's extension, using the Phase 1 frame.
 5. Per-tile failure isolation: a failed tile is logged and surfaced in the tile list; the rest of the map loads (US3 scenario 4).
-6. Viewer entry point: "Open ADT/v22 folder…" beside the Rosetta datastore open, wired through `TerrainManager`. Phasing, placement writing and cartography members return the documented "unsupported" values.
+6. Viewer entry point: "Open ADT v26 folder…" beside the Rosetta datastore open, wired through `TerrainManager`. Phasing, placement writing and cartography members return the documented "unsupported" values.
 7. No external asset lookup: textures render as per-layer flat colours or checker (layer index visible), and placements render as markers labelled with the `ADOO` name. Real asset loading is a later, separate decision, not part of this spec.
 8. Regression pass (US4): open one Alpha 0.5.3 map and one LK map; confirm the existing test suite is green (SC-008).
 9. **Gate**: `evidence/phase2-render.md`. The operator loads the corpus and confirms seams, textures and placements by eye (SC-007), with screenshots saved to evidence.
