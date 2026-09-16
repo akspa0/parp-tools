@@ -8,7 +8,7 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 
 ## Phase 1: Setup
 
-- [ ] T001 Record tier builds in specs/239-modern-client-assets/research.md (R1): tier C defaults to the current live retail build via CDN; tiers A/B are chosen from the builds Spec 238 T006 finds servable (operator has no candidates yet)
+- [ ] T001 Record tier builds in specs/239-modern-client-assets/research.md (R1): tier C = the local install at `I:\wow12\World of Warcraft` (build identity read from the install); tiers A/B are chosen from the builds Spec 238 T006 finds servable (operator has no candidates yet)
 - [ ] T002 [P] Create evidence folder README (receipt format including build identity from Spec 238) in specs/239-modern-client-assets/evidence/README.md
 
 ## Phase 2: Foundational — file reference resolver (blocks all stories)

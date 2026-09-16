@@ -33,7 +33,7 @@ proven on a real build against an independent extraction.
 
 **Scale/Scope**: One new catalog, one data source, one CLI command group, and `IDataSource`/`IArchiveReader` id-read extensions
 
-**Environment constraint (2026-09-16)**: no client newer than 5.0.1 is installed, and installing the live client needs the operator to free disk space first. **Remote (CDN) mode is therefore the first working path**; local-install work and local-vs-remote byte comparison wait for an install.
+**Environment (2026-09-16)**: a local CASC install is in progress at `I:\wow12\World of Warcraft` (operator configuration; never hardcoded). **Local mode is the first working path once it completes**; remote CDN follows. Its first consumer is Spec 237's asset resolution.
 
 **NEEDS CLARIFICATION → research**: TACTSharp's era coverage (R2); hybrid-mode behavior (R5); historical build mirrors (R6); the independent reference tool for SC-001 (R8)
 

@@ -86,7 +86,9 @@ chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decis
 
 ### R10: Asset resolution
 
-- **Decision (2026-09-16)**: none. This is a never-before-seen engine version with no companions (no WDT, map table, listfile or CDN lookup), so the spec renders from the tile files alone: height/wireframe, layer indices as colours, placements as labelled markers. The inventory still lists the `ATEX`/`ADOO` names as data. Whether any real asset source should ever be attached is a separate future decision, not an assumption here.
+- **Measured (2026-09-16)**: all **33/33** `ATEX` textures and **285/285** `ADOO` models (`.m2` and `.wmo`) resolve to FileDataIDs through the vendored community listfile (`evidence/scripts/names_to_fdid_v26.py`, 2026-09-16). The tile files themselves have no listfile names, but every asset they reference does.
+- **Decision**: resolve assets name → FileDataID → bytes from a local CASC install (`I:\wow12\World of Warcraft`, installing as of 2026-09-16) through Spec 238. Refresh the listfile with the viewer's existing `ListfileDownloader` (`community-listfile-withcapitals.csv`) and re-run `names_to_fdid_v26.py` against it. Unresolved assets fall back to index colours or labelled markers.
+- **Open**: whether the installed build's files at those FileDataIDs are the versions these tiles were authored against.
 
 ### R11: Tile coordinates
 

@@ -29,5 +29,6 @@ dotnet test tests/WowViewer.Core.Tests --filter "FullyQualifiedName~AdtAhdr"
 
 ## Phase 2: viewer
 
-Start the viewer, then use **Open ADT v26 folder…** and pick `$CORPUS`. Nothing is resolved
-externally: layers show as index colours and placements as labelled markers.
+Start the viewer, then use **Open ADT v26 folder…** and pick `$CORPUS`. With a local CASC install open
+as the data source (Spec 238), textures and models resolve by name → FileDataID; without one, layers show as index colours
+and placements as labelled markers.

@@ -26,7 +26,7 @@ The wiki's ADT/v22 page describes the family as DAT files.
 companions exist for these files. **The tile files are the only source of truth.** Every fact in this spec is either measured from the files (with the evidence linked)
 or explicitly marked as open. The permanent format write-up is [`docs/architecture/adt-v26-format.md`](../../docs/architecture/adt-v26-format.md).
 
-This spec is **standalone**: it does not depend on Specs 238/239.
+**Terrain is standalone**: heights, layers, alpha, shadows and placements come from the tile files alone. **Assets are not**: the textures and models the tiles name ship in a regular CASC install (being installed locally at `I:\wow12\World of Warcraft` as of 2026-09-16), and all **33/33** `ATEX` textures and **285/285** `ADOO` models (`.m2` and `.wmo`) resolve to FileDataIDs through the vendored community listfile (`evidence/scripts/names_to_fdid_v26.py`, 2026-09-16). Rendering real textures and models therefore uses Spec 238's local CASC reads plus the community listfile. The wireframe (US0) and the decoder (US1/US2) do not depend on it.
 
 ## Context
 
@@ -204,7 +204,8 @@ detection change at the `AHDR` branch must not leak into them.
 - **FR-011**: The inspection tooling MUST be able to dump any decoded tile's contents (header, name tables, per-chunk layers/placements, height and normal statistics) in human-readable and machine-readable form.
 - **FR-012**: The viewer MUST open a folder of AHDR-family tiles as a map **from the tile files alone** (no WDT, map table or listfile exists for them) and list the tiles present.
 - **FR-013**: The viewer MUST render decoded terrain with heights, normals, texture layers, alpha blending and shadows, using the same terrain rendering path as other formats.
-- **FR-014**: The viewer MUST place decoded object placements using names from the tile's own model table. Where no model can be loaded, it MUST draw a marker at the placement (bounding marker or point) so placement correctness is visible without any external assets.
+- **FR-014**: The viewer MUST place decoded object placements using names from the tile's own model table, resolving each name → FileDataID (community listfile) → model file through the local CASC install (Spec 238). Where a model cannot be loaded, it MUST draw a marker at the placement so placement correctness stays visible.
+- **FR-018**: Terrain textures MUST resolve the same way (`ATEX` name → FileDataID → BLP from the local CASC install). Layers whose texture cannot be loaded MUST render as an index colour.
 - **FR-015**: Existing map format detection, reading and rendering MUST be unchanged.
 - **FR-016**: Writing or converting to v26 (or v22/v23) is out of scope.
 - **FR-017**: A fast-path wireframe (US0) MUST render using only measured layout facts, and MUST be labelled in the UI as provisional (no textures/objects; inner-grid order unproven).

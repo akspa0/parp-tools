@@ -23,6 +23,9 @@ exists.
 **No companions exist**: no WDT, map table entry, listfile names or CDN-side metadata accompany these files. Everything
 below comes from the tile files alone.
 
+**Referenced assets do resolve**: all 33 texture names (`.blp`) and 285 model names (`.m2`, `.wmo`) in `ATEX`/`ADOO` have
+FileDataIDs in the community listfile (evidence Finding 6).
+
 ## Corpus
 
 - 699 unique tiles (plus one renamed duplicate). Extensionless files named by FileDataID (6893600–6894299). **The names encode no position.**

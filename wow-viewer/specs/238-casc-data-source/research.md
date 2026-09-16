@@ -61,7 +61,8 @@ Survey date: 2026-09-16.
 
 ### R9: Listfile
 
-- **Decision**: Reuse `libs/wowdev/wow-listfile` (already vendored). Refresh is an operator action. Ids unknown to the listfile stay browsable by id.
+- **Decision**: Load the community listfile through the viewer's existing `ListfileDownloader` (`https://github.com/wowdev/wow-listfile/releases/latest/download/community-listfile-withcapitals.csv`, `id;path`), with the vendored `libs/wowdev/wow-listfile/parts/*.csv` as the offline fallback. Ids unknown to the listfile stay browsable by id.
+- **Measured coverage (2026-09-16)**: the vendored parts already resolve all 33 textures and 285 models referenced by the DAT v26 corpus (Spec 237 `names_to_fdid_v26.py`).
 
 ### R10: What to learn from wow.export (reference, not port)
 

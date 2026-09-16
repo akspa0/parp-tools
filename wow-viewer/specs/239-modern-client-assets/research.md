@@ -15,7 +15,7 @@ real tier builds.
 ## R1: Tier representative builds
 
 - **Open (operator has no candidates yet, 2026-09-16)**: one build per tier: A (6.x–8.0), B (8.1–8.3), C (9.x+ / current). No client newer than 5.0.1 is installed.
-- **Working default until chosen**: tier C = the current live retail build via the CDN (Spec 238 remote), since that needs no install and no mirror. Tiers A and B are chosen later from what the Spec 238 era survey (T006) finds the CDN or mirrors actually serve. Pick them from that list rather than guessing.
+- **Tier C (2026-09-16)**: the local install at `I:\wow12\World of Warcraft` (installing) once it completes; its build identity is read from the install. Tiers A and B are chosen later from what the Spec 238 era survey (T006) finds the CDN or mirrors actually serve. Pick them from that list rather than guessing.
 - **Criteria**: openable through Spec 238 (local or a mirror), not heavily encrypted in world assets, with a recognizable outdoor zone and a city.
 
 ## R2: Survey before readers

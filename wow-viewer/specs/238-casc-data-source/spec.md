@@ -202,6 +202,7 @@ rendered output are unchanged, and the existing test suite passes.
 - wow.export (MIT, JavaScript) is a **reference** for behavior (remote/local source handling, cache layout, key handling, era differences). Its code is not ported wholesale.
 - The operator has lawful access to the builds being opened (Data Policy: bring your own data). The cache stays local and is never distributed.
 - The community listfile and a community key set are acceptable inputs, refreshed by the operator.
-- **No client newer than 5.0.1 is installed (2026-09-16)**, and installing the live client needs the operator to free disk space first. Remote CDN streaming (US2) is the first route to real modern data. US1 (local install) is implemented alongside it but validated only once an install exists. SC-001 runs against a remote build until then, and SC-002 waits for an install.
+- **Local install in progress (2026-09-16)** at `I:\wow12\World of Warcraft` (configuration, never hardcoded). Once it completes, US1 (local) is the first route to real modern data, and remote CDN (US2) follows. The product and build are read from the install, not assumed.
+- **First consumer**: Spec 237 needs local reads of the textures/models the DAT v26 tiles reference (all **33/33** `ATEX` textures and **285/285** `ADOO` models (`.m2` and `.wmo`) resolve to FileDataIDs through the vendored community listfile (`specs/237-adt-v26-terrain/evidence/scripts/names_to_fdid_v26.py`, 2026-09-16)).
 - Build-to-build patching, the install manifest, and background pre-download of whole builds are out of scope. Only on-demand reads are in scope.
 - Understanding modern file formats (FileDataID-referencing WDT/ADT/M2/WMO, DB2) is Spec 239, not this spec.

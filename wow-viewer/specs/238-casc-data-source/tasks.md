@@ -2,9 +2,9 @@
 
 **Input**: `specs/238-casc-data-source/` (spec, plan, research, quickstart)
 **Release**: v0.6 · **Branch**: `v0.5.4-dev`
-**Tests**: included (constitution real-data validation). 🌐 = needs network access to a CDN. 💾 = needs a local install of a client newer than 5.0.1 (**none installed as of 2026-09-16**; the operator is freeing disk space for the live client).
+**Tests**: included (constitution real-data validation). 🌐 = needs network access to a CDN. 💾 = needs a local install of a client newer than 5.0.1 (**installing at `I:\wow12\World of Warcraft` as of 2026-09-16**; pass it as configuration, never hardcode it).
 
-**Order note**: with no local install, remote reads are the first route to real data. The catalog is built mode-agnostic, and remote validation (Phase 5) may run before the 💾 local gates.
+**Order note**: once the local install completes, local reads (US1) are the first route to real data and unblock Spec 237's textures/models. The catalog is built mode-agnostic; remote (Phase 5) follows.
 
 Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `wow-viewer/` unless noted.
 
@@ -25,7 +25,7 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 - [ ] T008 [P] Add `IFileDataIdReader` (ReadFileById, FileIdExists, TryResolveId, TryResolvePath) in src/core/WowViewer.Core.IO/Files/IArchiveReader.cs
 - [ ] T009 [P] Create `CascStorageOptions` (mode Local/Remote/Hybrid, install path, product, region, locale, cache dir, ordered hosts, key-set source; no defaults pointing at machine paths) in src/core/WowViewer.Core.IO/Casc/CascStorageOptions.cs
 - [ ] T010 [P] Create `CascBuildIdentity` (product, version, buildConfig, cdnConfig) in src/core/WowViewer.Core.IO/Casc/CascBuildIdentity.cs
-- [ ] T011 [P] Create `CascListfile` bidirectional id↔path map over libs/wowdev/wow-listfile (ids without names allowed) in src/core/WowViewer.Core.IO/Casc/CascListfile.cs
+- [ ] T011 [P] Create `CascListfile` bidirectional id↔path map loaded from the existing `ListfileDownloader` community listfile (`id;path`), with libs/wowdev/wow-listfile/parts/*.csv as offline fallback (ids without names allowed) in src/core/WowViewer.Core.IO/Casc/CascListfile.cs
 - [ ] T012 [P] Unit tests for FileReadResult and CascListfile in tests/WowViewer.Core.Tests/FileReadResultTests.cs and tests/WowViewer.Core.Tests/CascListfileTests.cs
 
 ## Phase 3: User Story 1 — Open a local install (P1) 💾 (code now, gate when an install exists)
@@ -95,6 +95,6 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 
 ## Implementation strategy
 
-MVP = **remote build read by path and id with verified bytes** (Foundational → catalog core → US2), because no
-modern client is installed. Local install (US1) shares the same catalog and closes its 💾 gates once the live
-client is installed. Viewer integration comes last, once the catalog is proven.
+MVP = **local install read by path and id with verified bytes** (Foundational → US1) against the install at
+`I:\wow12\World of Warcraft` once it completes; its first consumer is Spec 237's asset resolution. Remote/CDN (US2) shares the same catalog and
+follows. Viewer integration comes last, once the catalog is proven.

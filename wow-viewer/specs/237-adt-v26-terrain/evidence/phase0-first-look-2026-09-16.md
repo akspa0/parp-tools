@@ -70,6 +70,12 @@ The layout matches the wiki's first five fields; one reserved slot is non-zero.
 - Header: `+0x08` = `0xD000` in every chunk; `+0x0C` = 0 in every chunk (the wiki's areaId). Bytes `0x10..0x2B` vary, with `0x55555555` / `0xAAAAAAAA` patterns consistent with the wiki's 2-bit `lowdetailtextureingmap` at 0x12. `+0x2C` and `+0x3C` are always 0.
 - `ACDO` (56 bytes) samples, read as the wiki struct: modelid 5/16/7; "position" component 0 and 2 within ±600, component 1 within ±1406; "rotation" e.g. (0, 280.5, 0); the wiki's "scale[3], float" read as e.g. (0.72, 1.0, 0.0, −0.0029); uniqueId ~63.42M; trailing 8 bytes `00000000 00000100`. Field meanings beyond modelid/uniqueId are **not yet tested**.
 
+## Finding 6: every referenced asset has a FileDataID (`scripts/names_to_fdid_v26.py`)
+
+- Against the vendored community listfile (`libs/wowdev/wow-listfile/parts/*.csv`, 2,204,732 entries): **33/33** distinct `ATEX` names and **285/285** distinct `ADOO` names resolve to FileDataIDs.
+- `ATEX` names are all `.blp`; `ADOO` names are `.m2` and `.wmo`.
+- The tile files themselves have no listfile entries; only the assets they reference do.
+
 ## Spec consequences (applied in the same pass)
 
 1. Detection: `MVER` + `AHDR` second, with the version read from `AHDR` (26 observed). The spec is retitled to ADT v26; wiki v22/v23 remain detected relatives only.

@@ -45,7 +45,7 @@ candidates apart. **Phase 2** maps the decoded tile into the viewer's existing `
 
 **Open inputs (operator)**:
 - Corpus: **on hand**, 700 files (699 unique) in `wow-viewer/test_data/v22_adts/unknown/` (git-ignored). No WDT, map table or listfile names exist for them. Extensionless FileDataID names. **Revision 26** (MVER 26 + AHDR). See evidence/phase0-first-look-2026-09-16.md
-- **Standalone**: a never-before-seen engine version. There are no external companions or lookups, so the tile files are the only source (research R10). No dependency on Specs 238/239.
+- **Terrain standalone, assets via local CASC**: the tile files are the only source for terrain data. Textures/models resolve name → FileDataID → file through the local CASC install at `I:\wow12\World of Warcraft` (installing as of 2026-09-16) via Spec 238, and all **33/33** `ATEX` textures and **285/285** `ADOO` models (`.m2` and `.wmo`) resolve to FileDataIDs through the vendored community listfile (`evidence/scripts/names_to_fdid_v26.py`, 2026-09-16) (research R10).
 
 **Dependency order**: Fast path F first, then Phase 0 → 1 → 2. Everything runs on the corpus already on disk; nothing waits on other specs.
 
@@ -180,7 +180,7 @@ not started until the previous gate passes.
 4. `LoadTileWithPlacements`: fill `TerrainChunkData` (heights, normals, layers → `TileTextures` indices, 64x64 alpha, shadow, area id). Map `ACDO` to `MddfPlacement` or `ModfPlacement` by the referenced name's extension, using the Phase 1 frame.
 5. Per-tile failure isolation: a failed tile is logged and surfaced in the tile list; the rest of the map loads (US3 scenario 4).
 6. Viewer entry point: "Open ADT v26 folder…" beside the Rosetta datastore open, wired through `TerrainManager`. Phasing, placement writing and cartography members return the documented "unsupported" values.
-7. No external asset lookup: textures render as per-layer flat colours or checker (layer index visible), and placements render as markers labelled with the `ADOO` name. Real asset loading is a later, separate decision, not part of this spec.
+7. Asset resolution: `ATEX`/`ADOO` name → FileDataID (community listfile) → bytes from the local CASC install through Spec 238's data source. Anything unresolved or unloadable falls back to an index colour (textures) or a labelled marker (models).
 8. Regression pass (US4): open one Alpha 0.5.3 map and one LK map; confirm the existing test suite is green (SC-008).
 9. **Gate**: `evidence/phase2-render.md`. The operator loads the corpus and confirms seams, textures and placements by eye (SC-007), with screenshots saved to evidence.
 
