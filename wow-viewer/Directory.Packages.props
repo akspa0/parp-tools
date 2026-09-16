@@ -6,7 +6,7 @@
   <!-- Vendored/forked third-party libraries under libs/ (several are git submodules pointing
        at pristine upstream commits, never to be edited directly) manage their own package
        versions and must opt out of central management here rather than in their own files. -->
-  <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('libs\WoW-Tools\SereniaBLPLib')) Or $(MSBuildProjectFullPath.Contains('libs/WoW-Tools/SereniaBLPLib')) Or $(MSBuildProjectFullPath.Contains('libs\wowdev\DBCD')) Or $(MSBuildProjectFullPath.Contains('libs/wowdev/DBCD')) Or $(MSBuildProjectFullPath.Contains('libs\ModernWoWTools\Warcraft.NET')) Or $(MSBuildProjectFullPath.Contains('libs/ModernWoWTools/Warcraft.NET'))">
+  <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('libs\WoW-Tools\SereniaBLPLib')) Or $(MSBuildProjectFullPath.Contains('libs/WoW-Tools/SereniaBLPLib')) Or $(MSBuildProjectFullPath.Contains('libs\wowdev\DBCD')) Or $(MSBuildProjectFullPath.Contains('libs/wowdev/DBCD')) Or $(MSBuildProjectFullPath.Contains('libs\ModernWoWTools\Warcraft.NET')) Or $(MSBuildProjectFullPath.Contains('libs/ModernWoWTools/Warcraft.NET')) Or $(MSBuildProjectFullPath.Contains('libs\wowdev\TACTSharp')) Or $(MSBuildProjectFullPath.Contains('libs/wowdev/TACTSharp'))">
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
   </PropertyGroup>
 

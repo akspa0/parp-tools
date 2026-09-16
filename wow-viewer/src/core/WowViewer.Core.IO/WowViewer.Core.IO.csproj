@@ -5,6 +5,7 @@
     <ProjectReference Include="..\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />
     <ProjectReference Include="..\..\..\libs\wowdev\DBCD\DBCD\DBCD.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
     <ProjectReference Include="..\..\..\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
+    <ProjectReference Include="..\..\..\libs\wowdev\TACTSharp\TACTSharp\TACTSharp.csproj" GlobalPropertiesToRemove="ManagePackageVersionsCentrally" />
   </ItemGroup>
 
   <ItemGroup>

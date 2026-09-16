@@ -56,6 +56,12 @@ switch (area)
 	case "wtf":
 		WowViewer.Tool.Inspect.WtfCommandSupport.Run(tail);
 		break;
+	case "casc":
+		WowViewer.Tool.Inspect.CascCommandSupport.Run(tail);
+		break;
+	case "adt-ahdr":
+		WowViewer.Tool.Inspect.AdtAhdrCommandSupport.Run(tail);
+		break;
 	case "audio":
 		RunAudio(tail);
 		break;

@@ -1973,6 +1973,12 @@ void main() {
                     _folderInputBuf = string.IsNullOrWhiteSpace(_lastGameFolderPath) ? "" : _lastGameFolderPath;
                 }
 
+                if (ImGui.MenuItem("Open CASC Install (local)..."))
+                    _wantOpenCascInstall = true;
+
+                if (ImGui.MenuItem("Open DAT v26 Terrain Folder..."))
+                    _wantOpenAhdrTerrainFolder = true;
+
                 if (ImGui.BeginMenu("Open Saved Game Folder", _knownGoodClientPaths.Count > 0))
                 {
                     foreach (var knownClient in _knownGoodClientPaths)
@@ -2626,6 +2632,8 @@ void main() {
                     }
                 });
         }
+
+        HandleCascAhdrMenuRequests();
 
         if (_wantAttachLooseMapFolder)
         {
