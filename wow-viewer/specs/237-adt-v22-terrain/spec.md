@@ -192,7 +192,8 @@ detection change at the `AHDR` branch must not leak into them.
 ## Assumptions
 
 - **Corpus not yet on hand (2026-09-16)**: the operator is acquiring the v22 files. Phase 0 cannot start until they arrive; synthetic-fixture work (detection fix, inventory walker) may proceed ahead of it.
-- The newly available files are loose files on local disk that the operator can point the tooling at. A WDT may or may not accompany them. Container/archive extraction is not part of this spec.
+- **Corpus location**: `wow-viewer/test_data/v22_adts/` (operator-decided 2026-09-16). This folder is already git-ignored (`wow-viewer/test_data/*`), so the files are never committed (Data Policy). Tooling still accepts any root as an argument.
+- The files are loose files on local disk. A WDT may or may not accompany them. Container/archive extraction is not part of this spec.
 - The corpus is primarily v22. v23 support comes through the same reader because the formats are near-identical, but v23 is only validated as far as real v23 files are available.
 - The viewer's existing terrain chunk/tile representation can carry v22 data. Whole-tile heights and normals are sliced into per-chunk grids, and whole-tile names are mapped to the existing per-tile tables.
 - Referenced textures and models resolve through the viewer's normal data-source configuration. Missing assets degrade to placeholders; they do not block rendering.

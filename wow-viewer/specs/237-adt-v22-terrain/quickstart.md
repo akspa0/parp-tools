@@ -7,7 +7,7 @@ never baked into code.
 > trusted, re-verify it against the real argument parser once the commands are implemented.
 
 ```powershell
-$CORPUS = 'D:\path\to\adt-v22-files'
+$CORPUS = 'test_data\v22_adts'   # git-ignored; drop the acquired files here
 
 # Phase 0: what is actually in the files
 dotnet run --project tools/inspect/WowViewer.Tool.Inspect -- `
@@ -23,8 +23,7 @@ dotnet run --project tools/inspect/WowViewer.Tool.Inspect -- `
 dotnet run --project tools/inspect/WowViewer.Tool.Inspect -- `
   adt-ahdr dump --file "$CORPUS\SomeMap_32_48.adt"
 
-# Real-data tests (skipped when the variable is unset)
-$env:WOWVIEWER_AHDR_CORPUS = $CORPUS
+# Real-data tests (read test_data\v22_adts by default; skipped when it is empty)
 dotnet test tests/WowViewer.Core.Tests --filter "FullyQualifiedName~AdtAhdr"
 ```
 

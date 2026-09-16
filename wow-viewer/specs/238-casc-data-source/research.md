@@ -52,11 +52,11 @@ Survey date: 2026-09-16.
 ### R7: Cache and Constitution VII
 
 - **Decision**: The cache holds verbatim objects keyed by content hash, is verified on read, and is never exported. It is documented as a read-side input cache.
-- **Open**: operator acknowledgement that this reading of Principle VII is intended (see plan Constitution Check).
+- **Resolved 2026-09-16**: the operator confirmed caches are fine; the project already uses caches.
 
 ### R8: Independent reference for byte verification (SC-001)
 
-- **Decision**: Compare against files extracted by an independent tool from the same build: wow.export, or wow.tools.local run by the operator. Record the tool name and version in the receipt.
+- **Decision**: Compare against files extracted by an independent tool from the same build: wow.export, or wow.tools.local run by the operator. Both can stream from the CDN, so **no local install is needed for the reference**. Record the tool name and version in the receipt.
 - **Detector power**: Deliberately alter one byte in a reference file; `casc verify` must report exactly that id as a mismatch.
 
 ### R9: Listfile

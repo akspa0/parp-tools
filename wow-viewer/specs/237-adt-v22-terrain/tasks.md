@@ -4,7 +4,7 @@
 **Release**: v0.6 · **Branch**: `v0.5.4-dev`
 **Tests**: included. The constitution requires real-data validation; synthetic tests guard behavior, and real-corpus tests are the sign-off.
 
-**Corpus status (2026-09-16)**: v22 files are still being acquired. Tasks marked 🗂 need the real corpus (`$env:WOWVIEWER_AHDR_CORPUS`); everything else can run now.
+**Corpus status (2026-09-16)**: v22 files are still being acquired. Tasks marked 🗂 need the real corpus in `wow-viewer/test_data/v22_adts/` (git-ignored; `$env:WOWVIEWER_AHDR_CORPUS` overrides); everything else can run now.
 
 Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `wow-viewer/`.
 
@@ -12,7 +12,7 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 
 - [ ] T001 Create evidence folder and README stating the receipt format (command, root, file count, SHA-256 of file list) in specs/237-adt-v22-terrain/evidence/README.md
 - [ ] T002 [P] Add chunk ids `Alyr`, `Amap`, `Ashd`, `Acdo` to src/core/WowViewer.Core/Maps/MapChunkIds.cs
-- [ ] T003 [P] Add real-corpus test gate helper that skips when `WOWVIEWER_AHDR_CORPUS` is unset in tests/WowViewer.Core.Tests/AdtAhdrCorpus.cs
+- [ ] T003 [P] Add a real-corpus helper resolving `GetWowViewerRoot()/test_data/v22_adts` (override: `WOWVIEWER_AHDR_CORPUS`) that skips when the folder is absent or empty, following the BlpPixelDecoderTests pattern, in tests/WowViewer.Core.Tests/AdtAhdrCorpus.cs
 
 ## Phase 2: Foundational (blocks all stories)
 

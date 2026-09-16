@@ -2,7 +2,9 @@
 
 **Input**: `specs/238-casc-data-source/` (spec, plan, research, quickstart)
 **Release**: v0.6 · **Branch**: `v0.5.4-dev`
-**Tests**: included (constitution real-data validation). 🌐 = needs a real local install (`WOWVIEWER_CASC_LOCAL`) or network access to a CDN.
+**Tests**: included (constitution real-data validation). 🌐 = needs network access to a CDN. 💾 = needs a local install of a client newer than 5.0.1 (**none installed as of 2026-09-16**; the operator is freeing disk space for the live client).
+
+**Order note**: with no local install, remote reads are the first route to real data. The catalog is built mode-agnostic, and remote validation (Phase 5) may run before the 💾 local gates.
 
 Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `wow-viewer/` unless noted.
 
@@ -12,8 +14,8 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 - [ ] T002 Add a TACTSharp ProjectReference (net10.0, `GlobalPropertiesToRemove="ManagePackageVersionsCentrally"`, matching the DBCD pattern) in src/core/WowViewer.Core.IO/WowViewer.Core.IO.csproj, and confirm the solution builds
 - [ ] T003 [P] Record the finding that existing `libs/*` gitlinks have no .gitmodules entries (not repaired here) in specs/238-casc-data-source/research.md
 - [ ] T004 [P] Add a cache directory pattern to .gitignore and state in the CLI help that the cache is local-only (Data Policy)
-- [ ] T005 🌐 Throwaway spike: open one local build, read 10 files by id, print identity, in tools/inspect/WowViewer.Tool.Inspect/Program.cs (`casc spike`; removed in T041)
-- [ ] T006 🌐 Era survey: one real build per root era (6.x legacy root, 8.2+ root, newest retail), pass/fail per era, library decision (TACTSharp or fallback with license resolved), and questions for Marlamin, in specs/238-casc-data-source/evidence/phase0-era-survey.md
+- [ ] T005 🌐 Throwaway spike: open the current live build **remotely** (no install needed), read 10 files by id, print identity, in tools/inspect/WowViewer.Tool.Inspect/Program.cs (`casc spike`; removed in T041)
+- [ ] T006 🌐 Era survey over the CDN/mirrors: one real build per root era (6.x legacy root, 8.2+ root, newest retail), pass/fail per era, library decision (TACTSharp or fallback with license resolved), and questions for Marlamin, in specs/238-casc-data-source/evidence/phase0-era-survey.md
 
 **Checkpoint (Phase 0 gate)**: era table and library decision recorded.
 
@@ -26,23 +28,23 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 - [ ] T011 [P] Create `CascListfile` bidirectional id↔path map over libs/wowdev/wow-listfile (ids without names allowed) in src/core/WowViewer.Core.IO/Casc/CascListfile.cs
 - [ ] T012 [P] Unit tests for FileReadResult and CascListfile in tests/WowViewer.Core.Tests/FileReadResultTests.cs and tests/WowViewer.Core.Tests/CascListfileTests.cs
 
-## Phase 3: User Story 1 — Open a local install (P1) 🎯 MVP
+## Phase 3: User Story 1 — Open a local install (P1) 💾 (code now, gate when an install exists)
 
 **Independent test**: read a known file by path and by id; hashes match an independent extraction (SC-001).
 
 - [ ] T013 [US1] Local product/build discovery from the install in src/core/WowViewer.Core.IO/Casc/CascProductDiscovery.cs
 - [ ] T014 [US1] `CascArchiveCatalog` local mode implementing IArchiveCatalog + IFileDataIdReader (ReadFile(path), ReadFileById, FileExists, GetAllKnownFiles, locale selection recorded) in src/core/WowViewer.Core.IO/Casc/CascArchiveCatalog.cs
-- [ ] T015 [US1] Thread-safety stress test (parallel reads, stable hashes) in tests/WowViewer.Core.Tests/CascRealDataTests.cs
+- [ ] T015 [US1] 💾 Thread-safety stress test (local; repeated over remote in T027) (parallel reads, stable hashes) in tests/WowViewer.Core.Tests/CascRealDataTests.cs
 - [ ] T016 [US1] CLI `casc products`, `casc read --id|--path --out` in tools/inspect/WowViewer.Tool.Inspect/Program.cs
 - [ ] T017 [US1] CLI `casc verify --sample N --reference <dir> [--json]` with a detector-power self-check (one altered reference byte must be reported) in tools/inspect/WowViewer.Tool.Inspect/Program.cs
-- [ ] T018 [US1] 🌐 Gate: SC-001 on a real local build (≥1000 ids) and SC-003 (≥200 ids per surveyed era), naming the reference tool and version, in specs/238-casc-data-source/evidence/phase1-local-verify.md
+- [ ] T018 [US1] 💾 Gate: SC-001 on a real local build (≥1000 ids) and SC-003 (≥200 ids per surveyed era), naming the reference tool and version, in specs/238-casc-data-source/evidence/phase1-local-verify.md
 
 ## Phase 4: User Story 5 — Build traceability (P2)
 
 - [ ] T019 [US5] Expose `CascBuildIdentity` from the catalog and add CLI `casc identity` in src/core/WowViewer.Core.IO/Casc/CascArchiveCatalog.cs and tools/inspect/WowViewer.Tool.Inspect/Program.cs
 - [ ] T020 [US5] Include build identity in every `casc` CLI JSON output and log line in tools/inspect/WowViewer.Tool.Inspect/Program.cs
 
-## Phase 5: User Story 2 — Stream from CDN (P1)
+## Phase 5: User Story 2 — Stream from CDN (P1) 🎯 MVP
 
 **Independent test**: open a remote build, load files, go offline, reload from cache (SC-002, SC-005).
 
@@ -52,7 +54,7 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 - [ ] T024 [US2] Offline behavior (cached → Ok, uncached → OfflineUnavailable) and cache stats in src/core/WowViewer.Core.IO/Casc/CascCacheStats.cs
 - [ ] T025 [US2] Hybrid mode (local first, remote fill for the same build identity only; off by default) in src/core/WowViewer.Core.IO/Casc/CascArchiveCatalog.cs
 - [ ] T026 [US2] CLI `casc builds --product --region`, `casc cache --stats|--verify`, and `--remote --cache` on read/verify, in tools/inspect/WowViewer.Tool.Inspect/Program.cs
-- [ ] T027 [US2] 🌐 Gate: SC-002 (local vs remote byte identity on the same sample) and SC-005 (offline) in specs/238-casc-data-source/evidence/phase2-remote.md
+- [ ] T027 [US2] 🌐 Gate: SC-001 **against a remote build** (≥1000 ids vs an independent CDN extraction from wow.export or wow.tools.local), SC-005 (offline), and the thread-safety stress over remote; SC-002 (local vs remote identity) is 💾 and deferred until an install exists, in specs/238-casc-data-source/evidence/phase2-remote.md
 
 ## Phase 6: User Story 4 — Encryption (P2)
 
@@ -83,8 +85,8 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 ## Dependencies
 
 - Setup (T001–T006 gate) → Foundational → US1 → {US5, US2} → {US4, US3} → US6 → Polish.
-- Spec 239 may start after US1 (T018). Spec 237's viewer phase needs US6.
-- **Open operator item**: acknowledge the Principle VII read-side cache interpretation (plan Constitution Check) before T022.
+- Spec 239 may start after **either** T018 (local) **or** T027 (remote), whichever lands first. With no install today, that is T027. Spec 237's viewer phase needs US6.
+- Principle VII cache question: resolved; operator confirmed caches are fine (2026-09-16).
 
 ## Parallel examples
 
@@ -93,5 +95,6 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 
 ## Implementation strategy
 
-MVP = local install read by path and id with verified bytes (US1). Remote/CDN (US2) follows
-immediately as the headline capability. Viewer integration comes last, once the catalog is proven.
+MVP = **remote build read by path and id with verified bytes** (Foundational → catalog core → US2), because no
+modern client is installed. Local install (US1) shares the same catalog and closes its 💾 gates once the live
+client is installed. Viewer integration comes last, once the catalog is proven.

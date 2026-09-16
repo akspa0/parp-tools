@@ -26,7 +26,7 @@ candidates apart. **Phase 2** maps the decoded tile into the viewer's existing `
 
 **Primary Dependencies**: existing `WowViewer.Core.IO` chunk infrastructure (`ChunkedFileReader`, `MapFileSummaryReader`, `MapSummaryReaderCommon`), `AdtMcalDecoder` (called, not modified), viewer `ITerrainAdapter` / `TerrainChunkData` / `TerrainRenderer`, Silk.NET.OpenGL
 
-**Storage**: Loose files on disk (read-only). Corpus root is operator configuration, never hardcoded (Constitution VI).
+**Storage**: Loose files on disk (read-only), in `wow-viewer/test_data/v22_adts/` by repo convention (like `test_data/0.5.3/`). The CLI takes `--root`. Tests resolve `GetWowViewerRoot()/test_data/v22_adts`, which `WOWVIEWER_AHDR_CORPUS` can override, and skip when it is absent.
 
 **Testing**: xUnit in `tests/WowViewer.Core.Tests`: synthetic-buffer unit tests, plus real-corpus tests that skip when the corpus root is not configured
 
@@ -41,7 +41,7 @@ candidates apart. **Phase 2** maps the decoded tile into the viewer's existing `
 **Scale/Scope**: One tile format family, about 10 chunk types. Corpus size is unknown until Phase 0 inventory.
 
 **Open inputs (operator)**:
-- Corpus: being acquired (2026-09-16); location on disk and whether a WDT accompanies it
+- Corpus: being acquired (2026-09-16); it will live in `wow-viewer/test_data/v22_adts/` (git-ignored). Whether a WDT accompanies it is still unknown
 - Asset resolution for Phase 2 comes through Spec 238 (CASC) + Spec 239 (FileDataID-era readers) when the referenced assets live in a modern client (research R10)
 
 **Dependency order**: Phase 0 synthetic steps (0.1–0.8) may run now; Phase 0 gate needs the corpus; Phase 2 steps 7/9 need 238 Phase 3 (and 239 Phase 3 for id-referenced models).
@@ -120,7 +120,7 @@ tests/WowViewer.Core.Tests/
 ├── AdtAhdrInventoryReaderTests.cs        # synthetic
 ├── AdtAhdrReaderTests.cs                 # synthetic, including malformed inputs
 ├── AdtAhdrTileSlicerTests.cs             # synthetic, known-answer grid mapping
-└── AdtAhdrRealDataTests.cs               # skips unless WOWVIEWER_AHDR_CORPUS is set
+└── AdtAhdrRealDataTests.cs               # uses test_data/v22_adts (or WOWVIEWER_AHDR_CORPUS); skips when absent
 ```
 
 **Structure Decision**: The code is named for the `AHDR` family rather than "V22", because the repo

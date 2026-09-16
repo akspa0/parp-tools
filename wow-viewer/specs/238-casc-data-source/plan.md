@@ -33,6 +33,8 @@ proven on a real build against an independent extraction.
 
 **Scale/Scope**: One new catalog, one data source, one CLI command group, and `IDataSource`/`IArchiveReader` id-read extensions
 
+**Environment constraint (2026-09-16)**: no client newer than 5.0.1 is installed, and installing the live client needs the operator to free disk space first. **Remote (CDN) mode is therefore the first working path**; local-install work and local-vs-remote byte comparison wait for an install.
+
 **NEEDS CLARIFICATION → research**: TACTSharp's era coverage (R2); hybrid-mode behavior (R5); historical build mirrors (R6); the independent reference tool for SC-001 (R8)
 
 ## Constitution Check
@@ -43,7 +45,7 @@ proven on a real build against an independent extraction.
 | II. Library-first | PASS | The catalog lives in `WowViewer.Core.IO/Casc`. The viewer data source and CLI are thin. |
 | III. Real-data validation | PASS (gated) | SC-001/002/003 use real builds with hashes and receipts. |
 | VI. No client path assumptions | PASS | Install path, cache dir, hosts, region, locale and keys are all configuration. |
-| VII. Containers are inputs | PASS (interpretation recorded) | CASC is read only. The remote cache stores **verbatim downloaded input objects** for reuse. It is not an emitted, repacked or distributable container. It is never an output of any tool, and no command exports it. **Operator acknowledgement requested** that a read-side download cache is within Principle VII. |
+| VII. Containers are inputs | PASS | CASC is read only. The remote cache stores verbatim downloaded input objects for reuse, and no command exports it. **Operator confirmed 2026-09-16: caches are fine** (the project already uses caches). |
 | Data Policy (BYOD) | PASS | The cache is local and excluded from git and releases. |
 | Format reader ownership | PASS | No CASC reader exists in wow-viewer. |
 | One phase at a time / bite-sized | PASS | 4 phases, at most 10 steps each. |

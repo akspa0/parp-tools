@@ -1,14 +1,14 @@
 # Tasks: Modern Client Assets (Post-5.0.1, FileDataID Era)
 
 **Input**: `specs/239-modern-client-assets/` (spec, plan, research)
-**Release**: v0.6 · **Branch**: `v0.5.4-dev` · **Depends on**: Spec 238 US1 (T018) for all real-build work
+**Release**: v0.6 · **Branch**: `v0.5.4-dev` · **Depends on**: Spec 238 remote gate T027 (or local T018, whichever lands first) for all real-build work
 **Tests**: included. 🌐 = needs a real tier build opened through Spec 238.
 
 Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `wow-viewer/`.
 
 ## Phase 1: Setup
 
-- [ ] T001 Operator selects one representative build per tier (A 6.x–8.0, B 8.1–8.3, C 9.x+) and records it in specs/239-modern-client-assets/research.md (R1)
+- [ ] T001 Record tier builds in specs/239-modern-client-assets/research.md (R1): tier C defaults to the current live retail build via CDN; tiers A/B are chosen from the builds Spec 238 T006 finds servable (operator has no candidates yet)
 - [ ] T002 [P] Create evidence folder README (receipt format including build identity from Spec 238) in specs/239-modern-client-assets/evidence/README.md
 
 ## Phase 2: Foundational — file reference resolver (blocks all stories)
@@ -78,7 +78,7 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 
 ## Dependencies
 
-- Spec 238 T018 → Setup → Foundational → US4 (survey) → US1 → US2 → US3 → US5 → Polish.
+- Spec 238 T027 (remote) or T018 (local) → Setup → Foundational → US4 (survey) → US1 → US2 → US3 → US5 → Polish.
 - T017 (liquids) completes fully after T028.
 - T014/T016 coordinate with Spec 197. Shader-combination fidelity is delegated to Spec 198.
 
@@ -90,6 +90,6 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 
 ## Implementation strategy
 
-Survey first (US4), so every reader change is backed by measured occurrence. Then the MVP: one tier
-B zone's terrain (US1), because B is id-first and exercises the resolver fully. Tiers A and C
-follow as regressions and extensions of the same code paths.
+Survey first (US4), so every reader change is backed by measured occurrence. Then the MVP: terrain for one
+zone on the **first tier build available**, which is tier C (live retail via the CDN) as of 2026-09-16. Tier B remains the
+most thorough resolver test once a B build is identified; tier A follows as regression coverage.
