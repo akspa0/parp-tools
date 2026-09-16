@@ -1,4 +1,5 @@
 using WowViewer.Core.IO.Casc;
+using WowViewer.Core.IO.Files;
 
 namespace WoWViewer.DataSources;
 
@@ -22,7 +23,11 @@ public sealed class CascDataSource : IDataSource
 
         _storages = storages;
         _listfile = listfile;
+        _resolver = listfile.GetPath;
+        FileDataIdPaths.Resolver = _resolver;
     }
+
+    private readonly Func<uint, string?> _resolver;
 
     public string Name => "CASC: " + string.Join(" + ", _storages.Select(static s => $"{s.Product.Product} {s.Product.Version}"));
 
@@ -31,12 +36,16 @@ public sealed class CascDataSource : IDataSource
     public IReadOnlyList<CascStorage> Storages => _storages;
 
     public bool FileExists(string virtualPath) =>
-        _listfile.TryGetFileDataId(virtualPath, out uint fileDataId) && FileExists(fileDataId);
+        TryGetFileDataId(virtualPath, out uint fileDataId) && FileExists(fileDataId);
+
+    /// <summary>Accepts listfile paths and <c>fdid:&lt;id&gt;</c> virtual paths.</summary>
+    private bool TryGetFileDataId(string virtualPath, out uint fileDataId) =>
+        FileDataIdPaths.TryParse(virtualPath, out fileDataId) || _listfile.TryGetFileDataId(virtualPath, out fileDataId);
 
     public bool FileExists(uint fileDataId) => _storages.Any(s => s.FileExists(fileDataId));
 
     public byte[]? ReadFile(string virtualPath) =>
-        _listfile.TryGetFileDataId(virtualPath, out uint fileDataId) ? ReadFile(fileDataId) : null;
+        TryGetFileDataId(virtualPath, out uint fileDataId) ? ReadFile(fileDataId) : null;
 
     public byte[]? ReadFile(uint fileDataId)
     {
@@ -67,5 +76,9 @@ public sealed class CascDataSource : IDataSource
             : _fileList.Where(f => f.EndsWith(extensionFilter, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        if (FileDataIdPaths.Resolver == _resolver)
+            FileDataIdPaths.Resolver = null;
+    }
 }

@@ -1,6 +1,8 @@
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
+using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.IO.M2Chunked;
@@ -648,6 +650,7 @@ internal static class WarcraftNetM2Adapter
                 ParsedModelData data = ParsedModelData.FromWarcraftNet(md21);
                 TrySupplementAnimationMetadataFromWarcraftNet(md21, m2Bytes, fileName, data);
                 TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+                ApplyTextureFileDataIds(m2Bytes, fileName, data);
                 return data;
             }
             catch (Exception rawMd20Ex)
@@ -658,6 +661,7 @@ internal static class WarcraftNetM2Adapter
                     ParsedModelData data = ParsedModelData.FromWarcraftNet(wrapped.ModelInformation);
                     TrySupplementAnimationMetadataFromWarcraftNet(wrapped.ModelInformation, m2Bytes, fileName, data);
                     TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+                    ApplyTextureFileDataIds(m2Bytes, fileName, data);
                     return data;
                 }
 
@@ -673,11 +677,48 @@ internal static class WarcraftNetM2Adapter
             ParsedModelData data = ParsedModelData.FromWarcraftNet(m2Model.ModelInformation);
             TrySupplementAnimationMetadataFromWarcraftNet(m2Model.ModelInformation, m2Bytes, fileName, data);
             TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+            ApplyTextureFileDataIds(m2Bytes, fileName, data);
             return data;
         }
 
         throw new InvalidDataException("M2 is missing MD21 model information.");
     }
+
+    /// <summary>
+    /// Spec 239: chunked M2s store texture references in TXID (by texture index) and leave the
+    /// in-model filename empty. Fill each empty filename from TXID via the active FileDataID resolver.
+    /// </summary>
+    private static void ApplyTextureFileDataIds(byte[] m2Bytes, string fileName, ParsedModelData data)
+    {
+        if (!M2ChunkedFileIds.TryRead(m2Bytes, out M2ChunkedFileIds ids) || ids.TextureFileDataIds.Length == 0)
+            return;
+
+        int applied = 0;
+        for (int i = 0; i < data.Textures.Count && i < ids.TextureFileDataIds.Length; i++)
+        {
+            ParsedTextureData texture = data.Textures[i];
+            uint fileDataId = ids.TextureFileDataIds[i];
+            if (fileDataId == 0 || !string.IsNullOrWhiteSpace(texture.Filename))
+                continue;
+
+            data.Textures[i] = new ParsedTextureData
+            {
+                Type = texture.Type,
+                Flags = texture.Flags,
+                Filename = FileDataIdPaths.Resolve(fileDataId),
+            };
+            applied++;
+        }
+
+        if (applied > 0)
+            ViewerLog.Trace($"[M2] {fileName}: resolved {applied} texture(s) from TXID");
+    }
+
+    /// <summary>Spec 239: skin path from SFID (first entry), when the M2 is chunked and carries one.</summary>
+    public static string? TryGetSkinPathFromFileDataIds(byte[] m2Bytes) =>
+        M2ChunkedFileIds.TryRead(m2Bytes, out M2ChunkedFileIds ids) && ids.SkinFileDataIds is [var first, ..] && first != 0
+            ? FileDataIdPaths.Resolve(first)
+            : null;
 
     private static void TrySupplementAnimationMetadataFromWarcraftNet(MD21 md21, byte[] modelBytes, string fileName, ParsedModelData data)
     {

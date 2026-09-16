@@ -12,24 +12,29 @@ namespace WoWViewer;
 public partial class ViewerApp
 {
     private bool _wantOpenCascInstall;
+    private bool _wantOpenCascInstallWithCdnFill;
     private bool _wantOpenAhdrTerrainFolder;
     private string? _lastCascInstallPath;
     private string? _lastAhdrTerrainFolder;
 
     private void HandleCascAhdrMenuRequests()
     {
-        if (_wantOpenCascInstall)
+        if (_wantOpenCascInstall || _wantOpenCascInstallWithCdnFill)
         {
+            bool allowCdnFill = _wantOpenCascInstallWithCdnFill;
             _wantOpenCascInstall = false;
+            _wantOpenCascInstallWithCdnFill = false;
             ImGuiPathPicker.Instance.Open(
-                "Select a CASC install folder (contains .build.info)",
+                allowCdnFill
+                    ? "Select a CASC install folder (missing local data is fetched from Blizzard's CDN for the same build)"
+                    : "Select a CASC install folder (contains .build.info)",
                 pickFolder: true,
                 initialPath: _lastCascInstallPath,
                 filterExtension: null,
                 path =>
                 {
                     if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
-                        LoadCascDataSource(path);
+                        LoadCascDataSource(path, allowCdnFill);
                 });
         }
 
@@ -53,7 +58,7 @@ public partial class ViewerApp
     /// Opens every product listed in the install's .build.info. Reads try products newest version
     /// first and fall through to older products when a newer one lacks the data locally.
     /// </summary>
-    private void LoadCascDataSource(string installDir)
+    private void LoadCascDataSource(string installDir, bool allowCdnFill = false)
     {
         try
         {
@@ -72,7 +77,7 @@ public partial class ViewerApp
             {
                 try
                 {
-                    storages.Add(CascStorage.OpenLocal(installDir, product.Product, cascCacheDir));
+                    storages.Add(CascStorage.OpenLocal(installDir, product.Product, cascCacheDir, allowCdnFill));
                 }
                 catch (Exception ex)
                 {

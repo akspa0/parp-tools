@@ -28,6 +28,9 @@ public static class CascCommandSupport
             case "exists":
                 RunExists(tail);
                 break;
+            case "wmo":
+                RunWmo(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown casc command '{command}'.");
                 ShowUsage();
@@ -60,6 +63,13 @@ public static class CascCommandSupport
         }
 
         CommunityListfile listfile = CommunityListfile.Load(listfiles);
+        List<string> products = GetOptions(args, "--product");
+        if (products.Count > 1)
+        {
+            RunExistsLayered(install, products, cache, pathsFile, listfile);
+            return;
+        }
+
         CascStorage storage = CascStorage.OpenLocal(install, product, cache);
         var counts = new SortedDictionary<string, SortedDictionary<string, int>>(StringComparer.OrdinalIgnoreCase);
         var missing = new List<string>();
@@ -146,7 +156,8 @@ public static class CascCommandSupport
         }
 
         var timer = Stopwatch.StartNew();
-        CascStorage storage = CascStorage.OpenLocal(install, product, cache);
+        bool cdnFill = args.Contains("--cdn-fill", StringComparer.OrdinalIgnoreCase);
+        CascStorage storage = CascStorage.OpenLocal(install, product, cache, cdnFill);
         Console.WriteLine($"opened {storage.Product.Product} {storage.Product.Version} build={storage.Product.BuildConfig} in {timer.ElapsedMilliseconds} ms");
 
         CascReadStatus status = storage.TryReadFile(fileDataId, out byte[]? data);
@@ -165,6 +176,123 @@ public static class CascCommandSupport
             File.WriteAllBytes(output, data);
             Console.WriteLine($"wrote {output}");
         }
+    }
+
+    /// <summary>Spec 239: parses a v17 WMO from CASC (groups via GFID, names via MOMT/MODI FileDataIDs) and reports resolution.</summary>
+    private static void RunWmo(string[] args)
+    {
+        string? install = GetOption(args, "--install");
+        string? cache = GetOption(args, "--cache");
+        string? path = GetOption(args, "--path");
+        List<string> products = GetOptions(args, "--product");
+        List<string> listfiles = GetOptions(args, "--listfile");
+        if (install is null || cache is null || path is null || products.Count == 0 || listfiles.Count == 0)
+        {
+            Console.WriteLine("  casc wmo --install <dir> --product <p> [--product <p2>] --cache <dir> --listfile <csv> --path <root.wmo>");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        CommunityListfile listfile = CommunityListfile.Load(listfiles);
+        WowViewer.Core.IO.Files.FileDataIdPaths.Resolver = listfile.GetPath;
+        List<CascStorage> storages = products.Select(p => CascStorage.OpenLocal(install, p, cache)).ToList();
+
+        byte[]? Read(string virtualPath)
+        {
+            uint id;
+            if (!WowViewer.Core.IO.Files.FileDataIdPaths.TryParse(virtualPath, out id) && !listfile.TryGetFileDataId(virtualPath, out id))
+                return null;
+            foreach (CascStorage storage in storages)
+            {
+                if (storage.TryReadFile(id, out byte[]? bytes) == CascReadStatus.Ok)
+                    return bytes;
+            }
+            return null;
+        }
+
+        byte[]? root = Read(path);
+        if (root is null)
+        {
+            Console.Error.WriteLine($"root not readable: {path}");
+            Environment.ExitCode = 2;
+            return;
+        }
+
+        uint[] groupIds = WowViewer.Core.IO.Converters.WmoV17ToV14Converter.ReadGroupFileDataIds(root);
+        var groups = new List<byte[]>();
+        foreach (uint groupId in groupIds)
+        {
+            byte[]? groupBytes = Read(WowViewer.Core.IO.Files.FileDataIdPaths.Resolve(groupId));
+            if (groupBytes is null)
+                break;
+            groups.Add(groupBytes);
+        }
+
+        var model = new WowViewer.Core.IO.Converters.WmoV17ToV14Converter().ParseV17ToModel(root, groups);
+        Console.WriteLine($"GFID groups={groupIds.Length} loaded={groups.Count} parsedGroups={model.Groups.Count} vertices={model.Groups.Sum(g => g.Vertices.Count)}");
+
+        var textures = model.Materials.SelectMany(m => new[] { m.Texture1Name, m.Texture2Name, m.Texture3Name }).Where(n => !string.IsNullOrEmpty(n)).Distinct().ToList();
+        Console.WriteLine($"material textures: {textures.Count} distinct, readable={textures.Count(t => Read(t) is not null)}");
+        foreach (string texture in textures.Take(4))
+            Console.WriteLine($"  {texture}");
+
+        var doodadNames = model.DoodadDefs.Select(d => ResolveOffset(model.DoodadNamesRaw, d.NameIndex)).Where(n => n.Length > 0).Distinct().ToList();
+        Console.WriteLine($"doodad defs={model.DoodadDefs.Count}, distinct doodad models={doodadNames.Count}, readable={doodadNames.Count(n => Read(n) is not null)}");
+        foreach (string name in doodadNames.Take(4))
+            Console.WriteLine($"  {name}");
+    }
+
+    private static string ResolveOffset(byte[] blob, uint offset)
+    {
+        if (offset >= blob.Length)
+            return string.Empty;
+        int end = Array.IndexOf(blob, (byte)0, (int)offset);
+        return System.Text.Encoding.ASCII.GetString(blob, (int)offset, (end < 0 ? blob.Length : end) - (int)offset);
+    }
+
+    /// <summary>Opens several products in one process (as the viewer does) and reports which product serves each path.</summary>
+    private static void RunExistsLayered(string install, List<string> products, string cache, string pathsFile, CommunityListfile listfile)
+    {
+        var storages = new List<CascStorage>();
+        foreach (string product in products)
+        {
+            try
+            {
+                storages.Add(CascStorage.OpenLocal(install, product, cache));
+                Console.WriteLine($"opened {product}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FAILED to open {product}: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        var servedBy = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        foreach (string raw in File.ReadLines(pathsFile))
+        {
+            string path = raw.Trim();
+            if (path.Length == 0)
+                continue;
+
+            string outcome = "unresolved";
+            if (listfile.TryGetFileDataId(path, out uint fileDataId))
+            {
+                foreach (CascStorage storage in storages)
+                {
+                    if (storage.TryReadFile(fileDataId, out _) == CascReadStatus.Ok)
+                    {
+                        outcome = storage.Product.Product;
+                        break;
+                    }
+                }
+            }
+
+            string key = $"{Path.GetExtension(path).ToUpperInvariant()} <- {outcome}";
+            servedBy[key] = servedBy.GetValueOrDefault(key) + 1;
+        }
+
+        foreach ((string key, int count) in servedBy)
+            Console.WriteLine($"  {key}: {count}");
     }
 
     private static string? GetOption(string[] args, string name)

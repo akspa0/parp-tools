@@ -355,6 +355,15 @@ public class WmoV17ToV14Converter
             // Reverse for comparison (chunks stored reversed on disk)
             var chunkId = new string(magic.Reverse().ToArray());
 
+            // Spec 239: FileDataID-era roots omit MOTX (MOMT texture fields are FileDataIDs) and MODN
+            // (doodads are listed by FileDataID in a trailing MODI). Measured on wow_classic_beta 1.60.1.
+            while (expectedRootChunkIndex < RootRequiredChunkOrder090.Length
+                && chunkId != RootRequiredChunkOrder090[expectedRootChunkIndex]
+                && RootChunksOptionalInFileDataIdEra.Contains(RootRequiredChunkOrder090[expectedRootChunkIndex]))
+            {
+                expectedRootChunkIndex++;
+            }
+
             if (expectedRootChunkIndex < RootRequiredChunkOrder090.Length)
             {
                 string expected = RootRequiredChunkOrder090[expectedRootChunkIndex];
@@ -448,6 +457,12 @@ public class WmoV17ToV14Converter
                 case "MCVP":
                     data.McvpRaw = reader.ReadBytes((int)effectiveSize);
                     break;
+                case "GFID":
+                    data.GroupFileDataIds = ReadUInt32Array(reader, effectiveSize);
+                    break;
+                case "MODI":
+                    data.DoodadFileDataIds = ReadUInt32Array(reader, effectiveSize);
+                    break;
             }
 
             reader.BaseStream.Position = chunkEnd;
@@ -459,7 +474,112 @@ public class WmoV17ToV14Converter
                 $"WMO root terminated early: parsed {expectedRootChunkIndex}/{RootRequiredChunkOrder090.Length} required chunks.");
         }
 
+        SynthesizeNameTablesFromFileDataIds(data);
         return data;
+    }
+
+    private static readonly HashSet<string> RootChunksOptionalInFileDataIdEra = ["MOTX", "MODN"];
+
+    /// <summary>Reads the GFID group FileDataID list from a v17 root without parsing the rest.</summary>
+    public static uint[] ReadGroupFileDataIds(byte[] rootBytes)
+    {
+        int position = 0;
+        while (position + 8 <= rootBytes.Length)
+        {
+            string chunkId = new(Encoding.ASCII.GetString(rootBytes, position, 4).Reverse().ToArray());
+            int size = BitConverter.ToInt32(rootBytes, position + 4);
+            if (size < 0 || position + 8L + size > rootBytes.Length)
+                break;
+
+            if (chunkId == "GFID")
+            {
+                var ids = new uint[size / 4];
+                for (int i = 0; i < ids.Length; i++)
+                    ids[i] = BitConverter.ToUInt32(rootBytes, position + 8 + (i * 4));
+                return ids;
+            }
+
+            position += 8 + size;
+        }
+
+        return [];
+    }
+
+    /// <summary>
+    /// Spec 239: when a root has no MOTX/MODN, build equivalent string tables from FileDataIDs so the
+    /// offset-based consumers downstream (materials, WmoRenderer doodad names) work unchanged.
+    /// Names come from <see cref="Files.FileDataIdPaths.Resolve"/> (listfile path or <c>fdid:&lt;id&gt;</c>).
+    /// </summary>
+    private static void SynthesizeNameTablesFromFileDataIds(WmoV17Data data)
+    {
+        if (data.TextureNamesRaw.Length == 0 && data.Materials.Count > 0)
+        {
+            var table = new FileDataIdStringTable();
+            foreach (WmoMaterial material in data.Materials)
+            {
+                material.Texture1 = table.OffsetOf(material.Texture1);
+                material.Texture2 = table.OffsetOf(material.Texture2);
+                material.Texture3 = table.OffsetOf(material.Texture3);
+            }
+
+            data.TextureNamesRaw = table.ToArray();
+            data.TextureNames = table.Names;
+        }
+
+        if (data.DoodadNamesRaw.Length == 0 && data.DoodadFileDataIds.Length > 0)
+        {
+            var table = new FileDataIdStringTable();
+            foreach (WmoDoodadDef doodad in data.DoodadDefs)
+            {
+                // MODD's low 24 bits index MODI in the FileDataID era; the high byte carries flags.
+                uint index = doodad.NameOfs & 0x00FF_FFFF;
+                uint fileDataId = index < data.DoodadFileDataIds.Length ? data.DoodadFileDataIds[index] : 0;
+                doodad.NameOfs = table.OffsetOf(fileDataId);
+            }
+
+            data.DoodadNamesRaw = table.ToArray();
+            data.DoodadNames = table.Names;
+        }
+    }
+
+    /// <summary>String table builder: offset 0 is the empty string (FileDataID 0 = no reference).</summary>
+    private sealed class FileDataIdStringTable
+    {
+        private readonly MemoryStream _blob = new();
+        private readonly Dictionary<uint, uint> _offsets = [];
+
+        public FileDataIdStringTable() => _blob.WriteByte(0);
+
+        public List<string> Names { get; } = [];
+
+        public uint OffsetOf(uint fileDataId)
+        {
+            if (fileDataId == 0)
+                return 0;
+
+            if (!_offsets.TryGetValue(fileDataId, out uint offset))
+            {
+                string name = Files.FileDataIdPaths.Resolve(fileDataId);
+                offset = (uint)_blob.Position;
+                byte[] bytes = Encoding.ASCII.GetBytes(name);
+                _blob.Write(bytes);
+                _blob.WriteByte(0);
+                _offsets[fileDataId] = offset;
+                Names.Add(name);
+            }
+
+            return offset;
+        }
+
+        public byte[] ToArray() => _blob.ToArray();
+    }
+
+    private static uint[] ReadUInt32Array(BinaryReader reader, uint size)
+    {
+        var values = new uint[size / 4];
+        for (int i = 0; i < values.Length; i++)
+            values[i] = reader.ReadUInt32();
+        return values;
     }
 
     private WmoV17GroupData ParseWmoV17Group(string path)
@@ -1464,6 +1584,8 @@ public class WmoV17ToV14Converter
         public List<WmoDoodadSet> DoodadSets = new();
         public List<string> DoodadNames = new();
         public byte[] DoodadNamesRaw = Array.Empty<byte>(); // Raw MODN blob for byte-offset resolution
+        public uint[] GroupFileDataIds = Array.Empty<uint>(); // GFID (FileDataID era)
+        public uint[] DoodadFileDataIds = Array.Empty<uint>(); // MODI (FileDataID era)
         public List<WmoDoodadDef> DoodadDefs = new();
         public List<WmoFog> Fogs = new();
         public byte[] McvpRaw = Array.Empty<byte>();

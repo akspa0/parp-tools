@@ -57,8 +57,14 @@ public sealed class CascStorage
     /// <summary>
     /// Opens one product of a local install. <paramref name="cacheDir"/> receives decoded
     /// manifests TACTSharp writes while loading (encoding/root); it is a local read-side cache.
+    /// <para>
+    /// <paramref name="allowCdnFill"/> (Spec 238 hybrid mode, off by default): when the root lists a
+    /// file whose data is not on disk, fetch it from Blizzard's CDN for the same build into
+    /// <paramref name="cacheDir"/>. Measured need: wow_classic_beta 1.60.1 lists all 33 DAT v26
+    /// tileset BLPs without local data.
+    /// </para>
     /// </summary>
-    public static CascStorage OpenLocal(string installDir, string product, string cacheDir)
+    public static CascStorage OpenLocal(string installDir, string product, string cacheDir, bool allowCdnFill = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(installDir);
         ArgumentException.ThrowIfNullOrWhiteSpace(product);
@@ -71,14 +77,18 @@ public sealed class CascStorage
         var build = new BuildInstance();
         build.Settings.BaseDir = installDir;
         build.Settings.Product = info.Product;
-        build.Settings.TryCDN = false;
+        build.Settings.TryCDN = false; // manifests must come from the install itself
         build.Settings.CacheDir = cacheDir;
         build.cdn.ProductDirectory = info.CdnPath;
 
         build.LoadConfigs(info.BuildConfig, info.CdnConfig);
         build.Load();
-        return new CascStorage(build, info, installDir);
+        build.Settings.TryCDN = allowCdnFill;
+        return new CascStorage(build, info, installDir) { AllowsCdnFill = allowCdnFill };
     }
+
+    /// <summary>True when reads may fetch missing local data from the CDN for this build.</summary>
+    public bool AllowsCdnFill { get; private init; }
 
     /// <summary>Adds a TACT decryption key (hex key name → key bytes).</summary>
     public static void AddKey(ulong keyName, byte[] key) => KeyService.SetKey(keyName, key);

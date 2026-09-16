@@ -9,6 +9,7 @@ using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.IO.Converters;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
 
@@ -1283,7 +1284,10 @@ private int _mdxLoadFailCount = 0;
             {
                 WarcraftNetM2Adapter.ValidateModelProfile(data, resolvedModelPath, _buildVersion);
 
-                var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
+                var candidatePaths = new List<string>();
+                if (WarcraftNetM2Adapter.TryGetSkinPathFromFileDataIds(data) is { } sfidSkinPath)
+                    candidatePaths.Add(sfidSkinPath);
+                candidatePaths.AddRange(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
                 if (_dataSource != null)
                 {
                     var bestSkinPath = ResolveBestSkinPath(resolvedModelPath);
@@ -1541,7 +1545,10 @@ private int _mdxLoadFailCount = 0;
         try
         {
             byte[]? skinBytes = null;
-            foreach (var skinPath in WarcraftNetM2Adapter.BuildSkinCandidates(normalizedKey).Distinct(StringComparer.OrdinalIgnoreCase))
+            IEnumerable<string> skinCandidates = WarcraftNetM2Adapter.BuildSkinCandidates(normalizedKey);
+            if (WarcraftNetM2Adapter.TryGetSkinPathFromFileDataIds(m2Bytes) is { } sfidSkinPath)
+                skinCandidates = skinCandidates.Prepend(sfidSkinPath);
+            foreach (var skinPath in skinCandidates.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 skinBytes = ReadFileData(skinPath);
                 if (skinBytes != null && skinBytes.Length > 0)
@@ -1685,7 +1692,7 @@ private int _mdxLoadFailCount = 0;
         if (version >= 17)
         {
             var v17Parser = new WmoV17ToV14Converter();
-            WmoV14ToV17Converter.WmoV14Data wmo = v17Parser.ParseV17ToModel(data, LoadWmoGroupBytes(normalizedKey));
+            WmoV14ToV17Converter.WmoV14Data wmo = v17Parser.ParseV17ToModel(data, LoadWmoGroupBytes(normalizedKey, data));
             ViewerLog.Trace($"[WMO] Parsed v{version} direct: {Path.GetFileName(normalizedKey)} ({wmo.Groups.Count} groups)");
             return wmo;
         }
@@ -1725,11 +1732,30 @@ private int _mdxLoadFailCount = 0;
         }
     }
 
-    private List<byte[]> LoadWmoGroupBytes(string normalizedKey)
+    private List<byte[]> LoadWmoGroupBytes(string normalizedKey, byte[] rootBytes)
     {
         string directory = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
         string baseName = Path.GetFileNameWithoutExtension(normalizedKey);
         var groupBytesList = new List<byte[]>();
+
+        // Spec 239: v17 roots from FileDataID-era builds list their group files in GFID.
+        uint[] groupFileDataIds = WmoV17ToV14Converter.ReadGroupFileDataIds(rootBytes);
+        if (groupFileDataIds.Length > 0)
+        {
+            foreach (uint groupFileDataId in groupFileDataIds)
+            {
+                byte[]? groupBytes = groupFileDataId == 0 ? null : ReadFileData(FileDataIdPaths.Resolve(groupFileDataId));
+                if (groupBytes == null || groupBytes.Length == 0)
+                {
+                    ViewerLog.Debug(ViewerLog.Category.Wmo, $"[WMO] {baseName}: GFID group {groupFileDataId} not readable; stopping group load");
+                    break;
+                }
+
+                groupBytesList.Add(groupBytes);
+            }
+
+            return groupBytesList;
+        }
 
         for (int gi = 0; gi < 512; gi++)
         {
