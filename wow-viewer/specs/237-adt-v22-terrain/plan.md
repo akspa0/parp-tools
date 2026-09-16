@@ -41,7 +41,7 @@ candidates apart. **Phase 2** maps the decoded tile into the viewer's existing `
 **Scale/Scope**: One tile format family, about 10 chunk types. Corpus size is unknown until Phase 0 inventory.
 
 **Open inputs (operator)**:
-- Corpus: being acquired (2026-09-16); it will live in `wow-viewer/test_data/v22_adts/` (git-ignored). Whether a WDT accompanies it is still unknown
+- Corpus: **on hand**, 700 files (699 unique) in `wow-viewer/test_data/v22_adts/unknown/` (git-ignored). No WDT, map table or listfile names exist for them. Extensionless FileDataID names. **Revision 26** (MVER 26 + AHDR). See evidence/phase0-first-look-2026-09-16.md
 - Asset resolution for Phase 2 comes through Spec 238 (CASC) + Spec 239 (FileDataID-era readers) when the referenced assets live in a modern client (research R10)
 
 **Dependency order**: Phase 0 synthetic steps (0.1–0.8) may run now; Phase 0 gate needs the corpus; Phase 2 steps 7/9 need 238 Phase 3 (and 239 Phase 3 for id-referenced models).
@@ -89,9 +89,9 @@ specs/237-adt-v22-terrain/
 
 ```text
 src/core/WowViewer.Core/
-├── Files/WowFileKind.cs                  # + AdtV22, AdtV22Error, AdtAhdrUnknownVersion
+├── Files/WowFileKind.cs                  # + AdtV22, AdtV22Error, AdtV26, AdtAhdrUnknownVersion
 ├── Maps/MapFileKind.cs                   # mirror kinds; update the ADT-family predicate
-├── Maps/MapChunkIds.cs                   # + Alyr, Amap, Ashd, Acdo
+├── Maps/MapChunkIds.cs                   # + Alyr, Amap, Ashd, Acdo, Aloc, Aoch, Adst
 └── Maps/AdtAhdr/                         # NEW: typed model (see data-model.md)
     ├── AdtAhdrTile.cs
     ├── AdtAhdrChunk.cs
@@ -130,13 +130,24 @@ already overloads "V22" for an unrelated dataset lane (`V22Enrich`, `V22ModelPay
 
 ## Phases
 
+### Fast path F: wireframe first look (US0; FR-017), runs before Phase 1
+
+Only facts already measured in `evidence/phase0-first-look-2026-09-16.md` are used. The phase gates below still apply to the full decoder.
+
+1. Detection: MVER-then-AHDR recognition and `AdtV26` kind (Phase 0 steps 1–3, pulled forward).
+2. Minimal reader: `AHDR` dims, `ALOC` X/Y, `AVTX` outer+inner float arrays, and nothing else. It never throws, and uses a diagnostic on short chunks.
+3. Slicer: outer row-major + inner second block → per-chunk 145-entry 9-8-9 heights (the Phase 2 step 1 slicer, pulled forward). Normals are computed from heights, not read from `ANRM`.
+4. `AhdrTerrainAdapter` minimal: content-sniff the folder, place tiles by `ALOC`, empty layers/placements, and a "provisional" label.
+5. Viewer entry "Open AHDR terrain folder…" rendered through the existing terrain wireframe mode.
+6. **Gate**: `evidence/fastpath-wireframe.md` with screenshots showing SC-009 (no cracks on ALOC-adjacent edges), and a note on whether the inner grid looks right.
+
 Each phase ends with a real-corpus gate recorded in `evidence/`. Per the constitution, a phase is
 not started until the previous gate passes.
 
 ### Phase 0: Detection + corpus inventory (US1, US4; FR-001–003)
 
-1. Add `AdtV22`, `AdtV22Error`, `AdtAhdrUnknownVersion` to `WowFileKind` and `MapFileKind`. Grep every `AdtV23` switch/predicate site and extend each explicitly.
-2. `WowFileDetector` AHDR branch: pick the kind from `AHDR.version` (22, 23, else unknown), keeping the `.error` split.
+1. Add `AdtV22`, `AdtV22Error`, `AdtV26`, `AdtAhdrUnknownVersion` to `WowFileKind` and `MapFileKind`. Grep every `AdtV23` switch/predicate site and extend each explicitly.
+2. `WowFileDetector`: recognize `AHDR` as the first chunk **or** the chunk right after `MVER` (observed revision 26), content-only with no filename or extension reliance. Pick the kind from `AHDR.version` (22, 23, 26, else unknown), keeping the `.error` split.
 3. Replace the synthetic detector/summary tests that assert v23 for every AHDR file with version-parametrized tests (22, 23, 99).
 4. Widen `AdtV23SummaryReader`'s guard to all AHDR kinds; add v22 to the inspect `map` output.
 5. `AdtAhdrInventoryReader`: recursive chunk walk that accounts for every byte. Top-level chunks, `ACNK` header plus nested chunks, `ALYR` fixed part plus nested `AMAP`. Record id, offset, size, parent, and gaps/overruns. Probe both padded and unpadded sub-chunk walks, and report which one accounts for all bytes.
@@ -162,7 +173,7 @@ not started until the previous gate passes.
 
 1. `AdtAhdrTileSlicer`: whole-tile outer/inner grids become per-chunk 145-entry interleaved heights/normals, using the Phase 1 winning order. Known-answer tests use an indexed ramp.
 2. Resolve height frame (absolute vs chunk-relative) from the Phase 1 evidence, and set `TerrainChunkData.WorldPosition` from tile/chunk grid math shared with the existing adapters.
-3. `AhdrTerrainAdapter` tile discovery: enumerate `<map>_<x>_<y>` files in the folder, use an optional WDT when present, and fall back to `ACNK` index fields when a filename doesn't parse (flag disagreements).
+3. `AhdrTerrainAdapter` tile discovery: content-sniff every file in the folder (any name or extension), and place each tile by `ALOC[1]` = X, `ALOC[2]` = Y (measured). Flag missing `ALOC` and duplicate tiles. There is no WDT; the folder of tiles is the whole map.
 4. `LoadTileWithPlacements`: fill `TerrainChunkData` (heights, normals, layers → `TileTextures` indices, 64x64 alpha, shadow, area id). Map `ACDO` to `MddfPlacement` or `ModfPlacement` by the referenced name's extension, using the Phase 1 frame.
 5. Per-tile failure isolation: a failed tile is logged and surfaced in the tile list; the rest of the map loads (US3 scenario 4).
 6. Viewer entry point: "Open ADT/v22 folder…" beside the Rosetta datastore open, wired through `TerrainManager`. Phasing, placement writing and cartography members return the documented "unsupported" values.

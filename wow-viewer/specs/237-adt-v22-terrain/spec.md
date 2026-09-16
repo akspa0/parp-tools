@@ -28,12 +28,42 @@ Real v22 files have just become available. The toolchain can't do anything usefu
 - Every existing test fixture is a synthetic buffer; no real `AHDR` file has ever been parsed.
 - There is no terrain adapter, so the viewer can't display the terrain at all.
 
+**First look at the real corpus (2026-09-16, [evidence/phase0-first-look-2026-09-16.md](evidence/phase0-first-look-2026-09-16.md))**: the 700 files Marlamin passed on are a
+**previously undocumented revision** of this family, not the wiki's v22. Every file is `MVER` 26 followed by `AHDR`
+(version 26), so the current detector's AHDR-first check never sees them. They add three chunks the wiki doesn't list
+(`ALOC`, `AOCH`, `ADST`). Filenames are bare FileDataIDs that encode no position. Tile coordinates are **measured**
+to come from `ALOC`: fields 1 and 2 are tile X and Y, and neighbouring tiles' height edges match exactly.
+
+**Provenance (operator, 2026-09-16)**: these files are **public**. They ship in today's `wow_classic_beta` build, the first
+WoW: Forever build on Battle.net servers and only hours old. **There is no WDT, map table entry or listfile name for
+them (operator-confirmed)**, so everything must come from the tile files themselves.
+
 The wowdev.wiki pages describe themselves as incomplete ("may not list all chunks", "do not bother
 implementing until final version"). Per the project's standing rule that a named field is
 unexamined until measured, every wiki layout in this spec is a **hypothesis to verify against the
 real files**, not an established fact.
 
 ## User Scenarios & Testing *(mandatory)*
+
+### User Story 0 - Fast path: see the new terrain as a wireframe (Priority: P1, first)
+
+The operator opens `test_data/v22_adts/unknown/` in the viewer and sees the terrain of the new revision-26 tiles as a
+height wireframe, each tile at its `ALOC` position. There are no textures, objects or lighting.
+
+**Why this priority**: the files are hours old and public. A first render is worth more now than a complete decoder
+later (time-to-signal). It uses **only measured facts**: detection (MVER + AHDR), `ALOC` tile X/Y, and row-major outer
+heights, which are seam-proven. It does not wait on the probes for normals, alpha or placements.
+
+**Independent Test**: open the folder; the 30 non-flat tiles appear as one continuous wireframe landscape with no
+cracks at tile edges; the 669 flat tiles appear flat (or are hidden by a toggle).
+
+**Acceptance Scenarios**:
+
+1. **Given** the corpus folder (extensionless FileDataID names), **When** the operator opens it, **Then** 699 tiles are listed by `ALOC` X/Y and none are placed by filename.
+2. **Given** two `ALOC`-adjacent tiles, **When** they render as wireframe, **Then** their shared edge has no visible crack.
+3. **Given** the inner 128×128 grid is not yet proven, **When** the wireframe renders, **Then** inner vertices come from the `AVTX` second block, and the result is itself a visual check on that hypothesis (a wrong inner order shows as spikes).
+
+---
 
 ### User Story 1 - Know exactly what the new files contain (Priority: P1)
 
@@ -51,8 +81,9 @@ unexplained bytes.
 
 **Acceptance Scenarios**:
 
-1. **Given** a folder of real v22 files, **When** the operator inventories it, **Then** each file is
-   reported as version 22 (not 23), and header dimensions/grid counts are listed.
+1. **Given** a folder of real AHDR-family files (extensionless, named by FileDataID), **When** the operator inventories it,
+   **Then** each file is reported with its actual revision (26 in the current corpus, never mislabeled v23), and header
+   dimensions/grid counts and `ALOC` tile coordinates are listed.
 2. **Given** a file containing a chunk the documentation does not list, **When** it is inventoried,
    **Then** the unknown chunk is reported by name, size, occurrence count and nesting position, not
    skipped silently.
@@ -134,22 +165,24 @@ detection change at the `AHDR` branch must not leak into them.
 
 ### Edge Cases
 
-- `AHDR.version` is neither 22 nor 23: report it as an unknown `AHDR` version and still inventory it; do not guess.
+- `AHDR` appears either first (wiki v22/v23) or immediately after `MVER` (observed revision 26): both must be detected.
+- `AHDR.version` is not a known revision (22, 23, 26): report it as an unknown `AHDR` revision and still inventory it; do not guess.
+- Files have no extension and FileDataID names: detection must be content-based, and nothing may be inferred from the name.
 - The file has a `.error` suffix (as existing detection already recognizes): keep that distinction for both versions.
 - `AHDR` vertex or chunk dimensions differ from 129/129/16/16: decode using the header values when they are self-consistent with the payload sizes, and flag them otherwise.
 - `ACNK` payload is 0x40 bytes or smaller (no header per the wiki): treat it as an empty chunk and record it.
-- Alpha map encoding can't be taken from WDT settings (no WDT present): infer it from the payload size, and report a size that fits neither encoding.
+- Alpha map encoding can't come from WDT settings, because **no WDT exists** for these files: infer it from the payload size, and report a size that fits neither encoding.
 - `ALYR` references a texture index beyond the `ATEX` table: flag it and render that layer with a placeholder.
 - `ACDO` model id beyond the `ADOO` table: flag it and skip the placement.
 - The `ACDO` trailing "name/doodadsets" field is undocumented in size: measure the actual record size across the corpus before fixing a layout.
 - Normal-vector triples don't normalize (magnitude far from 1): report the rate; don't silently renormalize away evidence of a wrong component order.
-- Tile coordinates aren't recoverable from the filename: fall back to the per-chunk index fields, and flag any disagreement between the two.
+- A file lacks `ALOC`, or two files claim the same `ALOC` tile: flag it, and do not place that tile silently. (In the current corpus the ACNK index fields are 0, so they are not a fallback.)
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-- **FR-001**: Detection MUST read the `AHDR` version field and distinguish ADT/v22 from ADT/v23 (and flag other versions as unknown), while preserving the existing `.error` distinction.
+- **FR-001**: Detection MUST recognize AHDR-family files whether `AHDR` is the first chunk or follows `MVER`, independent of filename or extension. It MUST record the revision from `AHDR.version` (22, 23, 26 known; others flagged as unknown) and preserve the existing `.error` distinction.
 - **FR-002**: The system MUST provide a corpus inventory that reports, per file: detected version, header dimensions, and every top-level and nested chunk with its size, including chunks absent from the documentation.
 - **FR-003**: The inventory MUST compare each known chunk's observed size against its documented layout and report every disagreement.
 - **FR-004**: The system MUST decode `AVTX` into outer (129x129) and inner (128x128) height grids, and `ANRM` into normals in the same order, honoring header dimensions.
@@ -160,11 +193,12 @@ detection change at the `AHDR` branch must not leak into them.
 - **FR-009**: Every field interpretation that the wiki leaves undocumented or ambiguous MUST be settled by a recorded measurement on the real corpus, kept as an evidence note, before it is relied on for rendering.
 - **FR-010**: Decoding MUST NOT throw on a malformed tile. It MUST return a result with explicit per-channel failure diagnostics.
 - **FR-011**: The inspection tooling MUST be able to dump any decoded tile's contents (header, name tables, per-chunk layers/placements, height and normal statistics) in human-readable and machine-readable form.
-- **FR-012**: The viewer MUST open a folder of v22/v23 tiles as a map, with or without an accompanying WDT, and list the tiles present.
+- **FR-012**: The viewer MUST open a folder of AHDR-family tiles as a map **from the tile files alone** (no WDT, map table or listfile exists for them) and list the tiles present.
 - **FR-013**: The viewer MUST render decoded terrain with heights, normals, texture layers, alpha blending and shadows, using the same terrain rendering path as other formats.
 - **FR-014**: The viewer MUST place decoded object placements, resolving model names from the tile's model table and assets from the configured data source when available.
 - **FR-015**: Existing map format detection, reading and rendering MUST be unchanged.
 - **FR-016**: Writing or converting to v22/v23 is out of scope.
+- **FR-017**: A fast-path wireframe (US0) MUST render using only measured layout facts, and MUST be labelled in the UI as provisional (no textures/objects; inner-grid order unproven).
 
 ### Key Entities
 
@@ -180,22 +214,23 @@ detection change at the `AHDR` branch must not leak into them.
 
 ### Measurable Outcomes
 
-- **SC-001**: 100% of files in the real corpus are assigned a version from their header, and 0 v22 files are labeled v23.
+- **SC-001**: 100% of files in the real corpus are detected as AHDR-family with the revision from their header (699/699 unique files are revision 26 today), and 0 files are mislabeled.
 - **SC-002**: 100% of bytes in every real file are accounted for by a known or explicitly inventoried unknown chunk. There are no unexplained gaps or overruns.
 - **SC-003**: At least 99% of real tiles decode with no channel failures; every failure has a recorded cause.
 - **SC-004**: Heights of horizontally or vertically adjacent real tiles agree along shared edges (median absolute edge difference at or near zero). This proves the outer/inner grid order is correct.
 - **SC-005**: At least 95% of decoded normals have magnitude within 5% of unit length, and normals agree in direction with normals derived from the decoded heights. This proves component order and scaling.
 - **SC-006**: 100% of texture-layer and object-placement references resolve to an entry in their tile's name table, or are individually flagged.
 - **SC-007**: The operator can open the corpus in the viewer and confirm by eye that terrain, textures and object placements appear coherent and seamless across tile boundaries.
+- **SC-009**: The US0 wireframe shows the 30 non-flat corpus tiles as one continuous surface with no crack at any of the 71 `ALOC`-adjacent tile edges (35 + 36 measured pairs).
 - **SC-008**: The existing test suite passes, with only the "every AHDR file is v23" assertions replaced.
 
 ## Assumptions
 
-- **Corpus not yet on hand (2026-09-16)**: the operator is acquiring the v22 files. Phase 0 cannot start until they arrive; synthetic-fixture work (detection fix, inventory walker) may proceed ahead of it.
+- **Corpus on hand (2026-09-16)**: 700 files (699 unique) in `test_data/v22_adts/unknown/`, passed on by Marlamin. First measurements are in [evidence/phase0-first-look-2026-09-16.md](evidence/phase0-first-look-2026-09-16.md).
 - **Corpus location**: `wow-viewer/test_data/v22_adts/` (operator-decided 2026-09-16). This folder is already git-ignored (`wow-viewer/test_data/*`), so the files are never committed (Data Policy). Tooling still accepts any root as an argument.
-- The files are loose files on local disk. A WDT may or may not accompany them. Container/archive extraction is not part of this spec.
+- The files are loose files on local disk. **No WDT, map table entry or listfile names exist for them** (operator-confirmed). Container/archive extraction is not part of this spec.
 - The corpus is primarily v22. v23 support comes through the same reader because the formats are near-identical, but v23 is only validated as far as real v23 files are available.
 - The viewer's existing terrain chunk/tile representation can carry v22 data. Whole-tile heights and normals are sliced into per-chunk grids, and whole-tile names are mapped to the existing per-tile tables.
 - Referenced textures and models resolve through the viewer's normal data-source configuration. Missing assets degrade to placeholders; they do not block rendering.
-- Tile grid coordinates follow the usual `<map>_<x>_<y>` filename convention unless the corpus shows otherwise.
+- Tile grid coordinates come from `ALOC` (measured, see evidence). Filenames are FileDataIDs with no positional meaning (operator-confirmed), and the map identity is unknown. `ALOC[0]` = 2869 is unexplained and must not be named without evidence from the files themselves.
 - Liquid is not documented for v22 and is out of scope unless the corpus inventory reveals a liquid chunk, in which case it becomes a follow-up.

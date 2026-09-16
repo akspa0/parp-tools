@@ -11,19 +11,24 @@ Phase 0/1 evidence settles it, and the final layout is recorded in
 | Field | Type | Source | Notes |
 |---|---|---|---|
 | SourcePath | string | | |
-| Kind | MapFileKind | AHDR.version | AdtV22 / AdtV23 / AdtAhdrUnknownVersion (+ Error) |
+| Kind | MapFileKind | AHDR.version | AdtV22 / AdtV23 / AdtV26 / AdtAhdrUnknownVersion (+ Error) |
 | Version | uint | AHDR +0x00 | |
 | VerticesX, VerticesY | int | AHDR +0x04, +0x08 | expected 129 |
 | ChunksX, ChunksY | int | AHDR +0x0C, +0x10 | expected 16 |
-| HeaderReserved | uint[11] | AHDR +0x14 | kept raw; inventory reports any nonzero |
+| HeaderReserved | uint[11] | AHDR +0x14 | kept raw; revision 26 has `8396383` at +0x14 (unexplained) |
+| AlocField0 | uint | ALOC +0x00 | constant 2869 in corpus; unexplained |
+| TileX, TileY | int | ALOC +0x04, +0x08 | **measured** tile position |
+| AlocTail | uint[2] | ALOC +0x0C, +0x10 | equal to TileX/TileY in corpus; meaning open |
+| Aoch | byte[2048]? | AOCH | all zero in corpus; kept raw |
+| Adst | uint[3]? | ADST | 321/699 files; kept raw |
 | OuterHeights | float[VX×VY] | AVTX first block | order *(measure R4)*, frame *(measure R5)* |
 | InnerHeights | float[(VX−1)×(VY−1)] | AVTX second block | |
 | OuterNormals / InnerNormals | Vector3[] | ANRM, sbyte/127 | component order *(measure R6)*; raw bytes retained |
-| TextureNames | string[] | ATEX | one chunk vs NUL-separated *(measure)* |
-| ModelNames | string[] | ADOO | M2 and WMO mixed |
+| TextureNames | string[] | ATEX | **one chunk per name** (measured, revision 26); may be empty |
+| ModelNames | string[] | ADOO | **one chunk per name** (measured); M2 and WMO mixed; looks map-global (the same ~225/285 names in every tile) |
 | Chunks | AdtAhdrChunk[ChunksX×ChunksY] | ACNK in file order | |
-| FlightBounds | (short[9] max, short[9] min)? | AFBO | v23 only |
-| VertexShading | byte[]? (RGBA per vertex) | ACVT | v23 only; order same as AVTX *(measure)* |
+| FlightBounds | (short[9] max, short[9] min)? | AFBO | v23 only; absent in revision 26 |
+| VertexShading | byte[]? (RGBA per vertex) | ACVT | v23 **and revision 26** (every file); order same as AVTX *(measure)* |
 | UnknownChunks | AdtAhdrRawChunk[] | inventory | id, offset, size, parent |
 | Diagnostics | AdtAhdrDiagnostic[] | reader | per channel: Ok / Missing / SizeMismatch / Malformed + message |
 
@@ -31,7 +36,7 @@ Phase 0/1 evidence settles it, and the final layout is recorded in
 
 | Field | Type | Source | Notes |
 |---|---|---|---|
-| IndexX, IndexY | int | ACNK +0x00, +0x04 | tile-absolute vs chunk-local *(measure R11)* |
+| IndexX, IndexY | int | ACNK +0x00, +0x04 | **0 in revision-26 corpus**; not a position source |
 | Flags | uint | v23 ACNK +0x08 | v22: reserved DWORD, kept raw |
 | AreaId | int | ACNK +0x0C | |
 | HolesLowRes | ushort | v23 +0x10 | v22: reserved |
@@ -84,7 +89,7 @@ Phase 0/1 evidence settles it, and the final layout is recorded in
 
 | `TerrainChunkData` | From |
 |---|---|
-| TileX, TileY | filename (cross-checked with ACNK index) |
+| TileX, TileY | `ALOC[1]`, `ALOC[2]` (measured; filenames are meaningless FileDataIDs) |
 | ChunkX, ChunkY, McinIndex | chunk grid position; McinIndex = ChunkY×16+ChunkX |
 | Heights (145, 9-8-9) | `AdtAhdrTileSlicer`: outer[(cy·8+r), (cx·8+c)] rows interleaved with inner[(cy·8+r), (cx·8+c)] using the R4 order, then re-framed per R5 |
 | Normals (145) | same slicing over outer/inner normals |

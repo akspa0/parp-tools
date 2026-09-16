@@ -17,9 +17,16 @@ wrong answer (see memory: "verify detector power before null results", "a name s
 
 ---
 
+### R0: First look at the real corpus (2026-09-16)
+
+**Provenance**: public files from the `wow_classic_beta` build of 2026-09-16 (first WoW: Forever build on Battle.net). **No WDT, map entry or listfile names exist for these files (operator-confirmed)**. The unexplained values (`ALOC[0]` = 2869, `AHDR`+0x14 = 8396383, `AOCH`, `ADST`) can only be studied from the tile files themselves.
+
+See [evidence/phase0-first-look-2026-09-16.md](evidence/phase0-first-look-2026-09-16.md). Summary: revision **26** (`MVER` 26 + `AHDR` 26), new chunks `ALOC`/`AOCH`/`ADST`, `ACVT` in every file,
+chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decisions below are updated where the corpus answered them.
+
 ### R1: Version identity
 
-- **Decision**: Split kinds by `AHDR.version`: `AdtV22`, `AdtV23`, `AdtAhdrUnknownVersion`, each with the `.error` variant where it already exists.
+- **Decision (updated after first look)**: Split kinds by `AHDR.version`: `AdtV22`, `AdtV23`, `AdtV26`, `AdtAhdrUnknownVersion`, with `.error` variants where they already exist. Detection accepts `AHDR` first **or** second after `MVER`, and never relies on extension or filename (the corpus is extensionless, named by FileDataID).
 - **Rationale**: FR-001. The current "every AHDR file is v23" behavior mislabels exactly the files that just arrived.
 - **Alternatives**: a single `AdtAhdr` kind plus a version property. Rejected because every consumer already switches on kind, and a hidden version would be silently ignored the way it is now.
 
@@ -37,6 +44,8 @@ wrong answer (see memory: "verify detector power before null results", "a name s
 
 ### R4: Vertex order (AVTX outer/inner → 9-8-9 interleave)
 
+- **Outer grid ANSWERED (revision 26)**: row-major. `ALOC[1]` runs along the column axis and `ALOC[2]` along the row axis. Seam median |Δh| = 0.0000 on both axes vs ≥650 for all 15 alternatives each (35/36 pairs). **Inner grid still open.**
+
 - **Hypothesis (wiki)**: 129x129 outer block, then 128x128 inner block, row-major.
 - **Decision**: Accept the order only after the seam probe. For each candidate order (transpose × flipI × flipJ), measure the median |Δh| along shared edges of adjacent real tiles. The winner must beat the runner-up by a clear margin.
 - **Detector power**: Apply a known flip to a tile's grid and confirm its seam score degrades. If the corpus has no adjacent tile pairs, fall back to within-tile outer/inner consistency: an inner vertex should lie near the mean of its 4 outer neighbors.
@@ -45,6 +54,7 @@ wrong answer (see memory: "verify detector power before null results", "a name s
 ### R5: Height frame
 
 - **Question**: Absolute world heights, or relative to something? v18 MCVT is relative to MCNK `position.z`, but the v22 ACNK header documents no position.
+- **Partially ANSWERED (revision 26)**: heights are continuous across tile edges with no per-tile offset, so they are absolute at least at tile level. Within-tile chunk-boundary behaviour is still to measure.
 - **Decision**: Measure. Seam continuity in absolute terms settles it, since relative heights would produce steps at chunk boundaries inside a tile. The chunk-boundary step statistic inside a tile is the detector.
 
 ### R6: Normal encoding (ANRM)
@@ -55,7 +65,7 @@ wrong answer (see memory: "verify detector power before null results", "a name s
 
 ### R7: Alpha map encoding
 
-- **Hypothesis (wiki)**: 8-bit uncompressed or "4-bit RLE", selected by WDT settings.
+- **Hypothesis (wiki)**: 8-bit uncompressed or "4-bit RLE", selected by WDT settings. **No WDT exists for this corpus**, so the encoding must be inferred from the data.
 - **Decision**: Infer from payload size per map. 4096 means 8-bit 64x64; 2048 means 4-bit 64x64; anything else is treated as compressed (MCAL-style RLE is the first candidate) and flagged. Decode through the existing `AdtMcalDecoder` **without modifying it** (Terrain Alpha Risk Area). Record the chosen encoding and its reason per map (FR-007).
 - **Measure**: the size histogram from the inventory. Also check whether 4-bit maps need the legacy edge fix (compare the last row/column against the neighboring chunk).
 
@@ -75,15 +85,25 @@ wrong answer (see memory: "verify detector power before null results", "a name s
 ### R10: Asset resolution / data source
 
 - **Decision**: The adapter uses the viewer's configured `IDataSource`. It does not invent a client.
-- **Open**: which client build best matches the texture/model paths the tiles reference. The inventory dumps the distinct `ATEX`/`ADOO` names so this can be answered by resolving them against the configured clients (and the listfile), not guessed.
+- **Open**: which client build best matches the texture/model paths the tiles reference. The inventory dumps the distinct `ATEX`/`ADOO` names so this can be answered by resolving them against the configured clients, not guessed. The tile files themselves have no listfile names.
 
 ### R11: Tile coordinates
 
-- **Decision**: Parse `<map>_<x>_<y>` from the filename. Cross-check against the `ACNK` index fields (which may be tile-absolute or chunk-local; measure which). A WDT is optional.
+- **ANSWERED (revision 26)**: `ALOC` = 5×uint32 `(2869, X, Y, X, Y)`. X = `ALOC[1]` (18–45), Y = `ALOC[2]` (16–40), and 699 distinct tiles. Proven by seam agreement (see R4). Filenames are FileDataIDs with no positional meaning. ACNK index fields are 0 in the corpus, so they are not usable.
+- **Open**: `ALOC[0]` = 2869 (constant; unexplained, do not name it); why fields 3/4 duplicate 1/2.
 
 ### R12: Real-data tests
 
 - **Decision**: The `WOWVIEWER_AHDR_CORPUS` environment variable points at the corpus root. Real-data tests skip when it is unset. No path is hardcoded (Constitution VI).
+
+### R14: Chunks new in revision 26
+
+| Chunk | Size | Observed | Status |
+|---|---|---|---|
+| `ALOC` | 20 | every file | tile location, measured (R11) |
+| `AOCH` | 2048 | every file, **all bytes zero** | unexplained. 2048 = 64×32, so possibly a per-chunk occlusion/horizon table unused here; don't name it until non-zero data appears |
+| `ADST` | 12 | 321/699 files | e.g. `(63420377, 190719, 1)`; unexplained |
+| `AHDR`+0x14 | 4 | `8396383` in every file | unexplained; do not name it |
 
 ### R13: Liquid
 
