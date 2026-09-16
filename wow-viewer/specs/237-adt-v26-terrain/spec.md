@@ -12,7 +12,10 @@
 
 ## Discovery record
 
-These tiles are an **ADT version 26**: a completely new terrain format that had never been seen before 2026-09-16.
+These tiles are **DAT version 26** (referred to as "ADT v26" in repo paths and code names): a completely new version of the
+DAT raw terrain project files, the source files the client's ADTs are built from. It had never been seen before 2026-09-16.
+The operator proposed years earlier that these loose files were the raw ADT project files; the wiki's ADT/v22 page now
+describes the family as DAT files as well.
 
 | When (2026-09-16) | Event |
 |---|---|

@@ -1,7 +1,7 @@
 __TOC__
-'''ADT v26''' is a terrain tile format first seen in the <tt>wow_classic_beta</tt> build published on 2026-09-16 (build number: TODO), the first WoW: Forever build on Battle.net. It shares most chunk names with [[ADT/v22]] and [[ADT/v23]], but it is a distinct version: <tt>MVER</tt> comes before <tt>AHDR</tt>, the version is 26, and it adds new chunks (<tt>ALOC</tt>, <tt>AOCH</tt>, <tt>ADST</tt>). The [[ADT/v22]] page also lists version 26 in its <tt>AHDR</tt> version comment.
+'''DAT v26''' is a version of the '''DAT''' terrain files: the raw terrain project files that the ADTs the client reads are built from (the internal editor's counterpart of an ADT, see [[ADT/v22]]). It was first seen in the <tt>wow_classic_beta</tt> build published on 2026-09-16 (build number: TODO), the first WoW: Forever build on Battle.net. It shares most chunk names with DAT versions 22 and 23 (documented at [[ADT/v22]] and [[ADT/v23]]), but it is a distinct version: <tt>MVER</tt> comes before <tt>AHDR</tt>, the version is 26, and it adds new chunks (<tt>ALOC</tt>, <tt>AOCH</tt>, <tt>ADST</tt>). The [[ADT/v22]] page also lists version 26 in its <tt>AHDR</tt> version comment.
 
-Everything below was observed in 699 files from that build. Where a field's meaning is not yet known, the page gives the observed values instead of guessing. Field names carried over from [[ADT/v22]] / [[ADT/v23]] are marked ''(v22 name)'' when they have not been verified for v26.
+Everything below was observed in 699 files from that build. Where a field's meaning is not yet known, the page gives the observed values instead of guessing. Field names carried over from the DAT v22/v23 documentation ([[ADT/v22]] / [[ADT/v23]]) are marked ''(v22 name)'' when they have not been verified for v26.
 
 == Files ==
 * The files ship without names: they are known only by FileDataID (observed range 6893600–6894299), with no extension. No WDT or listfile entry has been observed for them.

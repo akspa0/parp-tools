@@ -1,4 +1,10 @@
-# ADT v26 Terrain Format
+# DAT v26 Terrain Format (raw ADT project files)
+
+**Naming (2026-09-16)**: these are **DAT files**: the raw terrain project files that the client's ADTs are built from (the
+wiki's ADT/v22 page now also describes versions 22/23/26 as DAT files). The operator proposed years earlier that these loose
+files were the raw ADT project files; version 26 is the first corpus large enough to show it. The repo paths
+(`adt-v26-format.md`, `specs/237-adt-v26-terrain/`, and code names such as `AdtV26`) keep "ADT" to avoid churn. The format
+name is **DAT v26**.
 
 **Status**: living document, first written 2026-09-16. Owner spec: [237 ADT v26](../../specs/237-adt-v26-terrain/spec.md).
 **Confidence key**: **MEASURED** = proven on the real corpus with evidence linked; *open* = observed but not explained;
