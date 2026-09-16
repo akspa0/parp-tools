@@ -36,6 +36,12 @@ public interface IDataSource : IDisposable
     /// Returns false for archive-backed files with no loose source on disk.
     /// </summary>
     bool TryResolveWritablePath(string virtualPath, out string? fullPath);
+
+    /// <summary>
+    /// Spec 239: maps a virtual path to a FileDataID for FileDataID-aware sources (for example a WDT's
+    /// MAID table naming a tile's ADT files). Takes priority over listfile names. Default: ignored.
+    /// </summary>
+    void RegisterFileDataIdAlias(string virtualPath, uint fileDataId) { }
     
     /// <summary>
     /// Get a filtered list of known file paths matching a pattern.

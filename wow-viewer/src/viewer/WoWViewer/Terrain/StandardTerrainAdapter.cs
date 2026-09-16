@@ -9,6 +9,7 @@ using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using WowViewer.Core.Diagnostics;
 using WowViewer.Core.IO.Dbc;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Lk;
 using WowViewer.Core.IO.Liquids;
 using WowViewer.Core.IO.Maps;
@@ -112,6 +113,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Parse MAIN chunk to enumerate tiles
         _existingTiles = ResolveExistingTiles(wdtBytes);
         _existingTileSet = new HashSet<int>(_existingTiles);
+        RegisterMaidTileAliases(wdtBytes);
 
         _adtProfile = ResolveTerrainProfile(buildVersion, _existingTiles);
         _mcnkParseOptions = new Mcnk.ParseOptions
@@ -169,6 +171,41 @@ public class StandardTerrainAdapter : ITerrainAdapter
             if (ViewerLog.Verbose)
                 ViewerLog.Trace($"[Terrain] Tile[{di}]: rawIdx={idx}, tx={tx}(row), ty={ty}(col), file={fn}, exists={exists}");
         }
+    }
+
+    /// <summary>
+    /// Spec 239: FileDataID-era WDTs name each tile's files in MAID (8 uint32 per MAIN slot: root, obj0,
+    /// obj1, tex0, lod, mapTexture, mapTextureN, minimap). Registering them as path aliases lets every
+    /// existing path-based lookup find the exact files this build uses, with or without listfile names.
+    /// Measured on wow_classic_beta 1.60.1: development.wdt MAID has 82 tiles, all root/obj0/tex0 readable.
+    /// </summary>
+    private void RegisterMaidTileAliases(byte[] wdtBytes)
+    {
+        int maidOffset = FindChunk(wdtBytes, "MAID");
+        if (maidOffset < 0 || maidOffset + 8 > wdtBytes.Length)
+            return;
+
+        int size = BitConverter.ToInt32(wdtBytes, maidOffset + 4);
+        int payload = maidOffset + 8;
+        string[] suffixes = [".adt", "_obj0.adt", "_obj1.adt", "_tex0.adt", "_lod.adt"];
+        int registered = 0;
+        for (int slot = 0; slot < 4096 && payload + (slot + 1) * 32 <= payload + size && payload + (slot + 1) * 32 <= wdtBytes.Length; slot++)
+        {
+            int row = slot / 64;
+            int column = slot % 64;
+            string basePath = $"{_mapDir}\\{_mapName}_{column}_{row}";
+            for (int field = 0; field < suffixes.Length; field++)
+            {
+                uint fileDataId = BitConverter.ToUInt32(wdtBytes, payload + slot * 32 + field * 4);
+                if (fileDataId == 0)
+                    continue;
+
+                _dataSource.RegisterFileDataIdAlias(basePath + suffixes[field], fileDataId);
+                registered++;
+            }
+        }
+
+        ViewerLog.Important(ViewerLog.Category.Terrain, $"WDT MAID: registered {registered} tile file FileDataIDs for '{_mapName}'");
     }
 
     private AdtProfile ResolveTerrainProfile(string? buildVersion, IReadOnlyList<int> existingTiles)
@@ -1185,6 +1222,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 textures.AddRange(ParseMtexViaMhdr(texBytes, texMhdrStart, texMhdr));
             }
 
+            // Spec 239: FileDataID-era _tex0 files have no MTEX; MCLY texture ids index MDID (diffuse FileDataIDs).
+            if (textures.Count == 0)
+                textures.AddRange(ReadMdidTextureNames(texBytes));
         }
 
         // Find MHDR in root ADT — all other chunks located via MHDR offsets (or flat scan fallback)
@@ -3054,6 +3094,25 @@ public class StandardTerrainAdapter : ITerrainAdapter
             ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) flat placements: mddf={mddfOff >= 0}, modf={modfOff >= 0}, mmid={mmidEntries?.Count ?? 0}, mwid={mwidEntries?.Count ?? 0}");
     }
 
+    /// <summary>Spec 239: texture names from MDID (uint32 FileDataID per texture index), resolved through the listfile.</summary>
+    private static IEnumerable<string> ReadMdidTextureNames(byte[] texBytes)
+    {
+        int mdidOffset = FindChunk(texBytes, "MDID");
+        if (mdidOffset < 0 || mdidOffset + 8 > texBytes.Length)
+            yield break;
+
+        int size = BitConverter.ToInt32(texBytes, mdidOffset + 4);
+        for (int i = 0; i + 4 <= size && mdidOffset + 8 + i + 4 <= texBytes.Length; i += 4)
+        {
+            uint fileDataId = BitConverter.ToUInt32(texBytes, mdidOffset + 8 + i);
+            yield return fileDataId == 0 ? string.Empty : FileDataIdPaths.Resolve(fileDataId);
+        }
+    }
+
+    // MDDF flag 0x40 / MODF flag 0x8: the record's name id is a FileDataID, not an MMID/MWID index.
+    private const ushort MddfNameIdIsFileDataId = 0x40;
+    private const ushort ModfNameIdIsFileDataId = 0x8;
+
     /// <summary>
     /// Resolve a name from xID[index] → byte offset into string block.
     /// </summary>
@@ -3095,10 +3154,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
             float rotZ = BitConverter.ToSingle(data, pos + 24);
             float rotY = BitConverter.ToSingle(data, pos + 28);
             ushort scale = BitConverter.ToUInt16(data, pos + 32);
+            ushort mddfFlags = entrySize >= 36 ? BitConverter.ToUInt16(data, pos + 34) : (ushort)0;
 
             lock (_placementLock)
             {
-                string name = ResolveNameViaXid(nameId, mmidEntries, mmdxData);
+                string name = (mddfFlags & MddfNameIdIsFileDataId) != 0
+                    ? FileDataIdPaths.Resolve(nameId)
+                    : ResolveNameViaXid(nameId, mmidEntries, mmdxData);
                 int nameIdx = GetOrAddMdxName(name);
 
                 // Convert WoW coords to renderer: rendererX=MapOrigin-wowY, rendererY=MapOrigin-wowX, rendererZ=wowZ
@@ -3156,7 +3218,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             lock (_placementLock)
             {
-                string name = ResolveNameViaXid(nameId, mwidEntries, mwmoData);
+                string name = (flags & ModfNameIdIsFileDataId) != 0
+                    ? FileDataIdPaths.Resolve(nameId)
+                    : ResolveNameViaXid(nameId, mwidEntries, mwmoData);
                 int nameIdx = GetOrAddWmoName(name);
 
                 // Convert WoW coords to renderer: rendererX=MapOrigin-wowY, rendererY=MapOrigin-wowX, rendererZ=wowZ

@@ -108,12 +108,48 @@ public partial class ViewerApp
             _texResolver.SetDataSource(_dataSource);
             _catalogView?.SetDataSource(_dataSource, _texResolver);
             _dbcProvider = new MpqDBCProvider(_dataSource);
-            _dbcBuild = null; // DB2 table support for CASC builds is Spec 239.
             InitializeMinimapSupport();
-            RefreshDiscoveredMaps();
+
+            // Spec 239: DB2 tables resolve through the listfile; definitions are picked by the newest
+            // product's exact build (WoWDBDefs lists e.g. BUILD 1.60.1.69876 for wow_classic_beta).
+            _dbdDir = ResolveDbdDefinitionsDir();
+            _dbcBuild = _dbdDir is null ? null : storages[0].Product.Version;
+            if (_dbcBuild is not null)
+            {
+                try
+                {
+                    _texResolver.LoadFromDBC(_dbcProvider, _dbdDir!, _dbcBuild);
+                }
+                catch (Exception ex)
+                {
+                    ViewerLog.Important(ViewerLog.Category.Dbc, $"CASC {_dbcBuild}: replaceable texture tables unavailable: {ex.Message}");
+                }
+
+                try
+                {
+                    _areaTableService = new AreaTableService();
+                    _areaTableService.Load(_dbcProvider, _dbdDir!, _dbcBuild);
+                }
+                catch (Exception ex)
+                {
+                    _areaTableService = null;
+                    ViewerLog.Important(ViewerLog.Category.Dbc, $"CASC {_dbcBuild}: AreaTable unavailable: {ex.Message}");
+                }
+            }
+
+            try
+            {
+                RefreshDiscoveredMaps();
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Important(ViewerLog.Category.Dbc, $"CASC {_dbcBuild}: Map.db2 discovery failed ({ex.Message}); falling back to WDT file scan");
+                _discoveredMaps = MapDiscoveryService.DiscoverLooseMapsOnly(_dataSource);
+            }
+
             RefreshFileList();
 
-            _statusMessage = $"Loaded: {_dataSource.Name} (listfile: {listfile.Count} entries)";
+            _statusMessage = $"Loaded: {_dataSource.Name} (listfile: {listfile.Count} entries, build {_dbcBuild ?? "unknown"}, {_discoveredMaps.Count} maps)";
         }
         catch (Exception ex)
         {

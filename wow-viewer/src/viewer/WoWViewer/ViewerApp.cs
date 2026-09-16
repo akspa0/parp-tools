@@ -10687,20 +10687,18 @@ void main() {
             Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "test_data", "community-listfile-withcapitals.csv")),
         };
 
-        foreach (string candidate in bundledCandidates)
-        {
-            if (File.Exists(candidate))
-            {
-                ViewerLog.Info(ViewerLog.Category.MpqData, $"Using bundled listfile: {candidate}");
-                return candidate;
-            }
-        }
-
+        // New builds get listfile coverage within hours, so prefer the most recently written copy
+        // (bundled or downloaded) over the first bundled candidate that happens to exist.
         string? downloadedPath = ListfileDownloader.GetListfilePath();
-        if (!string.IsNullOrWhiteSpace(downloadedPath) && File.Exists(downloadedPath))
+        string? newest = bundledCandidates
+            .Append(downloadedPath ?? string.Empty)
+            .Where(static candidate => candidate.Length > 0 && File.Exists(candidate))
+            .OrderByDescending(static candidate => File.GetLastWriteTimeUtc(candidate))
+            .FirstOrDefault();
+        if (newest is not null)
         {
-            ViewerLog.Info(ViewerLog.Category.MpqData, $"Using cached/downloaded listfile: {downloadedPath}");
-            return downloadedPath;
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"Using listfile: {newest} ({File.GetLastWriteTime(newest):yyyy-MM-dd HH:mm})");
+            return newest;
         }
 
         ViewerLog.Important(ViewerLog.Category.MpqData, "No external listfile available. MPQ file discovery will rely on archive-internal names only.");

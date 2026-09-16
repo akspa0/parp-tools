@@ -38,9 +38,21 @@ public sealed class CascDataSource : IDataSource
     public bool FileExists(string virtualPath) =>
         TryGetFileDataId(virtualPath, out uint fileDataId) && FileExists(fileDataId);
 
-    /// <summary>Accepts listfile paths and <c>fdid:&lt;id&gt;</c> virtual paths.</summary>
+    /// <summary>Accepts <c>fdid:&lt;id&gt;</c> paths, registered aliases, then listfile paths.</summary>
     private bool TryGetFileDataId(string virtualPath, out uint fileDataId) =>
-        FileDataIdPaths.TryParse(virtualPath, out fileDataId) || _listfile.TryGetFileDataId(virtualPath, out fileDataId);
+        FileDataIdPaths.TryParse(virtualPath, out fileDataId)
+        || _aliases.TryGetValue(NormalizeAlias(virtualPath), out fileDataId)
+        || _listfile.TryGetFileDataId(virtualPath, out fileDataId);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, uint> _aliases = new(StringComparer.Ordinal);
+
+    public void RegisterFileDataIdAlias(string virtualPath, uint fileDataId)
+    {
+        if (fileDataId != 0)
+            _aliases[NormalizeAlias(virtualPath)] = fileDataId;
+    }
+
+    private static string NormalizeAlias(string path) => path.Replace('/', '\\').TrimStart('\\').ToLowerInvariant();
 
     public bool FileExists(uint fileDataId) => _storages.Any(s => s.FileExists(fileDataId));
 

@@ -31,6 +31,12 @@ public static class CascCommandSupport
             case "wmo":
                 RunWmo(tail);
                 break;
+            case "map-survey":
+                RunMapSurvey(tail);
+                break;
+            case "db2":
+                RunDb2(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown casc command '{command}'.");
                 ShowUsage();
@@ -240,6 +246,200 @@ public static class CascCommandSupport
         Console.WriteLine($"doodad defs={model.DoodadDefs.Count}, distinct doodad models={doodadNames.Count}, readable={doodadNames.Count(n => Read(n) is not null)}");
         foreach (string name in doodadNames.Take(4))
             Console.WriteLine($"  {name}");
+    }
+
+    /// <summary>
+    /// Spec 239: surveys every MAID tile of a WDT in one product: tex0 texture tables (MTEX vs MDID/MHID),
+    /// MCLY layer counts, and MDDF/MODF flag bits that mark FileDataID name references.
+    /// </summary>
+    private static void RunMapSurvey(string[] args)
+    {
+        string? install = GetOption(args, "--install");
+        string? product = GetOption(args, "--product");
+        string? cache = GetOption(args, "--cache");
+        string? wdtIdText = GetOption(args, "--wdt-id");
+        if (install is null || product is null || cache is null || wdtIdText is null)
+        {
+            Console.WriteLine("  casc map-survey --install <dir> --product <p> --cache <dir> --wdt-id <fileDataId> [--cdn-fill]");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        bool cdnFill = args.Contains("--cdn-fill", StringComparer.OrdinalIgnoreCase);
+        CascStorage storage = CascStorage.OpenLocal(install, product, cache, cdnFill);
+        byte[]? Read(uint id) => id != 0 && storage.TryReadFile(id, out byte[]? bytes) == CascReadStatus.Ok ? bytes : null;
+
+        byte[] wdt = Read(uint.Parse(wdtIdText)) ?? throw new InvalidOperationException("WDT not readable");
+        var chunks = TopChunks(wdt).ToDictionary(static c => c.Id, static c => c, StringComparer.Ordinal);
+        uint mphdFlags = BitConverter.ToUInt32(wdt, chunks["MPHD"].Offset);
+        Console.WriteLine($"WDT MPHD flags=0x{mphdFlags:X}; top-level chunks: {string.Join(' ', TopChunks(wdt).Select(static c => $"{c.Id}({c.Size})"))}");
+        if (!chunks.TryGetValue("MAID", out var maid))
+        {
+            Console.WriteLine("no MAID chunk");
+            return;
+        }
+
+        int tiles = 0, rootOk = 0, tex0Ok = 0, obj0Ok = 0, withMtex = 0, withMdid = 0, withMhid = 0;
+        var layerHistogram = new SortedDictionary<int, int>();
+        var tex0Chunks = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var obj0Chunks = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var mddfFlags = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var modfFlags = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var tileList = new List<string>();
+        var textureIds = new HashSet<uint>();
+        var doodadIds = new HashSet<uint>();
+        var wmoIds = new HashSet<uint>();
+        for (int slot = 0; slot < maid.Size / 32; slot++)
+        {
+            uint rootId = BitConverter.ToUInt32(wdt, maid.Offset + slot * 32);
+            uint obj0Id = BitConverter.ToUInt32(wdt, maid.Offset + slot * 32 + 4);
+            uint tex0Id = BitConverter.ToUInt32(wdt, maid.Offset + slot * 32 + 12);
+            if (rootId == 0 && obj0Id == 0 && tex0Id == 0)
+                continue;
+
+            tiles++;
+            tileList.Add($"{slot % 64}_{slot / 64}");
+            rootOk += Read(rootId) is null ? 0 : 1;
+
+            if (Read(tex0Id) is { } tex0)
+            {
+                tex0Ok++;
+                var top = TopChunks(tex0).ToList();
+                foreach (string id in top.Select(static c => c.Id).Distinct())
+                    tex0Chunks[id] = tex0Chunks.GetValueOrDefault(id) + 1;
+                withMtex += top.Any(static c => c.Id == "MTEX") ? 1 : 0;
+                withMdid += top.Any(static c => c.Id == "MDID") ? 1 : 0;
+                withMhid += top.Any(static c => c.Id == "MHID") ? 1 : 0;
+                foreach (var c in top.Where(static c => c.Id == "MDID"))
+                {
+                    for (int p = c.Offset; p + 4 <= c.Offset + c.Size; p += 4)
+                    {
+                        uint textureId = BitConverter.ToUInt32(tex0, p);
+                        if (textureId != 0)
+                            textureIds.Add(textureId);
+                    }
+                }
+                foreach (var mcnk in top.Where(static c => c.Id == "MCNK"))
+                {
+                    int layers = TopChunks(tex0, mcnk.Offset, mcnk.Offset + mcnk.Size).Where(static c => c.Id == "MCLY").Select(static c => c.Size / 16).FirstOrDefault();
+                    layerHistogram[layers] = layerHistogram.GetValueOrDefault(layers) + 1;
+                }
+            }
+
+            if (Read(obj0Id) is { } obj0)
+            {
+                obj0Ok++;
+                var top = TopChunks(obj0).ToList();
+                foreach (string id in top.Select(static c => c.Id).Distinct())
+                    obj0Chunks[id] = obj0Chunks.GetValueOrDefault(id) + 1;
+                foreach (var c in top.Where(static c => c.Id == "MDDF"))
+                {
+                    for (int p = c.Offset; p + 36 <= c.Offset + c.Size; p += 36)
+                    {
+                        ushort flags = BitConverter.ToUInt16(obj0, p + 34);
+                        string key = $"0x{flags:X}";
+                        mddfFlags[key] = mddfFlags.GetValueOrDefault(key) + 1;
+                        if ((flags & 0x40) != 0)
+                            doodadIds.Add(BitConverter.ToUInt32(obj0, p));
+                    }
+                }
+                foreach (var c in top.Where(static c => c.Id == "MODF"))
+                {
+                    for (int p = c.Offset; p + 64 <= c.Offset + c.Size; p += 64)
+                    {
+                        ushort flags = BitConverter.ToUInt16(obj0, p + 56);
+                        string key = $"0x{flags:X}";
+                        modfFlags[key] = modfFlags.GetValueOrDefault(key) + 1;
+                        if ((flags & 0x8) != 0)
+                            wmoIds.Add(BitConverter.ToUInt32(obj0, p));
+                    }
+                }
+            }
+        }
+
+        Console.WriteLine($"tiles={tiles} rootReadable={rootOk} tex0Readable={tex0Ok} obj0Readable={obj0Ok}");
+        Console.WriteLine($"tex0: MTEX={withMtex} MDID={withMdid} MHID={withMhid}; top-level chunk file counts {string.Join(' ', tex0Chunks.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+        Console.WriteLine($"MCLY layers per MCNK: {string.Join(' ', layerHistogram.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+        Console.WriteLine($"obj0 top-level chunk file counts {string.Join(' ', obj0Chunks.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+        Console.WriteLine($"MDDF flags: {string.Join(' ', mddfFlags.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+        Console.WriteLine($"MODF flags: {string.Join(' ', modfFlags.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+        Console.WriteLine($"tiles (x_y from MAID slot): {string.Join(' ', tileList.Take(40))}{(tileList.Count > 40 ? " ..." : "")}");
+        foreach ((string label, HashSet<uint> ids) in new[] { ("MDID textures", textureIds), ("MDDF models (0x40)", doodadIds), ("MODF WMOs (0x8)", wmoIds) })
+        {
+            var statuses = ids.GroupBy(id => storage.TryReadFile(id, out _)).ToDictionary(static g => g.Key, static g => g.Count());
+            Console.WriteLine($"{label}: {ids.Count} distinct; {string.Join(' ', statuses.Select(static kv => $"{kv.Key}={kv.Value}"))}");
+        }
+    }
+
+    /// <summary>Spec 239: decodes a DB2 table from CASC through DBCD + WoWDBDefs for the product's own build.</summary>
+    private static void RunDb2(string[] args)
+    {
+        string? install = GetOption(args, "--install");
+        string? product = GetOption(args, "--product");
+        string? cache = GetOption(args, "--cache");
+        string? defs = GetOption(args, "--defs");
+        List<string> tables = GetOptions(args, "--table");
+        List<string> listfiles = GetOptions(args, "--listfile");
+        if (install is null || product is null || cache is null || defs is null || tables.Count == 0 || listfiles.Count == 0)
+        {
+            Console.WriteLine("  casc db2 --install <dir> --product <p> --cache <dir> --defs <WoWDBDefs/definitions> --listfile <csv> --table <name> [--table ...]");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        CommunityListfile listfile = CommunityListfile.Load(listfiles);
+        CascStorage storage = CascStorage.OpenLocal(install, product, cache);
+        var provider = new CascDbcProvider(storage, listfile);
+        foreach (string table in tables)
+        {
+            try
+            {
+                DBCD.IDBCDStorage rows = WowViewer.Core.IO.Dbc.DbcTableLoader.Load(provider, defs, storage.Product.Version, table);
+                Console.WriteLine($"{table} @ {storage.Product.Version}: {rows.Count} rows; columns: {string.Join(", ", rows.AvailableColumns.Take(12))}{(rows.AvailableColumns.Length > 12 ? ", ..." : "")}");
+                if (string.Equals(table, "Map", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (DBCD.DBCDRow row in rows.Values)
+                    {
+                        string directory = row["Directory"]?.ToString() ?? string.Empty;
+                        if (directory.Equals("development", StringComparison.OrdinalIgnoreCase) || directory.Equals("Azeroth", StringComparison.OrdinalIgnoreCase))
+                            Console.WriteLine($"  Map row: ID={row["ID"]} Directory={directory} MapName={row["MapName_lang"]}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"{table} @ {storage.Product.Version}: FAILED {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    private sealed class CascDbcProvider(CascStorage storage, CommunityListfile listfile) : DBCD.Providers.IDBCProvider
+    {
+        public Stream StreamForTableName(string tableName, string build)
+        {
+            foreach (string path in WowViewer.Core.IO.Files.DbClientFileReader.EnumerateTablePaths(tableName))
+            {
+                if (listfile.TryGetFileDataId(path, out uint id) && storage.TryReadFile(id, out byte[]? data) == CascReadStatus.Ok && data is not null)
+                    return new MemoryStream(data);
+            }
+
+            throw new FileNotFoundException($"{tableName} not readable from {storage.Product.Product}");
+        }
+    }
+
+    private static IEnumerable<(string Id, int Offset, int Size)> TopChunks(byte[] data, int start = 0, int end = -1)
+    {
+        end = end < 0 ? data.Length : end;
+        int position = start;
+        while (position + 8 <= end)
+        {
+            string id = new(System.Text.Encoding.ASCII.GetString(data, position, 4).Reverse().ToArray());
+            int size = BitConverter.ToInt32(data, position + 4);
+            if (size < 0 || position + 8L + size > end)
+                yield break;
+            yield return (id, position + 8, size);
+            position += 8 + size;
+        }
     }
 
     private static string ResolveOffset(byte[] blob, uint offset)
