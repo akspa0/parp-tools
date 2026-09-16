@@ -29,5 +29,5 @@ dotnet test tests/WowViewer.Core.Tests --filter "FullyQualifiedName~AdtAhdr"
 
 ## Phase 2: viewer
 
-Start the viewer, then use **Open ADT/v22 folder…** and pick `$CORPUS`. Textures and models resolve
-through the currently configured client data source; anything missing renders as a placeholder.
+Start the viewer, then use **Open ADT/v22 folder…** and pick `$CORPUS`. Nothing is resolved
+externally: layers show as index colours and placements as labelled markers.

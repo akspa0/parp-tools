@@ -4,7 +4,10 @@
 
 **Release**: v0.6
 
-**Depends on**: [238 CASC Data Source](../238-casc-data-source/spec.md) and [239 Modern Client Assets](../239-modern-client-assets/spec.md) for resolving referenced textures/models (US3 only; US1/US2 are independent)
+**What this is (operator, 2026-09-16)**: a **never-before-seen ADT version from a new WoW engine**, the first build of the
+final WoW remaster. Nothing external documents or companions it: no WDT, no map table, no listfile names, and nothing to
+look up on a CDN. **The tile files are the only source of truth**, and this spec is standalone: it does not depend on
+Specs 238/239.
 
 **Created**: 2026-09-16
 
@@ -195,7 +198,7 @@ detection change at the `AHDR` branch must not leak into them.
 - **FR-011**: The inspection tooling MUST be able to dump any decoded tile's contents (header, name tables, per-chunk layers/placements, height and normal statistics) in human-readable and machine-readable form.
 - **FR-012**: The viewer MUST open a folder of AHDR-family tiles as a map **from the tile files alone** (no WDT, map table or listfile exists for them) and list the tiles present.
 - **FR-013**: The viewer MUST render decoded terrain with heights, normals, texture layers, alpha blending and shadows, using the same terrain rendering path as other formats.
-- **FR-014**: The viewer MUST place decoded object placements, resolving model names from the tile's model table and assets from the configured data source when available.
+- **FR-014**: The viewer MUST place decoded object placements using names from the tile's own model table. Where no model can be loaded, it MUST draw a marker at the placement (bounding marker or point) so placement correctness is visible without any external assets.
 - **FR-015**: Existing map format detection, reading and rendering MUST be unchanged.
 - **FR-016**: Writing or converting to v22/v23 is out of scope.
 - **FR-017**: A fast-path wireframe (US0) MUST render using only measured layout facts, and MUST be labelled in the UI as provisional (no textures/objects; inner-grid order unproven).

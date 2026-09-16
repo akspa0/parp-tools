@@ -78,7 +78,7 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 ## Phase 5: User Story 3 — See it in the viewer (P2)
 
 **Goal**: the corpus renders with seams, textures and placements. **Independent test**: operator visual check (SC-007).
-**Depends on**: US2 gate; Spec 238 Phase 3 (asset data source); Spec 239 Phase 3 if placements reference id-addressed models.
+**Depends on**: US2 gate only. Standalone: no external assets, so layers render as index colours and placements as labelled markers.
 
 - [ ] T034 [US3] Slicer: whole-tile outer/inner grids → per-chunk 145-entry 9-8-9 heights/normals using the measured order, with an indexed-ramp known-answer test, in src/core/WowViewer.Core.IO/Maps/AdtAhdrTileSlicer.cs and tests/WowViewer.Core.Tests/AdtAhdrTileSlicerTests.cs
 - [ ] T035 [US3] Adapter tile discovery: content-sniff every file regardless of name/extension, place each by ALOC[1]=X, ALOC[2]=Y, flag missing ALOC and duplicate tiles (no WDT exists; the tiles are the whole map) in src/viewer/WoWViewer/Terrain/AhdrTerrainAdapter.cs
@@ -102,7 +102,7 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 
 - Setup → Foundational → US1 → US2 → US3. US4 runs after US3 (or after any phase touching shared code).
 - 🗂 tasks block their story's checkpoint until the corpus arrives. T001–T016, T018, T020–T023, T027–T030 and T034 can be done on synthetic data first.
-- US3 also requires Spec 238 Phase 3 (and Spec 239 Phase 3 for id-referenced models).
+- No cross-spec dependencies: this is a new engine version with no external companions, and the tile files are the only input.
 
 ## Parallel examples
 

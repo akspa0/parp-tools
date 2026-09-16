@@ -37,7 +37,7 @@ reduction), 206 (Zarr residency), 202 (batching), 201 (metric attribution), 200 
 
 ## Epic 4 — Formats, Readers & Writers
 **Goal:** proven, era-faithful read/write for every format we touch.
-**Members:** 238 (**v0.6** CASC data source — local + remote CDN via TACTSharp), 239 (**v0.6** modern client assets — FileDataID-era WDT/ADT/M2/WMO/DB2, depends on 238), 237 (**v0.6** ADT/v22 AHDR terrain read + render, corpus being acquired), 197 (split ADT/targets, active), 221 (converter validation harness, active),
+**Members:** 238 (**v0.6** CASC data source — local + remote CDN via TACTSharp), 239 (**v0.6** modern client assets — FileDataID-era WDT/ADT/M2/WMO/DB2, depends on 238), 237 (**v0.6** new-engine ADT revision 26 — AHDR family, read + render from tile files alone; corpus on hand; wireframe fast path first; independent of 238/239), 197 (split ADT/targets, active), 221 (converter validation harness, active),
 220 (WMO writing), 235 (legacy MDX/M2 rendering 1.0.0-3.0.1 + fuckported-asset compatibility +
 light effects, Draft, not planned — supersedes 104 and 154's unimplemented residue), 193 (1.x M2
 parity, Benilla reference — prior art for 235), 105 (format profiles, prior art for 235's 1.0.0

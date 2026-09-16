@@ -42,9 +42,9 @@ candidates apart. **Phase 2** maps the decoded tile into the viewer's existing `
 
 **Open inputs (operator)**:
 - Corpus: **on hand**, 700 files (699 unique) in `wow-viewer/test_data/v22_adts/unknown/` (git-ignored). No WDT, map table or listfile names exist for them. Extensionless FileDataID names. **Revision 26** (MVER 26 + AHDR). See evidence/phase0-first-look-2026-09-16.md
-- Asset resolution for Phase 2 comes through Spec 238 (CASC) + Spec 239 (FileDataID-era readers) when the referenced assets live in a modern client (research R10)
+- **Standalone**: a never-before-seen engine version. There are no external companions or lookups, so the tile files are the only source (research R10). No dependency on Specs 238/239.
 
-**Dependency order**: Phase 0 synthetic steps (0.1–0.8) may run now; Phase 0 gate needs the corpus; Phase 2 steps 7/9 need 238 Phase 3 (and 239 Phase 3 for id-referenced models).
+**Dependency order**: Fast path F first, then Phase 0 → 1 → 2. Everything runs on the corpus already on disk; nothing waits on other specs.
 
 ## Constitution Check
 
@@ -57,7 +57,7 @@ candidates apart. **Phase 2** maps the decoded tile into the viewer's existing `
 | III. Real-data validation | PASS (gated) | Every phase gate is measured on the real corpus with command, root, and hashes recorded under `evidence/`. Synthetic tests are not sign-off. |
 | IV. Model architecture | N/A | No model. |
 | V. Streaming dataset pipeline | N/A | No dataset emission in scope. A later datastore ingest would follow "Python owns the datastore". |
-| VI. No client path assumptions | PASS | The corpus root and asset data source are CLI arguments or viewer configuration. The test root comes from an environment variable. |
+| VI. No client path assumptions | PASS | The corpus root is a CLI argument / viewer folder pick. Tests use `test_data/v22_adts` with an env override. |
 | VII. Containers are inputs | PASS | Read-only; no writer; no container output. |
 | Format reader ownership | PASS | No existing reader decodes AHDR payloads (verified: `AdtV23SummaryReader` reads the header only). |
 | Terrain alpha risk area | PASS | `AdtMcalDecoder` is called with the encoding inferred per map; no MCAL, edge-fix or shader-blend code is modified. |
@@ -177,7 +177,7 @@ not started until the previous gate passes.
 4. `LoadTileWithPlacements`: fill `TerrainChunkData` (heights, normals, layers → `TileTextures` indices, 64x64 alpha, shadow, area id). Map `ACDO` to `MddfPlacement` or `ModfPlacement` by the referenced name's extension, using the Phase 1 frame.
 5. Per-tile failure isolation: a failed tile is logged and surfaced in the tile list; the rest of the map loads (US3 scenario 4).
 6. Viewer entry point: "Open ADT/v22 folder…" beside the Rosetta datastore open, wired through `TerrainManager`. Phasing, placement writing and cartography members return the documented "unsupported" values.
-7. Asset resolution goes through the configured `IDataSource`. Missing textures and models fall back to the existing placeholders.
+7. No external asset lookup: textures render as per-layer flat colours or checker (layer index visible), and placements render as markers labelled with the `ADOO` name. Real asset loading is a later, separate decision, not part of this spec.
 8. Regression pass (US4): open one Alpha 0.5.3 map and one LK map; confirm the existing test suite is green (SC-008).
 9. **Gate**: `evidence/phase2-render.md`. The operator loads the corpus and confirms seams, textures and placements by eye (SC-007), with screenshots saved to evidence.
 

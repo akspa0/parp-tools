@@ -82,10 +82,9 @@ chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decis
 - **Scale**: 3 floats here vs uint16/1024 in MDDF. Check the per-axis distribution. If the axes are always equal, map to uniform scale; otherwise flag it, since the renderer supports uniform scale only.
 - **uniqueId**: record it; check for collisions across tiles (the same object straddling tiles).
 
-### R10: Asset resolution / data source
+### R10: Asset resolution
 
-- **Decision**: The adapter uses the viewer's configured `IDataSource`. It does not invent a client.
-- **Open**: which client build best matches the texture/model paths the tiles reference. The inventory dumps the distinct `ATEX`/`ADOO` names so this can be answered by resolving them against the configured clients, not guessed. The tile files themselves have no listfile names.
+- **Decision (2026-09-16)**: none. This is a never-before-seen engine version with no companions (no WDT, map table, listfile or CDN lookup), so the spec renders from the tile files alone: height/wireframe, layer indices as colours, placements as labelled markers. The inventory still lists the `ATEX`/`ADOO` names as data. Whether any real asset source should ever be attached is a separate future decision, not an assumption here.
 
 ### R11: Tile coordinates
 
