@@ -1692,9 +1692,18 @@ private int _mdxLoadFailCount = 0;
         if (version >= 17)
         {
             var v17Parser = new WmoV17ToV14Converter();
-            WmoV14ToV17Converter.WmoV14Data wmo = v17Parser.ParseV17ToModel(data, LoadWmoGroupBytes(normalizedKey, data));
-            ViewerLog.Trace($"[WMO] Parsed v{version} direct: {Path.GetFileName(normalizedKey)} ({wmo.Groups.Count} groups)");
-            return wmo;
+            try
+            {
+                WmoV14ToV17Converter.WmoV14Data wmo = v17Parser.ParseV17ToModel(data, LoadWmoGroupBytes(normalizedKey, data));
+                ViewerLog.Trace($"[WMO] Parsed v{version} direct: {Path.GetFileName(normalizedKey)} ({wmo.Groups.Count} groups)");
+                return wmo;
+            }
+            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or ArgumentException or IndexOutOfRangeException)
+            {
+                // A WMO layout this parser does not understand must never take the world down with it.
+                ViewerLog.Important(ViewerLog.Category.Wmo, $"[WMO] Skipping {normalizedKey}: {ex.GetType().Name}: {ex.Message}");
+                return null;
+            }
         }
 
         string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");

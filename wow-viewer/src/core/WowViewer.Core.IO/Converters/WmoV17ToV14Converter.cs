@@ -343,6 +343,7 @@ public class WmoV17ToV14Converter
         var data = new WmoV17Data();
         int expectedRootChunkIndex = 0;
         bool sawOptionalMcvp = false;
+        var seenRootChunks = new HashSet<string>(StringComparer.Ordinal);
 
         while (reader.BaseStream.Position + 8 <= reader.BaseStream.Length)
         {
@@ -355,30 +356,24 @@ public class WmoV17ToV14Converter
             // Reverse for comparison (chunks stored reversed on disk)
             var chunkId = new string(magic.Reverse().ToArray());
 
-            // Spec 239: FileDataID-era roots omit MOTX (MOMT texture fields are FileDataIDs) and MODN
-            // (doodads are listed by FileDataID in a trailing MODI). Measured on wow_classic_beta 1.60.1.
-            while (expectedRootChunkIndex < RootRequiredChunkOrder090.Length
-                && chunkId != RootRequiredChunkOrder090[expectedRootChunkIndex]
-                && RootChunksOptionalInFileDataIdEra.Contains(RootRequiredChunkOrder090[expectedRootChunkIndex]))
+            // Spec 239: the classic root order is a list of *known* chunks, not a required sequence.
+            // FileDataID-era roots omit some (MOTX, MODN, MOSB, MOVV, MOVB), insert others anywhere
+            // (MGI2, MOPE, MOLV, MDDI, MNLD, MFED, MAVG, MAVD, GFID, MODI) and may move MODI ahead of MODD.
+            // Measured on wow_classic_beta 1.60.1 development map: 3 distinct root sequences across 72 WMOs.
+            // Unknown chunks are skipped; a known chunk may be absent but must not appear before one
+            // already passed.
+            int knownIndex = Array.IndexOf(RootRequiredChunkOrder090, chunkId);
+            if (knownIndex >= 0)
             {
-                expectedRootChunkIndex++;
-            }
-
-            if (expectedRootChunkIndex < RootRequiredChunkOrder090.Length)
-            {
-                string expected = RootRequiredChunkOrder090[expectedRootChunkIndex];
-                if (chunkId != expected)
+                if (knownIndex < expectedRootChunkIndex)
                     throw new InvalidDataException(
-                        $"WMO root chunk order mismatch at offset 0x{payloadStart - 8:X}: got '{chunkId}', expected '{expected}'.");
-                expectedRootChunkIndex++;
+                        $"WMO root chunk order mismatch at offset 0x{payloadStart - 8:X}: '{chunkId}' after '{RootRequiredChunkOrder090[expectedRootChunkIndex - 1]}'.");
+                expectedRootChunkIndex = knownIndex + 1;
+                seenRootChunks.Add(chunkId);
             }
-            else
+            else if (chunkId == "MCVP")
             {
-                // Tolerant: skip unknown trailing root chunks (e.g., MCVP or
-                // version-specific chunks from different WoW builds).
-                if (chunkId == "MCVP" && !sawOptionalMcvp)
-                    sawOptionalMcvp = true;
-                // Any other trailing chunk: just skip it silently.
+                sawOptionalMcvp = true;
             }
 
             switch (chunkId)
@@ -468,17 +463,17 @@ public class WmoV17ToV14Converter
             reader.BaseStream.Position = chunkEnd;
         }
 
-        if (expectedRootChunkIndex != RootRequiredChunkOrder090.Length)
+        foreach (string required in RootChunksAlwaysRequired)
         {
-            throw new InvalidDataException(
-                $"WMO root terminated early: parsed {expectedRootChunkIndex}/{RootRequiredChunkOrder090.Length} required chunks.");
+            if (!seenRootChunks.Contains(required))
+                throw new InvalidDataException($"WMO root is missing required chunk '{required}'.");
         }
 
         SynthesizeNameTablesFromFileDataIds(data);
         return data;
     }
 
-    private static readonly HashSet<string> RootChunksOptionalInFileDataIdEra = ["MOTX", "MODN"];
+    private static readonly string[] RootChunksAlwaysRequired = ["MVER", "MOHD"];
 
     /// <summary>Reads the GFID group FileDataID list from a v17 root without parsing the rest.</summary>
     public static uint[] ReadGroupFileDataIds(byte[] rootBytes)
@@ -572,6 +567,37 @@ public class WmoV17ToV14Converter
         }
 
         public byte[] ToArray() => _blob.ToArray();
+    }
+
+    /// <summary>MPY2 (uint16 flags, uint16 materialId per face) → MOPY (byte flags, byte materialId).</summary>
+    private static byte[] ConvertMpy2ToMopy(byte[] mpy2)
+    {
+        int faces = mpy2.Length / 4;
+        var mopy = new byte[faces * 2];
+        for (int i = 0; i < faces; i++)
+        {
+            ushort flags = BitConverter.ToUInt16(mpy2, i * 4);
+            ushort materialId = BitConverter.ToUInt16(mpy2, i * 4 + 2);
+            mopy[i * 2] = (byte)(flags & 0xFF);
+            mopy[i * 2 + 1] = materialId > 0xFE ? (byte)0xFF : (byte)materialId;
+        }
+
+        return mopy;
+    }
+
+    /// <summary>MOVX (uint32 indices) → MOVI (uint16). Returns null when any index exceeds 16 bits.</summary>
+    private static ushort[]? ConvertMovxToMovi(byte[] movx)
+    {
+        var indices = new ushort[movx.Length / 4];
+        for (int i = 0; i < indices.Length; i++)
+        {
+            uint value = BitConverter.ToUInt32(movx, i * 4);
+            if (value > ushort.MaxValue)
+                return null;
+            indices[i] = (ushort)value;
+        }
+
+        return indices;
     }
 
     private static uint[] ReadUInt32Array(BinaryReader reader, uint size)
@@ -709,15 +735,22 @@ public class WmoV17ToV14Converter
             uint effectiveSize = (uint)Math.Max(0, chunkEnd - payloadStart);
             var chunkId = new string(magic.Reverse().ToArray());
 
-            if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length)
+            // Spec 239: FileDataID-era groups insert new sub-chunks (e.g. MOGX) and replace MOPY/MOVI with
+            // MPY2/MOVX (measured on wow_classic_beta 1.60.1). Treat the classic chain as known-in-order:
+            // unknown sub-chunks are skipped, known ones may be absent but not go backwards.
+            int requiredIndex = Array.IndexOf(GroupRequiredChunkOrder090, chunkId);
+            if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length && requiredIndex >= expectedRequiredSubchunkIndex)
             {
-                string expectedSubchunk = GroupRequiredChunkOrder090[expectedRequiredSubchunkIndex];
-                if (chunkId != expectedSubchunk)
-                {
-                    throw new InvalidDataException(
-                        $"MOGP required subchunk order mismatch at 0x{payloadStart - 8:X}: got '{chunkId}', expected '{expectedSubchunk}'. Flags=0x{data.Flags:X}.");
-                }
-                expectedRequiredSubchunkIndex++;
+                expectedRequiredSubchunkIndex = requiredIndex + 1;
+            }
+            else if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length && requiredIndex >= 0)
+            {
+                throw new InvalidDataException(
+                    $"MOGP required subchunk order mismatch at 0x{payloadStart - 8:X}: '{chunkId}' appears after '{GroupRequiredChunkOrder090[expectedRequiredSubchunkIndex - 1]}'. Flags=0x{data.Flags:X}.");
+            }
+            else if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length)
+            {
+                // Unknown sub-chunk inside the required chain: skip it.
             }
             else
             {
@@ -745,8 +778,19 @@ public class WmoV17ToV14Converter
                 case "MOPY":
                     data.MaterialInfo = reader.ReadBytes((int)effectiveSize);
                     break;
+                case "MPY2":
+                    // Spec 239: 4 bytes per face (uint16 flags, uint16 materialId). Down-convert to MOPY's
+                    // 2-byte form when no MOPY was present; material ids above 0xFE cannot be represented.
+                    if (data.MaterialInfo == null || data.MaterialInfo.Length == 0)
+                        data.MaterialInfo = ConvertMpy2ToMopy(reader.ReadBytes((int)effectiveSize));
+                    break;
                 case "MOVI":
                     data.Indices = ReadUInt16Array(reader, effectiveSize);
+                    break;
+                case "MOVX":
+                    // Spec 239: 32-bit indices. Used only when MOVI is absent and every index fits 16 bits.
+                    if (data.Indices == null || data.Indices.Length == 0)
+                        data.Indices = ConvertMovxToMovi(reader.ReadBytes((int)effectiveSize));
                     break;
                 case "MOVT":
                     data.Vertices = ReadVector3Array(reader, effectiveSize);

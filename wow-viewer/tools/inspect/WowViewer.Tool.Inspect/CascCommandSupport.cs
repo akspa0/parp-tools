@@ -364,6 +364,39 @@ public static class CascCommandSupport
         Console.WriteLine($"MDDF flags: {string.Join(' ', mddfFlags.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
         Console.WriteLine($"MODF flags: {string.Join(' ', modfFlags.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
         Console.WriteLine($"tiles (x_y from MAID slot): {string.Join(' ', tileList.Take(40))}{(tileList.Count > 40 ? " ..." : "")}");
+        var wmoSequences = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var wmoParse = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        foreach (uint wmoId in wmoIds)
+        {
+            if (Read(wmoId) is not { } wmoRoot)
+                continue;
+            string sequence = string.Join(' ', TopChunks(wmoRoot).Select(static c => c.Id));
+            wmoSequences[sequence] = wmoSequences.GetValueOrDefault(sequence) + 1;
+
+            string outcome;
+            try
+            {
+                var groups = WowViewer.Core.IO.Converters.WmoV17ToV14Converter.ReadGroupFileDataIds(wmoRoot)
+                    .Select(Read).TakeWhile(static g => g is not null).Select(static g => g!).ToList();
+                var model = new WowViewer.Core.IO.Converters.WmoV17ToV14Converter().ParseV17ToModel(wmoRoot, groups);
+                outcome = model.Groups.Count > 0 && model.Groups.Sum(static g => g.Vertices.Count) > 0 ? "ok (geometry)" : "ok (no geometry)";
+            }
+            catch (Exception ex)
+            {
+                outcome = $"FAILED {ex.GetType().Name}: {ex.Message}";
+            }
+
+            wmoParse[outcome] = wmoParse.GetValueOrDefault(outcome) + 1;
+        }
+
+        Console.WriteLine("WMO parse outcomes:");
+        foreach ((string outcome, int count) in wmoParse)
+            Console.WriteLine($"  [{count}] {outcome}");
+
+        Console.WriteLine("WMO root chunk sequences:");
+        foreach ((string sequence, int count) in wmoSequences)
+            Console.WriteLine($"  [{count}] {sequence}");
+
         foreach ((string label, HashSet<uint> ids) in new[] { ("MDID textures", textureIds), ("MDDF models (0x40)", doodadIds), ("MODF WMOs (0x8)", wmoIds) })
         {
             var statuses = ids.GroupBy(id => storage.TryReadFile(id, out _)).ToDictionary(static g => g.Key, static g => g.Count());
