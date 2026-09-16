@@ -216,9 +216,38 @@ public static class TemplatedTerrainGenerator
         TerrainBrushPaste? plazaSquare,
         TerrainBrushPaste? gentleKnoll)
     {
-        // 1. Initialize 145 flat heights (Z = 0)
+        // 1. Initialize 145 heights using continuous multi-octave harmonic fractal noise
         float[] heights = new float[McvtVertexCount];
         byte[] normals = GenerateFlatNormals();
+
+        float outerSpacing = ChunkSizeMeters / 8.0f;
+        float chunkOriginU = globalChunkX * ChunkSizeMeters;
+        float chunkOriginV = globalChunkY * ChunkSizeMeters;
+
+        // Continuous harmonic fractal noise across all global chunk/tile coordinates
+        for (int row = 0; row < 9; row++)
+        {
+            for (int col = 0; col < 9; col++)
+            {
+                int index = (row * 9) + col;
+                float u = chunkOriginU + (col * outerSpacing);
+                float v = chunkOriginV + (row * outerSpacing);
+                float noise = Procedural.ProceduralTerrainSculptor.SampleHarmonicNoise(u * 0.004f, v * 0.004f, 1.0f, 3, 0.45f, 1337);
+                heights[index] = (noise - 0.5f) * 6.0f; // gentle rolling relief +/- 3m
+            }
+        }
+
+        for (int row = 0; row < 8; row++)
+        {
+            for (int col = 0; col < 8; col++)
+            {
+                int index = 81 + (row * 8) + col;
+                float u = chunkOriginU + (col * outerSpacing) + (outerSpacing * 0.5f);
+                float v = chunkOriginV + (row * outerSpacing) + (outerSpacing * 0.5f);
+                float noise = Procedural.ProceduralTerrainSculptor.SampleHarmonicNoise(u * 0.004f, v * 0.004f, 1.0f, 3, 0.45f, 1337);
+                heights[index] = (noise - 0.5f) * 6.0f;
+            }
+        }
 
         // 2. Determine chunk topology role
         int spacing = Math.Max(1, template.PlazaSpacingChunks);
@@ -238,6 +267,10 @@ public static class TemplatedTerrainGenerator
 
         if (isPlazaNode && plazaSquare != null)
         {
+            // Level out plaza node for architectural courtyard
+            for (int i = 0; i < McvtVertexCount; i++)
+                heights[i] *= 0.15f;
+
             // Stamp exhibit courtyard plaza with white marble center and cobblestone border
             var plazaAlphas = plazaSquare.Layers;
             foreach (TerrainPasteLayer l in plazaAlphas)
@@ -248,6 +281,10 @@ public static class TemplatedTerrainGenerator
         }
         else if (isHorizontalAvenue || isVerticalAvenue)
         {
+            // Level out avenues for walkable pathways
+            for (int i = 0; i < McvtVertexCount; i++)
+                heights[i] *= 0.35f;
+
             // Stamp connected cobblestone walkway
             TerrainBrushPaste? road = (isHorizontalAvenue && isVerticalAvenue) ? roadCross : roadStraight;
             if (road != null && road.Layers.Count > 1)
@@ -255,20 +292,24 @@ public static class TemplatedTerrainGenerator
                 incomingLayers.Add(road.Layers[1]); // Cobblestone alpha splat
             }
         }
-        else if ((globalChunkX + globalChunkY) % 3 == 0 && gentleKnoll != null)
+        else
         {
-            // Scatter gentle relief knoll in open lawn area
-            for (int i = 0; i < McvtVertexCount; i++)
+            // Open nature area: optionally add curated knoll relief
+            if (gentleKnoll != null && (globalChunkX + globalChunkY) % 3 == 0)
             {
-                float u = (i % 9) / 8f;
-                float v = (i / 9) / 8f;
-                heights[i] = gentleKnoll.SampleHeight(u, v) * 0.75f; // Gentle +3.3m
-            }
-            RecalculateChunkNormals(heights, normals);
+                for (int i = 0; i < McvtVertexCount; i++)
+                {
+                    float u = (i < 81) ? ((i % 9) / 8f) : (((i - 81) % 8) / 7f);
+                    float v = (i < 81) ? ((i / 9) / 8f) : (((i - 81) / 8) / 7f);
+                    heights[i] += gentleKnoll.SampleHeight(u, v) * 0.5f;
+                }
 
-            if (gentleKnoll.Layers.Count > 1)
-                incomingLayers.Add(gentleKnoll.Layers[1]);
+                if (gentleKnoll.Layers.Count > 1)
+                    incomingLayers.Add(gentleKnoll.Layers[1]);
+            }
         }
+
+        RecalculateChunkNormals(heights, normals);
 
         // 3. Merge layers and enforce <= 4 layers
         AllocatedChunkLayers allocated = TerrainLayerAllocator.MergeLayers(

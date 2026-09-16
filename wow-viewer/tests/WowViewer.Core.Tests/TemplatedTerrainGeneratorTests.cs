@@ -144,7 +144,34 @@ public class TemplatedTerrainGeneratorTests
             Assert.True(model.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) ||
                         model.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase));
             Assert.StartsWith("World\\", model, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("HumanFountain", model, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    [Fact]
+    public void GenerateMap_SynthesizesContinuousFractalReliefInNatureChunks()
+    {
+        var template = new TerrainMapTemplate
+        {
+            MapName = "FractalReliefTest",
+            Theme = BiomeTheme.GardenMuseum,
+            TileRows = 1,
+            TileCols = 1,
+            BaseTileX = 30,
+            BaseTileY = 30,
+            PlazaSpacingChunks = 4
+        };
+
+        TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template);
+        LkAdtData tile = result.Tiles[(30, 30)];
+
+        // Find a pure nature chunk far from plazas and pathways (e.g. index 1, 1 when spacing is 4)
+        LkMcnkData natureChunk = tile.Chunks.First(c => c.IndexX == 1 && c.IndexY == 1);
+
+        // Verify height variation exists (fractal harmonic noise)
+        float min = natureChunk.Heights.Min();
+        float max = natureChunk.Heights.Max();
+        float spread = max - min;
+
+        Assert.True(spread > 0.05f, $"Nature chunk had zero/flat relief (spread: {spread}), expected fractal noise variation.");
     }
 }

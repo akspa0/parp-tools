@@ -28,10 +28,10 @@ public class TerrainLighting
     public bool HasManualGameTimeOverride { get; set; }
 
     /// <summary>
-    /// Whether the Alpha 0.5.3 real-time clock is enabled. It is on by default for the interactive
-    /// viewer; synthetic minimap generation uses its own frozen lighting contract.
+    /// Whether the Alpha 0.5.3 real-time clock is enabled. It is off by default so world
+    /// lighting remains stable at noon unless explicitly enabled by the user.
     /// </summary>
-    public bool AutomaticTimeOfDayEnabled { get; private set; } = true;
+    public bool AutomaticTimeOfDayEnabled { get; private set; } = false;
 
     public bool IsAutomaticTimeOfDay => AutomaticTimeOfDayEnabled && !HasManualGameTimeOverride;
 

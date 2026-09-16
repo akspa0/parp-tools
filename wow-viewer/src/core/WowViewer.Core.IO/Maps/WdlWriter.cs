@@ -1,5 +1,6 @@
 using System.Text;
 using WowViewer.Core.Chunks;
+using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
 
@@ -163,6 +164,50 @@ public static class WdlWriter
         }
 
         return new WdlHeightTile(tileX, tileY, outerHeights, innerHeights);
+    }
+
+    public static WdlHeightTile ExtractTileHeightsFromLk(LkAdtData adt)
+    {
+        ArgumentNullException.ThrowIfNull(adt);
+
+        var outerHeights = new short[OuterHeightCount];
+        var innerHeights = new short[InnerHeightCount];
+
+        for (int cy = 0; cy < 16; cy++)
+        {
+            for (int cx = 0; cx < 16; cx++)
+            {
+                int chunkIdx = cy * 16 + cx;
+                if (chunkIdx < adt.Chunks.Count)
+                {
+                    var chunk = adt.Chunks[chunkIdx];
+                    float baseZ = chunk.BaseHeight != 0f ? chunk.BaseHeight : chunk.PosZ;
+                    float h0 = (chunk.Heights != null && chunk.Heights.Length > 0) ? chunk.Heights[0] : 0f;
+                    float hCenter = (chunk.Heights != null && chunk.Heights.Length > 9) ? chunk.Heights[9] : h0;
+
+                    outerHeights[cy * 17 + cx] = (short)Math.Clamp(Math.Round(baseZ + h0), short.MinValue, short.MaxValue);
+                    innerHeights[cy * 16 + cx] = (short)Math.Clamp(Math.Round(baseZ + hCenter), short.MinValue, short.MaxValue);
+
+                    if (cx == 15)
+                    {
+                        float hRight = (chunk.Heights != null && chunk.Heights.Length > 8) ? chunk.Heights[8] : h0;
+                        outerHeights[cy * 17 + 16] = (short)Math.Clamp(Math.Round(baseZ + hRight), short.MinValue, short.MaxValue);
+                    }
+                    if (cy == 15)
+                    {
+                        float hBottom = (chunk.Heights != null && chunk.Heights.Length > 136) ? chunk.Heights[136] : h0;
+                        outerHeights[16 * 17 + cx] = (short)Math.Clamp(Math.Round(baseZ + hBottom), short.MinValue, short.MaxValue);
+                    }
+                    if (cx == 15 && cy == 15)
+                    {
+                        float hCorner = (chunk.Heights != null && chunk.Heights.Length > 144) ? chunk.Heights[144] : h0;
+                        outerHeights[16 * 17 + 16] = (short)Math.Clamp(Math.Round(baseZ + hCorner), short.MinValue, short.MaxValue);
+                    }
+                }
+            }
+        }
+
+        return new WdlHeightTile(adt.TileX, adt.TileY, outerHeights, innerHeights);
     }
 
     private static int CalculateMareaStartOffset()

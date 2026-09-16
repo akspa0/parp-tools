@@ -79,7 +79,7 @@ public enum RenderPass
 /// Renders an MDX model using OpenGL.
 /// Handles per-geoset VAO/VBO setup, shader management, BLP2 textured rendering.
 /// </summary>
-public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
+public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLightEmitter
 {
     private readonly GL _gl;
     private readonly MdxFile _mdx;
@@ -162,6 +162,38 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
 
     private static readonly object SharedTextureCacheLock = new();
     private static readonly Dictionary<string, SharedTextureEntry> SharedTextureCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public void CollectSceneLights(Matrix4x4 modelMatrix, ICollection<SceneLight> lights, string sourceKey)
+    {
+        ArgumentNullException.ThrowIfNull(lights);
+
+        for (int i = 0; i < _mdx.Lights.Count; i++)
+        {
+            MdlLight light = _mdx.Lights[i];
+            if (light.Type != (int)MdxLightType.Omni)
+                continue;
+
+            Vector3 position = Vector3.Transform(
+                new Vector3(light.Pivot.X, light.Pivot.Y, light.Pivot.Z),
+                modelMatrix);
+            Vector3 color = new(
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
+            float intensity = MdxMaterialRenderPolicy.ClampFinite(light.Intensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
+            float start = MdxMaterialRenderPolicy.ClampFinite(light.AttenuationStart, 0.0f, 100000.0f);
+            float end = MathF.Max(MdxMaterialRenderPolicy.ClampFinite(light.AttenuationEnd, 0.0f, 100000.0f), start + 0.001f);
+
+            lights.Add(new SceneLight(
+                position,
+                color,
+                intensity,
+                start,
+                end,
+                _isM2AdapterModel ? "M2-LITE" : "MDX-LITE",
+                sourceKey));
+        }
+    }
 
     private enum TextureAlphaKind
     {

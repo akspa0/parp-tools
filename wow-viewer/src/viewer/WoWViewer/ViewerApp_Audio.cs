@@ -29,8 +29,19 @@ public partial class ViewerApp
 
         ImGui.TextWrapped(scene.AudioStatus);
         ImGui.TextWrapped($"Area music: {scene.AreaMusicStatus}");
+
+        bool areaMusicEnabled = scene.AreaMusicPlaybackEnabled;
+        if (ImGui.Checkbox("Enable Zone/WMO Music Playback", ref areaMusicEnabled))
+            scene.SetAreaMusicPlaybackEnabled(areaMusicEnabled);
+        ImGui.SameLine();
+        if (ImGui.Button("Play Now##ZoneMusic"))
+            scene.PlayAreaMusicNow();
+        ImGui.SameLine();
+        if (ImGui.Button("Stop##ZoneMusic"))
+            scene.StopAreaMusicNow();
+
         if (!scene.AreaMusicPlaybackEnabled)
-            ImGui.TextDisabled("Automatic ZoneMusic playback is muted; MCNK/MCSE emitters remain independently testable.");
+            ImGui.TextDisabled("Zone/WMO music playback is paused/muted; check box or click 'Play Now' to start.");
         ImGui.Text(scene.AudioMuted ? "Output: MUTED" : "Output: ON");
         ImGui.Text($"Resident emitters: {scene.ResidentAudioEmitterCount}  |  Active: {scene.ActiveAudioEmitterCount}");
         ImGui.Text($"SoundEntries rows: {scene.ResolvedAudioSoundEntryCount}  |  SoundWaterType rows: {scene.ResolvedAudioSoundWaterTypeCount}");

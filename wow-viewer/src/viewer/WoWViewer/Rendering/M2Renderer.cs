@@ -6,12 +6,13 @@ using Silk.NET.OpenGL;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.M2;
+using WowViewer.Core.Mdx;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
 
 namespace WoWViewer.Rendering;
 
-public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
+public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLightEmitter
 {
     private readonly GL? _gl;
     private readonly IDataSource? _dataSource;
@@ -41,6 +42,7 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
     private Vector3 _batchLightColor;
     private Vector3 _batchAmbientColor;
     private DateTime _lastAnimationUpdateTime = DateTime.UtcNow;
+    private IReadOnlyList<M2AnimatedLightState>? _lastAnimatedLights;
 
     private static uint _shaderProgram;
     private static int _uModel;
@@ -176,6 +178,39 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
 
     public IAnimationController? Animator => _legacyRenderer?.Animator ?? _runtimeAnimator;
 
+    public void CollectSceneLights(Matrix4x4 modelMatrix, ICollection<SceneLight> lights, string sourceKey)
+    {
+        ArgumentNullException.ThrowIfNull(lights);
+
+        if (_legacyRenderer is ISceneLightEmitter legacyEmitter)
+        {
+            legacyEmitter.CollectSceneLights(modelMatrix, lights, sourceKey);
+            return;
+        }
+
+        IReadOnlyList<M2AnimatedLightState>? animatedLights = _lastAnimatedLights;
+        if (animatedLights == null || animatedLights.Count == 0)
+            return;
+
+        for (int i = 0; i < animatedLights.Count; i++)
+        {
+            M2AnimatedLightState light = animatedLights[i];
+            if (!light.Visible || light.Type != 0)
+                continue;
+
+            Vector3 position = Vector3.Transform(light.Position, modelMatrix);
+            Vector3 color = new(
+                MdxMaterialRenderPolicy.ClampFinite(light.DiffuseColor.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.DiffuseColor.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.DiffuseColor.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
+            float intensity = MdxMaterialRenderPolicy.ClampFinite(light.DiffuseIntensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
+            float start = MdxMaterialRenderPolicy.ClampFinite(light.AttenuationStart, 0.0f, 100000.0f);
+            float end = MathF.Max(MdxMaterialRenderPolicy.ClampFinite(light.AttenuationEnd, 0.0f, 100000.0f), start + 0.001f);
+
+            lights.Add(new SceneLight(position, color, intensity, start, end, "M2-LITE", sourceKey));
+        }
+    }
+
     public int SubObjectCount => _runtimeModel?.Sections.Count ?? _legacyRenderer?.SubObjectCount ?? _sections.Count;
 
     public void Render(Matrix4x4 view, Matrix4x4 proj)
@@ -303,6 +338,7 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
             M2BonePoseState bonePoseState = M2BonePoseEvaluator.Evaluate(_runtimeModel.Model, sequenceIndex, timeMs, externalAnimationState);
             M2SkinnedRenderModel skinnedRenderModel = M2SkinnedRenderModelBuilder.ApplyPose(_runtimeModel, bonePoseState);
             M2RenderConsumerFrameState consumerState = M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState);
+            _lastAnimatedLights = animatedState.Lights;
             ApplyAnimatedFrame(skinnedRenderModel, consumerState);
         }
         catch (Exception ex)

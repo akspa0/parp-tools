@@ -20,10 +20,12 @@ Governance: AGENTS.md §9 applies. Tasks are checked `[x]` only with verifiable 
 ## Phase 2 — Multi-Surface Light Casting
 
 - [ ] **T010**: Create `SceneLightManager.cs` to collect outdoor ambient/sun, WMO `MOLT` point lights, and placed doodad `LITE` lights into a spatial lookup structure.
-- [ ] **T011**: Modernize `WmoRenderer.cs` shader to accept up to 8 local point lights (`uLocalLightPos`, `uLocalLightColor`, `uLocalLightIntensity`, `uLocalLightStart`, `uLocalLightEnd`).
+- [x] **T011**: Modernize `WmoRenderer.cs` shader to accept up to 8 local point lights (`uLocalLightPos`, `uLocalLightColor`, `uLocalLightIntensity`, `uLocalLightStart`, `uLocalLightEnd`). (Receipt: `evidence/phase2-wmo-light-casting-slice.md`)
 - [ ] **T012**: Modernize `TerrainRenderer.cs` shader to accept nearby local lights for terrain illumination.
 - [ ] **T013**: Wire `SceneLightManager` in `WorldScene.cs` to upload nearby lights during WMO, terrain, and doodad passes.
 - [ ] **Gate 2**: Verify torches and braziers cast light onto surrounding WMO geometry and ground surfaces; receipt written to `evidence/phase2-light-casting.md`.
+
+2026-09-16 slice note: `evidence/phase2-wmo-light-casting-slice.md` lands the source-only WMO shell consumer plus WMO `MOLT`, MDX `LITE`, M2 light, and WMO-internal doodad light collection. T010 remains open until outdoor ambient/sun handling is represented in the manager contract; T012/T013/Gate 2 remain open until terrain and doodad consumers plus operator runtime visual proof are complete.
 
 ---
 

@@ -1,5 +1,7 @@
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.IO.Terrain;
+using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.Tests;
 
@@ -41,6 +43,47 @@ public class WdlWriterTests
         Assert.Equal(256 * 10 + 256, tile.OuterHeights[^1]);
         Assert.Equal(8 * 10 + 8, tile.InnerHeights[0]);
         Assert.Equal(248 * 10 + 248, tile.InnerHeights[^1]);
+    }
+
+    [Fact]
+    public void ExtractTileHeightsFromLk_SamplesChunkGridCornersAndCenters()
+    {
+        var chunks = new List<LkMcnkData>(256);
+        for (int i = 0; i < 256; i++)
+        {
+            var heights = new float[145];
+            heights[0] = 10f + i;      // top-left
+            heights[9] = 20f + i;      // center
+            heights[8] = 15f + i;      // top-right
+            heights[136] = 25f + i;    // bottom-left
+            heights[144] = 30f + i;    // bottom-right
+
+            chunks.Add(new LkMcnkData
+            {
+                IndexX = i % 16,
+                IndexY = i / 16,
+                PosZ = 100f,
+                Heights = heights
+            });
+        }
+
+        var adt = new LkAdtData
+        {
+            TileX = 30,
+            TileY = 40,
+            Chunks = chunks
+        };
+
+        var tile = WdlWriter.ExtractTileHeightsFromLk(adt);
+
+        Assert.Equal(30, tile.TileX);
+        Assert.Equal(40, tile.TileY);
+        Assert.Equal(17 * 17, tile.OuterHeights.Length);
+        Assert.Equal(16 * 16, tile.InnerHeights.Length);
+        // Chunk (0, 0): base 100 + h0 (10) = 110
+        Assert.Equal(110, tile.OuterHeights[0]);
+        // Chunk (0, 0) center: base 100 + hCenter (20) = 120
+        Assert.Equal(120, tile.InnerHeights[0]);
     }
 
     private static string ReadChunkId(byte[] data, int offset)

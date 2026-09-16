@@ -890,12 +890,19 @@ public class WmoV14ToV17Converter
         if (firstChunkPos != null)
         {
             int headerBytes = (int)(firstChunkPos.Value - startPos);
-            Console.WriteLine($"[DEBUG] MOGP header size={headerBytes} bytes (groupIndex={groupIndex}, nameOff={group.NameOffset}, liquid={group.GroupLiquid})");
+            if (headerBytes >= 0x3C)
+            {
+                reader.BaseStream.Position = startPos + 0x38;
+                group.WmoGroupId = reader.ReadUInt32();
+            }
+            Console.WriteLine($"[DEBUG] MOGP header size={headerBytes} bytes (groupIndex={groupIndex}, nameOff={group.NameOffset}, liquid={group.GroupLiquid}, wmoGroupId={group.WmoGroupId})");
             reader.BaseStream.Position = firstChunkPos.Value;
         }
         else
         {
-            Console.WriteLine($"[WARN] Failed to locate first subchunk in MOGP; falling back to 0x80 header (groupIndex={groupIndex}, nameOff={group.NameOffset}, liquid={group.GroupLiquid})");
+            reader.BaseStream.Position = startPos + 0x38;
+            group.WmoGroupId = reader.ReadUInt32();
+            Console.WriteLine($"[WARN] Failed to locate first subchunk in MOGP; falling back to 0x80 header (groupIndex={groupIndex}, nameOff={group.NameOffset}, liquid={group.GroupLiquid}, wmoGroupId={group.WmoGroupId})");
             reader.BaseStream.Position = startPos + 0x80;
         }
 
@@ -2497,6 +2504,7 @@ public class WmoV14ToV17Converter
         
         // v14 Lightmap data (to be converted to MOCV)
         public uint GroupLiquid; // MOGP offset 0x34 — liquid type reference
+        public uint WmoGroupId;  // MOGP offset 0x38 — foreign key to WMOAreaTable.dbc or AreaTable.dbc
         public List<Vector3> Normals = new(); // MONR - vertex normals (v16+)
         public List<Vector2> LightmapUVs = new(); // MOLV - per-face-vertex UVs
         public byte[] LightmapData = Array.Empty<byte>(); // MOLD - raw lightmap pixels

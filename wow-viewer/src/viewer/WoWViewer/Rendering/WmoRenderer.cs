@@ -67,7 +67,7 @@ public readonly record struct WmoRenderStats(
 /// Uses WowViewer.Core.IO.Converters' WmoV14Data model for geometry.
 /// Supports loading and rendering MDX doodads from DoodadSets.
 /// </summary>
-public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
+public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLightEmitter
 {
     private readonly GL _gl;
     private readonly WmoV14ToV17Converter.WmoV14Data _wmo;
@@ -85,6 +85,13 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     private static int _uModel, _uView, _uProj, _uHasTexture, _uUnlit, _uColor, _uAlphaTest;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
+    private const int MaxWmoLocalLights = SceneLightManager.MaxShaderLights;
+    private static int _uLocalLightCount;
+    private static readonly int[] _uLocalLightPos = new int[MaxWmoLocalLights];
+    private static readonly int[] _uLocalLightColor = new int[MaxWmoLocalLights];
+    private static readonly int[] _uLocalLightIntensity = new int[MaxWmoLocalLights];
+    private static readonly int[] _uLocalLightStart = new int[MaxWmoLocalLights];
+    private static readonly int[] _uLocalLightEnd = new int[MaxWmoLocalLights];
     private static int _uUseInstanceModel;
     private static int _shaderRefCount;
     private uint _gpuInstanceVbo;
@@ -104,6 +111,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     private readonly HashSet<int> _runtimeVisibleDoodadDefIndices = new();
     private readonly HashSet<string> _updatedDoodadModelsScratch = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<(int idx, float distSq)> _visibleDoodadsScratch = new();
+    private readonly SceneLight[] _localLightUploadScratch = new SceneLight[MaxWmoLocalLights];
     private readonly Dictionary<IModelRenderer, List<int>> _opaqueDoodadBatchGroups = new();
     private readonly List<IModelRenderer> _opaqueDoodadBatchRenderers = new();
     private bool _doodadAnimationsPreparedForWorldFrame;
@@ -253,6 +261,116 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     /// <summary>MOHD bounding box max in WMO local space.</summary>
     public Vector3 BoundsMax => _wmo.BoundsMax;
     public int GroupRenderCount => _groups.Count;
+    public uint WmoId => _wmo.WmoId;
+
+    public void CollectSceneLights(Matrix4x4 modelMatrix, ICollection<SceneLight> lights, string sourceKey)
+    {
+        ArgumentNullException.ThrowIfNull(lights);
+
+        for (int i = 0; i < _wmo.Lights.Count; i++)
+        {
+            WmoV14ToV17Converter.WmoLight light = _wmo.Lights[i];
+            Vector4 decodedColor = DecodePackedBgra(light.Color);
+            float intensity = Math.Clamp(FiniteOrDefault(light.Intensity, 0.0f), 0.0f, 4.0f);
+            float start = Math.Clamp(FiniteOrDefault(light.AttenStart, 0.0f), 0.0f, 100000.0f);
+            float end = Math.Clamp(FiniteOrDefault(light.AttenEnd, 0.0f), 0.0f, 100000.0f);
+
+            if (end <= start)
+                end = start + 0.001f;
+
+            lights.Add(new SceneLight(
+                Vector3.Transform(light.Position, modelMatrix),
+                new Vector3(decodedColor.X, decodedColor.Y, decodedColor.Z),
+                intensity,
+                start,
+                end,
+                "WMO-MOLT",
+                sourceKey));
+        }
+
+        if (!_doodadsVisible || !_runtimeDoodadsVisible || _doodadInstances.Count == 0)
+            return;
+
+        for (int i = 0; i < _doodadInstances.Count; i++)
+        {
+            DoodadInstance doodad = _doodadInstances[i];
+            if (!doodad.Visible || doodad.Renderer is not ISceneLightEmitter emitter)
+                continue;
+
+            Matrix4x4 doodadWorld = doodad.Transform * modelMatrix;
+            string doodadSourceKey = string.IsNullOrWhiteSpace(doodad.NormalizedModelPath)
+                ? sourceKey
+                : doodad.NormalizedModelPath;
+            emitter.CollectSceneLights(doodadWorld, lights, doodadSourceKey);
+        }
+    }
+
+    public uint GetRenderGroupAreaId(int renderGroupIndex)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return 0;
+        int groupIndex = _groups[renderGroupIndex].GroupIndex;
+        return groupIndex < _wmo.Groups.Count ? _wmo.Groups[groupIndex].WmoGroupId : 0;
+    }
+
+    public string? GetRenderGroupRawName(int renderGroupIndex)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return null;
+        int groupIndex = _groups[renderGroupIndex].GroupIndex;
+        return groupIndex < _wmo.Groups.Count ? _wmo.Groups[groupIndex].Name : null;
+    }
+
+    public bool TryGetGroupBounds(int renderGroupIndex, out Vector3 min, out Vector3 max)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+        {
+            min = default;
+            max = default;
+            return false;
+        }
+        int groupIndex = _groups[renderGroupIndex].GroupIndex;
+        if (groupIndex < _wmo.Groups.Count)
+        {
+            min = _wmo.Groups[groupIndex].BoundsMin;
+            max = _wmo.Groups[groupIndex].BoundsMax;
+            return true;
+        }
+        min = default;
+        max = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Tests a WMO-local point against group bounding boxes, returning the matching render group index, or -1.
+    /// Prefers groups whose bounds strictly contain the point; if multiple overlap, selects the smallest volume.
+    /// </summary>
+    public int FindGroupContainingPoint(Vector3 localPoint)
+    {
+        int bestIdx = -1;
+        float bestVolume = float.MaxValue;
+
+        for (int i = 0; i < _groups.Count; i++)
+        {
+            int gi = _groups[i].GroupIndex;
+            if (gi < 0 || gi >= _wmo.Groups.Count) continue;
+            var g = _wmo.Groups[gi];
+            if (localPoint.X >= g.BoundsMin.X && localPoint.X <= g.BoundsMax.X &&
+                localPoint.Y >= g.BoundsMin.Y && localPoint.Y <= g.BoundsMax.Y &&
+                localPoint.Z >= g.BoundsMin.Z && localPoint.Z <= g.BoundsMax.Z)
+            {
+                var size = g.BoundsMax - g.BoundsMin;
+                float volume = Math.Abs(size.X * size.Y * size.Z);
+                if (volume < bestVolume)
+                {
+                    bestVolume = volume;
+                    bestIdx = i;
+                }
+            }
+        }
+
+        return bestIdx;
+    }
 
     /// <summary>
     /// Exposes the already-loaded WMO portal read model for the opt-in scene-graph bridge.
@@ -760,6 +878,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         {
             if (!gb.IsVisible) continue;
             _gl.BindVertexArray(gb.Vao);
+            _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, gb.Ebo);
             _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
         }
 
@@ -797,7 +916,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
     /// </summary>
     public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, WmoRenderPass pass,
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
-        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null,
+        SceneLightManager? sceneLights = null)
     {
         ResetRenderStats();
         ProcessDeferredMaterialTextureLoads();
@@ -832,6 +952,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
         _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
         _gl.Uniform1(_uUnlit, 0);
+        UploadLocalLights(sceneLights, modelMatrix);
 
         UpdateRuntimeVisibility(modelMatrix, view, proj, cp);
 
@@ -1095,7 +1216,17 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _gl.Uniform3(_uLightDir, lightDir.X, lightDir.Y, lightDir.Z);
         _gl.Uniform3(_uLightColor, lightColor.X, lightColor.Y, lightColor.Z);
         _gl.Uniform3(_uAmbientColor, ambientColor.X, ambientColor.Y, ambientColor.Z);
+        UploadLocalLights(null, Matrix4x4.Identity);
         _gl.Uniform1(_uAlphaTest, 0.0f);
+    }
+
+    public unsafe void BeginGpuInstanceBatch(Matrix4x4 view, Matrix4x4 proj,
+        Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
+        Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor,
+        SceneLightManager? sceneLights)
+    {
+        BeginGpuInstanceBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+        UploadLocalLights(sceneLights, Matrix4x4.Identity);
     }
 
     public void QueueGpuInstance(Matrix4x4 modelMatrix)
@@ -1564,6 +1695,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _gl.Uniform4(_uColor, r, g, b, 1.0f);
         _currentDrawCalls++;
         _currentGroupFallbackDrawCalls++;
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, gb.Ebo);
         _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
     }
 
@@ -1576,6 +1708,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer
         _gl.Uniform4(_uColor, r, g, b, 1.0f);
         _currentDrawCalls++;
         _currentGroupFallbackDrawCalls++;
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, gb.Ebo);
         _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount,
             DrawElementsType.UnsignedShort, null, instanceCount);
     }
@@ -1724,8 +1857,21 @@ uniform vec3 uCameraPos;
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
 uniform vec3 uAmbientColor;
+uniform int uLocalLightCount;
+uniform vec3 uLocalLightPos[8];
+uniform vec3 uLocalLightColor[8];
+uniform float uLocalLightIntensity[8];
+uniform float uLocalLightStart[8];
+uniform float uLocalLightEnd[8];
 
 out vec4 FragColor;
+
+vec3 safeNormalize(vec3 value) {
+    float len = length(value);
+    if (len <= 0.0001)
+        return vec3(0.0, 0.0, 1.0);
+    return value / len;
+}
 
 void main() {
     vec3 norm = normalize(vNormal);
@@ -1735,6 +1881,22 @@ void main() {
     float diff = NdotL * 0.5 + 0.5; // half-Lambert: remap [-1,1] to [0,1]
     diff = diff * diff; // square for slightly sharper falloff
     vec3 lighting = uAmbientColor + uLightColor * diff;
+    vec3 localLight = vec3(0.0);
+    for (int i = 0; i < 8; i++) {
+        if (i >= uLocalLightCount)
+            break;
+
+        vec3 toLight = uLocalLightPos[i] - vFragPos;
+        float distanceToLight = length(toLight);
+        float attenuationRange = max(uLocalLightEnd[i] - uLocalLightStart[i], 0.001);
+        float attenuation = clamp((uLocalLightEnd[i] - distanceToLight) / attenuationRange, 0.0, 1.0);
+        float localDiffuse = max(dot(norm, safeNormalize(toLight)), 0.0);
+        localLight += max(uLocalLightColor[i], vec3(0.0))
+            * clamp(uLocalLightIntensity[i], 0.0, 4.0)
+            * attenuation
+            * localDiffuse;
+    }
+    lighting += localLight;
     float bakedWeight = clamp(vBakedWeight, 0.0, 1.0);
     vec3 bakedLighting = mix(vec3(1.0), clamp(vVertexLight.rgb, vec3(0.0), vec3(1.0)), bakedWeight);
 
@@ -1798,7 +1960,56 @@ void main() {
         _uLightDir = _gl.GetUniformLocation(_shaderProgram, "uLightDir");
         _uLightColor = _gl.GetUniformLocation(_shaderProgram, "uLightColor");
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
+        _uLocalLightCount = _gl.GetUniformLocation(_shaderProgram, "uLocalLightCount");
+        for (int i = 0; i < MaxWmoLocalLights; i++)
+        {
+            _uLocalLightPos[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightPos[{i}]");
+            _uLocalLightColor[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightColor[{i}]");
+            _uLocalLightIntensity[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightIntensity[{i}]");
+            _uLocalLightStart[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightStart[{i}]");
+            _uLocalLightEnd[i] = _gl.GetUniformLocation(_shaderProgram, $"uLocalLightEnd[{i}]");
+        }
     }
+
+    private void UploadLocalLights(SceneLightManager? sceneLights, Matrix4x4 modelMatrix)
+    {
+        if (_uLocalLightCount < 0)
+            return;
+
+        int count = 0;
+        if (sceneLights != null)
+        {
+            TransformAabb(BoundsMin, BoundsMax, modelMatrix, out Vector3 worldMin, out Vector3 worldMax);
+            count = sceneLights.QueryAffecting(worldMin, worldMax, _localLightUploadScratch);
+        }
+
+        _gl.Uniform1(_uLocalLightCount, count);
+        for (int i = 0; i < count; i++)
+        {
+            SceneLight light = _localLightUploadScratch[i];
+            Vector3 color = ClampVector(light.Color, 0.0f, 4.0f);
+            float intensity = Math.Clamp(FiniteOrDefault(light.Intensity, 0.0f), 0.0f, 4.0f);
+            float start = Math.Clamp(FiniteOrDefault(light.AttenuationStart, 0.0f), 0.0f, 100000.0f);
+            float end = MathF.Max(Math.Clamp(FiniteOrDefault(light.AttenuationEnd, 0.0f), 0.0f, 100000.0f), start + 0.001f);
+
+            _gl.Uniform3(_uLocalLightPos[i], light.Position.X, light.Position.Y, light.Position.Z);
+            _gl.Uniform3(_uLocalLightColor[i], color.X, color.Y, color.Z);
+            _gl.Uniform1(_uLocalLightIntensity[i], intensity);
+            _gl.Uniform1(_uLocalLightStart[i], start);
+            _gl.Uniform1(_uLocalLightEnd[i], end);
+        }
+    }
+
+    private static Vector3 ClampVector(Vector3 value, float min, float max)
+    {
+        return new Vector3(
+            Math.Clamp(FiniteOrDefault(value.X, 0.0f), min, max),
+            Math.Clamp(FiniteOrDefault(value.Y, 0.0f), min, max),
+            Math.Clamp(FiniteOrDefault(value.Z, 0.0f), min, max));
+    }
+
+    private static float FiniteOrDefault(float value, float fallback)
+        => float.IsFinite(value) ? value : fallback;
 
     private uint CompileShader(ShaderType type, string source)
     {

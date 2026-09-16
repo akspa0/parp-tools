@@ -11558,7 +11558,7 @@ void main() {
 
     private void UpdateCurrentAreaContext(TerrainRenderer? renderer)
     {
-        if (_areaTableService == null || renderer == null)
+        if (_areaTableService == null)
         {
             _currentAreaLookup = null;
             _currentAreaName = string.Empty;
@@ -11579,6 +11579,47 @@ void main() {
         _lastAreaLookupCameraPosition = _camera.Position;
         _lastAreaLookupLoadedTileCount = loadedTileCount;
         _lastAreaLookupMapId = _currentMapId;
+
+        // 1. Check if camera is inside a placed WMO group in the world scene
+        if (_worldScene != null && _worldScene.TryGetWmoGroupAt(_camera.Position, out var wmoInst, out var wmoR, out int renderGroupIndex))
+        {
+            uint wmoGroupId = wmoR.GetRenderGroupAreaId(renderGroupIndex);
+            string? rawGroupName = wmoR.GetRenderGroupRawName(renderGroupIndex);
+            var wmoArea = _areaTableService.ResolveWmoArea(wmoR.WmoId, renderGroupIndex, wmoGroupId, _currentMapId, rawGroupName);
+            if (wmoArea.Reason == WowViewer.Core.World.AreaResolutionReason.Resolved)
+            {
+                _currentAreaLookup = wmoArea;
+                _currentZoneName = _currentAreaLookup.ZoneText ?? string.Empty;
+                _currentAreaName = _currentAreaLookup.SubzoneText ?? _currentAreaLookup.ZoneText ?? string.Empty;
+                return;
+            }
+        }
+        else if (_renderer is WmoRenderer standaloneWmo)
+        {
+            int standaloneGroupIndex = standaloneWmo.FindGroupContainingPoint(_camera.Position);
+            if (standaloneGroupIndex >= 0)
+            {
+                uint wmoGroupId = standaloneWmo.GetRenderGroupAreaId(standaloneGroupIndex);
+                string? rawGroupName = standaloneWmo.GetRenderGroupRawName(standaloneGroupIndex);
+                var wmoArea = _areaTableService.ResolveWmoArea(standaloneWmo.WmoId, standaloneGroupIndex, wmoGroupId, _currentMapId, rawGroupName);
+                if (wmoArea.Reason == WowViewer.Core.World.AreaResolutionReason.Resolved)
+                {
+                    _currentAreaLookup = wmoArea;
+                    _currentZoneName = _currentAreaLookup.ZoneText ?? string.Empty;
+                    _currentAreaName = _currentAreaLookup.SubzoneText ?? _currentAreaLookup.ZoneText ?? string.Empty;
+                    return;
+                }
+            }
+        }
+
+        // 2. Fall back to terrain chunk under camera
+        if (renderer == null)
+        {
+            _currentAreaLookup = WowViewer.Core.World.AreaLookupResult.Unresolved(0, _currentMapId, WowViewer.Core.World.AreaResolutionReason.NoTerrainChunk);
+            _currentAreaName = string.Empty;
+            _currentZoneName = string.Empty;
+            return;
+        }
 
         var chunk = renderer.GetChunkInfoAt(_camera.Position.X, _camera.Position.Y);
         _currentAreaLookup = chunk is null

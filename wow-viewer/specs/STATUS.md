@@ -24,6 +24,21 @@ the current owner or registry names a forward pointer; do not infer closure from
 | 9 | [234 Map Save & New Map Creator](234-map-save-new-map/spec.md) | speckit spec authored 2026-09-09 (operator-directed): save merged/composed maps to Alpha WDT + LK ADT from Archaeology AND Editor Data I/O; New Map creator in Editor; multi-map explicitly out of scope | Plan authored; save pipeline round-trips both targets with receipts; operator client-load witness |
 | 10 | [235 Legacy MDX/M2 Rendering](235-legacy-mdx-m2-rendering/spec.md) | spec + plan authored 2026-09-10 (operator-directed): MDX/M2 rendering for 1.0.0-3.0.1 non-functional; supersedes unimplemented residue of 104 + 154 (which had real measured evidence — exact `0x100`-`0x107` broken range — but were untracked in any epic); adds fuckported-asset/Warcraft.NET parity + MDX light-emitter effects; 6-phase plan, Phase 0 must reconcile `FormatProfileRegistry` against the real `M2ModelReaderDispatcher` mechanism before any reader change | speckit-tasks, then Phase 0 reconciliation; build-by-build survey (US1) complete; objects render + bbox fallback across the range; operator visual witness |
 | 11 | [236 Unified Scene Lighting & Doodad Performance](236-scene-lighting-doodad-performance/spec.md) | spec + plan + tasks authored 2026-09-15 (operator-directed): v0.5.4-dev epic for dark MDX shading fix, Half-Lambert model diffuse, multi-surface light casting (torches/WMO lights), doodad batching performance overhaul, client-constrained map generator, and save/export pipeline (incorporating Spec 234) | Phase 1 shading fix, multi-surface lighting, doodad instancing, and save pipeline verified with receipts |
+| 12 | [237 ADT/v22 Terrain](237-adt-v22-terrain/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-16 (operator-directed): read + render AHDR-family tiles (v22, v23 via same reader); repo only had a header-only reader that labelled every AHDR file v23; every wiki layout settled by a power-checked probe. Corpus is being acquired | Synthetic Phase 0 steps may start now; Phase 0 gate on real corpus; viewer phase needs 238 (+239 for id-referenced assets) |
+| 13 | [238 CASC Data Source](238-casc-data-source/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-16 (operator-directed; Marlamin in contact): local install + remote CDN via vendored TACTSharp (Warcraft.NET has no CASC; vendored CascLib/TACT.NET folders are empty), id-addressed reads, keys, verified cache | Phase 0 era survey + library decision; byte-identical verification vs independent extraction |
+| 14 | [239 Modern Client Assets](239-modern-client-assets/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-16 (operator-directed): post-5.0.1 FileDataID era — WDT MAID, ADT id placements/MTXP, chunked M2, WMO GFID/MODI, DB2 by id; wow.export as behavioral reference; survey-first | Needs 238 Phase 1; Phase 0 coverage survey on one build per era tier |
+
+## v0.6 release scope (pinned 2026-09-16)
+
+Worked on the current `v0.5.4-dev` branch. Release theme: **modern data access + experimental terrain formats**.
+
+| Spec | Role | Order |
+|---|---|---|
+| 238 CASC Data Source | foundation: bytes from local/remote CASC | 1 |
+| 239 Modern Client Assets | FileDataID-era readers + renderer hookups | 2 (after 238 Phase 1) |
+| 237 ADT/v22 Terrain | AHDR reader/renderer; assets via 238/239 | parallel (reader phases), viewer phase after 238 |
+
+Carried in from v0.5.4-dev: 236 (active) remains the current owner until its gates close.
 
 ## Standing gates (operator-owned)
 
@@ -41,7 +56,7 @@ See [epics/active-epics.md](epics/active-epics.md) for members, supersessions an
 1. **UI & Approachability** — 231 · 227 · 229 · 225 · 212 · 223 (145/080 superseded into it)
 2. **Reconstruction & Editing** — 232 · 230 · 222 · 219 · 220 · 208 · 203 · 196 · 194 · 192 (195 superseded)
 3. **Renderer Performance & Correctness** — 226 · 153 · 152 · 151 · 150 · 204 · 207 · 206 · 202 · 201 · 200 · 199 · 198 · 160
-4. **Formats, Readers & Writers** — 197 · 221 · 220 · 193 · 105 · 205
+4. **Formats, Readers & Writers** — 238 · 239 · 237 (v0.6) · 197 · 221 · 220 · 193 · 105 · 205
 5. **World Simulation, Audio & Environment** — 214 · 215 · 216 · 217 · 218 · 148 · 147 · 146 · 144 · 143 · 142
 6. **PM4 Decoding** — 128–131 · 149 · 184 · 188 · 186 · 187
 7. **ML & Dataset Tooling** (eventually continue) — 139–141 · 138 · `data-harvester/`

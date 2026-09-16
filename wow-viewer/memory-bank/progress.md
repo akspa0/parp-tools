@@ -1,6 +1,20 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
+
+## 2026-09-16 — Spec 236 Phase 2 WMO Emitted-Light Casting Slice
+
+- **Implemented**:
+  - Added viewer-layer `SceneLight`, `SceneLightManager`, and `ISceneLightEmitter` for source-side emitted-light collection without changing the base model renderer interface.
+  - Exposed MDX omni `LITE`, legacy-backed M2 `LITE`, native M2 animated omni lights, WMO `MOLT`, and WMO-internal doodad lights as scene lights.
+  - Wired `WorldScene` to rebuild scene lights from visible placements and feed WMO shell draws.
+  - Updated `WmoRenderer` shell shader to upload/evaluate up to eight nearby point lights with bounded attenuation and per-fragment diffuse.
+  - Disabled WMO shell instancing while active scene lights exist so lit WMO placements do not share an approximate light set.
+- **Verification**:
+  - `dotnet build wow-viewer/WowViewer.slnx -c Debug`: exit 0, 0 errors.
+  - `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-build --filter "FullyQualifiedName~WorldObjectPassCoordinator"`: 11 passed, 0 failed.
+  - Full solution `dotnet test --no-build` still reports existing non-lighting failures (`LkToAlphaRoundTripTests` drift and old `WorldFramePassCoordinatorTests` WDL-default expectation when targeted with object-pass tests); no runtime visual proof claimed.
+- **Receipt**: `specs/236-scene-lighting-doodad-performance/evidence/phase2-wmo-light-casting-slice.md`.
 
 ## 2026-09-15 — v0.5.3 Remediation: Phase Tile Alignment, Authentic Map Creator Assets, GLB Exporters, and Startup Stability
 

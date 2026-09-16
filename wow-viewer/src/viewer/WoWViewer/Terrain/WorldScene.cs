@@ -1199,6 +1199,8 @@ public class WorldScene : ISceneRenderer
 
     // Scratch collections reused every frame to avoid hot-path allocations.
     private readonly WorldRenderFrame _renderFrame = new();
+    private readonly SceneLightManager _sceneLightManager = new();
+    private readonly List<SceneLight> _sceneLightCollectScratch = new();
     private readonly HashSet<WmoRenderer> _worldFrameWmoRenderers = new();
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
@@ -3950,6 +3952,14 @@ public class WorldScene : ISceneRenderer
     public void SetAudioEmitterGain(float gain) => _audioRuntime?.SetEmitterGain(gain);
 
     public void SetAudioWorldTriggersEnabled(bool enabled) => _audioRuntime?.SetWorldTriggersEnabled(enabled);
+
+    public void SetAreaMusicPlaybackEnabled(bool enabled) => _audioRuntime?.SetAreaMusicPlaybackEnabled(enabled);
+
+    public void PlayAreaMusicNow() => _audioRuntime?.PlayAreaMusicNow();
+
+    public void StopAreaMusicNow() => _audioRuntime?.StopAreaMusicNow();
+
+    public void SetExternalAudioEmitters(IReadOnlyList<TerrainSoundEmitter> emitters) => _audioRuntime?.SetExternalEmitters(emitters);
 
     /// <summary>
     /// Supplies the same Zone/SubZone resolution used by the viewer status bar
@@ -9022,6 +9032,68 @@ public class WorldScene : ISceneRenderer
         return false;
     }
 
+    /// <summary>
+    /// Tests a world-space point against all placed WMO instances and their internal group bounding boxes.
+    /// Returns true if the point falls inside a WMO group.
+    /// </summary>
+    public bool TryGetWmoGroupAt(Vector3 worldPos, out ObjectInstance wmoInstance, out WmoRenderer renderer, out int renderGroupIndex)
+    {
+        wmoInstance = default;
+        renderer = null!;
+        renderGroupIndex = -1;
+
+        if (_wmoInstances == null || _wmoInstances.Count == 0)
+            return false;
+
+        float bestVolume = float.MaxValue;
+        bool found = false;
+
+        foreach (var inst in _wmoInstances)
+        {
+            if (inst.BoundsResolved &&
+                (worldPos.X < inst.BoundsMin.X || worldPos.X > inst.BoundsMax.X ||
+                 worldPos.Y < inst.BoundsMin.Y || worldPos.Y > inst.BoundsMax.Y ||
+                 worldPos.Z < inst.BoundsMin.Z || worldPos.Z > inst.BoundsMax.Z))
+            {
+                continue;
+            }
+
+            if (!_assets.TryGetLoadedWmo(inst.ModelKey, out WmoRenderer? wmoRenderer) || wmoRenderer == null)
+                continue;
+
+            if (!Matrix4x4.Invert(inst.Transform, out Matrix4x4 invTransform))
+                continue;
+
+            Vector3 localPos = Vector3.Transform(worldPos, invTransform);
+            int groupIdx = wmoRenderer.FindGroupContainingPoint(localPos);
+            if (groupIdx >= 0)
+            {
+                if (wmoRenderer.TryGetGroupBounds(groupIdx, out Vector3 gMin, out Vector3 gMax))
+                {
+                    Vector3 size = gMax - gMin;
+                    float vol = Math.Abs(size.X * size.Y * size.Z);
+                    if (vol < bestVolume)
+                    {
+                        bestVolume = vol;
+                        wmoInstance = inst;
+                        renderer = wmoRenderer;
+                        renderGroupIndex = groupIdx;
+                        found = true;
+                    }
+                }
+                else if (!found)
+                {
+                    wmoInstance = inst;
+                    renderer = wmoRenderer;
+                    renderGroupIndex = groupIdx;
+                    found = true;
+                }
+            }
+        }
+
+        return found;
+    }
+
     public bool TryGetSelectedWmoDoodad(out WmoDoodadInfo doodadInfo, out Vector3 worldPosition, out ObjectInstance parentWmo)
     {
         doodadInfo = default;
@@ -10268,6 +10340,35 @@ public class WorldScene : ISceneRenderer
         return terrainHeight >= objectTop + terrainOcclusionMargin;
     }
 
+    private void RebuildSceneLights(WorldRenderFrame frame)
+    {
+        _sceneLightManager.Clear();
+        _sceneLightCollectScratch.Clear();
+
+        for (int i = 0; i < frame.Visibility.VisibleWmos.Count; i++)
+        {
+            VisibleWmoInstance visible = frame.Visibility.VisibleWmos[i];
+            WmoRenderer? renderer = ResolveVisibleWmoRenderer(frame, visible.Instance.ModelKey);
+            renderer?.CollectSceneLights(visible.Instance.Transform, _sceneLightCollectScratch, visible.Instance.ModelKey);
+        }
+
+        for (int i = 0; i < _mdxInstances.Count; i++)
+        {
+            ObjectInstance instance = _mdxInstances[i];
+            if (ShouldHideVisibleMdxInstance(instance))
+                continue;
+
+            IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, instance.ModelKey);
+            if (renderer is not ISceneLightEmitter emitter)
+                continue;
+
+            emitter.CollectSceneLights(instance.Transform, _sceneLightCollectScratch, instance.ModelKey);
+        }
+
+        _sceneLightManager.AddRange(_sceneLightCollectScratch);
+        _sceneLightCollectScratch.Clear();
+    }
+
     /// <summary>
     /// Resolves a camera-path sample against the loaded world. Terrain collision is
     /// heightfield-only; WMO collision uses the resident placement bounds as a
@@ -11227,7 +11328,10 @@ public class WorldScene : ISceneRenderer
                     cameraForward = ExtractCameraForward(viewInv);
                     _lastRenderedCameraPosition = cameraPos;
                     _hasLastRenderedCameraPosition = true;
-                    int audioAreaId = _terrainManager.Renderer.GetChunkInfoAt(cameraPos.X, cameraPos.Y)?.AreaId ?? 0;
+                    int terrainAreaId = _terrainManager.Renderer.GetChunkInfoAt(cameraPos.X, cameraPos.Y)?.AreaId ?? 0;
+                    int audioAreaId = (_currentAreaLookup?.Reason == WowViewer.Core.World.AreaResolutionReason.Resolved)
+                        ? (_currentAreaLookup.CanonicalAreaId ?? _currentAreaLookup.RawAreaId)
+                        : terrainAreaId;
 
                     // Sub-probes inside the timed pass. Both do periodic residency work and are the
                     // prime suspects for the ~212 ms recurring stall.
@@ -11277,6 +11381,7 @@ public class WorldScene : ISceneRenderer
                 {
                     frame.WmoVisibilityMs = MeasureDurationMs(() => CollectVisibleWmoInstances(frame, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians));
                     FlushPendingVisibleWmoLoads();
+                    RebuildSceneLights(frame);
 
                     // State is constant for this pass; set once to reduce per-instance churn and
                     // keep WMO submission running through one explicit visible-instance bucket.
@@ -11299,7 +11404,11 @@ public class WorldScene : ISceneRenderer
                             if (renderer != null)
                                 _worldFrameWmoRenderers.Add(renderer);
 
-                            bool canBatch = renderer is IGpuInstancedWmoRenderer gpuRenderer
+                            // Local scene lights are selected against each placement's world bounds.
+                            // Keep WMO shell instancing disabled while any scene light is active rather
+                            // than uploading one approximated light set for every placement in a batch.
+                            bool canBatch = _sceneLightManager.Count == 0
+                                && renderer is IGpuInstancedWmoRenderer gpuRenderer
                                 && gpuRenderer.SupportsGpuInstancedOpaque;
                             wmoBatchCandidates.Add(new(
                                 visible.Instance.ModelKey,
@@ -11323,7 +11432,8 @@ public class WorldScene : ISceneRenderer
 
                             renderer.RenderWithTransform(visible.Instance.Transform, view, proj, WmoRenderPass.Opaque,
                                 fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
+                                _sceneLightManager);
                             AccumulateWmoRenderStats(frame, renderer.LastRenderStats, renderer.LastGroupAdmission);
                         }
 
@@ -11339,8 +11449,9 @@ public class WorldScene : ISceneRenderer
                                 instances.Add(frame.Visibility.VisibleWmos[visibleIndex]);
 
                             gpuRenderer.BeginGpuInstanceBatch(
-                                view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                 view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
+                                 _sceneLightManager);
                             foreach (VisibleWmoInstance visible in instances)
                                 gpuRenderer.QueueGpuInstance(visible.Instance.Transform);
                             gpuRenderer.EndGpuInstanceBatch();
@@ -11654,7 +11765,8 @@ public class WorldScene : ISceneRenderer
                                 {
                                     renderer.RenderWithTransform(visibleWmo.Instance.Transform, view, proj, WmoRenderPass.Transparent,
                                         fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
+                                        _sceneLightManager);
                                 });
                                 frame.WmoTransparentSubmissionMs += wmoTransparentMs;
                                 AccumulateWmoRenderStats(frame, renderer.LastRenderStats, renderer.LastGroupAdmission);

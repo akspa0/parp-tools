@@ -15,6 +15,9 @@ public class AreaTableService
     private readonly Dictionary<int, AreaEntry> _areas = new();
     private readonly Dictionary<(int MapId, AreaNumberParts AreaNumber), AreaEntry> _areasByMapAndNumber = new();
     private readonly Dictionary<AreaNumberParts, List<AreaEntry>> _areasByNumber = new();
+    private readonly Dictionary<(int WmoId, int GroupId), WmoAreaEntry> _wmoAreasByWmoAndGroup = new();
+    private readonly Dictionary<int, WmoAreaEntry> _wmoAreasByGroupId = new();
+    private readonly Dictionary<int, WmoAreaEntry> _wmoAreasById = new();
     private int _rowCount;
     private int _primaryKeyCount;
     private int _fallbackAliasCount;
@@ -28,6 +31,15 @@ public class AreaTableService
         int Flags,
         int AreaNumber = 0,
         int ParentAreaNumber = 0);
+
+    public record WmoAreaEntry(
+        int Id,
+        int WmoId,
+        int WmoGroupId,
+        string Name,
+        int AreaTableId,
+        int ZoneMusic,
+        int AmbienceId);
 
     public int Count => _primaryKeyCount;
     public string? LoadedBuild { get; private set; }
@@ -130,6 +142,169 @@ public class AreaTableService
 
         ViewerLog.Important(ViewerLog.Category.General,
             $"[AreaTable] Loaded build={LoadedBuild} locale={LoadedLocale} rows={_rowCount} indexed={_areas.Count} primaryKeys={_primaryKeyCount} fallbackAliases={_fallbackAliasCount} aliasCollisions={_fallbackAliasCollisions} nameCol='{FormatColumn(nameCol)}' idCol='{FormatColumn(idCol)}' parentCol='{FormatColumn(parentCol)}' mapCol='{FormatColumn(mapCol)}' flagsCol='{FormatColumn(flagsCol)}'");
+
+        LoadWmoAreaTable(dbcProvider, dbdProvider, build, localeUsed);
+    }
+
+    private void LoadWmoAreaTable(IDBCProvider dbcProvider, FilesystemDBDProvider dbdProvider, string build, Locale localeUsed)
+    {
+        _wmoAreasByWmoAndGroup.Clear();
+        _wmoAreasByGroupId.Clear();
+        _wmoAreasById.Clear();
+
+        var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
+        IDBCDStorage storage;
+        try
+        {
+            try
+            {
+                storage = dbcd.Load("WMOAreaTable", build, localeUsed);
+            }
+            catch
+            {
+                storage = dbcd.Load("WMOAreaTable", build, Locale.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Dbc, $"[AreaTable] WMOAreaTable.dbc not loaded: {ex.Message}");
+            return;
+        }
+
+        var availableColumns = new HashSet<string>(storage.AvailableColumns, StringComparer.OrdinalIgnoreCase);
+        string? idCol = DetectColumn(availableColumns, "ID");
+        string? wmoIdCol = DetectColumn(availableColumns, "WMOID");
+        string? groupIdCol = DetectColumn(availableColumns, "WMOGroupID");
+        string? areaTableIdCol = DetectColumn(availableColumns, "AreaTableID");
+        string? nameCol = DetectColumn(availableColumns, "AreaName_lang", "AreaName", "Name");
+        string? zoneMusicCol = DetectColumn(availableColumns, "ZoneMusic");
+        string? ambienceIdCol = DetectColumn(availableColumns, "AmbienceID", "DayAmbienceSoundID");
+
+        foreach (var key in storage.Keys)
+        {
+            var row = storage[key];
+            int id = SafeIntField(row, idCol, key);
+            int wmoId = SafeIntField(row, wmoIdCol, 0);
+            int groupId = SafeIntField(row, groupIdCol, 0);
+            int areaTableId = SafeIntField(row, areaTableIdCol, 0);
+            string name = Sanitize(SafeField<string>(row, nameCol, string.Empty) ?? string.Empty);
+            int zoneMusic = SafeIntField(row, zoneMusicCol, 0);
+            int ambienceId = SafeIntField(row, ambienceIdCol, 0);
+
+            var entry = new WmoAreaEntry(id, wmoId, groupId, name, areaTableId, zoneMusic, ambienceId);
+            _wmoAreasById[id] = entry;
+            if (wmoId != 0 && groupId != 0)
+                _wmoAreasByWmoAndGroup[(wmoId, groupId)] = entry;
+            if (groupId != 0 && !_wmoAreasByGroupId.ContainsKey(groupId))
+                _wmoAreasByGroupId[groupId] = entry;
+        }
+
+        ViewerLog.Important(ViewerLog.Category.General,
+            $"[AreaTable] Loaded WMOAreaTable rows={storage.Keys.Count} byWmoAndGroup={_wmoAreasByWmoAndGroup.Count} byGroup={_wmoAreasByGroupId.Count}");
+    }
+
+    /// <summary>
+    /// Resolves an area name and hierarchy for a WMO group based on WMO ID, group index, and MOGP group ID.
+    /// Falls back to parent AreaTable or group raw name.
+    /// </summary>
+    public AreaLookupResult ResolveWmoArea(uint wmoId, int groupIndex, uint wmoGroupId, int mapId, string? fallbackGroupName = null)
+    {
+        WmoAreaEntry? wmoEntry = null;
+        if (wmoId != 0 && wmoGroupId != 0 && _wmoAreasByWmoAndGroup.TryGetValue(((int)wmoId, (int)wmoGroupId), out var entry))
+        {
+            wmoEntry = entry;
+        }
+        else if (wmoGroupId != 0 && _wmoAreasByGroupId.TryGetValue((int)wmoGroupId, out entry))
+        {
+            wmoEntry = entry;
+        }
+        else if (wmoGroupId != 0 && _wmoAreasById.TryGetValue((int)wmoGroupId, out entry))
+        {
+            wmoEntry = entry;
+        }
+        else if (wmoId != 0 && _wmoAreasByWmoAndGroup.TryGetValue(((int)wmoId, groupIndex), out entry))
+        {
+            wmoEntry = entry;
+        }
+
+        if (wmoEntry != null)
+        {
+            string? subzone = !string.IsNullOrWhiteSpace(wmoEntry.Name) ? wmoEntry.Name : fallbackGroupName;
+            string? zone = null;
+            int canonicalAreaId = wmoEntry.AreaTableId != 0 ? wmoEntry.AreaTableId : (int)wmoGroupId;
+
+            if (wmoEntry.AreaTableId != 0)
+            {
+                var parentArea = ResolveArea(wmoEntry.AreaTableId, mapId);
+                zone = parentArea.ZoneText ?? parentArea.SubzoneText;
+                if (string.IsNullOrWhiteSpace(subzone))
+                    subzone = parentArea.SubzoneText ?? parentArea.ZoneText;
+            }
+
+            if (string.IsNullOrWhiteSpace(zone))
+                zone = subzone;
+
+            return new AreaLookupResult(
+                (int)wmoGroupId,
+                mapId,
+                canonicalAreaId,
+                wmoEntry.AreaTableId != 0 ? wmoEntry.AreaTableId : null,
+                null,
+                subzone,
+                zone,
+                subzone,
+                AreaContextSource.DirectAreaId,
+                AreaResolutionReason.Resolved,
+                true);
+        }
+
+        // If not in WMOAreaTable, check if wmoGroupId directly points to an AreaTable entry
+        if (wmoGroupId != 0)
+        {
+            var direct = ResolveArea((int)wmoGroupId, mapId);
+            if (direct.Reason == AreaResolutionReason.Resolved)
+                return direct;
+        }
+
+        // Fallback: if we have a group name or wmoId
+        if (!string.IsNullOrWhiteSpace(fallbackGroupName))
+        {
+            return new AreaLookupResult(
+                (int)wmoGroupId,
+                mapId,
+                (int)wmoGroupId,
+                null,
+                null,
+                fallbackGroupName,
+                fallbackGroupName,
+                fallbackGroupName,
+                AreaContextSource.DirectAreaId,
+                AreaResolutionReason.Resolved,
+                true);
+        }
+
+        return AreaLookupResult.Unresolved((int)wmoGroupId, mapId, AreaResolutionReason.AreaRowMissing);
+    }
+
+    public bool TryGetWmoAudioInfo(uint wmoId, int groupIndex, uint wmoGroupId, out int zoneMusicId, out int ambienceId)
+    {
+        zoneMusicId = 0;
+        ambienceId = 0;
+        WmoAreaEntry? entry = null;
+
+        if (wmoId != 0 && wmoGroupId != 0 && _wmoAreasByWmoAndGroup.TryGetValue(((int)wmoId, (int)wmoGroupId), out entry)) { }
+        else if (wmoGroupId != 0 && _wmoAreasByGroupId.TryGetValue((int)wmoGroupId, out entry)) { }
+        else if (wmoGroupId != 0 && _wmoAreasById.TryGetValue((int)wmoGroupId, out entry)) { }
+        else if (wmoId != 0 && _wmoAreasByWmoAndGroup.TryGetValue(((int)wmoId, groupIndex), out entry)) { }
+
+        if (entry != null)
+        {
+            zoneMusicId = entry.ZoneMusic;
+            ambienceId = entry.AmbienceId;
+            return zoneMusicId != 0 || ambienceId != 0;
+        }
+
+        return false;
     }
 
     /// <summary>

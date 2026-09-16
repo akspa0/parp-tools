@@ -182,6 +182,13 @@ public sealed class NewMapCreatorService
             string wdtPath = Path.Combine(mapDir, $"{trimmedName}.wdt");
             LkWdtWriter.Write(wdtPath, existingTiles);
 
+            // Write WDL low-resolution terrain file
+            var wdlTiles = result.Tiles.Values
+                .Select(WdlWriter.ExtractTileHeightsFromLk)
+                .ToList();
+            string wdlPath = Path.Combine(mapDir, $"{trimmedName}.wdl");
+            WdlWriter.Write(wdlPath, wdlTiles);
+
             _statusMessage = $"Successfully created map '{trimmedName}' with {result.Tiles.Count} tiles at '{mapDir}'.";
             _statusColor = new Vector4(0.2f, 0.9f, 0.2f, 1f);
             ViewerLog.Important(ViewerLog.Category.General, $"[NewMapCreator] {_statusMessage}");

@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-10 (compacted during a Spec 224 `speckit-cleanup` pass)
+Last updated: 2026-09-16
 
 ## Fresh-chat route
 
@@ -57,8 +57,23 @@ gap directly — that's Spec 234 below, already the whole point of the spec.
 - **MDX & M2 Shading Corrections**:
   - Removed `!gl_FrontFacing` normal inversion in `ModelRenderer.cs` and `M2Renderer.cs`.
   - Implemented Half-Lambert diffuse wrapping (`(N·L * 0.5 + 0.5)^2`) matching `WmoRenderer.cs`.
+- **Automatic Daytime Disabled by Default**:
+  - Changed `TerrainLighting.AutomaticTimeOfDayEnabled` default to `false` so scenes remain stable at midday.
+- **Wireframe Defect on Textured WMO Geometry**:
+  - Bound `gb.Ebo` explicitly before `GL.DrawElements` in `WmoRenderer.cs`, restoring wireframes on textured geometry.
+- **WMO Group Area Names & Hierarchies**:
+  - Preserved `uint WmoGroupId` at MOGP offset 0x38 in `WmoV14ToV17Converter` and `WmoV17ToV14Converter`.
+  - Added `WMOAreaTable.dbc` loading and hierarchical name resolution in `AreaTableService.cs`.
+  - Wired hit-testing in `WmoRenderer.cs`, `WorldScene.cs`, and `ViewerApp.cs` (Spec 228 God-Class Freeze compliant).
+- **Zone & WMO Audio Playback + External Emitter Support**:
+  - Added zone music/ambience playback, UI controls in `ViewerApp_Audio.cs`, and support for WMO/doodad emitters.
+- **Map Generator WDL Output & Continuous Fractal Relief**:
+  - Added `WdlWriter.ExtractTileHeightsFromLk(LkAdtData)` and emitted `{mapName}.wdl` in `NewMapCreatorService.cs`.
+  - Integrated continuous multi-octave harmonic fractal noise in `TemplatedTerrainGenerator.cs`.
 - **Verification**:
   - Full solution build: 0 errors.
+  - WDL Writer tests: 3 passed, 0 failed.
+  - Templated Terrain Generator tests: 6 passed, 0 failed.
   - Phase unit tests: 76 passed, 0 failed.
   - Receipt: `specs/236-scene-lighting-doodad-performance/evidence/phase1-shading-fix.md`.
 
@@ -122,7 +137,14 @@ gap directly — that's Spec 234 below, already the whole point of the spec.
 ## Current lane — Spec 236 Unified Scene Lighting, Doodad Performance & Client-Constrained World Pipeline (v0.5.4-dev)
 
 [236-scene-lighting-doodad-performance/spec.md](../specs/236-scene-lighting-doodad-performance/spec.md) — Authored on branch `v0.5.4-dev`.
-Overhaul dark MDX shading bug, add Half-Lambert model diffuse, implement multi-surface scene light casting (torches/WMO MOLT lights onto terrain and WMO surfaces), optimize doodad rendering performance via unified GPU instancing, constrain custom map generator to loaded client listfile assets, and fix GLB export / map merge save pipeline (incorporating Spec 234). **Next: Phase 1 Shading & Normal Fix (T001–T003).**
+Overhaul dark MDX shading bug, add Half-Lambert model diffuse, implement multi-surface scene light casting (torches/WMO MOLT lights onto terrain and WMO surfaces), optimize doodad rendering performance via unified GPU instancing, constrain custom map generator to loaded client listfile assets, and fix GLB export / map merge save pipeline (incorporating Spec 234). **Current next step: continue Phase 2 after the WMO shell slice by adding terrain and doodad/model scene-light consumers.**
+
+- **Phase 2 WMO emitted-light slice (2026-09-16)**:
+  - Added `SceneLight`, `SceneLightManager`, and `ISceneLightEmitter` in the viewer rendering layer.
+  - `WorldScene` rebuilds active scene lights from visible WMO placements plus MDX/M2/WMO-internal doodad emitters.
+  - `WmoRenderer` emits WMO `MOLT` and internal doodad lights, uploads up to eight nearby lights, and accumulates local point-light diffuse in the WMO shell shader.
+  - WMO shell instancing is disabled while scene lights are active so each placement receives its own nearby-light selection rather than an approximated shared light set.
+  - Receipt: `specs/236-scene-lighting-doodad-performance/evidence/phase2-wmo-light-casting-slice.md`; T011 checked, T010/T012/T013/Gate 2 remain open.
 
 
 ## Other open lanes (all implemented-with-operator-gates; see each spec's tasks.md for detail)
@@ -155,9 +177,7 @@ Overhaul dark MDX shading bug, add Half-Lambert model diffuse, implement multi-s
 
 ## Handoff
 
-**Immediate:** the Spec 224 audit is done and its report says so — the next bounded action is
-`speckit-plan` for Spec 234. Operator decisions owed: the 16 un-checked Spec 223 checks (accept or
-supply retroactive receipts) and the Spec 231 T074 receipt gap.
+**Immediate:** continue Spec 236 Phase 2 from the WMO shell slice: add terrain local-light upload/evaluation, then doodad/model external scene-light consumers, then request operator-owned runtime visual proof for torch/brazier spill onto WMO geometry and ground. Operator decisions still owed: the 16 un-checked Spec 223 checks (accept or supply retroactive receipts) and the Spec 231 T074 receipt gap.
 
 **Do not claim:** any Spec 232/233/223/226 visual/runtime acceptance; the Spec 223 Phase 1–5 source
 tasks are now un-checked pending receipts; and the Spec 235 plan rewrite stays blocked on a real-file

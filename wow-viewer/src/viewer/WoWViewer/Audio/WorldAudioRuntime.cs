@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using DBCD;
 using Silk.NET.OpenAL;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
@@ -25,6 +26,8 @@ public sealed class WorldAudioRuntime : IDisposable
     private readonly Dictionary<EmitterKey, ActiveEmitter> _active = [];
     private readonly HashSet<EmitterKey> _heardInRange = [];
     private readonly HashSet<string> _diagnosticKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<TerrainSoundEmitter> _externalEmitters = [];
+    private readonly Dictionary<int, List<TerrainSoundEmitter>> _dbcEmittersByMap = [];
     private IReadOnlyList<TerrainSoundEmitter> _residentEmitterSnapshot = Array.Empty<TerrainSoundEmitter>();
     private IReadOnlyList<AudioTriggerDiagnostic> _emitterDiagnostics = Array.Empty<AudioTriggerDiagnostic>();
     private McseFrameEvidence _mcseFrameEvidence = McseFrameEvidence.Empty;
@@ -69,6 +72,7 @@ public sealed class WorldAudioRuntime : IDisposable
     private bool _disposed;
     private bool _loggedNoBackend;
     private bool _worldTriggersEnabled;
+    private bool _areaMusicPlaybackEnabled;
 
     public WorldAudioRuntime(IDataSource dataSource)
     {
@@ -151,7 +155,38 @@ public sealed class WorldAudioRuntime : IDisposable
     /// </summary>
     public bool WorldTriggersEnabled => _worldTriggersEnabled;
 
-    public bool AreaMusicPlaybackEnabled => WorldAudioPlaybackPolicy.AutomaticZoneMusicPlaybackEnabled;
+    public bool AreaMusicPlaybackEnabled
+    {
+        get => _areaMusicPlaybackEnabled;
+        set
+        {
+            _areaMusicPlaybackEnabled = value;
+            if (!_areaMusicPlaybackEnabled)
+                StopAreaMusic();
+        }
+    }
+
+    public void SetAreaMusicPlaybackEnabled(bool enabled) => AreaMusicPlaybackEnabled = enabled;
+
+    public void PlayAreaMusicNow()
+    {
+        _areaMusicPlaybackEnabled = true;
+        _worldTriggersEnabled = true;
+    }
+
+    public void StopAreaMusicNow() => StopAreaMusic();
+
+    public void SetExternalEmitters(IReadOnlyList<TerrainSoundEmitter> emitters)
+    {
+        lock (_tileEmittersLock)
+        {
+            _externalEmitters.Clear();
+            if (emitters != null)
+                _externalEmitters.AddRange(emitters);
+            _residentEmitterSnapshot = BuildResidentEmitterSnapshotLocked();
+        }
+        InvalidateEmitterDiagnostics();
+    }
 
     public int ResolvedSoundWaterTypeCount => _soundWaterTypes?.Entries.Count ?? 0;
 
@@ -202,6 +237,15 @@ public sealed class WorldAudioRuntime : IDisposable
             {
                 AreaMusicStatus = $"Area music metadata unavailable for {buildVersion}: {ex.Message}";
                 ViewerLog.Info(ViewerLog.Category.General, $"[Audio] {AreaMusicStatus}");
+            }
+
+            try
+            {
+                LoadDbcSoundEmitters(dbcProvider, definitionsDirectory, buildVersion);
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Debug(ViewerLog.Category.Dbc, $"[Audio] SoundEmitters.dbc not loaded: {ex.Message}");
             }
         }
         catch (Exception ex)
@@ -507,6 +551,57 @@ public sealed class WorldAudioRuntime : IDisposable
                     }
                 }
             }
+
+            // External emitters (WMO/doodads + DBC world emitters)
+            List<TerrainSoundEmitter> extraEmitters = [];
+            lock (_tileEmittersLock)
+            {
+                if (_externalEmitters.Count > 0)
+                    extraEmitters.AddRange(_externalEmitters);
+            }
+            if (continentId >= 0 && _dbcEmittersByMap.TryGetValue(continentId, out var dbcList))
+            {
+                extraEmitters.AddRange(dbcList);
+            }
+
+            scannedEmitterCount += extraEmitters.Count;
+            for (int index = 0; index < extraEmitters.Count; index++)
+            {
+                TerrainSoundEmitter emitter = extraEmitters[index];
+                EmitterKey key = new(-999, (int)emitter.SoundPointId, index);
+                uint soundEntryId = ResolveResidentSoundEntryId(emitter);
+                if (soundEntryId == 0 || !_soundEntries.TryResolve(soundEntryId, out AlphaSoundEntry? soundEntry))
+                    continue;
+
+                float maxDistance = FirstPositive(emitter.CutoffDistance, emitter.MaxDistance, soundEntry.DistanceCutoff, soundEntry.MaxDistance, 100f);
+                float minDistance = Math.Clamp(FirstPositive(emitter.MinDistance, soundEntry.MinDistance, 0f), 0f, maxDistance);
+                float distance = Vector3.Distance(listenerPosition, emitter.Position);
+                if (distance > maxDistance)
+                    continue;
+
+                inRange.Add(key);
+                float gain = soundEntry.Volume * Attenuation(distance, minDistance, maxDistance);
+                if (!_heardInRange.Contains(key))
+                {
+                    TryStartEmitter(key, emitter, soundEntry, minDistance, maxDistance, gain);
+                    _heardInRange.Add(key);
+                }
+
+                if (_active.TryGetValue(key, out ActiveEmitter? active))
+                {
+                    try
+                    {
+                        active.BaseGain = gain;
+                        _al.SetSourceProperty(active.Source, SourceVector3.Position, emitter.Position);
+                        _al.SetSourceProperty(active.Source, SourceFloat.Gain, gain * EffectiveMasterGain * EmitterGain);
+                    }
+                    catch (Exception ex)
+                    {
+                        DisableBackend($"emitter update failed: {ex.Message}");
+                        return;
+                    }
+                }
+            }
         }
 
         if (_previewSource is uint previewSource)
@@ -607,11 +702,16 @@ public sealed class WorldAudioRuntime : IDisposable
     }
 
     private IReadOnlyList<TerrainSoundEmitter> BuildResidentEmitterSnapshotLocked()
-        => _tileEmitters
+    {
+        var list = _tileEmitters
             .OrderBy(static pair => pair.Key.TileY)
             .ThenBy(static pair => pair.Key.TileX)
             .SelectMany(static pair => pair.Value)
-            .ToArray();
+            .ToList();
+        if (_externalEmitters.Count > 0)
+            list.AddRange(_externalEmitters);
+        return list;
+    }
 
     private void RefreshEmitterDiagnosticsIfDue()
     {
@@ -1053,13 +1153,13 @@ public sealed class WorldAudioRuntime : IDisposable
             areaLabel += $" (AreaID={areaKey})";
         }
         bool night = gameTime < 0.25f || gameTime >= 0.75f;
-        int soundEntryId = binding.Area.ZoneMusicId;
-        if (!WorldAudioPlaybackPolicy.AutomaticZoneMusicPlaybackEnabled)
+        int soundEntryId = binding.Area.ZoneMusicId > 0 ? binding.Area.ZoneMusicId : binding.Area.IntroSoundId;
+        if (!_areaMusicPlaybackEnabled)
         {
             StopAreaMusic();
             AreaMusicStatus = soundEntryId > 0
-                ? $"{areaLabel} selects ZoneMusic {soundEntryId}; automatic ZoneMusic playback is muted."
-                : $"{areaLabel} has area music metadata; automatic ZoneMusic playback is muted.";
+                ? $"{areaLabel} selects ZoneMusic {soundEntryId}; ZoneMusic playback is disabled."
+                : $"{areaLabel} has area music metadata; ZoneMusic playback is disabled.";
             return;
         }
 
@@ -1263,6 +1363,61 @@ public sealed class WorldAudioRuntime : IDisposable
             && _soundWaterTypes.TryResolve(emitter.LiquidFamily, emitter.SoundWaterSubtype, out SoundWaterTypeEntry? waterEntry)
             ? (uint)waterEntry.SoundId
             : 0u;
+    }
+
+    private void LoadDbcSoundEmitters(DBCD.Providers.IDBCProvider dbcProvider, string dbdDir, string buildVersion)
+    {
+        _dbcEmittersByMap.Clear();
+        var dbdProvider = new DBCD.Providers.FilesystemDBDProvider(dbdDir);
+        var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
+        IDBCDStorage storage;
+        try
+        {
+            storage = dbcd.Load("SoundEmitters", buildVersion, DBCD.Locale.None);
+        }
+        catch
+        {
+            return;
+        }
+
+        var available = new HashSet<string>(storage.AvailableColumns, StringComparer.OrdinalIgnoreCase);
+        string? mapCol = available.Contains("MapID") ? "MapID" : null;
+        string? soundCol = available.Contains("SoundEntriesID") ? "SoundEntriesID" : available.Contains("SoundEntryAdvancedID") ? "SoundEntryAdvancedID" : null;
+        string? posCol = available.Contains("Position") ? "Position" : null;
+
+        if (mapCol == null || soundCol == null || posCol == null) return;
+
+        foreach (var key in storage.Keys)
+        {
+            var row = storage[key];
+            int mapId = Convert.ToInt32(row[mapCol]);
+            uint soundId = Convert.ToUInt32(row[soundCol]);
+            float[] pos = (float[])row[posCol];
+            if (pos.Length < 3 || soundId == 0) continue;
+
+            // WoW coords (X, Y, Z) -> Viewer world coords (Y, X, Z)
+            var worldPos = new Vector3(pos[1], pos[0], pos[2]);
+            var emitter = new TerrainSoundEmitter(
+                -999, 0, 0, 0,
+                (uint)key,
+                soundId,
+                new Vector3(pos[0], pos[1], pos[2]),
+                worldPos,
+                10f, 100f, 150f,
+                0, 0, 0,
+                Array.Empty<byte>(),
+                TriggerKind: AudioTriggerKind.Mcse,
+                CoordinateProfile: "SoundEmitters.dbc -> world");
+
+            if (!_dbcEmittersByMap.TryGetValue(mapId, out var list))
+            {
+                list = new List<TerrainSoundEmitter>();
+                _dbcEmittersByMap[mapId] = list;
+            }
+            list.Add(emitter);
+        }
+
+        ViewerLog.Important(ViewerLog.Category.General, $"[Audio] Loaded SoundEmitters.dbc: {storage.Keys.Count} emitters across {_dbcEmittersByMap.Count} maps.");
     }
 
     private void ApplyActiveGains()

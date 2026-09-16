@@ -256,6 +256,7 @@ public class WmoV17ToV14Converter
                 IntBatchCount = g.IntBatchCount,
                 ExtBatchCount = g.ExtBatchCount,
                 GroupLiquid = g.GroupLiquid,
+                WmoGroupId = g.UniqueId,
             };
 
             // Resolve group name from raw MOGN blob via byte offset
