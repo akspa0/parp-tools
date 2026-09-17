@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.IO.Chunked;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
@@ -274,6 +275,7 @@ public static class AdtTextureReader
         out IReadOnlyList<SplitMcnkPayload> chunkPayloads)
     {
         List<string> names = [];
+        List<uint> diffuseFileDataIds = [];
         List<SplitMcnkPayload> payloads = [];
 
         int position = 0;
@@ -289,6 +291,13 @@ public static class AdtTextureReader
             {
                 names.AddRange(ParseNullStrings(bytes, dataOffset, size));
             }
+            else if (string.Equals(signature, "DIDM", StringComparison.Ordinal))
+            {
+                // FileDataID-era tex0 (8.1+, and the modern Classic lines) replaces MTEX with MDID:
+                // one diffuse texture FileDataID per MCLY texture index.
+                for (int entry = 0; entry + 4 <= size; entry += 4)
+                    diffuseFileDataIds.Add(BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(dataOffset + entry, 4)));
+            }
             else if (string.Equals(signature, "KNCM", StringComparison.Ordinal))
             {
                 byte[] payload = new byte[size];
@@ -301,6 +310,12 @@ public static class AdtTextureReader
                 break;
 
             position = next;
+        }
+
+        if (names.Count == 0 && diffuseFileDataIds.Count > 0)
+        {
+            // An id of 0 has no texture; keep the slot so MCLY indices stay aligned.
+            names.AddRange(diffuseFileDataIds.Select(static id => id == 0 ? string.Empty : FileDataIdPaths.Resolve(id)));
         }
 
         textureNames = names;

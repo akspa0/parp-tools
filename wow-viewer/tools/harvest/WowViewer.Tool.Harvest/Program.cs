@@ -11,6 +11,7 @@ using StreamProfile = WowViewer.Core.IO.Maps.RawArraySerializer.StreamProfile;
 using WowViewer.Core.Blp;
 using WowViewer.Core.Curation;
 using WowViewer.Core.IO.Blp;
+using WowViewer.Core.IO.Casc;
 using WowViewer.Core.IO.Converters;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
@@ -30,7 +31,7 @@ static class Program
 {
     private static Dictionary<string, string>? _md5Lookup;
     private static readonly ConcurrentDictionary<string, Lazy<WlLooseFileEntry[]>> _wlLooseFileCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConditionalWeakTable<NativeMpqService, KnownTerrainTexturePaths> _knownTerrainTexturePaths = new();
+    private static readonly ConditionalWeakTable<IArchiveCatalog, KnownTerrainTexturePaths> _knownTerrainTexturePaths = new();
     private static readonly int DefaultHarvestTileWorkers = Math.Max(1, Math.Min(8, Environment.ProcessorCount));
     private sealed record HarvestMapDiscoveryResult(
         string Map,
@@ -112,6 +113,7 @@ static class Program
 
         string command = args[0].ToLowerInvariant();
         string[] tail = args.Skip(1).ToArray();
+        ConfigureCascOptions(tail);
 
         switch (command)
         {
@@ -241,7 +243,16 @@ static class Program
               --build, -b       Client build version (e.g. "4.3.4.15595") for
                                version-aware ADT profile selection. Auto-detected
                                from input path if not specified.
-              --client-root     WoW client root directory (for extract-unified)
+              --client-root     WoW client root directory (for extract-unified). A CASC install
+                               root (a folder with .build.info, e.g. "World of Warcraft") is
+                               opened through CASC instead of MPQ archives.
+              --casc-product    CASC only: product(s) to read, comma-separated (e.g.
+                               wow_classic_beta). Default: every listed product, newest first.
+              --casc-listfile   CASC only: community listfile CSV (id;path). Default: the
+                               viewer's downloaded %LOCALAPPDATA%\WoWViewer copy.
+              --cdn-fill        CASC only: fetch files the local install lists but lacks from
+                               Blizzard's CDN for the same build (cached under --casc-cache,
+                               default output/cache/casc).
               --map, -m         Map name (e.g. "Azeroth") for archive-backed commands
 
             synthetic-minimap uses one achromatic global light at the frozen --time-hours value
@@ -346,9 +357,7 @@ static class Program
 
         clientRoot = ResolveGameClientRoot(clientRoot);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot, loadSupplementalListfile: false);
 
         MapDirectoryLookup lookup = new();
         lookup.Load(BuildClientSearchRoots(clientRoot), catalog);
@@ -375,6 +384,99 @@ static class Program
         Console.WriteLine(json);
     }
 
+    // Spec 238: CASC client options, shared by every --client-root command.
+    private static string[] _cascProducts = [];
+    private static bool _cascCdnFill;
+    private static string? _cascListfile;
+    private static string? _cascCacheDir;
+
+    static void ConfigureCascOptions(string[] args)
+    {
+        _cascProducts = (GetOption(args, "--casc-product", "") ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        _cascCdnFill = HasFlag(args, "--cdn-fill");
+        _cascListfile = GetOption(args, "--casc-listfile", "");
+        _cascCacheDir = GetOption(args, "--casc-cache", "");
+    }
+
+    /// <summary>
+    /// Opens the client at <paramref name="clientRoot"/>: a CASC install when it (or its parent) has a
+    /// <c>.build.info</c>, otherwise the MPQ archives under it.
+    /// </summary>
+    static IArchiveCatalog OpenClientCatalog(string clientRoot, bool loadSupplementalListfile = true)
+    {
+        if (TryResolveCascInstallRoot(clientRoot, out string installRoot))
+        {
+            string[] listfiles = ResolveCascListfilePaths();
+            if (listfiles.Length == 0)
+                throw new InvalidOperationException(
+                    "CASC needs a community listfile (id;path CSV). Pass --casc-listfile <path>, or open the install once in the viewer to download one.");
+
+            string cacheDir = _cascCacheDir ?? Path.Combine("output", "cache", "casc");
+            Console.Error.WriteLine($"  Opening CASC install {installRoot} (listfile {listfiles[0]}, cdn fill {(_cascCdnFill ? "on" : "off")})");
+            var casc = CascArchiveCatalog.Open(installRoot, _cascProducts, listfiles, cacheDir, _cascCdnFill,
+                message => Console.Error.WriteLine("  " + message));
+            Console.Error.WriteLine($"  Opened {casc.Name}");
+            return casc;
+        }
+
+        var catalog = new NativeMpqService();
+        catalog.LoadArchives([clientRoot]);
+        if (loadSupplementalListfile)
+            TryLoadSupplementalListfile(catalog);
+        LoadMd5Translate(clientRoot, catalog);
+        return catalog;
+    }
+
+    static bool TryResolveCascInstallRoot(string clientRoot, out string installRoot)
+    {
+        string trimmed = clientRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        foreach (string? candidate in new[] { trimmed, Path.GetDirectoryName(trimmed) })
+        {
+            if (!string.IsNullOrEmpty(candidate) && CascArchiveCatalog.IsCascInstall(candidate))
+            {
+                installRoot = candidate;
+                return true;
+            }
+        }
+
+        installRoot = string.Empty;
+        return false;
+    }
+
+    /// <summary>The newest of --casc-listfile and the viewer's downloaded community listfile.</summary>
+    static string[] ResolveCascListfilePaths()
+    {
+        if (!string.IsNullOrWhiteSpace(_cascListfile))
+            return File.Exists(_cascListfile) ? [_cascListfile] : [];
+
+        string downloaded = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "WoWViewer",
+            "community-listfile-withcapitals.csv");
+        return File.Exists(downloaded) ? [downloaded] : [];
+    }
+
+    /// <summary>Version of the CASC product harvest will read first (newest listed, or the first --casc-product).</summary>
+    static string? TryDetectCascBuildVersion(string clientRoot)
+    {
+        if (!TryResolveCascInstallRoot(clientRoot, out string installRoot))
+            return null;
+
+        try
+        {
+            return CascStorage.ListProducts(installRoot)
+                .Where(p => _cascProducts.Length == 0 || _cascProducts.Contains(p.Product, StringComparer.OrdinalIgnoreCase))
+                .OrderByDescending(static p => Version.TryParse(p.Version, out Version? v) ? v : new Version())
+                .Select(static p => p.Version)
+                .FirstOrDefault();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     static string? TryFindDefaultListfilePath()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);
@@ -390,7 +492,7 @@ static class Program
         return null;
     }
 
-    static void TryLoadSupplementalListfile(NativeMpqService catalog)
+    static void TryLoadSupplementalListfile(IArchiveCatalog catalog)
     {
         string? listfilePath = TryFindDefaultListfilePath();
         if (string.IsNullOrWhiteSpace(listfilePath) || !File.Exists(listfilePath))
@@ -823,10 +925,7 @@ static class Program
         clientRoot = ResolveGameClientRoot(clientRoot);
         string? buildVersion = requestedBuild ?? DetectBuildVersionFromClientRoot(clientRoot);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
         byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
@@ -928,10 +1027,7 @@ static class Program
         // Redirect Console.Out to stderr so stdout is pure binary (matches RunHarvestStream).
         Console.SetOut(Console.Error);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         List<string> assetPaths;
         if (!string.IsNullOrWhiteSpace(assetListPath) && File.Exists(assetListPath))
@@ -943,7 +1039,7 @@ static class Program
         {
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             assetPaths = [];
-            foreach (string raw in catalog.ListFiles("*"))
+            foreach (string raw in catalog.GetAllKnownFiles())
             {
                 string ext = Path.GetExtension(raw).ToLowerInvariant();
                 if (ext is not (".m2" or ".mdx" or ".wmo"))
@@ -1009,7 +1105,7 @@ static class Program
     }
 
     private static ObjectCaptureResult? CaptureWmoObject(
-        NativeMpqService catalog, ObjectCaptureRenderer capture, string assetPath, int resolution)
+        IArchiveCatalog catalog, ObjectCaptureRenderer capture, string assetPath, int resolution)
     {
         WmoV14ToV17Converter.WmoV14Data? wmo = WmoFullLoader.Load(catalog, assetPath);
         if (wmo is null || wmo.Groups.Count == 0)
@@ -1018,7 +1114,7 @@ static class Program
     }
 
     private static ObjectCaptureResult? CaptureMdxObject(
-        NativeMpqService catalog, ObjectCaptureRenderer capture, string assetPath, int resolution)
+        IArchiveCatalog catalog, ObjectCaptureRenderer capture, string assetPath, int resolution)
     {
         byte[]? data = catalog.ReadFile(assetPath);
         if (data is null || data.Length == 0)
@@ -1691,10 +1787,7 @@ static class Program
 
         Directory.CreateDirectory(outputDirectory);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         IReadOnlyList<MinimapLightMarker> lightMarkers = lightOverlay
             ? LoadMinimapLightMarkers(catalog, mapName, timeOfDayHours / 24f)
@@ -2341,7 +2434,7 @@ static class Program
 
     private sealed class KnownTerrainTexturePaths
     {
-        public KnownTerrainTexturePaths(NativeMpqService catalog)
+        public KnownTerrainTexturePaths(IArchiveCatalog catalog)
         {
             Paths = catalog.GetAllKnownFiles()
                 .Where(static path => path.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
@@ -2432,10 +2525,7 @@ static class Program
 
         Directory.CreateDirectory(outputDir);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
         byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
@@ -2510,10 +2600,7 @@ static class Program
 
         string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
         byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
@@ -2639,7 +2726,7 @@ static class Program
     }
 
     private static HarvestTileResult HarvestStreamTileWorker(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string clientRoot,
         string mapName,
         byte[] wdtBytes,
@@ -2663,7 +2750,7 @@ static class Program
     }
 
     private static byte[]? TryBuildHarvestStreamBlob(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string clientRoot,
         string mapName,
         byte[] wdtBytes,
@@ -2696,7 +2783,7 @@ static class Program
     /// divergent one.
     /// </summary>
     private static TerrainTileTensorPack? BuildEnrichedTensorPackForTile(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string clientRoot,
         string mapName,
         byte[] wdtBytes,
@@ -2838,10 +2925,7 @@ static class Program
             return;
         }
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         var records = new List<TileCurationRecord>();
         var findings = new List<MismatchFinding>();
@@ -2994,10 +3078,7 @@ static class Program
             return;
         }
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
         byte[]? wdtBytes = catalog.ReadFile(wdtVirtual);
@@ -3054,10 +3135,7 @@ static class Program
         clientRoot = ResolveGameClientRoot(clientRoot);
         string? buildVersion = DetectBuildVersionFromClientRoot(clientRoot);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         string[] maps = mapsOption.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var mapsOut = new Dictionary<string, List<Dictionary<string, object>>>();
@@ -3173,10 +3251,7 @@ static class Program
         clientRoot = ResolveGameClientRoot(clientRoot);
         Directory.CreateDirectory(outputDir);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         string[] paths = File.ReadAllLines(pathsFile)
             .Select(l => l.Trim())
@@ -3237,7 +3312,7 @@ static class Program
         Console.WriteLine($"extract-tilesets: {entries.Count} decoded, {failed} failed -> {manifestPath}");
     }
 
-    static bool RunExtractTileFromMpq(NativeMpqService catalog, string clientRoot, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements, string? syntheticMinimapPath = null, string? buildVersion = null)
+    static bool RunExtractTileFromMpq(IArchiveCatalog catalog, string clientRoot, string mapName, byte[] wdtBytes, int tileX, int tileY, string? outputPath, bool exportPlacements, string? syntheticMinimapPath = null, string? buildVersion = null)
     {
         TerrainTileTensorPack pack;
         AdtPlacementCatalog? placementCatalog = null;
@@ -3346,7 +3421,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         return true;
     }
 
-    private static HarvestMapDiscoveryResult DiscoverMap(NativeMpqService catalog, MapDirectoryEntry entry)
+    private static HarvestMapDiscoveryResult DiscoverMap(IArchiveCatalog catalog, MapDirectoryEntry entry)
     {
         string mapName = entry.Directory;
         string wdtVirtual = $"World\\Maps\\{mapName}\\{mapName}.wdt";
@@ -3458,7 +3533,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     private readonly record struct ProbeTileState(bool HasReadableTile, bool HasUsableTile);
 
     private static ProbeTileState ProbeMapTile(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string mapName,
         WdtTileCoordinate tile,
         byte[] wdtBytes,
@@ -3503,7 +3578,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     }
 
     private static TerrainTileTensorPack? BuildPackFromArchiveAdt(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string mapName,
         int tileX,
         int tileY,
@@ -3531,7 +3606,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     }
 
     private static TerrainTileTensorPack? TryBuildSyntheticMinimapPack(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string clientRoot,
         string mapName,
         byte[] wdtBytes,
@@ -3560,7 +3635,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         return pack;
     }
 
-    private static Dictionary<int, byte[,,]> LoadSyntheticMinimapTextures(NativeMpqService catalog, TerrainTileTensorPack pack)
+    private static Dictionary<int, byte[,,]> LoadSyntheticMinimapTextures(IArchiveCatalog catalog, TerrainTileTensorPack pack)
     {
         if (!pack.MclyTextureNames.Any(static textureName => !string.IsNullOrWhiteSpace(textureName)))
             return [];
@@ -3640,7 +3715,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     }
 
     private static byte[,,]? LoadTerrainTextureRgbProxy(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string requestedPath,
         out string resolvedPath,
         out string? resolutionKind)
@@ -3746,7 +3821,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     }
 
     private static void AnalyzeAuthoredMinimapLighting(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string mapName,
         TerrainTileTensorPack pack,
         string? buildVersion = null)
@@ -3835,10 +3910,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         clientRoot = ResolveGameClientRoot(clientRoot);
         string? buildVersion = GetOption(args, "--build", "-b") ?? DetectBuildVersionFromClientRoot(clientRoot);
 
-        using var catalog = new NativeMpqService();
-        catalog.LoadArchives([clientRoot]);
-        TryLoadSupplementalListfile(catalog);
-        LoadMd5Translate(clientRoot, catalog);
+        using IArchiveCatalog catalog = OpenClientCatalog(clientRoot);
 
         Console.WriteLine($"Authored minimap BLP encoding report — build {buildVersion ?? "unknown"}, map {mapName}");
         Console.WriteLine();
@@ -3953,7 +4025,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         Console.WriteLine("upscaled for display, and our 256+ renders are strictly higher fidelity than the target.");
     }
 
-    private static byte[]? TryReadMinimapBlpBytes(NativeMpqService catalog, string mapName, int tileX, int tileY)
+    private static byte[]? TryReadMinimapBlpBytes(IArchiveCatalog catalog, string mapName, int tileX, int tileY)
     {
         foreach (string candidate in new[]
         {
@@ -5193,7 +5265,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     /// </summary>
     private static float? TryInferAuthoredMinimapHour(
         TerrainTileTensorPack pack,
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string mapName,
         byte[,,] authoredMinimapRgb,
         string? buildVersion)
@@ -5224,7 +5296,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         }
     }
 
-    private static void AttachNameAlignedTexturePixels(NativeMpqService catalog, TerrainTileTensorPack pack)
+    private static void AttachNameAlignedTexturePixels(IArchiveCatalog catalog, TerrainTileTensorPack pack)
     {
         if (pack.MclyTextureNames.Count == 0)
             return;
@@ -5296,7 +5368,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     }
 
     private static IReadOnlyList<MinimapLightingTimeCandidate> LoadMinimapLightingTimeCandidates(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string mapName)
     {
         foreach (string candidatePath in EnumerateMapLitPaths(mapName))
@@ -5349,7 +5421,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     /// render's time of day, so the swatch shows what that light actually contributes at that hour.
     /// </summary>
     private static IReadOnlyList<MinimapLightMarker> LoadMinimapLightMarkers(
-        NativeMpqService catalog,
+        IArchiveCatalog catalog,
         string mapName,
         float gameTime)
     {
@@ -5598,7 +5670,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             McshEvidenceState = $"{profile.McshEvidenceState}; explicit_baked_mcsh_preview"
         };
 
-    static void GenerateSyntheticMinimap(NativeMpqService catalog, TerrainTileTensorPack pack, int tileX, int tileY, string outputPath)
+    static void GenerateSyntheticMinimap(IArchiveCatalog catalog, TerrainTileTensorPack pack, int tileX, int tileY, string outputPath)
     {
         try
         {
@@ -5627,7 +5699,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         }
     }
 
-    static WlLooseFileEntry[] GetArchiveWlFiles(NativeMpqService catalog, string clientRoot, string mapName)
+    static WlLooseFileEntry[] GetArchiveWlFiles(IArchiveCatalog catalog, string clientRoot, string mapName)
     {
         string cacheKey = $"{Path.GetFullPath(clientRoot)}|{mapName}";
         Lazy<WlLooseFileEntry[]> lazy = _wlLooseFileCache.GetOrAdd(
@@ -5638,7 +5710,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         return lazy.Value;
     }
 
-    static WlLooseFileEntry[] LoadArchiveWlFiles(NativeMpqService catalog, string clientRoot, string mapName)
+    static WlLooseFileEntry[] LoadArchiveWlFiles(IArchiveCatalog catalog, string clientRoot, string mapName)
     {
         string mapPrefix = $"World\\Maps\\{mapName}\\";
         string[] paths = catalog.GetAllKnownFiles()
@@ -5688,7 +5760,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         return loaded.ToArray();
     }
 
-    static void TryAddWlLiquidFromArchiveFiles(NativeMpqService catalog, string clientRoot, string mapName, int tileX, int tileY, TerrainTileTensorPack pack)
+    static void TryAddWlLiquidFromArchiveFiles(IArchiveCatalog catalog, string clientRoot, string mapName, int tileX, int tileY, TerrainTileTensorPack pack)
     {
         WlLooseFileEntry[] wlFiles = GetArchiveWlFiles(catalog, clientRoot, mapName);
         if (wlFiles.Length == 0)
@@ -5778,7 +5850,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         return false;
     }
 
-    static void LoadMd5Translate(string clientRoot, NativeMpqService catalog)
+    static void LoadMd5Translate(string clientRoot, IArchiveCatalog catalog)
     {
         if (Md5TranslateResolver.TryLoad(
             new[] { clientRoot },
@@ -5793,7 +5865,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         }
     }
 
-    static byte[,,]? TryLoadMinimapFromMpq(NativeMpqService catalog, string mapName, int tileX, int tileY)
+    static byte[,,]? TryLoadMinimapFromMpq(IArchiveCatalog catalog, string mapName, int tileX, int tileY)
     {
         string mapLower = mapName.ToLowerInvariant();
         string x2 = tileX.ToString("00");
@@ -5846,7 +5918,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     /// Load the raw authored minimap BLP bytes for a tile, for the encoding survey (FR-013). Mirrors
     /// the candidate paths of <see cref="TryLoadMinimapFromMpq"/> but returns the raw bytes.
     /// </summary>
-    static byte[]? TryLoadMinimapBlpBytes(NativeMpqService catalog, string mapName, int tileX, int tileY)
+    static byte[]? TryLoadMinimapBlpBytes(IArchiveCatalog catalog, string mapName, int tileX, int tileY)
     {
         string mapLower = mapName.ToLowerInvariant();
         string x2 = tileX.ToString("00");
@@ -5880,7 +5952,7 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
         return null;
     }
 
-    static byte[,,]? LoadTextureFromMpq(NativeMpqService catalog, string virtualPath)
+    static byte[,,]? LoadTextureFromMpq(IArchiveCatalog catalog, string virtualPath)
     {
         byte[]? blpBytes = catalog.ReadFile(virtualPath);
         if (blpBytes is null || blpBytes.Length < 8)
@@ -5947,6 +6019,9 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
 
     static string? DetectBuildVersionFromClientRoot(string clientRoot)
     {
+        if (TryDetectCascBuildVersion(clientRoot) is { } cascVersion)
+            return cascVersion;
+
         string dirName = Path.GetFileName(clientRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (string.IsNullOrWhiteSpace(dirName))
             return null;

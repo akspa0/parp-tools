@@ -28,7 +28,7 @@ but portable scripts and tests should take client roots as parameters.
 |---|---|---|
 | `inspect/` | `WowViewer.Tool.Inspect` | Multi-format inspection and research commands: `archive`, `assets`, `wtf`, `audio`, `blp`, `m2`, `mdx`, `map`, `adt`, `lit`, `light`, `pm4`, `pd4`, `wmo`, `rosetta-generate`, `casc` (CASC installs: `products`, `read`, `exists`, `wmo`, `m2`, `db2`, `map-survey`, `adt-heights`, `bench`) and `adt-ahdr check` (DAT v26 terrain). |
 | `converter/` | `WowViewer.Tool.Converter` | Dataset scans, map extraction, ML corpus helpers, Alpha/LK terrain conversion, WMO version conversion, M2/MDX conversion, and roundtrip validation. |
-| `harvest/` | `WowViewer.Tool.Harvest` | Terrain tensor harvest, MPQ-backed map harvest, minimap synthesis, streaming harvest, map discovery, holes/tileset extraction, relief-to-map, object capture, and curation helpers. |
+| `harvest/` | `WowViewer.Tool.Harvest` | Terrain tensor harvest, MPQ- and CASC-backed map harvest, minimap synthesis, streaming harvest, map discovery, holes/tileset extraction, relief-to-map, object capture, and curation helpers. |
 | `capture/` | `WowViewer.Tool.Capture` | Headless terrain tile render via `render`. |
 | `validation-capture/` | `WowViewer.Tool.ValidationCapture` | Production scene capture, batch capture, and render profiling via `capture`, `capture-batch`, and `profile-render`. |
 | `mask-validate/` | `WowViewer.Tool.MaskValidate` | ADT texture/mask validation for loose ADTs or MPQ-backed archive paths. |
@@ -126,6 +126,10 @@ dotnet run --project I:/parp/parp-tools/wow-viewer/tools/harvest/WowViewer.Tool.
   --per-tile `
   --whole-map
 ```
+
+For a CASC install (a folder with `.build.info`), pass it as `--client-root`; add
+`--casc-product wow_classic_beta` to pick a product and `--cdn-fill` to fetch files the install lacks
+locally. See [CASC Clients in Harvest](../docs/CLI-TOOLS.md#casc-clients-in-harvest).
 
 Long corpus harvests, GPU work, and training remain operator-owned. Prepare commands and dry-run checks,
 then stop before launching broad jobs unless explicitly told to run them.

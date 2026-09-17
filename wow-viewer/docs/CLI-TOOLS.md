@@ -27,6 +27,7 @@
 3. [Terrain Tensor Harvester (`wowviewer-harvest`)](#3-terrain-tensor-harvester-wowviewer-harvest)
    - [Harvesting Maps to NPZ / Zarr](#harvesting-maps-to-npz--zarr)
    - [Synthesizing Minimaps (`synthetic-minimap`)](#synthesizing-minimaps-synthetic-minimap)
+   - [CASC Clients in Harvest](#casc-clients-in-harvest)
    - [Streaming Pipe to Python (`harvest-stream`)](#streaming-pipe-to-python-harvest-stream)
 4. [Python ML Toolchain (`data-harvester`)](#4-python-ml-toolchain-data-harvester)
 
@@ -328,9 +329,36 @@ Composes paired terrain and liquid minimap images directly from raw ADT elevatio
 ```powershell
 dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- `
   synthetic-minimap `
-  --input-dir "C:\Extracted\World\Maps\Azeroth" `
+  --client-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --map Azeroth `
   --output-dir "output/synthetic_minimaps/Azeroth"
 ```
+
+### CASC Clients in Harvest
+Added in v0.5.4-alpha. Every `--client-root` command opens a CASC install when the folder (or its
+parent) contains `.build.info`, and MPQ archives otherwise. FileDataID-era maps resolve their tile
+files and authored minimaps through the WDT `MAID` chunk, and split `_tex0.adt` textures through
+`MDID`. Tested with `synthetic-minimap` on `wow_classic_beta` 1.60.1.69876 (`development`).
+
+| Option | Description |
+|---|---|
+| `--casc-product <a,b>` | Products to read, newest version first (default: all listed) |
+| `--casc-listfile <csv>` | Community listfile (`id;path`). Default: `%LOCALAPPDATA%\WoWViewer\community-listfile-withcapitals.csv`, which the viewer downloads |
+| `--cdn-fill` | Fetch files the install lists but has no local data for, from Blizzard's CDN for the same build |
+| `--casc-cache <dir>` | CDN download cache (default `output/cache/casc`) |
+
+```powershell
+dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- `
+  synthetic-minimap `
+  --client-root "I:\wow12\World of Warcraft" `
+  --casc-product wow_classic_beta --cdn-fill `
+  --map development `
+  --output-dir "output/synthetic_minimaps/development" `
+  --per-tile --whole-map --authored-reference
+```
+
+Texture slots whose `MDID` entry is 0 have no texture; the compositor substitutes a recorded RGB proxy
+and logs a warning for each.
 
 ### Streaming Pipe to Python (`harvest-stream`)
 Streams binary V22 tile blobs to standard output for direct consumption by Python data pipelines.
