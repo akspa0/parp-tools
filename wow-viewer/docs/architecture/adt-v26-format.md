@@ -81,12 +81,25 @@ v26 reuses the chunk vocabulary of the pre-Cataclysm experimental ADT v22/v23 on
 | `AOCH` | 2048 | all bytes zero in every file | *open* |
 | `AVTX` | 132100 | float32 × (129² + 128²): outer 129×129 **row-major**, then inner 128×128 | outer order and tile axes **MEASURED**; inner order *hypothesis* |
 | `ANRM` | 99075 | int8 × 3 × (129² + 128²), outer then inner; components **(column axis, vertical, row axis)**, 127 = 1.0 | **MEASURED** (mean dot 0.985 with height-derived normals; next-best order 0.658; every vector has length 127). Inner order *hypothesis* |
-| `ATEX` | variable | one NUL-terminated texture path per chunk | **MEASURED** |
-| `ADOO` | variable | one NUL-terminated model path per chunk (225 or 285 per file, near-identical across tiles, so it looks map-global) | **MEASURED** |
+| `ATEX` | variable | one texture path per chunk, **no NUL terminator** (length = chunk size) | **MEASURED** |
+| `ADOO` | variable | one model path per chunk, **no NUL terminator** (225 or 285 per file, near-identical across tiles, so it looks map-global) | **MEASURED** |
 | `ADST` | 12 | 3×uint32 `(uniqueId, model FileDataID, 1)`, e.g. `(63420377, 190719 = World/critter/BIRDS/Bird01.m2, 1)` | **MEASURED**: 321 rows in 7 files, 321/321 FileDataIDs name models in the community listfile, last field always 1. **None of the uniqueIds match an `ACDO`** in the 699 files and the rows have no position, so they are not placements |
 | `ACNK` | 64 or more | 64-byte header, then `ALYR × 0..4`, `ASHD` (512), `ACDO × n` (56 or 60 each). Header: +0x00/+0x04 chunk index; +0x08 = `0xD000`; +0x0C = 0; +0x10 uint16 = 0; **+0x12 16 bytes = 2-bit 8×8 predominant layer map** (LSB first, row-major); +0x22 uint64 sparse bitmask (725 of 179,200 chunks non-zero; position of MCNK's no-effect-doodad map); the rest 0 | predominant map **MEASURED** (95.0% of 239,808 cells match the dominant AMAP layer, control 67.9%); +0x22 *hypothesis*; others constant |
 | `ALYR` | 4136 | 0x20 fixed part (flags `0x100` always) + nested `AMAP` (4096 = 8-bit 64×64) | **MEASURED** |
+| `AMAP` | 4096 | per-layer **blend weight**, not ADT sequential alpha: the weights of all layers (layer 0 included) sum to 255 per pixel | **MEASURED**: per-chunk mean sum 254.6 (252.6..255.0), exactly 255 for 74% of pixels; highest-weight layer matches the ACNK predominant map in 99.93% of cells vs 95.03% when read as sequential alpha |
 | `ACVT` | 132100 | 4 bytes × (129² + 128²) per vertex, outer then inner: three bytes centred on 127 (neutral, like MCCV) and a fourth always 255 | value ranges **MEASURED**; which of bytes 0/2 is red *open* (the corpus is almost entirely neutral) |
+
+## Writer and round trip (experimental)
+
+- `AdtAhdrWriter` serializes the decoded model; `inspect adt-ahdr roundtrip --root <folder>` decodes and re-encodes
+  every file. **700/700 corpus files are byte-identical**, with `ACDO` written from its decoded fields, so the model keeps
+  every byte. (This run also found that `ATEX`/`ADOO` names carry no NUL terminator.)
+- `AdtAhdrTileBuilder` builds a v26 tile from ADT data through the measured frames (heights × 36, sequential alpha →
+  weights, MDDF/MODF → chunk-relative `ACDO`, MCNR → `ANRM`, MCCV → `ACVT`). In the viewer:
+  **File → Export Nearby Tiles as DAT v26 (experimental)** writes the loaded ADT map's tiles within 2 of the camera to
+  `output/dat_v26_export/`. Checks on the output: reopen with **Open DAT v26 Terrain Folder** and compare with the ADT view;
+  `inspect adt-ahdr check` (seams) and `adt-ahdr objects` (object heights vs terrain); `evidence/scripts/anrm_acvt_v26.py`
+  (stored normals vs heights, which tests the MCNR → ANRM mapping against independent client normals).
 
 ## Objects: ACDO (MEASURED)
 

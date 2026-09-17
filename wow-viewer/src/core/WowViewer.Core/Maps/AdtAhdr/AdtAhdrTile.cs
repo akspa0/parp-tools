@@ -32,6 +32,9 @@ public sealed class AdtAhdrTile
     /// <summary>Measured: ALOC[2] is tile Y (the outer grid's row axis).</summary>
     public int? TileY => Aloc is { Length: >= 3 } ? (int)Aloc[2] : null;
 
+    /// <summary>Raw AOCH payload (2048 bytes, all zero in the v26 corpus), kept so files can be rewritten exactly.</summary>
+    public byte[]? AochRaw { get; init; }
+
     /// <summary>Row-major outer heights, VerticesY rows × VerticesX columns (measured for v26).</summary>
     public float[] OuterHeights { get; init; } = [];
 
@@ -84,7 +87,10 @@ public sealed class AdtAhdrChunk
     public IReadOnlyList<AdtAhdrObjectDefinition> Objects { get; init; } = [];
 }
 
-/// <summary>ALYR. v26: flags 0x100 on every layer; AMAP is 4096 bytes (8-bit 64×64).</summary>
+/// <summary>
+/// ALYR. v26: flags 0x100 on every layer; AMAP is 4096 bytes (8-bit 64×64) holding this layer's blend <b>weight</b>
+/// (weights of all layers sum to 255 per pixel, layer 0 included). Convert with <c>AdtAhdrAlpha</c>.
+/// </summary>
 public sealed record AdtAhdrLayer(int TextureIndex, uint Flags, byte[]? AlphaMap);
 
 /// <summary>

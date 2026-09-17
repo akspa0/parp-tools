@@ -272,6 +272,9 @@ $listfile = "$env:LOCALAPPDATA\WoWViewer\community-listfile-withcapitals.csv"
 # ALOC-adjacent tiles share identical edge heights
 & $exe adt-ahdr check --root test_data\v22_adts\unknown
 
+# Decode and re-encode every file with the experimental writer; reports byte-identical files
+& $exe adt-ahdr roundtrip --root test_data\v22_adts\unknown
+
 # Resolve ACDO object placements and measure their heights against the terrain (add --list to print each)
 & $exe adt-ahdr objects --root test_data\v22_adts\unknown
 ```

@@ -27,6 +27,7 @@ public static class AdtAhdrReader
     private const uint Amap = 0x414D4150;
     private const uint Ashd = 0x41534844;
     private const uint Acdo = 0x4143444F;
+    private const uint Aoch = 0x414F4348;
 
     private const int AcnkHeaderSize = 0x40;
     private const int AlyrFixedSize = 0x20;
@@ -80,7 +81,7 @@ public static class AdtAhdrReader
         uint[] reserved = [];
         uint[]? aloc = null;
         float[] outer = [], inner = [];
-        byte[]? normals = null, shading = null;
+        byte[]? normals = null, shading = null, aoch = null;
         var textures = new List<string>();
         var models = new List<string>();
         var chunks = new List<AdtAhdrChunk>();
@@ -107,6 +108,9 @@ public static class AdtAhdrReader
                     break;
                 case Aloc:
                     aloc = ReadUInt32Array(payload);
+                    break;
+                case Aoch:
+                    aoch = payload.ToArray();
                     break;
                 case Avtx:
                     (outer, inner) = SplitGrid(payload, verticesX, verticesY, diagnostics);
@@ -158,6 +162,7 @@ public static class AdtAhdrReader
             ChunksY = chunksY,
             HeaderReserved = reserved,
             Aloc = aloc,
+            AochRaw = aoch,
             OuterHeights = outer,
             InnerHeights = inner,
             NormalsRaw = normals,

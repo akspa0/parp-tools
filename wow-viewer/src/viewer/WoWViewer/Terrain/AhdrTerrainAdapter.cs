@@ -146,8 +146,15 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
             {
                 AdtAhdrLayer layer = source.Layers[layerIndex];
                 layers[layerIndex] = new TerrainLayer { TextureIndex = layer.TextureIndex, Flags = layer.Flags };
-                if (layerIndex > 0 && layer.AlphaMap is { Length: 64 * 64 })
-                    alphaMaps[layerIndex] = layer.AlphaMap;
+            }
+
+            // AMAP holds per-layer blend weights (sum 255 per pixel, layer 0 included); the renderer blends ADT-style
+            // sequential alpha, so convert (see AdtAhdrAlpha).
+            if (source.Layers.Count > 1 && source.Layers.All(static l => l.AlphaMap is { Length: AdtAhdrAlpha.Pixels }))
+            {
+                byte[][] sequential = AdtAhdrAlpha.WeightsToSequentialAlpha(source.Layers.Select(static l => l.AlphaMap!).ToArray());
+                for (int layerIndex = 1; layerIndex < source.Layers.Count; layerIndex++)
+                    alphaMaps[layerIndex] = sequential[layerIndex - 1];
             }
 
             chunks.Add(new TerrainChunkData

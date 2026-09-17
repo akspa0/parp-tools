@@ -69,11 +69,11 @@ size: (129 × 129 + 128 × 128) × 3 = 99075
 * Checked against normals computed from <tt>AVTX</tt> (in inches): mean dot product 0.985, next-best component order 0.658.
 
 == ATEX: TEXtures ==
-* One chunk per texture filename (a zero-terminated string), not a single string block.
+* One chunk per texture filename, not a single string block. The name is '''not''' zero-terminated: the chunk size gives its length (216 of 216 observed chunks).
 * 33 distinct textures across the files; for example <tt>Tileset\TirisFall\TirisFallRockyMudGrass.BLP</tt>.
 
 == ADOO: DOOdad ==
-* One chunk per model filename (a zero-terminated string), 225 or 285 per file.
+* One chunk per model filename, not zero-terminated (159,600 of 159,600 observed chunks), 225 or 285 per file.
 * The list is nearly identical in every file, including the flat ones. For example: <tt>WORLD\LORDAERON\SILVERPINE\PASSIVEDOODADS\TREES\SILVERPINETREE03.M2</tt>.
 
 == ACNK: ChuNK ==
@@ -107,7 +107,10 @@ size: 0x1028 (4136) for every observed layer: a 0x20 header followed by a nested
  } alyr;
 
 ==== AMAP: alpha MAP ====
-size: 0x1000 (4096) in every observed layer, i.e. an uncompressed 8-bit 64 × 64 alpha map. Every layer has one, including the first.
+size: 0x1000 (4096) in every observed layer: an uncompressed 8-bit 64 × 64 map. Every layer has one, including the first.
+* The values are per-layer '''blend weights''', not the sequential alpha of [[ADT/v18#MCAL_sub-chunk|MCAL]]: the maps of all layers of a chunk add up to 255 at each pixel (about 254.6 on average, exactly 255 for 74% of pixels).
+* Check: the layer with the highest weight in each 8 × 8 cell matches <tt>ACNK.predominant_layer</tt> for 99.93% of 239,808 cells (95.03% if the maps are read as sequential alpha).
+* To convert to sequential alpha for layer ''i'' ≥ 1: ''a<sub>i</sub>'' = ''w<sub>i</sub>'' / (''w<sub>0</sub>'' + … + ''w<sub>i</sub>'').
 
 === ASHD: SHaDow map ===
 size: 0x200 (512). Present in every <tt>ACNK</tt> that has sub-chunks. Presumably 64 × 64 bits; every byte is 0 in all 15,360 observed <tt>ASHD</tt> chunks.

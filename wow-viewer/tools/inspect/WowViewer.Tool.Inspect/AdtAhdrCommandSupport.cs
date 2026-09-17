@@ -10,11 +10,13 @@ public static class AdtAhdrCommandSupport
     {
         bool isCheck = args.Length > 0 && string.Equals(args[0], "check", StringComparison.OrdinalIgnoreCase);
         bool isObjects = args.Length > 0 && string.Equals(args[0], "objects", StringComparison.OrdinalIgnoreCase);
-        if (!isCheck && !isObjects)
+        bool isRoundTrip = args.Length > 0 && string.Equals(args[0], "roundtrip", StringComparison.OrdinalIgnoreCase);
+        if (!isCheck && !isObjects && !isRoundTrip)
         {
             Console.WriteLine("adt-ahdr commands:");
             Console.WriteLine("  adt-ahdr check --root <folder of AHDR-family files, any names/extensions>");
             Console.WriteLine("  adt-ahdr objects --root <folder> [--list]   resolve ACDO placements and measure them against the terrain");
+            Console.WriteLine("  adt-ahdr roundtrip --root <folder>          decode then re-encode every file (experimental writer) and compare bytes");
             Environment.ExitCode = args.Length == 0 ? 0 : 1;
             return;
         }
@@ -27,7 +29,9 @@ public static class AdtAhdrCommandSupport
             return;
         }
 
-        if (isObjects)
+        if (isRoundTrip)
+            RunRoundTrip(args[rootIndex + 1]);
+        else if (isObjects)
             RunObjects(args[rootIndex + 1], args.Contains("--list", StringComparer.OrdinalIgnoreCase));
         else
             RunCheck(args[rootIndex + 1]);
@@ -96,6 +100,36 @@ public static class AdtAhdrCommandSupport
         Console.WriteLine($"ADST rows {adst}; uniqueIds matching an ACDO: {adstMatches}");
         foreach ((string key, int count) in trailing)
             Console.WriteLine($"  {count,6}  {key}");
+    }
+
+    /// <summary>Decode with <see cref="AdtAhdrReader"/>, re-encode with <see cref="AdtAhdrWriter"/>, compare byte for byte.</summary>
+    private static void RunRoundTrip(string root)
+    {
+        int files = 0, identical = 0;
+        foreach (string path in Directory.EnumerateFiles(root))
+        {
+            byte[] original = File.ReadAllBytes(path);
+            if (!AdtAhdrReader.IsAhdrFamily(original))
+                continue;
+
+            files++;
+            byte[] rewritten = AdtAhdrWriter.Write(AdtAhdrReader.Read(original, path));
+            if (rewritten.AsSpan().SequenceEqual(original))
+            {
+                identical++;
+                continue;
+            }
+
+            int firstDifference = 0;
+            int limit = Math.Min(original.Length, rewritten.Length);
+            while (firstDifference < limit && original[firstDifference] == rewritten[firstDifference])
+                firstDifference++;
+            Console.WriteLine($"  {Path.GetFileName(path)}: differs at byte {firstDifference} (original {original.Length} bytes, rewritten {rewritten.Length})");
+        }
+
+        Console.WriteLine($"round trip: {identical}/{files} files byte-identical");
+        if (identical != files)
+            Environment.ExitCode = 2;
     }
 
     private static float SampleOuter(AdtAhdrTile tile, float column, float row)

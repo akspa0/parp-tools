@@ -1988,6 +1988,12 @@ void main() {
                 if (ImGui.MenuItem("Open DAT v26 Terrain Folder..."))
                     _wantOpenAhdrTerrainFolder = true;
 
+                if (ImGui.MenuItem("Export Nearby Tiles as DAT v26 (experimental)", null, false, _terrainManager?.Adapter is StandardTerrainAdapter))
+                    ExportNearbyTilesAsDatV26(radius: 2);
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Writes the ADT tiles within 2 tiles of the camera as DAT v26 files (terrain, texture layers, vertex colours, normals, objects) to output/dat_v26_export. Reopen the folder with Open DAT v26 Terrain Folder to compare.");
+
                 DrawAhdrHeightScaleMenu();
 
                 if (ImGui.BeginMenu("Open Saved Game Folder", _knownGoodClientPaths.Count > 0))

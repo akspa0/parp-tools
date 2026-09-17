@@ -3,6 +3,8 @@ using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WowViewer.Core.IO.Casc;
+using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Maps.AdtAhdr;
 
 namespace WoWViewer;
 
@@ -318,6 +320,102 @@ public partial class ViewerApp
         {
             ViewerLog.Trace($"[ViewerApp] CASC load failed: {ex}");
             _statusMessage = $"Failed to open CASC install: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Spec 237 (experimental): writes the ADT tiles around the camera as DAT v26 through the measured frames
+    /// (<see cref="AdtAhdrTileBuilder"/>). A fresh adapter reads the tiles so the live scene's placement lists are
+    /// untouched. Reopening the folder with the DAT loader should reproduce the same terrain and objects.
+    /// </summary>
+    private void ExportNearbyTilesAsDatV26(int radius)
+    {
+        if (_terrainManager?.Adapter is not StandardTerrainAdapter || _dataSource is null)
+            return;
+
+        string mapName = _terrainManager.MapName;
+        byte[]? wdtBytes = _dataSource.ReadFile($"World\\Maps\\{mapName}\\{mapName}.wdt");
+        if (wdtBytes is null)
+        {
+            _statusMessage = $"DAT v26 export: could not read the WDT for {mapName}.";
+            return;
+        }
+
+        try
+        {
+            var adapter = new StandardTerrainAdapter(wdtBytes, mapName, _dataSource, _dbcBuild, _dbcProvider, _dbdDir);
+            string outputDir = Path.Combine("output", "dat_v26_export", $"{mapName}_{DateTime.Now:yyyyMMdd_HHmmss}");
+            Directory.CreateDirectory(outputDir);
+
+            const float tileSpan = WoWConstants.ChunkSize;
+            float cellSpan = tileSpan / 16f / 8f;
+            var exportedUniqueIds = new HashSet<int>();
+            int tiles = 0, objects = 0;
+            for (int tileX = _terrainManager.CameraTileX - radius; tileX <= _terrainManager.CameraTileX + radius; tileX++)
+            {
+                for (int tileY = _terrainManager.CameraTileY - radius; tileY <= _terrainManager.CameraTileY + radius; tileY++)
+                {
+                    if (tileX is < 0 or > 63 || tileY is < 0 or > 63 || !adapter.TileExists(tileX, tileY))
+                        continue;
+
+                    TileLoadResult result = adapter.LoadTileWithPlacements(tileX, tileY);
+                    if (result.Chunks.Count == 0)
+                        continue;
+
+                    var chunks = result.Chunks.Select(static chunk => new DatV26SourceChunk(
+                        chunk.ChunkX,
+                        chunk.ChunkY,
+                        chunk.Heights,
+                        // Renderer normal (X along -row, Y along -column, Z up) -> grid (column, vertical, row).
+                        chunk.Normals.Length >= AdtAhdrTileSlicer.VerticesPerChunk
+                            ? chunk.Normals.Select(static n => new System.Numerics.Vector3(-n.Y, n.Z, -n.X)).ToArray()
+                            : null,
+                        chunk.MccvColors,
+                        chunk.Layers.Select((layer, index) => (layer.TextureIndex,
+                            index > 0 && chunk.AlphaMaps.TryGetValue(index, out byte[]? alpha) && alpha.Length >= AdtAhdrAlpha.Pixels ? alpha : null)).ToArray()))
+                        .ToList();
+
+                    var placements = new List<DatV26SourcePlacement>();
+                    void AddPlacement(int uniqueId, string name, System.Numerics.Vector3 position, System.Numerics.Vector3 rotation, float scale)
+                    {
+                        float row = (WoWConstants.MapOrigin - position.X - tileX * tileSpan) / cellSpan;
+                        float column = (WoWConstants.MapOrigin - position.Y - tileY * tileSpan) / cellSpan;
+                        if (row is < 0 or >= 128 || column is < 0 or >= 128 || !exportedUniqueIds.Add(uniqueId))
+                            return;
+
+                        // Renderer rotation is (raw0, raw2, raw1); ACDO keeps MDDF's file order (raw0, raw1, raw2).
+                        placements.Add(new DatV26SourcePlacement(name, unchecked((uint)uniqueId), column, row, position.Z,
+                            new System.Numerics.Vector3(rotation.X, rotation.Z, rotation.Y), scale));
+                    }
+
+                    foreach (MddfPlacement p in result.MddfPlacements)
+                    {
+                        if ((uint)p.NameIndex < (uint)adapter.MdxModelNames.Count)
+                            AddPlacement(p.UniqueId, adapter.MdxModelNames[p.NameIndex], p.Position, p.Rotation, p.Scale);
+                    }
+
+                    foreach (ModfPlacement p in result.ModfPlacements)
+                    {
+                        if ((uint)p.NameIndex < (uint)adapter.WmoModelNames.Count)
+                            AddPlacement(p.UniqueId, adapter.WmoModelNames[p.NameIndex], p.Position, p.Rotation, 1f);
+                    }
+
+                    List<string> textures = adapter.TileTextures.TryGetValue((tileX, tileY), out List<string>? names) ? names : [];
+                    // ALOC X is the grid column axis = renderer tile Y; ALOC Y = renderer tile X (see AhdrTerrainAdapter).
+                    AdtAhdrTile dat = AdtAhdrTileBuilder.Build(tileY, tileX, textures, chunks, placements, $"{mapName}_{tileY}_{tileX}");
+                    File.WriteAllBytes(Path.Combine(outputDir, $"{mapName}_{tileY}_{tileX}.dat"), AdtAhdrWriter.Write(dat));
+                    tiles++;
+                    objects += placements.Count;
+                }
+            }
+
+            _statusMessage = $"DAT v26 export: {tiles} tiles, {objects} objects -> {Path.GetFullPath(outputDir)}";
+            ViewerLog.Important(ViewerLog.Category.Terrain, _statusMessage);
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"DAT v26 export failed: {ex.Message}";
+            ViewerLog.Important(ViewerLog.Category.Terrain, $"DAT v26 export failed: {ex}");
         }
     }
 

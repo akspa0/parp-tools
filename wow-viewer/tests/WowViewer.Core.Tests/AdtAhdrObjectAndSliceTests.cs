@@ -68,6 +68,42 @@ public sealed class AdtAhdrObjectAndSliceTests
         Assert.Equal(new byte[] { 127, 127, 127, 255 }, colors[..4]);
     }
 
+    [Fact]
+    public void TileBuilder_WriterReader_RoundTripsHeightsAlphaObjectsAndNormals()
+    {
+        var heights = new float[145];
+        for (int i = 0; i < heights.Length; i++)
+            heights[i] = 100f + i * 0.25f;
+        var alpha = new byte[AdtAhdrAlpha.Pixels];
+        for (int p = 0; p < alpha.Length; p++)
+            alpha[p] = (byte)(p % 256);
+        var normals = Enumerable.Repeat(Vector3.Normalize(new Vector3(0.3f, 0.9f, -0.2f)), 145).ToArray();
+        var chunk = new DatV26SourceChunk(3, 5, heights, normals, null, [(0, null), (1, alpha)]);
+        var placement = new DatV26SourcePlacement("World\\tree.m2", 42, Column: 3 * 8 + 6.5f, Row: 5 * 8 + 1.25f, HeightYards: 120f, new Vector3(1f, 45f, 2f), 1.25f);
+
+        AdtAhdrTile built = AdtAhdrTileBuilder.Build(31, 27, ["a.blp", "b.blp"], [chunk], [placement], "synthetic");
+        AdtAhdrTile read = AdtAhdrReader.Read(AdtAhdrWriter.Write(built), "synthetic");
+
+        Assert.Empty(read.Diagnostics);
+        Assert.Equal((31, 27), (read.TileX, read.TileY));
+        Assert.Equal(heights[0] * 36f, AdtAhdrTileSlicer.SliceHeights(read, 3, 5)[0], 3);
+
+        AdtAhdrChunk readChunk = read.Chunks[5 * 16 + 3];
+        byte[][] sequential = AdtAhdrAlpha.WeightsToSequentialAlpha(readChunk.Layers.Select(static l => l.AlphaMap!).ToArray());
+        Assert.All(Enumerable.Range(0, AdtAhdrAlpha.Pixels), p => Assert.InRange(Math.Abs(sequential[0][p] - alpha[p]), 0, 2));
+
+        AdtAhdrObjectDefinition obj = Assert.Single(readChunk.Objects);
+        (float column, float row, float height) = AdtAhdrTileSlicer.ResolveObjectGridPosition(read, readChunk, obj);
+        Assert.Equal(placement.Column, column, 3);
+        Assert.Equal(placement.Row, row, 3);
+        Assert.Equal(placement.HeightYards * 36f, height, 1);
+        Assert.Equal("World\\tree.m2", read.ModelNames[obj.ModelIndex]);
+
+        Vector3[] stored = AdtAhdrTileSlicer.SliceStoredNormals(read, 3, 5)!;
+        Vector3 expectedRenderer = Vector3.Normalize(new Vector3(-normals[0].Z, -normals[0].X, normals[0].Y));
+        Assert.True(Vector3.Dot(stored[0], expectedRenderer) > 0.999f);
+    }
+
     private static byte[] BuildAcdo(int modelIndex, Vector3 local, Vector3 rotation, float scale, uint uniqueId, uint[] trailing)
     {
         using var ms = new MemoryStream();
