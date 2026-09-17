@@ -43,6 +43,9 @@ public static class CascCommandSupport
             case "adt-heights":
                 RunAdtHeights(tail);
                 break;
+            case "bench":
+                RunBench(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown casc command '{command}'.");
                 ShowUsage();
@@ -548,6 +551,172 @@ public static class CascCommandSupport
                 Console.WriteLine($"{path}: FAILED {ex.GetType().Name}: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Load-path timing on real data: listfile load, per-extension list filtering (what
+    /// CascDataSource.GetFileList does per call), and reading every WMO root/group and M2/skin placed on
+    /// a map, sequentially and with parallel threads.
+    /// </summary>
+    private static void RunBench(string[] args)
+    {
+        string? install = GetOption(args, "--install");
+        string? product = GetOption(args, "--product");
+        string? cache = GetOption(args, "--cache");
+        string? wdtIdText = GetOption(args, "--wdt-id");
+        List<string> listfiles = GetOptions(args, "--listfile");
+        int threads = int.Parse(GetOption(args, "--threads") ?? "8");
+        if (install is null || product is null || cache is null || wdtIdText is null || listfiles.Count == 0)
+        {
+            Console.WriteLine("  casc bench --install <dir> --product <p> --cache <dir> --wdt-id <id> --listfile <csv> [--threads 8]");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        var sw = Stopwatch.StartNew();
+        CommunityListfile listfile = CommunityListfile.Load(listfiles);
+        Console.WriteLine($"listfile load: {sw.ElapsedMilliseconds} ms ({listfile.Count} entries)");
+
+        sw.Restart();
+        CascStorage storage = CascStorage.OpenLocal(install, product, cache, args.Contains("--cdn-fill", StringComparer.OrdinalIgnoreCase));
+        Console.WriteLine($"storage open: {sw.ElapsedMilliseconds} ms (cdn fill {storage.AllowsCdnFill})");
+
+        sw.Restart();
+        var present = listfile.Entries.Where(e => storage.FileExists(e.Key)).Select(static e => e.Value).ToList();
+        Console.WriteLine($"GetFileList base build (FileExists over listfile): {sw.ElapsedMilliseconds} ms ({present.Count} present)");
+        sw.Restart();
+        int blp = present.Count(static p => p.EndsWith(".blp", StringComparison.OrdinalIgnoreCase));
+        Console.WriteLine($"one GetFileList(\".blp\") filter pass: {sw.ElapsedMilliseconds} ms ({blp} matches)");
+
+        byte[]? Read(uint id) => id != 0 && storage.TryReadFile(id, out byte[]? b) == CascReadStatus.Ok ? b : null;
+        byte[] wdt = Read(uint.Parse(wdtIdText))!;
+        var maid = TopChunks(wdt).First(static c => c.Id == "MAID");
+        var modelIds = new HashSet<uint>();
+        var wmoIds = new HashSet<uint>();
+        for (int slot = 0; slot < maid.Size / 32; slot++)
+        {
+            if (Read(BitConverter.ToUInt32(wdt, maid.Offset + slot * 32 + 4)) is not { } obj0)
+                continue;
+            foreach (var c in TopChunks(obj0))
+            {
+                if (c.Id == "MDDF")
+                    for (int p = c.Offset; p + 36 <= c.Offset + c.Size; p += 36)
+                        modelIds.Add(BitConverter.ToUInt32(obj0, p));
+                else if (c.Id == "MODF")
+                    for (int p = c.Offset; p + 64 <= c.Offset + c.Size; p += 64)
+                        wmoIds.Add(BitConverter.ToUInt32(obj0, p));
+            }
+        }
+
+        // Expand to the full file set a load touches: WMO roots + GFID groups, M2s + SFID skins.
+        var files = new List<uint>();
+        foreach (uint wmoId in wmoIds)
+        {
+            files.Add(wmoId);
+            if (Read(wmoId) is { } root)
+                files.AddRange(WowViewer.Core.IO.Converters.WmoV17ToV14Converter.ReadGroupFileDataIds(root));
+        }
+        int wmoFileCount = files.Count;
+        foreach (uint modelId in modelIds)
+        {
+            files.Add(modelId);
+            if (Read(modelId) is { } model && WowViewer.Core.IO.M2.M2ChunkedFileIds.TryRead(model, out var ids))
+                files.AddRange(ids.SkinFileDataIds.Take(1));
+        }
+        Console.WriteLine($"file set: {wmoIds.Count} WMO roots + groups = {wmoFileCount} files, {modelIds.Count} M2 + skins; total {files.Count} (all already read once above: warm)");
+
+        sw.Restart();
+        long bytes = 0;
+        foreach (uint id in files)
+            bytes += Read(id)?.Length ?? 0;
+        Console.WriteLine($"sequential read (warm OS cache): {sw.ElapsedMilliseconds} ms, {bytes / 1_048_576.0:F1} MB, {files.Count / Math.Max(0.001, sw.Elapsed.TotalSeconds):F0} files/s");
+
+        sw.Restart();
+        long parallelBytes = 0;
+        Parallel.ForEach(files, new ParallelOptions { MaxDegreeOfParallelism = threads }, id => Interlocked.Add(ref parallelBytes, Read(id)?.Length ?? 0));
+        Console.WriteLine($"parallel read x{threads} through CascStorage (single read lock): {sw.ElapsedMilliseconds} ms");
+
+        // Concurrency proof: every file read in parallel without the lock must hash identically to a
+        // sequential locked read. Includes CDN-cached textures when --cdn-fill is set.
+        var sequentialHashes = new Dictionary<uint, string>();
+        foreach (uint id in files.Distinct())
+            sequentialHashes[id] = Read(id) is { } b ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(b)) : "-";
+        storage.SerializeReads = false;
+        var parallelHashes = new System.Collections.Concurrent.ConcurrentDictionary<uint, string>();
+        sw.Restart();
+        Parallel.ForEach(files.Distinct().Concat(files.Distinct()), new ParallelOptions { MaxDegreeOfParallelism = threads }, id =>
+        {
+            string hash = Read(id) is { } b ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(b)) : "-";
+            parallelHashes.AddOrUpdate(id, hash, (_, existing) => existing == hash ? hash : "MISMATCH");
+        });
+        int mismatches = sequentialHashes.Count(kv => !parallelHashes.TryGetValue(kv.Key, out string? h) || h != kv.Value);
+        Console.WriteLine($"lock-free parallel x{threads} (each file twice): {sw.ElapsedMilliseconds} ms; hash mismatches vs sequential: {mismatches} of {sequentialHashes.Count}");
+
+        sw.Restart();
+        var wmoGroups = files.Take(wmoFileCount).Select(Read).Where(static b => b is not null).ToList();
+        Console.WriteLine($"WMO bytes only ({wmoFileCount} files): {sw.ElapsedMilliseconds} ms, {wmoGroups.Sum(static b => b!.Length) / 1_048_576.0:F1} MB");
+
+        // WMO parse + convert (what WorldAssetManager.LoadWmoDataModel does), and material texture decode
+        // the way WmoRenderer/TerrainRenderer do (full mip 0 to RGBA via SereniaBLPLib).
+        WowViewer.Core.IO.Files.FileDataIdPaths.Resolver = listfile.GetPath;
+        var textureNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        sw.Restart();
+        foreach (uint wmoId in wmoIds)
+        {
+            if (Read(wmoId) is not { } root)
+                continue;
+            var groups = WowViewer.Core.IO.Converters.WmoV17ToV14Converter.ReadGroupFileDataIds(root).Select(Read).TakeWhile(static g => g is not null).Select(static g => g!).ToList();
+            var model = new WowViewer.Core.IO.Converters.WmoV17ToV14Converter().ParseV17ToModel(root, groups);
+            foreach (var material in model.Materials)
+            {
+                foreach (string? name in new[] { material.Texture1Name, material.Texture2Name })
+                {
+                    if (!string.IsNullOrEmpty(name))
+                        textureNames.Add(name);
+                }
+            }
+        }
+        Console.WriteLine($"WMO read+parse ({wmoIds.Count} WMOs incl. groups): {sw.ElapsedMilliseconds} ms; {textureNames.Count} distinct material textures");
+
+        // Cold, parallel texture fetch (what CascDataSource's prefetch pool does). Only meaningful with an
+        // empty --cache and --cdn-fill; run before the sequential loop so that loop measures warm reads.
+        sw.Restart();
+        Parallel.ForEach(textureNames, new ParallelOptions { MaxDegreeOfParallelism = threads }, name =>
+        {
+            if (WowViewer.Core.IO.Files.FileDataIdPaths.TryParse(name, out uint tid))
+                Read(tid);
+            else if (listfile.TryGetFileDataId(name, out uint lid))
+                Read(lid);
+        });
+        Console.WriteLine($"WMO textures parallel fetch x{threads} (first pass; cold if --cache is empty): {sw.ElapsedMilliseconds} ms");
+
+        long decodePixels = 0;
+        int decoded = 0, missing = 0;
+        var sizes = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        long readMs = 0, decodeMs = 0;
+        foreach (string name in textureNames)
+        {
+            var t = Stopwatch.StartNew();
+            byte[]? blpBytes = WowViewer.Core.IO.Files.FileDataIdPaths.TryParse(name, out uint tid) ? Read(tid)
+                : listfile.TryGetFileDataId(name, out uint lid) ? Read(lid) : null;
+            readMs += t.ElapsedMilliseconds;
+            if (blpBytes is null)
+            {
+                missing++;
+                continue;
+            }
+
+            t.Restart();
+            using var stream = new MemoryStream(blpBytes);
+            using var blpFile = new SereniaBLPLib.BlpFile(stream);
+            using var image = blpFile.GetImage(0);
+            decodeMs += t.ElapsedMilliseconds;
+            decodePixels += (long)image.Width * image.Height;
+            decoded++;
+            string key = $"{image.Width}x{image.Height}";
+            sizes[key] = sizes.GetValueOrDefault(key) + 1;
+        }
+        Console.WriteLine($"WMO textures: decoded {decoded}, not readable {missing}; read {readMs} ms, decode mip0->RGBA {decodeMs} ms, {decodePixels * 4 / 1_048_576.0:F0} MB RGBA; sizes {string.Join(' ', sizes.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
     }
 
     /// <summary>

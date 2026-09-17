@@ -42,6 +42,11 @@ public interface IDataSource : IDisposable
     /// MAID table naming a tile's ADT files). Takes priority over listfile names. Default: ignored.
     /// </summary>
     void RegisterFileDataIdAlias(string virtualPath, uint fileDataId) { }
+
+    /// <summary>
+    /// Hint that a file will be read soon so the source can load it in the background. Default: ignored.
+    /// </summary>
+    void PrefetchFile(string virtualPath) { }
     
     /// <summary>
     /// Get a filtered list of known file paths matching a pattern.

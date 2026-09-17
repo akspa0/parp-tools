@@ -1224,7 +1224,15 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             // Spec 239: FileDataID-era _tex0 files have no MTEX; MCLY texture ids index MDID (diffuse FileDataIDs).
             if (textures.Count == 0)
+            {
                 textures.AddRange(ReadMdidTextureNames(texBytes));
+                // Start terrain texture reads (possibly CDN downloads) before the renderer asks for them.
+                foreach (string texture in textures)
+                {
+                    if (texture.Length > 0)
+                        _dataSource.PrefetchFile(texture);
+                }
+            }
         }
 
         // Find MHDR in root ADT — all other chunks located via MHDR offsets (or flat scan fallback)

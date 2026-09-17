@@ -1610,7 +1610,7 @@ private int _mdxLoadFailCount = 0;
 
     private void PrefetchModelBytes(string normalizedKey)
     {
-        if (_dataSource is not MpqDataSource mpqDataSource)
+        if (_dataSource is not { } mpqDataSource)
             return;
 
         string canonicalModelPath = ResolveCanonicalModelPath(normalizedKey);
