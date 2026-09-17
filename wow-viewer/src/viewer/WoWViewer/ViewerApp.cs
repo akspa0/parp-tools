@@ -1985,6 +1985,8 @@ void main() {
                 if (ImGui.MenuItem("Open DAT v26 Terrain Folder..."))
                     _wantOpenAhdrTerrainFolder = true;
 
+                DrawAhdrHeightScaleMenu();
+
                 if (ImGui.BeginMenu("Open Saved Game Folder", _knownGoodClientPaths.Count > 0))
                 {
                     foreach (var knownClient in _knownGoodClientPaths)

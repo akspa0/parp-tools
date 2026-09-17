@@ -40,6 +40,9 @@ public static class CascCommandSupport
             case "m2":
                 RunM2(tail);
                 break;
+            case "adt-heights":
+                RunAdtHeights(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown casc command '{command}'.");
                 ShowUsage();
@@ -545,6 +548,70 @@ public static class CascCommandSupport
                 Console.WriteLine($"{path}: FAILED {ex.GetType().Name}: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Writes absolute outer-vertex heights (MCNK position.z + MCVT) of a rectangle of ADT tiles from a WDT's
+    /// MAID as a CSV (tileX,tileY,row,col,height) for offline comparison with DAT v26 grids.
+    /// </summary>
+    private static void RunAdtHeights(string[] args)
+    {
+        string? install = GetOption(args, "--install");
+        string? product = GetOption(args, "--product");
+        string? cache = GetOption(args, "--cache");
+        string? wdtIdText = GetOption(args, "--wdt-id");
+        string? output = GetOption(args, "--out");
+        int x0 = int.Parse(GetOption(args, "--x0") ?? "0"), x1 = int.Parse(GetOption(args, "--x1") ?? "63");
+        int y0 = int.Parse(GetOption(args, "--y0") ?? "0"), y1 = int.Parse(GetOption(args, "--y1") ?? "63");
+        if (install is null || product is null || cache is null || wdtIdText is null || output is null)
+        {
+            Console.WriteLine("  casc adt-heights --install <dir> --product <p> --cache <dir> --wdt-id <id> --x0 --x1 --y0 --y1 --out <csv>");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        CascStorage storage = CascStorage.OpenLocal(install, product, cache);
+        byte[]? Read(uint id) => id != 0 && storage.TryReadFile(id, out byte[]? b) == CascReadStatus.Ok ? b : null;
+        byte[] wdt = Read(uint.Parse(wdtIdText)) ?? throw new InvalidOperationException("WDT not readable");
+        var maid = TopChunks(wdt).First(static c => c.Id == "MAID");
+
+        using var writer = new StreamWriter(output);
+        writer.WriteLine("tileX,tileY,row,col,height");
+        int tiles = 0;
+        for (int y = y0; y <= y1; y++)
+        {
+            for (int x = x0; x <= x1; x++)
+            {
+                uint rootId = BitConverter.ToUInt32(wdt, maid.Offset + (y * 64 + x) * 32);
+                if (Read(rootId) is not { } root)
+                    continue;
+
+                tiles++;
+                int chunkIndex = 0;
+                foreach (var mcnk in TopChunks(root).Where(static c => c.Id == "MCNK"))
+                {
+                    int chunkX = BitConverter.ToInt32(root, mcnk.Offset + 4);
+                    int chunkY = BitConverter.ToInt32(root, mcnk.Offset + 8);
+                    float baseZ = BitConverter.ToSingle(root, mcnk.Offset + 0x70);
+                    var mcvt = TopChunks(root, mcnk.Offset + 0x80, mcnk.Offset + mcnk.Size).FirstOrDefault(static c => c.Id == "MCVT");
+                    if (mcvt.Id is null)
+                        continue;
+
+                    for (int outerRow = 0; outerRow < 9; outerRow++)
+                    {
+                        for (int c = 0; c < 9; c++)
+                        {
+                            float h = baseZ + BitConverter.ToSingle(root, mcvt.Offset + (outerRow * 17 + c) * 4);
+                            writer.WriteLine($"{x},{y},{chunkY * 8 + outerRow},{chunkX * 8 + c},{h:0.###}");
+                        }
+                    }
+
+                    chunkIndex++;
+                }
+            }
+        }
+
+        Console.WriteLine($"wrote {tiles} tiles to {output}");
     }
 
     /// <summary>Same steps as WowViewerM2RuntimeBridge.BuildStaticRenderModel; returns "ok" or a failure category.</summary>

@@ -77,18 +77,41 @@ public sealed class CascStorage
         var build = new BuildInstance();
         build.Settings.BaseDir = installDir;
         build.Settings.Product = info.Product;
-        build.Settings.TryCDN = false; // manifests must come from the install itself
+        build.Settings.TryCDN = false; // manifests come from the install when present
         build.Settings.CacheDir = cacheDir;
         build.cdn.ProductDirectory = info.CdnPath;
 
-        build.LoadConfigs(info.BuildConfig, info.CdnConfig);
-        build.Load();
+        bool manifestsFromCdn = false;
+        try
+        {
+            build.LoadConfigs(info.BuildConfig, info.CdnConfig);
+            build.Load();
+        }
+        catch (FileNotFoundException)
+        {
+            // Measured 2026-09-16: the launcher rewrote .build.info with a new CDN config
+            // (272d201d… → 504e831a…) for the same build before putting that config on disk.
+            // Fetch only the missing manifests for this exact build from the CDN (cached in cacheDir).
+            build = new BuildInstance();
+            build.Settings.BaseDir = installDir;
+            build.Settings.Product = info.Product;
+            build.Settings.TryCDN = true;
+            build.Settings.CacheDir = cacheDir;
+            build.cdn.ProductDirectory = info.CdnPath;
+            build.LoadConfigs(info.BuildConfig, info.CdnConfig);
+            build.Load();
+            manifestsFromCdn = true;
+        }
+
         build.Settings.TryCDN = allowCdnFill;
-        return new CascStorage(build, info, installDir) { AllowsCdnFill = allowCdnFill };
+        return new CascStorage(build, info, installDir) { AllowsCdnFill = allowCdnFill, ManifestsFetchedFromCdn = manifestsFromCdn };
     }
 
     /// <summary>True when reads may fetch missing local data from the CDN for this build.</summary>
     public bool AllowsCdnFill { get; private init; }
+
+    /// <summary>True when the install lacked this build's manifests locally and they were fetched from the CDN.</summary>
+    public bool ManifestsFetchedFromCdn { get; private init; }
 
     /// <summary>Adds a TACT decryption key (hex key name → key bytes).</summary>
     public static void AddKey(ulong keyName, byte[] key) => KeyService.SetKey(keyName, key);

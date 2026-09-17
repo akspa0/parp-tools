@@ -17,6 +17,35 @@ public partial class ViewerApp
     private string? _lastCascInstallPath;
     private string? _lastAhdrTerrainFolder;
 
+    /// <summary>DAT v26 height display divisor; 36 treats heights as inches (see AhdrTerrainAdapter.HeightDivisor).</summary>
+    private float _ahdrHeightDivisor = 36f;
+
+    private static readonly (string Label, float Divisor)[] AhdrHeightScaleOptions =
+    [
+        ("Inches → yards (÷36)", 36f),
+        ("Raw (1×)", 1f),
+        ("÷12", 12f),
+        ("÷100", 100f),
+    ];
+
+    private void DrawAhdrHeightScaleMenu()
+    {
+        if (!ImGuiNET.ImGui.BeginMenu("DAT v26 Height Scale"))
+            return;
+
+        foreach ((string label, float divisor) in AhdrHeightScaleOptions)
+        {
+            if (ImGuiNET.ImGui.MenuItem(label, null, _ahdrHeightDivisor == divisor))
+            {
+                _ahdrHeightDivisor = divisor;
+                if (_lastAhdrTerrainFolder is not null && _terrainManager?.Adapter is AhdrTerrainAdapter)
+                    LoadAhdrTerrain(_lastAhdrTerrainFolder);
+            }
+        }
+
+        ImGuiNET.ImGui.EndMenu();
+    }
+
     private void HandleCascAhdrMenuRequests()
     {
         if (_wantOpenCascInstall || _wantOpenCascInstallWithCdnFill)
@@ -77,7 +106,10 @@ public partial class ViewerApp
             {
                 try
                 {
-                    storages.Add(CascStorage.OpenLocal(installDir, product.Product, cascCacheDir, allowCdnFill));
+                    CascStorage storage = CascStorage.OpenLocal(installDir, product.Product, cascCacheDir, allowCdnFill);
+                    if (storage.ManifestsFetchedFromCdn)
+                        ViewerLog.Important(ViewerLog.Category.MpqData, $"CASC {product.Product} {product.Version}: local manifests missing for CDN config {product.CdnConfig}; fetched them from the CDN for this build.");
+                    storages.Add(storage);
                 }
                 catch (Exception ex)
                 {
@@ -166,7 +198,7 @@ public partial class ViewerApp
         AhdrTerrainAdapter adapter;
         try
         {
-            adapter = new AhdrTerrainAdapter(folder);
+            adapter = new AhdrTerrainAdapter(folder, _ahdrHeightDivisor);
         }
         catch (Exception ex)
         {
@@ -188,6 +220,7 @@ public partial class ViewerApp
             $"Type: DAT v26 terrain folder (provisional: no objects, vertex colours or shadows yet)\n" +
             $"Folder: {folder}\n" +
             $"Tiles: {adapter.ExistingTiles.Count} (skipped {adapter.SkippedFiles.Count})\n" +
+            $"Height divisor: {adapter.HeightDivisor:0.##} (File > DAT v26 Height Scale)\n" +
             $"Assets: {(_dataSource is null ? "no data source open; textures will be missing" : _dataSource.Name)}\n");
     }
 

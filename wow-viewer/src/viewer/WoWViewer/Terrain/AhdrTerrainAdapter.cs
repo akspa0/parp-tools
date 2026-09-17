@@ -29,9 +29,10 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
     private readonly List<int> _existingTiles = [];
     private readonly List<PhaseLayerSettings> _phaseLayers = [];
 
-    public AhdrTerrainAdapter(string folder)
+    public AhdrTerrainAdapter(string folder, float heightDivisor = 1f)
     {
         Folder = folder;
+        HeightDivisor = heightDivisor > 0f ? heightDivisor : 1f;
         foreach (string path in Directory.EnumerateFiles(folder))
         {
             byte[] head = ReadHead(path, 256);
@@ -58,6 +59,13 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
     }
 
     public string Folder { get; }
+
+    /// <summary>
+    /// Display divisor applied to DAT v26 heights. DAT heights appear to be in inches: the corpus's
+    /// 5th-percentile height −18559.47 ÷ 36 = −515.54, matching the shipped Azeroth ADT ocean floor
+    /// (−515.19..−516.07 yd). The horizontal scale is not yet established.
+    /// </summary>
+    public float HeightDivisor { get; }
 
     /// <summary>Files that were AHDR-family but not placed, with the reason.</summary>
     public List<string> SkippedFiles { get; } = [];
@@ -130,8 +138,9 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
                 TileY = tileY,
                 ChunkX = gridColumn,
                 ChunkY = gridRow,
-                Heights = AdtAhdrTileSlicer.SliceHeights(tile, gridColumn, gridRow),
-                Normals = AdtAhdrTileSlicer.ComputeNormals(tile, gridColumn, gridRow, vertexSpacing),
+                Heights = ScaleHeights(AdtAhdrTileSlicer.SliceHeights(tile, gridColumn, gridRow)),
+                // Dividing heights by D flattens slopes by D; equivalently widen the spacing by D.
+                Normals = AdtAhdrTileSlicer.ComputeNormals(tile, gridColumn, gridRow, vertexSpacing * HeightDivisor),
                 Layers = layers,
                 AlphaMaps = alphaMaps,
                 WorldPosition = new Vector3(worldX, worldY, 0f),
@@ -160,6 +169,17 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
     public bool TryResolveMap(string mapName) => true;
 
     public bool IsMapWmoBased(string mapName) => false;
+
+    private float[] ScaleHeights(float[] heights)
+    {
+        if (HeightDivisor != 1f)
+        {
+            for (int i = 0; i < heights.Length; i++)
+                heights[i] /= HeightDivisor;
+        }
+
+        return heights;
+    }
 
     private static int TileKey(int tileX, int tileY) => tileX * 64 + tileY;
 
