@@ -216,7 +216,7 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug --
 
 ### CASC Installs (`casc`)
 
-Added in v0.5.4-dev. Reads a local CASC install through TACTSharp. `--install` is the folder containing
+Added in v0.5.4-alpha. Reads a local CASC install through TACTSharp. `--install` is the folder containing
 `.build.info`; `--cache` is a local folder for decoded manifests and CDN downloads. `--listfile` takes
 community listfile CSVs (`id;path`) and may be repeated.
 

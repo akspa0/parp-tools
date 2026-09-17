@@ -303,7 +303,7 @@ The former File > Load from Rosetta Datastore menu has been retired.
 
 ## 12. Modern CASC Clients: WoW: Forever (alpha)
 
-Added in v0.5.4-dev. Tested against **WoW: Forever**, the `wow_classic_beta` product, build 1.60.1.69876 (a 12.0-based client).
+Added in v0.5.4-alpha. Tested against **WoW: Forever**, the `wow_classic_beta` product, build 1.60.1.69876 (a 12.0-based client).
 
 ### Opening an install
 1. **File → Open CASC Install (local + CDN fill)...** and pick the folder that contains `.build.info` (for example the `World of Warcraft` folder the Battle.net launcher installed).

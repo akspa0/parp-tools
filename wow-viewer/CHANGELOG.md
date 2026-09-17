@@ -3,13 +3,13 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
-## v0.5.4-dev (alpha) — 2026-09-16
+## v0.5.4-alpha — 2026-09-16
 
 Alpha pre-release: modern CASC install support for **WoW: Forever** (`wow_classic_beta` 1.60.1.69876,
 12.0-based client), FileDataID-era maps, M2 and WMO, DB2 tables for that build, and a first reader and
 renderer for the new DAT v26 terrain project format.
 
-Full notes: [`docs/releases/v0.5.4-dev.md`](docs/releases/v0.5.4-dev.md)
+Full notes: [`docs/releases/v0.5.4-alpha.md`](docs/releases/v0.5.4-alpha.md)
 
 ### Added
 - **CASC installs**: File → Open CASC Install (local / local + CDN fill), built on TACTSharp. Parallel reads, background prefetch, and a download cache.
