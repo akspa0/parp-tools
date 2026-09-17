@@ -77,7 +77,7 @@ v26 reuses the chunk vocabulary of the pre-Cataclysm experimental ADT v22/v23 on
 |---|---|---|---|
 | `MVER` | 4 | uint32 version = 26 | **MEASURED** |
 | `AHDR` | 64 | uint32 version=26, verticesX=129, verticesY=129, chunksX=16, chunksY=16, then 11×uint32: `8396383`, 0×10 | sizes **MEASURED**; `8396383` *open* |
-| `ALOC` | 20 | 5×uint32 `(2869, tileX, tileY, tileX, tileY)` | tileX/tileY **MEASURED**; field 0 (constant 2869) and the repeat in fields 3/4 *open* |
+| `ALOC` | 20 | 5×uint32 `(2869, tileX, tileY, tileX, tileY)` | tileX/tileY **MEASURED**; field 0 see "ALOC[0] = 2869" below; the repeat in fields 3/4 *open* |
 | `AOCH` | 2048 | all bytes zero in every file | *open* |
 | `AVTX` | 132100 | float32 × (129² + 128²): outer 129×129 **row-major**, then inner 128×128 | outer order and tile axes **MEASURED**; inner order *hypothesis* |
 | `ANRM` | 99075 | int8 × 3 × (129² + 128²), outer then inner; components **(column axis, vertical, row axis)**, 127 = 1.0 | **MEASURED** (mean dot 0.985 with height-derived normals; next-best order 0.658; every vector has length 127). Inner order *hypothesis* |
@@ -131,6 +131,21 @@ vertex instead of the 145-vertex mean gives 22.3 in; treating positions as tile-
 A chunk is 1200 inches wide (8 cells × 150 in), the same 33.33 yd span as an ADT chunk. The ±600 in range of `ACDO`
 horizontal offsets (half a chunk) is consistent with this.
 
+## ALOC[0] = 2869 and AHDR +0x14 = 8396383
+
+Both values are the same in all 700 files, so neither is a per-tile index (as a 64×64 index 2869 would be tile 53, 44).
+MEASURED 2026-09-17 with `inspect casc db2 --find` and the community listfile:
+
+- Neither value is a FileDataID in the community listfile.
+- Neither appears in any column of `Map`, `AreaTable`, `MapDifficulty` or `UiMap` in `wow_classic_beta` 1.60.1.69876 or
+  `wow_classic_era` 1.15.9.69722. (Control: the same search finds Map 451 `development`.)
+- `Map` IDs in both builds run 0..3109 (beta) / 0..2921 (era). Around 2869 the rows present are 2853 Deadwind Pass,
+  2856 Scarlet Enclave, **2868 Eastern Plaguelands (Scarlet Raid Phase)**, then **2875 Karazhan Crypts**; 2869–2874 have
+  no rows. These neighbours use the map ID as their `Directory`.
+
+*Hypothesis*: 2869 is the Map ID of the map these tiles belong to, a map with no row in either client's `Map` table.
+Not proven: no file or table in these builds refers to 2869.
+
 ## Tile placement and heights (MEASURED)
 
 - `ALOC[1]` is tile X, along the height grid's **column** axis. `ALOC[2]` is tile Y, along the **row** axis. Observed ranges are X 18–45, Y 16–40.
@@ -144,7 +159,7 @@ horizontal offsets (half a chunk) is consistent with this.
 3. `ASHD` is all zero in all 15,360 chunks that carry it, so its bit layout cannot be measured from this corpus.
 4. `ACDO` +0x28, +0x34 and the trailing values; `ACNK` +0x22 bitmask; whether ACDO yaw is mirrored relative to the game world.
 5. `ADST`: why its uniqueIds match no `ACDO` (objects outside this corpus, or removed objects).
-6. `ALOC[0]` = 2869, why `ALOC[3..4]` repeat X/Y, `AHDR` +0x14 = 8396383, `AOCH` (all zero).
+6. Why `ALOC[3..4]` repeat X/Y (possibly a tile range), `AHDR` +0x14 = 8396383, `AOCH` (all zero); whether `ALOC[0]` is a Map ID (see above).
 7. The exact offset of these tiles against the shipped ADT tile grid.
 
 Update this document whenever a probe settles one of these. Link the evidence and never promote a *hypothesis* without it.

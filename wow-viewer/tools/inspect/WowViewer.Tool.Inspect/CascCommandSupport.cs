@@ -702,9 +702,10 @@ public static class CascCommandSupport
         string? defs = GetOption(args, "--defs");
         List<string> tables = GetOptions(args, "--table");
         List<string> listfiles = GetOptions(args, "--listfile");
+        List<long> findValues = GetOptions(args, "--find").Select(static v => long.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToList();
         if (install is null || product is null || cache is null || defs is null || tables.Count == 0 || listfiles.Count == 0)
         {
-            Console.WriteLine("  casc db2 --install <dir> --product <p> --cache <dir> --defs <WoWDBDefs/definitions> --listfile <csv> --table <name> [--table ...]");
+            Console.WriteLine("  casc db2 --install <dir> --product <p> --cache <dir> --defs <WoWDBDefs/definitions> --listfile <csv> --table <name> [--table ...] [--find <integer> ...]");
             Environment.ExitCode = 1;
             return;
         }
@@ -718,6 +719,46 @@ public static class CascCommandSupport
             {
                 DBCD.IDBCDStorage rows = WowViewer.Core.IO.Dbc.DbcTableLoader.Load(provider, defs, storage.Product.Version, table);
                 Console.WriteLine($"{table} @ {storage.Product.Version}: {rows.Count} rows; columns: {string.Join(", ", rows.AvailableColumns.Take(12))}{(rows.AvailableColumns.Length > 12 ? ", ..." : "")}");
+                if (findValues.Count > 0)
+                {
+                    // Scan every column (arrays element-wise) for the requested integers; dictionary keys are the real row ids.
+                    long maxKey = rows.Keys.Count > 0 ? rows.Keys.Max() : 0;
+                    Console.WriteLine($"  row ids {rows.Keys.Min()}..{maxKey}");
+                    foreach (long wanted in findValues)
+                    {
+                        int[] below = rows.Keys.Where(k => k < wanted).OrderByDescending(static k => k).Take(3).OrderBy(static k => k).ToArray();
+                        int[] above = rows.Keys.Where(k => k > wanted).OrderBy(static k => k).Take(3).ToArray();
+                        Console.WriteLine($"  nearest row ids around {wanted}: [{string.Join(", ", below)}] .. [{string.Join(", ", above)}]{(rows.ContainsKey((int)Math.Min(wanted, int.MaxValue)) ? " (row exists)" : "")}");
+                    }
+                    foreach (int key in rows.Keys)
+                    {
+                        DBCD.DBCDRow row = rows[key];
+                        foreach (string column in rows.AvailableColumns)
+                        {
+                            object? value = row[column];
+                            IEnumerable<object?> values = value is Array array ? array.Cast<object?>() : [value];
+                            int index = 0;
+                            foreach (object? element in values)
+                            {
+                                if (element is IConvertible convertible and not string)
+                                {
+                                    long number;
+                                    try { number = Convert.ToInt64(convertible, System.Globalization.CultureInfo.InvariantCulture); }
+                                    catch (Exception) { index++; continue; }
+                                    if (findValues.Contains(number))
+                                    {
+                                        string label = rows.AvailableColumns.Contains("Directory") ? $" Directory={row["Directory"]}" : string.Empty;
+                                        string name = rows.AvailableColumns.Contains("MapName_lang") ? $" MapName={row["MapName_lang"]}" : rows.AvailableColumns.Contains("AreaName_lang") ? $" AreaName={row["AreaName_lang"]}" : string.Empty;
+                                        Console.WriteLine($"  match {number}: row {key} column {column}{(value is Array ? $"[{index}]" : string.Empty)}{label}{name}");
+                                    }
+                                }
+
+                                index++;
+                            }
+                        }
+                    }
+                }
+
                 if (string.Equals(table, "Map", StringComparison.OrdinalIgnoreCase))
                 {
                     foreach (DBCD.DBCDRow row in rows.Values)

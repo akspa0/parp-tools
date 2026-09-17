@@ -265,6 +265,15 @@ $listfile = "$env:LOCALAPPDATA\WoWViewer\community-listfile-withcapitals.csv"
   --listfile $listfile [--threads 12] [--cdn-fill]
 ```
 
+
+Search DB2 tables for integer values (every column, arrays element-wise; also prints the nearest row IDs):
+
+```powershell
+& $exe casc db2 --install "I:\wow12\World of Warcraft" --product wow_classic_beta --cache output\cache\casc `
+  --defs libs\wowdev\WoWDBDefs\definitions --listfile $env:LOCALAPPDATA\WoWViewer\community-listfile-withcapitals.csv `
+  --table Map --table AreaTable --find 2869
+```
+
 ### DAT v26 Terrain (`adt-ahdr`)
 
 ```powershell

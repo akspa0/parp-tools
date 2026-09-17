@@ -45,6 +45,7 @@ New in v26. size: 0x14
 * Each file has a unique (<tt>tile_x</tt>, <tt>tile_y</tt>) pair.
 * Checked with heights: for tiles whose <tt>tile_x</tt> differs by 1, the last column of one tile's outer <tt>AVTX</tt> grid is identical to the first column of the neighbour's. For <tt>tile_y</tt>, the same holds for rows (35 and 36 neighbour pairs, all exact matches; every other edge combination differs by hundreds of units).
 * Why <tt>tile_x</tt>/<tt>tile_y</tt> are stored twice is unknown; possibly a min/max tile range.
+* <tt>unknown</tt> (2869) is identical in every observed file, so it is not a per-tile index. It is not a FileDataID in the community listfile, and no <tt>Map</tt>, <tt>AreaTable</tt>, <tt>MapDifficulty</tt> or <tt>UiMap</tt> row in 1.60.1.69876 or 1.15.9.69722 contains it. Those <tt>Map</tt> tables have rows 2868 (Eastern Plaguelands (Scarlet Raid Phase)) and 2875 (Karazhan Crypts) but none for 2869–2874, so it may be the ID of a map that is not in the client's <tt>Map</tt> table.
 
 == AOCH ==
 New in v26. size: 0x800 (2048)
