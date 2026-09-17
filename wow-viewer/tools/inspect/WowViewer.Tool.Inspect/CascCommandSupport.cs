@@ -286,6 +286,10 @@ public static class CascCommandSupport
         var mddfFlags = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var modfFlags = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var tileList = new List<string>();
+        var zeroExamples = new SortedSet<string>(StringComparer.Ordinal);
+        var mclyFlags = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var layerRefs = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        var mcalSizesPerLayerCount = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var textureIds = new HashSet<uint>();
         var doodadIds = new HashSet<uint>();
         var wmoIds = new HashSet<uint>();
@@ -319,10 +323,31 @@ public static class CascCommandSupport
                             textureIds.Add(textureId);
                     }
                 }
+                uint[] mdid = top.Where(static c => c.Id == "MDID").Select(c => Enumerable.Range(0, c.Size / 4).Select(i => BitConverter.ToUInt32(tex0, c.Offset + i * 4)).ToArray()).FirstOrDefault() ?? [];
                 foreach (var mcnk in top.Where(static c => c.Id == "MCNK"))
                 {
-                    int layers = TopChunks(tex0, mcnk.Offset, mcnk.Offset + mcnk.Size).Where(static c => c.Id == "MCLY").Select(static c => c.Size / 16).FirstOrDefault();
+                    var sub = TopChunks(tex0, mcnk.Offset, mcnk.Offset + mcnk.Size).ToList();
+                    var mcly = sub.FirstOrDefault(static c => c.Id == "MCLY");
+                    int layers = mcly.Id is null ? 0 : mcly.Size / 16;
                     layerHistogram[layers] = layerHistogram.GetValueOrDefault(layers) + 1;
+                    var mcal = sub.FirstOrDefault(static c => c.Id == "MCAL");
+                    for (int l = 0; l < layers; l++)
+                    {
+                        int textureIndex = BitConverter.ToInt32(tex0, mcly.Offset + l * 16);
+                        uint layerFlags = BitConverter.ToUInt32(tex0, mcly.Offset + l * 16 + 4);
+                        string flagKey = $"0x{layerFlags & ~0x7u:X}";
+                        mclyFlags[flagKey] = mclyFlags.GetValueOrDefault(flagKey) + 1;
+                        string reference = textureIndex < 0 || textureIndex >= mdid.Length ? "index-out-of-MDID" : mdid[textureIndex] == 0 ? "MDID-zero" : "MDID-ok";
+                        if (reference == "MDID-zero" && zeroExamples.Count < 6)
+                            zeroExamples.Add($"tile {slot % 64}_{slot / 64} tex0={tex0Id} MDID[{textureIndex}]=0 (MDID length {mdid.Length}, MHID[{textureIndex}]={(top.FirstOrDefault(static c => c.Id == "MHID") is var mh && mh.Id is not null && textureIndex * 4 + 4 <= mh.Size ? BitConverter.ToUInt32(tex0, mh.Offset + textureIndex * 4) : 0)})");
+                        layerRefs[reference] = layerRefs.GetValueOrDefault(reference) + 1;
+                    }
+
+                    if (layers > 1)
+                    {
+                        string mcalKey = mcal.Id is null ? "none" : $"{mcal.Size}";
+                        mcalSizesPerLayerCount[$"{layers}L:{mcalKey}"] = mcalSizesPerLayerCount.GetValueOrDefault($"{layers}L:{mcalKey}") + 1;
+                    }
                 }
             }
 
@@ -360,6 +385,11 @@ public static class CascCommandSupport
         Console.WriteLine($"tiles={tiles} rootReadable={rootOk} tex0Readable={tex0Ok} obj0Readable={obj0Ok}");
         Console.WriteLine($"tex0: MTEX={withMtex} MDID={withMdid} MHID={withMhid}; top-level chunk file counts {string.Join(' ', tex0Chunks.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
         Console.WriteLine($"MCLY layers per MCNK: {string.Join(' ', layerHistogram.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+        Console.WriteLine($"MCLY flags (low 3 bits masked): {string.Join(' ', mclyFlags.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+        Console.WriteLine($"MCLY texture references: {string.Join(' ', layerRefs.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+        foreach (string example in zeroExamples)
+            Console.WriteLine($"MDID-zero example: {example}");
+        Console.WriteLine($"MCAL size by layer count (top 12): {string.Join(' ', mcalSizesPerLayerCount.OrderByDescending(static kv => kv.Value).Take(12).Select(static kv => $"{kv.Key}={kv.Value}"))}");
         Console.WriteLine($"obj0 top-level chunk file counts {string.Join(' ', obj0Chunks.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
         Console.WriteLine($"MDDF flags: {string.Join(' ', mddfFlags.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
         Console.WriteLine($"MODF flags: {string.Join(' ', modfFlags.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
