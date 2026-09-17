@@ -19,6 +19,8 @@
    - [Lighting Inspection (`lit` & `light`)](#lighting-inspection-lit--light)
    - [Audio Catalog Inspection (`audio alpha-area`)](#audio-catalog-inspection-audio-alpha-area)
    - [Archive & Listfile Caching](#archive--listfile-caching)
+   - [CASC Installs (`casc`)](#casc-installs-casc)
+   - [DAT v26 Terrain (`adt-ahdr`)](#dat-v26-terrain-adt-ahdr)
 2. [Format Converter (`wowviewer-converter`)](#2-format-converter-wowviewer-converter)
    - [Alpha WDT → LK Format (`alpha-to-lk`)](#alpha-wdt--lk-format-alpha-to-lk)
    - [LK Format → Alpha WDT (`lk-to-alpha`)](#lk-format--alpha-wdt-lk-to-alpha)
@@ -210,6 +212,64 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug --
   archive build-listfile-cache `
   --archive-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
   --cache-key "3.3.5.12340"
+```
+
+### CASC Installs (`casc`)
+
+Added in v0.5.4-dev. Reads a local CASC install through TACTSharp. `--install` is the folder containing
+`.build.info`; `--cache` is a local folder for decoded manifests and CDN downloads. `--listfile` takes
+community listfile CSVs (`id;path`) and may be repeated.
+
+```powershell
+$exe = 'wow-viewer\tools\inspect\WowViewer.Tool.Inspect\bin\Release\net10.0\WowViewer.Tool.Inspect.exe'
+$install = 'D:\Games\World of Warcraft'
+$listfile = "$env:LOCALAPPDATA\WoWViewer\community-listfile-withcapitals.csv"
+
+# Products and builds in .build.info
+& $exe casc products --install $install
+
+# Read one file by FileDataID or listfile path (--cdn-fill downloads data the install lacks)
+& $exe casc read --install $install --product wow_classic_beta --cache output\casc-cache --id 857684 --out output\development.wdt
+& $exe casc read --install $install --product wow_classic_beta --cache output\casc-cache `
+  --path 'World\Maps\Azeroth\Azeroth_31_40.adt' --listfile $listfile --out output\Azeroth_31_40.adt --cdn-fill
+
+# Which listed paths are readable (one product per line: NotPresent/NotLocal/KeyUnavailable/Failed counts;
+# two or more --product values report which product serves each path)
+& $exe casc exists --install $install --product wow_classic_beta --product wow_classic_era --cache output\casc-cache `
+  --paths-file paths.txt --listfile $listfile [--show-missing]
+
+# Parse a WMO (groups via GFID, textures/doodads via FileDataIDs) and report resolution
+& $exe casc wmo --install $install --product wow_classic_beta --cache output\casc-cache --listfile $listfile `
+  --path 'WORLD\WMO\AZEROTH\BUILDINGS\CHAPEL\DUSKWOODCHAPEL.WMO'
+
+# Build chunked M2s on the native render path (SFID skin, TXID textures)
+& $exe casc m2 --install $install --product wow_classic_beta --cache output\casc-cache --listfile $listfile `
+  --path 'WORLD\LORDAERON\SILVERPINE\PASSIVEDOODADS\TREES\SILVERPINETREE03.M2'
+
+# Decode DB2 tables with WoWDBDefs for the product's own build
+& $exe casc db2 --install $install --product wow_classic_beta --cache output\casc-cache `
+  --defs wow-viewer\libs\wowdev\WoWDBDefs\definitions --listfile $listfile --table Map --table AreaTable
+
+# Survey a map by WDT FileDataID: MAID tiles, MDID/MHID, MCLY/MCAL, placement flags,
+# WMO parse outcomes, native M2 build outcomes, asset readability
+& $exe casc map-survey --install $install --product wow_classic_beta --cache output\casc-cache --wdt-id 857684 [--cdn-fill]
+
+# Export absolute ADT outer-vertex heights for a tile rectangle (CSV: tileX,tileY,row,col,height)
+& $exe casc adt-heights --install $install --product wow_classic_beta --cache output\casc-cache `
+  --wdt-id 775971 --x0 24 --x1 38 --y0 14 --y1 30 --out output\azeroth_heights.csv
+
+# Loading benchmark: listfile load, file-list filtering, sequential vs parallel reads (with a
+# byte-identity check), WMO parse, WMO texture fetch and decode
+& $exe casc bench --install $install --product wow_classic_beta --cache output\casc-cache --wdt-id 857684 `
+  --listfile $listfile [--threads 12] [--cdn-fill]
+```
+
+### DAT v26 Terrain (`adt-ahdr`)
+
+```powershell
+# Decode every AHDR-family file in a folder (any names), check ACNK indices, and verify that
+# ALOC-adjacent tiles share identical edge heights
+& $exe adt-ahdr check --root test_data\v22_adts\unknown
 ```
 
 ---

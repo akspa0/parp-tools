@@ -1,6 +1,6 @@
 # WoWViewer Toolkit (`wow-viewer`)
 
-The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data across the active project eras, primarily Alpha 0.5.3 through WotLK 3.3.5a.
+The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data across the active project eras, primarily Alpha 0.5.3 through WotLK 3.3.5a, plus (alpha, v0.5.4-dev) modern CASC installs of **WoW: Forever** (`wow_classic_beta` 1.60.1, 12.0-based client).
 
 ---
 
@@ -8,6 +8,8 @@ The primary development and runtime workspace for `parp-tools`. This project pro
 
 ### 1. 3D World Viewer (`src/viewer/WoWViewer`)
 An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
+- **Modern CASC Clients (alpha)**: File → Open CASC Install (local, or local + CDN fill) for WoW: Forever (`wow_classic_beta` 1.60.1.69876). Covers FileDataID-era maps (`MAID`, `MDID`, FileDataID placements), chunked `MD21` M2s, `GFID`/`MODI` WMOs and DB2 tables. Tileset textures are blended per chunk at full resolution. See [release notes](docs/releases/v0.5.4-dev.md).
+- **DAT v26 Terrain (alpha)**: File → Open DAT v26 Terrain Folder renders the raw terrain project files that shipped in that build ([format write-up](docs/architecture/adt-v26-format.md)).
 - **Terrain Streaming**: Bounded camera-centered tile streaming with directional lookahead and WDL low-detail horizon fallback.
 - **WMO Portals & Interiors**: Hierarchical culling with bounded portal traversal and group-level admission.
 - **M2/MDX Skeletal Animation**: Multi-track sequence evaluation, bone poses, particle systems, and ribbons.
@@ -20,7 +22,7 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 
 ### 2. Shared Core Libraries (`src/core`)
 - **`WowViewer.Core`**: Data contracts, vertex/index buffers, terrain tensor layouts, and coordinate transformations.
-- **`WowViewer.Core.IO`**: Binary readers and writers for ADT, WDT, WDL, WMO (v14/v17), supported-era M2/MDX layouts, BLP, LIT, and MPQ archives.
+- **`WowViewer.Core.IO`**: Binary readers and writers for ADT, WDT, WDL, WMO (v14/v17), supported-era M2/MDX layouts, BLP, LIT, MPQ archives, CASC installs (via TACTSharp), and DAT v26 terrain.
 - **`WowViewer.Core.PM4`**: Deep PM4 chunk decoding (MSCN, MSPV, MSUR, MSHD, MSLK), geometry segment construction, and signature extractors.
 - **`WowViewer.Core.Runtime`**: M2 animation evaluators, bone matrices, and skin profile resolvers.
 - **`WowViewer.Core.Editor`**: Transactional placement manipulation, history stacks, ID allocation with high-water marks, and provenance metadata tracking.
@@ -90,7 +92,7 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.T
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  WoWViewer v0.5.3.1                                            [_][□][X]    │
+│  WoWViewer v0.5.4-dev                                          [_][□][X]    │
 ├──────────────┬───────────────────────────────────────────────┬──────────────┤
 │  NAVIGATOR   │                                               │  WORKBENCH   │
 │  (Left Bar)  │               3D VIEWPORT                     │  (Right Bar) │
@@ -120,6 +122,8 @@ See the **[Desktop Viewer User Guide](docs/WoWViewer/USERGUIDE.md)** for a full 
 | `rosetta-datastore-info` | `WowViewer.Tool.Inspect` | Inspect registered builds, maps, and deduplication statistics in Zarr datastore |
 | `rosetta-datastore-diff` | `WowViewer.Tool.Inspect` | Compute cross-build asset additions, removals, format migrations, and geometry changes |
 | `map inspect` | `WowViewer.Tool.Inspect` | Analyze ADT/WDT terrain chunks, layers, and bounding boxes |
+| `casc products\|read\|exists\|wmo\|m2\|db2\|map-survey\|adt-heights\|bench` | `WowViewer.Tool.Inspect` | Open a local CASC install: list products, read by path or FileDataID, validate WMO/M2/DB2 decoding, survey a map, benchmark loading |
+| `adt-ahdr check` | `WowViewer.Tool.Inspect` | Decode a folder of DAT v26 terrain files and verify tile seams |
 | `convert-alpha-to-lk` | `WowViewer.Tool.Converter` | Convert 0.5.3 monolithic WDT maps into modern LK ADT/WDT files |
 | `convert-lk-to-alpha` | `WowViewer.Tool.Converter` | Convert modern LK ADT maps into 0.5.3 monolithic WDT containers |
 | `harvest-map` | `WowViewer.Tool.Harvest` | Extract terrain height, normals, and texture layers into tensor stores |
@@ -138,8 +142,9 @@ See the **[CLI tooling README](tools/README.md)** for the canonical tool index, 
 | **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
 | **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
 | **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
+| **WoW: Forever** | 1.60.1.69876 (`wow_classic_beta`, 12.0-based, CASC) | **Alpha (v0.5.4-dev)** | Local CASC + optional CDN fill; `MAID`/`MDID` terrain, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO, DB2 via WoWDBDefs; DAT v26 terrain project files |
 
-Later client terrain formats are outside the current project scope unless a future spec explicitly reopens that lane.
+Other retail CASC builds are untested; the FileDataID-era readers are not yet validated beyond `wow_classic_beta` 1.60.1.
 
 ---
 

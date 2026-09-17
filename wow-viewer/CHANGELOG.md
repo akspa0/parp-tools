@@ -3,6 +3,24 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.5.4-dev (alpha) — 2026-09-16
+
+Alpha pre-release: modern CASC install support for **WoW: Forever** (`wow_classic_beta` 1.60.1.69876,
+12.0-based client), FileDataID-era maps, M2 and WMO, DB2 tables for that build, and a first reader and
+renderer for the new DAT v26 terrain project format.
+
+Full notes: [`docs/releases/v0.5.4-dev.md`](docs/releases/v0.5.4-dev.md)
+
+### Added
+- **CASC installs**: File → Open CASC Install (local / local + CDN fill), built on TACTSharp. Parallel reads, background prefetch, and a download cache.
+- **FileDataID assets**: WDT `MAID`, tex0 `MDID`, FileDataID placement flags, `MD21` M2 (`SFID`/`TXID`), WMO `GFID`/`MODI`/`MOMT` texture IDs, DB2 tables via WoWDBDefs.
+- **DAT v26 terrain**: File → Open DAT v26 Terrain Folder, `ALOC` tile placement, height scale option (default ÷36).
+- **CLI**: `inspect casc …` and `inspect adt-ahdr check`.
+
+### Fixed
+- Newer WMO root/group chunk layouts no longer crash the world (unknown chunks skipped; unparseable WMOs skipped with a log line).
+- Listfile resolution prefers the newest listfile instead of a stale bundled copy.
+
 ## v0.5.3.1 — 2026-09-15
 
 Hotfix release: Mjollna community credit, authentic asset mappings in New Map Creator, GLB exports for active terrain & M2 models, cartography phase tile alignment, console window suppression, and startup resilience.

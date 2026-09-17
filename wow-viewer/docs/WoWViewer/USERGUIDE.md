@@ -17,7 +17,11 @@
 7. [Audio System and Positional Emitters](#7-audio-system-and-positional-emitters)
 8. [Lighting, Atmosphere, and Time of Day](#8-lighting-atmosphere-and-time-of-day)
 9. [PM4 Object Reconciliation Workbench (Spec 176)](#9-pm4-object-reconciliation-workbench-spec-176)
-10. [Troubleshooting and FAQ](#10-troubleshooting-and-faq)
+10. [Phased Terrain Dual-Map Overlay (Spec 135 & 137)](#10-phased-terrain-dual-map-overlay-spec-135--137)
+11. [Rosetta Multi-Version Zarr Datastore & Cross-Era Loading (Spec 190)](#11-rosetta-multi-version-zarr-datastore--cross-era-loading-spec-190)
+12. [Modern CASC Clients: WoW: Forever (alpha)](#12-modern-casc-clients-wow-forever-alpha)
+13. [DAT v26 Terrain Project Files (alpha)](#13-dat-v26-terrain-project-files-alpha)
+14. [Troubleshooting and FAQ](#14-troubleshooting-and-faq)
 
 ---
 
@@ -297,7 +301,50 @@ The former File > Load from Rosetta Datastore menu has been retired.
 
 ---
 
-## 12. Troubleshooting and FAQ
+## 12. Modern CASC Clients: WoW: Forever (alpha)
+
+Added in v0.5.4-dev. Tested against **WoW: Forever**, the `wow_classic_beta` product, build 1.60.1.69876 (a 12.0-based client).
+
+### Opening an install
+1. **File → Open CASC Install (local + CDN fill)...** and pick the folder that contains `.build.info` (for example the `World of Warcraft` folder the Battle.net launcher installed).
+   - Every product in `.build.info` opens (for example `wow_classic_beta` and `wow_classic_era`). Reads try the newest version first.
+   - **CDN fill** downloads files the install lists but does not have on disk, for the same build, and caches them under `output\cache\casc`. In the tested install most textures were not on disk, so without CDN fill terrain and models render untextured.
+   - **File → Open CASC Install (local)...** never downloads game data. If the launcher has updated `.build.info` before downloading that build's manifests, those manifests alone are fetched; this is logged.
+2. The map list is read from the build's `Map.db2` (for example **[451] Development Land**). Load a map as usual.
+
+### What is supported
+- Terrain tiles from the WDT's `MAID` table. Full-resolution tileset textures blended per chunk from `MDID`, with 4-bit alpha maps.
+- M2 models (`MD21`): skins from `SFID`, textures from `TXID`.
+- WMO buildings: groups from `GFID`, material textures from `MOMT` FileDataIDs, doodads from `MODI`.
+- Area names, lights and liquid types from the build's DB2 tables, using WoWDBDefs.
+
+### Loading speed
+- The first visit to a map downloads its textures (with CDN fill). Downloads run in parallel in the background. Later visits read from the cache.
+- Measured on `development`: the 460 WMO textures took 5.3 s to download in parallel, and about 1 s to read once cached.
+
+### Known limitations
+- At most 4 texture layers per chunk. Layers whose texture FileDataID is 0 in the shipped data have no texture.
+- Height-based texture blending (`MHID`) is not applied yet.
+- The Azeroth WDT's `MAI2` chunk is not interpreted.
+
+---
+
+## 13. DAT v26 Terrain Project Files (alpha)
+
+DAT v26 files are raw terrain project files: the uncompiled data client ADTs are built from. They shipped in the same `wow_classic_beta` build. Format details: [`docs/architecture/adt-v26-format.md`](../architecture/adt-v26-format.md).
+
+1. (Optional, for textures) open the CASC install first, as in section 12.
+2. **File → Open DAT v26 Terrain Folder...** and pick a folder of DAT v26 files. File names do not matter: files are recognised by content and placed by their `ALOC` tile coordinates.
+3. **File → DAT v26 Height Scale** changes the height divisor and reloads the folder. The default ÷36 treats heights as inches: −18,559.47 ÷ 36 = −515.54, matching the shipped ocean floor. The other options are 1×, ÷12 and ÷100.
+
+Not rendered yet: object placements (`ACDO`), vertex colours (`ACVT`) and shadows (`ASHD`). The horizontal scale relative to shipped ADTs is not established.
+
+---
+
+## 14. Troubleshooting and FAQ
+
+### Q: A CASC map shows untextured terrain or models?
+**A**: The install probably lacks the texture data on disk. Reopen it with **File → Open CASC Install (local + CDN fill)...**.
 
 ### Q: Why is terrain black or missing textures?
 **A**: Ensure your client root points to the folder containing the `Data` directory (or loose `World\` folders). If the client uses MPQ archives, verify `ArchiveCatalog` has enumerated the listfiles.

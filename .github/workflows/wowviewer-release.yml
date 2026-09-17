@@ -57,15 +57,22 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # Tags with a suffix (v0.5.4-dev, v0.6.0-alpha, v1.0.0-rc1) are published as GitHub pre-releases.
+          prerelease=()
+          title="parp-tools WoW Viewer ${TAG}"
+          if [[ "$TAG" == *-* ]]; then
+            prerelease=(--prerelease)
+            title="${title} (alpha)"
+          fi
           notes="wow-viewer/docs/releases/${TAG}.md"
           if [ -f "$notes" ]; then
             echo "Using release notes: $notes"
             gh release create "$TAG" dist/ParpToolsWoWViewer-*.zip \
-              --title "parp-tools WoW Viewer ${TAG}" \
+              --title "$title" "${prerelease[@]}" \
               --notes-file "$notes"
           else
             echo "No notes file at $notes; falling back to generated notes."
             gh release create "$TAG" dist/ParpToolsWoWViewer-*.zip \
-              --title "parp-tools WoW Viewer ${TAG}" \
+              --title "$title" "${prerelease[@]}" \
               --generate-notes
           fi

@@ -22,7 +22,7 @@ name: WoWViewer build
 
 on:
   push:
-    branches: [main, v0.5.0-prerelease]
+    branches: [main, v0.5.0-prerelease, v0.5.4-dev]
     paths:
       - 'wow-viewer/src/**'
       - 'wow-viewer/tools/**'
@@ -59,6 +59,7 @@ env:
     wow-viewer/libs/wowdev/DBCD
     wow-viewer/libs/wowdev/WoWDBDefs
     wow-viewer/libs/wowdev/wow-listfile
+    wow-viewer/libs/wowdev/TACTSharp
 
 jobs:
   build:
