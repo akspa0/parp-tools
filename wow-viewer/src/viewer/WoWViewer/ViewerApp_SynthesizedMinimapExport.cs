@@ -2,26 +2,56 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using ImGuiNET;
+using WoWViewer.DataSources;
+using WowViewer.Core.IO.Casc;
 using WowViewer.Core.Maps;
 
 namespace WoWViewer;
 
 public partial class ViewerApp
 {
+    // CASC sessions: products to read and whether harvest may fetch missing files from the CDN.
+    private string _synthesizedMinimapCascProducts = string.Empty;
+    private bool _synthesizedMinimapCdnFill;
+
+    // The session (data source + map) the dialog inputs were last filled from. Inputs are refilled only when it
+    // changes, so values the user typed are not overwritten every frame.
+    private string? _synthesizedMinimapPreparedSession;
+
+    private string CurrentSynthesizedMinimapSessionKey() => $"{_dataSource?.Name}|{GetCurrentSessionMapName()}";
+
     private void PrepareSynthesizedMinimapExportDialogInputs()
     {
+        _synthesizedMinimapPreparedSession = CurrentSynthesizedMinimapSessionKey();
+
         // Keep the slider hour/minute fields in sync with the persisted time-of-day value.
         TimeOfDayClock persistedTime = TimeOfDayClock.FromHours(_synthesizedMinimapTimeHours);
         _synthesizedMinimapHour = persistedTime.Hour;
         _synthesizedMinimapMinute = persistedTime.Minute;
 
-        string? activeClientRoot = GetActiveGamePath();
-        if (!string.IsNullOrWhiteSpace(activeClientRoot))
-            _synthesizedMinimapClientRoot = activeClientRoot;
+        if (_dataSource is CascDataSource casc && casc.Storages.Count > 0)
+        {
+            // CASC: harvest opens the install itself; pass the same products and CDN setting the viewer uses.
+            _synthesizedMinimapClientRoot = casc.Storages[0].InstallDir;
+            _synthesizedMinimapCascProducts = string.Join(",", casc.Storages.Select(static storage => storage.Product.Product));
+            _synthesizedMinimapCdnFill = casc.Storages.Any(static storage => storage.AllowsCdnFill);
+        }
+        else
+        {
+            string? activeClientRoot = GetActiveGamePath();
+            if (!string.IsNullOrWhiteSpace(activeClientRoot))
+                _synthesizedMinimapClientRoot = activeClientRoot;
+            _synthesizedMinimapCascProducts = string.Empty;
+            _synthesizedMinimapCdnFill = false;
+        }
 
         string? activeMapName = GetCurrentSessionMapName();
         if (!string.IsNullOrWhiteSpace(activeMapName))
+        {
+            if (!string.Equals(activeMapName, _synthesizedMinimapMapName, StringComparison.OrdinalIgnoreCase))
+                _synthesizedMinimapOutputDirectory = string.Empty; // default below follows the new map
             _synthesizedMinimapMapName = activeMapName;
+        }
 
         if (string.IsNullOrWhiteSpace(_synthesizedMinimapOutputDirectory)
             && !string.IsNullOrWhiteSpace(_synthesizedMinimapMapName))
@@ -51,7 +81,8 @@ public partial class ViewerApp
 
     private void DrawSynthesizedMinimapExportContent(bool showCloseButton = false)
     {
-        PrepareSynthesizedMinimapExportDialogInputs();
+        if (!string.Equals(_synthesizedMinimapPreparedSession, CurrentSynthesizedMinimapSessionKey(), StringComparison.Ordinal))
+            PrepareSynthesizedMinimapExportDialogInputs();
 
         ImGui.TextWrapped(
             "Build paired terrain-only and _liquid PNG minimaps directly from client BLP textures plus MCLY/MCAL, MCNR, MCSH, and decoded liquid coverage. " +
@@ -77,6 +108,16 @@ public partial class ViewerApp
                     if (!string.IsNullOrWhiteSpace(selected))
                         _synthesizedMinimapClientRoot = selected;
                 });
+        }
+
+        bool isCascRoot = !string.IsNullOrWhiteSpace(_synthesizedMinimapClientRoot)
+            && File.Exists(Path.Combine(_synthesizedMinimapClientRoot.Trim(), ".build.info"));
+        if (isCascRoot)
+        {
+            ImGui.Text("CASC products (comma-separated, first = game version):");
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputText("##synthmin_casc_products", ref _synthesizedMinimapCascProducts, 256);
+            ImGui.Checkbox("Fetch missing files from Blizzard's CDN##synthmin_cdn", ref _synthesizedMinimapCdnFill);
         }
 
         ImGui.Text("Map name:");
@@ -207,6 +248,8 @@ public partial class ViewerApp
         string clientRoot = _synthesizedMinimapClientRoot.Trim();
         string mapName = _synthesizedMinimapMapName.Trim();
         string outputDirectory = _synthesizedMinimapOutputDirectory.Trim();
+        string cascProducts = _synthesizedMinimapCascProducts.Trim();
+        bool cdnFill = _synthesizedMinimapCdnFill;
         float timeHours = _synthesizedMinimapTimeHours;
         int resolution = _synthesizedMinimapResolution;
         bool emitTiles = _synthesizedMinimapEmitTiles;
@@ -229,7 +272,9 @@ public partial class ViewerApp
                     emitWholeMap,
                     includeWmos,
                     bakeMcsh,
-                    castShadows);
+                    castShadows,
+                    cascProducts,
+                    cdnFill);
             }
             catch (Exception ex)
             {
@@ -255,8 +300,14 @@ public partial class ViewerApp
         bool emitWholeMap,
         bool includeWmos,
         bool bakeMcsh,
-        bool castShadows)
+        bool castShadows,
+        string cascProducts,
+        bool cdnFill)
     {
+        // Harvest runs with its own working directory, so relative paths must be resolved here.
+        clientRoot = Path.GetFullPath(clientRoot);
+        outputDirectory = Path.GetFullPath(outputDirectory);
+
         HarvestLaunchSpec? launch = ResolveHarvestLaunchSpec();
         if (launch is null)
         {
@@ -300,8 +351,29 @@ public partial class ViewerApp
         if (!castShadows)
             startInfo.ArgumentList.Add("--no-cast-shadows");
 
-        AppendSynthesizedMinimapLog(
-            $"> {launch.DisplayName} synthetic-minimap --map {mapName} --time-hours {TimeOfDayClock.FromHours(timeHours)}");
+        if (File.Exists(Path.Combine(clientRoot, ".build.info")))
+        {
+            if (!string.IsNullOrWhiteSpace(cascProducts))
+            {
+                startInfo.ArgumentList.Add("--casc-product");
+                startInfo.ArgumentList.Add(cascProducts);
+            }
+
+            if (cdnFill)
+                startInfo.ArgumentList.Add("--cdn-fill");
+
+            // Same listfile and download cache as the viewer, so files the viewer already fetched are not fetched again.
+            if (ResolveListfilePath(null) is { } listfile)
+            {
+                startInfo.ArgumentList.Add("--casc-listfile");
+                startInfo.ArgumentList.Add(Path.GetFullPath(listfile));
+            }
+
+            startInfo.ArgumentList.Add("--casc-cache");
+            startInfo.ArgumentList.Add(Path.GetFullPath(Path.Combine(CacheDir, "casc")));
+        }
+
+        AppendSynthesizedMinimapLog($"> {launch.DisplayName} {string.Join(' ', startInfo.ArgumentList.Skip(launch.PrefixArguments.Count).Select(static a => a.Contains(' ') ? $"\"{a}\"" : a))}");
         using Process? process = Process.Start(startInfo);
         if (process is null)
             throw new InvalidOperationException("Unable to start the in-repository Harvest command.");
@@ -353,7 +425,14 @@ public partial class ViewerApp
         if (repositoryRoot is null)
             return null;
 
+        // In a source checkout, run the project so the harvest code matches the viewer build. A prebuilt
+        // bin/ copy can be older than the viewer (it is not rebuilt when the viewer is) and silently lack
+        // features the dialog passes, such as CASC support.
         string projectDirectory = Path.Combine(repositoryRoot, "tools", "harvest", "WowViewer.Tool.Harvest");
+        string projectPath = Path.Combine(projectDirectory, "WowViewer.Tool.Harvest.csproj");
+        if (File.Exists(projectPath) && FindDotnet() is not null)
+            return new HarvestLaunchSpec("dotnet", repositoryRoot, ["run", "--project", projectPath, "-c", "Debug", "--"], "dotnet run --project WowViewer.Tool.Harvest --");
+
         foreach (string configuration in new[] { "Debug", "Release" })
         {
             string outputDirectory = Path.Combine(projectDirectory, "bin", configuration, "net10.0");
@@ -366,10 +445,19 @@ public partial class ViewerApp
                 return new HarvestLaunchSpec("dotnet", outputDirectory, [assembly], $"dotnet {Path.GetFileName(assembly)}");
         }
 
-        string projectPath = Path.Combine(projectDirectory, "WowViewer.Tool.Harvest.csproj");
-        return File.Exists(projectPath)
-            ? new HarvestLaunchSpec("dotnet", repositoryRoot, ["run", "--project", projectPath, "--"], "dotnet run --project WowViewer.Tool.Harvest")
-            : null;
+        return null;
+    }
+
+    private static string? FindDotnet()
+    {
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(path))
+            return null;
+
+        string name = OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet";
+        return path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(directory => Path.Combine(directory.Trim(), name))
+            .FirstOrDefault(File.Exists);
     }
 
     private static string? FindWowViewerRepositoryRoot()
