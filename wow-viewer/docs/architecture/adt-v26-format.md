@@ -80,13 +80,43 @@ v26 reuses the chunk vocabulary of the pre-Cataclysm experimental ADT v22/v23 on
 | `ALOC` | 20 | 5×uint32 `(2869, tileX, tileY, tileX, tileY)` | tileX/tileY **MEASURED**; field 0 (constant 2869) and the repeat in fields 3/4 *open* |
 | `AOCH` | 2048 | all bytes zero in every file | *open* |
 | `AVTX` | 132100 | float32 × (129² + 128²): outer 129×129 **row-major**, then inner 128×128 | outer order and tile axes **MEASURED**; inner order *hypothesis* |
-| `ANRM` | 99075 | int8 × 3 × (129² + 128²), outer then inner | size **MEASURED**; component order and scale *hypothesis* |
+| `ANRM` | 99075 | int8 × 3 × (129² + 128²), outer then inner; components **(column axis, vertical, row axis)**, 127 = 1.0 | **MEASURED** (mean dot 0.985 with height-derived normals; next-best order 0.658; every vector has length 127). Inner order *hypothesis* |
 | `ATEX` | variable | one NUL-terminated texture path per chunk | **MEASURED** |
 | `ADOO` | variable | one NUL-terminated model path per chunk (225 or 285 per file, near-identical across tiles, so it looks map-global) | **MEASURED** |
-| `ADST` | 12 | 3×uint32, e.g. `(63420377, 190719, 1)`; the first field falls in the `ACDO` uniqueId range | *open* |
-| `ACNK` | 64 or more | 64-byte header (+0x00/+0x04 chunk index, +0x08 = `0xD000`, +0x0C = 0), then `ALYR × 0..4`, `ASHD` (512), optional `ACDO` (56 or 60) | order and sizes **MEASURED**; most header fields *open* |
+| `ADST` | 12 | 3×uint32 `(uniqueId, model FileDataID, 1)`, e.g. `(63420377, 190719 = World/critter/BIRDS/Bird01.m2, 1)` | **MEASURED**: 321 rows in 7 files, 321/321 FileDataIDs name models in the community listfile, last field always 1. **None of the uniqueIds match an `ACDO`** in the 699 files and the rows have no position, so they are not placements |
+| `ACNK` | 64 or more | 64-byte header, then `ALYR × 0..4`, `ASHD` (512), `ACDO × n` (56 or 60 each). Header: +0x00/+0x04 chunk index; +0x08 = `0xD000`; +0x0C = 0; +0x10 uint16 = 0; **+0x12 16 bytes = 2-bit 8×8 predominant layer map** (LSB first, row-major); +0x22 uint64 sparse bitmask (725 of 179,200 chunks non-zero; position of MCNK's no-effect-doodad map); the rest 0 | predominant map **MEASURED** (95.0% of 239,808 cells match the dominant AMAP layer, control 67.9%); +0x22 *hypothesis*; others constant |
 | `ALYR` | 4136 | 0x20 fixed part (flags `0x100` always) + nested `AMAP` (4096 = 8-bit 64×64) | **MEASURED** |
-| `ACVT` | 132100 | 4 bytes × (129² + 128²), presumably RGBA per vertex, outer then inner | size **MEASURED**; channel order *hypothesis* |
+| `ACVT` | 132100 | 4 bytes × (129² + 128²) per vertex, outer then inner: three bytes centred on 127 (neutral, like MCCV) and a fourth always 255 | value ranges **MEASURED**; which of bytes 0/2 is red *open* (the corpus is almost entirely neutral) |
+
+## Objects: ACDO (MEASURED)
+
+5,309 records in 18 files (5,276 M2, 33 WMO; 0 invalid model indexes). Scripts:
+`evidence/scripts/objects_v26.py`, `acdo_chunk_frame_v26.py`; C# check: `inspect adt-ahdr objects --root <folder>`.
+
+| Offset | Type | Meaning |
+|---|---|---|
+| 0x00 | uint32 | model index into `ADOO` (0..284) |
+| 0x04 | float | column-axis offset in **inches** from the centre of the chunk that stores the record (±600) |
+| 0x08 | float | vertical offset in inches from the **mean of the chunk's 145 `AVTX` heights** |
+| 0x0C | float | row-axis offset in inches from the chunk centre (±600) |
+| 0x10 | float ×3 | rotation in degrees, same axis order as the position (+0x14 about the vertical, 0..360) |
+| 0x1C | float | scale (0.1..3.47) |
+| 0x20 | float | always 1.0 |
+| 0x24 | uint32 | always 0 |
+| 0x28 | float | mostly 0, 298 distinct values (±1484); *open* |
+| 0x2C | uint32 | uniqueId, distinct for every record |
+| 0x30 | uint32 | count of trailing uint32 values: 0 (56-byte records) or 1 (60-byte records, all WMOs) |
+| 0x34 | uint32 | 0 (3,143), 65536 (2,159), 1/2/3 (7); *open* |
+| 0x38 | uint32 × count | 1 or 2; *open* (possibly a WMO doodad set) |
+
+**Frame proof**: objects placed this way sit on the terrain with median |Δh| **0.31 in** (p90 2.37 in, signed median 0.00;
+3,202 of 5,309 within 0.5 in). The same test with objects moved to random chunks gives 103.9 in; using the chunk-centre
+vertex instead of the 145-vertex mean gives 22.3 in; treating positions as tile-relative yards or inches gives ≥ 55 yd.
+
+## Units: horizontal span
+
+A chunk is 1200 inches wide (8 cells × 150 in), the same 33.33 yd span as an ADT chunk. The ±600 in range of `ACDO`
+horizontal offsets (half a chunk) is consistent with this.
 
 ## Tile placement and heights (MEASURED)
 
@@ -96,11 +126,12 @@ v26 reuses the chunk vocabulary of the pre-Cataclysm experimental ADT v22/v23 on
 
 ## Open questions
 
-1. The inner 128×128 grid order (the wireframe fast path will show a wrong order as spikes).
-2. `ANRM` component order and scale; `ACVT` channel order.
-3. `ACNK` sub-chunk layouts in v26 (`ALYR`, `AMAP` alpha encoding, `ASHD`, `ACDO` placements and their frame).
-4. `ALOC[0]` = 2869, and why `ALOC[3..4]` repeat X/Y.
-5. `AHDR` +0x14 = 8396383, `AOCH` (all zero) and `ADST`.
-6. The overall height range is −18798.58..+9965.19. Check which tiles hold the extremes, and whether flat tiles sit at a sentinel height.
+1. The inner 128×128 grid order (assumed to match the outer grid; the ACDO height fit using the 145-vertex mean is consistent with it).
+2. `ACVT` red/blue byte order.
+3. `ASHD` is all zero in all 15,360 chunks that carry it, so its bit layout cannot be measured from this corpus.
+4. `ACDO` +0x28, +0x34 and the trailing values; `ACNK` +0x22 bitmask; whether ACDO yaw is mirrored relative to the game world.
+5. `ADST`: why its uniqueIds match no `ACDO` (objects outside this corpus, or removed objects).
+6. `ALOC[0]` = 2869, why `ALOC[3..4]` repeat X/Y, `AHDR` +0x14 = 8396383, `AOCH` (all zero).
+7. The exact offset of these tiles against the shipped ADT tile grid.
 
 Update this document whenever a probe settles one of these. Link the evidence and never promote a *hypothesis* without it.

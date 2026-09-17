@@ -65,7 +65,8 @@ size: (129 × 129 + 128 × 128) × 3 = 99075
  using Vec3c = int8_t[3];
  Vec3c outer[ahdr.vertices_y][ahdr.vertices_x];
  Vec3c inner[ahdr.vertices_y - 1][ahdr.vertices_x - 1];
-* The size matches. Component order and scale (127 = 1.0 in [[ADT/v22]]) have not been verified for v26.
+* Component order is '''(column axis, vertical, row axis)''', the same order as <tt>ACDO</tt> positions; 127 is 1.0 (every observed vector has length 127).
+* Checked against normals computed from <tt>AVTX</tt> (in inches): mean dot product 0.985, next-best component order 0.658.
 
 == ATEX: TEXtures ==
 * One chunk per texture filename (a zero-terminated string), not a single string block.
@@ -84,15 +85,17 @@ size: (129 × 129 + 128 × 128) × 3 = 99075
  /*0x04*/ uint32_t index_y;   // i / 16
  /*0x08*/ uint32_t flags;     // 0xD000 in every observed chunk
  /*0x0C*/ uint32_t areaId;    // (v22 name) 0 in every observed chunk
- /*0x10*/ uint16_t holes_low_res;               // (v22 name)
- /*0x12*/ uint32_t lowdetailtextureingmap[4];   // (v22 name) values such as 0x55555555 / 0xAAAAAAAA fit a 2-bit-per-cell map
- /*0x22*/ uint8_t  unknown[0x0A];               // mostly 0
+ /*0x10*/ uint16_t holes_low_res;               // (v22 name) 0 in every observed chunk
+ /*0x12*/ uint2_t  predominant_layer[8][8];     // layer index per cell, LSB first, row-major (see below)
+ /*0x22*/ uint64_t unknown_mask;                // non-zero in 725 of 179200 chunks; MCNK keeps noEffectDoodad[8][8] at this spot
+ /*0x2A*/ uint16_t unknown1;                    // 0 in every observed chunk
  /*0x2C*/ uint32_t unknown2;                    // 0 in every observed chunk
  /*0x30*/ uint8_t  unknown3[0x0C];              // almost always 0
  /*0x3C*/ uint32_t unknown4;                    // 0 in every observed chunk
  } acnk_header;
+* <tt>predominant_layer</tt>: for 95.0% of 239,808 cells in chunks with layers it equals the layer that dominates the cell after blending the <tt>AMAP</tt>s (67.9% when every cell of a chunk is given its most common layer).
 Sub-chunk order after the header:
- ALYR × 0..4, ASHD, [ACDO]
+ ALYR × 0..4, ASHD, ACDO × n
 
 === ALYR: LaYeR ===
 size: 0x1028 (4136) for every observed layer: a 0x20 header followed by a nested <tt>AMAP</tt>.
@@ -107,41 +110,47 @@ size: 0x1028 (4136) for every observed layer: a 0x20 header followed by a nested
 size: 0x1000 (4096) in every observed layer, i.e. an uncompressed 8-bit 64 × 64 alpha map. Every layer has one, including the first.
 
 === ASHD: SHaDow map ===
-size: 0x200 (512). Present in every <tt>ACNK</tt> that has sub-chunks. Presumably 64 × 64 bits; not yet verified.
+size: 0x200 (512). Present in every <tt>ACNK</tt> that has sub-chunks. Presumably 64 × 64 bits; every byte is 0 in all 15,360 observed <tt>ASHD</tt> chunks.
 
 === ACDO: Chunk - Definitions of Objects ===
-size: 0x38 (5298 observed), or 0x3C (11 observed). One object per chunk.
+size: 0x38 (5298 observed) or 0x3C (11 observed, all WMOs). Zero or more per chunk.
  struct
  {
- /*0x00*/ int32_t  modelid;      // index into ADOO
- /*0x04*/ float    position[3];  // (v22 name) observed: [0] and [2] within ±600, [1] within ±1407
- /*0x10*/ float    rotation[3];  // (v22 name) e.g. (0, 280.5, 0)
- /*0x1C*/ float    scale[3];     // (v22 name) observed e.g. (0.72, 1.0, 0.0); meaning not verified
- /*0x28*/ float    unknown;      // e.g. -0.0029
- /*0x2C*/ uint32_t uniqueId;     // observed around 63.42 million
- /*0x30*/ uint32_t unknown2;     // 0 in the samples
- /*0x34*/ uint32_t unknown3;     // 0x00010000 in the samples
+ /*0x00*/ uint32_t modelid;          // index into ADOO
+ /*0x04*/ float    position[3];      // inches: [0] column axis and [2] row axis from the centre of this ACNK (±600),
+                                     //         [1] vertical from the mean of this chunk's 145 AVTX heights
+ /*0x10*/ float    rotation[3];      // degrees, same axis order as position ([1] is about the vertical)
+ /*0x1C*/ float    scale;            // 0.1 .. 3.47
+ /*0x20*/ float    unknown0;         // 1.0 in every observed record
+ /*0x24*/ uint32_t unknown1;         // 0 in every observed record
+ /*0x28*/ float    unknown2;         // mostly 0
+ /*0x2C*/ uint32_t uniqueId;
+ /*0x30*/ uint32_t extra_count;      // 0, or 1 in the 0x3C records
+ /*0x34*/ uint32_t unknown3;         // 0, 1, 2, 3 or 0x10000
+ /*0x38*/ uint32_t extra[extra_count]; // 1 or 2
  } acdo;
-* The ranges of <tt>position[0]</tt> and <tt>position[2]</tt> (about ±600) suggest coordinates relative to the tile, with <tt>position[1]</tt> as height. This is not yet verified.
+* Frame check: with this frame, object heights match the terrain under them with a median difference of 0.31 inches (p90 2.37 in); moving each object to a random chunk gives 103.9 inches.
+* A chunk is 1200 inches wide (33.33 yards), so the ±600 range of position[0] and position[2] is half a chunk.
 
 == ADST ==
 New in v26. size: 0x0C. It appears only in some files, as a run after the last <tt>ACNK</tt>.
  struct
  {
- uint32_t unknown0; // e.g. 63420377; falls in the same range as ACDO.uniqueId
- uint32_t unknown1; // e.g. 190719
- uint32_t unknown2; // e.g. 1
+ uint32_t uniqueId;    // same value range as ACDO.uniqueId
+ uint32_t fileDataID;  // a model, e.g. 190719 = World/critter/BIRDS/Bird01.m2
+ uint32_t unknown;     // 1
  } adst;
+* 321 rows in 7 files; every <tt>fileDataID</tt> is a model in the community listfile.
+* No <tt>ADST.uniqueId</tt> matches an <tt>ACDO.uniqueId</tt> in the observed files, and the rows carry no position.
 
 == ACVT: VerTex shading ==
 size: (129 × 129 + 128 × 128) × 4 = 132100. Present in every observed file.
-* Presumably one 4-byte colour per vertex, outer grid then inner grid, as in [[ADT/v23]]. Channel order not verified.
+* One 4-byte colour per vertex, outer grid then inner grid, as in [[ADT/v23]]. Three bytes are centred on 127 (neutral, as in MCCV) and the fourth is always 255. Which of the first and third bytes is red is not known: almost every observed value is neutral.
 
 == Open questions ==
 * <tt>AHDR</tt> +0x14 (8396383), <tt>ALOC.unknown</tt> (2869), and why <tt>ALOC</tt> repeats the tile coordinates.
-* <tt>AOCH</tt> (all zero) and <tt>ADST</tt>.
-* The inner <tt>AVTX</tt>/<tt>ANRM</tt> grid order, the <tt>ANRM</tt> encoding, and the <tt>ACVT</tt> channel order.
-* The <tt>ACNK</tt> header fields from 0x10 on, and the <tt>ASHD</tt> bit layout.
-* The <tt>ACDO</tt> coordinate frame, rotation units and the "scale" fields.
+* <tt>AOCH</tt> (all zero), and why no <tt>ADST.uniqueId</tt> matches an <tt>ACDO</tt>.
+* The inner <tt>AVTX</tt>/<tt>ANRM</tt> grid order and the <tt>ACVT</tt> red/blue order.
+* <tt>ACNK</tt> +0x22, the <tt>ASHD</tt> bit layout (all zero so far), and <tt>ACDO</tt> unknown0..3.
 
 [[Category:Format]]

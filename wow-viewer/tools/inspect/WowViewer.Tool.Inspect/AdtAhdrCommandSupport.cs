@@ -8,10 +8,13 @@ public static class AdtAhdrCommandSupport
 {
     public static void Run(string[] args)
     {
-        if (args.Length == 0 || !string.Equals(args[0], "check", StringComparison.OrdinalIgnoreCase))
+        bool isCheck = args.Length > 0 && string.Equals(args[0], "check", StringComparison.OrdinalIgnoreCase);
+        bool isObjects = args.Length > 0 && string.Equals(args[0], "objects", StringComparison.OrdinalIgnoreCase);
+        if (!isCheck && !isObjects)
         {
             Console.WriteLine("adt-ahdr commands:");
             Console.WriteLine("  adt-ahdr check --root <folder of AHDR-family files, any names/extensions>");
+            Console.WriteLine("  adt-ahdr objects --root <folder> [--list]   resolve ACDO placements and measure them against the terrain");
             Environment.ExitCode = args.Length == 0 ? 0 : 1;
             return;
         }
@@ -24,7 +27,84 @@ public static class AdtAhdrCommandSupport
             return;
         }
 
-        RunCheck(args[rootIndex + 1]);
+        if (isObjects)
+            RunObjects(args[rootIndex + 1], args.Contains("--list", StringComparer.OrdinalIgnoreCase));
+        else
+            RunCheck(args[rootIndex + 1]);
+    }
+
+    /// <summary>
+    /// Resolves every ACDO through <see cref="AdtAhdrTileSlicer.ResolveObjectGridPosition"/> and compares the
+    /// object's height with the bilinear terrain height (outer grid) under it. Also reports ADST rows and
+    /// whether their uniqueIds match any ACDO.
+    /// </summary>
+    private static void RunObjects(string root, bool list)
+    {
+        var tiles = new List<AdtAhdrTile>();
+        foreach (string path in Directory.EnumerateFiles(root))
+        {
+            byte[] data = File.ReadAllBytes(path);
+            if (AdtAhdrReader.IsAhdrFamily(data))
+                tiles.Add(AdtAhdrReader.Read(data, path));
+        }
+
+        var errors = new List<double>();
+        var uniqueIds = new HashSet<uint>();
+        int objects = 0, m2 = 0, wmo = 0, badIndex = 0, adst = 0;
+        var trailing = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        foreach (AdtAhdrTile tile in tiles)
+        {
+            adst += tile.ModelFileReferences.Count;
+            foreach (AdtAhdrChunk chunk in tile.Chunks)
+            {
+                foreach (AdtAhdrObjectDefinition obj in chunk.Objects)
+                {
+                    objects++;
+                    uniqueIds.Add(obj.UniqueId);
+                    if ((uint)obj.ModelIndex >= (uint)tile.ModelNames.Count)
+                    {
+                        badIndex++;
+                        continue;
+                    }
+
+                    string model = tile.ModelNames[obj.ModelIndex];
+                    if (model.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase)) wmo++; else m2++;
+                    string key = $"field34={obj.Field34} trailing=[{string.Join(",", obj.TrailingValues)}]";
+                    trailing[key] = trailing.GetValueOrDefault(key) + 1;
+
+                    (float column, float row, float height) = AdtAhdrTileSlicer.ResolveObjectGridPosition(tile, chunk, obj);
+                    if (column is >= 0 and <= 128 && row is >= 0 and <= 128 && tile.OuterHeights.Length == 129 * 129)
+                        errors.Add(Math.Abs(height - SampleOuter(tile, column, row)));
+
+                    if (list)
+                    {
+                        Console.WriteLine($"  tile {tile.TileX},{tile.TileY} chunk {chunk.IndexX},{chunk.IndexY} uid {obj.UniqueId} {model} " +
+                            $"grid ({column:F2},{row:F2}) h {height / 36f:F2} yd rot ({obj.RotationDegrees.X:F1},{obj.RotationDegrees.Y:F1},{obj.RotationDegrees.Z:F1}) scale {obj.Scale:F3}");
+                    }
+                }
+            }
+        }
+
+        errors.Sort();
+        int adstMatches = tiles.SelectMany(static t => t.ModelFileReferences).Count(r => uniqueIds.Contains(r.UniqueId));
+        Console.WriteLine($"files {tiles.Count}; ACDO {objects} ({m2} M2, {wmo} WMO, {badIndex} invalid model index)");
+        if (errors.Count > 0)
+        {
+            Console.WriteLine($"height vs terrain (inches): median {errors[errors.Count / 2]:F2}, p90 {errors[(int)(errors.Count * 0.9)]:F2}, " +
+                $"within 0.5 in {errors.Count(static e => e < 0.5)}/{errors.Count}");
+        }
+        Console.WriteLine($"ADST rows {adst}; uniqueIds matching an ACDO: {adstMatches}");
+        foreach ((string key, int count) in trailing)
+            Console.WriteLine($"  {count,6}  {key}");
+    }
+
+    private static float SampleOuter(AdtAhdrTile tile, float column, float row)
+    {
+        int c0 = Math.Min((int)column, 127), r0 = Math.Min((int)row, 127);
+        float ax = column - c0, ay = row - r0;
+        float[] h = tile.OuterHeights;
+        return h[r0 * 129 + c0] * (1 - ax) * (1 - ay) + h[r0 * 129 + c0 + 1] * ax * (1 - ay)
+            + h[(r0 + 1) * 129 + c0] * (1 - ax) * ay + h[(r0 + 1) * 129 + c0 + 1] * ax * ay;
     }
 
     private static void RunCheck(string root)

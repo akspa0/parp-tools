@@ -26,7 +26,7 @@ but portable scripts and tests should take client roots as parameters.
 
 | Folder | Project | Main Commands / Purpose |
 |---|---|---|
-| `inspect/` | `WowViewer.Tool.Inspect` | Multi-format inspection and research commands: `archive`, `assets`, `wtf`, `audio`, `blp`, `m2`, `mdx`, `map`, `adt`, `lit`, `light`, `pm4`, `pd4`, `wmo`, `rosetta-generate`, `casc` (CASC installs: `products`, `read`, `exists`, `wmo`, `m2`, `db2`, `map-survey`, `adt-heights`, `bench`) and `adt-ahdr check` (DAT v26 terrain). |
+| `inspect/` | `WowViewer.Tool.Inspect` | Multi-format inspection and research commands: `archive`, `assets`, `wtf`, `audio`, `blp`, `m2`, `mdx`, `map`, `adt`, `lit`, `light`, `pm4`, `pd4`, `wmo`, `rosetta-generate`, `casc` (CASC installs: `products`, `read`, `exists`, `wmo`, `m2`, `db2`, `map-survey`, `adt-heights`, `bench`) and `adt-ahdr check|objects` (DAT v26 terrain). |
 | `converter/` | `WowViewer.Tool.Converter` | Dataset scans, map extraction, ML corpus helpers, Alpha/LK terrain conversion, WMO version conversion, M2/MDX conversion, and roundtrip validation. |
 | `harvest/` | `WowViewer.Tool.Harvest` | Terrain tensor harvest, MPQ- and CASC-backed map harvest, minimap synthesis, streaming harvest, map discovery, holes/tileset extraction, relief-to-map, object capture, and curation helpers. |
 | `capture/` | `WowViewer.Tool.Capture` | Headless terrain tile render via `render`. |

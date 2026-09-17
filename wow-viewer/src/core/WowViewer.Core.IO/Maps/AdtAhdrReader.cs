@@ -30,6 +30,7 @@ public static class AdtAhdrReader
 
     private const int AcnkHeaderSize = 0x40;
     private const int AlyrFixedSize = 0x20;
+    // v26 records are 0x38 or 0x3C bytes; the wiki's v22/v23 layout is unmeasured, so fields past 0x30 are optional.
     private const int AcdoMinimumSize = 0x30;
 
     /// <summary>True when the buffer starts with AHDR, or with MVER immediately followed by AHDR.</summary>
@@ -83,7 +84,7 @@ public static class AdtAhdrReader
         var textures = new List<string>();
         var models = new List<string>();
         var chunks = new List<AdtAhdrChunk>();
-        var adst = new List<uint[]>();
+        var modelFileReferences = new List<AdtAhdrModelFileReference>();
 
         ReadOnlySpan<byte> span = data;
         int end = 0;
@@ -122,8 +123,14 @@ public static class AdtAhdrReader
                 case Acnk:
                     chunks.Add(ReadChunk(span, offset, size, chunks.Count, diagnostics));
                     break;
+                case Adst when size >= 12:
+                    modelFileReferences.Add(new AdtAhdrModelFileReference(
+                        BinaryPrimitives.ReadUInt32LittleEndian(payload),
+                        BinaryPrimitives.ReadUInt32LittleEndian(payload[4..]),
+                        BinaryPrimitives.ReadUInt32LittleEndian(payload[8..])));
+                    break;
                 case Adst:
-                    adst.Add(ReadUInt32Array(payload));
+                    diagnostics.Add($"ADST is {size} bytes, expected 12");
                     break;
                 case Acvt:
                     shading = payload.ToArray();
@@ -158,7 +165,7 @@ public static class AdtAhdrReader
             TextureNames = textures,
             ModelNames = models,
             Chunks = chunks,
-            Adst = adst,
+            ModelFileReferences = modelFileReferences,
             Diagnostics = diagnostics,
         };
     }
@@ -221,14 +228,27 @@ public static class AdtAhdrReader
         return new AdtAhdrLayer(textureIndex, flags, alpha);
     }
 
-    private static AdtAhdrObjectDefinition ReadObject(ReadOnlySpan<byte> record) => new(
-        BinaryPrimitives.ReadInt32LittleEndian(record),
-        ReadVector3(record[0x04..]),
-        ReadVector3(record[0x10..]),
-        ReadVector3(record[0x1C..]),
-        BinaryPrimitives.ReadSingleLittleEndian(record[0x28..]),
-        BinaryPrimitives.ReadUInt32LittleEndian(record[0x2C..]),
-        record.ToArray());
+    private static AdtAhdrObjectDefinition ReadObject(ReadOnlySpan<byte> record)
+    {
+        uint trailingCount = record.Length >= 0x34 ? BinaryPrimitives.ReadUInt32LittleEndian(record[0x30..]) : 0;
+        int available = Math.Max(0, (record.Length - 0x38) / 4);
+        var trailing = new uint[Math.Max(0, (int)Math.Min(trailingCount, (uint)available))];
+        for (int i = 0; i < trailing.Length; i++)
+            trailing[i] = BinaryPrimitives.ReadUInt32LittleEndian(record[(0x38 + i * 4)..]);
+
+        return new AdtAhdrObjectDefinition(
+            BinaryPrimitives.ReadInt32LittleEndian(record),
+            ReadVector3(record[0x04..]),
+            ReadVector3(record[0x10..]),
+            BinaryPrimitives.ReadSingleLittleEndian(record[0x1C..]),
+            BinaryPrimitives.ReadSingleLittleEndian(record[0x20..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(record[0x24..]),
+            BinaryPrimitives.ReadSingleLittleEndian(record[0x28..]),
+            BinaryPrimitives.ReadUInt32LittleEndian(record[0x2C..]),
+            record.Length >= 0x38 ? BinaryPrimitives.ReadUInt32LittleEndian(record[0x34..]) : 0,
+            trailing,
+            record.ToArray());
+    }
 
     private static (float[] Outer, float[] Inner) SplitGrid(ReadOnlySpan<byte> payload, int verticesX, int verticesY, List<string> diagnostics)
     {

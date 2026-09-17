@@ -87,6 +87,104 @@ public static class AdtAhdrTileSlicer
         return normals;
     }
 
+    /// <summary>
+    /// Stored ANRM normals for one chunk in the renderer frame. MEASURED for DAT v26: components are
+    /// (column axis, vertical, row axis) with 127 = 1.0 (mean dot product 0.985 with normals computed from AVTX
+    /// in inches, next-best order 0.658; script anrm_acvt_v26.py). Renderer X decreases along rows and Y along
+    /// columns, so the renderer normal is (-row, -column, vertical). The inner grid is assumed to use the same
+    /// order as the outer grid. Returns null when ANRM is absent or the wrong size.
+    /// </summary>
+    public static Vector3[]? SliceStoredNormals(AdtAhdrTile tile, int chunkX, int chunkY)
+    {
+        if (!HasGrids(tile) || tile.NormalsRaw is not { Length: (129 * 129 + 128 * 128) * 3 } raw)
+            return null;
+
+        var normals = new Vector3[VerticesPerChunk];
+        int index = 0;
+        for (int row = 0; row < 17; row++)
+        {
+            int r = row / 2;
+            bool outer = (row & 1) == 0;
+            int width = outer ? 129 : 128;
+            int gridOffset = outer ? 0 : 129 * 129;
+            int count = outer ? CellsPerChunk + 1 : CellsPerChunk;
+            for (int c = 0; c < count; c++)
+            {
+                int vertex = gridOffset + (chunkY * CellsPerChunk + r) * width + chunkX * CellsPerChunk + c;
+                float column = (sbyte)raw[vertex * 3];
+                float vertical = (sbyte)raw[vertex * 3 + 1];
+                float rowComponent = (sbyte)raw[vertex * 3 + 2];
+                var n = new Vector3(-rowComponent, -column, vertical);
+                normals[index++] = n.LengthSquared() > 0 ? Vector3.Normalize(n) : Vector3.UnitZ;
+            }
+        }
+
+        return normals;
+    }
+
+    /// <summary>
+    /// ACVT vertex colours for one chunk as 145 × 4 bytes in the renderer's MCCV layout. MEASURED for DAT v26:
+    /// three bytes centre on 127 (neutral, as MCCV) and the fourth is always 255; which of the first and third
+    /// bytes is red is not established (the corpus is almost entirely neutral), so bytes are passed through in
+    /// file order and treated as MCCV's BGRA. Returns null when ACVT is absent or the wrong size.
+    /// </summary>
+    public static byte[]? SliceVertexColors(AdtAhdrTile tile, int chunkX, int chunkY)
+    {
+        if (!HasGrids(tile) || tile.VertexShadingRaw is not { Length: (129 * 129 + 128 * 128) * 4 } raw)
+            return null;
+
+        var colors = new byte[VerticesPerChunk * 4];
+        int index = 0;
+        for (int row = 0; row < 17; row++)
+        {
+            int r = row / 2;
+            bool outer = (row & 1) == 0;
+            int width = outer ? 129 : 128;
+            int gridOffset = outer ? 0 : 129 * 129;
+            int count = outer ? CellsPerChunk + 1 : CellsPerChunk;
+            for (int c = 0; c < count; c++)
+            {
+                int vertex = gridOffset + (chunkY * CellsPerChunk + r) * width + chunkX * CellsPerChunk + c;
+                Buffer.BlockCopy(raw, vertex * 4, colors, index * 4, 4);
+                index++;
+            }
+        }
+
+        return colors;
+    }
+
+    /// <summary>Inches per outer-grid cell: a chunk is 1200 inches (33.33 yd) wide and has 8 cells.</summary>
+    public const float InchesPerCell = 150f;
+
+    /// <summary>Mean of the chunk's 145 AVTX heights (81 outer + 64 inner), in file units (inches for v26).</summary>
+    public static float ChunkMeanHeight(AdtAhdrTile tile, int chunkX, int chunkY)
+    {
+        if (!HasGrids(tile))
+            return 0f;
+
+        double sum = 0;
+        for (int r = 0; r <= CellsPerChunk; r++)
+            for (int c = 0; c <= CellsPerChunk; c++)
+                sum += tile.OuterHeights[(chunkY * CellsPerChunk + r) * tile.VerticesX + chunkX * CellsPerChunk + c];
+        for (int r = 0; r < CellsPerChunk; r++)
+            for (int c = 0; c < CellsPerChunk; c++)
+                sum += tile.InnerHeights[(chunkY * CellsPerChunk + r) * (tile.VerticesX - 1) + chunkX * CellsPerChunk + c];
+
+        return (float)(sum / VerticesPerChunk);
+    }
+
+    /// <summary>
+    /// Resolves an ACDO placement to tile-grid coordinates: fractional outer-grid column and row (0..128) and
+    /// the absolute height in file units. Frame measured for DAT v26 (see <see cref="AdtAhdrObjectDefinition"/>).
+    /// </summary>
+    public static (float Column, float Row, float Height) ResolveObjectGridPosition(AdtAhdrTile tile, AdtAhdrChunk chunk, AdtAhdrObjectDefinition obj)
+    {
+        float column = chunk.IndexX * CellsPerChunk + CellsPerChunk / 2f + obj.LocalPositionInches.X / InchesPerCell;
+        float row = chunk.IndexY * CellsPerChunk + CellsPerChunk / 2f + obj.LocalPositionInches.Z / InchesPerCell;
+        float height = ChunkMeanHeight(tile, chunk.IndexX, chunk.IndexY) + obj.LocalPositionInches.Y;
+        return (column, row, height);
+    }
+
     private static bool HasGrids(AdtAhdrTile tile) =>
         tile.VerticesX == 129 && tile.VerticesY == 129
         && tile.OuterHeights.Length == 129 * 129

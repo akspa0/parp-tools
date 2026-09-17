@@ -19,8 +19,14 @@ namespace WoWViewer.Terrain;
 /// and seam-exact. Whether the result is mirrored relative to the game world is not yet verified.
 /// </para>
 /// <para>
-/// Not rendered yet: object placements (ACDO frame unverified), vertex shading (ACVT channel order
-/// unverified), shadows (ASHD bit layout unverified).
+/// Objects come from ACDO (frame measured, see <see cref="AdtAhdrObjectDefinition"/>): M2 names become
+/// <see cref="MddfPlacements"/> and WMO names <see cref="ModfPlacements"/>, positioned on the same grid as the
+/// terrain. ADST rows (uniqueId → model FileDataID) have no position and are not placed.
+/// Rotation follows the MDDF axis order; whether yaw is mirrored with the terrain is not yet verified.
+/// </para>
+/// <para>
+/// Normals come from ANRM at the ÷36 display scale (component order measured) and vertex colours from ACVT
+/// (MCCV-like, red/blue order unverified). ASHD is not rendered: it is all zero in the DAT v26 corpus.
 /// </para>
 /// </summary>
 public sealed class AhdrTerrainAdapter : ITerrainAdapter
@@ -60,10 +66,13 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
 
     public string Folder { get; }
 
+    private const float InchesPerYard = 36f;
+
     /// <summary>
-    /// Display divisor applied to DAT v26 heights. DAT heights appear to be in inches: the corpus's
+    /// Display divisor applied to DAT v26 heights, which are in inches (÷36 = yards): the corpus's
     /// 5th-percentile height −18559.47 ÷ 36 = −515.54, matching the shipped Azeroth ADT ocean floor
-    /// (−515.19..−516.07 yd). The horizontal scale is not yet established.
+    /// (−515.19..−516.07 yd). Horizontally a chunk is 1200 inches (33.33 yd), the same span as an ADT chunk,
+    /// which ACDO object positions confirm.
     /// </summary>
     public float HeightDivisor { get; }
 
@@ -74,9 +83,19 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
 
     public ConcurrentDictionary<(int tileX, int tileY), List<string>> TileTextures { get; } = new();
 
-    public IReadOnlyList<string> MdxModelNames => [];
+    private readonly object _placementLock = new();
+    private readonly List<string> _mdxNames = [];
+    private readonly List<string> _wmoNames = [];
+    private readonly Dictionary<string, int> _mdxNameIndex = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _wmoNameIndex = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<uint> _placedUniqueIds = [];
 
-    public IReadOnlyList<string> WmoModelNames => [];
+    public IReadOnlyList<string> MdxModelNames => _mdxNames;
+
+    public IReadOnlyList<string> WmoModelNames => _wmoNames;
+
+    /// <summary>ADST rows seen in loaded tiles (not placed: they carry no position).</summary>
+    public int ModelFileReferenceCount { get; private set; }
 
     public List<MddfPlacement> MddfPlacements { get; } = [];
 
@@ -139,15 +158,103 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
                 ChunkX = gridColumn,
                 ChunkY = gridRow,
                 Heights = ScaleHeights(AdtAhdrTileSlicer.SliceHeights(tile, gridColumn, gridRow)),
-                // Dividing heights by D flattens slopes by D; equivalently widen the spacing by D.
-                Normals = AdtAhdrTileSlicer.ComputeNormals(tile, gridColumn, gridRow, vertexSpacing * HeightDivisor),
+                // Stored ANRM normals describe the true (inch) surface, so they apply at the ÷36 scale. Other
+                // display scales flatten slopes by D, so normals are recomputed with the spacing widened by D.
+                Normals = (HeightDivisor == InchesPerYard ? AdtAhdrTileSlicer.SliceStoredNormals(tile, gridColumn, gridRow) : null)
+                    ?? AdtAhdrTileSlicer.ComputeNormals(tile, gridColumn, gridRow, vertexSpacing * HeightDivisor),
+                MccvColors = AdtAhdrTileSlicer.SliceVertexColors(tile, gridColumn, gridRow),
                 Layers = layers,
                 AlphaMaps = alphaMaps,
                 WorldPosition = new Vector3(worldX, worldY, 0f),
             });
         }
 
-        return new TileLoadResult { Chunks = chunks };
+        var result = new TileLoadResult { Chunks = chunks };
+        AddObjectPlacements(tile, tileX, tileY, vertexSpacing, result);
+        return result;
+    }
+
+    private void AddObjectPlacements(AdtAhdrTile tile, int tileX, int tileY, float vertexSpacing, TileLoadResult result)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        int skipped = 0;
+        lock (_placementLock)
+        {
+            ModelFileReferenceCount += tile.ModelFileReferences.Count;
+            foreach (AdtAhdrChunk chunk in tile.Chunks)
+            {
+                foreach (AdtAhdrObjectDefinition obj in chunk.Objects)
+                {
+                    if ((uint)obj.ModelIndex >= (uint)tile.ModelNames.Count || string.IsNullOrWhiteSpace(tile.ModelNames[obj.ModelIndex]))
+                    {
+                        skipped++;
+                        continue;
+                    }
+
+                    (float column, float row, float height) = AdtAhdrTileSlicer.ResolveObjectGridPosition(tile, chunk, obj);
+
+                    // Same mapping as the terrain vertices: renderer TileX = ALOC Y (grid rows), TileY = ALOC X (grid columns).
+                    var position = new Vector3(
+                        WoWConstants.MapOrigin - tileX * tileSpan - row * vertexSpacing,
+                        WoWConstants.MapOrigin - tileY * tileSpan - column * vertexSpacing,
+                        height / HeightDivisor);
+
+                    // ACDO rotation is in position order (column axis, vertical, row axis), like MDDF's (X, Z, Y).
+                    var rotation = new Vector3(obj.RotationDegrees.X, obj.RotationDegrees.Z, obj.RotationDegrees.Y);
+                    string modelName = tile.ModelNames[obj.ModelIndex];
+                    bool firstSighting = _placedUniqueIds.Add(obj.UniqueId);
+
+                    if (modelName.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var placement = new ModfPlacement
+                        {
+                            NameIndex = GetOrAddName(modelName, _wmoNames, _wmoNameIndex),
+                            UniqueId = unchecked((int)obj.UniqueId),
+                            Position = position,
+                            Rotation = rotation,
+                            BoundsMin = position,
+                            BoundsMax = position,
+                        };
+                        if (firstSighting)
+                            ModfPlacements.Add(placement);
+                        result.ModfPlacements.Add(placement);
+                    }
+                    else
+                    {
+                        var placement = new MddfPlacement
+                        {
+                            NameIndex = GetOrAddName(modelName, _mdxNames, _mdxNameIndex),
+                            UniqueId = unchecked((int)obj.UniqueId),
+                            Position = position,
+                            Rotation = rotation,
+                            Scale = obj.Scale > 0f ? obj.Scale : 1f,
+                        };
+                        if (firstSighting)
+                            MddfPlacements.Add(placement);
+                        result.MddfPlacements.Add(placement);
+                    }
+                }
+            }
+        }
+
+        int placed = result.MddfPlacements.Count + result.ModfPlacements.Count;
+        if (placed > 0 || skipped > 0 || tile.ModelFileReferences.Count > 0)
+        {
+            ViewerLog.Trace($"[AhdrTerrainAdapter] tile ({tileX},{tileY}): {result.MddfPlacements.Count} M2 + {result.ModfPlacements.Count} WMO placements, " +
+                $"{skipped} with an invalid model index, {tile.ModelFileReferences.Count} ADST rows (not placed)");
+        }
+    }
+
+    private static int GetOrAddName(string name, List<string> names, Dictionary<string, int> index)
+    {
+        if (!index.TryGetValue(name, out int value))
+        {
+            value = names.Count;
+            names.Add(name);
+            index[name] = value;
+        }
+
+        return value;
     }
 
     public bool TryGetPlacementSourceData(int tileX, int tileY, out string sourcePath, out byte[] sourceBytes)
