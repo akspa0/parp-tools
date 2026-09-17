@@ -6,7 +6,7 @@
 
 **Created**: 2026-09-17
 
-**Status**: Draft
+**Status**: Deferred (operator, 2026-09-17): not pursued. DAT v26 stays a format to read and study, not a save or interchange format. The capability table below is kept as measured facts.
 
 **Depends on**: [Spec 237 DAT v26](../237-adt-v26-terrain/spec.md) (reader, writer, measured frames), [Spec 234 Map Save](../234-map-save-new-map/spec.md) (save targets)
 
