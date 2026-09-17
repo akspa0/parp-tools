@@ -10,7 +10,7 @@ fix second, resurvey third; every fix carries before/after counts.
 
 ## Technical Context
 
-**Language**: C# / .NET 10 · **Libraries**: TACTSharp (CASC), DBCD + WoWDBDefs (DB2), SereniaBLPLib (BLP; BLPSharp is its MIT successor)
+**Language**: C# / .NET 10 · **Libraries**: TACTSharp (CASC), DBCD + WoWDBDefs (DB2), Warcraft.NET (M2 chunks, `.skel`), SereniaBLPLib (BLP; BLPSharp is its MIT successor). Recheck upstream freshness before each phase (research.md R1)
 **Readers touched**: `WowViewer.Core.IO` — `Converters/WmoV17ToV14Converter.cs`, `Lk/Mcnk.cs`, `Maps/AdtTextureReader.cs`, `Maps/MopAdtChunkParser.cs`, `M2/M2ChunkedFileIds.cs`
 **Renderers touched**: `src/viewer/WoWViewer/Rendering/WmoRenderer.cs`, `Terrain/TerrainRenderer.cs`, `Rendering/WowViewerM2RuntimeBridge.cs`
 **Survey surface**: `tools/inspect/WowViewer.Tool.Inspect/CascCommandSupport.cs` (existing `wmo-survey`, `map-survey`, `m2`)
@@ -50,12 +50,12 @@ Move survey logic out of `CascCommandSupport.cs` into `WowViewer.Core.IO/Survey/
 3. MTXF/MCLY texture scale and MCLY animation.
 4. MODF 0x80 + MWDR/MWDS doodad sets.
 
-### Phase 3 — M2 (US4)
+### Phase 3 — M2 renderer audit (US4)
 
-1. Parse SKID/BFID/AFID/LDV1 in `M2ChunkedFileIds`; extend CASC prefetch fan-out.
-2. `.skel` reader (study WoWFormatLib `SKELReader` behaviour; implement from the wiki structures) feeding the existing runtime bone path.
-3. AFID-resolved external animations through the existing `.anim` loader.
-4. Investigate the 15 "0 sections" models from map-survey.
+Warcraft.NET (vendored, identical to upstream) parses all modern M2 chunks and `.skel`; animation works.
+1. Survey which chunks each model carries and which the render path (`WarcraftNetM2Adapter`, `WowViewerM2RuntimeBridge`) consumes.
+2. LDV1 skin LOD selection if the survey shows the renderer ignores it.
+3. Investigate the 15 "0 sections" models from map-survey.
 
 ### Phase 4 — BLP and WDT companions (US5)
 

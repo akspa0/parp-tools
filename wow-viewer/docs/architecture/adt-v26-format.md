@@ -31,6 +31,17 @@ FileDataIDs in the community listfile (evidence Finding 6).
 - 699 unique tiles (plus one renamed duplicate). Extensionless files named by FileDataID (6893600–6894299). **The names encode no position.**
 - Content: Lordaeron / Eastern Kingdoms tilesets (TirisFall, SilverPine, Wetlands) and matching doodads.
 - 30 tiles carry terrain. 669 are perfectly flat.
+- The terrain is the **southwest corner of Tirisfal Glades**. The exact offset to the shipped ADT tile grid is not solved yet (best alignment attempt: median RMSE 41.6 yd, see evidence `align_dat_to_adt.py`).
+
+## Units: heights are in inches
+
+`AVTX` heights are stored in **inches**. The client's ADTs store yards, so the DAT height data is **36× finer** than the
+shipped terrain (1 yd = 36 in). Dividing by 36 gives ADT units: the corpus minimum −18559.47 in ÷ 36 = −515.54 yd, which
+matches the shipped ocean floor in that region. **MEASURED**
+
+The horizontal vertex grid is the same size as an ADT tile's (129 × 129 outer + 128 × 128 inner, i.e. 16 × 16 chunks of
+8 × 8 cells), so the extra precision is in height values, not in vertex count. The viewer's default display scale is ÷36
+(File → DAT v26 Height Scale).
 - Evidence and reproducible scripts: [specs/237-adt-v26-terrain/evidence/](../../specs/237-adt-v26-terrain/evidence/phase0-first-look-2026-09-16.md).
 
 ## File layout

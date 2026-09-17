@@ -8,6 +8,7 @@ Everything below was observed in 699 files from that build. Where a field's mean
 * A file's tile coordinates are '''not''' derived from its name; they are stored in the file itself (see [[#ALOC|ALOC]]).
 * Chunks are standard little-endian IFF chunks (<tt>uint32 magic; uint32 size;</tt> payload) with no padding. All 699 files parse with no bytes left over.
 * Of the 699 files, 30 have varying heights and 669 are completely flat; in 640 files every <tt>ACNK</tt> is header-only.
+* The 30 tiles with terrain are the southwest corner of Tirisfal Glades.
 
 == Chunk order ==
  MVER AHDR ALOC AOCH AVTX ANRM [ATEX × n] ADOO × n ACNK × 256 [ADST × n] ACVT
@@ -56,6 +57,8 @@ size: (vertices_x × vertices_y + (vertices_x − 1) × (vertices_y − 1)) × 4
 * In the outer grid, rows run along <tt>ALOC.tile_y</tt> and columns along <tt>ALOC.tile_x</tt> (from the shared edges described under [[#ALOC|ALOC]]).
 * Heights match exactly across tile edges with no per-tile base height, so they are absolute at least at tile level (chunk edges inside a tile not yet checked).
 * The inner grid order is assumed to match the outer grid but has not been verified.
+* '''Units: heights are in inches.''' ADT heights are in yards, so DAT heights are 36 times finer (1 yard = 36 inches). Dividing by 36 gives ADT units: the lowest observed height, −18559.47, becomes −515.54, which matches the shipped ocean floor in the same area.
+* The vertex grid has the same dimensions as an ADT tile's (129 × 129 outer + 128 × 128 inner), so the added precision is in the height values, not in the number of vertices.
 
 == ANRM: NoRMals ==
 size: (129 × 129 + 128 × 128) × 3 = 99075

@@ -16,6 +16,20 @@ the wiki is incomplete and has been wrong for this project before (MH2O "≥42" 
 | [wowdev/BLPSharp](https://github.com/wowdev/BLPSharp) | Successor of SereniaBLPLib (the copy vendored here), uses TinyBCSharp | MIT | Candidate replacement for BC5 and other formats (see R5) |
 | TACTSharp, DBCD, WoWDBDefs | Already vendored/used here | MIT | — |
 
+### Vendored library freshness (checked 2026-09-17 against upstream default branches)
+
+| Library | Local commit | Upstream |
+|---|---|---|
+| ModernWoWTools/Warcraft.NET | 7789b2e | identical |
+| wowdev/TACTSharp | cc5bf85 | identical |
+| wowdev/DBCD | 9ca6553 → **2d50ae2** | was 7 commits behind (string-table allocation and an out-of-range fix); updated, DB2 reads unchanged (AreaTable 1372, LiquidType 51, Light 625, Map 73 rows) |
+| WoW-Tools/SereniaBLPLib | 2323219 | identical (successor: wowdev/BLPSharp, last commit 2026-04-01) |
+| Marlamin/WoWTools.Minimaps | 5b09808 | identical |
+| wowdev/WoWDBDefs | 2b8d984 | identical |
+| wowdev/wow-listfile | 50d13bb | identical |
+
+Datamining for the new build is ongoing upstream; rerun this comparison before each conformance phase.
+
 **CODE**: WoWFormatLib `WMOReader.LoadWMO(stream, lod)` slices GFID as `nGroups * lodLevel` and falls back to a lower LOD when an id is 0 — the same model adopted in `WmoV17ToV14Converter.ReadGroupFileDataIds` (commit 251026d7).
 **CODE**: WoWFormatLib `M2Reader` handles chunks MD21, AFID, BFID, SFID, PFID, SKID, TXID, RPID, GPID, PCOL and skips TXAC, EXPT, EXP2, PABC, PADC, PEDC, PSBC, PGD1, WFV1–3, LDV1, PFDC, EDGF, DETL, NERF, DBOC, AFRA, DPIV, TEXL.
 
@@ -52,13 +66,18 @@ the wiki is incomplete and has been wrong for this project before (MH2O "≥42" 
 
 ## R4. M2 (chunked MD21)
 
+**Correction (2026-09-17)**: an earlier version of this section listed SKID/BFID/AFID/LDV1 and the other chunks as
+missing. That came from a search that excluded `libs/`. The vendored **Warcraft.NET** (identical to upstream) implements
+every chunk in the table below (`Files/M2/Chunks/{Legion,BfA,SL,DF,TWW}/`) and a `.skel` reader (`Files/Skel/`: SKL1,
+SKA1, SKB1, SKS1, SKPD). M2 animation is reported working in the viewer through that path.
+
 | Item | Wiki claim | State here | Evidence |
 |---|---|---|---|
 | SFID / TXID | skin + texture ids | **Supported** | 3,069 v272 + 30 v274 models build (map-survey) |
-| SKID (`.skel`) / BFID (`.bone`) / AFID (`.anim`) | skeleton, bone, external animation file ids | **Missing** | CODE: 0 matches for SKID/BFID/AFID; external `.anim` loading exists only by path (`M2ToMdxConverter.EnumerateExternalAnimationPaths`) |
-| LDV1 | LOD skin selection | **Missing** | CODE |
-| RPID / GPID | particle model ids | **Missing** | CODE |
-| TXAC, EXP2, PABC, PADC, PSBC, PEDC, PGD1, WFV1–3, EDGF, NERF, DETL, TEXL, PFDC | extended particle, texture weights, waterfall/PBR, edge fade, light cookies… | **Missing** | CODE |
+| SKID, BFID, AFID, PFID, LDV1, RPID, GPID | skeleton, bone, animation, physics, LOD, particle model ids | **Parsed by Warcraft.NET** | CODE: `libs/ModernWoWTools/Warcraft.NET/Warcraft.NET/Files/M2/Chunks/` |
+| TXAC, EXPT, EXP2, PABC, PADC, PEDC, PSBC, PGD1, WFV1–3, EDGF, NERF, DETL, DBOC, PFDC, AFRA, DPIV, PCOL | extended particles, texture weights, waterfall, edge fade, … | **Parsed by Warcraft.NET**; which ones the renderer uses is not audited | CODE (same folder); TEXL (12.0.0, textured lights) has no class |
+| `.skel` | SKL1/SKA1/SKB1/SKS1/SKPD | **Parsed by Warcraft.NET** | CODE: `Files/Skel/` |
+| Renderer use of the above | — | **To audit**: which parsed chunks reach `WowViewerM2RuntimeBridge` / `WarcraftNetM2Adapter` | — |
 | "ok but 0 sections" | — | 11 v272 + 4 v274 models on Azeroth | MEASURED (map-survey) — cause not investigated |
 
 ## R5. BLP

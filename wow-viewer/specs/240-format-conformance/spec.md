@@ -23,7 +23,8 @@ checked against real data, found defects that looked like rendering bugs but wer
 - **Shader-23 WMO materials had no texture** (texture_1 empty or a placeholder).
 - **Terrain drew at most 4 layers** where Azeroth uses up to 8.
 
-Those four are fixed (commits d9fcbca1..251026d7). [research.md](research.md) lists what remains, per
+Those four are fixed (commits d9fcbca1..251026d7). M2 is not among them: the vendored Warcraft.NET already parses the
+modern M2 chunks and `.skel` files, and animation works. [research.md](research.md) lists what remains, per
 format, each row marked MEASURED or CODE. This spec turns that audit into a repeatable conformance loop so
 the next gap is found by a survey, not by a screenshot.
 
@@ -69,13 +70,14 @@ texture scale, and layer animation.
 where the 64-bit mask says; a height-blended tile matches the minimap more closely than linear alpha
 (scored with the existing synthetic-minimap scorecard).
 
-### User Story 4 — Modern M2 animation and LOD (Priority: P2)
+### User Story 4 — M2 renderer use of parsed chunks (Priority: P3)
 
-Chunked M2s load skeletons (`SKID` → `.skel`), bones (`BFID`), external animations (`AFID` → `.anim`),
-and LOD skins (`LDV1`), so creatures animate and distant models use lower skins.
+Warcraft.NET already parses every modern M2 chunk and `.skel` files, and animation works. What remains is an
+audit of which parsed chunks the renderer uses (LOD skins from `LDV1`, particle model ids, texture weights,
+edge fade) and the 15 models that build with 0 sections.
 
-**Independent Test**: a creature model with `SKID` animates its stand sequence; survey shows AFID/SKID/BFID
-references resolved vs. missing.
+**Independent Test**: survey reports, per chunk, models that carry it and whether the render path consumes it;
+the 0-section models have a recorded cause.
 
 ### User Story 5 — BLP and WDT companions (Priority: P3)
 
@@ -100,7 +102,7 @@ file after measurement.
 - **FR-005**: WMO rendering MUST select textures and blending per shader id; shader ids without a render path MUST fall back explicitly (logged once per shader id), never silently to texture_1.
 - **FR-006**: The WMO converter MUST keep 16-bit material ids end to end and MUST NOT drop MPY2 materials above 0xFE.
 - **FR-007**: ADT reading MUST honour MCNK flag `high_res_holes`.
-- **FR-008**: Chunked M2 loading MUST resolve SKID, BFID and AFID file ids.
+- **FR-008**: M2 work MUST build on Warcraft.NET's chunk and `.skel` parsing; no parallel M2 chunk reader is added.
 - **FR-009**: BLP decoding MUST report (not silently mis-decode) pixel formats it does not support.
 - **FR-010**: research.md MUST be kept current: each row MEASURED or CODE, with the command or file.
 - **FR-011**: Studying WTL/WoWFormatLib MUST record which behaviour was compared and the outcome; no code is copied from repositories without a license.
@@ -116,7 +118,7 @@ file after measurement.
 - **SC-002**: Zero WMO materials in the survey fall into "no render path" without an explicit, logged fallback.
 - **SC-003**: `11DL_Dalaran` and `Orgrimmar2FrontGate` captures show distinct textures per surface matching the reference captures (operator witness).
 - **SC-004**: Every research.md row marked Missing has either a task in tasks.md or a recorded reason for deferral.
-- **SC-005**: A creature M2 with SKID plays its stand animation.
+- **SC-005**: Every modern M2 chunk in the survey is marked consumed or not consumed by the render path, and the 0-section models have a recorded cause.
 
 ## Assumptions
 

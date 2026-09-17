@@ -26,7 +26,7 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 - [ ] T004 [US1] `ConformanceReport` model (build identity, per-format inventory, field tallies, outcomes) + JSON writer in src/core/WowViewer.Core.IO/Survey/ConformanceReport.cs
 - [ ] T005 [P] [US1] Move WMO tallies (parse outcomes, material shapes, MOBA large ids, failing layouts) from CascCommandSupport into src/core/WowViewer.Core.IO/Survey/WmoConformanceSurvey.cs; add MOTV/MOCV set counts, MOHD flags, split-group header values, MOMX and MGI2 raw value distributions
 - [ ] T006 [P] [US1] ADT tallies (MCNK flags incl. 0x10000, nLayers histogram, MCLY flag bits, MTXP/MHID/MTXF presence, MODF flag 0x80, MWDR/MWDS presence, `_lod.adt` presence) in src/core/WowViewer.Core.IO/Survey/AdtConformanceSurvey.cs
-- [ ] T007 [P] [US1] M2 tallies (chunk inventory, SKID/BFID/AFID/LDV1/RPID/GPID presence and resolution, 0-section models) in src/core/WowViewer.Core.IO/Survey/M2ConformanceSurvey.cs
+- [ ] T007 [P] [US1] M2 tallies via Warcraft.NET's parsed model (chunk inventory, SKID/BFID/AFID/LDV1/RPID/GPID presence and resolution, 0-section models) in src/core/WowViewer.Core.IO/Survey/M2ConformanceSurvey.cs
 - [ ] T008 [P] [US1] BLP tallies (colour encoding × pixel format × alpha depth × size) in src/core/WowViewer.Core.IO/Survey/BlpConformanceSurvey.cs
 - [ ] T009 [P] [US1] WDT tallies (MPHD flags, FileDataID fields, companion WDT presence) in src/core/WowViewer.Core.IO/Survey/WdtConformanceSurvey.cs
 - [ ] T010 [US1] CLI `inspect casc survey --format wmo|adt|m2|blp|wdt|all [--map <wdt fdid>] [--limit n] [--out <dir>]` in tools/inspect/WowViewer.Tool.Inspect/CascCommandSupport.cs; keep `wmo-survey` as an alias
@@ -53,13 +53,13 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 - [ ] T025 [P] [US3] MTXF/MCLY texture scale and MCLY layer animation in the tile shader
 - [ ] T026 [P] [US3] MODF flag 0x80 + MWDR/MWDS doodad sets in src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs
 
-## Phase 5: M2 (US4)
+## Phase 5: M2 renderer audit (US4)
 
-- [ ] T027 [US4] Parse SKID, BFID, AFID, LDV1 in src/core/WowViewer.Core.IO/M2/M2ChunkedFileIds.cs; add them to CASC prefetch fan-out
-- [ ] T028 [US4] `.skel` reader from the wiki structures (behaviour cross-checked against WoWFormatLib SKELReader, no code copied) in src/core/WowViewer.Core.IO/M2/M2SkeletonReader.cs
-- [ ] T029 [US4] Route SKID bones and AFID animations into the existing runtime (src/viewer/WoWViewer/Rendering/WowViewerM2RuntimeBridge.cs); SC-005 creature stand animation
-- [ ] T030 [P] [US4] LDV1-driven skin LOD selection
-- [ ] T031 [P] [US4] Investigate the 15 "ok but 0 sections" models from map-survey; record cause in evidence/m2-zero-sections.md
+Warcraft.NET already parses SKID/BFID/AFID/LDV1 and `.skel`; M2 animation works.
+
+- [ ] T027 [US4] Per-chunk consumption audit: which Warcraft.NET-parsed chunks reach src/viewer/WoWViewer/Rendering/WarcraftNetM2Adapter.cs and WowViewerM2RuntimeBridge.cs; record in specs/240-format-conformance/evidence/m2-chunk-consumption.md
+- [ ] T028 [P] [US4] LDV1-driven skin LOD selection if T027 shows it unused
+- [ ] T029 [P] [US4] Investigate the 15 "ok but 0 sections" models from map-survey; record cause in specs/240-format-conformance/evidence/m2-zero-sections.md
 
 ## Phase 6: BLP and WDT companions (US5)
 
@@ -70,17 +70,18 @@ Format: `- [ ] T### [P?] [US?] description (path)`. All paths are relative to `w
 ## Phase 7: Reference study (FR-011)
 
 - [ ] T035 [P] Study WTL (MIT): CASC product/branch handling, listfile and naming (WoWNamingLib), file linking; record in specs/240-format-conformance/evidence/reference-study.md
-- [ ] T036 [P] Study WoWFormatLib (no license — behaviour only): WMO LOD fallback, M2 chunk handling, ADT `_lod` reader, MOBA material struct; record differences from our readers in the same file
+- [ ] T036 [P] Study WoWFormatLib (no license — behaviour only): WMO LOD fallback, ADT `_lod` reader, MOBA material struct; record differences from our readers in the same file
+- [ ] T036b Before each phase, recheck vendored libraries against upstream (Warcraft.NET, TACTSharp, DBCD, WoWDBDefs, wow-listfile, SereniaBLPLib/BLPSharp) and update research.md R1
 - [ ] T037 Propose confirmed wiki corrections (e.g. MCMT layer note vs. 8-layer data, MGI2 layout) in specs/240-format-conformance/evidence/wiki-notes.md
 
 ## Polish
 
 - [ ] T038 Rerun the full survey; update research.md states and SC status
-- [ ] T039 Update specs/STATUS.md v0.6 scope and specs/epics/active-epics.md membership
+- [x] T039 Update specs/STATUS.md v0.6 scope and specs/epics/active-epics.md membership
 
 ## Dependencies
 
-Phase 2 (survey) blocks Phases 3–6. Within Phase 3, T016 blocks T017. T022 blocks T023. T027 blocks T028–T030. Phase 7 can run any time.
+Phase 2 (survey) blocks Phases 3–6. Within Phase 3, T016 blocks T017. T022 blocks T023. T027 blocks T028. Phase 7 can run any time.
 
 ## MVP
 
