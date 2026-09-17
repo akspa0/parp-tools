@@ -27,6 +27,7 @@ the current owner or registry names a forward pointer; do not infer closure from
 | 12 | [237 ADT v26 — brand-new format](237-adt-v26-terrain/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-16 (operator-directed): **first reader/renderer anywhere for ADT v26**, a completely new terrain format that first shipped ~8h earlier in the first WoW: Forever (`wow_classic_beta`) build; tip-off from Marlamin ~1h before analysis; this project did the first analysis. 699 tiles on hand; MVER 26 + AHDR 26, new ALOC/AOCH/ADST chunks; tile X/Y decoded from ALOC and seam-proven. Format doc: `docs/architecture/adt-v26-format.md` | Phase 0 inventory tooling must reproduce evidence/phase0-first-look-2026-09-16.md; fast-path wireframe (US0, T045–T050) first. Terrain from tile files alone; **textures/models resolve name → FileDataID (33/33, 285/285) → local CASC install via 238** |
 | 13 | [238 CASC Data Source](238-casc-data-source/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-16 (operator-directed; Marlamin in contact): local install + remote CDN via vendored TACTSharp (Warcraft.NET has no CASC; vendored CascLib/TACT.NET folders are empty), id-addressed reads, keys, verified cache | Phase 0 era survey over CDN + library decision; **local-first**: install in progress at `I:\wow12\World of Warcraft`; first consumer is 237's asset resolution; byte-identical verification vs independent CDN extraction |
 | 14 | [239 Modern Client Assets](239-modern-client-assets/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-16 (operator-directed): post-5.0.1 FileDataID era — WDT MAID, ADT id placements/MTXP, chunked M2, WMO GFID/MODI, DB2 by id; wow.export as behavioral reference; survey-first | Needs 238 remote gate (T027); tier builds not chosen yet, so tier C defaults to live retail via CDN; coverage survey first |
+| 15 | [240 Format Conformance](240-format-conformance/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-17: wowdev.wiki × readers audit against `wow_classic_beta` 1.60.1 ([research.md](240-format-conformance/research.md)); already fixed: WMO MOBA 16-bit material ids (64% of batches), GFID per-LOD groups, shader-23 base texture, 8 terrain layers. WTL (MIT) and WoWFormatLib (no license: behaviour only) as references | Phase 2 conformance survey reproduces research.md WMO counts; then WMO per-shader materials (MVP) |
 
 ## v0.6 release scope (pinned 2026-09-16)
 
@@ -37,6 +38,7 @@ Worked on the current `v0.5.4-dev` branch. Release theme: **modern data access +
 | 238 CASC Data Source | foundation: bytes from local/remote CASC | 1 |
 | 239 Modern Client Assets | FileDataID-era readers + renderer hookups | 2 (after 238 Phase 1) |
 | 237 ADT v26 (brand-new format, first seen 2026-09-16) | AHDR reader + wireframe/terrain render from the tile files alone | **now**: fast-path wireframe first; fully independent of 238/239 |
+| 240 Format Conformance | per-format survey + reader/renderer gaps from the wowdev.wiki audit | 3 (after 239 loads real builds; survey first) |
 
 Carried in from v0.5.4-dev: 236 (active) remains the current owner until its gates close.
 
