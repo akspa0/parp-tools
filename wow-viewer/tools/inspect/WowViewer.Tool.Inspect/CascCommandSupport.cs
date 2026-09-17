@@ -37,6 +37,9 @@ public static class CascCommandSupport
             case "db2":
                 RunDb2(tail);
                 break;
+            case "m2":
+                RunM2(tail);
+                break;
             default:
                 Console.Error.WriteLine($"Unknown casc command '{command}'.");
                 ShowUsage();
@@ -427,6 +430,17 @@ public static class CascCommandSupport
         foreach ((string sequence, int count) in wmoSequences)
             Console.WriteLine($"  [{count}] {sequence}");
 
+        var m2Outcomes = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        foreach (uint doodadId in doodadIds)
+        {
+            string outcome = TryBuildNativeM2(Read, doodadId, $"fdid_{doodadId}.m2", out _);
+            m2Outcomes[outcome] = m2Outcomes.GetValueOrDefault(outcome) + 1;
+        }
+
+        Console.WriteLine("Native M2 build outcomes:");
+        foreach ((string outcome, int count) in m2Outcomes.OrderByDescending(static kv => kv.Value))
+            Console.WriteLine($"  [{count}] {outcome}");
+
         foreach ((string label, HashSet<uint> ids) in new[] { ("MDID textures", textureIds), ("MDDF models (0x40)", doodadIds), ("MODF WMOs (0x8)", wmoIds) })
         {
             var statuses = ids.GroupBy(id => storage.TryReadFile(id, out _)).ToDictionary(static g => g.Key, static g => g.Count());
@@ -473,6 +487,95 @@ public static class CascCommandSupport
             {
                 Console.WriteLine($"{table} @ {storage.Product.Version}: FAILED {ex.GetType().Name}: {ex.Message}");
             }
+        }
+    }
+
+    /// <summary>
+    /// Spec 239: runs the viewer's native static M2 build (geometry reader + SFID skin + skin profile
+    /// runtime + static render model) on models from CASC. Paths from --path, or every model placed on
+    /// a WDT's first N tiles via --wdt-id.
+    /// </summary>
+    private static void RunM2(string[] args)
+    {
+        string? install = GetOption(args, "--install");
+        string? product = GetOption(args, "--product");
+        string? cache = GetOption(args, "--cache");
+        List<string> listfiles = GetOptions(args, "--listfile");
+        List<string> paths = GetOptions(args, "--path");
+        if (install is null || product is null || cache is null || listfiles.Count == 0 || paths.Count == 0)
+        {
+            Console.WriteLine("  casc m2 --install <dir> --product <p> --cache <dir> --listfile <csv> --path <model.m2> [--path ...]");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        CommunityListfile listfile = CommunityListfile.Load(listfiles);
+        WowViewer.Core.IO.Files.FileDataIdPaths.Resolver = listfile.GetPath;
+        CascStorage storage = CascStorage.OpenLocal(install, product, cache);
+        byte[]? Read(uint id) => storage.TryReadFile(id, out byte[]? b) == CascReadStatus.Ok ? b : null;
+
+        foreach (string path in paths)
+        {
+            try
+            {
+                if (!listfile.TryGetFileDataId(path, out uint id) || Read(id) is not { } model)
+                {
+                    Console.WriteLine($"{path}: model not readable");
+                    continue;
+                }
+
+                if (!WowViewer.Core.IO.M2.M2ChunkedFileIds.TryRead(model, out var ids) || ids.SkinFileDataIds.Length == 0 || Read(ids.SkinFileDataIds[0]) is not { } skin)
+                {
+                    Console.WriteLine($"{path}: no readable SFID skin");
+                    continue;
+                }
+
+                using var modelStream = new MemoryStream(WowViewer.Core.IO.M2.M2ChunkedFileIds.GetMd20Payload(model), writable: false);
+                var geometry = ids.ApplyTextureNames(WowViewer.Core.IO.M2.M2GeometryReader.Read(modelStream, path));
+                using var skinStream = new MemoryStream(skin, writable: false);
+                var skinDocument = WowViewer.Core.IO.M2.M2SkinReader.Read(skinStream, WowViewer.Core.IO.Files.FileDataIdPaths.Resolve(ids.SkinFileDataIds[0]).Replace('/', '\\'));
+                var selection = new WowViewer.Core.M2.M2SkinProfileSelection(0, skinDocument.SourcePath);
+                var chosen = new WowViewer.Core.Runtime.M2.M2SkinProfileRuntimeState(geometry.Model, selection, WowViewer.Core.Runtime.M2.M2SkinProfileStage.Chosen, loadedSkin: null, activeSkinProfile: null);
+                var initialized = WowViewer.Core.Runtime.M2.M2SkinProfileRuntime.Initialize(WowViewer.Core.Runtime.M2.M2SkinProfileRuntime.Load(chosen, skinDocument));
+                var render = WowViewer.Core.Runtime.M2.M2StaticRenderModelBuilder.Build(geometry, initialized);
+                Console.WriteLine($"{path}: OK md20v={geometry.Model.Version} vertices={geometry.Vertices.Count} sections={render.Sections.Count} textures=[{string.Join(", ", geometry.Textures.Select(static t => t.Filename ?? $"<replaceable {t.ReplaceableId}>"))}]");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"{path}: FAILED {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>Same steps as WowViewerM2RuntimeBridge.BuildStaticRenderModel; returns "ok" or a failure category.</summary>
+    private static string TryBuildNativeM2(Func<uint, byte[]?> read, uint modelId, string path, out string detail)
+    {
+        detail = string.Empty;
+        try
+        {
+            if (read(modelId) is not { } model)
+                return "model not readable";
+            if (!WowViewer.Core.IO.M2.M2ChunkedFileIds.TryRead(model, out var ids))
+                return "not MD21";
+            if (ids.SkinFileDataIds.Length == 0)
+                return "no SFID";
+            if (read(ids.SkinFileDataIds[0]) is not { } skin)
+                return "SFID skin not readable";
+
+            using var modelStream = new MemoryStream(WowViewer.Core.IO.M2.M2ChunkedFileIds.GetMd20Payload(model), writable: false);
+            var geometry = ids.ApplyTextureNames(WowViewer.Core.IO.M2.M2GeometryReader.Read(modelStream, path));
+            using var skinStream = new MemoryStream(skin, writable: false);
+            var skinDocument = WowViewer.Core.IO.M2.M2SkinReader.Read(skinStream, $"fdid_{ids.SkinFileDataIds[0]}.skin");
+            var selection = new WowViewer.Core.M2.M2SkinProfileSelection(0, skinDocument.SourcePath);
+            var chosen = new WowViewer.Core.Runtime.M2.M2SkinProfileRuntimeState(geometry.Model, selection, WowViewer.Core.Runtime.M2.M2SkinProfileStage.Chosen, loadedSkin: null, activeSkinProfile: null);
+            var render = WowViewer.Core.Runtime.M2.M2StaticRenderModelBuilder.Build(geometry, WowViewer.Core.Runtime.M2.M2SkinProfileRuntime.Initialize(WowViewer.Core.Runtime.M2.M2SkinProfileRuntime.Load(chosen, skinDocument)));
+            detail = $"v{geometry.Model.Version} vertices={geometry.Vertices.Count} sections={render.Sections.Count}";
+            return render.Sections.Count > 0 ? $"ok (md20 v{geometry.Model.Version})" : $"ok but 0 sections (v{geometry.Model.Version})";
+        }
+        catch (Exception ex)
+        {
+            string message = ex.Message.Length > 110 ? ex.Message[..110] : ex.Message;
+            return $"FAILED {ex.GetType().Name}: {System.Text.RegularExpressions.Regex.Replace(message, @"'[^']*'", "'…'")}";
         }
     }
 

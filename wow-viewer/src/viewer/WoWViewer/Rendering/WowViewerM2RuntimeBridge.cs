@@ -23,8 +23,18 @@ internal static class WowViewerM2RuntimeBridge
         ArgumentException.ThrowIfNullOrWhiteSpace(modelPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(skinPath);
 
-        using MemoryStream modelStream = new(modelBytes, writable: false);
+        // Spec 239: chunked (MD21) models wrap the MD20 blob; the geometry reader needs the bare blob,
+        // and texture names come from TXID.
+        // Model identity requires a model extension; unnamed FileDataID assets arrive as "fdid:<id>".
+        if (WowViewer.Core.IO.Files.FileDataIdPaths.TryParse(modelPath, out uint modelFileDataId))
+            modelPath = $"fdid_{modelFileDataId}.m2";
+        if (WowViewer.Core.IO.Files.FileDataIdPaths.TryParse(skinPath, out uint skinFileDataId))
+            skinPath = $"fdid_{skinFileDataId}.skin";
+
+        using MemoryStream modelStream = new(WowViewer.Core.IO.M2.M2ChunkedFileIds.GetMd20Payload(modelBytes), writable: false);
         M2GeometryDocument geometry = M2GeometryReader.Read(modelStream, modelPath);
+        if (WowViewer.Core.IO.M2.M2ChunkedFileIds.TryRead(modelBytes, out var chunkedIds))
+            geometry = chunkedIds.ApplyTextureNames(geometry);
 
         using MemoryStream skinStream = new(skinBytes, writable: false);
         M2SkinDocument skin = M2SkinReader.Read(skinStream, skinPath.Replace('/', '\\'));
