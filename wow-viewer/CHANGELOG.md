@@ -12,7 +12,7 @@ renderer for the new DAT v26 terrain project format.
 Full notes: [`docs/releases/v0.5.4-alpha.md`](docs/releases/v0.5.4-alpha.md)
 
 ### Added
-- **CASC installs**: File → Open CASC Install (local / local + CDN fill), built on TACTSharp. Parallel reads, background prefetch, and a download cache.
+- **CASC installs**: File → Open CASC Install (local / local + CDN fill) with a game version picker, built on TACTSharp. Parallel reads, background prefetch, and a download cache.
 - **FileDataID assets**: WDT `MAID`, tex0 `MDID`, FileDataID placement flags, `MD21` M2 (`SFID`/`TXID`), WMO `GFID`/`MODI`/`MOMT` texture IDs, DB2 tables via WoWDBDefs.
 - **DAT v26 terrain**: File → Open DAT v26 Terrain Folder, `ALOC` tile placement, height scale option (default ÷36).
 - **CLI**: `inspect casc …` and `inspect adt-ahdr check`.

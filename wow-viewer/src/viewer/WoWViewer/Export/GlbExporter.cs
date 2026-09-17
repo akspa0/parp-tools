@@ -119,9 +119,9 @@ public static class GlbExporter
             matBuilder.WithDoubleSide(true);
 
             // Try to load texture
-            if (!string.IsNullOrEmpty(wmoMat.Texture1Name))
+            if (!string.IsNullOrEmpty(wmoMat.BaseTextureName))
             {
-                byte[]? pngBytes = ResolveWmoTexturePngBytes(wmoMat.Texture1Name, modelDir, dataSource);
+                byte[]? pngBytes = ResolveWmoTexturePngBytes(wmoMat.BaseTextureName, modelDir, dataSource);
                 if (pngBytes != null)
                 {
                     var img = new SharpGLTF.Memory.MemoryImage(pngBytes);
@@ -231,9 +231,9 @@ public static class GlbExporter
             var matBuilder = new MaterialBuilder($"wmo_mat_{m}");
             matBuilder.WithDoubleSide(true);
 
-            if (!string.IsNullOrEmpty(wmoMat.Texture1Name))
+            if (!string.IsNullOrEmpty(wmoMat.BaseTextureName))
             {
-                byte[]? pngBytes = ResolveWmoTexturePngBytes(wmoMat.Texture1Name, modelDir, dataSource);
+                byte[]? pngBytes = ResolveWmoTexturePngBytes(wmoMat.BaseTextureName, modelDir, dataSource);
                 if (pngBytes != null)
                 {
                     var img = new SharpGLTF.Memory.MemoryImage(pngBytes);

@@ -2475,6 +2475,35 @@ public class WmoV14ToV17Converter
         
         // Resolved names
         public string Texture1Name, Texture2Name, Texture3Name;
+
+        /// <summary>
+        /// Shader 23 ("UnkDFShader" on wowdev), used by FileDataID-era WMOs. Measured 2026-09-16 over 9,860
+        /// wow_classic_beta 1.60.1 roots: 22,380 shader-23 materials; 10,785 have texture_1 = 0, and where
+        /// texture_1 is set it names a placeholder (Dungeons/TEXTURES/EFFECTS/PRETTYCOLORS*.BLP). texture_2 and
+        /// texture_3 decode as colour maps (checked on Orgrimmar2FrontGate and 10DU_HallUldamanUprez_Main01).
+        /// </summary>
+        public const uint ShaderUnkDF = 23;
+
+        /// <summary>
+        /// The texture to draw as the material's base colour: texture_2 for shader 23 (texture_1 is empty or a
+        /// placeholder there), otherwise texture_1, falling back to texture_2 then texture_3 when earlier slots are empty.
+        /// </summary>
+        public readonly string? BaseTextureName
+        {
+            get
+            {
+                if (Shader == ShaderUnkDF && !string.IsNullOrWhiteSpace(Texture2Name))
+                    return Texture2Name;
+
+                if (!string.IsNullOrWhiteSpace(Texture1Name))
+                    return Texture1Name;
+
+                if (!string.IsNullOrWhiteSpace(Texture2Name))
+                    return Texture2Name;
+
+                return string.IsNullOrWhiteSpace(Texture3Name) ? null : Texture3Name;
+            }
+        }
     }
 
     public struct WmoGroupInfo
@@ -2524,7 +2553,10 @@ public class WmoV14ToV17Converter
         public byte[] BoundingBoxRaw; // 12 bytes (2x 3x int16)
         public uint FirstIndex;
         public ushort IndexCount, FirstVertex, LastVertex;
-        public byte Flags, MaterialId;
+        public byte Flags;
+
+        /// <summary>MOMT index. 16-bit: Legion+ batches address more than 255 materials (material_id_large).</summary>
+        public ushort MaterialId;
     }
 
     private sealed class RebuiltStringTableBuilder

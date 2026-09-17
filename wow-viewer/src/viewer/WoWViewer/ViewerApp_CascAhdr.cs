@@ -13,6 +13,15 @@ public partial class ViewerApp
 {
     private bool _wantOpenCascInstall;
     private bool _wantOpenCascInstallWithCdnFill;
+
+    // Product picker state: shown after a CASC install folder is chosen.
+    private string? _cascPickerInstallDir;
+    private IReadOnlyList<CascProductInfo> _cascPickerProducts = [];
+    private int _cascPickerSelected;
+    private bool _cascPickerCdnFill = true;
+    private bool _cascPickerFallbackToOtherProducts;
+    private string? _cascPickerError;
+    private string? _lastCascProduct;
     private bool _wantOpenAhdrTerrainFolder;
     private string? _lastCascInstallPath;
     private string? _lastAhdrTerrainFolder;
@@ -63,9 +72,11 @@ public partial class ViewerApp
                 path =>
                 {
                     if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
-                        LoadCascDataSource(path, allowCdnFill);
+                        OpenCascProductPicker(path, allowCdnFill);
                 });
         }
+
+        DrawCascProductPicker();
 
         if (_wantOpenAhdrTerrainFolder)
         {
@@ -83,11 +94,127 @@ public partial class ViewerApp
         }
     }
 
+    /// <summary>Game folder a launcher install uses for each product, for the "installed" hint.</summary>
+    private static readonly Dictionary<string, string> CascProductFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["wow"] = "_retail_",
+        ["wowt"] = "_ptr_",
+        ["wowxptr"] = "_xptr_",
+        ["wow_beta"] = "_beta_",
+        ["wow_classic"] = "_classic_",
+        ["wow_classic_ptr"] = "_classic_ptr_",
+        ["wow_classic_beta"] = "_classic_beta_",
+        ["wow_classic_era"] = "_classic_era_",
+        ["wow_classic_era_ptr"] = "_classic_era_ptr_",
+        ["wow_anniversary"] = "_anniversary_",
+    };
+
+    private void OpenCascProductPicker(string installDir, bool allowCdnFill)
+    {
+        // The menu item chosen sets CDN fill; the checkbox in the picker can still change it.
+        _cascPickerCdnFill = allowCdnFill;
+
+        // Pickers often land one level too deep (e.g. inside _retail_); .build.info lives in the install root.
+        string root = installDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!File.Exists(Path.Combine(root, ".build.info")) && Path.GetDirectoryName(root) is { } parent && File.Exists(Path.Combine(parent, ".build.info")))
+            root = parent;
+
+        try
+        {
+            _cascPickerProducts = CascStorage.ListProducts(root)
+                .OrderByDescending(static p => Version.TryParse(p.Version, out Version? v) ? v : new Version())
+                .ToArray();
+            _cascPickerError = _cascPickerProducts.Count == 0 ? ".build.info lists no products." : null;
+        }
+        catch (Exception ex)
+        {
+            _cascPickerProducts = [];
+            _cascPickerError = ex.Message;
+        }
+
+        _cascPickerInstallDir = root;
+        _cascPickerSelected = 0;
+        for (int i = 0; i < _cascPickerProducts.Count; i++)
+        {
+            if (string.Equals(_cascPickerProducts[i].Product, _lastCascProduct, StringComparison.OrdinalIgnoreCase))
+                _cascPickerSelected = i;
+        }
+    }
+
+    private void DrawCascProductPicker()
+    {
+        if (_cascPickerInstallDir is null)
+            return;
+
+        bool open = true;
+        ImGuiNET.ImGui.SetNextWindowSize(new System.Numerics.Vector2(620, 0), ImGuiNET.ImGuiCond.Appearing);
+        ImGuiNET.ImGui.SetNextWindowPos(ImGuiNET.ImGui.GetMainViewport().GetCenter(), ImGuiNET.ImGuiCond.Appearing, new System.Numerics.Vector2(0.5f, 0.5f));
+        if (ImGuiNET.ImGui.Begin("Open CASC Install###CascProductPicker", ref open, ImGuiNET.ImGuiWindowFlags.NoCollapse | ImGuiNET.ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGuiNET.ImGui.TextUnformatted(_cascPickerInstallDir);
+            ImGuiNET.ImGui.Separator();
+
+            if (_cascPickerError is not null)
+            {
+                ImGuiNET.ImGui.TextColored(new System.Numerics.Vector4(1f, 0.45f, 0.45f, 1f), _cascPickerError);
+            }
+            else
+            {
+                ImGuiNET.ImGui.TextUnformatted("Game version:");
+                for (int i = 0; i < _cascPickerProducts.Count; i++)
+                {
+                    CascProductInfo product = _cascPickerProducts[i];
+                    bool installed = CascProductFolders.TryGetValue(product.Product, out string? folder)
+                        && Directory.Exists(Path.Combine(_cascPickerInstallDir, folder));
+                    string label = $"{product.Version}   {product.Product}{(installed ? $"   ({folder})" : "   (no game folder)")}###casc_product_{i}";
+                    if (ImGuiNET.ImGui.RadioButton(label, _cascPickerSelected == i))
+                        _cascPickerSelected = i;
+                }
+
+                ImGuiNET.ImGui.Spacing();
+                ImGuiNET.ImGui.Checkbox("Fetch missing files from Blizzard's CDN (same build)", ref _cascPickerCdnFill);
+                if (ImGuiNET.ImGui.IsItemHovered())
+                    ImGuiNET.ImGui.SetTooltip("Reads local data first. Files the build lists but the install does not have on disk are downloaded once and cached.");
+
+                ImGuiNET.ImGui.Checkbox("Fall back to the other products for missing files", ref _cascPickerFallbackToOtherProducts);
+                if (ImGuiNET.ImGui.IsItemHovered())
+                    ImGuiNET.ImGui.SetTooltip("Mixes data across game versions: a file missing from the selected build is read from another product instead. Off keeps the selected version pure.");
+            }
+
+            ImGuiNET.ImGui.Separator();
+            bool canOpen = _cascPickerError is null && _cascPickerProducts.Count > 0;
+            if (!canOpen)
+                ImGuiNET.ImGui.BeginDisabled();
+            if (ImGuiNET.ImGui.Button("Open", new System.Numerics.Vector2(120, 0)))
+            {
+                CascProductInfo selected = _cascPickerProducts[_cascPickerSelected];
+                var products = new List<string> { selected.Product };
+                if (_cascPickerFallbackToOtherProducts)
+                    products.AddRange(_cascPickerProducts.Where(p => p != selected).Select(static p => p.Product));
+
+                string installDir = _cascPickerInstallDir;
+                _lastCascProduct = selected.Product;
+                _cascPickerInstallDir = null;
+                LoadCascDataSource(installDir, products, _cascPickerCdnFill);
+            }
+            if (!canOpen)
+                ImGuiNET.ImGui.EndDisabled();
+
+            ImGuiNET.ImGui.SameLine();
+            if (ImGuiNET.ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0)))
+                open = false;
+        }
+
+        ImGuiNET.ImGui.End();
+        if (!open)
+            _cascPickerInstallDir = null;
+    }
+
     /// <summary>
-    /// Opens every product listed in the install's .build.info. Reads try products newest version
-    /// first and fall through to older products when a newer one lacks the data locally.
+    /// Opens the given products of a CASC install, in order: the first is the game version whose
+    /// build drives DB2 definitions and format profiles; later ones only fill files it lacks.
     /// </summary>
-    private void LoadCascDataSource(string installDir, bool allowCdnFill = false)
+    private void LoadCascDataSource(string installDir, IReadOnlyList<string> productOrder, bool allowCdnFill)
     {
         try
         {
@@ -99,11 +226,15 @@ public partial class ViewerApp
                 return;
             }
 
-            IReadOnlyList<CascProductInfo> products = CascStorage.ListProducts(installDir);
+            IReadOnlyList<CascProductInfo> listed = CascStorage.ListProducts(installDir);
             string cascCacheDir = Path.Combine(CacheDir, "casc");
             var storages = new List<CascStorage>();
-            foreach (CascProductInfo product in products.OrderByDescending(static p => Version.TryParse(p.Version, out Version? v) ? v : new Version()))
+            foreach (string productName in productOrder)
             {
+                CascProductInfo? product = listed.FirstOrDefault(p => string.Equals(p.Product, productName, StringComparison.OrdinalIgnoreCase));
+                if (product is null)
+                    continue;
+
                 try
                 {
                     CascStorage storage = CascStorage.OpenLocal(installDir, product.Product, cascCacheDir, allowCdnFill);

@@ -6,11 +6,18 @@ namespace WoWViewer.Terrain;
 
 /// <summary>
 /// Builds a single GPU mesh per tile (256 chunks) to drastically reduce draw calls.
-/// Geometry is concatenated; per-vertex attributes carry chunk-slice (0..255) and 4 diffuse texture indices.
-/// Also uploads a per-tile 64x64x256 RGBA8 texture array storing alpha1/alpha2/alpha3/shadow.
+/// Geometry is concatenated; per-vertex attributes carry chunk-slice (0..255) and up to 8 diffuse texture indices.
+/// Also uploads a per-tile 64x64x256 RGBA8 texture array storing alpha1/alpha2/alpha3/shadow, plus a second
+/// array for alpha4..alpha7 when any chunk in the tile has more than 4 layers.
 /// </summary>
 public sealed class TerrainTileMeshBuilder
 {
+    /// <summary>
+    /// Layers rendered per chunk. Measured 2026-09-16 on wow_classic_beta 1.60.1 Azeroth (188,216 chunks):
+    /// 5 layers 2,176, 6 layers 295, 7 layers 14, 8 layers 1; none above 8.
+    /// </summary>
+    public const int MaxLayers = 8;
+
     private readonly GL _gl;
 
     public TerrainTileMeshBuilder(GL gl)
@@ -30,7 +37,7 @@ public sealed class TerrainTileMeshBuilder
         int vertexCount = chunks.Count * vertsPerChunk;
         var vertices = new float[vertexCount * floatsPerVert];
         var chunkSlice = new byte[vertexCount];
-        var texIndices = new ushort[vertexCount * 4];
+        var texIndices = new ushort[vertexCount * MaxLayers];
         var indices = new List<ushort>(chunks.Count * 256 * 3);
 
         var tileMin = new Vector3(float.MaxValue);
@@ -39,6 +46,10 @@ public sealed class TerrainTileMeshBuilder
         const int alphaSize = 64;
         const int sliceCount = 256;
         var alphaShadow = new byte[alphaSize * alphaSize * 4 * sliceCount];
+        int maxChunkLayers = 0;
+        foreach (TerrainChunkData chunk in chunks)
+            maxChunkLayers = Math.Max(maxChunkLayers, Math.Min(MaxLayers, chunk.Layers.Length));
+        byte[]? alphaExt = maxChunkLayers > 4 ? new byte[alphaSize * alphaSize * 4 * sliceCount] : null;
 
         for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
         {
@@ -121,20 +132,13 @@ public sealed class TerrainTileMeshBuilder
                 int vertexIndex = chunkIndex * vertsPerChunk + i;
                 chunkSlice[vertexIndex] = (byte)slice;
 
-                ushort tex0 = 0xFFFF;
-                ushort tex1 = 0xFFFF;
-                ushort tex2 = 0xFFFF;
-                ushort tex3 = 0xFFFF;
-                if (chunk.Layers.Length > 0) tex0 = (ushort)Math.Clamp(chunk.Layers[0].TextureIndex, 0, 0xFFFE);
-                if (chunk.Layers.Length > 1) tex1 = (ushort)Math.Clamp(chunk.Layers[1].TextureIndex, 0, 0xFFFE);
-                if (chunk.Layers.Length > 2) tex2 = (ushort)Math.Clamp(chunk.Layers[2].TextureIndex, 0, 0xFFFE);
-                if (chunk.Layers.Length > 3) tex3 = (ushort)Math.Clamp(chunk.Layers[3].TextureIndex, 0, 0xFFFE);
-
-                int texBase = vertexIndex * 4;
-                texIndices[texBase + 0] = tex0;
-                texIndices[texBase + 1] = tex1;
-                texIndices[texBase + 2] = tex2;
-                texIndices[texBase + 3] = tex3;
+                int texBase = vertexIndex * MaxLayers;
+                for (int layer = 0; layer < MaxLayers; layer++)
+                {
+                    texIndices[texBase + layer] = layer < chunk.Layers.Length
+                        ? (ushort)Math.Clamp(chunk.Layers[layer].TextureIndex, 0, 0xFFFE)
+                        : (ushort)0xFFFF;
+                }
 
                 boundsMin = Vector3.Min(boundsMin, new Vector3(wx, wy, z));
                 boundsMax = Vector3.Max(boundsMax, new Vector3(wx, wy, z));
@@ -149,19 +153,21 @@ public sealed class TerrainTileMeshBuilder
             for (int i = 0; i < chunkIndices.Length; i++)
                 indices.Add((ushort)(chunkIndices[i] + baseVertex));
 
-            FillAlphaShadowSlice(alphaShadow, slice, chunk);
+            FillAlphaShadowSlice(alphaShadow, alphaExt, slice, chunk);
         }
 
         if (indices.Count == 0)
             return (null, chunkInfos);
 
-        var tileMesh = Upload(tileX, tileY, vertices, chunkSlice, texIndices, indices.ToArray(), tileMin, tileMax, chunks.Count);
-        UploadAlphaShadowArray(tileMesh, alphaShadow);
+        var tileMesh = Upload(tileX, tileY, vertices, chunkSlice, texIndices, indices.ToArray(), tileMin, tileMax, chunks.Count, maxChunkLayers);
+        tileMesh.AlphaShadowArrayTexture = UploadRgbaArray(alphaShadow);
+        if (alphaExt != null)
+            tileMesh.AlphaExtArrayTexture = UploadRgbaArray(alphaExt);
 
         return (tileMesh, chunkInfos);
     }
 
-    private unsafe TerrainTileMesh Upload(int tileX, int tileY, float[] vertices, byte[] chunkSlice, ushort[] texIndices, ushort[] indices, Vector3 boundsMin, Vector3 boundsMax, int chunkCount)
+    private unsafe TerrainTileMesh Upload(int tileX, int tileY, float[] vertices, byte[] chunkSlice, ushort[] texIndices, ushort[] indices, Vector3 boundsMin, Vector3 boundsMax, int chunkCount, int maxChunkLayers)
     {
         uint vao = _gl.GenVertexArray();
         _gl.BindVertexArray(vao);
@@ -192,8 +198,11 @@ public sealed class TerrainTileMeshBuilder
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, texIndexBuffer);
         fixed (ushort* ptr = texIndices)
             _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(texIndices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
+        uint texIndexStride = (uint)(MaxLayers * sizeof(ushort));
         _gl.EnableVertexAttribArray(4);
-        _gl.VertexAttribIPointer(4, 4, VertexAttribIType.UnsignedShort, (uint)(4 * sizeof(ushort)), (void*)0);
+        _gl.VertexAttribIPointer(4, 4, VertexAttribIType.UnsignedShort, texIndexStride, (void*)0);
+        _gl.EnableVertexAttribArray(6);
+        _gl.VertexAttribIPointer(6, 4, VertexAttribIType.UnsignedShort, texIndexStride, (void*)(4 * sizeof(ushort)));
 
         uint elementBuffer = _gl.GenBuffer();
         _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, elementBuffer);
@@ -216,10 +225,11 @@ public sealed class TerrainTileMeshBuilder
             BoundsMin = boundsMin,
             BoundsMax = boundsMax,
             ChunkCount = chunkCount,
+            MaxChunkLayerCount = maxChunkLayers,
         };
     }
 
-    private unsafe void UploadAlphaShadowArray(TerrainTileMesh tileMesh, byte[] alphaShadow)
+    private unsafe uint UploadRgbaArray(byte[] alphaShadow)
     {
         const int size = 64;
         const int depth = 256;
@@ -238,10 +248,10 @@ public sealed class TerrainTileMeshBuilder
         _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
 
         _gl.BindTexture(TextureTarget.Texture2DArray, 0);
-        tileMesh.AlphaShadowArrayTexture = texture;
+        return texture;
     }
 
-    private static void FillAlphaShadowSlice(byte[] alphaShadow, int slice, TerrainChunkData chunk)
+    private static void FillAlphaShadowSlice(byte[] alphaShadow, byte[]? alphaExt, int slice, TerrainChunkData chunk)
     {
         const int size = 64;
         int sliceBase = slice * size * size * 4;
@@ -253,9 +263,14 @@ public sealed class TerrainTileMeshBuilder
             return y * size + x;
         }
 
-        for (int layer = 1; layer <= 3; layer++)
+        for (int layer = 1; layer < MaxLayers; layer++)
         {
-            int channel = layer - 1;
+            // Layers 1..3 share the shadow array (RGB); layers 4..7 use the extension array (RGBA).
+            byte[]? target = layer <= 3 ? alphaShadow : alphaExt;
+            if (target == null)
+                break;
+
+            int channel = layer <= 3 ? layer - 1 : layer - 4;
             bool hasLayer = layer < chunk.Layers.Length;
             bool usesAlphaMap = hasLayer && (chunk.Layers[layer].Flags & 0x100u) != 0;
 
@@ -267,7 +282,7 @@ public sealed class TerrainTileMeshBuilder
                     {
                         int dst = y * size + x;
                         int src = EdgeFixedIndex(x, y);
-                        alphaShadow[sliceBase + dst * 4 + channel] = alpha[src];
+                        target[sliceBase + dst * 4 + channel] = alpha[src];
                     }
                 }
                 continue;
@@ -280,7 +295,7 @@ public sealed class TerrainTileMeshBuilder
                     for (int x = 0; x < size; x++)
                     {
                         int dst = y * size + x;
-                        alphaShadow[sliceBase + dst * 4 + channel] = 255;
+                        target[sliceBase + dst * 4 + channel] = 255;
                     }
                 }
             }

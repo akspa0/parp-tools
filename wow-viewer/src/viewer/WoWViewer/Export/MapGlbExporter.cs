@@ -521,9 +521,9 @@ public static class MapGlbExporter
             matBuilder.WithDoubleSide(true);
 
             // Best-effort texture resolve via data source.
-            if (!string.IsNullOrEmpty(wmoMat.Texture1Name))
+            if (!string.IsNullOrEmpty(wmoMat.BaseTextureName))
             {
-                byte[]? png = TryResolveWmoTexturePngBytes(wmoMat.Texture1Name, dataSource);
+                byte[]? png = TryResolveWmoTexturePngBytes(wmoMat.BaseTextureName, dataSource);
                 if (png != null)
                     matBuilder.WithBaseColor(new SharpGLTF.Memory.MemoryImage(png));
                 else

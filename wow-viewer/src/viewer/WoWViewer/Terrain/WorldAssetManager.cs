@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
 using WowViewer.Core.IO.Mdx;
@@ -88,6 +89,9 @@ public class WorldAssetManager : IDisposable
     private readonly Dictionary<string, IModelRenderer?> _mdxModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WmoRenderer?> _wmoModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WmoMeshSummary> _wmoMeshSummaries = new(StringComparer.OrdinalIgnoreCase);
+    // WMOs whose bytes could not be parsed. Remembered so bounds/summary queries, which run per
+    // placement and per scene rebuild, do not re-read and re-parse (and re-log) the same file every call.
+    private readonly ConcurrentDictionary<string, byte> _unloadableWmoKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, MdxCollisionMeshSummary?> _mdxCollisionSummaries = new(StringComparer.OrdinalIgnoreCase);
 
     // LRU tracking — keys ordered by last access time (most recent at end)
@@ -1677,6 +1681,9 @@ private int _mdxLoadFailCount = 0;
 
     private WmoV14ToV17Converter.WmoV14Data? LoadWmoDataModel(string normalizedKey)
     {
+        if (_unloadableWmoKeys.ContainsKey(normalizedKey))
+            return null;
+
         byte[]? data = ReadFileData(normalizedKey);
         if (data == null || data.Length == 0)
         {
@@ -1701,7 +1708,8 @@ private int _mdxLoadFailCount = 0;
             catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or ArgumentException or IndexOutOfRangeException)
             {
                 // A WMO layout this parser does not understand must never take the world down with it.
-                ViewerLog.Important(ViewerLog.Category.Wmo, $"[WMO] Skipping {normalizedKey}: {ex.GetType().Name}: {ex.Message}");
+                if (_unloadableWmoKeys.TryAdd(normalizedKey, 0))
+                    ViewerLog.Important(ViewerLog.Category.Wmo, $"[WMO] Skipping {normalizedKey}: {ex.GetType().Name}: {ex.Message}");
                 return null;
             }
         }

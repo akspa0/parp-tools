@@ -229,6 +229,10 @@ public sealed class CascDataSource : IDataSource
                     momt = (payload, size);
                     break;
                 case "GFID":
+                    // Only the full-detail groups: GFID repeats the group list per LOD (see ReadGroupFileDataIds).
+                    foreach (uint groupFileDataId in WowViewer.Core.IO.Converters.WmoV17ToV14Converter.ReadGroupFileDataIds(data))
+                        EnqueuePrefetch(groupFileDataId);
+                    break;
                 case "MODI":
                     for (int i = 0; i + 4 <= size; i += 4)
                         EnqueuePrefetch(BitConverter.ToUInt32(data, payload + i));

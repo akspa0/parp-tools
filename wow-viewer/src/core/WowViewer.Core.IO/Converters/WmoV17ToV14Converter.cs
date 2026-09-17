@@ -293,7 +293,7 @@ public class WmoV17ToV14Converter
             {
                 foreach (var b in g.Batches)
                 {
-                    byte materialId = b.MaterialId;
+                    ushort materialId = b.MaterialId;
                     if ((materialId == byte.MaxValue || materialId >= model.Materials.Count) && g.MaterialInfo != null && g.MaterialInfo.Length >= 2)
                     {
                         int firstFace = (int)(b.StartIndex / 3u);
@@ -475,9 +475,19 @@ public class WmoV17ToV14Converter
 
     private static readonly string[] RootChunksAlwaysRequired = ["MVER", "MOHD"];
 
-    /// <summary>Reads the GFID group FileDataID list from a v17 root without parsing the rest.</summary>
-    public static uint[] ReadGroupFileDataIds(byte[] rootBytes)
+    /// <summary>
+    /// Reads one level-of-detail's group FileDataIDs from a v17 root's GFID without parsing the rest.
+    /// <para>
+    /// GFID holds <c>MOHD.nGroups</c> ids per LOD when MOHD flag 0x10 (lod) is set: numLod lists, or 3 when
+    /// numLod is 0 (wowdev WMO#GFID). Measured 2026-09-16 on wow_classic_beta 1.60.1: ND_Dalaran has
+    /// nGroups 91 and 364 GFID ids, 11DL_Dalaran 126 and 504; LOD 0 has no zero ids, LOD 1-3 do. Reading
+    /// the whole array as one group list drew LOD 1 copies over the full-detail groups.
+    /// </para>
+    /// </summary>
+    public static uint[] ReadGroupFileDataIds(byte[] rootBytes, int lodLevel = 0)
     {
+        uint groupCount = 0;
+        uint[]? all = null;
         int position = 0;
         while (position + 8 <= rootBytes.Length)
         {
@@ -486,18 +496,31 @@ public class WmoV17ToV14Converter
             if (size < 0 || position + 8L + size > rootBytes.Length)
                 break;
 
-            if (chunkId == "GFID")
+            if (chunkId == "MOHD" && size >= 8)
             {
-                var ids = new uint[size / 4];
-                for (int i = 0; i < ids.Length; i++)
-                    ids[i] = BitConverter.ToUInt32(rootBytes, position + 8 + (i * 4));
-                return ids;
+                groupCount = BitConverter.ToUInt32(rootBytes, position + 8 + 4);
+            }
+            else if (chunkId == "GFID")
+            {
+                all = new uint[size / 4];
+                for (int i = 0; i < all.Length; i++)
+                    all[i] = BitConverter.ToUInt32(rootBytes, position + 8 + (i * 4));
             }
 
             position += 8 + size;
         }
 
-        return [];
+        if (all is null)
+            return [];
+
+        if (groupCount == 0 || groupCount >= all.Length)
+            return lodLevel == 0 ? all : [];
+
+        long start = (long)groupCount * lodLevel;
+        if (lodLevel < 0 || start + groupCount > all.Length)
+            return [];
+
+        return all.AsSpan((int)start, (int)groupCount).ToArray();
     }
 
     /// <summary>
@@ -849,11 +872,10 @@ public class WmoV17ToV14Converter
             reader.BaseStream.Position = chunkEnd;
         }
 
-        if (expectedRequiredSubchunkIndex != GroupRequiredChunkOrder090.Length)
-        {
-            throw new InvalidDataException(
-                $"MOGP missing required subchunks: parsed {expectedRequiredSubchunkIndex}/{GroupRequiredChunkOrder090.Length}. Flags=0x{data.Flags:X}.");
-        }
+        // A short chain is valid data, not corruption. Measured 2026-09-16 over 9,860 local
+        // wow_classic_beta 1.60.1 WMO roots: all 275 parse failures were groups that end before MOBA
+        // (collision/portal groups: MOPY MOVI MOVT MONR [MOTV] MOBN MOBR, no batches) or carry only
+        // MOPL (no geometry at all). Such groups convert with whatever they have and draw nothing.
 
         EnsureAllFlaggedOptionalMogpSubchunksPresent(seenOptionalSubchunks, multiOccurrenceCounters, data.Flags);
     }
@@ -1373,7 +1395,13 @@ public class WmoV17ToV14Converter
             result[i].StartVertex = r.ReadUInt16();
             result[i].EndVertex = r.ReadUInt16();
             result[i].Flags = r.ReadByte();
-            result[i].MaterialId = r.ReadByte();
+            byte materialId = r.ReadByte();
+
+            // Legion+ SMOBatch: bytes 0x0A-0x0B hold material_id_large, used when flag 0x2 is set (wowdev WMO#MOBA).
+            // Measured 2026-09-16 over wow_classic_beta 1.60.1 WMOs: 252,161 of 393,397 batches set the flag,
+            // 242,028 of those differ from material_id, and ids reach 473, so the 8-bit id is wrong for most batches.
+            ushort materialIdLarge = (ushort)(result[i].BoundingBox[5] & 0xFFFF);
+            result[i].MaterialId = (result[i].Flags & 0x2) != 0 ? materialIdLarge : materialId;
         }
         return result;
     }
@@ -1766,7 +1794,9 @@ public class WmoV17ToV14Converter
         public ushort StartVertex;
         public ushort EndVertex;
         public byte Flags;
-        public byte MaterialId;
+
+        /// <summary>MOMT index: material_id, or material_id_large when flag 0x2 is set (Legion+).</summary>
+        public ushort MaterialId;
     }
 
     #endregion

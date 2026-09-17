@@ -22,6 +22,15 @@ public sealed class TerrainTileMesh : IDisposable
 
     public uint AlphaShadowArrayTexture { get; set; }
 
+    /// <summary>
+    /// Alpha for layers 4..7 (RGBA = layer 4,5,6,7), one slice per chunk. 0 when no chunk in the tile has
+    /// more than 4 layers, which keeps the 4MB array off tiles that do not need it.
+    /// </summary>
+    public uint AlphaExtArrayTexture { get; set; }
+
+    /// <summary>Highest MCLY layer count among this tile's chunks, capped at <see cref="TerrainTileMeshBuilder.MaxLayers"/>.</summary>
+    public int MaxChunkLayerCount { get; init; }
+
     public uint DiffuseArrayTexture { get; set; }
 
     public int DiffuseLayerCount { get; set; }
@@ -39,6 +48,7 @@ public sealed class TerrainTileMesh : IDisposable
         if (VboTexIndices != 0) Gl.DeleteBuffer(VboTexIndices);
         if (Ebo != 0) Gl.DeleteBuffer(Ebo);
         if (AlphaShadowArrayTexture != 0) Gl.DeleteTexture(AlphaShadowArrayTexture);
+        if (AlphaExtArrayTexture != 0) Gl.DeleteTexture(AlphaExtArrayTexture);
         if (DiffuseArrayTexture != 0) Gl.DeleteTexture(DiffuseArrayTexture);
     }
 }

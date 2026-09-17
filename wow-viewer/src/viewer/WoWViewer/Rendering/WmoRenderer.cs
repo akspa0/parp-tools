@@ -2609,7 +2609,7 @@ void main() {
 
     private string? ResolveMaterialTextureName(WmoV14ToV17Converter.WmoMaterial material)
     {
-        string? textureName = material.Texture1Name;
+        string? textureName = material.BaseTextureName;
         if (!string.IsNullOrWhiteSpace(textureName))
             return textureName;
 

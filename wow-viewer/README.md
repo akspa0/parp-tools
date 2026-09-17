@@ -8,7 +8,7 @@ The primary development and runtime workspace for `parp-tools`. This project pro
 
 ### 1. 3D World Viewer (`src/viewer/WoWViewer`)
 An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
-- **Modern CASC Clients (alpha)**: File → Open CASC Install (local, or local + CDN fill) for WoW: Forever (`wow_classic_beta` 1.60.1.69876). Covers FileDataID-era maps (`MAID`, `MDID`, FileDataID placements), chunked `MD21` M2s, `GFID`/`MODI` WMOs and DB2 tables. Tileset textures are blended per chunk at full resolution. See [release notes](docs/releases/v0.5.4-alpha.md).
+- **Modern CASC Clients (alpha)**: File → Open CASC Install (local, or local + CDN fill), then pick the game version. Tested with WoW: Forever (`wow_classic_beta` 1.60.1.69876). Covers FileDataID-era maps (`MAID`, `MDID`, FileDataID placements), chunked `MD21` M2s, `GFID`/`MODI` WMOs and DB2 tables. Tileset textures are blended per chunk at full resolution. See [release notes](docs/releases/v0.5.4-alpha.md).
 - **DAT v26 Terrain (alpha)**: File → Open DAT v26 Terrain Folder renders the raw terrain project files that shipped in that build ([format write-up](docs/architecture/adt-v26-format.md)).
 - **Terrain Streaming**: Bounded camera-centered tile streaming with directional lookahead and WDL low-detail horizon fallback.
 - **WMO Portals & Interiors**: Hierarchical culling with bounded portal traversal and group-level admission.

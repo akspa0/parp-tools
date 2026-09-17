@@ -1884,7 +1884,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             bool chunkBigAlpha = InferBigAlphaForChunk(mcnk, useBigAlpha);
             int mcalLength = mcnk.McalRawData.Length;
 
-            for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
+            for (int i = 1; i < mcnk.TextureLayers.Count && i < TerrainTileMeshBuilder.MaxLayers; i++)
             {
                 var layer = mcnk.TextureLayers[i];
                 byte[]? alpha = null;
@@ -1952,7 +1952,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             int mcalLength = mcnk.McalRawData.Length;
             int layerCount = mcnk.TextureLayers.Count;
-            for (int i = 1; i < layerCount && i < 4; i++)
+            for (int i = 1; i < layerCount && i < TerrainTileMeshBuilder.MaxLayers; i++)
             {
                 int offset = unchecked((int)mcnk.TextureLayers[i].AlphaMapOffset);
                 if (offset < 0 || offset >= mcalLength)
@@ -1990,7 +1990,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             int offset = 0;
             int nLayers = mcnk.TextureLayers.Count;
-            for (int layer = 1; layer < nLayers && layer < 4; layer++)
+            for (int layer = 1; layer < nLayers && layer < TerrainTileMeshBuilder.MaxLayers; layer++)
             {
                 int alphaSize = chunkBigAlphaLegacy ? 4096 : 2048;
                 if (offset + alphaSize > mcnk.McalRawData.Length)
@@ -2040,7 +2040,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (!useBigAlpha || chunk.Layers.Length <= 1)
             return;
 
-        int layerCount = Math.Min(4, chunk.Layers.Length);
+        int layerCount = Math.Min(TerrainTileMeshBuilder.MaxLayers, chunk.Layers.Length);
         for (int targetLayerIndex = 1; targetLayerIndex < layerCount; targetLayerIndex++)
         {
             if (chunk.AlphaMaps.ContainsKey(targetLayerIndex))
@@ -2075,7 +2075,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         TerrainChunkData chunk,
         IReadOnlyDictionary<(int chunkX, int chunkY), TerrainChunkData> chunkLookup)
     {
-        int layerCount = Math.Min(4, chunk.Layers.Length);
+        int layerCount = Math.Min(TerrainTileMeshBuilder.MaxLayers, chunk.Layers.Length);
         for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
         {
             if (!chunk.AlphaMaps.TryGetValue(layerIndex, out var alpha) || alpha.Length < 64 * 64)
@@ -2109,7 +2109,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (!chunkLookup.TryGetValue((neighborChunkX, neighborChunkY), out var neighborChunk))
             return false;
 
-        int layerCount = Math.Min(4, neighborChunk.Layers.Length);
+        int layerCount = Math.Min(TerrainTileMeshBuilder.MaxLayers, neighborChunk.Layers.Length);
         for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
         {
             if (neighborChunk.Layers[layerIndex].TextureIndex != textureIndex)
@@ -2282,7 +2282,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         if (mcnk.TextureLayers != null)
         {
-            for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
+            for (int i = 1; i < mcnk.TextureLayers.Count && i < TerrainTileMeshBuilder.MaxLayers; i++)
             {
                 if ((mcnk.TextureLayers[i].Flags & MclyFlags.CompressedAlpha) != 0)
                     return true;

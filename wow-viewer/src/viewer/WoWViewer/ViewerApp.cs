@@ -1976,11 +1976,14 @@ void main() {
                 if (ImGui.MenuItem("Open CASC Install (local)..."))
                     _wantOpenCascInstall = true;
 
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Pick a Battle.net install folder, then the game version to load. Reads only what is on disk.");
+
                 if (ImGui.MenuItem("Open CASC Install (local + CDN fill)..."))
                     _wantOpenCascInstallWithCdnFill = true;
 
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Reads the local install first; data the install lists but does not have on disk is downloaded from Blizzard's CDN for the same build.");
+                    ImGui.SetTooltip("Pick a Battle.net install folder, then the game version to load. Files the build lists but the install does not have on disk are downloaded from Blizzard's CDN for the same build.");
 
                 if (ImGui.MenuItem("Open DAT v26 Terrain Folder..."))
                     _wantOpenAhdrTerrainFolder = true;

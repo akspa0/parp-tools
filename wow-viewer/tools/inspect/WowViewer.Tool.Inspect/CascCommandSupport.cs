@@ -31,6 +31,9 @@ public static class CascCommandSupport
             case "wmo":
                 RunWmo(tail);
                 break;
+            case "wmo-survey":
+                RunWmoSurvey(tail);
+                break;
             case "map-survey":
                 RunMapSurvey(tail);
                 break;
@@ -60,6 +63,7 @@ public static class CascCommandSupport
         Console.WriteLine("  casc products --install <wow install dir>");
         Console.WriteLine("  casc read --install <dir> --product <product> --cache <dir> (--id <fileDataId> | --path <virtual path> --listfile <id;path csv>...) [--out <file>]");
         Console.WriteLine("  casc exists --install <dir> --product <product> --cache <dir> --paths-file <one path per line> --listfile <id;path csv>... [--show-missing]");
+        Console.WriteLine("  casc wmo-survey --install <dir> --product <p> --cache <dir> --listfile <csv> [--limit <n>]");
     }
 
     private static void RunExists(string[] args)
@@ -255,6 +259,241 @@ public static class CascCommandSupport
         Console.WriteLine($"doodad defs={model.DoodadDefs.Count}, distinct doodad models={doodadNames.Count}, readable={doodadNames.Count(n => Read(n) is not null)}");
         foreach (string name in doodadNames.Take(4))
             Console.WriteLine($"  {name}");
+    }
+
+    /// <summary>
+    /// Spec 239: parses every listfile-named WMO root present locally in one product and tallies
+    /// parse failures by message, plus the MOGP sub-chunk sequence of each group that fails alone.
+    /// Local data only (no CDN), so the survey measures the install as-is.
+    /// </summary>
+    private static void RunWmoSurvey(string[] args)
+    {
+        string? install = GetOption(args, "--install");
+        string? product = GetOption(args, "--product");
+        string? cache = GetOption(args, "--cache");
+        List<string> listfiles = GetOptions(args, "--listfile");
+        int limit = int.TryParse(GetOption(args, "--limit"), out int parsedLimit) ? parsedLimit : int.MaxValue;
+        if (install is null || product is null || cache is null || listfiles.Count == 0)
+        {
+            Console.WriteLine("  casc wmo-survey --install <dir> --product <p> --cache <dir> --listfile <csv> [--limit <n>]");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        CommunityListfile listfile = CommunityListfile.Load(listfiles);
+        WowViewer.Core.IO.Files.FileDataIdPaths.Resolver = listfile.GetPath;
+        CascStorage storage = CascStorage.OpenLocal(install, product, cache);
+        var groupSuffix = new System.Text.RegularExpressions.Regex(@"_\d{3}\.wmo$|_lod\d\.wmo$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        List<KeyValuePair<uint, string>> roots = listfile.Entries
+            .Where(e => e.Value.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase) && !groupSuffix.IsMatch(e.Value) && storage.FileExists(e.Key))
+            .OrderBy(static e => e.Key)
+            .Take(limit)
+            .ToList();
+
+        int ok = 0, notLocal = 0, nonV17 = 0, failed = 0;
+        var materialShapes = new Dictionary<string, (int Count, string Example)>(StringComparer.Ordinal);
+        var momxSizes = new Dictionary<string, (int Count, string Example)>(StringComparer.Ordinal);
+        long batchTotal = 0, batchLargeFlag = 0, batchLargeDiffers = 0;
+        int maxLargeMaterialId = 0;
+        string? largeExample = null;
+        var failureMessages = new Dictionary<string, int>(StringComparer.Ordinal);
+        var failingGroupLayouts = new Dictionary<string, (int Count, string Example)>(StringComparer.Ordinal);
+        var parser = new WowViewer.Core.IO.Converters.WmoV17ToV14Converter();
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        foreach ((uint rootId, string rootPath) in roots)
+        {
+            if (storage.TryReadFile(rootId, out byte[]? root) != CascReadStatus.Ok || root is null)
+            {
+                notLocal++;
+                continue;
+            }
+
+            if (root.Length < 12 || BitConverter.ToUInt32(root, 8) != 17)
+            {
+                nonV17++;
+                continue;
+            }
+
+            TallyMaterials(root, rootPath, materialShapes, momxSizes);
+
+            var groups = new List<byte[]>();
+            bool groupMissing = false;
+            foreach (uint groupId in WowViewer.Core.IO.Converters.WmoV17ToV14Converter.ReadGroupFileDataIds(root))
+            {
+                if (storage.TryReadFile(groupId, out byte[]? groupBytes) != CascReadStatus.Ok || groupBytes is null)
+                {
+                    groupMissing = true;
+                    break;
+                }
+
+                groups.Add(groupBytes);
+            }
+
+            if (groupMissing)
+            {
+                notLocal++;
+                continue;
+            }
+
+            TallyBatches(groups, ref batchTotal, ref batchLargeFlag, ref batchLargeDiffers, ref maxLargeMaterialId, ref largeExample, rootPath);
+
+            try
+            {
+                parser.ParseV17ToModel(root, groups);
+                ok++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                string message = System.Text.RegularExpressions.Regex.Replace(ex.GetType().Name + ": " + ex.Message, @"0x[0-9A-Fa-f]+", "0x?");
+                failureMessages[message] = failureMessages.GetValueOrDefault(message) + 1;
+                foreach (byte[] group in groups)
+                {
+                    try
+                    {
+                        parser.ParseV17ToModel(root, [group]);
+                    }
+                    catch (Exception)
+                    {
+                        string layout = DescribeMogpLayout(group);
+                        (int count, string example) = failingGroupLayouts.GetValueOrDefault(layout, (0, rootPath));
+                        failingGroupLayouts[layout] = (count + 1, example);
+                    }
+                }
+            }
+        }
+
+        Console.WriteLine($"{product}: {roots.Count} WMO roots in listfile+root; ok={ok} failed={failed} notLocal={notLocal} nonV17={nonV17} in {stopwatch.Elapsed.TotalSeconds:F1}s");
+        foreach ((string message, int count) in failureMessages.OrderByDescending(static kv => kv.Value))
+            Console.WriteLine($"  {count,6}  {message}");
+        Console.WriteLine($"MOBA batches: {batchTotal}; flag 0x2 (material_id_large) set on {batchLargeFlag}; large id differs from material_id on {batchLargeDiffers}; max large id {maxLargeMaterialId}{(largeExample is null ? "" : $" e.g. {largeExample}")}");
+        Console.WriteLine("MOMT materials (shader | blend | texture slots set 1/2/3 | MOMX present):");
+        foreach ((string shape, (int count, string example)) in materialShapes.OrderByDescending(static kv => kv.Value.Count).Take(40))
+            Console.WriteLine($"  {count,7}  {shape}   e.g. {example}");
+        Console.WriteLine("MOMX size relative to MOMT count:");
+        foreach ((string shape, (int count, string example)) in momxSizes.OrderByDescending(static kv => kv.Value.Count).Take(10))
+            Console.WriteLine($"  {count,7}  {shape}   e.g. {example}");
+        Console.WriteLine("failing group layouts (flags | sub-chunks):");
+        foreach ((string layout, (int count, string example)) in failingGroupLayouts.OrderByDescending(static kv => kv.Value.Count).Take(25))
+            Console.WriteLine($"  {count,6}  {layout}   e.g. {example}");
+    }
+
+    private static void TallyBatches(List<byte[]> groups, ref long total, ref long largeFlag, ref long largeDiffers, ref int maxLarge, ref string? example, string rootPath)
+    {
+        foreach (byte[] group in groups)
+        {
+            // MOGP payload: 68-byte header then sub-chunks.
+            if (group.Length < 12 + 8 + 68)
+                continue;
+            int mogpSize = BitConverter.ToInt32(group, 12 + 4);
+            int end = Math.Min(group.Length, 12 + 8 + mogpSize);
+            for (int position = 12 + 8 + 68; position + 8 <= end;)
+            {
+                string id = new string(System.Text.Encoding.ASCII.GetString(group, position, 4).Reverse().ToArray());
+                int size = BitConverter.ToInt32(group, position + 4);
+                if (size < 0)
+                    break;
+                if (id == "MOBA")
+                {
+                    for (int record = position + 8; record + 24 <= Math.Min(end, position + 8 + size); record += 24)
+                    {
+                        total++;
+                        ushort large = BitConverter.ToUInt16(group, record + 10);
+                        byte flags = group[record + 22];
+                        byte materialId = group[record + 23];
+                        if ((flags & 0x2) != 0)
+                        {
+                            largeFlag++;
+                            maxLarge = Math.Max(maxLarge, large);
+                            if (large != materialId)
+                            {
+                                largeDiffers++;
+                                example ??= rootPath;
+                            }
+                        }
+                    }
+                }
+
+                position += 8 + size;
+            }
+        }
+    }
+
+    private static void TallyMaterials(
+        byte[] root,
+        string rootPath,
+        Dictionary<string, (int Count, string Example)> materialShapes,
+        Dictionary<string, (int Count, string Example)> momxSizes)
+    {
+        int momt = -1, momtSize = 0, momxSize = -1;
+        for (int position = 0; position + 8 <= root.Length;)
+        {
+            string id = new string(System.Text.Encoding.ASCII.GetString(root, position, 4).Reverse().ToArray());
+            int size = BitConverter.ToInt32(root, position + 4);
+            if (size < 0 || position + 8L + size > root.Length)
+                break;
+            if (id == "MOMT") { momt = position + 8; momtSize = size; }
+            if (id == "MOMX") momxSize = size;
+            position += 8 + size;
+        }
+
+        if (momt < 0)
+            return;
+
+        int materialCount = momtSize / 64;
+        if (momxSize >= 0)
+        {
+            string key = materialCount == 0 ? $"size={momxSize}" : $"bytes/material={(double)momxSize / materialCount:0.##} (size {momxSize % Math.Max(1, materialCount) == 0})";
+            (int c, string e) = momxSizes.GetValueOrDefault(key, (0, rootPath));
+            momxSizes[key] = (c + 1, e);
+        }
+
+        for (int i = 0; i < materialCount; i++)
+        {
+            int o = momt + i * 64;
+            uint shader = BitConverter.ToUInt32(root, o + 4);
+            uint blend = BitConverter.ToUInt32(root, o + 8);
+            uint t1 = BitConverter.ToUInt32(root, o + 12);
+            uint t2 = BitConverter.ToUInt32(root, o + 24);
+            uint t3 = BitConverter.ToUInt32(root, o + 36);
+            string shape = $"shader {shader,2} | blend {blend} | {(t1 != 0 ? 1 : 0)}{(t2 != 0 ? 1 : 0)}{(t3 != 0 ? 1 : 0)} | momx {(momxSize >= 0 ? "y" : "n")}";
+            (int c, string e) = materialShapes.GetValueOrDefault(shape, (0, rootPath));
+            materialShapes[shape] = (c + 1, e);
+        }
+    }
+
+    private static string DescribeMogpLayout(byte[] group)
+    {
+        var parts = new List<string>();
+        for (int position = 0; position + 8 <= group.Length;)
+        {
+            string id = new string(System.Text.Encoding.ASCII.GetString(group, position, 4).Reverse().ToArray());
+            int size = BitConverter.ToInt32(group, position + 4);
+            if (size < 0)
+                break;
+
+            if (id == "MOGP" && position + 8 + 68 <= group.Length)
+            {
+                uint flags = BitConverter.ToUInt32(group, position + 8 + 8);
+                var sub = new List<string>();
+                for (int inner = position + 8 + 68; inner + 8 <= Math.Min(group.Length, position + 8 + size);)
+                {
+                    string subId = new string(System.Text.Encoding.ASCII.GetString(group, inner, 4).Reverse().ToArray());
+                    int subSize = BitConverter.ToInt32(group, inner + 4);
+                    if (subSize < 0)
+                        break;
+                    sub.Add(subId);
+                    inner += 8 + subSize;
+                }
+
+                parts.Add($"0x{flags:X8} | {string.Join(' ', sub)}");
+            }
+
+            position += 8 + size;
+        }
+
+        return string.Join(" ; ", parts);
     }
 
     /// <summary>

@@ -57,10 +57,39 @@ public class TerrainRenderer : IDisposable
 
     private bool _wireframe;
 
-    public bool ShowLayer0 { get; set; } = true;
-    public bool ShowLayer1 { get; set; } = true;
-    public bool ShowLayer2 { get; set; } = true;
-    public bool ShowLayer3 { get; set; } = true;
+    private readonly bool[] _showLayers = Enumerable.Repeat(true, TerrainTileMeshBuilder.MaxLayers).ToArray();
+
+    public bool ShowLayer0 { get => _showLayers[0]; set => _showLayers[0] = value; }
+    public bool ShowLayer1 { get => _showLayers[1]; set => _showLayers[1] = value; }
+    public bool ShowLayer2 { get => _showLayers[2]; set => _showLayers[2] = value; }
+    public bool ShowLayer3 { get => _showLayers[3]; set => _showLayers[3] = value; }
+
+    /// <summary>Visibility of texture layer <paramref name="layer"/> (0 = base, up to <see cref="TerrainTileMeshBuilder.MaxLayers"/> - 1).</summary>
+    public bool GetShowLayer(int layer) => (uint)layer < (uint)_showLayers.Length && _showLayers[layer];
+
+    public void SetShowLayer(int layer, bool visible)
+    {
+        if ((uint)layer < (uint)_showLayers.Length)
+            _showLayers[layer] = visible;
+    }
+
+    /// <summary>Highest per-chunk layer count among resident tiles; drives how many layer toggles the UI offers.</summary>
+    public int MaxResidentLayerCount => _tiles.Count == 0 ? 0 : _tiles.Max(static t => t.MaxChunkLayerCount);
+
+    private int ShowLayerMask
+    {
+        get
+        {
+            int mask = 0;
+            for (int layer = 0; layer < _showLayers.Length; layer++)
+            {
+                if (_showLayers[layer])
+                    mask |= 1 << layer;
+            }
+
+            return mask;
+        }
+    }
     public bool UseWorldUvForDiffuse { get; set; } = true;
     public bool ShowChunkGrid { get; set; }
     public bool ShowTileGrid { get; set; }
@@ -602,12 +631,15 @@ public class TerrainRenderer : IDisposable
 
         foreach (var tile in _tiles)
         {
-            if (tile.AlphaShadowArrayTexture == 0)
-                continue;
+            foreach (uint arrayTexture in new[] { tile.AlphaShadowArrayTexture, tile.AlphaExtArrayTexture })
+            {
+                if (arrayTexture == 0)
+                    continue;
 
-            _gl.BindTexture(TextureTarget.Texture2DArray, tile.AlphaShadowArrayTexture);
-            _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, minFilter);
-            _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, magFilter);
+                _gl.BindTexture(TextureTarget.Texture2DArray, arrayTexture);
+                _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, minFilter);
+                _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, magFilter);
+            }
         }
 
         _gl.BindTexture(TextureTarget.Texture2D, 0);
@@ -716,14 +748,11 @@ public class TerrainRenderer : IDisposable
         _tileShader.SetFloat("uShadowStrength", Math.Clamp(ShadowStrength, 0f, 1f));
         _tileShader.SetInt("uShowContours", ShowContours ? 1 : 0);
         _tileShader.SetFloat("uContourInterval", ContourInterval);
-        _tileShader.SetInt("uShowLayer0", ShowLayer0 ? 1 : 0);
-        _tileShader.SetInt("uShowLayer1", ShowLayer1 ? 1 : 0);
-        _tileShader.SetInt("uShowLayer2", ShowLayer2 ? 1 : 0);
-        _tileShader.SetInt("uShowLayer3", ShowLayer3 ? 1 : 0);
+        _tileShader.SetInt("uShowLayerMask", ShowLayerMask);
 
         Uniform1Counted(_uTileUseWorldUvLoc, UseWorldUvForDiffuse ? 1 : 0);
         Uniform1Counted(_uTileUseMccvLoc, UseMccv ? 1 : 0);
-        Uniform1Counted(_uTileAlphaDebugChannelLoc, Math.Clamp(AlphaMaskChannel, 0, 3));
+        Uniform1Counted(_uTileAlphaDebugChannelLoc, Math.Clamp(AlphaMaskChannel, 0, TerrainTileMeshBuilder.MaxLayers - 1));
 
         // Wireframe overlay default: flat-color line pass (see chunk-path note).
         _tileShader.SetInt("uWireframe", 0);
@@ -736,7 +765,7 @@ public class TerrainRenderer : IDisposable
         LastFrameDrawCalls = 0;
 
         bool baseVisible = ShowLayer0;
-        bool overlayVisible = ShowLayer1 || ShowLayer2 || ShowLayer3;
+        bool overlayVisible = (ShowLayerMask & ~1) != 0;
         bool blendOverlaysOnly = !baseVisible && overlayVisible;
 
         List<TerrainTileMesh>? wireframeTiles = _wireframe ? new List<TerrainTileMesh>() : null;
@@ -790,7 +819,9 @@ public class TerrainRenderer : IDisposable
 
             BindTextureArray(0, tile.DiffuseArrayTexture);
             BindTextureArray(1, tile.AlphaShadowArrayTexture);
+            BindTextureArray(2, tile.AlphaExtArrayTexture);
             _gl.Uniform1(_uTileDiffuseLayerCountLoc, tile.DiffuseLayerCount);
+            _tileShader.SetInt("uHasAlphaExt", tile.AlphaExtArrayTexture != 0 ? 1 : 0);
             LastFrameUniform1Calls++;
             _tileShader.SetFloat("uOpacity", tileOpacity);
 
@@ -1708,6 +1739,7 @@ layout(location = 2) in vec2 aTexCoord;
 layout(location = 3) in uint aChunkSlice;
 layout(location = 4) in uvec4 aTexIdx;
 layout(location = 5) in vec4 aVertexColor;
+layout(location = 6) in uvec4 aTexIdxExt;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -1720,6 +1752,7 @@ out vec2 vTexCoord;
 out vec4 vVertexColor;
 flat out uint vChunkSlice;
 flat out uvec4 vTexIdx;
+flat out uvec4 vTexIdxExt;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
@@ -1730,6 +1763,7 @@ void main() {
     vVertexColor = aVertexColor;
     vChunkSlice = aChunkSlice;
     vTexIdx = aTexIdx;
+    vTexIdxExt = aTexIdxExt;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -1742,17 +1776,17 @@ in vec2 vTexCoord;
 in vec4 vVertexColor;
 flat in uint vChunkSlice;
 flat in uvec4 vTexIdx;
+flat in uvec4 vTexIdxExt;
 
 uniform sampler2DArray uDiffuseArray;
 uniform sampler2DArray uAlphaShadowArray;
+uniform sampler2DArray uAlphaExtArray;
+uniform int uHasAlphaExt;
 uniform int uDiffuseLayerCount;
 uniform int uUseWorldUV;
 uniform int uUseMccv;
 uniform int uAlphaDebugChannel;
-uniform int uShowLayer0;
-uniform int uShowLayer1;
-uniform int uShowLayer2;
-    uniform int uShowLayer3;
+uniform int uShowLayerMask;
     uniform int uShowChunkGrid;
     uniform int uShowTileGrid;
     uniform int uShowCellGrid;
@@ -1787,32 +1821,28 @@ void main() {
     vec2 diffuseUV = (uUseWorldUV == 1) ? (vec2(-vWorldPos.y, -vWorldPos.x) * texScale) : (vTexCoord * 8.0);
 
     vec4 alphaShadow = texture(uAlphaShadowArray, vec3(vTexCoord, float(vChunkSlice)));
-    bool has0 = HasLayer(vTexIdx.x);
-    bool has1 = HasLayer(vTexIdx.y);
-    bool has2 = HasLayer(vTexIdx.z);
-    bool has3 = HasLayer(vTexIdx.w);
+    vec4 alphaExt = (uHasAlphaExt == 1) ? texture(uAlphaExtArray, vec3(vTexCoord, float(vChunkSlice))) : vec4(0.0);
 
-    float a1Raw = alphaShadow.r;
-    float a2Raw = alphaShadow.g;
-    float a3Raw = alphaShadow.b;
-    float a1 = (uShowLayer1 == 1 && has1) ? a1Raw : 0.0;
-    float a2 = (uShowLayer2 == 1 && has2) ? a2Raw : 0.0;
-    float a3 = (uShowLayer3 == 1 && has3) ? a3Raw : 0.0;
+    // Up to 8 layers: indices 0..3 in vTexIdx and 4..7 in vTexIdxExt; alpha 1..3 in the shadow
+    // array RGB and alpha 4..7 in the extension array RGBA. Layer 0 has no alpha.
+    uint texIdx[8] = uint[8](vTexIdx.x, vTexIdx.y, vTexIdx.z, vTexIdx.w, vTexIdxExt.x, vTexIdxExt.y, vTexIdxExt.z, vTexIdxExt.w);
+    float alphaRaw[8] = float[8](1.0, alphaShadow.r, alphaShadow.g, alphaShadow.b, alphaExt.r, alphaExt.g, alphaExt.b, alphaExt.a);
+    bool visible[8];
+    for (int i = 0; i < 8; i++)
+        visible[i] = ((uShowLayerMask >> i) & 1) == 1 && HasLayer(texIdx[i]);
 
     float alphaDbg = -1.0;
     if (uShowAlphaMask == 1) {
         alphaDbg = 1.0;
-        if (uAlphaDebugChannel == 1) alphaDbg = (uShowLayer1 == 1 && has1) ? a1Raw : 0.0;
-        else if (uAlphaDebugChannel == 2) alphaDbg = (uShowLayer2 == 1 && has2) ? a2Raw : 0.0;
-        else if (uAlphaDebugChannel == 3) alphaDbg = (uShowLayer3 == 1 && has3) ? a3Raw : 0.0;
-        else {
+        if (uAlphaDebugChannel >= 1 && uAlphaDebugChannel <= 7) {
+            alphaDbg = visible[uAlphaDebugChannel] ? alphaRaw[uAlphaDebugChannel] : 0.0;
+        } else {
             float sum = 0.0;
             int count = 0;
-            if (uShowLayer1 == 1 && has1) { sum += a1Raw; count++; }
-            if (uShowLayer2 == 1 && has2) { sum += a2Raw; count++; }
-            if (uShowLayer3 == 1 && has3) { sum += a3Raw; count++; }
-            if (count > 0) alphaDbg = sum / float(count);
-            else alphaDbg = 0.0;
+            for (int i = 1; i < 8; i++) {
+                if (visible[i]) { sum += alphaRaw[i]; count++; }
+            }
+            alphaDbg = (count > 0) ? sum / float(count) : 0.0;
         }
     }
 
@@ -1822,21 +1852,14 @@ void main() {
     vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility;
     vec3 result = vec3(1.0);
 
-    if (uShowLayer0 == 1 && has0) {
-        vec4 c0 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.x)));
-        result = c0.rgb * lighting;
+    if (visible[0]) {
+        result = texture(uDiffuseArray, vec3(diffuseUV, float(texIdx[0]))).rgb * lighting;
     }
-    if (uShowLayer1 == 1 && has1) {
-        vec4 c1 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.y)));
-        result = mix(result, c1.rgb * lighting, a1);
-    }
-    if (uShowLayer2 == 1 && has2) {
-        vec4 c2 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.z)));
-        result = mix(result, c2.rgb * lighting, a2);
-    }
-    if (uShowLayer3 == 1 && has3) {
-        vec4 c3 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.w)));
-        result = mix(result, c3.rgb * lighting, a3);
+    for (int i = 1; i < 8; i++) {
+        if (!visible[i])
+            continue;
+        vec4 layerColor = texture(uDiffuseArray, vec3(diffuseUV, float(texIdx[i])));
+        result = mix(result, layerColor.rgb * lighting, alphaRaw[i]);
     }
 
     // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.
@@ -1852,7 +1875,8 @@ void main() {
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
     vec3 finalColor = mix(uFogColor, result, fogFactor);
 
-    if (uShowContours == 1 && uShowLayer0 == 1) {
+    bool baseLayerShown = (uShowLayerMask & 1) == 1;
+    if (uShowContours == 1 && baseLayerShown) {
         float height = vWorldPos.z;
         float interval = max(uContourInterval, 0.5);
         float dh = fwidth(height);
@@ -1877,7 +1901,7 @@ void main() {
         finalColor = vec3(alphaDbg);
     }
 
-    if (uShowLayer0 == 1) {
+    if (baseLayerShown) {
         if (uShowChunkGrid == 1) {
             float chunkSize = 33.333;
             vec2 chunkUv = vWorldPos.xy / chunkSize;
@@ -1931,11 +1955,11 @@ void main() {
     }
 
     float outAlpha = 1.0;
-    if (uShowLayer0 == 0) {
+    if (!baseLayerShown) {
         float inv = 1.0;
-        if (uShowLayer1 == 1 && has1) inv *= (1.0 - a1);
-        if (uShowLayer2 == 1 && has2) inv *= (1.0 - a2);
-        if (uShowLayer3 == 1 && has3) inv *= (1.0 - a3);
+        for (int i = 1; i < 8; i++) {
+            if (visible[i]) inv *= (1.0 - alphaRaw[i]);
+        }
         outAlpha = 1.0 - inv;
     }
 
@@ -1947,6 +1971,7 @@ void main() {
         program.Use();
         program.SetInt("uDiffuseArray", 0);
         program.SetInt("uAlphaShadowArray", 1);
+        program.SetInt("uAlphaExtArray", 2);
         return program;
     }
 

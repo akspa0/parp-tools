@@ -157,17 +157,7 @@ public partial class ViewerApp
                 ImGui.SameLine();
 
                 // Layer visibility (single source of truth)
-                bool l0 = renderer.ShowLayer0;
-                if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
-                ImGui.SameLine();
-                bool l1 = renderer.ShowLayer1;
-                if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
-                ImGui.SameLine();
-                bool l2 = renderer.ShowLayer2;
-                if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
-                ImGui.SameLine();
-                bool l3 = renderer.ShowLayer3;
-                if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
+                DrawTerrainLayerToggles(renderer);
                 ImGui.SameLine();
                 bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
                     ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
@@ -451,6 +441,24 @@ public partial class ViewerApp
     }
 
     /// <summary>
+    /// Base + L1..L3 always; L4..L7 appear once resident terrain has chunks with that many layers
+    /// (modern maps carry up to 8 MCLY layers per chunk).
+    /// </summary>
+    private static void DrawTerrainLayerToggles(TerrainRenderer renderer)
+    {
+        int layerCount = Math.Clamp(renderer.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers);
+        for (int layer = 0; layer < layerCount; layer++)
+        {
+            if (layer > 0)
+                ImGui.SameLine();
+
+            bool visible = renderer.GetShowLayer(layer);
+            if (ImGui.Checkbox(layer == 0 ? "Base" : $"L{layer}", ref visible))
+                renderer.SetShowLayer(layer, visible);
+        }
+    }
+
+    /// <summary>
     /// Terrain layer, grid, hole, and overlay toggles. Drawn collapsed inside the
     /// workspace sidebar (the bottom bar exposes the same controls) and reusable
     /// wherever the full toggle set is needed.
@@ -458,17 +466,7 @@ public partial class ViewerApp
     private void DrawLayersGridsOverlaysContent(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
     {
         ImGui.TextDisabled("Terrain Layers");
-        bool l0 = renderer.ShowLayer0;
-        if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
-        ImGui.SameLine();
-        bool l1 = renderer.ShowLayer1;
-        if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
-        ImGui.SameLine();
-        bool l2 = renderer.ShowLayer2;
-        if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
-        ImGui.SameLine();
-        bool l3 = renderer.ShowLayer3;
-        if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
+        DrawTerrainLayerToggles(renderer);
 
         bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
             ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally

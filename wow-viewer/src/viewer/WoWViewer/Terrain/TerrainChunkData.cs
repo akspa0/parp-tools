@@ -31,7 +31,7 @@ public class TerrainChunkData
     /// <summary>Hole mask from MCNK header (16-bit, one bit per 2×2 cell group).</summary>
     public int HoleMask { get; init; }
 
-    /// <summary>Texture layers for this chunk (up to 4).</summary>
+    /// <summary>Texture layers for this chunk (all MCLY entries; the tile renderer draws up to 8).</summary>
     public TerrainLayer[] Layers { get; init; } = Array.Empty<TerrainLayer>();
 
     /// <summary>Alpha map data per layer (layer index → 64×64 byte array). Layer 0 has no alpha.</summary>

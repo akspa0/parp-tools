@@ -306,14 +306,15 @@ The former File > Load from Rosetta Datastore menu has been retired.
 Added in v0.5.4-alpha. Tested against **WoW: Forever**, the `wow_classic_beta` product, build 1.60.1.69876 (a 12.0-based client).
 
 ### Opening an install
-1. **File → Open CASC Install (local + CDN fill)...** and pick the folder that contains `.build.info` (for example the `World of Warcraft` folder the Battle.net launcher installed).
-   - Every product in `.build.info` opens (for example `wow_classic_beta` and `wow_classic_era`). Reads try the newest version first.
-   - **CDN fill** downloads files the install lists but does not have on disk, for the same build, and caches them under `output\cache\casc`. In the tested install most textures were not on disk, so without CDN fill terrain and models render untextured.
-   - **File → Open CASC Install (local)...** never downloads game data. If the launcher has updated `.build.info` before downloading that build's manifests, those manifests alone are fetched; this is logged.
-2. The map list is read from the build's `Map.db2` (for example **[451] Development Land**). Load a map as usual.
+1. **File → Open CASC Install (local + CDN fill)...** (or **(local)...** to read only what is on disk) and pick the folder that contains `.build.info` (for example the `World of Warcraft` folder the Battle.net launcher installed). Picking a game folder such as `_retail_` also works.
+2. The **Open CASC Install** window lists every game version in `.build.info` (for example `1.60.1.69876 wow_classic_beta` and `1.15.9.69722 wow_classic_era`), and shows which ones have a game folder on disk. Select one.
+   - **Fetch missing files from Blizzard's CDN** starts ticked when opened with **(local + CDN fill)** and unticked with **(local)**. It downloads files the build lists but the install does not have on disk, for the same build, and caches them under `output\cache\casc`. In the tested install most `wow_classic_beta` textures were not on disk, so without it terrain and models render untextured. With it off, no game data is downloaded; if the launcher has updated `.build.info` before downloading that build's manifests, those manifests alone are fetched and this is logged.
+   - **Fall back to the other products for missing files** (off by default) reads a file from another listed version when the selected one lacks it. This mixes data across game versions.
+   - The selected version's build number picks the DB2 definitions.
+3. The map list is read from the build's `Map.db2` (for example **[451] Development Land**). Load a map as usual.
 
 ### What is supported
-- Terrain tiles from the WDT's `MAID` table. Full-resolution tileset textures blended per chunk from `MDID`, with 4-bit alpha maps.
+- Terrain tiles from the WDT's `MAID` table. Full-resolution tileset textures blended per chunk from `MDID`, up to 8 layers per chunk. The layer bar shows L4–L7 once loaded terrain uses them (Azeroth in 1.60.1 has chunks with 5 to 8 layers).
 - M2 models (`MD21`): skins from `SFID`, textures from `TXID`.
 - WMO buildings: groups from `GFID`, material textures from `MOMT` FileDataIDs, doodads from `MODI`.
 - Area names, lights and liquid types from the build's DB2 tables, using WoWDBDefs.

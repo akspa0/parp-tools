@@ -18,7 +18,7 @@ public sealed unsafe class WmoObjectRenderer : IDisposable
     private readonly ObjectCaptureShader _shader;
     private readonly TextureCache _textureCache;
     private readonly List<GpuGroup> _groups = [];
-    private readonly Dictionary<byte, uint> _materialTextures = new();
+    private readonly Dictionary<int, uint> _materialTextures = new();
     private bool _disposed;
 
     public Vector3 BoundsMin { get; private set; }
@@ -38,9 +38,9 @@ public sealed unsafe class WmoObjectRenderer : IDisposable
         BoundsMin = wmo.BoundsMin;
         BoundsMax = wmo.BoundsMax;
 
-        for (byte m = 0; m < wmo.Materials.Count; m++)
+        for (int m = 0; m < wmo.Materials.Count; m++)
         {
-            string texName = wmo.Materials[m].Texture1Name;
+            string? texName = wmo.Materials[m].BaseTextureName;
             _materialTextures[m] = string.IsNullOrEmpty(texName) ? 0 : _textureCache.GetOrCreateTexture(texName);
         }
 
@@ -153,9 +153,7 @@ public sealed unsafe class WmoObjectRenderer : IDisposable
             _gl.BindVertexArray(g.Vao);
             foreach (var batch in g.Batches)
             {
-                if (batch.MaterialId == 0xFF)
-                    continue;
-
+                // Material ids are 16-bit (Legion+ material_id_large), so 0xFF can be a real material.
                 uint tex = _materialTextures.GetValueOrDefault(batch.MaterialId, 0u);
                 _gl.BindTexture(TextureTarget.Texture2D, tex);
                 _shader.SetHasTexture(tex != 0);
