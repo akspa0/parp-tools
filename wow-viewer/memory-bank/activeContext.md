@@ -28,8 +28,21 @@ light count, so modern data renders one draw call per placement).
 Also newly opened and operator-prioritised: [Spec 243](../specs/243-modern-to-legacy-map-conversion/spec.md)
 — one-way modern → legacy conversion to **LK v18** and **Alpha 0.5.3** outputs, merging multi-layer
 alpha/texture-id stacks, batch many maps, near-zero-touch UI, optional asset inclusion. Old → modern
-writers are explicitly out of scope. Both specs are registered in `STATUS.md` and their epics
-(242 → Epic 3, 243 → Epic 4); neither is implemented.
+writers are explicitly out of scope.
+
+Two more opened 2026-09-18 from the same session:
+- [Spec 244](../specs/244-modern-liquid-flow/spec.md) — read the modern WDT **`MAI2`**
+  `liquidFlowTexture` (R = +Y west, G = −X south, 128 = zero; chunk is ≥ 12.0.5.66330 and is listed in
+  the v0.6.0-alpha notes as uninterpreted), surface flow as liquid context in the viewer, publish one
+  shared flow datum, and state per-target legacy disposition (Alpha MCLQ flow vector vs LK MH2O drop).
+  Grounded against [`wowdev.wiki/WDT`](https://wowdev.wiki/WDT), not guessed.
+- [Spec 245](../specs/245-modern-chunk-completeness-survey/spec.md) — inventory every chunk the modern
+  readers discard (WDT/`_occ`/`_lgt`, root ADT, `_tex0`, `_obj0`, `_lod`) with counts, documented
+  meaning, confidence and disposition, plus per-chunk legacy build-in feasibility including alpha-mask
+  and texture-id re-expression and the loss each incurs.
+
+All four specs (242 Epic 3, 243/244/245 Epic 4) are registered in `STATUS.md`; none is implemented.
+Note the repo already models a legacy MCLQ flow vector (`MclqChunk`), which is the Alpha side of 244.
 
 ## Spec 224 governance audit — COMPLETE (2026-09-11)
 

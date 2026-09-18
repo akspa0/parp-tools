@@ -30,6 +30,8 @@ the current owner or registry names a forward pointer; do not infer closure from
 | 15 | [240 Format Conformance](240-format-conformance/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-17: wowdev.wiki × readers audit against `wow_classic_beta` 1.60.1 ([research.md](240-format-conformance/research.md)); already fixed: WMO MOBA 16-bit material ids (64% of batches), GFID per-LOD groups, shader-23 base texture, 8 terrain layers. WTL (MIT) and WoWFormatLib (no license: behaviour only) as references | Phase 2 conformance survey reproduces research.md WMO counts; then WMO per-shader materials (MVP) |
 | 16 | [242 WMO Instancing Performance](242-wmo-instancing-performance/spec.md) | **v0.6** · spec authored 2026-09-18 (operator-directed): v0.6.0-alpha regression — the scene-light gate disables WMO shell instancing globally, so modern data renders one draw call per placement (~5.5 FPS, 16,431 WMO draw calls on `wow_classic_beta` 1.60.1 `Azeroth`). Fix: decide instancing per placement from whether a light actually reaches it | speckit-plan (FR-006 god-class check first), then implement; receipt must carry a real before/after FPS + draw-call pair |
 | 17 | [243 Modern-to-Legacy Map Conversion](243-modern-to-legacy-map-conversion/spec.md) | **v0.6** · spec authored 2026-09-18 (operator-directed, "important and overlooked too long"): one-way **modern → legacy** conversion producing **LK v18 ADT/WDT** and **Alpha 0.5.3 WDT**, merging multi-layer alpha/texture-id stacks into the target's layer model; batch many maps in one run; near-zero-touch UI (direction + target + input only); optional asset inclusion with a manifest. Old → modern writers explicitly out of scope | speckit-plan (FR-009 owned service + UI inventory row), then implement; receipt must include a real modern map converted to both targets and loaded in the viewer |
+| 18 | [244 Modern Liquid Directional Flow](244-modern-liquid-flow/spec.md) | **v0.6** · spec authored 2026-09-18 (operator-directed): read the modern WDT **`MAI2`** chunk (`MapFileDataIDs2[4096]`, ≥ 12.0.5.66330) and its `liquidFlowTexture`, decoded as R = +Y flows west / G = −X flows south / 128 = zero; surface flow as liquid **context in the viewer UI**; expose one shared flow datum for other consumers; state legacy disposition (Alpha MCLQ flow vector preserved, LK MH2O dropped). Flow-aware *rendering* out of scope. `MAI2` is currently a documented v0.6.0-alpha limitation | speckit-plan (confirm magnitude scaling against the real texture), then implement; receipt needs a real-map UI witness |
+| 19 | [245 Modern Chunk Completeness Survey](245-modern-chunk-completeness-survey/spec.md) | **v0.6** · spec authored 2026-09-18 (operator-directed): inventory **every** chunk in the modern WDT/`_occ`/`_lgt`, root ADT, `_tex0`, `_obj0`, `_lod` families with counts + current handling + code reference; per ignored chunk record documented meaning, confidence and disposition; per candidate state **legacy build-in feasibility** for LK v18 and Alpha 0.5.3 including alpha-mask and texture-id re-expression, with the loss stated. Research deliverable; no runtime change | speckit-plan; receipt is a reproducible corpus walk (counts + command), and findings feed 243/244 |
 
 ## v0.6 release scope (pinned 2026-09-16)
 
@@ -43,10 +45,12 @@ Worked on the current `v0.5.4-dev` branch. Release theme: **modern data access +
 | 240 Format Conformance | per-format survey + reader/renderer gaps from the wowdev.wiki audit | 3 (after 239 loads real builds; survey first) |
 | 242 WMO Instancing Performance | fix the v0.6.0-alpha per-placement regression so modern data is interactive again | 4 (blocking modern-data usability; opened 2026-09-18) |
 | 243 Modern-to-Legacy Map Conversion | make modern terrain usable in the legacy eras: merge multi-layer chunks into LK v18 and Alpha 0.5.3 outputs, batched, low-touch | 5 (operator priority, 2026-09-18) |
+| 244 Modern Liquid Directional Flow | stop ignoring the WDT `MAI2` liquid flow map; give liquids their flow context in the viewer, and state its legacy disposition | 6 (after 243's service shape; independent of 245) |
+| 245 Modern Chunk Completeness Survey | one authoritative inventory of everything the modern readers discard, and which of it can be re-expressed in legacy targets | 7 (research; feeds 243/244) |
 
 Carried in from v0.5.4-dev: 236 (active) remains the current owner until its gates close. 242 was
-opened from the v0.6.0-alpha build and is not implemented in it; 243 is new, unimplemented, and
-operator-prioritised.
+opened from the v0.6.0-alpha build and is not implemented in it; 243, 244 and 245 are new,
+unimplemented, and operator-directed.
 
 ## Standing gates (operator-owned)
 

@@ -20,6 +20,11 @@ Last updated: 2026-09-18
   - Core requirement: merge the multi-layer modern chunk (up to 8 layers + `AMAP` weights) into the target's layer model, combining texture ids and alpha masks, with a per-tile report of what was merged/dropped/unresolved.
   - Batch many maps in one run with per-map failure isolation; near-zero-touch UI (direction + target + input only); optional referenced-asset inclusion with a manifest.
   - New dir `specs/243-modern-to-legacy-map-conversion/` (`spec.md` + `checklists/requirements.md`); registered in `STATUS.md` row 17 / v0.6 scope table and Epic 4.
+- **Specs 244 + 245 opened (operator-directed, modern-data gaps)**:
+  - Grounded the "new water directional flow" claim against [`wowdev.wiki/WDT`](https://wowdev.wiki/WDT) rather than guessing: the modern WDT **`MAI2`** chunk (≥ `12.0.5.66330`) is `MapFileDataIDs2[64*64]` at 32 bytes/entry, and its first field is `liquidFlowTexture` — documented as "R channel = +Y flows west, +G = −X flows south, 128 is 0 flow"; the other seven fields are `unknown1..unknown7`. This is the same `MAI2` the v0.6.0-alpha notes list as uninterpreted.
+  - **Spec 244** (`specs/244-modern-liquid-flow/`): decode `MAI2` + resolve the flow texture through the FileDataID/CASC path, decode to a normalized vector with 128 = zero, surface it as liquid **context in the viewer UI**, publish one shared flow datum, and report per-target legacy disposition (Alpha MCLQ already has a flow vector — `MclqChunk.MclqFlowVector`; LK `MH2O` has none → dropped). Flow-aware *rendering* out of scope.
+  - **Spec 245** (`specs/245-modern-chunk-completeness-survey/`): inventory every chunk in the modern WDT/`_occ`/`_lgt`, root ADT, `_tex0`, `_obj0`, `_lod` families with counts, current handling, code reference, documented meaning + confidence, and a disposition; then, per candidate, state **legacy build-in feasibility** for LK v18 and Alpha 0.5.3 including alpha-mask and texture-id re-expression, with the loss stated. Research deliverable, no runtime change; feeds 243/244.
+  - Registered both in `STATUS.md` (rows 18/19, v0.6 scope table) and Epic 4 (members + Next).
 - **Git**: release commit `c247f383`; tag `v0.6.0-alpha` created locally (push left to the operator — it triggers `wowviewer-release.yml` and the GitHub prerelease).
 
 ## 2026-09-16 — Spec 236 Phase 2 WMO Emitted-Light Casting Slice
