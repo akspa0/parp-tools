@@ -6,6 +6,12 @@ re-deriving context or tripping over each other's dependencies.
 
 Read [STATUS.md](./STATUS.md) for per-spec detail. This file is only the **order and the reasons**.
 
+> [!IMPORTANT]
+> **Superseded for the v0.6 modern-data lanes (2026-09-18).** This plan predates the v0.6 modern-data
+> work and does not include Specs 242–246. The current implementation order, with the next bounded
+> action and proof owner per lane, lives in [`memory-bank/activeContext.md`](../memory-bank/activeContext.md)
+> ("Implement next — five v0.6 lanes"). Use the blocks below only for the older specs they name.
+
 ---
 
 ## Ordering rationale

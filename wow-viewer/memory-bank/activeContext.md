@@ -13,67 +13,43 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
 on-demand context, never default reading. Landed-work narrative lives in `progress.md`, not here —
 this file states only the current lane and what's still open.
 
-## Release lane — v0.6.0-alpha committed + tagged locally (2026-09-18)
+## Current state — v0.6.0-alpha released, push pending (2026-09-18)
 
-Docs + version bump for the v0.6 line are in (`eng/Version.props` → `0.6.0-alpha`; release notes,
-CHANGELOG and README/era-matrix updates; USERGUIDE §12–13 and CLI-TOOLS re-attributed). Viewer build
-is clean and the title bar reads `v0.6.0-alpha`. Release commit `c247f383`, tag `v0.6.0-alpha` created
-locally; **push (and the GitHub prerelease) left to the operator.**
+`eng/Version.props` is `0.6.0` / `InformationalVersion 0.6.0-alpha`; release notes, CHANGELOG, README,
+era matrix, USERGUIDE §12–13 and CLI-TOOLS are updated. Release commit `c247f383`, tag `v0.6.0-alpha`
+created **locally** — the operator still has to push (it fires `wowviewer-release.yml` and the GitHub
+prerelease). Viewer build clean; title bar reads `v0.6.0-alpha` (operator screenshot).
 
-Operator decided (2026-09-18) to ship the alpha as-is and track the modern-data WMO regression as a
-new spec rather than fix it inside the release: [Spec 242](../specs/242-wmo-instancing-performance/spec.md)
-(per-placement instancing under scene lights; `WorldScene.cs` gates WMO batching on the whole-scene
-light count, so modern data renders one draw call per placement).
+## Implement next — five v0.6 lanes (none implemented)
 
-Also newly opened and operator-prioritised: [Spec 243](../specs/243-modern-to-legacy-map-conversion/spec.md)
-— one-way modern → legacy conversion to **LK v18** and **Alpha 0.5.3** outputs, merging multi-layer
-alpha/texture-id stacks, batch many maps, near-zero-touch UI, optional asset inclusion. Old → modern
-writers are explicitly out of scope.
+Pick exactly one; load its `spec.md`, then `plan.md`/`tasks.md`, then only its linked receipt.
+Ordered by dependency, not by number.
 
-Two more opened 2026-09-18 from the same session:
-- [Spec 244](../specs/244-modern-liquid-flow/spec.md) — read the modern WDT **`MAI2`**
-  `liquidFlowTexture` (R = +Y west, G = −X south, 128 = zero; chunk is ≥ 12.0.5.66330 and is listed in
-  the v0.6.0-alpha notes as uninterpreted), surface flow as liquid context in the viewer, publish one
-  shared flow datum, and state per-target legacy disposition (Alpha MCLQ flow vector vs LK MH2O drop).
-  Grounded against [`wowdev.wiki/WDT`](https://wowdev.wiki/WDT), not guessed.
-- [Spec 245](../specs/245-modern-chunk-completeness-survey/spec.md) — inventory every chunk the modern
-  readers discard (WDT/`_occ`/`_lgt`, root ADT, `_tex0`, `_obj0`, `_lod`) with counts, documented
-  meaning, confidence and disposition, plus per-chunk legacy build-in feasibility including alpha-mask
-  and texture-id re-expression and the loss each incurs.
+| Order | Spec | One-line scope | Next bounded action | Proof owner |
+|---|---|---|---|---|
+| 1 | [246 modern M2 camera paths + benchmarking](../specs/246-modern-m2-camera-paths-and-benchmarking/spec.md) · Epic 3 | `MD21` CASC M2 camera tracks as playable paths; path-driven modern renderer benchmark with legacy-shaped receipt | `speckit-plan`, FR-002 diagnosis first: locate where modern cameras drop (era dispatch vs `MD21` conversion — `M2ModelReader` already has a `0x74` modern camera branch) | operator run for FPS + path witness |
+| 2 | [242 WMO instancing](../specs/242-wmo-instancing-performance/spec.md) · Epic 3 | Per-placement instancing under scene lights; modern data currently one draw call per placement (~5.5 FPS, 16,431 WMO draw calls) | `speckit-plan`; no new god-class members; 246 is its measurement vehicle | operator before/after run |
+| 3 | [243 modern→legacy conversion](../specs/243-modern-to-legacy-map-conversion/spec.md) · Epic 4 | One-way modern → **LK v18** + **Alpha 0.5.3**, multi-layer alpha/texture-id merge, batch maps, low-touch UI, optional assets | `speckit-plan`; owned service + UI inventory row | operator client-load witness |
+| 4 | [244 modern liquid flow](../specs/244-modern-liquid-flow/spec.md) · Epic 4 | WDT `MAI2` `liquidFlowTexture` (R = +Y west, G = −X south, 128 = zero) → viewer liquid context + one shared flow datum + legacy disposition | `speckit-plan`; confirm magnitude scaling against a real flow texture | operator visual check |
+| 5 | [245 modern chunk survey](../specs/245-modern-chunk-completeness-survey/spec.md) · Epic 4 | Inventory every discarded modern chunk + per-chunk legacy build-in feasibility via alpha-mask/texture-id re-expression, loss stated | `speckit-plan`; reproducible corpus-walk receipt | self (counts) |
 
-A fifth, also 2026-09-18:
-- [Spec 246](../specs/246-modern-m2-camera-paths-and-benchmarking/spec.md) — load camera tracks from
-  **modern `MD21` CASC M2s** as playable camera paths (same document/overlay as legacy), and make a
-  **path-driven renderer benchmark** runnable on modern maps with the same receipt shape as legacy data
-  (build/map/path identity, warmup, frames, mean+p99, hitches, submission counters). FR-002 requires the
-  camera-loss point to be evidenced before any code. This benchmark is the measurement vehicle for 242.
+Handy facts for these lanes: legacy MCLQ already carries a flow vector
+([`MclqChunk`](../src/core/WowViewer.Core.IO/Liquids/MclqChunk.cs)) — 244's Alpha-side home;
+`inspect casc bench` measures **CASC reads, not renderer frames**, so 246's benchmark is genuinely new;
+the v0.6.0-alpha notes already list `MAI2` as uninterpreted (244 closes that).
 
-All five specs (242 and 246 Epic 3, 243/244/245 Epic 4) are registered in `STATUS.md`; none is
-implemented. Note the repo already models a legacy MCLQ flow vector (`MclqChunk`), which is the Alpha
-side of 244. Also note `M2ModelReader` already has a modern camera branch (`0x74` stride + FOV track),
-so 246's diagnosis should start at the era dispatch / `MD21` conversion seam, not at the format.
+## Spec 224 governance — audit closed, gate open (last audit 2026-09-11)
 
-## Spec 224 governance audit — COMPLETE (2026-09-11)
+224-T201's receipt/symbol audit is complete across all specs that carried checked tasks. 224-T202
+(archival) and Gate 2 remain open; next monthly cleanup run is due 2026-10-01. Reports:
+[2026-09-11](../specs/224-speckit-governance/evidence/cleanup-2026-09-11.md) ·
+[2026-09-10](../specs/224-speckit-governance/evidence/cleanup-2026-09-10.md).
 
-224-T201's receipt/symbol audit now covers all 5 active specs carrying checked tasks. 227 clean
-(2026-09-10); 232 had 8 of 12 checks corrected to `[ ]` (2026-09-10); **233 clean** (3/3 receipts,
-14 checks); **231 clean** (0 un-checked — T001 resolved to PASS via `inventory-v3-baseline.md`;
-T074 kept checked but flagged "receipt not in evidence/"); **223 had 16 receipt-less pre-§9.2 checks
-un-checked** (T101–T107, Gate A, T201, T202, T301–T302, Gate B, T401, T501–T502) and is listed for
-operator decision. Reports:
-[cleanup-2026-09-11.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-11.md) (this pass)
-and [cleanup-2026-09-10.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-10.md).
-224-T201 closes on operator acknowledgment; 224-T202 (archival) and Gate 2 remain open.
+## Open operator-reported defects (2026-09-10, filed not fixed)
 
-## New operator-reported gaps (2026-09-10, not yet investigated)
-
-Filed as new tasks, not fixed: Spec 232 gained Phase 7 (T067 remove "Bake MCSH shadows" minimap
-option permanently; T068 "Include WMO geometry" minimap checkbox broken; T069 no-water minimap
-shading glitches; T070 cell fine-tune needs true 1-cell X/Y granularity — Hellfire Ramparts vs
-Expansion01 won't align closer than 1–3/1–2 cells with current tooling; T071 offset counters too
-small to show a signed two-digit value, must scale with UI text). Spec 231 gained Phase 8 (T080
-hovered-WMO doodad-set combo disappears on mouse-leave). Operator also re-stated the save-pipeline
-gap directly — that's Spec 234 below, already the whole point of the spec.
+Spec 232 Phase 7: T067 (–) "Bake MCSH shadows" option, T068 broken "Include WMO geometry" checkbox,
+T069 no-water minimap shading, T070 cell fine-tune granularity, T071 offset counter sizing. Spec 231
+Phase 8: T080 hovered-WMO doodad-set combo. Save-pipeline gap is Spec 234's whole purpose.
 
 ## Active lane — Spec 236 Scene Lighting, Doodad Performance & Phase Map Tooling — Phase 1 & Minimap Defect Fixes Implemented (2026-09-15)
 
