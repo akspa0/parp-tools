@@ -29,11 +29,11 @@ composition, implemented), 196 (WDL magnetizer, complete), 194 (stratigraphy, co
 
 ## Epic 3 — Renderer Performance & Correctness
 **Goal:** correct images at high FPS with measured, attributable improvements.
-**Members:** 236 (v0.5.4-dev: unified scene lighting, multi-surface light casting, doodad batching performance, OWNS active execution), 242 (**v0.6** per-placement WMO shell instancing under scene lights — fixes the 236 Phase 2 whole-scene gate that stalls modern data; operator-directed 2026-09-18), 226 (wireframe + MDX lighting defects, absorbed into 236), 153/152/151 (hitch,
+**Members:** 236 (v0.5.4-dev: unified scene lighting, multi-surface light casting, doodad batching performance, OWNS active execution), 242 (**v0.6** per-placement WMO shell instancing under scene lights — fixes the 236 Phase 2 whole-scene gate that stalls modern data; operator-directed 2026-09-18), 246 (**v0.6** modern M2 camera paths + modern-data renderer benchmarking — closes the camera-import gap for `MD21` CASC assets and gives modern maps the same path-driven benchmark + receipt shape as legacy data; the measurement vehicle for 242), 226 (wireframe + MDX lighting defects, absorbed into 236), 153/152/151 (hitch,
 stability, admission — mostly shipped/measuring), 204 (off-thread decode), 207 (draw-call
 reduction), 206 (Zarr residency), 202 (batching), 201 (metric attribution), 200 (portal fallback),
 199 (MCAL decode), 198 (shader permutations), 160 (skybox).
-**Next:** 242 speckit-plan → per-placement instancing fix (modern-data FPS regression); then 236 Phase 3 doodad instancing and the remaining Phase 1/2 operator visual gates.
+**Next:** 246 first if benchmarking must precede the fix (it is 242's measurement vehicle), otherwise 242 speckit-plan → per-placement instancing fix (modern-data FPS regression); then 236 Phase 3 doodad instancing and the remaining Phase 1/2 operator visual gates.
 
 ## Epic 4 — Formats, Readers & Writers
 **Goal:** proven, era-faithful read/write for every format we touch.

@@ -41,8 +41,17 @@ Two more opened 2026-09-18 from the same session:
   meaning, confidence and disposition, plus per-chunk legacy build-in feasibility including alpha-mask
   and texture-id re-expression and the loss each incurs.
 
-All four specs (242 Epic 3, 243/244/245 Epic 4) are registered in `STATUS.md`; none is implemented.
-Note the repo already models a legacy MCLQ flow vector (`MclqChunk`), which is the Alpha side of 244.
+A fifth, also 2026-09-18:
+- [Spec 246](../specs/246-modern-m2-camera-paths-and-benchmarking/spec.md) — load camera tracks from
+  **modern `MD21` CASC M2s** as playable camera paths (same document/overlay as legacy), and make a
+  **path-driven renderer benchmark** runnable on modern maps with the same receipt shape as legacy data
+  (build/map/path identity, warmup, frames, mean+p99, hitches, submission counters). FR-002 requires the
+  camera-loss point to be evidenced before any code. This benchmark is the measurement vehicle for 242.
+
+All five specs (242 and 246 Epic 3, 243/244/245 Epic 4) are registered in `STATUS.md`; none is
+implemented. Note the repo already models a legacy MCLQ flow vector (`MclqChunk`), which is the Alpha
+side of 244. Also note `M2ModelReader` already has a modern camera branch (`0x74` stride + FOV track),
+so 246's diagnosis should start at the era dispatch / `MD21` conversion seam, not at the format.
 
 ## Spec 224 governance audit — COMPLETE (2026-09-11)
 
