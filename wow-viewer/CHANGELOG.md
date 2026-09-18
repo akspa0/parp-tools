@@ -3,6 +3,29 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.6.0-alpha — 2026-09-18
+
+Alpha pre-release on the v0.6 line: **modern data access + experimental terrain formats**. A CASC
+game-version picker, the full 8-layer terrain shader, modern WMO materials and LOD groups, the first
+decoded DAT v26 objects/normals/colours plus an experimental DAT v26 writer, and CASC reads in
+harvest and the `inspect` CLI.
+
+Full notes: [`docs/releases/v0.6.0-alpha.md`](docs/releases/v0.6.0-alpha.md)
+
+### Added
+- **CASC game-version picker**: choose which product in `.build.info` to read; newest remains the default.
+- **8-layer terrain shader**: chunks render up to 8 texture layers (raised from 4), blended at full resolution.
+- **Modern WMO**: per-LOD `GFID` groups, modern per-shader base textures, and 16-bit `MOBA` material ids.
+- **DAT v26 objects, normals & colours**: `ACDO` placements, `ANRM` normals and `ACVT` vertex colours decode and render.
+- **DAT v26 experimental writer**: File → Export Nearby Tiles as DAT v26 writes the ADT tiles around the camera; the writer round-trips the 700-file corpus byte-identically.
+- **CASC in harvest**: every `--client-root` command opens a CASC install when `.build.info` is present.
+
+### Fixed
+- **Synthesized minimap export** now works for edited tiles and CASC-backed worlds.
+
+### Docs
+- Format-conformance pass against the wowdev.wiki audit (Spec 240); DAT v26 interchange explicitly deferred (Spec 241).
+
 ## v0.5.4-alpha — 2026-09-16
 
 Alpha pre-release: modern CASC install support for **WoW: Forever** (`wow_classic_beta` 1.60.1.69876,

@@ -28,6 +28,7 @@ the current owner or registry names a forward pointer; do not infer closure from
 | 13 | [238 CASC Data Source](238-casc-data-source/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-16 (operator-directed; Marlamin in contact): local install + remote CDN via vendored TACTSharp (Warcraft.NET has no CASC; vendored CascLib/TACT.NET folders are empty), id-addressed reads, keys, verified cache | Phase 0 era survey over CDN + library decision; **local-first**: install in progress at `I:\wow12\World of Warcraft`; first consumer is 237's asset resolution; byte-identical verification vs independent CDN extraction |
 | 14 | [239 Modern Client Assets](239-modern-client-assets/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-16 (operator-directed): post-5.0.1 FileDataID era — WDT MAID, ADT id placements/MTXP, chunked M2, WMO GFID/MODI, DB2 by id; wow.export as behavioral reference; survey-first | Needs 238 remote gate (T027); tier builds not chosen yet, so tier C defaults to live retail via CDN; coverage survey first |
 | 15 | [240 Format Conformance](240-format-conformance/spec.md) | **v0.6** · spec + plan + tasks authored 2026-09-17: wowdev.wiki × readers audit against `wow_classic_beta` 1.60.1 ([research.md](240-format-conformance/research.md)); already fixed: WMO MOBA 16-bit material ids (64% of batches), GFID per-LOD groups, shader-23 base texture, 8 terrain layers. WTL (MIT) and WoWFormatLib (no license: behaviour only) as references | Phase 2 conformance survey reproduces research.md WMO counts; then WMO per-shader materials (MVP) |
+| 16 | [242 WMO Instancing Performance](242-wmo-instancing-performance/spec.md) | **v0.6** · spec authored 2026-09-18 (operator-directed): v0.6.0-alpha regression — the scene-light gate disables WMO shell instancing globally, so modern data renders one draw call per placement (~5.5 FPS, 16,431 WMO draw calls on `wow_classic_beta` 1.60.1 `Azeroth`). Fix: decide instancing per placement from whether a light actually reaches it | speckit-plan (FR-006 god-class check first), then implement; receipt must carry a real before/after FPS + draw-call pair |
 
 ## v0.6 release scope (pinned 2026-09-16)
 
@@ -39,8 +40,10 @@ Worked on the current `v0.5.4-dev` branch. Release theme: **modern data access +
 | 239 Modern Client Assets | FileDataID-era readers + renderer hookups | 2 (after 238 Phase 1) |
 | 237 ADT v26 (brand-new format, first seen 2026-09-16) | AHDR reader + wireframe/terrain render from the tile files alone | **now**: fast-path wireframe first; fully independent of 238/239 |
 | 240 Format Conformance | per-format survey + reader/renderer gaps from the wowdev.wiki audit | 3 (after 239 loads real builds; survey first) |
+| 242 WMO Instancing Performance | fix the v0.6.0-alpha per-placement regression so modern data is interactive again | 4 (blocking modern-data usability; opened 2026-09-18) |
 
-Carried in from v0.5.4-dev: 236 (active) remains the current owner until its gates close.
+Carried in from v0.5.4-dev: 236 (active) remains the current owner until its gates close. 242 was
+opened from the v0.6.0-alpha build and is not implemented in it.
 
 ## Standing gates (operator-owned)
 

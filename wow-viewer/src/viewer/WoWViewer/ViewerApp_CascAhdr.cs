@@ -446,7 +446,7 @@ public partial class ViewerApp
 
         string mapName = "DAT v26: " + Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
         LoadTerrainFromAdapter(adapter, mapName,
-            $"Type: DAT v26 terrain folder (provisional: no objects, vertex colours or shadows yet)\n" +
+            $"Type: DAT v26 terrain folder (shadows are all-zero in the corpus and not rendered)\n" +
             $"Folder: {folder}\n" +
             $"Tiles: {adapter.ExistingTiles.Count} (skipped {adapter.SkippedFiles.Count})\n" +
             $"Height divisor: {adapter.HeightDivisor:0.##} (File > DAT v26 Height Scale)\n" +

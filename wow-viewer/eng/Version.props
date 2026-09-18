@@ -1,11 +1,13 @@
 <Project>
   <PropertyGroup>
     <!-- Single source of truth for all wow-viewer assembly versions.
-         InformationalVersion may carry a prerelease tag (e.g. -rc1); the
-         .NET SDK appends "+<git-commit>" build metadata automatically. -->
-    <VersionPrefix>0.5.4</VersionPrefix>
-    <AssemblyVersion>0.5.4.0</AssemblyVersion>
-    <FileVersion>0.5.4.0</FileVersion>
-    <InformationalVersion>0.5.4-dev</InformationalVersion>
+         InformationalVersion may carry a prerelease tag (e.g. -alpha, -rc1); the
+         .NET SDK appends "+<git-commit>" build metadata automatically. The viewer
+         title bar and About box display this value with the build metadata trimmed,
+         so it must match the release tag (v0.6.0-alpha -> 0.6.0-alpha). -->
+    <VersionPrefix>0.6.0</VersionPrefix>
+    <AssemblyVersion>0.6.0.0</AssemblyVersion>
+    <FileVersion>0.6.0.0</FileVersion>
+    <InformationalVersion>0.6.0-alpha</InformationalVersion>
   </PropertyGroup>
 </Project>

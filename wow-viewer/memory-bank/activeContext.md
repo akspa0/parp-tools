@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-16
+Last updated: 2026-09-18
 
 ## Fresh-chat route
 
@@ -12,6 +12,18 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
 [progress ledger](progress.md) (dated session history), and [archives](archive/README.md) are
 on-demand context, never default reading. Landed-work narrative lives in `progress.md`, not here —
 this file states only the current lane and what's still open.
+
+## Release lane — v0.6.0-alpha prepared, tag held (2026-09-18)
+
+Docs + version bump for the v0.6 line are in (`eng/Version.props` → `0.6.0-alpha`; release notes,
+CHANGELOG and README/era-matrix updates; USERGUIDE §12–13 and CLI-TOOLS re-attributed). Viewer build
+is clean and the title bar reads `v0.6.0-alpha`. **Not tagged/pushed yet.**
+
+Open operator decision: modern-data (`wow_classic_beta` 1.60.1) WMO performance is ~5.5 FPS because
+`WorldScene.cs:11410` disables WMO shell instancing whenever *any* scene light exists. The
+per-placement `SceneLightManager.QueryAffecting` test already exists (`WmoRenderer.cs:1982`), so the
+bounded fix is to gate batching per placement. Decide: land the fix before tagging, or ship as-is and
+open a performance spec task. Detail in `progress.md` (2026-09-18).
 
 ## Spec 224 governance audit — COMPLETE (2026-09-11)
 

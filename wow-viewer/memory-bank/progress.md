@@ -1,6 +1,19 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-16
+Last updated: 2026-09-18
+
+## 2026-09-18 — v0.6.0-alpha Release Prep + Modern-Data WMO Performance Finding
+
+- **Release prep (docs + version)**:
+  - `eng/Version.props`: `0.6.0` / `0.6.0.0` / `InformationalVersion 0.6.0-alpha` (was `0.5.4` / `0.5.4-dev`). The viewer title bar and About box read this value, so the tag `v0.6.0-alpha` and the UI now agree.
+  - New release notes `docs/releases/v0.6.0-alpha.md`; `CHANGELOG.md` entry; `README.md` (root + wow-viewer) version refs, feature bullets and era matrix; `docs/WoWViewer/README.md`, `USERGUIDE.md` §12–13, `docs/CLI-TOOLS.md` version attributions.
+  - Corrected stale UI text in `ViewerApp_CascAhdr.cs` (DAT v26 folder status claimed objects/vertex colours were missing; both decode now).
+  - Verification: `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug` exit 0, 0 errors; operator screenshot confirms the title bar reads `WoWViewer v0.6.0-alpha`. No tag/push yet — held pending the performance decision below.
+- **Performance finding (operator-reported, `wow_classic_beta` 1.60.1 `Azeroth`)**:
+  - Measured on the running v0.6.0-alpha build: ~5.5 FPS, ~230 ms uncapped frame, `WMO draw calls 16,431`, WMO render pass ≈5,493 ms of 7,716 ms.
+  - Root cause candidate: `WorldScene.cs:11410` gates WMO shell GPU instancing on the **global** `_sceneLightManager.Count == 0`. Modern data always has emitted lights, so every WMO placement takes the per-instance fallback path and instancing is effectively always off.
+  - The **per-placement** test already exists: `WmoRenderer.cs:1982-1983` transforms the placement AABB and calls `SceneLightManager.QueryAffecting(worldMin, worldMax, …)`, which returns 0 when no light's attenuation sphere touches the placement.
+  - Bounded fix proposal (not yet implemented, needs operator approval per AGENTS §9.1): gate batching on "no light affecting **this** placement" instead of "no lights in the scene". Awaiting decision on whether to land it before tagging v0.6.0-alpha.
 
 ## 2026-09-16 — Spec 236 Phase 2 WMO Emitted-Light Casting Slice
 

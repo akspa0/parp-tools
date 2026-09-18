@@ -324,7 +324,7 @@ Added in v0.5.4-alpha. Tested against **WoW: Forever**, the `wow_classic_beta` p
 - Measured on `development`: the 460 WMO textures took 5.3 s to download in parallel, and about 1 s to read once cached.
 
 ### Known limitations
-- At most 4 texture layers per chunk. Layers whose texture FileDataID is 0 in the shipped data have no texture.
+- Up to 8 texture layers per chunk (raised from 4 in v0.6.0-alpha). Layers whose texture FileDataID is 0 in the shipped data have no texture.
 - Height-based texture blending (`MHID`) is not applied yet.
 - The Azeroth WDT's `MAI2` chunk is not interpreted.
 
@@ -332,13 +332,14 @@ Added in v0.5.4-alpha. Tested against **WoW: Forever**, the `wow_classic_beta` p
 
 ## 13. DAT v26 Terrain Project Files (alpha)
 
-DAT v26 files are raw terrain project files: the uncompiled data client ADTs are built from. They shipped in the same `wow_classic_beta` build. Format details: [`docs/architecture/adt-v26-format.md`](../architecture/adt-v26-format.md).
+DAT v26 files are raw terrain project files: the uncompiled data client ADTs are built from. They shipped in the same `wow_classic_beta` build. Format details: [`docs/architecture/adt-v26-format.md`](../architecture/adt-v26-format.md). The reader and renderer were added in v0.5.4-alpha; decoded objects/normals/colours and the experimental writer were added in v0.6.0-alpha.
 
 1. (Optional, for textures) open the CASC install first, as in section 12.
-2. **File → Open DAT v26 Terrain Folder...** and pick a folder of DAT v26 files. File names do not matter: files are recognised by content and placed by their `ALOC` tile coordinates.
+2. **File → Open DAT v26 Terrain Folder...** and pick a folder of DAT v26 files. File names do not matter: files are recognised by content and placed by their `ALOC` tile coordinates. Heights, normals (`ANRM`), vertex colours (`ACVT`), texture layers and `ACDO` object placements render.
 3. **File → DAT v26 Height Scale** changes the height divisor and reloads the folder. The default ÷36 treats heights as inches: −18,559.47 ÷ 36 = −515.54, matching the shipped ocean floor. The other options are 1×, ÷12 and ÷100.
+4. **File → Export Nearby Tiles as DAT v26 (experimental)** writes the ADT tiles within 2 tiles of the camera (terrain, texture layers, vertex colours, normals, objects) to `output/dat_v26_export`. Reopen that folder with the step 2 command to compare.
 
-Not rendered yet: object placements (`ACDO`), vertex colours (`ACVT`) and shadows (`ASHD`). The horizontal scale relative to shipped ADTs is not established.
+Shadows (`ASHD`) are all zero in the corpus and are not rendered. The format has no liquid, hole or area data in this corpus, and it is not the project's save/interchange format (Spec 241, deferred). The horizontal scale relative to shipped ADTs is not established.
 
 ---
 

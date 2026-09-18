@@ -2,7 +2,7 @@
 
 Preservation, conversion, reverse engineering, analysis, and 3D visualization tooling for World of Warcraft client data.
 
-**Current Release Line**: `v0.5.3`  
+**Current Release Line**: `v0.6.0-alpha` (v0.6 line)
 **Primary Project Directory**: `wow-viewer/`  
 **Target Runtime**: .NET 10 (`net10.0`) & Python 3.12+ (`uv`)
 
@@ -13,9 +13,9 @@ Preservation, conversion, reverse engineering, analysis, and 3D visualization to
 
 ## What is parp-tools?
 
-`parp-tools` is an end-to-end suite for exploring, reconstructing, and analyzing World of Warcraft game assets across the project's active client eras, primarily Alpha 0.5.3 through WotLK 3.3.5a:
+`parp-tools` is an end-to-end suite for exploring, reconstructing, and analyzing World of Warcraft game assets across the project's active client eras, primarily Alpha 0.5.3 through WotLK 3.3.5a, plus alpha support for modern CASC installs of **WoW: Forever**:
 
-- **Interactive 3D World Viewer (`WoWViewer`)**: High-performance multi-platform desktop viewer supporting streaming terrain, interior WMO portal culling, M2/MDX skeletal animations, directional lighting/fog, positional OpenAL audio emitters, camera path authoring, and PM4 placement reconciliation.
+- **Interactive 3D World Viewer (`WoWViewer`)**: High-performance multi-platform desktop viewer supporting streaming terrain, interior WMO portal culling, M2/MDX skeletal animations, directional lighting/fog, positional OpenAL audio emitters, camera path authoring, PM4 placement reconciliation, modern CASC installs (FileDataID-era maps, models and DB2), and experimental DAT v26 terrain.
 - **Format Inspection & Analysis CLI (`wowviewer-inspect`)**: Comprehensive tools to inspect, dump, and audit M2, MDX, BLP, WMO, ADT, WDT, LIT, and PM4 files directly from MPQ archives or disk. The canonical CLI index is [`wow-viewer/tools/README.md`](wow-viewer/tools/README.md).
 - **Rosetta Calibration Corpus Generator (`rosetta-generate`)**: Generates synthetic, fully-labeled ADT/WDT maps placing every client model on an elevation-modulated pedestal with high-resolution antialiased MCAL/MCLY terrain labels for exact PM4 geometry calibration.
 - **Format Conversion (`wowviewer-converter`)**: Bidirectional format conversion between pre-release Alpha monolithic WDT containers and modern Wrath of the Lich King (LK) ADT/WDT terrain files.
@@ -140,8 +140,9 @@ dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowView
 | **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
 | **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
 | **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
+| **WoW: Forever** | 1.60.1.69876 (`wow_classic_beta`, 12.0-based, CASC) | **Alpha (v0.6.0-alpha)** | Local CASC + CDN fill + version picker; `MAID`/`MDID` terrain with up to 8 blended layers, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO, DB2 via WoWDBDefs; DAT v26 terrain reader/renderer/experimental writer |
 
-Later client terrain formats are outside the current project scope unless a future spec explicitly reopens that lane.
+Later client terrain formats are outside the current project scope unless a future spec explicitly reopens that lane; the WoW: Forever modern-data lane was opened by Specs 237–240 on the v0.6 line.
 
 ---
 

@@ -276,6 +276,9 @@ Search DB2 tables for integer values (every column, arrays element-wise; also pr
 
 ### DAT v26 Terrain (`adt-ahdr`)
 
+`adt-ahdr check` was added in v0.5.4-alpha; `adt-ahdr roundtrip` and `adt-ahdr objects` were added in
+v0.6.0-alpha.
+
 ```powershell
 # Decode every AHDR-family file in a folder (any names), check ACNK indices, and verify that
 # ALOC-adjacent tiles share identical edge heights
@@ -350,7 +353,7 @@ dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug --
 ```
 
 ### CASC Clients in Harvest
-Added in v0.5.4-alpha. Every `--client-root` command opens a CASC install when the folder (or its
+Added in v0.6.0-alpha. Every `--client-root` command opens a CASC install when the folder (or its
 parent) contains `.build.info`, and MPQ archives otherwise. FileDataID-era maps resolve their tile
 files and authored minimaps through the WDT `MAID` chunk, and split `_tex0.adt` textures through
 `MDID`. Tested with `synthetic-minimap` on `wow_classic_beta` 1.60.1.69876 (`development`).
