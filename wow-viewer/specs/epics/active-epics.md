@@ -37,7 +37,7 @@ reduction), 206 (Zarr residency), 202 (batching), 201 (metric attribution), 200 
 
 ## Epic 4 — Formats, Readers & Writers
 **Goal:** proven, era-faithful read/write for every format we touch.
-**Members:** 238 (**v0.6** CASC data source — local + remote CDN via TACTSharp), 239 (**v0.6** modern client assets — FileDataID-era WDT/ADT/M2/WMO/DB2, depends on 238), 240 (**v0.6** format conformance — wowdev.wiki × reader audit, per-format survey, WMO shader/LOD/material and terrain/M2 field gaps, depends on 238/239), 237 (**v0.6** ADT v26 — brand-new terrain format first seen 2026-09-16 in the first WoW: Forever build; first analysis is ours — AHDR family, read + render from tile files alone; corpus on hand; wireframe fast path first; independent of 238/239), 197 (split ADT/targets, active), 221 (converter validation harness, active),
+**Members:** 238 (**v0.6** CASC data source — local + remote CDN via TACTSharp), 239 (**v0.6** modern client assets — FileDataID-era WDT/ADT/M2/WMO/DB2, depends on 238), 240 (**v0.6** format conformance — wowdev.wiki × reader audit, per-format survey, WMO shader/LOD/material and terrain/M2 field gaps, depends on 238/239), 243 (**v0.6** modern → legacy map conversion — merges multi-layer modern chunks into LK v18 ADT/WDT and Alpha 0.5.3 WDT, batched and low-touch, optional asset bundling; operator-prioritised 2026-09-18, consumes 234 writers + 238/239 readers), 237 (**v0.6** ADT v26 — brand-new terrain format first seen 2026-09-16 in the first WoW: Forever build; first analysis is ours — AHDR family, read + render from tile files alone; corpus on hand; wireframe fast path first; independent of 238/239), 197 (split ADT/targets, active), 221 (converter validation harness, active),
 220 (WMO writing), 235 (legacy MDX/M2 rendering 1.0.0-3.0.1 + fuckported-asset compatibility +
 light effects, Draft, not planned — supersedes 104 and 154's unimplemented residue), 193 (1.x M2
 parity, Benilla reference — prior art for 235), 105 (format profiles, prior art for 235's 1.0.0
@@ -45,9 +45,10 @@ pillar), 205 (MH2O, implemented — operator visual proof owed).
 **Superseded:** 104 (legacy M2 rendering) and 154 (M2 reader era parity) → unimplemented residue
 absorbed into 235; both were previously missing from this epic's tracking entirely, which is how
 they went untracked despite 104 claiming "Status: Active."
-**Next:** speckit-plan for 235, starting with reconciling `FormatProfileRegistry` against whatever
-era-resolution mechanism 104/154 already built (235 FR-014); 221-T101 object corpus validator; 197
-slot-aware MoP writer research (gates Spec 230 US3).
+**Next:** 243 speckit-plan → plan the modern→legacy conversion service (layer-merge policy, LK + Alpha
+targets, batch driver, asset manifest) — operator priority; then speckit-plan for 235, starting with
+reconciling `FormatProfileRegistry` against whatever era-resolution mechanism 104/154 already built
+(235 FR-014); 221-T101 object corpus validator; 197 slot-aware MoP writer research (gates Spec 230 US3).
 
 ## Epic 5 — World Simulation, Audio & Environment
 **Goal:** the world behaves: audio, weather, physics, lighting.

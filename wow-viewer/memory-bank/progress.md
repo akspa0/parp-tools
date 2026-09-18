@@ -13,7 +13,14 @@ Last updated: 2026-09-18
   - Measured on the running v0.6.0-alpha build: ~5.5 FPS, ~230 ms uncapped frame, `WMO draw calls 16,431`, WMO render pass ≈5,493 ms of 7,716 ms.
   - Root cause candidate: `WorldScene.cs:11410` gates WMO shell GPU instancing on the **global** `_sceneLightManager.Count == 0`. Modern data always has emitted lights, so every WMO placement takes the per-instance fallback path and instancing is effectively always off.
   - The **per-placement** test already exists: `WmoRenderer.cs:1982-1983` transforms the placement AABB and calls `SceneLightManager.QueryAffecting(worldMin, worldMax, …)`, which returns 0 when no light's attenuation sphere touches the placement.
-  - Bounded fix proposal (not yet implemented, needs operator approval per AGENTS §9.1): gate batching on "no light affecting **this** placement" instead of "no lights in the scene". Awaiting decision on whether to land it before tagging v0.6.0-alpha.
+  - Bounded fix proposal (not yet implemented): gate batching on "no light affecting **this** placement" instead of "no lights in the scene".
+  - Operator decision (2026-09-18): ship v0.6.0-alpha as-is; tracked as [Spec 242](../specs/242-wmo-instancing-performance/spec.md) (registered in `STATUS.md` row 16, v0.6 scope table, and Epic 3).
+- **New spec — 243 Modern-to-Legacy Map Conversion (operator-directed, prioritised)**:
+  - One-way **modern → legacy**: outputs **LK v18 ADT/WDT** and **Alpha 0.5.3 monolithic WDT**; no old→modern writers ("too early", no real engine to consume them).
+  - Core requirement: merge the multi-layer modern chunk (up to 8 layers + `AMAP` weights) into the target's layer model, combining texture ids and alpha masks, with a per-tile report of what was merged/dropped/unresolved.
+  - Batch many maps in one run with per-map failure isolation; near-zero-touch UI (direction + target + input only); optional referenced-asset inclusion with a manifest.
+  - New dir `specs/243-modern-to-legacy-map-conversion/` (`spec.md` + `checklists/requirements.md`); registered in `STATUS.md` row 17 / v0.6 scope table and Epic 4.
+- **Git**: release commit `c247f383`; tag `v0.6.0-alpha` created locally (push left to the operator — it triggers `wowviewer-release.yml` and the GitHub prerelease).
 
 ## 2026-09-16 — Spec 236 Phase 2 WMO Emitted-Light Casting Slice
 

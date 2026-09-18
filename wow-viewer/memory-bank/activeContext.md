@@ -13,17 +13,23 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
 on-demand context, never default reading. Landed-work narrative lives in `progress.md`, not here —
 this file states only the current lane and what's still open.
 
-## Release lane — v0.6.0-alpha prepared, tag held (2026-09-18)
+## Release lane — v0.6.0-alpha committed + tagged locally (2026-09-18)
 
 Docs + version bump for the v0.6 line are in (`eng/Version.props` → `0.6.0-alpha`; release notes,
 CHANGELOG and README/era-matrix updates; USERGUIDE §12–13 and CLI-TOOLS re-attributed). Viewer build
-is clean and the title bar reads `v0.6.0-alpha`. **Not tagged/pushed yet.**
+is clean and the title bar reads `v0.6.0-alpha`. Release commit `c247f383`, tag `v0.6.0-alpha` created
+locally; **push (and the GitHub prerelease) left to the operator.**
 
-Open operator decision: modern-data (`wow_classic_beta` 1.60.1) WMO performance is ~5.5 FPS because
-`WorldScene.cs:11410` disables WMO shell instancing whenever *any* scene light exists. The
-per-placement `SceneLightManager.QueryAffecting` test already exists (`WmoRenderer.cs:1982`), so the
-bounded fix is to gate batching per placement. Decide: land the fix before tagging, or ship as-is and
-open a performance spec task. Detail in `progress.md` (2026-09-18).
+Operator decided (2026-09-18) to ship the alpha as-is and track the modern-data WMO regression as a
+new spec rather than fix it inside the release: [Spec 242](../specs/242-wmo-instancing-performance/spec.md)
+(per-placement instancing under scene lights; `WorldScene.cs` gates WMO batching on the whole-scene
+light count, so modern data renders one draw call per placement).
+
+Also newly opened and operator-prioritised: [Spec 243](../specs/243-modern-to-legacy-map-conversion/spec.md)
+— one-way modern → legacy conversion to **LK v18** and **Alpha 0.5.3** outputs, merging multi-layer
+alpha/texture-id stacks, batch many maps, near-zero-touch UI, optional asset inclusion. Old → modern
+writers are explicitly out of scope. Both specs are registered in `STATUS.md` and their epics
+(242 → Epic 3, 243 → Epic 4); neither is implemented.
 
 ## Spec 224 governance audit — COMPLETE (2026-09-11)
 
