@@ -71,6 +71,45 @@ public static class AdtAhdrReader
         return false;
     }
 
+    /// <summary>
+    /// Parses the trailing "XX_YY" tile coordinates from a DAT file name (e.g. "area_51_31.dat"
+    /// -> X=51, Y=31). v22/v23 files carry the same AHDR-family vocabulary as v26 but no ALOC
+    /// chunk, so the file name is the only tile-location source. The two integers are read in
+    /// ALOC order (X then Y). Returns false when the name has fewer than two integers.
+    /// </summary>
+    public static bool TryParseTileLocationFromName(string path, out int tileX, out int tileY)
+    {
+        tileX = tileY = -1;
+        string stem = Path.GetFileNameWithoutExtension(path);
+        var numbers = new List<int>();
+        int current = 0;
+        bool inNumber = false;
+        foreach (char c in stem)
+        {
+            if (char.IsAsciiDigit(c))
+            {
+                current = (current * 10) + (c - '0');
+                inNumber = true;
+            }
+            else if (inNumber)
+            {
+                numbers.Add(current);
+                current = 0;
+                inNumber = false;
+            }
+        }
+
+        if (inNumber)
+            numbers.Add(current);
+
+        if (numbers.Count < 2)
+            return false;
+
+        tileX = numbers[^2];
+        tileY = numbers[^1];
+        return true;
+    }
+
     public static AdtAhdrTile Read(byte[] data, string sourcePath)
     {
         ArgumentNullException.ThrowIfNull(data);

@@ -1034,7 +1034,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
 
             if (renderOpaquePass)
                 RenderOpaqueDoodads(visibleDoodadRenderCount, modelMatrix, view, proj,
-                    fc, fogStart, fogEnd, cp, ld, lc, ac);
+                    fc, fogStart, fogEnd, cp, ld, lc, ac, sceneLights);
         }
 
         // Pass 3: Liquid surfaces (semi-transparent, before transparent WMO geometry)
@@ -1080,7 +1080,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
                 _currentDoodadSubmissions++;
                 inst.Renderer.RenderWithTransform(doodadWorld, view, proj, RenderPass.Transparent, 1.0f,
                     fogColor, fogStart, fogEnd, cameraPos,
-                    lightDir, lightColor, ambientColor);
+                    lightDir, lightColor, ambientColor, sceneLights);
             }
         }
 
@@ -1418,7 +1418,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
 
     private unsafe void RenderOpaqueDoodads(int visibleDoodadRenderCount, Matrix4x4 modelMatrix,
         Matrix4x4 view, Matrix4x4 proj, Vector3 fogColor, float fogStart, float fogEnd,
-        Vector3 cameraPos, Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
+        Vector3 cameraPos, Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor,
+        SceneLightManager? sceneLights = null)
     {
         _opaqueDoodadBatchGroups.Clear();
         _opaqueDoodadBatchRenderers.Clear();
@@ -1432,7 +1433,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
             {
                 _currentDoodadSubmissions++;
                 renderer.RenderWithTransform(inst.Transform * modelMatrix, view, proj, RenderPass.Opaque, 1.0f,
-                    fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+                    fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor, sceneLights);
                 continue;
             }
 
@@ -1466,7 +1467,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
             else
             {
                 renderer.BeginBatch(view, proj, fogColor, fogStart, fogEnd,
-                    cameraPos, lightDir, lightColor, ambientColor);
+                    cameraPos, lightDir, lightColor, ambientColor, sceneLights);
                 foreach (int doodadIndex in indices)
                 {
                     DoodadInstance inst = _doodadInstances[doodadIndex];

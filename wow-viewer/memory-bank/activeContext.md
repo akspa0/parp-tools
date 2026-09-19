@@ -29,7 +29,7 @@ Ordered by dependency, not by number.
 |---|---|---|---|---|
 | 1 | [246 modern M2 camera paths + benchmarking](../specs/246-modern-m2-camera-paths-and-benchmarking/spec.md) · Epic 3 | `MD21` CASC M2 camera tracks as playable paths; path-driven modern renderer benchmark with legacy-shaped receipt | `speckit-plan`, FR-002 diagnosis first: locate where modern cameras drop (era dispatch vs `MD21` conversion — `M2ModelReader` already has a `0x74` modern camera branch) | operator run for FPS + path witness |
 | 2 | [242 WMO instancing](../specs/242-wmo-instancing-performance/spec.md) · Epic 3 | Per-placement instancing under scene lights; modern data currently one draw call per placement (~5.5 FPS, 16,431 WMO draw calls) | `speckit-plan`; no new god-class members; 246 is its measurement vehicle | operator before/after run |
-| 3 | [243 modern→legacy conversion](../specs/243-modern-to-legacy-map-conversion/spec.md) · Epic 4 | One-way modern → **LK v18** + **Alpha 0.5.3**, multi-layer alpha/texture-id merge, batch maps, low-touch UI, optional assets | `speckit-plan`; owned service + UI inventory row | operator client-load witness |
+| 3 | [243 modern→legacy conversion](../specs/243-modern-to-legacy-map-conversion/spec.md) · Epic 4 | One-way modern → **LK v18** + **Alpha 0.5.3**, multi-layer alpha/texture-id merge, batch maps, low-touch UI, optional assets | **Plan authored 2026-09-18** (`plan.md`/`research.md`/`data-model.md`/`contracts/`/`quickstart.md`); next `speckit-tasks` | operator client-load witness |
 | 4 | [244 modern liquid flow](../specs/244-modern-liquid-flow/spec.md) · Epic 4 | WDT `MAI2` `liquidFlowTexture` (R = +Y west, G = −X south, 128 = zero) → viewer liquid context + one shared flow datum + legacy disposition | `speckit-plan`; confirm magnitude scaling against a real flow texture | operator visual check |
 | 5 | [245 modern chunk survey](../specs/245-modern-chunk-completeness-survey/spec.md) · Epic 4 | Inventory every discarded modern chunk + per-chunk legacy build-in feasibility via alpha-mask/texture-id re-expression, loss stated | `speckit-plan`; reproducible corpus-walk receipt | self (counts) |
 
@@ -44,6 +44,29 @@ the v0.6.0-alpha notes already list `MAI2` as uninterpreted (244 closes that).
 (archival) and Gate 2 remain open; next monthly cleanup run is due 2026-10-01. Reports:
 [2026-09-11](../specs/224-speckit-governance/evidence/cleanup-2026-09-11.md) ·
 [2026-09-10](../specs/224-speckit-governance/evidence/cleanup-2026-09-10.md).
+
+## DAT loader — any version (2026-09-19)
+
+`AhdrTerrainAdapter` now loads **v22/v23** DAT files (AHDR-family, same vocabulary as v26) by falling
+back to the `XX_YY` tile coordinates in the file name when the ALOC chunk is absent
+(`AdtAhdrReader.TryParseTileLocationFromName`). v26 keeps its ALOC. **GLB export** now works for DAT
+folders (nullable data source + menu gating), and a new harvest `dump-dat` command writes a JSON
+historical record. The Kalimdor files are **Lost Isles (`expansion03`)** terrain. Receipts:
+`specs/237-adt-v26-terrain/evidence/v22-v23-filename-tile-location-2026-09-19.md`,
+`specs/237-adt-v26-terrain/evidence/dat-glb-export-and-record-2026-09-19.md`. **Still open**:
+synthesized minimap for DAT files (needs an AHDR→pack builder + DAT-folder input mode).
+
+## Open operator-reported defects (2026-09-18)
+
+Synthesized-minimap export on New Map Creator output:
+- **Fixed 2026-09-18** — generated-map terrain shadow-side flip (NW instead of SE): MCNR byte order
+  was `(X,Y,Z)` instead of disk `(X,Z,Y)`. Receipt:
+  `specs/192-terrain-template-brush-generator/evidence/mcnr-byte-order-fix-2026-09-18.md`.
+- **Landed 2026-09-18** — "Apply DXT1 compression" and "Apply MCCV vertex colors" options in the
+  synthesized-minimap export dialog (harvest `--no-dxt1` / `--mccv`). Receipt:
+  `specs/111-minimap-lighting-calibration/evidence/synthesized-minimap-dxt1-mccv-options-2026-09-18.md`.
+- **Still open** — liquids (ocean/other layers) render with grid lines/omissions. Root cause not yet
+  established; needs a zoomed capture + exact map/era before a fix is attempted.
 
 ## Open operator-reported defects (2026-09-10, filed not fixed)
 
@@ -160,7 +183,18 @@ Overhaul dark MDX shading bug, add Half-Lambert model diffuse, implement multi-s
   - `WorldScene` rebuilds active scene lights from visible WMO placements plus MDX/M2/WMO-internal doodad emitters.
   - `WmoRenderer` emits WMO `MOLT` and internal doodad lights, uploads up to eight nearby lights, and accumulates local point-light diffuse in the WMO shell shader.
   - WMO shell instancing is disabled while scene lights are active so each placement receives its own nearby-light selection rather than an approximated shared light set.
-  - Receipt: `specs/236-scene-lighting-doodad-performance/evidence/phase2-wmo-light-casting-slice.md`; T011 checked, T010/T012/T013/Gate 2 remain open.
+  - Receipt: `specs/236-scene-lighting-doodad-performance/evidence/phase2-wmo-light-casting-slice.md`; T011 checked.
+- **Phase 2 terrain light-casting slice + ambient/sun contract (2026-09-18)**:
+  - `SceneLightManager` now carries the frame outdoor ambient/sun representation (`SceneAmbientLight`); `WorldScene.RebuildSceneLights` publishes it from the active `TerrainLighting` profile (T010 checked).
+  - Both `TerrainRenderer` shader programs (legacy per-chunk and batched tile) declare up to eight local-light uniforms and accumulate bounded point-light diffuse; `UploadLocalLights` queries `SceneLightManager.QueryAffecting(chunk/tile bounds)` per draw (T012 checked).
+  - `WorldScene` forwards `_sceneLightManager` into the terrain pass via `TerrainManager.Render` (T013 terrain half landed).
+  - Receipt: `specs/236-scene-lighting-doodad-performance/evidence/phase2-light-casting.md`; T010/T012 checked.
+- **Phase 2 doodad/model external-light consumer — FR-007 (2026-09-18)**:
+  - `IModelRenderer.BeginBatch`/`RenderWithTransform` gained an optional `SceneLightManager?` (additive; `null` = unchanged behavior).
+  - `MdxRenderer.UploadMdxLights(modelMatrix, sceneLights)` selects nearest manager lights (omni) by transformed model AABB when a manager is present — the manager already contains this model's own omni lights, so no double-counting; ambient-type MDX lights still feed `uLocalAmbientColor`.
+  - `WorldScene` passes `_sceneLightManager` into the unbatched/state-hoisted/transparent doodad passes and the WMO doodad-batch fallback; `WmoRenderer` threads `sceneLights` into WMO-internal doodad draws; `M2Renderer` forwards to its legacy-backed renderer.
+  - **Deliberate boundary**: GPU-**instanced** opaque doodad batches (one draw many placements, one light set) and native (non-legacy) M2 stay base-lit. Per-placement routing is the next step, shared with Spec 242.
+  - Receipt: `specs/236-scene-lighting-doodad-performance/evidence/phase2-doodad-light-consumer.md`; T013 still open on that boundary, Gate 2 operator-owned.
 
 
 ## Other open lanes (all implemented-with-operator-gates; see each spec's tasks.md for detail)
@@ -193,7 +227,7 @@ Overhaul dark MDX shading bug, add Half-Lambert model diffuse, implement multi-s
 
 ## Handoff
 
-**Immediate:** continue Spec 236 Phase 2 from the WMO shell slice: add terrain local-light upload/evaluation, then doodad/model external scene-light consumers, then request operator-owned runtime visual proof for torch/brazier spill onto WMO geometry and ground. Operator decisions still owed: the 16 un-checked Spec 223 checks (accept or supply retroactive receipts) and the Spec 231 T074 receipt gap.
+**Immediate:** Spec 236 Phase 2 landed terrain light casting + ambient/sun contract and the doodad/model external-light consumer (T010/T012 checked; FR-007 wired for unbatched/state-hoisted/transparent + WMO-internal doodads). Next bounded slice: close T013 by routing **light-affected** opaque placements off GPU instancing onto per-placement lit draws (instanced batches cannot carry per-placement lights), shared with Spec 242; then request operator-owned runtime visual proof (Gate 2) for torch/brazier spill onto WMO geometry, terrain, and doodads. Operator decisions still owed: the 16 un-checked Spec 223 checks (accept or supply retroactive receipts) and the Spec 231 T074 receipt gap.
 
 **Do not claim:** any Spec 232/233/223/226 visual/runtime acceptance; the Spec 223 Phase 1–5 source
 tasks are now un-checked pending receipts; and the Spec 235 plan rewrite stays blocked on a real-file

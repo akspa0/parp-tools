@@ -1129,13 +1129,13 @@ public class TerrainManager : ISceneRenderer
     /// <summary>
     /// Render with explicit camera position and optional frustum culler.
     /// </summary>
-    public void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum = null)
+    public void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum = null, SceneLightManager? sceneLights = null)
     {
         _cameraPos = cameraPos;
         if (!TerrainVisible)
             return;
 
-        _terrainRenderer.Render(view, proj, cameraPos, frustum, visibleTileKeys: null);
+        _terrainRenderer.Render(view, proj, cameraPos, frustum, visibleTileKeys: null, sceneLights);
         TraceDirectionalFrameDiagnostics();
     }
 

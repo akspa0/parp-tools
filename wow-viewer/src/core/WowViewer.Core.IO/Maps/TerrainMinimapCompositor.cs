@@ -111,6 +111,13 @@ public static class TerrainMinimapCompositor
                     detailV,
                     untextured);
 
+                // MCCV is the client's per-vertex ambient tint. The terrain shader multiplies by
+                // clamp(vertexColor.rgb * 2, 0, 2) (neutral 127/255 -> 1.0); mirror that here so an
+                // opt-in MCCV pass matches the runtime look. Off by default: authored minimaps do
+                // not bake MCCV, so it is a diagnostic/authoring signal, not a match-the-client one.
+                if (options.Lighting.ApplyMccv)
+                    blended *= ResolveMccvTint(pack, sourceX, sourceY, alphaWidth, alphaHeight);
+
                 float lambert = ResolveInterpolatedLambert(
                     pack,
                     sourceX,
@@ -514,6 +521,29 @@ public static class TerrainMinimapCompositor
             : Vector3.UnitZ;
     }
 
+    private static Vector3 ResolveMccvTint(
+        TerrainTileTensorPack pack,
+        int sourceX,
+        int sourceY,
+        int sourceWidth,
+        int sourceHeight)
+    {
+        float[,,]? mccv = pack.MccvRgb;
+        if (mccv is null || mccv.GetLength(2) < 3)
+            return Vector3.One;
+
+        int height = mccv.GetLength(0);
+        int width = mccv.GetLength(1);
+        int y = ScaleCoordinate(sourceY, sourceHeight, height);
+        int x = ScaleCoordinate(sourceX, sourceWidth, width);
+
+        // Match the terrain shader: tintColor = clamp(vertexColor.rgb * 2, 0, 2).
+        return new Vector3(
+            Math.Clamp(mccv[y, x, 0] * 2f, 0f, 2f),
+            Math.Clamp(mccv[y, x, 1] * 2f, 0f, 2f),
+            Math.Clamp(mccv[y, x, 2] * 2f, 0f, 2f));
+    }
+
     private static float Lambert(Vector3 normal, Vector3 lightDirection)
     {
         Vector3 light = lightDirection.LengthSquared() > 1e-10f
@@ -715,7 +745,8 @@ public sealed record TerrainMinimapLighting(
     bool LinearSpaceShading = false,
     float LinearLightGain = 1f,
     float CastShadowSoftness = TerrainCastShadowMap.DefaultSoftnessWorldUnits,
-    float MaxCastShadowLength = TerrainCastShadowMap.UncappedShadowLength)
+    float MaxCastShadowLength = TerrainCastShadowMap.UncappedShadowLength,
+    bool ApplyMccv = false)
 {
     /// <summary>Visible neutral composition for callers that intentionally do not grade lighting.</summary>
     public static TerrainMinimapLighting Neutral { get; } = new(

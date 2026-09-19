@@ -10345,6 +10345,11 @@ public class WorldScene : ISceneRenderer
         _sceneLightManager.Clear();
         _sceneLightCollectScratch.Clear();
 
+        // Spec 236 T010: publish the frame outdoor ambient/sun representation alongside the
+        // emitted point lights so consumers share one base-lighting contract.
+        TerrainLighting baseLighting = _terrainManager.Lighting;
+        _sceneLightManager.SetAmbient(baseLighting.LightDirection, baseLighting.LightColor, baseLighting.AmbientColor);
+
         for (int i = 0; i < frame.Visibility.VisibleWmos.Count; i++)
         {
             VisibleWmoInstance visible = frame.Visibility.VisibleWmos[i];
@@ -11287,8 +11292,8 @@ public class WorldScene : ISceneRenderer
                 },
                 () =>
                 {
-                    // 1. Render terrain (with frustum culling)
-                    frame.TerrainMs = MeasureDurationMs(() => _terrainManager.Render(view, proj, camPos, _frustumCuller));
+                    // 1. Render terrain (with frustum culling) and nearby emitted-light evaluation
+                    frame.TerrainMs = MeasureDurationMs(() => _terrainManager.Render(view, proj, camPos, _frustumCuller, _sceneLightManager));
 
                     // Reset GL state after terrain
                     _gl.DepthFunc(DepthFunction.Lequal);
@@ -11498,7 +11503,8 @@ public class WorldScene : ISceneRenderer
                                 cameraPos,
                                 lighting.LightDirection,
                                 lighting.LightColor,
-                                lighting.AmbientColor);
+                                lighting.AmbientColor,
+                                _sceneLightManager);
                         }
 
                         foreach ((IModelRenderer renderer, List<Matrix4x4> transforms) in wmoDoodadBatchGroups)
@@ -11531,7 +11537,8 @@ public class WorldScene : ISceneRenderer
                                     cameraPos,
                                     lighting.LightDirection,
                                     lighting.LightColor,
-                                    lighting.AmbientColor);
+                                    lighting.AmbientColor,
+                                    _sceneLightManager);
                                 foreach (Matrix4x4 transform in transforms)
                                     renderer.RenderInstance(transform, RenderPass.Opaque, 1.0f);
                             }
@@ -11621,7 +11628,8 @@ public class WorldScene : ISceneRenderer
 
                                     renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Opaque, visible.OpaqueFade,
                                         fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
+                                        _sceneLightManager);
                                     MdxRenderedCount++;
                                 },
                                 visible =>
@@ -11672,7 +11680,8 @@ public class WorldScene : ISceneRenderer
                                         {
                                             renderer.BeginBatch(
                                                 view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
+                                                _sceneLightManager);
                                         }
 
                                         renderer.RenderInstance(visible.Instance.Transform, RenderPass.Opaque, visible.OpaqueFade);
@@ -11789,7 +11798,8 @@ public class WorldScene : ISceneRenderer
                             {
                                 mdxRenderer.RenderWithTransform(visibleMdx.Instance.Transform, view, proj, RenderPass.Transparent, visibleMdx.TransparentFade,
                                     fogColor, objectFogStart, objectFogEnd, cameraPos,
-                                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
+                                    _sceneLightManager);
                             });
                             frame.MdxTransparentSubmissionMs += mdxTransparentMs;
                             frame.TransparentUnbatchedMdxCount++;

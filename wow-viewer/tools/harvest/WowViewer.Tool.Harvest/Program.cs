@@ -19,6 +19,7 @@ using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Maps;
+using WowViewer.Core.Maps.AdtAhdr;
 using WowViewer.Core.Renderer.Headless;
 using WowViewer.Core.Renderer.ObjectCapture;
 using WowViewer.Core.Renderer.Terrain;
@@ -125,6 +126,9 @@ static class Program
                 break;
             case "synthetic-minimap":
                 RunSyntheticMinimap(tail);
+                break;
+            case "dump-dat":
+                RunDumpDat(tail);
                 break;
             case "sun-diagnostic":
                 RunSunDiagnostic(tail);
@@ -1574,6 +1578,80 @@ static class Program
         return height;
     }
 
+    /// <summary>
+    /// Spec 237 follow-up: writes a JSON record of every AHDR-family DAT file in a folder (or a single
+    /// file) for historical preservation. Decodes with <see cref="AdtAhdrReader"/> and reports the
+    /// header, tile location, textures, models, per-chunk layer/object counts and diagnostics.
+    /// </summary>
+    static void RunDumpDat(string[] args)
+    {
+        string? input = GetOption(args, "--input", "-i");
+        string? output = GetOption(args, "--output", "-o");
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            Console.Error.WriteLine("Error: dump-dat requires --input <file-or-folder> [--output <json>].");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        string[] files = Directory.Exists(input)
+            ? Directory.EnumerateFiles(input).OrderBy(static p => p, StringComparer.OrdinalIgnoreCase).ToArray()
+            : [input];
+
+        var records = new List<object>();
+        foreach (string path in files)
+        {
+            byte[] bytes;
+            try
+            {
+                bytes = File.ReadAllBytes(path);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"  {Path.GetFileName(path)}: {ex.Message}");
+                continue;
+            }
+
+            if (!AdtAhdrReader.IsAhdrFamily(bytes))
+                continue;
+
+            AdtAhdrTile tile = AdtAhdrReader.Read(bytes, path);
+            records.Add(new
+            {
+                file = Path.GetFileName(path),
+                bytes = bytes.Length,
+                mver = tile.MverVersion,
+                version = tile.Version,
+                verticesX = tile.VerticesX,
+                verticesY = tile.VerticesY,
+                chunksX = tile.ChunksX,
+                chunksY = tile.ChunksY,
+                aloc = tile.Aloc,
+                tileX = tile.TileX,
+                tileY = tile.TileY,
+                textures = tile.TextureNames,
+                models = tile.ModelNames,
+                chunkCount = tile.Chunks.Count,
+                layerCount = tile.Chunks.Sum(static c => c.Layers.Count),
+                objectCount = tile.Chunks.Sum(static c => c.Objects.Count),
+                modelFileReferences = tile.ModelFileReferences.Select(static r => new { r.UniqueId, r.FileDataId, r.Field8 }).ToArray(),
+                diagnostics = tile.Diagnostics,
+            });
+        }
+
+        string json = JsonSerializer.Serialize(records, new JsonSerializerOptions { WriteIndented = true });
+        if (!string.IsNullOrWhiteSpace(output))
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output)) ?? ".");
+            File.WriteAllText(output, json);
+            Console.WriteLine($"Wrote {records.Count} DAT record(s) to {output}");
+        }
+        else
+        {
+            Console.WriteLine(json);
+        }
+    }
+
     static void RunSyntheticMinimap(string[] args)
     {
         string? clientRoot = GetOption(args, "--client-root", "-c");
@@ -1616,6 +1694,9 @@ static class Program
         bool bakeMcsh = HasFlag(args, "--bake-mcsh");
         bool includeWmos = HasFlag(args, "--include-wmos");
         bool emitAuthoredReference = HasFlag(args, "--authored-reference");
+        // --mccv: multiply the composed albedo by the client's per-vertex MCCV ambient tint, matching
+        // the terrain shader. Off by default (authored minimaps do not bake MCCV).
+        bool applyMccv = HasFlag(args, "--mccv");
         // Cast shadows are on by default: Lambert alone cannot darken flat ground behind a ridge,
         // which is why synthesized tiles read as shadowless next to authored minimaps. The opt-out
         // exists for A/B comparison and for callers that need the pre-v0.5.3 hillshade-only look.
@@ -1848,7 +1929,7 @@ static class Program
 
         bool isAlpha = AlphaWdtReader.IsAlphaWdt(wdtBytes);
         float gameTime = timeOfDayHours / 24f;
-        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting(gameTime, castShadows, tuning);
+        SyntheticMinimapLightingProfile lighting = ResolveSyntheticMinimapLighting(gameTime, castShadows, tuning, applyMccv);
         if (bakeMcsh)
             lighting = WithBakedMcsh(lighting);
         Console.WriteLine($"Synthetic minimap lighting: {lighting.Source} ({lighting.EvidenceState})");
@@ -1972,7 +2053,7 @@ static class Program
                         pack, catalog, mapName, authoredReference, buildVersion);
                     if (inferredHours is { } inferred && float.IsFinite(inferred))
                     {
-                        tileLighting = ResolveSyntheticMinimapLighting(inferred / 24f, castShadows, tuning);
+                        tileLighting = ResolveSyntheticMinimapLighting(inferred / 24f, castShadows, tuning, applyMccv);
                         // Re-resolving the profile for the inferred hour rebuilds it from scratch,
                         // which would silently drop an explicit --bake-mcsh for match-time tiles.
                         if (bakeMcsh)
@@ -5616,7 +5697,8 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
     private static SyntheticMinimapLightingProfile ResolveSyntheticMinimapLighting(
         float gameTime,
         bool castShadows = true,
-        SyntheticMinimapTuning? tuningOverride = null)
+        SyntheticMinimapTuning? tuningOverride = null,
+        bool applyMccv = false)
     {
         SyntheticMinimapTuning tuning = tuningOverride ?? SyntheticMinimapTuning.Default;
         string timeLabel = TimeOfDayClock.FromHours(gameTime * 24f).CompactText;
@@ -5636,7 +5718,8 @@ if (AlphaWdtReader.IsAlphaWdt(wdtBytes))
             // still unverified.
             LightDirection = tuning.Era.ResolveLightDirection(gameTime),
             ApplyMcshToMinimap = false,
-            ApplyCastShadows = castShadows
+            ApplyCastShadows = castShadows,
+            ApplyMccv = applyMccv
         };
         if (tuning.LightGainOverride is { } explicitGain)
             lighting = lighting with { LinearLightGain = explicitGain };

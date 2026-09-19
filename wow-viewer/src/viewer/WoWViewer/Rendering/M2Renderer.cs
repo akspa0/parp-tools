@@ -365,11 +365,12 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer, ISc
         Vector3 cameraPos,
         Vector3 lightDir,
         Vector3 lightColor,
-        Vector3 ambientColor)
+        Vector3 ambientColor,
+        SceneLightManager? sceneLights = null)
     {
         if (_legacyRenderer != null)
         {
-            _legacyRenderer.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+            _legacyRenderer.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor, sceneLights);
             return;
         }
 
@@ -441,11 +442,12 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         Vector3? cameraPos = null,
         Vector3? lightDir = null,
         Vector3? lightColor = null,
-        Vector3? ambientColor = null)
+        Vector3? ambientColor = null,
+        SceneLightManager? sceneLights = null)
     {
         if (_legacyRenderer != null)
         {
-            _legacyRenderer.RenderWithTransform(modelMatrix, view, proj, pass, fadeAlpha, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+            _legacyRenderer.RenderWithTransform(modelMatrix, view, proj, pass, fadeAlpha, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor, sceneLights);
             return;
         }
 

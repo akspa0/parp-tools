@@ -2,6 +2,112 @@
 
 Last updated: 2026-09-18
 
+## 2026-09-19 — DAT GLB Export + Historical Data Record
+
+- **GLB export for DAT folders**: `MapGlbExporter` now takes a nullable `IDataSource?` (placements/
+  textures skipped when null; terrain mesh still exports), and the GLB menu is enabled for
+  `_renderer != null || _terrainManager != null` (was gated on a standalone-model flag + a data
+  source, so it was disabled for DAT folders).
+- **Historical record**: new harvest command `dump-dat` writes a JSON record of every AHDR-family DAT
+  file (header, tile location, textures, models, per-chunk layer/object counts, ADST refs,
+  diagnostics). Produced `output/dat-records/kalimdor-lost-isles.json` (4 records).
+- **Finding**: the Kalimdor files are **Lost Isles (`expansion03`)** terrain — `area_51_31` (310
+  layers) and `area_51_32` (614 layers), textures `expansion03\lostisles\li_*` + `Tileset\Generic\*`.
+- **Verification**: viewer + harvest builds 0 errors; dump ran on the real files. Receipt:
+  `specs/237-adt-v26-terrain/evidence/dat-glb-export-and-record-2026-09-19.md`.
+- **Still open**: synthesized minimap for DAT files (needs an AHDR→`TerrainTileTensorPack` builder +
+  a DAT-folder input mode in the harvest).
+
+## 2026-09-19 — DAT v22/v23 Loading via Filename Tile Location
+
+- **Operator request**: load any version of the DAT files; Wrath v23 files at
+  `E:\WC2\wrath\World\Maps\Kalimdor` (a deleted Lost Isles pre-alpha region of Kalimdor).
+- **Analysis**: the files are **DAT v23** (`MVER` 23), AHDR-family with the **same vocabulary as v26**
+  (AHDR 129×129/16×16, AVTX 132100, ANRM 99075, ATEX, ACNK×256 with one ALYR + AMAP 4096) but **no
+  ALOC chunk**.
+- **Root cause**: `AhdrTerrainAdapter` required ALOC to place a file, so every v22/v23 file was
+  skipped. The reader itself is version-agnostic.
+- **Fix**: new `AdtAhdrReader.TryParseTileLocationFromName` (trailing `XX_YY` → X, Y) and an adapter
+  fallback when ALOC is absent; v26 keeps its ALOC.
+- **Verification**: viewer build 0 errors; `AdtAhdr` tests 13/13 (new `AdtAhdrV23Tests`). Receipt:
+  `specs/237-adt-v26-terrain/evidence/v22-v23-filename-tile-location-2026-09-19.md`.
+- **Recorded (not a task)**: v26 objects can carry a negative uniqueID (operator suspects
+  non-shipping/untracked objects); `UniqueId` is read as `uint`.
+
+## 2026-09-18 — Spec 243 Modern-to-Legacy Map Conversion: Plan Authored
+
+- Ran `speckit-plan` for [Spec 243](../specs/243-modern-to-legacy-map-conversion/spec.md) (the map
+  converter's modern→legacy lane, previously spec-only). Pointed `.specify/feature.json` at 243 and
+  ran `setup-plan.ps1`; authored the full design set:
+  - `plan.md` — technical context, constitution check (all PASS), real source layout, 6-phase
+    breakdown (research → design → core service → assets → surfaces → validation).
+  - `research.md` — 8 decisions: modern layer stack from the existing readers; **coverage-ranked
+    layer merge** (keep base + top capacity-1, fold dropped into nearest kept, deterministic
+    tie-break); area-average alpha downsample; FileDataID→path resolution with unresolved reported;
+    reuse `LkAdtWriter`/`AlphaWdtWriter`; **one owned `ModernToLegacyMapConversionService`** surfaced
+    in CLI + Editor; determinism; route validation via `MapConversionFormats`.
+  - `data-model.md` — SourceMap, LayerStack, MergePolicy, MergeRecord, ConversionRun, AssetManifest.
+  - `contracts/` — service API, CLI `convert-map` contract, merge-report JSON schema.
+  - `quickstart.md` — operator commands for both targets + batch + asset inclusion.
+- Registered in `STATUS.md` row 17 and the activeContext "Implement next" table (row 3). Next:
+  `speckit-tasks`, then implement Phase 2 (core service).
+
+## 2026-09-18 — Synthesized-Minimap DXT1 + MCCV Options
+
+- **DXT1 option**: exposed the harvest tool's existing `--no-dxt1` in the viewer's synthesized-minimap
+  export dialog ("Apply DXT1 compression", default on) so later-era outputs can skip the codec floor.
+- **MCCV option**: added `ApplyMccv` to `TerrainMinimapLighting` + a `ResolveMccvTint` helper in
+  `TerrainMinimapCompositor` (multiplies albedo by `clamp(mccv*2,0,2)`, matching the terrain shader),
+  a harvest `--mccv` flag, and an "Apply MCCV vertex colors" dialog checkbox (default off).
+- **Verification**: viewer + harvest builds both exit 0, 0 errors. Receipt:
+  `specs/111-minimap-lighting-calibration/evidence/synthesized-minimap-dxt1-mccv-options-2026-09-18.md`.
+- **Still open**: liquids render with grid lines/omissions in synthesized minimaps — root cause not
+  established; needs a zoomed capture + exact map/era.
+
+## 2026-09-18 — Generated-Map MCNR Byte-Order Fix (synthesized-minimap shadow side)
+
+- **Operator report**: synthesized minimaps from New Map Creator output show the terrain shadow on
+  the north-west flank instead of the south-east.
+- **Root cause**: `TemplatedTerrainGenerator` wrote MCNR components in `(X, Y, Z)` byte order, but the
+  disk order is signed `(X, Z, Y)` (`BlankAdtFactory.CreateUpNormals`, `AlphaTerrainAdapter.DecodeNormal`,
+  `WorldTerrainTileBuilder.TryReadMcnrNormals`). The up component landed in the horizontal Y axis and
+  the Y slope in Z, so every generated slope shaded on the wrong side. Both `RecalculateChunkNormals`
+  and `GenerateFlatNormals` were wrong.
+- **Fix**: write `(X, Z, Y)` in both functions.
+- **Verification**: `dotnet test WowViewer.Core.Tests --filter "FullyQualifiedName~TemplatedTerrainGenerator"`:
+  7 passed, 0 failed, including new regression test
+  `GenerateMap_WritesMcnrInDiskXzyOrderSoTerrainNormalsPointUp`. Receipt:
+  `specs/192-terrain-template-brush-generator/evidence/mcnr-byte-order-fix-2026-09-18.md`.
+- **Still open (same operator report)**: (1) liquids render with grid lines/omissions in synthesized
+  minimaps; (2) option to skip DXT1 compression on outputs; (3) option to include MCCV vertex colors.
+
+## 2026-09-18 — Spec 236 Phase 2: Terrain Light Casting + Ambient/Sun Contract
+
+- Landed the terrain half of Spec 236 Phase 2 multi-surface light casting:
+  - **T010**: `SceneLightManager` gained `SceneAmbientLight` (direction/light color/ambient color),
+    `Ambient`, `SetAmbient(...)` (finite-guarded), and `Clear()` now resets ambient; `WorldScene`
+    publishes it from the active `TerrainLighting` profile in `RebuildSceneLights`.
+  - **T012**: both `TerrainRenderer` shader programs (legacy chunk + batched tile) now declare
+    `uLocalLightCount`/`uLocalLightPos[8]`/`uLocalLightColor[8]`/`uLocalLightIntensity[8]`/
+    `uLocalLightStart[8]`/`uLocalLightEnd[8]`, carry `vWorldNormal`, and accumulate a bounded
+    per-fragment point-light diffuse term. New `UploadLocalLights` + `LocalLightUniforms` select the
+    nearest lights via `SceneLightManager.QueryAffecting(chunk/tile bounds)` per draw.
+  - **T013 (terrain half)**: `TerrainManager.Render` accepts an optional `SceneLightManager` and
+    `WorldScene` forwards `_sceneLightManager` into the terrain pass.
+  - **FR-007 doodad/model external-light consumer** (same day): optional `SceneLightManager?` added to
+    `IModelRenderer.BeginBatch`/`RenderWithTransform`; `MdxRenderer.UploadMdxLights(matrix, sceneLights)`
+    selects nearest manager lights (omni) by transformed model AABB (manager already contains the
+    model's own omni lights, so no double-counting); `WorldScene` passes `_sceneLightManager` into the
+    unbatched/state-hoisted/transparent doodad passes and the WMO doodad-batch fallback; `WmoRenderer`
+    threads `sceneLights` into WMO-internal doodad draws; `M2Renderer` forwards to legacy. Deliberate
+    boundary: GPU-**instanced** opaque doodad batches (one light set for many placements) and native
+    non-legacy M2 stay base-lit — per-placement routing is the next step, shared with Spec 242.
+- **Still open**: T013 (instanced-opaque + native-M2 boundary) and operator visual Gate 2.
+- Verification: `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug`: exit 0,
+  0 errors; focused `dotnet test WowViewer.Core.Tests --filter "TerrainLighting|WorldObjectPassCoordinator|M2Runtime"`:
+  47 passed, 0 failed. Receipts: `specs/236-scene-lighting-doodad-performance/evidence/phase2-light-casting.md`,
+  `specs/236-scene-lighting-doodad-performance/evidence/phase2-doodad-light-consumer.md`.
+
 ## 2026-09-18 — v0.6.0-alpha Release Prep + Modern-Data WMO Performance Finding
 
 - **Release prep (docs + version)**:

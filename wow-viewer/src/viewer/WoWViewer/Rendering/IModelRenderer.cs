@@ -41,7 +41,8 @@ public interface IModelRenderer : ISceneRenderer
         Vector3 cameraPos,
         Vector3 lightDir,
         Vector3 lightColor,
-        Vector3 ambientColor);
+        Vector3 ambientColor,
+        SceneLightManager? sceneLights = null);
 
     void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f);
 
@@ -57,7 +58,8 @@ public interface IModelRenderer : ISceneRenderer
         Vector3? cameraPos = null,
         Vector3? lightDir = null,
         Vector3? lightColor = null,
-        Vector3? ambientColor = null);
+        Vector3? ambientColor = null,
+        SceneLightManager? sceneLights = null);
 
     void RenderBackdrop(
         Matrix4x4 modelMatrix,

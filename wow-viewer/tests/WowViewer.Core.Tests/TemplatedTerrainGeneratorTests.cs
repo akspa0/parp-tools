@@ -148,6 +148,41 @@ public class TemplatedTerrainGeneratorTests
     }
 
     [Fact]
+    public void GenerateMap_WritesMcnrInDiskXzyOrderSoTerrainNormalsPointUp()
+    {
+        var template = new TerrainMapTemplate
+        {
+            MapName = "NormalOrderTest",
+            Theme = BiomeTheme.GardenMuseum,
+            TileRows = 1,
+            TileCols = 1,
+            BaseTileX = 30,
+            BaseTileY = 30,
+            PlazaSpacingChunks = 4
+        };
+
+        TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template);
+        LkAdtData tile = result.Tiles[(30, 30)];
+
+        // Disk MCNR component order is signed X, Z, Y (BlankAdtFactory.CreateUpNormals,
+        // AlphaTerrainAdapter.DecodeNormal). A regression that wrote (X, Y, Z) put the up
+        // component into the horizontal Y axis, so every generated slope shaded on the wrong
+        // side. Decode with the disk order and require the up component to dominate.
+        foreach (LkMcnkData chunk in tile.Chunks)
+        {
+            for (int vertex = 0; vertex < 145; vertex++)
+            {
+                int offset = vertex * 3;
+                float nz = (sbyte)chunk.Normals[offset + 1] / 127f;
+                Assert.True(
+                    nz > 0.5f,
+                    $"Chunk ({chunk.IndexX},{chunk.IndexY}) vertex {vertex} decoded Z={nz:0.000}; " +
+                    "MCNR must be written in disk (X, Z, Y) order so terrain normals point up.");
+            }
+        }
+    }
+
+    [Fact]
     public void GenerateMap_SynthesizesContinuousFractalReliefInNatureChunks()
     {
         var template = new TerrainMapTemplate

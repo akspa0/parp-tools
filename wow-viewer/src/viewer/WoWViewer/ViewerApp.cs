@@ -2228,14 +2228,17 @@ void main() {
 
                     if (ImGui.BeginMenu("GLB"))
                     {
-                        if (ImGui.MenuItem("Export GLB...", _renderer != null))
+                        // Terrain (including DAT folders opened with no client data source) can export
+                        // GLB too, so the menu is enabled for either a standalone model or a terrain.
+                        bool canExportGlb = _renderer != null || _terrainManager != null;
+                        if (ImGui.MenuItem("Export GLB...", canExportGlb))
                             _wantExportGlb = true;
                         if (ImGui.MenuItem("Export GLB (Collision Only)...", _renderer != null))
                             _wantExportGlbCollision = true;
 
                         ImGui.Separator();
 
-                        bool canExportMapGlb = _terrainManager != null && _dataSource != null;
+                        bool canExportMapGlb = _terrainManager != null;
                         if (ImGui.BeginMenu("Map Tiles", canExportMapGlb))
                         {
                             if (ImGui.MenuItem("Current Tile (Terrain + Objects)", "", false, canExportMapGlb))
@@ -2841,7 +2844,7 @@ void main() {
                     _statusMessage = $"Export failed: {ex.Message}";
                 }
             }
-            else if (_terrainManager != null && _dataSource != null)
+            else if (_terrainManager != null)
             {
                 Directory.CreateDirectory(ExportDir);
                 int curTx = _terrainManager.CameraTileX;

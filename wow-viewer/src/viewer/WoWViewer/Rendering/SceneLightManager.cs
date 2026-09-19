@@ -3,7 +3,18 @@ using System.Numerics;
 namespace WoWViewer.Rendering;
 
 /// <summary>
+/// Outdoor ambient/directional lighting for the current frame, sourced from the active
+/// weather/LIT/DBC profile. Point-light casting is layered on top of this base lighting.
+/// </summary>
+public readonly record struct SceneAmbientLight(
+    Vector3 Direction,
+    Vector3 LightColor,
+    Vector3 AmbientColor);
+
+/// <summary>
 /// Collects active scene-emitted point lights and selects the nearest bounded set for a render target.
+/// Also carries the frame's outdoor ambient/sun representation so every lit surface can share one
+/// base-lighting contract.
 /// </summary>
 public sealed class SceneLightManager
 {
@@ -11,12 +22,34 @@ public sealed class SceneLightManager
 
     private readonly List<SceneLight> _lights = new();
     private readonly List<(SceneLight Light, float DistanceSq)> _selectionScratch = new(MaxShaderLights * 2);
+    private SceneAmbientLight? _ambient;
 
     public int Count => _lights.Count;
 
     public IReadOnlyList<SceneLight> Lights => _lights;
 
-    public void Clear() => _lights.Clear();
+    /// <summary>
+    /// Frame outdoor ambient/sun lighting, or <c>null</c> when no profile has supplied one this frame.
+    /// </summary>
+    public SceneAmbientLight? Ambient => _ambient;
+
+    /// <summary>
+    /// Sets the frame outdoor ambient/sun representation. Non-finite or zero-radius inputs are
+    /// rejected so a corrupt profile cannot poison every lit surface.
+    /// </summary>
+    public void SetAmbient(Vector3 direction, Vector3 lightColor, Vector3 ambientColor)
+    {
+        if (!IsFinite(direction) || !IsFinite(lightColor) || !IsFinite(ambientColor))
+            return;
+
+        _ambient = new SceneAmbientLight(direction, lightColor, ambientColor);
+    }
+
+    public void Clear()
+    {
+        _lights.Clear();
+        _ambient = null;
+    }
 
     public void Add(SceneLight light)
     {

@@ -34,6 +34,11 @@ public class TerrainRenderer : IDisposable
     private readonly int[] _uImplicitAlphaLoc = new int[4];
     private readonly int _uHasShadowLoc;
 
+    private const int MaxTerrainLocalLights = SceneLightManager.MaxShaderLights;
+    private readonly LocalLightUniforms _chunkLocalLights;
+    private readonly LocalLightUniforms _tileLocalLights;
+    private readonly SceneLight[] _localLightUploadScratch = new SceneLight[MaxTerrainLocalLights];
+
     private readonly uint[] _boundTexture2DByUnit = new uint[8];
     private int _activeTextureUnit = -1;
 
@@ -341,6 +346,9 @@ public class TerrainRenderer : IDisposable
         for (int i = 1; i < 4; i++)
             _uHasAlphaLoc[i] = _shader.GetUniformLocation($"uHasAlpha{i}");
 
+        _chunkLocalLights = LocalLightUniforms.Resolve(_shader);
+        _tileLocalLights = LocalLightUniforms.Resolve(_tileShader);
+
         InitializeSamplerUniforms();
         _lastTileFadeTimestamp = Stopwatch.GetTimestamp();
     }
@@ -483,7 +491,8 @@ public class TerrainRenderer : IDisposable
         Matrix4x4 proj,
         Vector3 cameraPos,
         FrustumCuller? frustum = null,
-        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys = null)
+        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys = null,
+        SceneLightManager? sceneLights = null)
     {
         LastFrameDrawCalls = 0;
         LastFrameUniform1Calls = 0;
@@ -505,7 +514,7 @@ public class TerrainRenderer : IDisposable
 
         if (_tiles.Count > 0)
         {
-            RenderTiles(view, proj, cameraPos, frustum, visibleTileKeys);
+            RenderTiles(view, proj, cameraPos, frustum, visibleTileKeys, sceneLights);
             return;
         }
 
@@ -571,6 +580,7 @@ public class TerrainRenderer : IDisposable
                 continue;
             }
 
+            UploadLocalLights(_chunkLocalLights, sceneLights, chunk.BoundsMin, chunk.BoundsMax);
             RenderChunk(chunk);
             ChunksRendered++;
             wireframeChunks?.Add(chunk);
@@ -721,7 +731,8 @@ public class TerrainRenderer : IDisposable
         Matrix4x4 proj,
         Vector3 cameraPos,
         FrustumCuller? frustum,
-        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys)
+        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys,
+        SceneLightManager? sceneLights)
     {
         UpdateTileFades();
 
@@ -824,6 +835,7 @@ public class TerrainRenderer : IDisposable
             _tileShader.SetInt("uHasAlphaExt", tile.AlphaExtArrayTexture != 0 ? 1 : 0);
             LastFrameUniform1Calls++;
             _tileShader.SetFloat("uOpacity", tileOpacity);
+            UploadLocalLights(_tileLocalLights, sceneLights, tile.BoundsMin, tile.BoundsMax);
 
             _gl.BindVertexArray(tile.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, tile.IndexCount, DrawElementsType.UnsignedShort, null);
@@ -1461,6 +1473,75 @@ public class TerrainRenderer : IDisposable
         return texture;
     }
 
+    private void UploadLocalLights(LocalLightUniforms uniforms, SceneLightManager? sceneLights, Vector3 boundsMin, Vector3 boundsMax)
+    {
+        if (uniforms.CountLocation < 0)
+            return;
+
+        int count = sceneLights == null
+            ? 0
+            : sceneLights.QueryAffecting(boundsMin, boundsMax, _localLightUploadScratch);
+
+        _gl.Uniform1(uniforms.CountLocation, count);
+        for (int i = 0; i < count; i++)
+        {
+            SceneLight light = _localLightUploadScratch[i];
+            Vector3 color = ClampVector(light.Color, 0.0f, 4.0f);
+            float intensity = Math.Clamp(FiniteOrDefault(light.Intensity, 0.0f), 0.0f, 4.0f);
+            float start = Math.Clamp(FiniteOrDefault(light.AttenuationStart, 0.0f), 0.0f, 100000.0f);
+            float end = MathF.Max(Math.Clamp(FiniteOrDefault(light.AttenuationEnd, 0.0f), 0.0f, 100000.0f), start + 0.001f);
+
+            _gl.Uniform3(uniforms.PosLocations[i], light.Position.X, light.Position.Y, light.Position.Z);
+            _gl.Uniform3(uniforms.ColorLocations[i], color.X, color.Y, color.Z);
+            _gl.Uniform1(uniforms.IntensityLocations[i], intensity);
+            _gl.Uniform1(uniforms.StartLocations[i], start);
+            _gl.Uniform1(uniforms.EndLocations[i], end);
+        }
+    }
+
+    private static Vector3 ClampVector(Vector3 value, float min, float max)
+        => new(
+            Math.Clamp(FiniteOrDefault(value.X, 0.0f), min, max),
+            Math.Clamp(FiniteOrDefault(value.Y, 0.0f), min, max),
+            Math.Clamp(FiniteOrDefault(value.Z, 0.0f), min, max));
+
+    private static float FiniteOrDefault(float value, float fallback)
+        => float.IsFinite(value) ? value : fallback;
+
+    private sealed class LocalLightUniforms
+    {
+        public int CountLocation { get; init; } = -1;
+
+        public int[] PosLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public int[] ColorLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public int[] IntensityLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public int[] StartLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public int[] EndLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public static LocalLightUniforms Resolve(ShaderProgram shader)
+        {
+            var uniforms = new LocalLightUniforms
+            {
+                CountLocation = shader.GetUniformLocation("uLocalLightCount")
+            };
+
+            for (int i = 0; i < MaxTerrainLocalLights; i++)
+            {
+                uniforms.PosLocations[i] = shader.GetUniformLocation($"uLocalLightPos[{i}]");
+                uniforms.ColorLocations[i] = shader.GetUniformLocation($"uLocalLightColor[{i}]");
+                uniforms.IntensityLocations[i] = shader.GetUniformLocation($"uLocalLightIntensity[{i}]");
+                uniforms.StartLocations[i] = shader.GetUniformLocation($"uLocalLightStart[{i}]");
+                uniforms.EndLocations[i] = shader.GetUniformLocation($"uLocalLightEnd[{i}]");
+            }
+
+            return uniforms;
+        }
+    }
+
     private ShaderProgram CreateTerrainShader()
     {
         string vertSrc = @"
@@ -1476,6 +1557,7 @@ uniform mat4 uProj;
 uniform vec3 uLightDir;
 
 out vec3 vWorldPos;
+out vec3 vWorldNormal;
 out float vDiffuse;
 out vec2 vTexCoord;
 out vec4 vVertexColor;
@@ -1484,6 +1566,7 @@ void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
     vec3 worldNormal = normalize(mat3(uModel) * aNormal);
+    vWorldNormal = worldNormal;
     vDiffuse = max(dot(worldNormal, normalize(uLightDir)), 0.0);
     vTexCoord = aTexCoord;
     vVertexColor = aVertexColor;
@@ -1494,6 +1577,7 @@ void main() {
         string fragSrc = @"
 #version 330 core
 in vec3 vWorldPos;
+in vec3 vWorldNormal;
 in float vDiffuse;
 in vec2 vTexCoord;
 in vec4 vVertexColor;
@@ -1539,6 +1623,12 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform int uLocalLightCount;
+uniform vec3 uLocalLightPos[8];
+uniform vec3 uLocalLightColor[8];
+uniform float uLocalLightIntensity[8];
+uniform float uLocalLightStart[8];
+uniform float uLocalLightEnd[8];
 uniform float uOpacity;
 uniform int uWireframe;
 uniform vec4 uWireframeColor;
@@ -1592,7 +1682,23 @@ void main() {
     float shadowVisibility = (uShowShadowMap == 1 && uHasShadowMap == 1)
         ? 1.0 - clamp(texture(uShadowSampler, vTexCoord).r, 0.0, 1.0) * clamp(uShadowStrength, 0.0, 1.0)
         : 1.0;
-    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility;
+    vec3 localLight = vec3(0.0);
+    for (int i = 0; i < 8; i++) {
+        if (i >= uLocalLightCount)
+            break;
+
+        vec3 toLight = uLocalLightPos[i] - vWorldPos;
+        float distanceToLight = length(toLight);
+        float attenuationRange = max(uLocalLightEnd[i] - uLocalLightStart[i], 0.001);
+        float attenuation = clamp((uLocalLightEnd[i] - distanceToLight) / attenuationRange, 0.0, 1.0);
+        vec3 toLightDir = distanceToLight > 0.0001 ? toLight / distanceToLight : vec3(0.0, 0.0, 1.0);
+        float localDiffuse = max(dot(normalize(vWorldNormal), toLightDir), 0.0);
+        localLight += max(uLocalLightColor[i], vec3(0.0))
+            * clamp(uLocalLightIntensity[i], 0.0, 4.0)
+            * attenuation
+            * localDiffuse;
+    }
+    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility + localLight;
     vec3 result = vec3(1.0);
 
     if (uShowLayer0 == 1) {
@@ -1747,6 +1853,7 @@ uniform mat4 uProj;
 uniform vec3 uLightDir;
 
 out vec3 vWorldPos;
+out vec3 vWorldNormal;
 out float vDiffuse;
 out vec2 vTexCoord;
 out vec4 vVertexColor;
@@ -1758,6 +1865,7 @@ void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
     vec3 worldNormal = normalize(mat3(uModel) * aNormal);
+    vWorldNormal = worldNormal;
     vDiffuse = max(dot(worldNormal, normalize(uLightDir)), 0.0);
     vTexCoord = aTexCoord;
     vVertexColor = aVertexColor;
@@ -1771,6 +1879,7 @@ void main() {
         string fragSrc = @"
 #version 330 core
 in vec3 vWorldPos;
+in vec3 vWorldNormal;
 in float vDiffuse;
 in vec2 vTexCoord;
 in vec4 vVertexColor;
@@ -1801,6 +1910,12 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform int uLocalLightCount;
+uniform vec3 uLocalLightPos[8];
+uniform vec3 uLocalLightColor[8];
+uniform float uLocalLightIntensity[8];
+uniform float uLocalLightStart[8];
+uniform float uLocalLightEnd[8];
 uniform int uWireframe;
 uniform vec4 uWireframeColor;
 
@@ -1849,7 +1964,23 @@ void main() {
     float shadowVisibility = (uShowShadowMap == 1)
         ? 1.0 - clamp(alphaShadow.a, 0.0, 1.0) * clamp(uShadowStrength, 0.0, 1.0)
         : 1.0;
-    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility;
+    vec3 localLight = vec3(0.0);
+    for (int i = 0; i < 8; i++) {
+        if (i >= uLocalLightCount)
+            break;
+
+        vec3 toLight = uLocalLightPos[i] - vWorldPos;
+        float distanceToLight = length(toLight);
+        float attenuationRange = max(uLocalLightEnd[i] - uLocalLightStart[i], 0.001);
+        float attenuation = clamp((uLocalLightEnd[i] - distanceToLight) / attenuationRange, 0.0, 1.0);
+        vec3 toLightDir = distanceToLight > 0.0001 ? toLight / distanceToLight : vec3(0.0, 0.0, 1.0);
+        float localDiffuse = max(dot(normalize(vWorldNormal), toLightDir), 0.0);
+        localLight += max(uLocalLightColor[i], vec3(0.0))
+            * clamp(uLocalLightIntensity[i], 0.0, 4.0)
+            * attenuation
+            * localDiffuse;
+    }
+    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility + localLight;
     vec3 result = vec3(1.0);
 
     if (visible[0]) {

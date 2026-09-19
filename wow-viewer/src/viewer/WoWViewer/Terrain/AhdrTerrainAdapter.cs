@@ -42,12 +42,22 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
         foreach (string path in Directory.EnumerateFiles(folder))
         {
             byte[] head = ReadHead(path, 256);
-            if (!AdtAhdrReader.IsAhdrFamily(head) || !AdtAhdrReader.TryReadTileLocation(head, out int alocX, out int alocY))
+            if (!AdtAhdrReader.IsAhdrFamily(head))
                 continue;
+
+            // v22/v23 DAT files (e.g. the Wrath "area_*" corpus) carry the same AHDR-family
+            // vocabulary as v26 but no ALOC chunk, so the tile location must come from the file
+            // name. v26 keeps its ALOC and is unaffected.
+            if (!AdtAhdrReader.TryReadTileLocation(head, out int alocX, out int alocY)
+                && !AdtAhdrReader.TryParseTileLocationFromName(path, out alocX, out alocY))
+            {
+                SkippedFiles.Add($"{Path.GetFileName(path)}: no ALOC and no tile coordinates in the file name");
+                continue;
+            }
 
             if (alocX is < 0 or >= 64 || alocY is < 0 or >= 64)
             {
-                SkippedFiles.Add($"{Path.GetFileName(path)}: ALOC tile ({alocX}, {alocY}) outside the 64x64 grid");
+                SkippedFiles.Add($"{Path.GetFileName(path)}: tile ({alocX}, {alocY}) outside the 64x64 grid");
                 continue;
             }
 

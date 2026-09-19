@@ -370,9 +370,11 @@ public static class TemplatedTerrainGenerator
         var normals = new byte[McvtVertexCount * 3];
         for (int i = 0; i < McvtVertexCount; i++)
         {
+            // Disk MCNR component order is signed X, Z, Y (BlankAdtFactory.CreateUpNormals,
+            // AlphaTerrainAdapter.DecodeNormal). Up is byte[1], not byte[2].
             normals[i * 3 + 0] = 0;
-            normals[i * 3 + 1] = 0;
-            normals[i * 3 + 2] = 127; // Upward Z normal
+            normals[i * 3 + 1] = 127; // Upward Z normal
+            normals[i * 3 + 2] = 0;
         }
         return normals;
     }
@@ -401,9 +403,13 @@ public static class TemplatedTerrainGenerator
                 sbyte ny = (sbyte)Math.Clamp((int)(-dzy / len * 127f), -128, 127);
                 sbyte nz = (sbyte)Math.Clamp((int)(1f / len * 127f), -128, 127);
 
+                // Disk MCNR component order is signed X, Z, Y (see BlankAdtFactory.CreateUpNormals
+                // and AlphaTerrainAdapter.DecodeNormal). Writing (X, Y, Z) here put the up component
+                // into the horizontal Y axis and the Y slope into Z, so every generated slope shaded
+                // on the wrong side. GenerateFlatNormals already uses the correct (X, Z, Y) order.
                 normals[vIdx * 3 + 0] = (byte)nx;
-                normals[vIdx * 3 + 1] = (byte)ny;
-                normals[vIdx * 3 + 2] = (byte)nz;
+                normals[vIdx * 3 + 1] = (byte)nz;
+                normals[vIdx * 3 + 2] = (byte)ny;
             }
         }
     }

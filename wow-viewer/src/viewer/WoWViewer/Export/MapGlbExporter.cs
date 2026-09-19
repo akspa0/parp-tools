@@ -24,7 +24,7 @@ public static class MapGlbExporter
 
     public static void ExportTile(
         TerrainManager terrain,
-        IDataSource dataSource,
+        IDataSource? dataSource,
         Md5TranslateIndex? md5Index,
         int tileX,
         int tileY,
@@ -60,8 +60,13 @@ public static class MapGlbExporter
             $"(chunks={result.Chunks.Count}, mddf={result.MddfPlacements.Count}, modf={result.ModfPlacements.Count})");
     }
 
-    private static void AddPlacements(SceneBuilder scene, ITerrainAdapter adapter, TileLoadResult result, IDataSource dataSource)
+    private static void AddPlacements(SceneBuilder scene, ITerrainAdapter adapter, TileLoadResult result, IDataSource? dataSource)
     {
+        // A DAT folder can be opened with no client data source; the terrain still exports, but
+        // placements need model bytes, so skip them rather than throw.
+        if (dataSource is null)
+            return;
+
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
 
@@ -145,14 +150,14 @@ public static class MapGlbExporter
         int tileY,
         IReadOnlyList<TerrainChunkData> chunks,
         string mapName,
-        IDataSource dataSource,
+        IDataSource? dataSource,
         Md5TranslateIndex? md5Index)
     {
         // Material: minimap tile if available.
         var terrainMat = new MaterialBuilder("terrain");
         terrainMat.WithDoubleSide(true);
 
-        byte[]? minimapPng = TryLoadMinimapPngBytes(dataSource, md5Index, mapName, tileX, tileY);
+        byte[]? minimapPng = dataSource is null ? null : TryLoadMinimapPngBytes(dataSource, md5Index, mapName, tileX, tileY);
         if (minimapPng != null)
         {
             terrainMat.WithBaseColor(new SharpGLTF.Memory.MemoryImage(minimapPng));
@@ -242,12 +247,15 @@ public static class MapGlbExporter
     private static Vector3 ZupToYup(float x, float y, float z) => new(x, z, -y);
 
     private static byte[]? TryLoadMinimapPngBytes(
-        IDataSource dataSource,
+        IDataSource? dataSource,
         Md5TranslateIndex? md5Index,
         string mapName,
         int tileX,
         int tileY)
     {
+        if (dataSource is null)
+            return null;
+
         string plainPath = MinimapService.GetMinimapTilePath(mapName, tileX, tileY);
 
         byte[]? data = null;
@@ -288,8 +296,11 @@ public static class MapGlbExporter
         }
     }
 
-    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? TryLoadMdxMesh(string modelPath, IDataSource dataSource)
+    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? TryLoadMdxMesh(string modelPath, IDataSource? dataSource)
     {
+        if (dataSource is null)
+            return null;
+
         try
         {
             byte[]? mdxData = dataSource.ReadFile(modelPath);
@@ -381,8 +392,11 @@ public static class MapGlbExporter
         }
     }
 
-    private static byte[]? TryResolveMdxTexturePngBytes(MdxFile mdx, MdlGeoset geoset, IDataSource dataSource)
+    private static byte[]? TryResolveMdxTexturePngBytes(MdxFile mdx, MdlGeoset geoset, IDataSource? dataSource)
     {
+        if (dataSource is null)
+            return null;
+
         int texId = -1;
         if (geoset.MaterialId >= 0 && geoset.MaterialId < mdx.Materials.Count)
         {
@@ -426,8 +440,11 @@ public static class MapGlbExporter
             new VertexTexture1(uv));
     }
 
-    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? TryLoadWmoMesh(string modelPath, IDataSource dataSource)
+    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? TryLoadWmoMesh(string modelPath, IDataSource? dataSource)
     {
+        if (dataSource is null)
+            return null;
+
         try
         {
             byte[]? data = dataSource.ReadFile(modelPath);
@@ -504,7 +521,7 @@ public static class MapGlbExporter
     private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty> BuildWmoMesh(
         WmoV14ToV17Converter.WmoV14Data wmo,
         string modelPath,
-        IDataSource dataSource)
+        IDataSource? dataSource)
     {
         string baseName = Path.GetFileNameWithoutExtension(modelPath);
         var mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>($"wmo_{baseName}");
@@ -591,8 +608,11 @@ public static class MapGlbExporter
         return new Vector4(r, g, b, 1.0f);
     }
 
-    private static byte[]? TryResolveWmoTexturePngBytes(string textureName, IDataSource dataSource)
+    private static byte[]? TryResolveWmoTexturePngBytes(string textureName, IDataSource? dataSource)
     {
+        if (dataSource is null)
+            return null;
+
         byte[]? blp = dataSource.ReadFile(textureName) ?? dataSource.ReadFile(textureName.Replace('/', '\\'));
         if (blp == null || blp.Length == 0)
             return null;

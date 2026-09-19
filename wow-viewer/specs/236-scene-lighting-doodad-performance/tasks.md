@@ -19,13 +19,15 @@ Governance: AGENTS.md §9 applies. Tasks are checked `[x]` only with verifiable 
 
 ## Phase 2 — Multi-Surface Light Casting
 
-- [ ] **T010**: Create `SceneLightManager.cs` to collect outdoor ambient/sun, WMO `MOLT` point lights, and placed doodad `LITE` lights into a spatial lookup structure.
+- [x] **T010**: Create `SceneLightManager.cs` to collect outdoor ambient/sun, WMO `MOLT` point lights, and placed doodad `LITE` lights into a spatial lookup structure. (Receipt: `evidence/phase2-wmo-light-casting-slice.md`, `evidence/phase2-light-casting.md` — outdoor ambient/sun `SceneAmbientLight` contract added 2026-09-18)
 - [x] **T011**: Modernize `WmoRenderer.cs` shader to accept up to 8 local point lights (`uLocalLightPos`, `uLocalLightColor`, `uLocalLightIntensity`, `uLocalLightStart`, `uLocalLightEnd`). (Receipt: `evidence/phase2-wmo-light-casting-slice.md`)
-- [ ] **T012**: Modernize `TerrainRenderer.cs` shader to accept nearby local lights for terrain illumination.
-- [ ] **T013**: Wire `SceneLightManager` in `WorldScene.cs` to upload nearby lights during WMO, terrain, and doodad passes.
-- [ ] **Gate 2**: Verify torches and braziers cast light onto surrounding WMO geometry and ground surfaces; receipt written to `evidence/phase2-light-casting.md`.
+- [x] **T012**: Modernize `TerrainRenderer.cs` shader to accept nearby local lights for terrain illumination. (Receipt: `evidence/phase2-light-casting.md` — both chunk and tile programs)
+- [ ] **T013**: Wire `SceneLightManager` in `WorldScene.cs` to upload nearby lights during WMO, terrain, and doodad passes. **Partial 2026-09-18**: WMO (prior slice), terrain, and the doodad/model external-light consumer for unbatched/state-hoisted/transparent + WMO-internal doodads all landed with receipts. Remaining: the GPU-**instanced** opaque doodad batch (cannot carry per-placement lights) and native (non-legacy) M2 — see `evidence/phase2-doodad-light-consumer.md`.
+- [ ] **Gate 2**: Verify torches and braziers cast light onto surrounding WMO geometry and ground surfaces; receipt written to `evidence/phase2-light-casting.md`. **Operator-owned visual gate still open**; only the source receipt exists.
 
-2026-09-16 slice note: `evidence/phase2-wmo-light-casting-slice.md` lands the source-only WMO shell consumer plus WMO `MOLT`, MDX `LITE`, M2 light, and WMO-internal doodad light collection. T010 remains open until outdoor ambient/sun handling is represented in the manager contract; T012/T013/Gate 2 remain open until terrain and doodad consumers plus operator runtime visual proof are complete.
+2026-09-16 slice note: `evidence/phase2-wmo-light-casting-slice.md` lands the source-only WMO shell consumer plus WMO `MOLT`, MDX `LITE`, M2 light, and WMO-internal doodad light collection.
+
+2026-09-18 slice note: `evidence/phase2-light-casting.md` lands the outdoor ambient/sun manager contract (T010), both terrain shaders' nearby-light evaluation (T012), and the terrain consumer wiring in `WorldScene`. `evidence/phase2-doodad-light-consumer.md` lands the doodad/model external-light consumer (FR-007) for unbatched/state-hoisted/transparent world doodads and WMO-internal doodads, with a deliberate non-regressive boundary: GPU-instanced opaque doodad batches and native (non-legacy) M2 remain base-lit. T013 stays unchecked until that boundary closes (shared with Spec 242's per-placement instancing decision); Gate 2 stays unchecked because runtime visual proof is operator-owned.
 
 ---
 

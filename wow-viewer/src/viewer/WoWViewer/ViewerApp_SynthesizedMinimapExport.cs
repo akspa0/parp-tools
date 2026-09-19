@@ -14,6 +14,14 @@ public partial class ViewerApp
     private string _synthesizedMinimapCascProducts = string.Empty;
     private bool _synthesizedMinimapCdnFill;
 
+    // Exposes the harvest tool's --no-dxt1. Authored 0.5.3 minimaps are DXT1, but later-era minimaps
+    // differ too much for the codec floor to be representative, so the cycle must be optional.
+    private bool _synthesizedMinimapDxt1 = true;
+
+    // Exposes the harvest tool's --mccv: multiply the composed albedo by the client's per-vertex
+    // MCCV ambient tint. Off by default (authored minimaps do not bake MCCV).
+    private bool _synthesizedMinimapMccv;
+
     // The session (data source + map) the dialog inputs were last filled from. Inputs are refilled only when it
     // changes, so values the user typed are not overwritten every frame.
     private string? _synthesizedMinimapPreparedSession;
@@ -167,6 +175,24 @@ public partial class ViewerApp
                 + "Shadows do not cross tile seams: each tile is traced against its own heightfield only.");
         }
 
+        ImGui.Checkbox("Apply DXT1 compression", ref _synthesizedMinimapDxt1);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "Apply the DXT1 4x4-block / RGB565 codec cycle to the primary tiles, matching authored "
+                + "0.5.3 minimaps. Turn OFF to emit pristine 24-bit tiles as primary -- later-era "
+                + "minimaps differ too much from DXT1 for the codec floor to be representative.");
+        }
+
+        ImGui.Checkbox("Apply MCCV vertex colors", ref _synthesizedMinimapMccv);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(
+                "Multiply the composed albedo by the client's per-vertex MCCV ambient tint, matching "
+                + "the terrain shader. Authored minimaps do not bake MCCV, so this is an "
+                + "authoring/diagnostic signal, not a match-the-client setting.");
+        }
+
         ImGui.Text("Output directory:");
         ImGui.SetNextItemWidth(-88);
         ImGui.InputText("##synthmin_output", ref _synthesizedMinimapOutputDirectory, 1024);
@@ -257,6 +283,8 @@ public partial class ViewerApp
         bool includeWmos = _synthesizedMinimapIncludeWmos;
         bool bakeMcsh = _synthesizedMinimapBakeMcsh;
         bool castShadows = _synthesizedMinimapCastShadows;
+        bool dxt1 = _synthesizedMinimapDxt1;
+        bool mccv = _synthesizedMinimapMccv;
 
         _ = Task.Run(async () =>
         {
@@ -273,6 +301,8 @@ public partial class ViewerApp
                     includeWmos,
                     bakeMcsh,
                     castShadows,
+                    dxt1,
+                    mccv,
                     cascProducts,
                     cdnFill);
             }
@@ -301,6 +331,8 @@ public partial class ViewerApp
         bool includeWmos,
         bool bakeMcsh,
         bool castShadows,
+        bool dxt1,
+        bool mccv,
         string cascProducts,
         bool cdnFill)
     {
@@ -350,6 +382,11 @@ public partial class ViewerApp
         // Harvest defaults cast shadows ON, so only the opt-out needs to be forwarded.
         if (!castShadows)
             startInfo.ArgumentList.Add("--no-cast-shadows");
+        // Harvest defaults DXT1 ON, so only the opt-out needs to be forwarded.
+        if (!dxt1)
+            startInfo.ArgumentList.Add("--no-dxt1");
+        if (mccv)
+            startInfo.ArgumentList.Add("--mccv");
 
         if (File.Exists(Path.Combine(clientRoot, ".build.info")))
         {
