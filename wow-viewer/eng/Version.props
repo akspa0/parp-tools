@@ -4,10 +4,10 @@
          InformationalVersion may carry a prerelease tag (e.g. -alpha, -rc1); the
          .NET SDK appends "+<git-commit>" build metadata automatically. The viewer
          title bar and About box display this value with the build metadata trimmed,
-         so it must match the release tag (v0.6.0-alpha -> 0.6.0-alpha). -->
+         so it must match the release tag (v0.6.0-alpha2 -> 0.6.0-alpha2). -->
     <VersionPrefix>0.6.0</VersionPrefix>
     <AssemblyVersion>0.6.0.0</AssemblyVersion>
     <FileVersion>0.6.0.0</FileVersion>
-    <InformationalVersion>0.6.0-alpha</InformationalVersion>
+    <InformationalVersion>0.6.0-alpha2</InformationalVersion>
   </PropertyGroup>
 </Project>
