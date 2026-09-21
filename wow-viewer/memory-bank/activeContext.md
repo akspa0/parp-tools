@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-18
+Last updated: 2026-09-20
 
 ## Fresh-chat route
 
@@ -19,6 +19,33 @@ this file states only the current lane and what's still open.
 era matrix, USERGUIDE §12–13 and CLI-TOOLS are updated. Release commit `c247f383`, tag `v0.6.0-alpha`
 created **locally** — the operator still has to push (it fires `wowviewer-release.yml` and the GitHub
 prerelease). Viewer build clean; title bar reads `v0.6.0-alpha` (operator screenshot).
+
+## Live lane — 237 DAT v22/v23/v26 (2026-09-20)
+
+All three DAT revisions now load from real files. **First v22 ever seen** (`Expansion01`, 4 files,
+Terokkar / Bone Wastes) renders — operator screenshot, 999 chunks, 119 FPS. v23 confirmed at
+`IcecrownCitadel`. Path-picker blocker fixed (it discarded pasted paths in **every** picker).
+
+**Main gap**: v22 `AMAP` is an **unidentified encoding** (128-3474 B, never 4096; v18 MCAL RLE
+refuted at chance level). `AhdrTerrainAdapter:178` demands a 4096-byte map on *every* layer, so v22
+drops all alpha and **renders layer 0 only**. Two bounded next actions, neither started, both needing
+operator go-ahead:
+
+1. Relax the alpha guard so partial alpha sets still blend (small, independent of the codec).
+2. Identify the v22 `AMAP` encoding (new scope — spec task per §9.1).
+
+**New lane: [247 DAT Capture & LK ADT Export](../specs/247-dat-capture-and-adt-export/spec.md)** —
+spec + checklist authored 2026-09-20, awaiting approval to plan. Captured PNG per tile + stitched
+overview, and one-way DAT → LK v18 ADT. Operator chose codec-first ordering. 241 stays deferred; 247
+is the narrow one-way case it did not cover. Next artifact: `speckit-plan`.
+
+**Also measured 2026-09-20 — v22 carries what v26 does not** (corrects 241's capability table):
+`ACNK` +0x0C holds real **area IDs** (3519 / 3520; names unconfirmed against AreaTable), `ASHD` has
+**289 of 767 non-zero** (512 B = LK `MCSH` shape), holes are 0 as on v26. The viewer shows
+`Area ID: 0` only because `AdtAhdrChunk` keeps `HeaderRaw` and surfaces nothing — a reader gap, not
+missing data. `ASHD` (767) and `ACDO` (851) are parsed but unconsumed for v22.
+Receipts: [first-v22](../specs/237-adt-v26-terrain/evidence/first-v22-dat-render-2026-09-20.md) ·
+[v23 icecrown](../specs/237-adt-v26-terrain/evidence/real-v23-dat-icecrown-2026-09-20.md).
 
 ## Implement next — five v0.6 lanes (none implemented)
 

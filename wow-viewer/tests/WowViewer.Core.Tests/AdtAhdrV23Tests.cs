@@ -50,6 +50,32 @@ public sealed class AdtAhdrV23Tests
         Assert.Contains(tile.Diagnostics, d => d.Contains("no ALOC", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// The AHDR-family DATs are loose developer files scattered through client data under arbitrary
+    /// extensions, so a folder can mix revisions: the version must be readable per file, from a short
+    /// head rather than a full decode (the folder scan only reads 256 bytes per file).
+    /// </summary>
+    [Fact]
+    public void TryReadVersion_ReadsAhdrRevisionFromA256ByteHead()
+    {
+        byte[] file = BuildV23Tile();
+        byte[] head = file[..256];
+
+        Assert.True(AdtAhdrReader.TryReadVersion(head, out uint version));
+        Assert.Equal(23u, version);
+
+        // Same answer from the whole file, and the truncated head must not resolve a tile location.
+        Assert.True(AdtAhdrReader.TryReadVersion(file, out uint fullVersion));
+        Assert.Equal(23u, fullVersion);
+        Assert.False(AdtAhdrReader.TryReadTileLocation(head, out _, out _));
+    }
+
+    [Fact]
+    public void TryReadVersion_RejectsNonAhdrData()
+    {
+        Assert.False(AdtAhdrReader.TryReadVersion(new byte[64], out _));
+    }
+
     /// <summary>Minimal v23-shaped file: MVER 23, AHDR, AVTX, ANRM, ATEX, ACNK×256 (one ALYR each), no ALOC.</summary>
     private static byte[] BuildV23Tile()
     {

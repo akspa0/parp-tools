@@ -58,18 +58,39 @@ MVER  AHDR  ALOC  AOCH  AVTX  ANRM  [ATEX × n]  ADOO × n  ACNK × 256  [ADST �
 
 `ADST` (12 bytes) appears in 7 files as a run of 2–139 chunks between the last `ACNK` and `ACVT`. **MEASURED**
 
-## Relationship to ADT v22/v23
+## Relationship to DAT v22/v23
 
-v26 reuses the chunk vocabulary of the pre-Cataclysm experimental ADT v22/v23 on wowdev.wiki. It differs as follows:
+**All three revisions are now MEASURED on real files** (v22 and v23 acquired 2026-09-19/20), so this
+table is no longer wiki-derived:
 
-| | wiki v22/v23 | **v26** |
-|---|---|---|
-| First chunk | `AHDR` | `MVER` (26), then `AHDR` |
-| Version | 22 / 23 | **26** (in both `MVER` and `AHDR`) |
-| Tile location | not in file (filename convention) | **`ALOC` chunk** |
-| `ACVT` | v23 only | every file |
-| `AOCH`, `ADST` | absent | present (unexplained) |
-| `ACNK` index fields | chunk position | chunk-local 0–15, row-major (tile position is in `ALOC`) |
+| | **v22** | **v23** | **v26** |
+|---|---|---|---|
+| Corpus | Expansion01, 4 files | Kalimdor + IcecrownCitadel | `wow_classic_beta`, 699 files |
+| First chunk | `MVER` (22), then `AHDR` | `MVER` (23), then `AHDR` | `MVER` (26), then `AHDR` |
+| Tile location | not in file (filename) | not in file (filename) | **`ALOC` chunk** |
+| `ACVT` | **absent** | present | every file |
+| `AFBO` | **absent** | **present** (72 bytes) | absent |
+| `ADOO` | present | absent in sample | present |
+| `AOCH`, `ADST` | absent | absent | present (unexplained) |
+| `ACNK` count | **243–255, variable (chunks omitted)** | exactly 256 | exactly 256 |
+| `ACNK` sub-chunks | `ALYR`, `ASHD`, `ACDO` | `ALYR` only | `ALYR`, `ASHD`, `ACDO` |
+| `ACNK` header size | 0x40 | 0x40 | 0x40 |
+| `AMAP` | **128–3474, variable, encoding unknown** | 4096 | 4096 |
+| `ACNK` index fields | chunk position | chunk position | chunk-local 0–15, row-major (tile position is in `ALOC`) |
+
+Notes:
+
+- The wiki's "v22 has no `AFBO`/`ACVT`" claim is **CONFIRMED**. `AFBO` turns out to be a **v23-only**
+  chunk in the samples held — v26 never shows it.
+- **v22 omits empty `ACNK` rather than writing all 256.** Never index v22 chunks by ordinal position;
+  use the `ACNK` +0x00/+0x04 index fields.
+- **v22 `AMAP` is encoded, not raw.** Sizes 128–3474, never 4096. The v18 `MCAL` fill/copy RLE is
+  **refuted** (137 of 1385 payloads decode cleanly — chance level). Encoding unidentified; the viewer
+  currently renders v22 layer 0 only.
+- `ALYR` flag `0x100` gates the nested `AMAP` on v22 as well as v23 (measured 2382/2383).
+
+Evidence: [first-v22-dat-render-2026-09-20.md](../../specs/237-adt-v26-terrain/evidence/first-v22-dat-render-2026-09-20.md) ·
+[real-v23-dat-icecrown-2026-09-20.md](../../specs/237-adt-v26-terrain/evidence/real-v23-dat-icecrown-2026-09-20.md)
 
 ## Chunks
 

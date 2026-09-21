@@ -41,9 +41,13 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
         HeightDivisor = heightDivisor > 0f ? heightDivisor : 1f;
         foreach (string path in Directory.EnumerateFiles(folder))
         {
+            ScannedFileCount++;
             byte[] head = ReadHead(path, 256);
             if (!AdtAhdrReader.IsAhdrFamily(head))
                 continue;
+
+            if (AdtAhdrReader.TryReadVersion(head, out uint fileVersion))
+                VersionCounts[fileVersion] = VersionCounts.GetValueOrDefault(fileVersion) + 1;
 
             // v22/v23 DAT files (e.g. the Wrath "area_*" corpus) carry the same AHDR-family
             // vocabulary as v26 but no ALOC chunk, so the tile location must come from the file
@@ -88,6 +92,17 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
 
     /// <summary>Files that were AHDR-family but not placed, with the reason.</summary>
     public List<string> SkippedFiles { get; } = [];
+
+    /// <summary>Every file the folder scan looked at, AHDR-family or not (for "nothing found" diagnostics).</summary>
+    public int ScannedFileCount { get; private set; }
+
+    /// <summary>AHDR version field → file count, over every AHDR-family file seen (placed or skipped).</summary>
+    public Dictionary<uint, int> VersionCounts { get; } = [];
+
+    /// <summary>The scanned versions as "23x3, 26x1", or "none" when no AHDR-family file was seen.</summary>
+    public string VersionSummary => VersionCounts.Count == 0
+        ? "none"
+        : string.Join(", ", VersionCounts.OrderBy(kv => kv.Key).Select(kv => $"v{kv.Key}x{kv.Value}"));
 
     public IReadOnlyList<int> ExistingTiles => _existingTiles;
 

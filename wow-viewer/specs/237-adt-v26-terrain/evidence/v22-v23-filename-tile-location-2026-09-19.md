@@ -53,9 +53,13 @@ reports the expected "no ALOC" diagnostic.
 
 ## Proof boundary
 
-Source + unit-test proof only. **No runtime load witness is claimed** — the operator should open
-`E:\WC2\wrath\World\Maps\Kalimdor` with **File → Open DAT v26 Terrain Folder** and confirm the two
-tiles render. The height divisor may need adjusting for v23 (the UI's "DAT v26 Height Scale").
+Source + unit-test proof only at the time of writing. **No runtime load witness was claimed** — the
+operator was asked to open `E:\WC2\wrath\World\Maps\Kalimdor` with **File → Open DAT Terrain Folder**
+and confirm the two tiles render.
+
+**Resolved 2026-09-20 (operator):** v23 renders fine, as does v26. The runtime witness is satisfied;
+see [real-v23-dat-icecrown-2026-09-20.md](real-v23-dat-icecrown-2026-09-20.md). The menu label quoted
+above was renamed from "DAT v26 Height Scale" to "DAT Terrain Height Scale" in the same change.
 
 ## Operator observation recorded (not a task)
 

@@ -1,6 +1,28 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-18
+Last updated: 2026-09-20
+
+## 2026-09-20 — First DAT v22 Ever Loaded + Path-Picker Load Blocker
+
+- **Load blocker (all pickers)**: `ImGuiPathPicker.ResolveSelection` returned `_currentDirectory` and
+  ignored `_pathInputBuffer`, so a pasted path confirmed without Enter/Go was silently discarded and
+  the process working directory was used instead. New `TryCommitPathBar()` resolves it on confirm or
+  errors. Affected every picker (CASC, exports, overlays), not just DAT.
+- **First v22 in project history**: `E:\WC2\wrat2\world\maps\Expansion01` — 4 files, MVER/AHDR 22,
+  Terokkar / Bone Wastes tileset art. They **render** (operator screenshot: 4 tiles, 999 chunks,
+  119 FPS). Also confirmed real **v23** at `.../IcecrownCitadel` (3 files).
+- **v22 is structurally distinct**: no `ACVT`, no `AFBO`, **omits empty `ACNK`** (243-255, not 256),
+  carries `ASHD` + `ACDO`. `ACNK` header is 0x40 on all three revisions. `ALYR` flag `0x100` gates
+  `AMAP` on v22 too (2382/2383).
+- **Open defect**: v22 `AMAP` is **encoded** (128-3474 B, never 4096) and the encoding is
+  **unidentified** — v18 MCAL RLE refuted (137/1385 = chance). `AhdrTerrainAdapter:178` requires every
+  layer to carry a 4096-byte map, so v22 drops all alpha and **renders layer 0 only**. Not fixed.
+- **UI**: reader-side labels renamed `DAT v26` → `DAT (v22/23/26)`; export labels keep v26 (the writer
+  emits only v26). New `TryReadVersion` reports per-file revision in the info panel.
+- **Verification**: slnx build 0 errors; AHDR tests 15/15; full suite failures all pre-existing
+  (verified against a stashed clean tree). Receipts:
+  `specs/237-adt-v26-terrain/evidence/first-v22-dat-render-2026-09-20.md` and
+  `.../real-v23-dat-icecrown-2026-09-20.md`.
 
 ## 2026-09-19 — DAT GLB Export + Historical Data Record
 

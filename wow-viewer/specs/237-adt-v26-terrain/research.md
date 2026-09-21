@@ -35,13 +35,15 @@ chunk-per-name `ATEX`/`ADOO`, 669/699 tiles flat, 0 unaccounted bytes. The decis
 
 - **Decision**: A single `AdtAhdrReader`, with version-gated `ACNK` header layout and v23-only `AFBO`/`ACVT`.
 - **Rationale**: The wiki layouts match apart from the ACNK header and the two extra chunks.
-- **v26 measured**: no `AFBO`; `ACVT` in every file. The v22/v23 claims ("v22 has no `AFBO`/`ACVT`") stay unverified because no real v22/v23 files exist.
+- **v26 measured**: no `AFBO`; `ACVT` in every file.
+- **v22 measured (2026-09-20)**: real v22 files are in hand (Expansion01, 4 files). The wiki claim is **CONFIRMED for v22**: no `AFBO`, no `ACVT`. v22 also omits empty `ACNK` (243-255, not 256), carries `ASHD` + `ACDO` sub-chunks, and its `AMAP` is **encoded** (128-3474 bytes, never 4096; v18 MCAL RLE refuted at 137/1385 = chance). `ACNK` header is 0x40 on v22 too, so the version-gated header layout this section anticipated is **not needed**. See evidence/first-v22-dat-render-2026-09-20.md.
+- **v23 measured (2026-09-20, correction)**: real v23 files now exist in two samples. The IcecrownCitadel sample carries **both** `AFBO` (72 bytes) and `ACVT` (132,100 bytes = 33,025 x 4), so the wiki-derived "v22 has no `AFBO`/`ACVT`" claim does not hold for v23, and `AFBO` is a chunk the v26 corpus never showed. `AFBO` is walked past, not decoded. One tile in that sample has zero `ATEX` and all 256 `ACNK` as bare 0x40 headers. See evidence/real-v23-dat-icecrown-2026-09-20.md.
 - **Measure**: the inventory confirms per revision and that the ACNK header size matches per version.
 
 ### R3: Nested chunk walk and padding
 
 - **Decision**: Walk `ACNK` as `[0x40 header if size > 0x40] + sub-chunks`, and `ALYR` as `[0x20 fixed] + optional AMAP`. Pick padding by **byte accounting**: the walk variant that leaves 0 unaccounted bytes across the corpus wins.
-- **Why measure**: The repo already carries both padded and unpadded chunk walks (`padOddChunkSizes`), and the wiki says nothing on padding. The wiki also says `AMAP` presence is signalled by `flags & 0x100` in v23 only.
+- **Why measure**: The repo already carries both padded and unpadded chunk walks (`padOddChunkSizes`), and the wiki says nothing on padding. The wiki also says `AMAP` presence is signalled by `flags & 0x100` in v23 only. **Measured 2026-09-20**: the `0x100` gate holds on **v22** as well (1385 flagged with `AMAP`, 997 unflagged without, 1 anomaly out of 2383). The 0x40 `ACNK` header and 0x20 `ALYR` fixed part are confirmed on all three revisions.
 - **Detector power**: A synthetic file with an odd-sized sub-chunk must make the wrong variant report a gap.
 
 ### R4: Vertex order (AVTX outer/inner → 9-8-9 interleave)

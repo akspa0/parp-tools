@@ -51,6 +51,26 @@ public static class AdtAhdrReader
         return next + 4 <= data.Length && BinaryPrimitives.ReadUInt32LittleEndian(data[(int)next..]) == Ahdr;
     }
 
+    /// <summary>
+    /// Reads the AHDR version field without decoding the whole file. The AHDR-family DATs are loose
+    /// developer files scattered through client data under arbitrary extensions, so a folder can mix
+    /// revisions and the version is only knowable per file.
+    /// </summary>
+    public static bool TryReadVersion(ReadOnlySpan<byte> data, out uint version)
+    {
+        version = 0;
+        foreach ((uint id, int offset, int size) in Walk(data, 0, data.Length))
+        {
+            if (id == Ahdr && size >= 4)
+            {
+                version = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Reads only ALOC tile coordinates (X, Y) without decoding the whole file.</summary>
     public static bool TryReadTileLocation(ReadOnlySpan<byte> data, out int tileX, out int tileY)
     {

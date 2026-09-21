@@ -24,6 +24,14 @@ That makes DAT v26 a candidate for the one format edits are saved in and dataset
 
 ### What v26 can and cannot carry today (MEASURED on the corpus)
 
+> **v22/v23 correction (2026-09-20).** The table below was measured on the **v26** corpus only, when no
+> real v22/v23 files existed. Real files now do, and two rows do **not** generalise: v22 carries real
+> **area IDs** (`ACNK` +0x0C = 3519/3520) and **live shadows** (`ASHD` 289 of 767 non-zero), and v22
+> **omits empty `ACNK`** (243-255, not 256). See
+> [237 evidence](../237-adt-v26-terrain/evidence/first-v22-dat-render-2026-09-20.md). This spec stays
+> **deferred**; one-way DAT->LK ADT export lives in
+> [247](../247-dat-capture-and-adt-export/spec.md).
+
 | Content | In v26? | Evidence |
 |---|---|---|
 | Heights, normals, vertex colours | Yes (`AVTX`, `ANRM`, `ACVT`) | round trip 700/700 |

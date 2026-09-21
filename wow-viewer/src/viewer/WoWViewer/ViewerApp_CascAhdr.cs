@@ -28,7 +28,7 @@ public partial class ViewerApp
     private string? _lastCascInstallPath;
     private string? _lastAhdrTerrainFolder;
 
-    /// <summary>DAT v26 height display divisor; 36 treats heights as inches (see AhdrTerrainAdapter.HeightDivisor).</summary>
+    /// <summary>DAT terrain height display divisor; 36 treats heights as inches (see AhdrTerrainAdapter.HeightDivisor).</summary>
     private float _ahdrHeightDivisor = 36f;
 
     private static readonly (string Label, float Divisor)[] AhdrHeightScaleOptions =
@@ -41,7 +41,7 @@ public partial class ViewerApp
 
     private void DrawAhdrHeightScaleMenu()
     {
-        if (!ImGuiNET.ImGui.BeginMenu("DAT v26 Height Scale"))
+        if (!ImGuiNET.ImGui.BeginMenu("DAT Terrain Height Scale"))
             return;
 
         foreach ((string label, float divisor) in AhdrHeightScaleOptions)
@@ -84,7 +84,7 @@ public partial class ViewerApp
         {
             _wantOpenAhdrTerrainFolder = false;
             ImGuiPathPicker.Instance.Open(
-                "Select a folder of DAT v26 terrain files (any file names)",
+                "Select a folder of DAT terrain files (v22/23/26; any file name or extension)",
                 pickFolder: true,
                 initialPath: _lastAhdrTerrainFolder,
                 filterExtension: null,
@@ -422,7 +422,7 @@ public partial class ViewerApp
     private void LoadAhdrTerrain(string folder)
     {
         _lastAhdrTerrainFolder = Path.GetFullPath(folder);
-        _statusMessage = $"Scanning DAT v26 terrain files in {folder}...";
+        _statusMessage = $"Scanning DAT terrain files in {folder}...";
 
         AhdrTerrainAdapter adapter;
         try
@@ -431,25 +431,31 @@ public partial class ViewerApp
         }
         catch (Exception ex)
         {
-            _statusMessage = $"DAT v26 scan failed: {ex.Message}";
-            return;
-        }
-
-        if (adapter.ExistingTiles.Count == 0)
-        {
-            _statusMessage = $"No DAT v26 (AHDR-family) terrain files with ALOC found in {folder}.";
+            _statusMessage = $"DAT terrain scan failed: {ex.Message}";
             return;
         }
 
         foreach (string skipped in adapter.SkippedFiles)
-            ViewerLog.Info(ViewerLog.Category.MpqData, $"[DAT v26] skipped {skipped}");
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"[DAT] skipped {skipped}");
 
-        string mapName = "DAT v26: " + Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
+        if (adapter.ExistingTiles.Count == 0)
+        {
+            // Name the folder actually scanned and say whether anything AHDR-family was even seen:
+            // the usual cause is a folder that is not the one the user meant.
+            _statusMessage = adapter.SkippedFiles.Count == 0
+                ? $"No AHDR-family DAT terrain files (v22/23/26) in {Path.GetFullPath(folder)}: {adapter.ScannedFileCount} file(s) scanned, none started with MVER+AHDR or AHDR (file extensions are ignored; content is sniffed)."
+                : $"No placeable AHDR-family terrain files in {Path.GetFullPath(folder)}: {adapter.SkippedFiles.Count} of {adapter.ScannedFileCount} scanned file(s) skipped (see the log; first: {adapter.SkippedFiles[0]}).";
+            ViewerLog.Important(ViewerLog.Category.Terrain, _statusMessage);
+            return;
+        }
+
+        string mapName = "DAT: " + Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
         LoadTerrainFromAdapter(adapter, mapName,
-            $"Type: DAT v26 terrain folder (shadows are all-zero in the corpus and not rendered)\n" +
+            $"Type: DAT terrain folder, AHDR family\n" +
+            $"Revisions: {adapter.VersionSummary} (ASHD is all-zero in the v26 corpus and not rendered)\n" +
             $"Folder: {folder}\n" +
             $"Tiles: {adapter.ExistingTiles.Count} (skipped {adapter.SkippedFiles.Count})\n" +
-            $"Height divisor: {adapter.HeightDivisor:0.##} (File > DAT v26 Height Scale)\n" +
+            $"Height divisor: {adapter.HeightDivisor:0.##} (File > DAT Terrain Height Scale)\n" +
             $"Assets: {(_dataSource is null ? "no data source open; textures will be missing" : _dataSource.Name)}\n");
     }
 
