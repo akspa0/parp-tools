@@ -13,12 +13,21 @@ The [documentation router](../docs/README.md), [spec routing registry](../specs/
 on-demand context, never default reading. Landed-work narrative lives in `progress.md`, not here —
 this file states only the current lane and what's still open.
 
-## Current state — v0.6.0-alpha released, push pending (2026-09-18)
+## Current state — v0.6.0-alpha2 RELEASED (2026-09-21)
 
-`eng/Version.props` is `0.6.0` / `InformationalVersion 0.6.0-alpha`; release notes, CHANGELOG, README,
-era matrix, USERGUIDE §12–13 and CLI-TOOLS are updated. Release commit `c247f383`, tag `v0.6.0-alpha`
-created **locally** — the operator still has to push (it fires `wowviewer-release.yml` and the GitHub
-prerelease). Viewer build clean; title bar reads `v0.6.0-alpha` (operator screenshot).
+`eng/Version.props` is `0.6.0` / `InformationalVersion 0.6.0-alpha2`. Tag `v0.6.0-alpha2` pushed from
+`v0.5.4-dev` (commit `d4228e87`); `wowviewer-release.yml` run 35566694458 succeeded on all five jobs
+and published the prerelease with all four self-contained binaries (win-x64, linux-x64, osx-x64,
+osx-arm64). Notes: `wow-viewer/docs/releases/v0.6.0-alpha2.md`.
+<https://github.com/akspa0/parp-tools/releases/tag/v0.6.0-alpha2>
+
+The earlier note that `v0.6.0-alpha` was "created locally, push pending" was **stale** — that tag had
+already been pushed and released on 2026-09-18.
+
+**Shipped unverified in alpha2** (all need a real run): the M2 texture-wrap fix changes rendering for
+every M2 era; `LkAdtWriter`'s chunk-completeness fixes change output for all 17 of its call sites; no
+exported map has been loaded in a client or Noggit; no DAT Cartography layer has been composed on
+screen; the new export menu/sidebar buttons have never been clicked.
 
 ## Live lane — 237 DAT v22/v23/v26 (2026-09-20)
 

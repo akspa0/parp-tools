@@ -2,6 +2,19 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-21 — v0.6.0-alpha2 released
+
+- `InformationalVersion` → `0.6.0-alpha2`; notes at `wow-viewer/docs/releases/v0.6.0-alpha2.md`.
+- Commit `d4228e87` on `v0.5.4-dev`, tag `v0.6.0-alpha2` pushed. Release workflow run **35566694458
+  succeeded** (5/5 jobs, 4 binaries attached, prerelease published).
+- Only `Version.props` + the notes were staged; `imgui.ini` and the untracked `SereniaBLPLib` working
+  copy were left alone (§5 worktree safety). Operator had already committed the day's code as
+  `3fdd5719` + `cbb36ec0`.
+- `git exit 128` annotations on the build jobs are non-blocking (they appear on passing jobs); worth a
+  look sometime, likely submodule/`git describe` during build.
+- **Ships unverified**: M2 wrap fix (all eras), LkAdtWriter chunk fixes (17 call sites), DAT export
+  never loaded in a client, DAT layer never composed on screen, new buttons never clicked.
+
 ## 2026-09-20 — One export button, format by checkbox; DAT items moved to a File submenu
 
 - **Operator**: one sidebar button with checkbox-settable LK/Alpha output, and put the DAT items in a
