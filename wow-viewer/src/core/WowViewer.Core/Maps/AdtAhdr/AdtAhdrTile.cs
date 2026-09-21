@@ -105,7 +105,12 @@ public sealed record AdtAhdrLayer(int TextureIndex, uint Flags, byte[]? AlphaMap
 /// are moved to random chunks.</item>
 /// <item>+0x10/+0x14/+0x18 rotation in degrees, same axis order as the position (+0x14 is about the vertical).</item>
 /// <item>+0x1C scale (0.1..3.47). +0x20 always 1.0, +0x24 always 0, +0x28 float mostly 0 (meaning open).</item>
-/// <item>+0x2C uniqueId (distinct for every record).</item>
+/// <item>+0x2C uniqueId, **signed int32**, distinct for every record (MEASURED: 5,309 ids, 0 duplicates).
+/// v26 uses TWO allocators: 4,096 positive (63,418,942..63,423,379, 92.3% dense) and 1,213 negative
+/// (-1,233..-2, 98.5% dense), both sequential, mixed within the same tile. Negative ids look locally
+/// allocated rather than issued by the shared uniqueID service. v22 has none (849 ids, 681,015..728,199).
+/// This property is typed <c>uint</c>, so a negative reads as a large unsigned value; cast to int to
+/// recover the on-disk sign. See evidence/acdo-negative-uniqueids-2026-09-20.md.</item>
 /// <item>+0x30 count of trailing uint32 values (0 in 56-byte records, 1 in the 11 60-byte records, all WMOs);
 /// +0x34 uint32 (0, 1, 2, 3 or 65536; open); +0x38.. the trailing values (1 or 2; open, possibly a doodad set).</item>
 /// </list>

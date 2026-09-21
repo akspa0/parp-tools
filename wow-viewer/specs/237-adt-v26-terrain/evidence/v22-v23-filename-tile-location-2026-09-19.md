@@ -63,6 +63,13 @@ above was renamed from "DAT v26 Height Scale" to "DAT Terrain Height Scale" in t
 
 ## Operator observation recorded (not a task)
 
+> **MEASURED 2026-09-20, superseding the speculation below.** The negative ids are real and the field
+> is genuinely a uniqueId: v26 runs **two sequential allocators**, 4,096 positive
+> (63,418,942..63,423,379) and 1,213 negative (-1,233..-2), 0 duplicates across all 5,309 records, and
+> four tiles contain both. The prediction below that a negative would "surface as a large unsigned
+> value" is wrong in practice — `AhdrTerrainAdapter` casts to `int`, so the viewer shows the true
+> signed value. See [acdo-negative-uniqueids-2026-09-20.md](acdo-negative-uniqueids-2026-09-20.md).
+
 v26 objects can carry a **negative uniqueID** — the operator suspects these are objects not meant to
 ship in the client or be tracked. [`AdtAhdrObjectDefinition.UniqueId`](../../../src/core/WowViewer.Core/Maps/AdtAhdr/AdtAhdrTile.cs:113)
 is read as `uint`, so a negative on-disk int32 surfaces as a large unsigned value. Worth keeping in

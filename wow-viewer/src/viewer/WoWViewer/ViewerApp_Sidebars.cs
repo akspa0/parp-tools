@@ -645,7 +645,32 @@ public partial class ViewerApp
             {
                 DrawWorldOverviewContent();
             }
+
+            DrawMapExportControls();
         }
+    }
+
+    /// <summary>
+    /// Spec 247: one export button for the loaded map, with the output format picked by checkbox rather
+    /// than a separate button per target. Only shown for DAT terrain, which is the only source the
+    /// exporter currently reads.
+    /// </summary>
+    private void DrawMapExportControls()
+    {
+        if (_terrainManager?.Adapter is not AhdrTerrainAdapter)
+            return;
+
+        ImGui.Spacing();
+        ImGui.SeparatorText("Export Map");
+        Terrain.MapExportFormats.DrawCheckboxes("sidebar");
+
+        ImGui.BeginDisabled(!Terrain.MapExportFormats.Any);
+        if (ImGui.Button($"Export as {Terrain.MapExportFormats.Summary}...", new Vector2(-1f, 0f)))
+            ExportLoadedDatMap();
+        ImGui.EndDisabled();
+
+        if (ImGui.IsItemHovered() && Terrain.MapExportFormats.Any)
+            ImGui.SetTooltip("Writes the loaded DAT folder in every ticked format, plus a manifest naming every field carried and dropped.");
     }
 
     private void DrawSharedWorldMapsSection(bool defaultOpenWhenNoWorld = false)

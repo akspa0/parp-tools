@@ -1985,16 +1985,39 @@ void main() {
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Pick a Battle.net install folder, then the game version to load. Files the build lists but the install does not have on disk are downloaded from Blizzard's CDN for the same build.");
 
-                if (ImGui.MenuItem("Open DAT Terrain Folder (v22/23/26)..."))
-                    _wantOpenAhdrTerrainFolder = true;
+                // Spec 247: every DAT action lives under one submenu instead of four peers in File.
+                if (ImGui.BeginMenu("DAT Terrain (v22/23/26)"))
+                {
+                    if (ImGui.MenuItem("Open DAT Terrain Folder..."))
+                        _wantOpenAhdrTerrainFolder = true;
 
-                if (ImGui.MenuItem("Export Nearby Tiles as DAT v26 (experimental)", null, false, _terrainManager?.Adapter is StandardTerrainAdapter))
-                    ExportNearbyTilesAsDatV26(radius: 2);
+                    ImGui.Separator();
+                    ImGui.TextDisabled("Export format");
+                    Terrain.MapExportFormats.DrawCheckboxes("filemenu");
 
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Writes the ADT tiles within 2 tiles of the camera as DAT v26 files (terrain, texture layers, vertex colours, normals, objects) to output/dat_v26_export. Reopen the folder with Open DAT Terrain Folder to compare.");
+                    bool datLoaded = _terrainManager?.Adapter is AhdrTerrainAdapter;
+                    if (ImGui.MenuItem("Export Loaded DAT Map...", null, false, datLoaded && Terrain.MapExportFormats.Any))
+                        ExportLoadedDatMap();
 
-                DrawAhdrHeightScaleMenu();
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(!datLoaded
+                            ? "Open a DAT terrain folder first."
+                            : !Terrain.MapExportFormats.Any
+                                ? "Tick at least one output format above."
+                                : $"Writes the loaded DAT folder as {Terrain.MapExportFormats.Summary}, plus a manifest naming every field carried and dropped.");
+                    }
+
+                    ImGui.Separator();
+                    if (ImGui.MenuItem("Export Nearby Tiles as DAT v26 (experimental)", null, false, _terrainManager?.Adapter is StandardTerrainAdapter))
+                        ExportNearbyTilesAsDatV26(radius: 2);
+
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Writes the ADT tiles within 2 tiles of the camera as DAT v26 files (terrain, texture layers, vertex colours, normals, objects) to output/dat_v26_export. Reopen with Open DAT Terrain Folder to compare.");
+
+                    DrawAhdrHeightScaleMenu();
+                    ImGui.EndMenu();
+                }
 
                 if (ImGui.BeginMenu("Open Saved Game Folder", _knownGoodClientPaths.Count > 0))
                 {

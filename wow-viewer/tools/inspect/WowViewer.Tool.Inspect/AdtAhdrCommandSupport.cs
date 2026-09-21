@@ -1,4 +1,5 @@
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Maps;
 using WowViewer.Core.Maps.AdtAhdr;
 
 namespace WowViewer.Tool.Inspect;
@@ -11,12 +12,16 @@ public static class AdtAhdrCommandSupport
         bool isCheck = args.Length > 0 && string.Equals(args[0], "check", StringComparison.OrdinalIgnoreCase);
         bool isObjects = args.Length > 0 && string.Equals(args[0], "objects", StringComparison.OrdinalIgnoreCase);
         bool isRoundTrip = args.Length > 0 && string.Equals(args[0], "roundtrip", StringComparison.OrdinalIgnoreCase);
-        if (!isCheck && !isObjects && !isRoundTrip)
+        bool isExportLk = args.Length > 0 && string.Equals(args[0], "export-lk", StringComparison.OrdinalIgnoreCase);
+        if (!isCheck && !isObjects && !isRoundTrip && !isExportLk)
         {
             Console.WriteLine("adt-ahdr commands:");
             Console.WriteLine("  adt-ahdr check --root <folder of AHDR-family files, any names/extensions>");
             Console.WriteLine("  adt-ahdr objects --root <folder> [--list]   resolve ACDO placements and measure them against the terrain");
             Console.WriteLine("  adt-ahdr roundtrip --root <folder>          decode then re-encode every file (experimental writer) and compare bytes");
+            Console.WriteLine("  adt-ahdr export-lk --root <folder> [--out <dir>] [--map <name>] [--transpose]");
+            Console.WriteLine("                     [--format lk|alpha|lk+alpha]  (default lk)");
+            Console.WriteLine("                                              convert every DAT tile to LK v18 ADT + WDT and write a loss manifest");
             Environment.ExitCode = args.Length == 0 ? 0 : 1;
             return;
         }
@@ -29,7 +34,9 @@ public static class AdtAhdrCommandSupport
             return;
         }
 
-        if (isRoundTrip)
+        if (isExportLk)
+            RunExportLk(args, args[rootIndex + 1]);
+        else if (isRoundTrip)
             RunRoundTrip(args[rootIndex + 1]);
         else if (isObjects)
             RunObjects(args[rootIndex + 1], args.Contains("--list", StringComparer.OrdinalIgnoreCase));
@@ -199,6 +206,64 @@ public static class AdtAhdrCommandSupport
         Console.WriteLine($"files={files} ahdr={ahdr} versions={string.Join(',', versions.Select(static kv => $"{kv.Key}:{kv.Value}"))} unique-tiles={tiles.Count} duplicate-tiles={duplicates}");
         Console.WriteLine($"files-with-diagnostics={withDiagnostics} acnk-index-mismatches={indexMismatches}");
         Console.WriteLine($"slicer seams: x-neighbours {xExact}/{xPairs} exact, y-neighbours {yExact}/{yPairs} exact");
+    }
+
+    /// <summary>
+    /// Spec 247 US3: convert every AHDR-family DAT tile in a folder to LK v18 ADT + WDT with a loss manifest.
+    /// The walk and the manifest live in <see cref="DatToLkAdtFolderExporter"/> so the viewer's menu item and
+    /// this command run exactly the same conversion.
+    /// </summary>
+    private static void RunExportLk(string[] args, string root)
+    {
+        string? map = ArgValue(args, "--map");
+        string? outDir = ArgValue(args, "--out");
+        bool transpose = args.Contains("--transpose", StringComparer.OrdinalIgnoreCase);
+
+        // --format lk | alpha | lk+alpha (default lk)
+        string formats = (ArgValue(args, "--format") ?? "lk").ToLowerInvariant();
+        var targets = new List<MapConversionTargetFormat>();
+        if (formats.Contains("lk"))
+            targets.Add(MapConversionTargetFormat.LkAdtV18);
+        if (formats.Contains("alpha"))
+            targets.Add(MapConversionTargetFormat.AlphaWdt053);
+        if (targets.Count == 0)
+        {
+            Console.Error.WriteLine("--format must name lk, alpha, or lk+alpha.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        DatFolderExportResult result = DatToLkAdtFolderExporter.Export(
+            root, outDir, map, new DatToLkConversionOptions { TransposeChunks = transpose }, targets);
+
+        foreach (string reason in result.SkipReasons)
+            Console.WriteLine($"  skipped {reason}");
+
+        if (result.TilesWritten.Count == 0)
+        {
+            Console.Error.WriteLine($"No AHDR-family tiles could be placed in {result.SourceRoot}.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        DatToLkConversionReport report = result.Report;
+        Console.WriteLine($"files={result.FilesSeen} skipped={result.SkipReasons.Count} tiles={result.TilesWritten.Count} "
+            + $"versions={result.VersionSummary}");
+        Console.WriteLine($"chunks: source={report.ChunksInSource} written={report.ChunksWritten} empty-filled={report.ChunksSynthesizedEmpty}");
+        Console.WriteLine($"layers={report.LayersWritten} alpha-maps={report.AlphaMapsWritten} dropped-no-alpha={report.LayersDroppedNoAlpha}");
+        Console.WriteLine($"shadows={report.ShadowMapsCarried} area-ids={report.AreaIdsCarried} mccv-chunks={report.VertexColourChunks} "
+            + $"objects={report.ObjectsPlaced} (skipped {report.ObjectsSkippedUnnamed})");
+        Console.WriteLine($"adst-dropped={report.AdstRowsDropped} negative-uniqueids={report.ObjectsWithNegativeUniqueId}");
+        Console.WriteLine($"targets={string.Join(" + ", result.TargetsWritten.Select(MapConversionFormats.GetDisplayName))}");
+        if (result.AlphaWdtPath is not null)
+            Console.WriteLine($"alpha-wdt={result.AlphaWdtPath}");
+        Console.WriteLine($"-> {result.OutputDirectory}");
+    }
+
+    private static string? ArgValue(string[] args, string name)
+    {
+        int i = Array.FindIndex(args, a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase));
+        return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
     }
 
     /// <summary>Outer vertex at (outerRow, column) of the 145-entry layout.</summary>

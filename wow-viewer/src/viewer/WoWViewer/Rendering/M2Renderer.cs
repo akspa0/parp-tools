@@ -1144,8 +1144,15 @@ void main()
                 continue;
 
             // In WoW M2 files, textures repeat by default. Flags 0x1 and 0x2 request clamp-to-edge on S and T.
-            bool clampS = (candidate.TextureFlags & 0x1u) != 0;
-            bool clampT = (candidate.TextureFlags & 0x2u) != 0;
+            // M2Texture.flags (offset 0x04): bit 0x1 = "texture wrap X", 0x2 = "texture wrap Y".
+            // The bit SET means REPEAT, so clamping is the absence of the bit. 64ce5aaa inverted this to
+            // `!= 0` while chasing smeared UVs on ballista/wood models; that made every texture which
+            // declares wrap clamp instead, which is what breaks cylinders - tree trunks and lighthouse
+            // tubes smear at the seam because their UVs run past 1.0 all the way round. The UV garbage
+            // that inversion was really chasing came from the M2Era100 vertex-layout offsets, fixed
+            // separately in the same series.
+            bool clampS = (candidate.TextureFlags & 0x1u) == 0;
+            bool clampT = (candidate.TextureFlags & 0x2u) == 0;
             if (TryGetOrLoadTexture(resolvedPath, clampS, clampT, out textureId))
             {
                 uvSet = candidate.UvSet;

@@ -115,9 +115,17 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
     private readonly Dictionary<string, int> _wmoNameIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> _placedUniqueIds = [];
 
-    public IReadOnlyList<string> MdxModelNames => _mdxNames;
+    // Published snapshots. Tiles load on up to 4 ThreadPool workers (TerrainManager) and this adapter
+    // builds its name tables lazily as each tile's ACDO records are resolved, while WorldScene.OnTileLoaded
+    // indexes them from the main thread. Handing out the live List means a reader can observe the new Count
+    // with the old backing array mid-Add and resolve a placement to the wrong name - a different wrong model
+    // on every run. Readers get an immutable array instead; writers swap a fresh one in under the lock.
+    private volatile string[] _mdxNamesPublished = [];
+    private volatile string[] _wmoNamesPublished = [];
 
-    public IReadOnlyList<string> WmoModelNames => _wmoNames;
+    public IReadOnlyList<string> MdxModelNames => _mdxNamesPublished;
+
+    public IReadOnlyList<string> WmoModelNames => _wmoNamesPublished;
 
     /// <summary>ADST rows seen in loaded tiles (not placed: they carry no position).</summary>
     public int ModelFileReferenceCount { get; private set; }
@@ -277,14 +285,24 @@ public sealed class AhdrTerrainAdapter : ITerrainAdapter
         }
     }
 
-    private static int GetOrAddName(string name, List<string> names, Dictionary<string, int> index)
+    /// <summary>
+    /// Interns a model name in the shared table. Call under <see cref="_placementLock"/>: it mutates the
+    /// builder list and republishes the snapshot readers use.
+    /// </summary>
+    private int GetOrAddName(string name, List<string> names, Dictionary<string, int> index)
     {
-        if (!index.TryGetValue(name, out int value))
-        {
-            value = names.Count;
-            names.Add(name);
-            index[name] = value;
-        }
+        if (index.TryGetValue(name, out int value))
+            return value;
+
+        value = names.Count;
+        names.Add(name);
+        index[name] = value;
+
+        // Republish before the index escapes, so no reader can see an index past the array it can read.
+        if (ReferenceEquals(names, _mdxNames))
+            _mdxNamesPublished = names.ToArray();
+        else if (ReferenceEquals(names, _wmoNames))
+            _wmoNamesPublished = names.ToArray();
 
         return value;
     }

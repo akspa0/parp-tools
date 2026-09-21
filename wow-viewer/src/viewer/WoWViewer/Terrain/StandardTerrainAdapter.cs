@@ -67,6 +67,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
     public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
 
     /// <summary>
+    /// Spec 247 US5: height divisor applied to DAT folder layers. DAT stores heights in inches, so 36 puts a
+    /// donor in the same yards as this adapter's own terrain (see <see cref="AhdrTerrainAdapter.HeightDivisor"/>).
+    /// </summary>
+    public float DatLayerHeightDivisor { get; set; } = 36f;
+
+    /// <summary>
     /// Single-overlay shim over <see cref="PhaseLayers"/>, kept so existing callers and saved
     /// settings keep working. Reads the first enabled layer; assigning replaces the whole stack.
     /// </summary>
@@ -282,6 +288,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (string.IsNullOrEmpty(overlayMapName))
             return false;
 
+        // Spec 247 US5: a DAT folder donor is not in this adapter's data source.
+        if (DatLayerSource.IsDatSource(overlayMapName))
+            return DatLayerSource.Resolve(overlayMapName, DatLayerHeightDivisor)?.TileExists(tileX, tileY) ?? false;
+
         string overlayBase = $"World\\Maps\\{overlayMapName}\\{overlayMapName}_{tileY}_{tileX}";
         return HasTilePayload(overlayBase);
     }
@@ -295,6 +305,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
     {
         if (string.IsNullOrWhiteSpace(mapName))
             return false;
+
+        if (DatLayerSource.IsDatSource(mapName))
+            return DatLayerSource.Resolve(mapName, DatLayerHeightDivisor) is not null;
 
         // The base map is trivially resolvable — this adapter is its WDT/ADT source.
         if (string.Equals(mapName, _mapName, StringComparison.OrdinalIgnoreCase))
@@ -318,6 +331,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
     {
         if (string.IsNullOrWhiteSpace(mapName))
             return Array.Empty<(int, int)>();
+
+        // Spec 247 US5: a DAT donor's footprint comes from its own content sniff, not a WDT.
+        if (DatLayerSource.IsDatSource(mapName))
+            return DatLayerSource.OccupiedTiles(mapName, DatLayerHeightDivisor);
 
         if (_occupiedTileCache.TryGetValue(mapName, out var cached))
             return cached;
@@ -564,6 +581,21 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
     private ParsedTileSource LoadMapTile(string mapName, int tileX, int tileY)
     {
+        // Spec 247 US5: DAT donors are read by their own adapter and handed over in the shared
+        // TileLoadResult shape, so the rest of composition (transform, channel gating, merge) is unchanged.
+        if (DatLayerSource.IsDatSource(mapName))
+        {
+            AhdrTerrainAdapter? dat = DatLayerSource.Resolve(mapName, DatLayerHeightDivisor);
+            if (dat is null || !dat.TileExists(tileX, tileY))
+                return new ParsedTileSource(new TileLoadResult(), []);
+
+            TileLoadResult datResult = dat.LoadTileWithPlacements(tileX, tileY);
+            List<string> datTextures = dat.TileTextures.TryGetValue((tileX, tileY), out List<string>? names)
+                ? names
+                : [];
+            return new ParsedTileSource(datResult, datTextures);
+        }
+
         string? prevLoadingMap = _currentLoadingMapName;
         _currentLoadingMapName = mapName;
         try

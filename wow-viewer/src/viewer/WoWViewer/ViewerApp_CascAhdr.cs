@@ -419,6 +419,60 @@ public partial class ViewerApp
         }
     }
 
+    /// <summary>
+    /// Spec 247 US3: writes the loaded DAT folder as an LK v18 map. The picker is opened inline (it defers its
+    /// own draw), so this needs no ViewerApp state field - AGENTS.md section 10. The conversion itself lives in
+    /// DatToLkAdtFolderExporter, shared with the adt-ahdr export-lk command.
+    /// </summary>
+    private void ExportLoadedDatMap()
+    {
+        if (_lastAhdrTerrainFolder is not { } source)
+        {
+            _statusMessage = "Open a DAT terrain folder first (File > Open DAT Terrain Folder).";
+            return;
+        }
+
+        string map = DatToLkAdtFolderExporter.SanitizeName(
+            Path.GetFileName(Path.TrimEndingDirectorySeparator(source)));
+
+        ImGuiPathPicker.Instance.Open(
+            $"Choose where to write the {Terrain.MapExportFormats.Summary} export for '{map}'",
+            pickFolder: true,
+            initialPath: Path.GetFullPath(DatToLkAdtFolderExporter.DefaultOutputDirectory(map)) is { } d && Directory.Exists(d)
+                ? d
+                : GetProjectOutputRootDirectory(),
+            filterExtension: null,
+            chosen =>
+            {
+                if (string.IsNullOrWhiteSpace(chosen))
+                    return;
+
+                try
+                {
+                    DatFolderExportResult result = DatToLkAdtFolderExporter.Export(
+                        source, Path.Combine(chosen, map), map, options: null,
+                        targets: Terrain.MapExportFormats.Selected);
+
+                    if (result.TilesWritten.Count == 0)
+                    {
+                        _statusMessage = $"DAT -> LK ADT: nothing written; no placeable AHDR-family tiles in {source}.";
+                        ViewerLog.Important(ViewerLog.Category.Terrain, _statusMessage);
+                        return;
+                    }
+
+                    _statusMessage = result.Summary;
+                    ViewerLog.Important(ViewerLog.Category.Terrain, _statusMessage);
+                    foreach (string reason in result.SkipReasons)
+                        ViewerLog.Info(ViewerLog.Category.Terrain, $"[DAT -> LK] skipped {reason}");
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"DAT -> LK ADT export failed: {ex.Message}";
+                    ViewerLog.Important(ViewerLog.Category.Terrain, $"DAT -> LK ADT export failed: {ex}");
+                }
+            });
+    }
+
     private void LoadAhdrTerrain(string folder)
     {
         _lastAhdrTerrainFolder = Path.GetFullPath(folder);

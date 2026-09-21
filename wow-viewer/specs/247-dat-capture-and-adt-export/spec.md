@@ -6,7 +6,7 @@
 
 **Created**: 2026-09-20
 
-**Status**: Specified — awaiting operator approval to plan
+**Status**: **US3 DELIVERED** 2026-09-20 (`adt-ahdr export-lk`; receipt evidence/us3-dat-to-lk-adt-2026-09-20.md). **US5 CODE COMPLETE** 2026-09-20 (DAT folders as Cartography layers; receipt evidence/us5-dat-as-cartography-layer-2026-09-20.md), unwitnessed in the viewer. US1 (v22 AMAP codec) attempted and OPEN. US2 (capture) not started.
 
 **Depends on**: [Spec 237 DAT v22/v23/v26](../237-adt-v26-terrain/spec.md) (reader, slicer, measured frames)
 
@@ -77,6 +77,17 @@ tooling that reads LK maps.
 with terrain, texture layers and object placements present, and a written manifest states every field
 that could not be carried.
 
+### User Story 5 — Overlay DAT on the shipped map (Priority: P2)
+
+A user adds a folder of DAT files as a Cartography layer over the map those tiles belong to, and
+compares the project data against what shipped, using the layer's existing alignment controls.
+
+Operator input (2026-09-20): *"it'd be nice if we could load DAT files as Cartography layers, since
+they are effectively the real project files for existing tiles."*
+
+**Independent Test**: add the Expansion01 DAT folder as a layer over a base map; its footprint draws
+on the minimap at the donor's own tiles, and its terrain composes into the scene.
+
 ### User Story 4 — Know what was lost (Priority: P2)
 
 A user reading the export manifest can tell exactly which source fields were carried, which were
@@ -123,6 +134,19 @@ chunk-level diff of source against output.
 - **FR-014**: The exported map MUST load in the application's existing LK path.
 - **FR-015**: Heights MUST be converted from the source's inch units to the target's yard units, and
   the conversion MUST be stated in the manifest.
+
+### Functional — Phase 4: DAT as a Cartography layer
+
+- **FR-016**: A layer MUST be able to name a folder of DAT files as its donor, not only a map in the
+  base adapter's own data source.
+- **FR-017**: A DAT donor MUST compose through the existing layer pipeline, so tile offset, cell
+  offset, rotation, mirrors, channel gating and locking all apply to it unchanged.
+- **FR-018**: A DAT donor's footprint MUST draw on the Cartography overlay from its own occupied
+  tiles.
+- **FR-019**: A missing, empty or unreadable DAT folder MUST be a displayable state, never a crash.
+- **FR-020**: Layers that name an ordinary map MUST behave exactly as before. A regression test MUST
+  pin this.
+- **FR-021**: Donor heights MUST be converted from inches to the base map's yards.
 
 ### Non-functional
 

@@ -34,7 +34,25 @@ operator go-ahead:
 1. Relax the alpha guard so partial alpha sets still blend (small, independent of the codec).
 2. Identify the v22 `AMAP` encoding (new scope — spec task per §9.1).
 
-**New lane: [247 DAT Capture & LK ADT Export](../specs/247-dat-capture-and-adt-export/spec.md)** —
+**Lane 247 — two of four stories landed 2026-09-20.**
+**US3 DELIVERED**: `adt-ahdr export-lk` writes DAT → LK v18 ADT + WDT + loss manifest. Real runs:
+v22 Expansion01 (4 tiles, 999 chunks, 289 MCSH, 997 area ids, 849 objects) and v23 IcecrownCitadel
+(3 tiles, 48 MCAL, 768 MCCV). **Not loaded in a client yet** — `--transpose` exists if axes are wrong.
+**US5 CODE COMPLETE**: DAT folders as Cartography layer donors (`dat:<folder>` locator in `MapName`,
+`DatLayerSource` + 4 seam points in `StandardTerrainAdapter`, "Add DAT folder..." button).
+**Unwitnessed on screen**; Standard base maps only (Alpha resolves donors through a sibling typed
+adapter and needs its own change).
+**US1 OPEN** (v22 `AMAP` codec), **US2 not started** (capture).
+
+**Next bounded action**: load an exported ADT and overlay a DAT layer; both answer the same open
+question — whether DAT tile axes need transposing. Aligning a DAT layer by eye settles it and feeds
+back into the exporter.
+
+[Spec 247](../specs/247-dat-capture-and-adt-export/spec.md) ·
+[US3 receipt](../specs/247-dat-capture-and-adt-export/evidence/us3-dat-to-lk-adt-2026-09-20.md) ·
+[US5 receipt](../specs/247-dat-capture-and-adt-export/evidence/us5-dat-as-cartography-layer-2026-09-20.md)
+
+Old note: [247 DAT Capture & LK ADT Export](../specs/247-dat-capture-and-adt-export/spec.md)** —
 spec + checklist authored 2026-09-20, awaiting approval to plan. Captured PNG per tile + stitched
 overview, and one-way DAT → LK v18 ADT. Operator chose codec-first ordering. 241 stays deferred; 247
 is the narrow one-way case it did not cover. Next artifact: `speckit-plan`.

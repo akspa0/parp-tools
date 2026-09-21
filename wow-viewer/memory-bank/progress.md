@@ -2,6 +2,158 @@
 
 Last updated: 2026-09-20
 
+## 2026-09-20 — One export button, format by checkbox; DAT items moved to a File submenu
+
+- **Operator**: one sidebar button with checkbox-settable LK/Alpha output, and put the DAT items in a
+  File submenu.
+- **`MapExportFormats`** (new owned settings service, static — no ViewerApp fields, §10) holds the LK v18
+  / Alpha 0.5.3 selection and draws the checkboxes. The File menu and the sidebar call the same
+  `DrawCheckboxes`, so the two surfaces cannot drift.
+- **File menu**: four peer DAT entries collapsed into one **"DAT Terrain (v22/23/26)"** submenu — open,
+  format checkboxes, export, DAT v26 export, height scale.
+- **Sidebar**: "Export as ‹formats›..." under World Overview, shown only for DAT terrain, disabled with
+  a reason when no format is ticked.
+- **Alpha target implemented by reuse**, not a second converter: DAT → `LkAdtData` →
+  `LkToAlphaConverter.ConvertTile` → `AlphaWdtWriter`. Tiles convert **lazily through the writer's
+  provider** because each `AlphaTileData` allocates ~20 MB (16 MB alpha pack + 4 MB shadow); holding all
+  699 v26 tiles would be ~14 GB.
+- **Verified**: `--format lk+alpha` on the v22 corpus writes 4 ADTs + LK WDT + a 1.3 MB Alpha WDT.
+  Alpha walk: `MVER MPHD MAIN MDNM MONM` + 4×(`MHDR MCIN MTEX MDDF MODF`) + 1024 `MCNK`, closes exactly
+  on EOF. CLI gained `--format lk|alpha|lk+alpha`.
+- **NOT clicked** — the menu and sidebar are unexercised; verification is via the CLI path they share.
+
+## 2026-09-20 — LkAdtWriter emitted incomplete ADTs (affects ALL LK output, 17 call sites)
+
+- **Operator**: the written LK ADTs are missing chunks the format requires, subchunks too. Correct, and
+  **not** DAT-specific — `LkAdtWriter` is shared by `AlphaToLkConverter`, `SplitAdtToLkCommand`,
+  `RosettaTilesetGenerator`, `NewMapCreatorService`, viewer map save and more.
+- **Six defects**: (1) `MCSE` never written; (2) **`ofsMCCV` (+0x74) never set — MCCV was written into
+  the file where nothing could find it**, 179,200 orphaned chunks in the v26 export; (3) MCNK flag
+  `0x40` never set; (4) `ofsMCLV` (+0x78) never set; (5) `MHDR.ofsMFBO` hardcoded 0 while MFBO was
+  written, and flag `0x1` never set; (6) `MTXF` never written, `MHDR.ofsMTXF` hardcoded 0.
+  `mccvOffset`/`mclvOffset` were computed into locals and discarded.
+- **Nearly broke a working thing**: reader and writer looked 8 bytes apart on MCNK sub-chunk offsets.
+  Measured a real ADT first — `ofsMCVT = 136`, counted from the MCNK tag — and **both were already
+  correct**. No change made there.
+- **Verified**: re-exported v22 + v23 and walked the output checking each header offset resolves to a
+  chunk whose tag matches the field (`MCVT/MCNR/MCLY/MCRF/MCAL/MCSH/MCSE/MCCV`). **Zero misaddressed
+  offsets**, walk closes on EOF, `MTXF` and `MCSE`×256 now present. LK regression tests 83 passed /
+  1 failed, the failure being the pre-existing alpha-quantisation drift baselined earlier today.
+- **NOT loaded in a client or Noggit** — structural validity is not loading. Operator proof outstanding.
+- Receipt: `specs/247-dat-capture-and-adt-export/evidence/lk-writer-missing-chunks-2026-09-20.md`.
+
+## 2026-09-20 — v22 objects loaded a random wrong model each run: a data race
+
+- **Operator**: "it loads a random different model every time, implying that an index is not being
+  used right." Right in substance, wrong index.
+- **Decode ruled out**: `ACDO.ModelIndex` is a **per-tile** index into that tile's `ADOO` list; all
+  four v22 files are in range, and the lists genuinely differ per tile (`ADOO[1]` =
+  `TerokkarTreeStump` in one, `TerokkarBush01` in another). All three call sites resolve per-tile
+  correctly. `adt-ahdr objects --list` is correct and deterministic.
+- **Root cause**: `AhdrTerrainAdapter` has no WDT, so it builds the shared model-name table **lazily
+  during tile loads**, and exposed it as a live `List<string>`. Tiles load on the **ThreadPool, 4
+  concurrently**; `WorldScene.OnTileLoaded` indexes that list from the main thread. A reader can see
+  the new `Count` against the old backing array mid-`Add` → wrong name, different every run. WDT-backed
+  adapters do not show it because their tables are populated before streaming.
+- **Fix**: publish immutable `volatile string[]` snapshots, swapped in under `_placementLock`
+  **before** the new index is returned, so no index can outrun the array a reader holds.
+- **NOT confirmed fixed visually** — needs an operator run; a race is never proven absent by one clean
+  run. Next suspect if it persists: `WorldAssetManager.NormalizeKey` collisions / MDX cache.
+- **Latent, untouched**: `_placedUniqueIds` is never cleared, so a tile re-entering after eviction
+  does not re-add its placements to the adapter-wide list `BuildInstances` iterates.
+- Receipt: `specs/237-adt-v26-terrain/evidence/v22-random-model-race-2026-09-20.md`.
+
+## 2026-09-20 — DAT->LK export gets a UI entry point (it had none)
+
+- **Operator**: "how does the exporter work? there's nowhere to push to export!" — correct, US3 shipped
+  CLI-only. **File > Export Loaded DAT as LK ADT...** added, enabled only when a DAT folder is loaded,
+  asks for an output directory, reports on the status line. Picker opened inline so **no new ViewerApp
+  field** (§10).
+- **Shared, not duplicated**: the folder walk + WDT write + manifest moved into
+  `DatToLkAdtFolderExporter` (core). The CLI now delegates and **lost 4,615 chars** of duplicate code;
+  the viewer did not gain a second copy. v22 re-export is byte-for-byte identical in counts
+  (999 chunks, 289 MCSH, 997 area ids, 849 objects), so the refactor is behaviour-preserving.
+- **Two manifest defects fixed**: `ADST`/`AOCH` were being dropped silently (violating 247
+  FR-013/SC-004), and count-bearing notes de-duplicated badly, producing ~15 near-identical lines per
+  manifest. Counts are now report counters emitted once.
+
+## 2026-09-20 — Modern write support: measured state + v26 completeness
+
+- **Operator**: "we should be writing modern ADT's but we have no support for any modern chunks or
+  writers". **Confirmed**, precisely: `MapConversionTargetFormat.MopSplitAdt` is declared with a
+  display name, command value and parser, but `HasWriter => false`, `LkAdtWriter.EnsureTargetFormat`
+  throws for it, and it has **zero consumers**. A prepared socket, nothing plugged in — honest (no
+  mislabelled output) but empty. `MopAdtChunkParser` has exactly **one** method, `ParseMtxpChunk`.
+- **`AdtRawChunkBlobCollector` already captures every unparsed chunk verbatim**, but its 5 consumers
+  are all ML/dataset; **no writer takes raw blobs**. So unknown chunks survive into training data and
+  are discarded from files. A passthrough writer is the cheap half-step to a modern writer.
+- **Counterpoint, MEASURED**: LK v18 is **not** lossy for DAT v26. `ALYR` per `ACNK` over all 179,200
+  v26 chunks maxes at **4** — exactly LK's limit, 0 chunks with 5+. Heights/normals/MCCV/layers/alpha/
+  placements all map. Only `ADST` (321 rows, positionless by construction) and `AOCH` (2048 B,
+  all-zero) have no LK equivalent. The modern-writer gap is real but does not bite the 247 export lane.
+- **Defect fixed in the same pass**: the export manifest silently dropped `ADST` and `AOCH`, violating
+  247 FR-013/SC-004 ("no silent drops"). Now named, with counts. Also fixed a note-dedup bug that was
+  emitting 15 near-duplicate running-count lines per manifest.
+- **Asymmetry is the real finding**: the project reads modern and writes only legacy, so no
+  modern→modern workflow is possible. Sequencing proposed (not started): 245's chunk inventory → raw
+  passthrough → native split writer behind the existing socket.
+- Receipt: `specs/245-modern-chunk-completeness-survey/evidence/modern-write-support-state-2026-09-20.md`.
+
+## 2026-09-20 — ACDO negative uniqueIds MEASURED: v26 runs two allocators
+
+- **Operator question**: "v26 has objects with negative uniqueID's, not sure if that's right?" — it is.
+- **MEASURED** over all 5,309 v26 `ACDO`: **two dense sequential allocators**, 4,096 positive
+  (63,418,942..63,423,379, 92.3% dense) and **1,213 negative** (-1,233..-2, 98.5% dense), **0
+  duplicates** across all 5,309. Four tiles contain both; no split by file, record size or model kind.
+  Counting down from -2 is the shape of a locally allocated, never-committed id.
+- **v22 has none** (849 ids, 681,015..728,199); the v23 sample has no `ACDO` at all. v26-only so far.
+- Retires the unmeasured 2026-09-19 suspicion, and corrects its prediction that a negative would show
+  as a large unsigned value — `AhdrTerrainAdapter` casts to `int`, so the Inspector's `-210` is right.
+- **Export consequence**: LK `MDDF` uniqueId is unsigned, so negatives become ~4.29 billion. Manifest
+  now reports the count (1,213 on the v26 run). Pass-through vs remap vs drop is an operator call.
+- **Also**: v26 corpus exported end to end — 699 tiles, 179,200 chunks, 8,457 MCAL, 0 area ids, 0
+  shadows, matching 237's independent measurements. All three revisions now export.
+- Receipt: `specs/237-adt-v26-terrain/evidence/acdo-negative-uniqueids-2026-09-20.md`.
+
+## 2026-09-20 (later still) — Spec 247 US5: DAT Folders as Cartography Layers
+
+- **Finding**: a Cartography layer identified its donor only by `PhaseLayerSettings.MapName`, resolved
+  **inside the base adapter's own data source** (`LoadMapTile`/`OverlayTileExists`/`GetOccupiedTiles`
+  on Standard; a sibling typed adapter on Alpha). A DAT folder has no map name and no WDT, so no seam
+  existed. The data shape already matched — `AhdrTerrainAdapter.LoadTileWithPlacements` returns the
+  same `TileLoadResult` composition consumes.
+- **Design**: `MapName` also accepts `dat:<absolute folder>`; new `DatLayerSource` owns parsing plus a
+  per-folder adapter cache. No core model change, so Cartography project persistence and layer cloning
+  keep working. Every branch is a guard at the top of a method, so non-DAT layers are untouched.
+- **Also**: `DatLayerHeightDivisor` (36) puts donor inches in the base map's yards; "Add DAT folder..."
+  button opens the picker inline, adding **no ViewerApp members** (§10).
+- **Why it matters beyond convenience**: Cartography's offset/rotation/mirror controls are the way to
+  settle the DAT axis question that forced `--transpose` on the US3 exporter — align once by eye and
+  the alignment is the answer.
+- **Verification**: slnx 0 errors; Ahdr+DatToLk+DatLayer tests 31/31 (10 new). **NOT witnessed on
+  screen** — no DAT layer has been composed over a base map; alignment, textures and project-file
+  round-trip all unverified. `StandardTerrainAdapter` only; Alpha needs its own change. Receipt:
+  `specs/247-dat-capture-and-adt-export/evidence/us5-dat-as-cartography-layer-2026-09-20.md`.
+
+## 2026-09-20 (later) — Spec 247: DAT → LK v18 ADT Export DELIVERED
+
+- **New**: `DatToLkAdtConverter` (core) + `adt-ahdr export-lk` CLI. Converts AHDR-family DAT tiles to
+  LK v18 ADT + WDT with a CARRIED/DROPPED manifest. Reuses `LkAdtWriter`/`LkWdtWriter`/
+  `AdtAhdrTileSlicer`/`AdtAhdrAlpha` — **no new format writer**.
+- **Real runs**: v22 Expansion01 → 4 tiles, 999/999 chunks, 289 MCSH, 997 area ids, 849 MDDF/MODF.
+  v23 IcecrownCitadel → 3 tiles, **48 MCAL** (196,608 B = 48×4096, alpha path proven), 768 MCCV.
+  Independent chunk walk: 256 MCNK per file, 0 unaccounted bytes.
+- **Chunks addressed by ACNK index, never ordinal** — v22 omits empties (25 empty MCNK synthesized).
+- **v22 alpha still dropped** (1386 layers): the `AMAP` codec is unidentified. Upper layers are
+  deliberately omitted rather than emitted opaque, which would hide layer 0.
+- **AMAP codec attempt 1 failed but is now scoreable**: eliminated MCAL RLE (137/1373), a 32-variant
+  grid, pure `(count,value)` pairs (589 odd-length payloads), zlib. **Oracle confirmed**: `ACNK` +0x12
+  2-bit 8×8 predominant-layer map, 0 violations across 997 v22 chunks.
+- **v22/v23 carry area ids and v22 carries live shadows** — corrects spec 241's v26-only table.
+- **Verification**: slnx build 0 errors; Ahdr+DatToLk tests 21/21. **Not loaded in a client/viewer** —
+  operator proof outstanding; `--transpose` exists if axes come out wrong. Receipt:
+  `specs/247-dat-capture-and-adt-export/evidence/us3-dat-to-lk-adt-2026-09-20.md`.
+
 ## 2026-09-20 — First DAT v22 Ever Loaded + Path-Picker Load Blocker
 
 - **Load blocker (all pickers)**: `ImGuiPathPicker.ResolveSelection` returned `_currentDirectory` and
