@@ -78,3 +78,31 @@ navigation — built on code that is small enough to change safely.
 recorded separately from build evidence; 231 T050–T052 navigation smoke + inventory v3; v0.5.2.3
 checks (slider order, overlay balance, hover occlusion, About credits); alpha2's new export menu and
 sidebar buttons have never been clicked.
+
+## Amendment 2026-09-23 — operator triage
+
+**Decision:** U-01 is **Want, priority 1** (operator: *"the big cs files are worrying, as they eat up
+context when being edited, and it doesn't help us fix problems when the model runs out of context
+because of that issue alone"*). All other U-items remain untriaged.
+
+**Goal restated from the operator's words:** reduce the context an agent must load to change one
+feature. Success = the code an edit touches lives in a file well under the ~2,000-line budget.
+
+**Measured map (2026-09-23, member-level scan):**
+
+| File | Lines | Largest cohesive areas |
+|---|---|---|
+| `Terrain/WorldScene.cs` | 17,154 | PM4 overlay ≈5,560 lines (`GetPm4ObjectColor` 684, `LoadPm4OverlayAsync` 472, `BuildPm4TileObjects` 309, OBJ export 236, placement-match states 213); `Render()` is one 1,830-line method; selection/hover/pick ≈1,020 |
+| `ViewerApp.cs` | 16,746 | `DrawMenuBar` 960; map/WMO converter dialogs ≈710; `DrawWorldObjectsContentCore` 483; settings load 292; selection/hover ≈1,815 |
+
+**Change to the archived 228 plan — APPROVED by operator 2026-09-23 ("Approve re-order"):**
+
+1. Re-order extractions by context removed, not by the 228 selection-first order:
+   E1 PM4 overlay out of `WorldScene` → E2 `Render()` split into pass classes → E3 `ViewerApp`
+   menu bar + converter dialogs → E4 selection/hover (228's original first target).
+2. Drop 228's dependency on 227-T004 (a UI-inventory gate). Behaviour-preserving extraction changes
+   no UI surface, so the inventory is not needed to prove it.
+
+Unchanged from 228/AGENTS.md §10: behaviour-preserving only; extracted classes take state through
+constructors/parameters and never reach back into god-class internals; the god class keeps one field +
+delegation; receipts per §9.2 including an operator smoke of the moved feature.

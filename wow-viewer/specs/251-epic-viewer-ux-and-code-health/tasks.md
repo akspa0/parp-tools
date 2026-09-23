@@ -15,3 +15,17 @@ Implementation tasks are generated **after** triage. Nothing is checked without 
 - [ ] V002 231 T050 navigation smoke (Editor 4-page IA, Archaeology de-hosting).
 - [ ] V003 v0.5.2.3 runtime checks (slider order, overlay balance, hover occlusion, About credits).
 - [ ] V004 Click every new export menu / sidebar button shipped in v0.6.0-alpha2.
+
+## U-01 — God-class decomposition (operator P1, 2026-09-23)
+
+Blocked on operator approval of the re-ordered plan (spec.md amendment 2026-09-23).
+
+- [x] U01-T001 Operator approves the E1→E4 order and dropping the 227-T004 gate. — Approved 2026-09-23 ("Approve re-order"). Receipt: operator answer in session.
+- [ ] U01-T002 E1 PM4 overlay extraction: verbatim move, delegation, build + tests, line-count receipt.
+- [ ] U01-T003 E1 operator smoke (PM4 overlay, colours, selection, OBJ export).
+- [ ] U01-T004 E2 `Render()` pass split (after R-10 lands).
+- [ ] U01-T005 E2 operator smoke on a legacy and a modern map.
+- [ ] U01-T006 E3 `ViewerApp` menu bar + converter dialogs.
+- [ ] U01-T007 E3 operator smoke.
+- [ ] U01-T008 E4 selection/hover service (228 T004–T011).
+- [ ] U01-T009 E4 operator smoke; update AGENTS.md §10 measured line counts.

@@ -78,6 +78,9 @@ public readonly record struct WorldRenderFrameStats(
     /// </summary>
     public WorldModelSubmissionStats TransparentModelSubmission { get; init; }
 
+    /// <summary>Scene-light workload and the WMO batch partition it drove (Epic 249 R-10a).</summary>
+    public SceneLightingFrameStats SceneLighting { get; init; }
+
     public static WorldRenderFrameStats Empty { get; } = new(
         0,
         0,

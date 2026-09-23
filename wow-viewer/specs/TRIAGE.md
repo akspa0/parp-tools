@@ -8,6 +8,19 @@ scheduled until it is marked **Want**; no implementation approach is chosen unti
 **How to fill in**: put `Want`, `Drop` or `Later` in the *Decision* column. Recommendations are an
 agent's suggestion only. Sizes are rough (S ≈ a day, M ≈ days, L ≈ a week+, XL ≈ multi-week).
 
+## 0. Operator priorities (2026-09-23)
+
+Operator: *"we ought to fix our modern data lighting change issue, that's killing performance
+horribly. the big cs files are worrying, as they eat up context when being edited … Those are my most
+important issues/take aways that need triage first."*
+
+| Priority | Item | Decision |
+|---|---|---|
+| P1 | R-10 — modern-data lighting performance regression (see [Epic 249 amendment](249-epic-renderer-performance-and-correctness/spec.md#amendment-2026-09-23--operator-triage)) | **Want** |
+| P1 | U-01 — god-class decomposition to cut editing context (see [Epic 251 amendment](251-epic-viewer-ux-and-code-health/spec.md#amendment-2026-09-23--operator-triage)) | **Want** |
+
+All other items remain untriaged.
+
 ## 1. "We thought we had it" — measured gaps between belief and code
 
 | Belief | Reality (2026-09-23) | Item |
@@ -77,7 +90,7 @@ R-10 · R-38 (capture first) · F-01 (guard relax half) · E-03 · U-18 · U-21 
 | R-03 | Capture receipt model + authoring handoff | M | Core | |
 | R-04 | GPU timer-query attribution | M | Later | |
 | R-05 | M2/MDX metric close-out (operator flight) | S | Quick win | |
-| R-10 | Per-placement WMO instancing under lights | S | Quick win | |
+| R-10 | Per-placement WMO instancing under lights | S | Quick win | **Want (P1)** |
 | R-11 | Lit placements off GPU instancing | M | Core | |
 | R-12 | Unified batching planner | L | Core | |
 | R-13 | Doodad batch planning + diagnostics | M | Core (with R-12) | |
@@ -135,7 +148,7 @@ R-10 · R-38 (capture first) · F-01 (guard relax half) · E-03 · U-18 · U-21 
 
 | ID | Item | Size | Rec. | Decision |
 |---|---|---|---|---|
-| U-01 | God-class extraction (selection service first) | L | Core | |
+| U-01 | God-class extraction | L | Core | **Want (P1)** |
 | U-02 | Governance Gate 1 + ledger sync | S | Core | |
 | U-03 | MCP tooling/automation surface | L | Later | |
 | U-10 | Sidebar standard (SharedUiWidgets) | M | Core | |

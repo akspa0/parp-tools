@@ -72,6 +72,21 @@ public class FrustumCuller
     }
 
     /// <summary>
+    /// Sphere test against the side and near planes only. Used where the far plane this culler holds
+    /// can be nearer than the farthest drawn geometry (object fog end vs terrain draw distance), so a
+    /// far-plane rejection could drop something that still affects a drawn pixel.
+    /// </summary>
+    public bool TestSphereIgnoringFarPlane(Vector3 center, float radius)
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            if (SignedDistance(_planes[i], center) < -radius)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
     /// Test whether an axis-aligned bounding box intersects or is inside the frustum.
     /// Uses the "test all 8 corners against each plane" approach from the original client.
     /// If camera is inside or near the bounding box, it is unconditionally visible.

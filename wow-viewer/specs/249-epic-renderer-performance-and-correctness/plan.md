@@ -41,3 +41,18 @@ batching gap under different names; 150 was superseded by 152, which spun off 15
   Every item lands in an owned service class.
 - Every performance claim needs a before/after pair from the same path, build and map (R-01/R-03).
 - The profiler's static camera cannot prove a null result (memory: renderer profiler is blind).
+
+## Approach — R-10 (operator P1, 2026-09-23; pending scope approval)
+
+Order: measure → cheap exact fixes → re-measure → decide whether the per-instance-light path is needed.
+
+| Step | Change | Owner (no god-class growth) | Proof |
+|---|---|---|---|
+| R-10a | Frame counters: lights collected, `QueryAffecting` calls + ms, WMO placements batched / lit-fallback / self-lit | existing `WorldRenderDiagnostics` + frame-history counters | operator baseline capture on 1.60.1 Azeroth |
+| R-10b | `WorldWmoOpaqueBatchCandidate` gets a lit flag; `PlanOpaqueWmoBatches` batches only unlit placements; batch path uploads 0 local lights | `Core.Runtime/World/Passes/WorldObjectPassCoordinator` (+ `WorldObjectPassCoordinatorTests`); one-line call-site change at `WorldScene.cs:11415` | unit tests: deterministic partition (242 FR-004) |
+| R-10c | *(spec-synced 2026-09-23)* Visible MDX is collected after the WMO pass, so the rebuild instead keeps only lights whose sphere (+256 margin) touches the view's side/near planes — exact for drawn pixels | existing method body + `FrustumCuller.TestSphereIgnoringFarPlane` | kept/collected counters |
+| R-10d | Uniform-grid spatial index built once per frame in `SceneLightManager`; `QueryAffecting` returns the same lights in the same order | `SceneLightManager` (owned service); tests in a new test file | equivalence tests vs the linear scan |
+| R-10e | *(conditional)* per-instance light sets for instanced WMO shells | `WmoRenderer` + shader | only if R-10a re-measure says self-lit WMOs dominate |
+
+Risk: R-10b changes which WMOs light up only if a light reaching a placement was previously dropped —
+it must not be. Batched placements are exactly those no light reaches, so their shading is unchanged.

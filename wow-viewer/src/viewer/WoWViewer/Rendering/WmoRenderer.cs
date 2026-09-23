@@ -263,6 +263,13 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     public int GroupRenderCount => _groups.Count;
     public uint WmoId => _wmo.WmoId;
 
+    /// <summary>Whether this model's own MOLT lights feed the scene light set.</summary>
+    public bool EmitsSceneLights => _wmo.Lights.Count > 0;
+
+    /// <summary>World-space AABB of the model placed with <paramref name="modelMatrix"/>.</summary>
+    public void GetWorldBounds(Matrix4x4 modelMatrix, out Vector3 worldMin, out Vector3 worldMax)
+        => TransformAabb(BoundsMin, BoundsMax, modelMatrix, out worldMin, out worldMax);
+
     public void CollectSceneLights(Matrix4x4 modelMatrix, ICollection<SceneLight> lights, string sourceKey)
     {
         ArgumentNullException.ThrowIfNull(lights);

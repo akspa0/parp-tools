@@ -90,3 +90,41 @@ attributable to a before/after receipt.
 136 T008/T011 (parity + I/O); 142 real-client promotion gates (T027–T029, T069, T073, T077);
 152-phase-6 gate; 153 SC-007 smoothness; 233 T015 Feature Tour + video witness; 236 T003 + Gate 2
 (torch/brazier spill onto WMO, terrain, doodads); 226 captures.
+
+## Amendment 2026-09-23 — operator triage
+
+**Decision:** R-10 is **Want, priority 1** (operator: *"we ought to fix our modern data lighting change
+issue, that's killing performance horribly"*). All other R-items remain untriaged.
+
+**Code findings that change R-10's shape** (read 2026-09-23; not yet measured at runtime):
+
+1. The gate is whole-scene: `WorldScene.cs:11415` `canBatch = _sceneLightManager.Count == 0 && …`, so
+   any active light anywhere sends every WMO placement down the per-placement fallback.
+2. WMOs emit their own `MOLT` lights (and WMO-internal doodad lights) into the same manager
+   (`WmoRenderer.CollectSceneLights`). A per-placement "does a light reach it" gate (archived 242
+   FR-001) therefore still leaves every **self-lit** WMO unbatched. 242 alone may not recover the frame.
+3. `SceneLightManager.QueryAffecting` is a linear scan over **all** frame lights plus a sort, and it is
+   called per WMO placement, per terrain chunk/tile and per lit doodad draw — CPU cost of
+   placements × lights per frame.
+4. `WorldScene.RebuildSceneLights` walks **all** `_mdxInstances` every frame (not the visible set) to
+   collect emitters.
+5. `WmoRenderer.BeginGpuInstanceBatch(…, sceneLights)` queries lights against the model-space bounds
+   (identity matrix), not any placement.
+
+**R-10 scope — APPROVED by operator 2026-09-23 ("Full bundle"):** the
+operator-named issue is the lighting-change performance regression, so R-10 is proposed as that
+issue's measured root causes, not only 242's gate:
+
+- R-10a Measure first: per-frame counters for lights collected, `QueryAffecting` calls and time,
+  WMO placements batched vs lit-fallback vs self-lit — so the before/after receipt is attributable.
+- R-10b Per-placement batch gate (242 FR-001–FR-004) via the Core batch planner; batched placements
+  upload zero local lights (fixes finding 5).
+- R-10c Light collection limited to visible emitters (finding 4).
+- R-10d Spatial index for `QueryAffecting` with identical results (same set, same nearest-first order),
+  unit-tested (finding 3).
+- R-10e Only if R-10a shows self-lit WMOs still dominate after b–d: an instanced path that carries each
+  placement's own light set (not a shared approximation, so 242 FR-002 still holds). Decide from data.
+
+Unchanged from 242: FR-002 no approximated light sets on lit placements; FR-005 no terrain/M2/portal/
+reader behaviour change; FR-006 no new `WorldScene`/`ViewerApp` members; FR-007 real before/after receipt
+on `wow_classic_beta` 1.60.1 `Azeroth` (operator-run).

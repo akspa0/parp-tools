@@ -3251,6 +3251,9 @@ public partial class ViewerApp
             ImGui.Spacing();
             ImGui.Text($"WMO draw calls:  total {live.WmoDrawCallCount,6}  batched {live.WmoBatchDrawCallCount,6}  group-fallback {live.WmoGroupFallbackDrawCallCount,6}");
             ImGui.Text($"WMO doodad submissions: {live.WmoDoodadSubmissionCount}   visible groups: {live.WmoVisibleGroupSubmissionCount}");
+            SceneLightingFrameStats lightStats = live.SceneLighting;
+            ImGui.Text($"WMO placements:  batched {lightStats.WmoPlacementsBatched,6}  lit per-placement {lightStats.WmoPlacementsLitFallback,6}  (self-lit {lightStats.WmoPlacementsSelfLit})");
+            ImGui.Text($"Scene lights:  kept {lightStats.LightsKept,6} of {lightStats.LightsCollected,6}  queries {lightStats.QueryCount,6}  candidates tested {lightStats.CandidatesTested,8}");
 
             ImGui.Spacing();
             ImGui.TextDisabled($"Pre-decomposition aggregate (spec 201 FR-005 sum check): opaque batched {live.OpaqueBatchedMdxCount}"

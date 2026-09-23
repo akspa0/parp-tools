@@ -21,6 +21,11 @@ then each epic gets phased tasks and a chosen implementation approach (operator 
 wanted/unwanted first, approach second). Receipt:
 [reconciliation README](../specs/archived/reconciliation-2026-09-23/README.md).
 
+**Operator P1 (2026-09-23):** R-10 modern-data lighting performance (Epic 249 amendment: whole-scene
+light gate + self-lit WMOs + linear `QueryAffecting` + all-MDX light collection) and U-01 god-class
+decomposition (Epic 251 amendment: E1 PM4 overlay out of `WorldScene` → E2 `Render()` passes → E3
+`ViewerApp` menu/dialogs → E4 selection). Both approaches await operator approval; R-10 first.
+
 **Next bounded action (agent):** once TRIAGE.md has decisions, record them as dated amendments in each
 epic's `spec.md` and run `speckit-tasks` for the Want items only. Start with the quick-win shortlist
 if the operator marks those Want.

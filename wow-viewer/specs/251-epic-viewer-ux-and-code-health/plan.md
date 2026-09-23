@@ -31,3 +31,21 @@ unfinished part; U-10–U-19 are its single merged residue.
 
 AGENTS.md §10 (no new `WorldScene`/`ViewerApp` members, ~2,000-line budget, owned services) and §11
 (`SharedUiWidgets`, one authoritative home per surface, inventory row per new surface).
+
+## Approach — U-01 (operator P1, 2026-09-23; pending approval of the re-ordering)
+
+One extraction per change, each independently buildable and revertible. Order by context removed:
+
+| Step | Extract | From | Approx. lines out | Target | Operator smoke |
+|---|---|---|---|---|---|
+| E1 | PM4 overlay: load, tile objects, colouring, OBJ export, placement-match state | `WorldScene.cs` | ~5,500 | owned `Pm4OverlayScene` (+ smaller helpers, each <2,000) under `Terrain/Pm4/` | load a PM4 map; overlay, colours, selection, OBJ export unchanged |
+| E2 | `Render()` → frame orchestrator + per-pass classes (terrain, WMO, MDX/doodad, liquid, transparent, overlays) | `WorldScene.cs` | ~1,800 | `Terrain/Passes/*` | fly a legacy map + a modern map; frame counters unchanged |
+| E3 | `DrawMenuBar`, map/WMO converter dialogs, world-objects panel | `ViewerApp.cs` | ~2,150 | owned UI services under `Workbench/` | every menu item + both converter dialogs open and run |
+| E4 | Selection / hover / pick (228's pure Core selection service first) | both | ~2,800 | Core selection service + viewer adapter | click/hover selection on terrain, WMO, doodad, PM4 |
+
+After E1–E4 both files would sit near 8,000–9,000 lines. Remaining work continues the same way
+(settings, terrain/tile management) as later steps; each needs its own operator-visible smoke.
+
+Mechanics per step: move code verbatim first (no logic edits in the same change); replace the
+god-class members with one field + delegating calls; build; run the full test suite; operator smoke.
+R-10 (Epic 249) lands **before** E2, so the performance fix is not entangled with a move of the WMO pass.

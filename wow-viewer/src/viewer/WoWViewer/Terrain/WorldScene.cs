@@ -10370,7 +10370,11 @@ public class WorldScene : ISceneRenderer
             emitter.CollectSceneLights(instance.Transform, _sceneLightCollectScratch, instance.ModelKey);
         }
 
-        _sceneLightManager.AddRange(_sceneLightCollectScratch);
+        // Epic 249 R-10c: a light whose sphere lies wholly outside the view (side + near planes)
+        // cannot light a drawn pixel. The margin covers terrain, which renders before this rebuild
+        // and so uses the previous frame's set while the camera moves.
+        _sceneLightManager.AddRange(_sceneLightCollectScratch,
+            light => _frustumCuller.TestSphereIgnoringFarPlane(light.Position, light.AttenuationEnd + SceneLightManager.FrustumCullMargin));
         _sceneLightCollectScratch.Clear();
     }
 
@@ -11025,7 +11029,10 @@ public class WorldScene : ISceneRenderer
             terrainChunksRendered,
             terrainChunksCulled,
             wdlVisibleTiles,
-            wdlHiddenTiles);
+            wdlHiddenTiles) with
+        {
+            SceneLighting = _sceneLightManager.TakeFrameCounters(),
+        };
 
         // Retain the frame. Without this the stats are produced and immediately discarded, which is
         // why a periodic hitch was invisible to every consumer.
@@ -11409,16 +11416,25 @@ public class WorldScene : ISceneRenderer
                             if (renderer != null)
                                 _worldFrameWmoRenderers.Add(renderer);
 
-                            // Local scene lights are selected against each placement's world bounds.
-                            // Keep WMO shell instancing disabled while any scene light is active rather
-                            // than uploading one approximated light set for every placement in a batch.
-                            bool canBatch = _sceneLightManager.Count == 0
-                                && renderer is IGpuInstancedWmoRenderer gpuRenderer
+                            // Epic 249 R-10b: the batch decision is per placement. A placement a scene
+                            // light reaches keeps the per-placement path and its own light set; one no
+                            // light reaches is instanced. (Previously any active light anywhere disabled
+                            // WMO instancing for the whole scene.)
+                            bool canBatch = renderer is IGpuInstancedWmoRenderer gpuRenderer
                                 && gpuRenderer.SupportsGpuInstancedOpaque;
+                            bool reachedByLight = false;
+                            if (canBatch && _sceneLightManager.Count > 0)
+                            {
+                                renderer!.GetWorldBounds(visible.Instance.Transform, out Vector3 placementMin, out Vector3 placementMax);
+                                reachedByLight = _sceneLightManager.AnyAffecting(placementMin, placementMax);
+                            }
+
                             wmoBatchCandidates.Add(new(
                                 visible.Instance.ModelKey,
                                 canBatch,
-                                visibleIndex));
+                                visibleIndex,
+                                reachedByLight,
+                                renderer?.EmitsSceneLights ?? false));
                         }
 
                         foreach (WmoRenderer renderer in _worldFrameWmoRenderers)
@@ -11426,6 +11442,10 @@ public class WorldScene : ISceneRenderer
 
                         WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan wmoBatchPlan =
                             WorldObjectPassCoordinator.PlanOpaqueWmoBatches(wmoBatchCandidates);
+                        _sceneLightManager.RecordWmoPartition(
+                            wmoBatchPlan.BatchedPlacementCount,
+                            wmoBatchPlan.LitFallbackCount,
+                            wmoBatchPlan.SelfLitFallbackCount);
                         Dictionary<IModelRenderer, List<Matrix4x4>> wmoDoodadBatchGroups = frame.WmoDoodadBatchGroupScratch;
                         List<WmoOpaqueDoodadBatchItem> wmoDoodadUnbatched = frame.WmoDoodadUnbatchedScratch;
                         foreach (int visibleIndex in wmoBatchPlan.FallbackVisibleIndices)
@@ -11453,10 +11473,12 @@ public class WorldScene : ISceneRenderer
                             foreach (int visibleIndex in batch.VisibleIndices)
                                 instances.Add(frame.Visibility.VisibleWmos[visibleIndex]);
 
+                            // Only placements no scene light reaches are batched, so the exact local
+                            // light set for every instance here is empty.
                             gpuRenderer.BeginGpuInstanceBatch(
                                  view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
                                  lighting.LightDirection, lighting.LightColor, lighting.AmbientColor,
-                                 _sceneLightManager);
+                                 sceneLights: null);
                             foreach (VisibleWmoInstance visible in instances)
                                 gpuRenderer.QueueGpuInstance(visible.Instance.Transform);
                             gpuRenderer.EndGpuInstanceBatch();
