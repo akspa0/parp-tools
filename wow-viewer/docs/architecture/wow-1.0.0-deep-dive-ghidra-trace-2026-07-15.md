@@ -1,11 +1,11 @@
 # WoW 1.0.0 (Beta-3) Deep-Dive — M2 Record Layouts, WMO Format, Dev/Dead Code (Ghidra, 2026-07-15)
 
-Companion to the M2 format trace (`specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`)
+Companion to the M2 format trace (`specs/archived/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`)
 and the renderer-features trace (`docs/architecture/wow-1.0.0-renderer-features-ghidra-trace-2026-07-15.md`).
 This doc goes deeper: **per-field M2 record layouts**, the **WMO/WDT format** as 1.0.0 sees it,
 and **dead code / development tools still present** in this beta-3 binary. Recovered via the
 GhidraMCP HTTP API; raw decompilations in `output/ghidra_1.0.0/sub_*.c` and `deep_*.c`
-(copied to `specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/`).
+(copied to `specs/archived/104-legacy-m2-rendering/evidence/1.0.0-ghidra/`).
 
 This build is **beta 3** (string `BETA_BUILD` at `0x007fded0`, referenced by `FUN_004751b0` and
 `FUN_004a4ad0`) — not a final release — and is intended to set up the whole 1.x era of objects.

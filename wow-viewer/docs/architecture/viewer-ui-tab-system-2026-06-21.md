@@ -78,9 +78,9 @@ The old UI is still there (sidebars, panels, floating windows). They are:
 | `src/viewer/WoWViewer/ViewerApp_Sidebars.cs` | DrawTopTabBar, DrawBottomTabBar, per-top-tab sub-tab dispatchers |
 | `src/viewer/WoWViewer/ViewerApp_MinimapAndStatus.cs` | DrawMinimapContent (headless variant) |
 | `src/viewer/WoWViewer/ViewerApp_CaptureAutomation.cs` | PendingCaptureRequest.ApplyArcheologyPlayback, ActiveVideoRecording.ApplyArcheologyPlayback, per-shot advance, video start/stop hooks |
-| `specs/069-viewer-ui-overhaul/spec.md` | Full spec |
-| `specs/069-viewer-ui-overhaul/plan.md` | 8-phase plan |
-| `specs/069-viewer-ui-overhaul/tasks.md` | 79 tasks, all done |
+| `specs/archived/069-viewer-ui-overhaul/spec.md` | Full spec |
+| `specs/archived/069-viewer-ui-overhaul/plan.md` | 8-phase plan |
+| `specs/archived/069-viewer-ui-overhaul/tasks.md` | 79 tasks, all done |
 
 ## Out of Scope (Future)
 

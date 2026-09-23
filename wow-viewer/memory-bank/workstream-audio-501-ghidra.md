@@ -1,5 +1,7 @@
 # 5.0.1 Audio (SE3) — Ghidra Evidence
 
+> **Owner since 2026-09-23:** Epic 252 (World, audio items W-01–W-06) — [252-epic-world-simulation-and-audio](../specs/252-epic-world-simulation-and-audio/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
+
 Last verified: 2026-09-02 against Ghidra project `Mists of Pandaria 5.0.1.15464`, program `/Wow.exe`.
 Read-only session; nothing in the program was edited.
 

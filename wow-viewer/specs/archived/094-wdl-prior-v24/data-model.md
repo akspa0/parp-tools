@@ -2,7 +2,7 @@
 
 **Purpose**: Define the V24 Zarr store schema, the per-tile data structures, and the entity relationships for the WDL Prior + Lattice Detailer (V24) spec.
 **Created**: 2026-07-06
-**Source**: [`./spec.md`](./spec.md), [`./research.md`](./research.md)
+**Source**: [`./spec.md`](spec.md), [`./research.md`](research.md)
 
 > **Amended 2026-07-06** (audited; see `spec.md` "Implementation Amendments" A1/A4/A5): the C# reader returns 17×17 outer + 16×16 inner int16 per MARE and does **not** read MAHO, so `wdl_prior_holes` is dropped. The V24 store uses paired arrays — `wdl_prior_outer` (N,17,17), `wdl_prior_inner` (N,16,16), with `_source_*` (uint8) and `_confidence_*` (float32) mates — plus a copied `index.parquet`; V18 arrays are referenced from the V18 store by `tile_id`, not copied. V18 actual names/shapes: `minimap_rgb` (256,256,3) uint8, `object_precise_mask` (257,257) float32, `liquid_mask` (256,256) float32, `holes_16` (16,16) bool, `no_object_minimap` present on 0_5_3 only.
 

@@ -59,7 +59,7 @@ See
 Full detail, per-map manual commands, and the
 current one-client-build scope limitation are in
 [`../docs/dataset-preparation-userguide.md`](../docs/dataset-preparation-userguide.md#8-v50-clean-room-dataset-current-canonical-lane)
-and [`../specs/109-v50-clean-room-audit/quickstart.md`](../specs/109-v50-clean-room-audit/quickstart.md).
+and [`../specs/archived/109-v50-clean-room-audit/quickstart.md`](../specs/archived/109-v50-clean-room-audit/quickstart.md).
 
 ## Environment
 

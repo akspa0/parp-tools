@@ -1,5 +1,7 @@
 # Workstream — PM4 decode
 
+> **Owner since 2026-09-23:** Epic 253 (PM4) — [253-epic-pm4-navmesh-research](../specs/253-epic-pm4-navmesh-research/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
+
 Owner specs: 130 (remaining decode), 131 (scene graph / doodads), epic-pm4-restoration.
 Last updated: 2026-08-04. Branch `131-pm4-scene-graph-doodads`.
 

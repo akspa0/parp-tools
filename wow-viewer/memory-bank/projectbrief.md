@@ -15,7 +15,7 @@ user explicitly requests a bounded compatibility fix.
 ## Architecture boundaries
 
 - Readers and reusable contracts live in `src/core/`; viewer shell work lives in
-  `src/viewer/WoWViewer/`; CLI tools live in `src/tools/`; tests live in `tests/`.
+  `src/viewer/WoWViewer/`; CLI tools live in `tools/` (shared CLI support in `src/tools-shared/`); tests live in `tests/`.
 - New behavior starts in `specs/`, follows Specify -> Plan -> Tasks -> one validated phase, and
   records proof in the owning spec.
 - Runtime client roots are configuration. `H:\CLIENTS` is an approved local library, but no

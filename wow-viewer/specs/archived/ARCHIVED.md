@@ -58,3 +58,10 @@ mv specs/086-v22-consolidated-dataset specs/archived/086-v22-consolidated-datase
 mv specs/087-v22-asset-library-payloads specs/archived/087-v22-asset-library-payloads
 ```
 and update the directory paths in `088-v22-enrichment-from-v18/spec.md`. This is intentionally deferred to the user because it requires a git history decision.
+
+## 2026-09-23 reconciliation
+
+Every remaining spec directory (137) and the three `epic-*` folders were audited against the code and
+archived here in one pass. Each carries a banner with its disposition (complete / folded / superseded /
+cold) and its successor epic (248–254). Full ledger, audit reports and method:
+[reconciliation-2026-09-23/README.md](reconciliation-2026-09-23/README.md).

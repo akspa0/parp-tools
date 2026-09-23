@@ -6,7 +6,7 @@ lit, shadowed, and fogged the world — so we stop approximating and start repro
 
 Companion docs (same client):
 - Visibility / render order / portals / BSP: [`wow-1.0.0-wmo-rendering-ghidra-trace-2026-07-15.md`](wow-viewer/docs/architecture/wow-1.0.0-wmo-rendering-ghidra-trace-2026-07-15.md) §20
-- Raw decompilations: [`evidence/1.0.0-ghidra/`](wow-viewer/specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/)
+- Raw decompilations: [`evidence/1.0.0-ghidra/`](wow-viewer/specs/archived/104-legacy-m2-rendering/evidence/1.0.0-ghidra/)
 
 Confidence tags: **[V]** = verified in decomp/strings, **[I]** = inferred (era-standard,
 consistent with the evidence) and flagged so we don't over-claim.

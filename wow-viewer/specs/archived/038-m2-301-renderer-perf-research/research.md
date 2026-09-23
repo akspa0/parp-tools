@@ -1,6 +1,6 @@
 # Research: M2 3.0.1 Renderer Performance
 
-**Branch**: `038-m2-301-renderer-perf-research` | **Spec**: [spec.md](./spec.md)
+**Branch**: `038-m2-301-renderer-perf-research` | **Spec**: [spec.md](spec.md)
 **Ghidra binary**: `WoW.exe 3.0.1.8303` (32-bit, base `0x00401000`, .text `0x00401000..0x0091bbff`, .rdata `0x0091c000..0x009d01ff`, .data `0x009d1000..0x01045573`)
 **Validation clients**: `I:\parp\parp-tools\output\tmp\wowarchive-clients\3_0_1_8303\`, `3_3_5_12340\`
 **Companion notes**: `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` (3.3.5/4.0.0 baseline)

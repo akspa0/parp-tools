@@ -97,7 +97,7 @@ The current state is essentially "we have the foundation files for a renderer li
 | `game-viewer-host-plan-2026-05-13.md` (slices 3, 4, 5, 6) | World session closure, terrain/liquid shader baseline, skybox + lighting, standalone asset consumer | **Direct overlap** with the "renderer modernization" half. Slices 3-6 are basically the same effort framed differently. |
 | `wow-viewer-full-porting-roadmap.md` (Phase I, Priority 5) | Lists "OpenGL renderer port" + "Vulkan renderer primary backend" + "Map editor" as a long-range Priority 5 | The user is now asking for this lane to be pulled forward. |
 | `wow-viewer-library-completeness-plan-2026-05-06.md` (Section 2.3, Section 3 Phase F) | "Rendering System" table marks `MdxRenderer`, `TerrainRenderer`, `WmoRenderer`, `LiquidRenderer`, `ShaderProgram`, `RenderQueue`, `FrustumCuller`, `Material` as **Missing**. Notes Phase F is "out of scope and requires its own architecture spec." | **This is exactly the architecture spec being requested now.** |
-| `specs/009-full-project-reimplementation-spec/` (2,650 lines) | The master design reference. Has full rendering pipeline + GLSL shader source. | Should be referenced for the GPU/LOD section. |
+| `specs/archived/009-full-project-reimplementation-spec/` (2,650 lines) | The master design reference. Has full rendering pipeline + GLSL shader source. | Should be referenced for the GPU/LOD section. |
 | `specs/020-renderer-culling-and-tile-capture` (P1/P2) | Frustum and tile-level capture culling fix in the current `WowViewerWorldRuntimeBridge` | Must remain compatible; this new spec cannot regress the tile capture culling fix. |
 | `specs/030-wmo-render-pass-architecture` | WMO-specific render pass architecture | WMO pass is a sub-concern. Should be referenced, not duplicated. |
 | `specs/031-terrain-cell-awareness` | Terrain cell awareness | Sub-concern. Reference. |
@@ -228,7 +228,7 @@ Reaffirmed by the user message and RULE 8:
 
 **Approve as the basis for a new spec, with these constraints:**
 
-1. Promote this analysis into `wow-viewer/specs/056-viewerapp-gpu-lod-modernization/spec.md` (Spec Kit).
+1. Promote this analysis into `wow-viewer/specs/archived/056-viewerapp-gpu-lod-modernization/spec.md` (Spec Kit).
 2. Force the user to answer **3-5 scope questions** before writing the spec — see Open Questions below.
 3. After spec is written, use `speckit-plan` + `speckit-tasks` to break it into phases of ≤ 10 steps.
 4. **Reconcile with `specs/036-renderer-improvements`** before plan generation: either supersede 036, or hand off 036's User Story 3 (live 3.3.5 frame pacing) to a separate track.
@@ -413,7 +413,7 @@ Confirmed in the user's message and locked by Q1/Q2/Q4/Q7:
 
 ## 9. Next Step
 
-Load `speckit-specify` and write `wow-viewer/specs/056-viewerapp-gpu-lod-modernization/spec.md` from this analysis + the locked decisions.
+Load `speckit-specify` and write `wow-viewer/specs/archived/056-viewerapp-gpu-lod-modernization/spec.md` from this analysis + the locked decisions.
 
 After the spec is approved, run `speckit-plan` to produce `plan.md` (phases, max 10 steps each, dependency-ordered) and `speckit-tasks` to break each phase into concrete bite-sized steps. Then `speckit-implement` to land one phase at a time with real-data validation.
 

@@ -3,7 +3,7 @@
 **Feature Branch**: `094-wdl-prior-v24`
 **Created**: 2026-07-06
 **Owner**: wow-viewer
-**Source**: [`./spec.md`](./spec.md), [`./research.md`](./research.md), [`./data-model.md`](./data-model.md), [`./checklists/requirements.md`](./checklists/requirements.md)
+**Source**: [`./spec.md`](spec.md), [`./research.md`](research.md), [`./data-model.md`](data-model.md), [`./checklists/requirements.md`](checklists/requirements.md)
 
 > **Amended 2026-07-06**: see `spec.md` "Implementation Amendments" — verified C# reader shape (17×17 outer + 16×16 inner int16, MAHO not read), WDLs resolved from MPQs via `NativeMpqService` (batch-first shim modes), V18 actual schema (`minimap_rgb` 256², `object_precise_mask` float32, `liquid_mask` name, `holes_16` available, `no_object_minimap` on 0_5_3), paired-array V24 store schema (A5), exact quincunx 33→257 upsample (A6), Stage A interpolation heads (A7), and the added C#-grounded V22 dataset audit lane (A8). The phases below are executed with those amendments in force.
 

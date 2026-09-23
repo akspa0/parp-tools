@@ -10,8 +10,8 @@ This folder is the viewer-facing guide layer for the current `wow-viewer` app.
 4. [CLI tooling README](../../tools/README.md)
 5. [Expanded CLI reference](../CLI-TOOLS.md)
 6. [Release notes — v0.6.0-alpha](../releases/v0.6.0-alpha.md) · [v0.5.4-alpha](../releases/v0.5.4-alpha.md) · [v0.5.3.1](../releases/v0.5.3.1.md)
-7. [Spec 227 — UI re-audit](../../specs/227-ui-reaudit/spec.md)
-8. [Spec 229 — WoW shell and keybind profiles](../../specs/229-wow-shell-keybind-profiles/spec.md)
+7. [Spec 227 — UI re-audit](../../specs/archived/227-ui-reaudit/spec.md)
+8. [Spec 229 — WoW shell and keybind profiles](../../specs/archived/229-wow-shell-keybind-profiles/spec.md)
 
 ## Current viewer truth
 

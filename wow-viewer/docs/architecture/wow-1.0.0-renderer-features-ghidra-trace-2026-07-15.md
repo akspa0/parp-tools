@@ -3,7 +3,7 @@
 Static reverse-engineering of the **WoW 1.0.0** client's world/M2 renderer features
 beyond the M2 format itself: **liquids, particles, ribbons, attachments (armor/equipment),
 helmet/hair geosets, skybox/sky, and camera/POV**. Recovered via the GhidraMCP HTTP API
-(see [`specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`](../../specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md) §1 for tooling).
+(see [`specs/archived/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`](../../specs/archived/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md) §1 for tooling).
 Raw decompilations: `output/ghidra_1.0.0/liq_*.c` and `feat_*.c`.
 
 This is implementation seed material for the wow-viewer renderer — the goal the user

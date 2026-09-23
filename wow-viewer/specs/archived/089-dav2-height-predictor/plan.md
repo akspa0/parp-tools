@@ -1,6 +1,6 @@
 # Implementation Plan: DA-V2-Small LoRA Height Predictor with Cross-Tile Consistency
 
-**Branch**: `089-dav2-height-predictor` | **Date**: 2026-07-03 | **Spec**: [`spec.md`](./spec.md)
+**Branch**: `089-dav2-height-predictor` | **Date**: 2026-07-03 | **Spec**: [`spec.md`](spec.md)
 
 **Input**: Feature specification at `wow-viewer/specs/089-dav2-height-predictor/spec.md`
 

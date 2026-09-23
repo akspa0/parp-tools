@@ -3,7 +3,7 @@
 **Feature Branch**: `094-wdl-prior-v24`
 **Created**: 2026-07-06
 **Owner**: wow-viewer
-**Source**: [`./spec.md`](./spec.md), [`./plan.md`](./plan.md), [`./data-model.md`](./data-model.md), [`./research.md`](./research.md), [`./checklists/requirements.md`](./checklists/requirements.md)
+**Source**: [`./spec.md`](spec.md), [`./plan.md`](plan.md), [`./data-model.md`](data-model.md), [`./research.md`](research.md), [`./checklists/requirements.md`](checklists/requirements.md)
 
 Tasks are organized by phase (matching the plan.md phases) and within each phase, by user story where applicable. Every task is bite-sized (one concern), independently testable, and follows the strict checklist format.
 

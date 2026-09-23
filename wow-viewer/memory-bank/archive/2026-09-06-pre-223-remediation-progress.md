@@ -17,7 +17,7 @@ Last updated: 2026-09-06
   These are source/policy checks only: live fog dragging, GL WMO admission/rendering, ffmpeg output,
   camera-path capture, and UX are unproven. Spec 212 phases 1–4 remain open.
 - **Next bounded action:** operator runs the retest matrix in
-  [`phase6-validation.md`](../specs/223-ui-consolidation-audit/evidence/phase6-validation.md) with a
+  [`phase6-validation.md`](../../specs/archived/223-ui-consolidation-audit/evidence/phase6-validation.md) with a
   configured client and real `ffmpeg`, recording the exact root/build/map/output evidence. Do not
   restore a Phase 6 completion claim or update the user-facing capture guide until that retest passes.
 
@@ -25,32 +25,32 @@ Last updated: 2026-09-06
 - **Transport:** active taxi-route poses now bypass only presentation/selection filters (`TaxiRideSimulationPolicy`, 2/2 focused tests), remain pose-valid without a mount asset, and release when ride/world ownership stops. Camera paths normalize equivalent map/build format differences but still stop on a real provenance change; plain Play streams progressively while video/queue capture retains readiness gating (3/3 focused policy tests).
 - **Inspector and navigation:** terrain no longer enters the standalone-model branch; ground clicks pin a resident/source-scoped MCNK, then fall back safely after eviction/source change. Inspector owns Context / Placements / LOD & Budget and its Context holds the MCNK overlay controls. Scene/Utilities are compatibility routes only; the visible workbench is Quick / Inspector / Editor / Archaeology.
 - **Quick preservation:** switching Viewer, Editor, or Archaeology while Quick is active preserves Quick rather than overwriting it with the profile page. Shared `SharedUiWidgets` keeps the migrated presentation primitives consistent.
-- **Validation:** solution Debug build passes **0 errors** (305 warnings); viewer-only rebuild after the profile-preservation adjustment passes **0 errors** (265 warnings). Operator still owns real-client taxi/camera movement, capture readiness, terrain pinning, compact-width navigation, and utility-route walkthrough. Details: [`phase6-validation.md`](../specs/223-ui-consolidation-audit/evidence/phase6-validation.md).
+- **Validation:** solution Debug build passes **0 errors** (305 warnings); viewer-only rebuild after the profile-preservation adjustment passes **0 errors** (265 warnings). Operator still owns real-client taxi/camera movement, capture readiness, terrain pinning, compact-width navigation, and utility-route walkthrough. Details: [`phase6-validation.md`](../../specs/archived/223-ui-consolidation-audit/evidence/phase6-validation.md).
 
 ## 2026-09-04 — Menu Bar Refinement, First-Class Import/Export Dashboard, Rosetta 3D Object Library & Spec 212 Plan
 - **Menu Bar Refinement:** Cleaned up `File` (purged broken Rosetta Datastore Zarr loader; logical grouping of Open, MPQ Presets, Loose Map overrides, Base persistence, Settings/Exit) and `Tools` (retired broken `Offline Data / Conversion` submenu, elevated `Converters` directly, deduplicated `Settings...`).
 - **Editor Imports & Exports Dashboard:** Transformed sub-tab 3 into a comprehensive dashboard covering Synthesized Minimap generation & quick export, GLB Scene / Collision / Map Tile export (Current / Loaded / Whole Map scopes), Terrain layer export (Alpha masks, Heightmaps 257, MCCV), and Terrain layer import.
 - **Rosetta 3D Object Library:** Sub-tab 2 transformed from dead ML training into an interactive 3D model/WMO asset library (`WorkbenchNavigator.cs` and `ViewerApp_Editor.cs`). Discovers and parses `rosetta-manifest.json` into `RosettaReferenceLibrary` with 5,832 authentic assets (5,545 M2 models, 287 WMOs). Search, category filter (All, M2, WMO), size sorting, master-detail inspector (bounding box, span, center, volume, footprint, calibration tile occurrences), and direct actions: in-viewport 3D model inspection (`OnCatalogLoadModel`), path copying, and active placement assignment.
 - **OpenSCAD MCP 3D HUD Primitives:** Generated and committed `camera_hud_curved_bezel.off/.scad`, `camera_hud_reticle_tactical.off/.scad`, `camera_hud_compass_tape.off/.scad` into `src/viewer/WoWViewer/Assets/OpenScad/`.
-- **Spec 212 (3D Spatial UI Shell & Camera HUD):** Authored technical design plan (`specs/212-spatial-ui-shell/plan.md`) and task breakdown (`specs/212-spatial-ui-shell/tasks.md`) specifying camera-space attachment math, OpenSCAD procedural loading, and `Tab` shortcut visibility toggle (`!_hideUiChrome`).
+- **Spec 212 (3D Spatial UI Shell & Camera HUD):** Authored technical design plan (`specs/archived/212-spatial-ui-shell/plan.md`) and task breakdown (`specs/archived/212-spatial-ui-shell/tasks.md`) specifying camera-space attachment math, OpenSCAD procedural loading, and `Tab` shortcut visibility toggle (`!_hideUiChrome`).
 - **Validation:** Solution build passes with 0 errors; focused Core unit tests 16/16 pass (`WmoDoodadSetResolverTests`).
 
 ## 2026-09-04 — Spec 223: Viewer UI Consolidation Audit (Phases 1–5 Complete)
-- **Landed in Core & Core.Runtime:** Created `WowViewer.Core.Runtime.World.Inspection` content model (`InspectorPayload`, `InspectorSection`, `InspectorAction`, `InspectorSubBlock`) and `WmoDoodadSetResolver.cs` ([`WmoDoodadSetResolverTests.cs`](../tests/WowViewer.Core.Tests/WmoDoodadSetResolverTests.cs) 16/16 green).
+- **Landed in Core & Core.Runtime:** Created `WowViewer.Core.Runtime.World.Inspection` content model (`InspectorPayload`, `InspectorSection`, `InspectorAction`, `InspectorSubBlock`) and `WmoDoodadSetResolver.cs` ([`WmoDoodadSetResolverTests.cs`](../../tests/WowViewer.Core.Tests/WmoDoodadSetResolverTests.cs) 16/16 green).
 - **Landed in Viewer:**
-  - **Unified Object Inspector (Phase 1):** Right-sidebar Inspector host ([`InspectorContentHost.cs`](../src/viewer/WoWViewer/Workbench/InspectorContentHost.cs)) consolidating ADT, MDX/M2, WMO (with MODS doodad-set switching), PM4, and WL* liquid inspection into unified sections with capability parity; compact hover overlays deep-linking to Inspector.
+  - **Unified Object Inspector (Phase 1):** Right-sidebar Inspector host ([`InspectorContentHost.cs`](../../src/viewer/WoWViewer/Workbench/InspectorContentHost.cs)) consolidating ADT, MDX/M2, WMO (with MODS doodad-set switching), PM4, and WL* liquid inspection into unified sections with capability parity; compact hover overlays deep-linking to Inspector.
   - **Duplicate Window Retirement (Phase 2):** Retired 7 floating inspection windows (`DrawMcnkExplorerWindow`, `DrawTerrainAnalysisWindow`, `DrawRenderQualityWindow`, `DrawPm4AlignmentWindow`, `DrawPm4WmoCorrelationWindow`, `DrawPm4ObjectMatchWindow`, `DrawChunkClipboardWindow`); Log and Perf floaters guarded to legacy UI and routed to Workbench Utilities in tab UI; deduplicated duplicate draw methods.
   - **Editor & Archaeology Profile Split (Phases 3 & 4):** Cleanly separated authoring/writing features into dedicated `Editor` profile (`WorkbenchTab.Editor`, F6 shortcut) with dedicated sub-tabs (Tasks, Converters, ML Dataset & Training, Imports & Exports) from analysis/inspection in `Archaeology` profile (`WorkbenchTab.Archaeology`). Cartography (Spec 222) integrated under Archaeology. Top-bar action button sets configured per profile.
-  - **Authoritative Fog Controls & Quick Mirror (Phase 5):** Unified fog sliders into `DrawAuthoritativeFogControls` in [`ViewerApp_Settings.cs`](../src/viewer/WoWViewer/ViewerApp_Settings.cs) serving both Settings and Quick controls (FR-6 zero fork) with **Fog End rendered first**, immediate persistence to defaults, and profile-tailored Quick sections.
+  - **Authoritative Fog Controls & Quick Mirror (Phase 5):** Unified fog sliders into `DrawAuthoritativeFogControls` in [`ViewerApp_Settings.cs`](../../src/viewer/WoWViewer/ViewerApp_Settings.cs) serving both Settings and Quick controls (FR-6 zero fork) with **Fog End rendered first**, immediate persistence to defaults, and profile-tailored Quick sections.
 - **Validation:** Solution build passes with 0 errors; focused Core unit tests 16/16 pass (`WmoDoodadSetResolverTests`).
 
 ## 2026-09-03 — Spec 219: Phase 1 Core transform seam and policy gate passed
-- **Landed in Core:** [`TileContentTransform.cs`](../src/core/WowViewer.Core/Maps/TileContentTransform.cs)
+- **Landed in Core:** [`TileContentTransform.cs`](../../src/core/WowViewer.Core/Maps/TileContentTransform.cs)
   implements exact 90°/180° rotation and horizontal/vertical mirrors for the interleaved 145-vertex
   chunk lattice, renderer-space normals, hole masks, 64×64 alpha/shadow grids, MCCV, 8×8 liquid
   flags, complete MDDF/MODF placement records, and MODF bounds. It also exposes origin-based free
   point rotation and has no dependency on phase-system types.
-- **Composition policy:** [`PhaseComposition.cs`](../src/core/WowViewer.Core/Maps/PhaseComposition.cs)
+- **Composition policy:** [`PhaseComposition.cs`](../../src/core/WowViewer.Core/Maps/PhaseComposition.cs)
   now carries rotation angle/origin, mirrors, and donor→target mappings on `PhaseLayerSettings`;
   clone preserves all state. `ResolveTileSource` enforces per-tile-last-wins precedence, reports
   duplicate target claim counts, performs origin-aware inverse lookup, normalizes negative quarter
@@ -81,7 +81,7 @@ Last updated: 2026-09-06
 - **Name-table remap (operator-confirmed `newbindstone.mdx` → `gypsywagon.mdx`):** MDDF/MODF
   `NameIndex` is local to its owning WDT's MDNM/MONM table. The Alpha composition path copied a
   phase placement into the base tile unchanged, so the renderer resolved the base table's unrelated
-  entry at the same numeric slot — correct transform, wrong model. [`AlphaTerrainAdapter.cs`](../src/viewer/WoWViewer/Terrain/AlphaTerrainAdapter.cs)
+  entry at the same numeric slot — correct transform, wrong model. [`AlphaTerrainAdapter.cs`](../../src/viewer/WoWViewer/Terrain/AlphaTerrainAdapter.cs)
   now resolves each phase index to its phase-table path, reuses or appends that path in the base
   table, and rewrites the placement index before rendering; logs record the index/path map.
 - **Tile-offset double inversion (operator-confirmed `+11,-2` behaving as `-11,+2`):** two causes.
@@ -94,26 +94,26 @@ Last updated: 2026-09-06
 - **Verification:** full solution Debug build **0 errors**; focused phase-composition tests
   **18/18 passed** (updated `TileOffsetToWorldTranslation_IsNegativeInBothAxes` to the tile-span
   contract). Operator visual reload of an offset Alpha phase layer is the remaining proof.
-- **Spec:** [`203-multi-phase-map-composition/spec.md`](../specs/203-multi-phase-map-composition/spec.md).
+- **Spec:** [`203-multi-phase-map-composition/spec.md`](../../specs/archived/203-multi-phase-map-composition/spec.md).
 
 ## 2026-09-03 — Spec 214: solver-independent physics policy implemented and validated
-- **Planning and audit:** Authored the Spec Kit pack and [`current-implementation-audit.md`](../specs/214-mop-physics-domino/evidence/current-implementation-audit.md). The audit separates the unconsumed M2 `0x20` flag, MDX `CLID` inspection geometry, camera navigation clamping, and visual particle gravity from actual physicalised-model simulation.
-- **Landed in Core.Runtime:** [`PhysicsRuntimePolicy.cs`](../src/core/WowViewer.Core.Runtime/World/Physics/PhysicsRuntimePolicy.cs) reuses `ClientBuildKey` to resolve exact `0.5.3.3368` as known-disabled, exact `5.0.1.15464` as admission-enabled, and every malformed/unmeasured build as unknown. Every decision carries activation state, profile/build/evidence provenance, diagnostics, and an explicit admitted/cull/defer/refusal reason. Budget and candidate inputs are validated; capacity selection is deterministic by priority, distance, then ordinal stable id, while results preserve input order.
-- **Verification:** [`PhysicsRuntimePolicyTests.cs`](../tests/WowViewer.Core.Tests/PhysicsRuntimePolicyTests.cs) passes **16/16**; the affected `WowViewer.Core.Runtime` Debug build succeeds with **0 errors**. The full Core scope gate reports **1,379 passed, 1 skipped, and the same 9 unrelated baseline failures**. Existing `Snappier` NU1903 warnings remain unrelated. No runtime, visual, real-client, or solver claim was made.
+- **Planning and audit:** Authored the Spec Kit pack and [`current-implementation-audit.md`](../../specs/archived/214-mop-physics-domino/evidence/current-implementation-audit.md). The audit separates the unconsumed M2 `0x20` flag, MDX `CLID` inspection geometry, camera navigation clamping, and visual particle gravity from actual physicalised-model simulation.
+- **Landed in Core.Runtime:** [`PhysicsRuntimePolicy.cs`](../../src/core/WowViewer.Core.Runtime/World/Physics/PhysicsRuntimePolicy.cs) reuses `ClientBuildKey` to resolve exact `0.5.3.3368` as known-disabled, exact `5.0.1.15464` as admission-enabled, and every malformed/unmeasured build as unknown. Every decision carries activation state, profile/build/evidence provenance, diagnostics, and an explicit admitted/cull/defer/refusal reason. Budget and candidate inputs are validated; capacity selection is deterministic by priority, distance, then ordinal stable id, while results preserve input order.
+- **Verification:** [`PhysicsRuntimePolicyTests.cs`](../../tests/WowViewer.Core.Tests/PhysicsRuntimePolicyTests.cs) passes **16/16**; the affected `WowViewer.Core.Runtime` Debug build succeeds with **0 errors**. The full Core scope gate reports **1,379 passed, 1 skipped, and the same 9 unrelated baseline failures**. Existing `Snappier` NU1903 warnings remain unrelated. No runtime, visual, real-client, or solver claim was made.
 - **Still absent and gated:** no sidecar resolver/parser, solver package, body simulation, collision response, cloth, joints, animation binding, or viewer integration. Next evidence remains read-only adapter-to-sidecar discovery plus exact-version solver license/cloth evaluation; parser/solver/viewer tasks stay blocked until those gates pass.
 
 ## 2026-09-02 — Spec 211: WMO Interior Ray Picking, Doodad Selection & Ghost Transparent Wireframes
 - **Landed (Spec 211 Phases 1–3):**
-  - **WMO Container Fall-Through:** Created [`WmoContainerFallThroughFilter.cs`](../src/core/WowViewer.Core.Runtime/World/WmoContainerFallThroughFilter.cs) in `WowViewer.Core.Runtime.World` with 6 unit tests in [`WmoContainerFallThroughFilterTests.cs`](../tests/WowViewer.Core.Tests/World/WmoContainerFallThroughFilterTests.cs) (all passing). Resolves the enclosing WMO bounding box lockout where rays hitting interior objects (MDX, WMO doodads, nested WMOs) were occluded by outer building AABBs.
+  - **WMO Container Fall-Through:** Created [`WmoContainerFallThroughFilter.cs`](../../src/core/WowViewer.Core.Runtime/World/WmoContainerFallThroughFilter.cs) in `WowViewer.Core.Runtime.World` with 6 unit tests in [`WmoContainerFallThroughFilterTests.cs`](../../tests/WowViewer.Core.Tests/World/WmoContainerFallThroughFilterTests.cs) (all passing). Resolves the enclosing WMO bounding box lockout where rays hitting interior objects (MDX, WMO doodads, nested WMOs) were occluded by outer building AABBs.
   - **WMO Doodad Selection:** Added `ObjectType.WmoDoodad`, implemented `WmoRenderer.TryPickDoodadsByRay`, and wired candidate hits through `WorldScene.AppendWmoDoodadPickHits` and `ViewerApp_ClickSelection.cs`. Plumbed parent WMO index and selection retrieval into `ViewerApp.cs` for inspector detail, BB overlay, and camera framing.
   - **Dual-Pass Ghost Transparent Wireframe Rendering:**
-    - **M2/MDX Models ([`ModelRenderer.cs`](../src/viewer/WoWViewer/Rendering/ModelRenderer.cs)):** Pass 1 renders textured geosets with 33% alpha blending (`fadeAlpha * 0.33f`); Pass 2 overlays prominent wireframe lines with `PolygonOffsetLine` (-1.0, -1.0) and 1.5 line width.
-    - **WMO Objects ([`WmoRenderer.cs`](../src/viewer/WoWViewer/Rendering/WmoRenderer.cs)):** Unbinds GPU instancing under wireframe mode, renders opaque groups with 33% alpha blending (`uColor = (1, 1, 1, 0.33)`), and draws wireframe overlay on top.
-    - **Terrain ([`TerrainRenderer.cs`](../src/viewer/WoWViewer/Terrain/TerrainRenderer.cs)):** Renders textured terrain fill in `PolygonMode.Fill`, then draws offset wireframe line pass on top so texturing remains clearly visible while wireframes are distinct.
+    - **M2/MDX Models ([`ModelRenderer.cs`](../../src/viewer/WoWViewer/Rendering/ModelRenderer.cs)):** Pass 1 renders textured geosets with 33% alpha blending (`fadeAlpha * 0.33f`); Pass 2 overlays prominent wireframe lines with `PolygonOffsetLine` (-1.0, -1.0) and 1.5 line width.
+    - **WMO Objects ([`WmoRenderer.cs`](../../src/viewer/WoWViewer/Rendering/WmoRenderer.cs)):** Unbinds GPU instancing under wireframe mode, renders opaque groups with 33% alpha blending (`uColor = (1, 1, 1, 0.33)`), and draws wireframe overlay on top.
+    - **Terrain ([`TerrainRenderer.cs`](../../src/viewer/WoWViewer/Terrain/TerrainRenderer.cs)):** Renders textured terrain fill in `PolygonMode.Fill`, then draws offset wireframe line pass on top so texturing remains clearly visible while wireframes are distinct.
   - Verified with `dotnet build` (0 errors) and `dotnet test` (all 6 new tests green, full test suite unchanged). Ready for operator interactive verification.
 
 ## 2026-09-01 — Specs 201/202: submission attribution, GPU instancing completed, batching blockers found
-- **Landed (201 Phase 1 + 202 Phase 0):** [`ModelSubmissionAccounting.cs`](../src/core/WowViewer.Core.Runtime/World/Passes/ModelSubmissionAccounting.cs) — instanced / state-hoisted / unbatched / unbatchable are now four separate numbers **per render path** (`M2RouteType` mapped via `WorldAssetManager.GetRouteDecision`, using `AppliedRoute`). Draw calls are counted at the four GL call sites ([`ModelDrawCallCounter.cs`](../src/viewer/WoWViewer/Rendering/ModelDrawCallCounter.cs)) because a model draws once per geoset or section — no arithmetic over instance counts can produce that number. Every instance short of instancing carries a named gate. 16 new tests; full `WowViewer.Core.Tests` 1267 passed / 9 pre-existing failures, unchanged.
+- **Landed (201 Phase 1 + 202 Phase 0):** [`ModelSubmissionAccounting.cs`](../../src/core/WowViewer.Core.Runtime/World/Passes/ModelSubmissionAccounting.cs) — instanced / state-hoisted / unbatched / unbatchable are now four separate numbers **per render path** (`M2RouteType` mapped via `WorldAssetManager.GetRouteDecision`, using `AppliedRoute`). Draw calls are counted at the four GL call sites ([`ModelDrawCallCounter.cs`](../../src/viewer/WoWViewer/Rendering/ModelDrawCallCounter.cs)) because a model draws once per geoset or section — no arithmetic over instance counts can produce that number. Every instance short of instancing carries a named gate. 16 new tests; full `WowViewer.Core.Tests` 1267 passed / 9 pre-existing failures, unchanged.
 - **Root cause found — GPU instancing was unreachable dead code.** `MdxRenderer.SupportsGpuInstancedOpaque` was hardcoded `false` and `M2Renderer` delegated to it, so **no renderer could ever instance** and "batched" only ever meant state-hoisted. The CPU side was complete (instance VBO, divisor-tagged attributes at locations 6–10, `DrawElementsInstanced`) but **the vertex shader declared only locations 0–5** — enabling the flag as it stood would have stacked every doodad on the world origin. Shader completed (instance transform + per-instance fade) with a constant-folded non-instanced fallback and automatic disable if it fails to compile.
 - **Second blocker removed:** `MdxRenderer.RequiresUnbatchedWorldRender` narrowed to `_wireframe`. The particle/ribbon terms blocked **3,305 of 3,313** opaque instances for effects the opaque pass never draws — particles render only under `RenderPass.Transparent` (which never batches), and on M2 adapter models they are never drawn at all because the adapter copies header emitter counts but never populates `ParticleEmitters2` (the `[M2] Unresolved effect systems` log).
 - **Correctness guard:** models with local MDX lights are excluded from instancing. `RenderInstance` calls `UploadMdxLights(modelMatrix)` per instance; the instanced path uploads once from identity, so a batched lamp would light every copy as if at the world origin (contract C2).
@@ -122,11 +122,11 @@ Last updated: 2026-09-06
 - **Open (user-owned proof):** fly with "Opaque MDX batching" **and** "GPU instancing for opaque models" both ticked; confirm `instanced` rises and draw calls fall toward `distinct models`. Check lamps/braziers and distance-faded doodads for appearance change.
 
 ## 2026-09-01 — Spec 205: MH2O liquid is 100% LiquidObject ids; river heightmaps discarded (MEASURED)
-- **Measured, not inferred:** new command `inspect adt liquid-formats --client <dir> --map <name>` ([`AdtLiquidFormatSupport.cs`](../tools/inspect/WowViewer.Tool.Inspect/AdtLiquidFormatSupport.cs)) over 80 MoP root ADTs / 17,461 liquid layers: **100% carry a `LiquidObject.dbc` id** in `liquid_object_or_lvf` (42, 2325, 2333, 2372), never a vertex format 0–3. Both MH2O decoders `switch` on that field with **no `default`**, so every layer falls through with `heights = null` and renders flat at the header `minHeight` — no error, no counter, no log.
+- **Measured, not inferred:** new command `inspect adt liquid-formats --client <dir> --map <name>` ([`AdtLiquidFormatSupport.cs`](../../tools/inspect/WowViewer.Tool.Inspect/AdtLiquidFormatSupport.cs)) over 80 MoP root ADTs / 17,461 liquid layers: **100% carry a `LiquidObject.dbc` id** in `liquid_object_or_lvf` (42, 2325, 2333, 2372), never a vertex format 0–3. Both MH2O decoders `switch` on that field with **no `default`**, so every layer falls through with `heights = null` and renders flat at the header `minHeight` — no error, no counter, no log.
 - **Ocean is not the defect:** id 42 (17,317 layers, liquidType 2) is genuinely depth-only — 6,008 of its 6,194 vertex blocks read as implausible floats, i.e. depth bytes — and renders correctly today. The **144 river layers** (ids 2325/2333/2372, liquidType 5) are 100% plausible heights that **vary**, spreads of 11.90 / 70.15 / 163.25 world units, all discarded. The substituted flat plane is also at the wrong height: the lowest vertex disagrees with the header in every varying layer, which is why adjacent chunks step against each other.
 - **Two decoders, only one in the render path:** `StandardTerrainAdapter` calls `Mh2oChunk.Parse`; `AdtLiquidReader` serves harvest/dataset/converter. Both carry the defect independently — fixing `AdtLiquidReader` alone would change nothing visible. Harvested MoP liquid data has been wrong too.
 - **Fix (specced, not implemented):** DBC chain `LiquidObject → LiquidType → LiquidMaterial → LVF`; neither `LiquidObject` nor `LiquidMaterial` has a reader, and the offsets are wiki-documented and **unverified against this client** — Phase 1 is a gate with a corpus-derived expected answer. The float-plausibility probe that made the diagnosis is **not** acceptable as the decoder (0.3% false positives on ocean); keep it as a cross-check only.
-- **Spec:** [`specs/205-mh2o-liquid-object-vertex-format/`](../specs/205-mh2o-liquid-object-vertex-format/spec.md).
+- **Spec:** [`specs/archived/205-mh2o-liquid-object-vertex-format/`](../../specs/archived/205-mh2o-liquid-object-vertex-format/spec.md).
 
 ## 2026-09-01 — Spec 204: asset loading is synchronous on the render thread (not the SSD, not the MPQ reader)
 - **Measured:** 2048-frame MoP flight — median 75.26 ms, p95 144.59, p99 235.37, max 541.65, **2047/2048 frames over 33.3 ms**. `DeferredAssetLoads` owns **12 of 13** recent hitches at **26.4–68.1 ms** each.
@@ -135,13 +135,13 @@ Last updated: 2026-09-06
 - **The throttle makes it worse:** at ≥33 ms previous-frame CPU it clamps to 1 load/frame, but the first load stays unconditional — so it cuts streaming ~6x **without reducing the hitch**. Self-reinforcing: slow frames throttle loading, oversized loads keep frames slow.
 - **Also found:** `ProcessDeferredTextureLoads()` runs from the top of `MdxRenderer.RenderGeosets`, so texture decode/upload happen **inside the draw pass**, billed to `MdxOpaqueSubmission` and governed by no budget. Prefetch covers root files only — WMO group files and BLPs are discovered after the parse.
 - **Phase 1 is a hard gate:** GL objects live on static fields and `MdxTextureDiagnosticLogger` is a process-global `StreamWriter` re-opened per model from a renderer constructor.
-- **Spec:** [`specs/204-off-thread-asset-decode/`](../specs/204-off-thread-asset-decode/spec.md).
+- **Spec:** [`specs/archived/204-off-thread-asset-decode/`](../../specs/archived/204-off-thread-asset-decode/spec.md).
 
 ## 2026-09-01 — Spec 197: PTCH/BSDIFF patch-artifact reconstruction (random missing tiles root cause)
 - **Root cause confirmed:** Loose 5.0.1 `.adt` files are frequently PTCH/BSDIFF patch artifacts (`PTCH`/`MD5_`/`BSD0`/`BSDIFF40`); the viewer fed them raw to `ParseAdt`, the `KNCM` scan found nothing, and the tile silently produced zero chunks. Native proof: `MapArea` (`FUN_00BB0850`) receives already-reconstructed bytes — load-complete callback `FUN_00BB70F0` (`MapAdtFileData.cpp`) stores final `(fileData, size)`; cache helpers `FUN_00BB71B0`/`FUN_00BB7C80` are pure hash-table plumbing; key builder `FUN_00BB6C70` packs `mapId|adtFileType|y|x`.
-- **Landed:** [`AdtPatchArtifact.cs`](../src/core/WowViewer.Core.IO/Maps/AdtPatchArtifact.cs) — pure PTCH parse, standard BSDIFF40 applier (BZip2 control/diff/extra), MD5-matched base selection with `REVM` validation. `ReadFileCopies` base-copy enumeration added to `IDataSource` (default single-copy), `MpqDataSource` (archives lowest-priority first, alpha wrapper, loose last), and `IArchiveCatalog.ReadFileCopiesLowestFirst` (default + `MpqArchiveCatalog` override). `StandardTerrainAdapter.LoadMapTile` reconstructs root + `_texN`/`_objN` companions; reconstruction failure logs Important and treats the file as missing instead of parsing artifact bytes.
+- **Landed:** [`AdtPatchArtifact.cs`](../../src/core/WowViewer.Core.IO/Maps/AdtPatchArtifact.cs) — pure PTCH parse, standard BSDIFF40 applier (BZip2 control/diff/extra), MD5-matched base selection with `REVM` validation. `ReadFileCopies` base-copy enumeration added to `IDataSource` (default single-copy), `MpqDataSource` (archives lowest-priority first, alpha wrapper, loose last), and `IArchiveCatalog.ReadFileCopiesLowestFirst` (default + `MpqArchiveCatalog` override). `StandardTerrainAdapter.LoadMapTile` reconstructs root + `_texN`/`_objN` companions; reconstruction failure logs Important and treats the file as missing instead of parsing artifact bytes.
 - **Validation:** Full solution Debug build 0 errors. New `AdtPatchArtifactTests` (7 tests) + existing terrain builder tests: 12/12 passed. Full `WowViewer.Core.Tests`: 1245 passed / 9 failed — the 9 failures were verified identical at HEAD via a path-scoped stash (frame-pass ordering, M2 footprints, WTF classifier, V23 summaries, enrichment streams, V18 placements; all disjoint from this change).
-- **Evidence:** [`5.0.1-adt-ptch-patch-artifacts.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-adt-ptch-patch-artifacts.md).
+- **Evidence:** [`5.0.1-adt-ptch-patch-artifacts.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-adt-ptch-patch-artifacts.md).
 - **Open (user-owned proof):** Reload Thunder Isle from MoPBeta; confirm previously missing tiles render and `Reconstructed patched ADT ... via embedded BSDIFF patch` log lines appear. Out of scope: multi-step chain base synthesis, patched-WDT reconstruction, editing patched companions.
 
 ## 2026-08-31 — Spec 197: split reader/runtime and explicit conversion target boundary
@@ -152,25 +152,25 @@ Last updated: 2026-09-06
 - **Open:** Audit compact MCIN consumers and the runtime convenience path; extend merger/texture-transfer/converter inputs to band 1; define the canonical slot-aware document and loss policy; implement/test a genuine native MoP split writer; finish native WDT/MAIN, blend/seam, numeric FourCC, indirect-reachability, and address-resolution evidence.
 
 ## 2026-08-31 — Spec 197: 5.0.1 dead/dormant/partial documentation checkpoint
-- **Recorded:** Added the focused [`5.0.1-dead-dormant-partial-rendering.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md) evidence note and consolidated [`wow-5.0.1-adt-wdt-definitive.md`](../docs/architecture/wow-5.0.1-adt-wdt-definitive.md) guide, following the legacy ADT/WDT and Ghidra definitive-guide structure.
+- **Recorded:** Added the focused [`5.0.1-dead-dormant-partial-rendering.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md) evidence note and consolidated [`wow-5.0.1-adt-wdt-definitive.md`](../../docs/architecture/wow-5.0.1-adt-wdt-definitive.md) guide, following the legacy ADT/WDT and Ghidra definitive-guide structure.
 - **Confirmed/classified:** `FUN_00b7a230` has a partial liquid-factory default branch (`Not implemented!`) after supported selectors `7`, `9`, `10`, and `0xd`; `FUN_004b16d0` has a real `CSimpleEditBox.cpp` FIXME early-return branch; DepthCache/GBuffer are capability-gated implemented infrastructure; atlas/doodad/particle batching and water-detail paths are optional or explicitly unsupported settings; MapArea/MapRenderChunkState assertions are cleanup contracts.
 - **Boundary:** 2,184 zero-direct-xref functions remain low-reachability candidates because indirect dispatch is not ruled out. No function is called proven dead. A path-builder discrepancy (`0x00bb9490` vs `FUN_00b94990`) remains explicitly unresolved. No production code or Ghidra state changed.
 - **Next:** Complete native WDT/MAIN, numeric `MHID`/`MDID`/`MCXH`, blend/seam, indirect registration, and address-resolution evidence before reopening T118–T120.
 
 ## 2026-08-31 — Spec 197: GhidraMCP 6.0.0 bridge recovery
 - **Diagnosed:** Ghidra itself was not the failure. The GhidraMCP 6.0.0 plugin was already running against the loaded `Mists of Pandaria 5.0.1.15464` project and serving HTTP on `127.0.0.1:8089` (status dialog: UDS + TCP running, 222 endpoints). The stale config referenced the absent `H:\ghidra_12.1.2_PUBLIC\GhidraMCP-5.14.2\.venv\Scripts\python.exe` and passed unsupported `--ghidra-server` arguments to the bridge script.
-- **Landed:** Downloaded the release-provided `ghidra_mcp_bridge-6.0.0-py3-none-any.whl` and installed it with `uv tool install --force`. Updated both [`.mcp.json`](../../.mcp.json) and [`.roo/mcp.json`](../../.roo/mcp.json) to launch `C:\Users\akspa\.local\bin\bridge-mcp-ghidra.exe --no-lazy` with `GHIDRA_MCP_URL=http://127.0.0.1:8089`.
+- **Landed:** Downloaded the release-provided `ghidra_mcp_bridge-6.0.0-py3-none-any.whl` and installed it with `uv tool install --force`. Updated both [`.mcp.json`](../../../.mcp.json) and [`.roo/mcp.json`](../../../.roo/mcp.json) to launch `C:\Users\akspa\.local\bin\bridge-mcp-ghidra.exe --no-lazy` with `GHIDRA_MCP_URL=http://127.0.0.1:8089`.
 - **Validated:** JSON configs parse; bridge help works; stdio initialize succeeds; bridge auto-connects by TCP to the named 5.0.1 project and registers 221 live tools (the HTTP schema reports 222). `get_current_program_info` confirms `Wow.exe` PE x86, image base `0x00400000`, 38,405 functions, 175,352 symbols, and 790 data types. Read-only HTTP probes found 766 `.cpp`-matching strings, including rendering, terrain, WMO, liquid, and `CMapChunk` anchors.
 - **Next:** T117 is the read-only Ghidra extraction pass for rendering systems, parser entry points, and split-ADT/height-blend/WMO seams. No Ghidra program edits were made.
 
 ## 2026-08-31 — Spec 197: 5.0.1 Ghidra reconnaissance checkpoint
-- **Recorded:** Added [`research-ghidra-5.0.1.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md) with the live binary provenance, source-path/function map, and the first confirmed `CMapChunk`/WMO reader facts.
+- **Recorded:** Added [`research-ghidra-5.0.1.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md) with the live binary provenance, source-path/function map, and the first confirmed `CMapChunk`/WMO reader facts.
 - **Confirmed:** `CMapChunk` accepts a 128-byte header, dispatches `MCMT`, `MCDD`, `MCAL`, `MCBB`, `MCCV`, `MCLQ`, `MCLV`, `MCLY`, `MCRD`, `MCRW`, `MCNR`, `MCRF`, `MCSH`, and `MCVT`, derives MCLY/reference/blend-batch counts from payload sizes, and uses the exact `33.333332` / `17066.666` world transform. WMO parsing asserts `MVER == 0x0011` and uses 0x10-byte material records.
 - **Open:** Literal string searches found no `MHID`, `MDID`, `MCXH`, or `CMapTile` tokens; this is not evidence of absence because the MCNK parser uses numeric FourCC comparisons. Blend/render batch routines and numeric split-ADT tracing remain T117.
 - **Boundary:** No production code or Ghidra state changed; parser/renderer implementation remains gated on the next decompilation and cross-check pass.
 
 ## 2026-08-31 — Spec 197: native 5.0.1 ADT family matrix checkpoint
-- **Recorded:** Expanded [`research-ghidra-5.0.1.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md:173) and the Spec 197 plan/tasks with the versioned split-loader contract; documentation-only change, with no production reader/renderer or Ghidra edits.
+- **Recorded:** Expanded [`research-ghidra-5.0.1.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md:173) and the Spec 197 plan/tasks with the versioned split-loader contract; documentation-only change, with no production reader/renderer or Ghidra edits.
 - **Confirmed:** The 5.0.1 path requires `MVER == 0x12`; constructs the root plus exactly one selected `_obj0`/`_obj1` and `_tex0`/`_tex1` pair; distinguishes at least cache types 0–4; requires 256 outer MCNK records per file-data object; consumes the 128-byte MCNK header only for root slot 0; and merges headerless split MCNK payloads by chunk index.
 - **Confirmed:** Native area creation is gated by the WDT/map-table `CMapTableEntry::Flag_Exists` bit, separate from root/split file discovery. This is now the leading explanation for false tile admission; it remains a hypothesis until a real WDT/MAIN sample is compared.
 - **Not confirmed:** `_lod.adt` is not constructed in the investigated 5.0.1 loader path; `MHID`, `MDID`, and `MCXH` have no confirmed native parser location; the relation between the two suffix bands and broader internal `LOD_COUNT` remains open.
@@ -330,7 +330,7 @@ Last updated: 2026-09-06
   `WorldScene.LoadedPm4Tiles`. Prefill helper was deleted while Sidebars still calls it. Next code
   step is Spec 176 **T001**, not more UX.
 - **Still open:** in-scene overlay, off-thread preview, P1 transfer, user-owned reload/visual proof.
-  Durable detail lives in `specs/176-object-transfer/` (`plan.md`, `tasks.md`, `quickstart.md`).
+  Durable detail lives in `specs/archived/176-object-transfer/` (`plan.md`, `tasks.md`, `quickstart.md`).
 
 ## 2026-08-25 — Spec 176 real PM4-driven preview + hardened apply (skeleton replaced)
 
@@ -493,7 +493,7 @@ Last updated: 2026-09-06
   all pre-existing and unrelated; net +15 passing tests.
 - **Nothing is measured.** Every SC still needs the user-owned Stranglethorn before/after. Phase 0's
   capture protocol and an empty results table are in
-  [Spec 153 research.md](../specs/153-renderer-hitch-and-batching/research.md); Phases 2 and 4 stay
+  [Spec 153 research.md](../../specs/archived/153-renderer-hitch-and-batching/research.md); Phases 2 and 4 stay
   gated behind it.
 
 ## 2026-08-15 — Renderer gallop diagnosed; Spec 153 opened, flattening lane suspended
@@ -504,7 +504,7 @@ Last updated: 2026-09-06
   percentiles, hitch marking, unaccounted time, region peaks, allocation-free recording asserted by
   test) and an in-viewer panel under Utilities > Perf with an injected-stall self-check.
 - Diagnosed against real clients across four zones. **Four measured defects**, all recorded in
-  [Spec 153](../specs/153-renderer-hitch-and-batching/spec.md): a ~212 ms stall every ~47–50 frames
+  [Spec 153](../../specs/archived/153-renderer-hitch-and-batching/spec.md): a ~212 ms stall every ~47–50 frames
   living entirely in the pass gap; 100% of opaque MDX submitting unbatched while WMO batches 198/198;
   `SceneMaintenance` max 454.8 ms; and a deferred-load budget checked only between loads (58 ms vs
   3.5 ms nominal).
@@ -713,7 +713,7 @@ belongs to the owning spec, linked workstream, or `memory-bank/archive/`.
 ## 2026-08-14 — Spec 150 Alpha 0.5.3 renderer performance planning
 
 - Created an evidence-first Spec Kit pack for learning from the 0.5.3 OpenGL renderer without
-  porting original code: `specs/150-alpha-renderer-performance/`.
+  porting original code: `specs/archived/150-alpha-renderer-performance/`.
 - Reused the existing production `profile-render` path and current WorldScene/TerrainRenderer/object
   counters as the baseline seam. The new lane requires native Ghidra anchors, explicit CPU versus
   GPU/driver timing classification, one reversible optimization at a time, and user-owned real

@@ -25,4 +25,4 @@ Current drafts:
 - Alpha page refresh: `alpha-draft.md`
 - ADT/v18 cross-page follow-ups: `adt-v18-followups.md`
 - PM4/PD4 page refresh: `pm4-pd4-draft.md`
-- **New page DAT v26** (MediaWiki markup, ready to paste): `dat-v26.wiki`, first documentation of version 26 of the DAT raw terrain project files (the source files ADTs are built from), first seen 2026-09-16 in `wow_classic_beta`. Backed by `specs/237-adt-v26-terrain/evidence/` (scripts reproduce every number). Fill in the build number before submitting.
+- **New page DAT v26** (MediaWiki markup, ready to paste): `dat-v26.wiki`, first documentation of version 26 of the DAT raw terrain project files (the source files ADTs are built from), first seen 2026-09-16 in `wow_classic_beta`. Backed by `specs/archived/237-adt-v26-terrain/evidence/` (scripts reproduce every number). Fill in the build number before submitting.

@@ -6,16 +6,25 @@ This document is the authoritative reference for any path that appears in wow-vi
 
 ## Quick Reference
 
-| What | Default location | Override |
+> **Verified 2026-09-23:** the environment-variable overrides this document used to list
+> (`WOWVIEWER_WORKSPACE`, `WOWVIEWER_CACHE`, `WOWVIEWER_DATASETS`, `WOWVIEWER_TMP`,
+> `WOWVIEWER_TEST_DATA`, `WOWVIEWER_STAGED_CLIENTS`, `WOWARCHIVE_MOUNT`) are **not implemented** —
+> no C# or Python code reads them. Paths are set by explicit CLI arguments or UI pickers, or fall back
+> to conventions. Some viewer outputs resolve relative to the app base directory (`bin/…`), not the
+> workspace: the PM4 overlay cache (`Pm4OverlayCacheService`) and the export directory (Epic 250 E-03).
+> Environment variables actually read: `WOWVIEWER_PM4_PROFILE` and the `PARP_*` debug flags
+> (`PARP_MDX_TEXTURE_DIAG`, `PARP_M2_ENABLE_ANIMATION`, `PARP_M2_FORCE_SOLID`, `PARP_MDX_DEBUG`).
+
+| What | Conventional location | How to change it |
 |------|------------------|----------|
-| Workspace root | `<repo>` (wherever you cloned `parp-tools`) | `WOWVIEWER_WORKSPACE` |
-| Configured game-client library | runtime CLI/config; `H:\CLIENTS` is approved on this machine | explicit CLI argument |
-| Optional staged game clients | `output/tmp/wowarchive-clients/` (under the workspace) | `WOWVIEWER_STAGED_CLIENTS` |
-| WoWArchive mount | `G:\WoW\WoWArchive-0.X-3.X\Mount` (Windows default) | `WOWARCHIVE_MOUNT` |
-| Build/test data | `test_data/` (under the workspace) | `WOWVIEWER_TEST_DATA` |
-| Caches (listfiles, PM4 overlays) | `wow-viewer/output/cache/` | `WOWVIEWER_CACHE` |
-| Datasets (Zarr stores) | `wow-viewer/output/datasets/` | `WOWVIEWER_DATASETS` |
-| Temp / scratch | `output/tmp/` | `WOWVIEWER_TMP` |
+| Workspace root | `<repo>` (wherever you cloned `parp-tools`) | run from the repo |
+| Configured game-client library | runtime CLI/config; `H:\CLIENTS` is approved on this machine | explicit CLI argument / viewer picker |
+| Optional staged game clients | `output/tmp/wowarchive-clients/` (under the workspace) | explicit CLI argument |
+| WoWArchive mount | `G:\WoW\WoWArchive-0.X-3.X\Mount` (Windows default) | explicit CLI argument |
+| Build/test data | `test_data/` (under the workspace) | explicit CLI argument |
+| Caches (listfiles, PM4 overlays) | `wow-viewer/output/cache/` (PM4 overlay cache: app base dir `output/cache/pm4-overlay/`) | not configurable |
+| Datasets (Zarr stores) | `wow-viewer/output/datasets/` | explicit CLI argument |
+| Temp / scratch | `output/tmp/` | explicit CLI argument |
 
 All default paths are relative to the workspace root unless stated otherwise. The `wow-viewer/` prefix on a default indicates the path is under the `wow-viewer` subdirectory of the monorepo.
 
@@ -75,7 +84,7 @@ with the mount entrypoint at `MountAll.bat` and the readme at `Readme.txt`. Runn
 
 The mount is intended for discovery and one-off copies, not as a working root. Stage what you need, then work from the staged copy.
 
-If your WoWArchive lives elsewhere, set `WOWARCHIVE_MOUNT` to its mount point. On non-Windows hosts, `WOWARCHIVE_MOUNT` is the path where you have bound the deduplicated bundle (for example, via a loop mount or a network share).
+If your WoWArchive lives elsewhere, pass its mount point explicitly to the tool (no environment-variable override exists).
 
 ## Test Data
 
@@ -99,16 +108,16 @@ Alpha 0.5.3 reference assets (MDX, BLP, DBC) for era-aware reader tests.
 
 Development map minimap PNGs. Used by training-curation and validation-capture tests.
 
-To relocate the entire test-data tree (for example, onto a fast scratch disk), set `WOWVIEWER_TEST_DATA` to the new root.
+To relocate the test-data tree, pass the new root explicitly to the tool or test fixture (no environment-variable override exists).
 
 ## Output Roots
 
-| Purpose | Default | Override |
-|---------|---------|----------|
-| Caches (listfiles, PM4 overlays) | `wow-viewer/output/cache/` | `WOWVIEWER_CACHE` |
-| Datasets (Zarr stores) | `wow-viewer/output/datasets/` | `WOWVIEWER_DATASETS` |
-| Smoke / scratch reports | `wow-viewer/output/tmp/` | `WOWVIEWER_TMP` |
-| Optional staged clients | `output/tmp/wowarchive-clients/` | `WOWVIEWER_STAGED_CLIENTS` |
+| Purpose | Default |
+|---------|---------|
+| Caches (listfiles, PM4 overlays) | `wow-viewer/output/cache/` |
+| Datasets (Zarr stores) | `wow-viewer/output/datasets/` |
+| Smoke / scratch reports | `wow-viewer/output/tmp/` |
+| Optional staged clients | `output/tmp/wowarchive-clients/` |
 
 Output directories under `wow-viewer/output/` are gitignored. Datasets and caches are large; they live under `wow-viewer/output/` rather than the repo-root `output/` so they stay inside the active development target.
 
@@ -118,11 +127,12 @@ For throwaway smoke runs, use `wow-viewer/output/tmp/` rather than the repo-root
 
 When a wow-viewer tool or library needs a path, it resolves in this order:
 
-1. Explicit CLI argument (if the tool accepts one).
-2. Environment variable (the names listed in the tables above).
-3. Convention-based default relative to the workspace root.
+1. Explicit CLI argument or UI picker (if the tool accepts one).
+2. Convention-based default (workspace-relative for tools; some viewer outputs are app-base-relative,
+   see the note under Quick Reference).
 
-The workspace root is the directory containing the `wow-viewer/` subdirectory. The default is the current working directory if a `wow-viewer/` directory is present there; otherwise the parent of the `wow-viewer` binary's location. Set `WOWVIEWER_WORKSPACE` to override.
+There is no environment-variable layer today (verified 2026-09-23); an override mechanism would be new
+scope and needs an operator-approved spec item.
 
 There is no automatic fallback to a hardcoded absolute path. If an override is unset and the default is missing, the operation fails with a clear "path not found" error rather than silently substituting a stale root.
 

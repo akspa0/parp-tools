@@ -10,9 +10,9 @@ seam semantics and a native split-family writer remain open.
 `0x00400000`.
 
 **Primary evidence:**
-[`research-ghidra-5.0.1.md`](../../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md)
+[`research-ghidra-5.0.1.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md)
 and
-[`5.0.1-dead-dormant-partial-rendering.md`](../../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md).
+[`5.0.1-dead-dormant-partial-rendering.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md).
 This guide follows the structure of the legacy
 [`ADT_WDT_Format_Specification.md`](../../../gillijimproject_refactor/docs/ADT_WDT_Format_Specification.md)
 and
@@ -290,7 +290,7 @@ A build-specific parent value `0x212` remaps the third liquid slot to slot
 `0xF`. The adjacent `MapChunkLiquid.cpp` and `LiquidGeomFactories.cpp` paths
 show format-specific constructors and an explicit unfinished default branch; see
 the focused
-[`dead/dormant evidence note`](../../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md).
+[`dead/dormant evidence note`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md).
 
 ### Blend batches and alpha/shadow paths
 
@@ -340,7 +340,7 @@ be collapsed into one “dead code” bucket:
 | Low direct reachability | 2,184 zero-direct-xref candidates | Search indirect tables before dead-code labels |
 
 The complete classification table and excerpts live in
-[`5.0.1-dead-dormant-partial-rendering.md`](../../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md).
+[`5.0.1-dead-dormant-partial-rendering.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md).
 
 ## 12. Current WowViewer delta
 

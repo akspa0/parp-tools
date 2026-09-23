@@ -19,10 +19,16 @@ wow-viewer/
 │   │   ├── WowViewer.Core/        # Data models
 │   │   ├── WowViewer.Core.IO/     # Format readers and writers
 │   │   ├── WowViewer.Core.PM4/    # PM4 chunk analysis
-│   │   ├── WowViewer.Core.Runtime/# M2 runtime, render pipeline
-│   │   └── WowViewer.Core.Anim/   # M2 animation pose extraction
+│   │   ├── WowViewer.Core.Runtime/# M2 runtime, world/scene-graph contracts
+│   │   ├── WowViewer.Core.Renderer/# OpenGL rendering for headless tools (not UI)
+│   │   ├── WowViewer.Core.Editor/ # Editor plugin host, session, operations
+│   │   ├── WowViewer.Core.Curation/# Dataset curation (Parquet)
+│   │   └── WowViewer.Core.Anim/   # M2 animation loader layer
+│   ├── tools-shared/
+│   │   └── WowViewer.Tools.Shared/ # Shared CLI support
 │   └── viewer/
-│       └── WoWViewer/         # 3D world viewer app (the only UI project)
+│       ├── WoWViewer/         # 3D world viewer app (the only UI project)
+│       └── WowViewer.App.Defunct/ # Quarantined legacy bootstrap code
 ├── tools/                     # CLI tools (thin wrappers over libraries)
 ├── tests/                     # xUnit tests, mirroring the library layout
 ├── data-harvester/            # Python ML pipeline (uv-managed)

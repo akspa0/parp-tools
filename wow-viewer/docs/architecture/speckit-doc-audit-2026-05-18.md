@@ -31,7 +31,7 @@ All architecture/spec documents under `wow-viewer/docs/architecture/` plus subdi
 | `wow-engine-modernization-plan-2026-05-14.md` | partial | Core/IO/Runtime/App all exist. Replaced 2026-06-14 — viewer-first, UE bridge. Vulkan/WebGL/Museums/BASE scrapped. | Replaced — viewer-first + UE bridge. |
 | `wow-viewer-full-porting-roadmap.md` | partial | Phase A (terrain types) DONE. Phase B (harvest pipeline) DONE. Phase C (converters) partially landed. Phase D (renderers) and Phase E (viewer) mostly not done. | Keep open as master tracker. |
 | `wow-viewer-library-completeness-plan-2026-05-06.md` | partial | Many format readers done. Many renderers still missing (MdxRenderer, TerrainRenderer, WmoRenderer, LiquidRenderer). Converters partially done. | Keep open as gap tracker. |
-| `specs/009-full-project-reimplementation-spec/spec.md` | implemented | **NEW 2026-05-22.** 2,650-line comprehensive design specification covering all 28 sections: binary format specs, rendering pipeline, ML pipeline, CLI tools, PM4 research, WMO portals, terrain edge cases, M2 animation, GLSL shaders, converters, liquid system, object masking, world rendering, legacy renderer. Sufficient for full from-scratch reimplementation. | Keep as master design reference. |
+| `specs/archived/009-full-project-reimplementation-spec/spec.md` | implemented | **NEW 2026-05-22.** 2,650-line comprehensive design specification covering all 28 sections: binary format specs, rendering pipeline, ML pipeline, CLI tools, PM4 research, WMO portals, terrain edge cases, M2 animation, GLSL shaders, converters, liquid system, object masking, world rendering, legacy renderer. Sufficient for full from-scratch reimplementation. | Keep as master design reference. |
 
 ## Subdirectories
 

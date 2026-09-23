@@ -23,7 +23,7 @@ This doc continues to own the 3.3.5 (and earlier 3.0.1+ / 2.0.0) research surfac
 The **WoW 1.0.0** (Vanilla release) M2/MDX subsystem was fully traced statically in Ghidra
 (GhidraMCP plugin + `bridge_mcp_ghidra.py`, REST on `127.0.0.1:8080`, now wired into
 `.mcp.json` as the `ghidra` server). Full evidence + implementation seeds live in
-[`specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`](../../specs/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md).
+[`specs/archived/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md`](../../specs/archived/104-legacy-m2-rendering/research-1.0.0-ghidra-trace.md).
 Key findings:
 
 **Implementation (Jul 15, 2026)**: The 1.0.0 reader codepath is now implemented in

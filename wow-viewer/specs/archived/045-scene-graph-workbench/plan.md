@@ -1,6 +1,6 @@
 # Implementation Plan: Scene Graph Workbench
 
-**Branch**: `045-scene-graph-workbench` | **Date**: 2026-06-03 | **Spec**: [spec.md](./spec.md)
+**Branch**: `045-scene-graph-workbench` | **Date**: 2026-06-03 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `/specs/045-scene-graph-workbench/spec.md`
 

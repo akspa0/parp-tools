@@ -4,13 +4,13 @@ Last updated: 2026-09-06
 
 ## 2026-09-06 — Spec 227 implementation began with evidence-gated inventory v2 (T001)
 
-- **SpecKit controls created:** [plan](../specs/227-ui-reaudit/plan.md),
-  [tasks](../specs/227-ui-reaudit/tasks.md), research, audit record model, and quickstart now make
+- **SpecKit controls created:** [plan](../../specs/archived/227-ui-reaudit/plan.md),
+  [tasks](../../specs/archived/227-ui-reaudit/tasks.md), research, audit record model, and quickstart now make
   Spec 227 executable without inventing UI scope. The first source mutation is blocked on an
   inventory row that names its replacement.
-- **T001 receipted:** [inventory v2](../specs/227-ui-reaudit/surface-inventory-v2.md) records the
+- **T001 receipted:** [inventory v2](../../specs/archived/227-ui-reaudit/surface-inventory-v2.md) records the
   current Quick/Inspector/Editor/Archaeology roots and the weak-signal, minimap, and Inspector
-  duplicate families; the [receipt](../specs/227-ui-reaudit/evidence/t001-source-audit.md) records
+  duplicate families; the [receipt](../../specs/archived/227-ui-reaudit/evidence/t001-source-audit.md) records
   source-audit commands. Screenshots, interaction counts, minimap teleport, and final authority
   decisions are explicitly pending — no viewer source changed.
 - **Next:** T002 completed the source reconciliation; T003 is now the operator's current-build
@@ -33,11 +33,11 @@ Last updated: 2026-09-06
 
 ## 2026-09-06 — WoW-style shell + keybind profiles + reconstruction editor specced (Specs 229/230)
 
-- **Spec 229** ([spec](../specs/229-wow-shell-keybind-profiles/spec.md)): the operator's REPEATEDLY
+- **Spec 229** ([spec](../../specs/archived/229-wow-shell-keybind-profiles/spec.md)): the operator's REPEATEDLY
   unimplemented request for a **WoW-interface-style shell** is finally in writing, paired with
   **contextual keybind profiles** (Noggit/Noggit-Red reference) — active surface swaps binding set +
   visible action row; registry binds to canonical services; conflicts reported; bindings persisted.
-- **Spec 230** ([spec](../specs/230-reconstruction-editor/spec.md)): reconstruction-first editing —
+- **Spec 230** ([spec](../../specs/archived/230-reconstruction-editor/spec.md)): reconstruction-first editing —
   Rosetta-indexed object placement through the staged pipeline, **New Map Generator** UI wrapping the
   Spec 192 CLI, save targets Alpha WDT/LK ADT (Cata/MoP gated on Spec 197's slot-aware writer).
 - Both sequence after Spec 227's inventory v2; they compose existing tooling, no forks. STATUS.md
@@ -77,7 +77,7 @@ Last updated: 2026-09-06
   fean, implave, IS4, Adspartan (Noggit), Skarn (Noggit-Red) — with the WoW Exploration community
   credit and the restoration-not-polish framing (Noggit/Noggit-Red are the preferred fine-tuning
   editors for this tooling's output).
-- **Spec 226** ([spec](../specs/226-renderer-polish/spec.md)) authored verbatim from operator
+- **Spec 226** ([spec](../../specs/archived/226-renderer-polish/spec.md)) authored verbatim from operator
   feedback: wireframe fails by camera angle (suspected fill/line depth-fighting) and MDX lighting
   lacks real specular. Not diagnosed or changed yet — both require before/after captures.
 - **Build:** viewer Debug **0 errors**. Runtime visual proof operator-owned.
@@ -105,7 +105,7 @@ Last updated: 2026-09-06
   ("I didn't ask for 99.9% of what is there") and demanded systemic rules, receipts, and monthly
   cleanup.
 - **Landed:** `AGENTS.md` §9 governance (scope freeze, receipts, write containment, spec-sync,
-  context discipline, cleanup ledger); [Spec 224](../specs/224-speckit-governance/spec.md)
+  context discipline, cleanup ledger); [Spec 224](../../specs/archived/224-speckit-governance/spec.md)
   spec/plan/tasks; `speckit-cleanup` skill authored in `.roo/skills/` and installed to the operator
   skill directory. Spec 212 Phase 2 rewritten with dated correction; `CameraHudRig` stripped to
   gimbal+brackets with `Enabled = false` (viewer Debug build 0 errors).
@@ -131,11 +131,11 @@ Last updated: 2026-09-06
   gimbal, and brackets. Focused tests pass **3/3** and an isolated viewer Debug build passes
   **0 errors**. Gates 1–2 live visual proof remains open; no interactive surface, pointer routing,
   Museum profile, or 3D time control is claimed.
-- **Documentation:** [Spec 223 status](../specs/STATUS.md),
-  [tasks](../specs/223-ui-consolidation-audit/tasks.md),
-  [Phase 6 evidence](../specs/223-ui-consolidation-audit/evidence/phase6-validation.md), and the
-  [user guide](../docs/WoWViewer/USERGUIDE.md) now distinguish source repairs from retest evidence.
-  Pre-compression history is preserved in [archive](archive/README.md).
+- **Documentation:** [Spec 223 status](../../specs/STATUS.md),
+  [tasks](../../specs/archived/223-ui-consolidation-audit/tasks.md),
+  [Phase 6 evidence](../../specs/archived/223-ui-consolidation-audit/evidence/phase6-validation.md), and the
+  [user guide](../../docs/WoWViewer/USERGUIDE.md) now distinguish source repairs from retest evidence.
+  Pre-compression history is preserved in [archive](README.md).
 
 ## 2026-09-05 — Spec 223 Phase 6 source gate passed; operator acceptance subsequently failed
 
@@ -149,12 +149,12 @@ Last updated: 2026-09-06
 - **Spec 212:** authored OpenSCAD HUD assets are not interactive UI. Camera-space/rig source work is
   complete with visual Gate 1 open; surface/hit-test, pointer-routing, Museum, and time-control tasks
   remain authoritative in
-  [Spec 212 tasks](../specs/212-spatial-ui-shell/tasks.md).
+  [Spec 212 tasks](../../specs/archived/212-spatial-ui-shell/tasks.md).
 - **Spec 222:** Cartography is specified as a multi-map/multi-tile composition workbench; work starts
-  with occupied-tile queries. See [Spec 222](../specs/222-map-composition-workbench/tasks.md).
+  with occupied-tile queries. See [Spec 222](../../specs/archived/222-map-composition-workbench/tasks.md).
 - **Spec 221:** corpus validation found Alpha alpha-leg round-trip drift; object corpus validation and
-  alpha-leg repair remain open. See [Phase 0 evidence](../specs/221-converter-validation-harness/evidence/phase0-baseline.md).
+  alpha-leg repair remain open. See [Phase 0 evidence](../../specs/archived/221-converter-validation-harness/evidence/phase0-baseline.md).
 - **Specs 151/153/204:** renderer performance ownership and earlier measurement detail are durable in
   their specs; real-client benchmark/capture proof remains required for visual/FPS claims.
 
-Historical session detail before 2026-09-06 is preserved in [memory-bank/archive](archive/README.md).
+Historical session detail before 2026-09-06 is preserved in [memory-bank/archive](README.md).

@@ -1,8 +1,8 @@
 # Public Contract Shapes: Real Validation Batch Extraction
 
-**Spec**: [spec.md](./spec.md)
+**Spec**: [spec.md](spec.md)
 
-**Plan**: [plan.md](./plan.md)
+**Plan**: [plan.md](plan.md)
 
 ## Purpose
 

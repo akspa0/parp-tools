@@ -18,7 +18,7 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **Camera Path Authoring**: Full timeline keyframing, roll control, JSON project save/load, and native `.m2` camera export.
 - **PM4 Reconciliation Workbench**: Spec 176 reconciliation panel for matching real PM4 geometry segments to ADT placements with guarded preview, hash verification, and undoable apply operations.
 - **Cartography Composition (Spec 232)**: multi-layer map composition — donor tiles, placement locks, rotation/mirror, Z transform, WDL edge-snap — with project save/load.
-- **Map Save & New Map Creator (Spec 234, spec authored 2026-09-09)**: planned save of merged/composed maps to Alpha 0.5.3 WDT and LK v18 ADT from both Archaeology and the Editor's Data I/O page, plus a New Map creator in the Editor tab. Multi-map support is explicitly deferred to a future spec. See [specs/234-map-save-new-map/spec.md](specs/234-map-save-new-map/spec.md).
+- **Map Save & New Map Creator**: a New Map creator service exists; **saving composed/merged maps to Alpha 0.5.3 WDT / LK v18 ADT is not implemented yet** — tracked as item E-01 in [Epic 250](specs/250-epic-reconstruction-and-editor-platform/spec.md) (origin: archived Spec 234).
 
 ### 2. Shared Core Libraries (`src/core`)
 - **`WowViewer.Core`**: Data contracts, vertex/index buffers, terrain tensor layouts, and coordinate transformations.

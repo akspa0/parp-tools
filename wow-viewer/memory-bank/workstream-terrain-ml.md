@@ -1,5 +1,7 @@
 # Workstream — terrain / minimap ML
 
+> **Owner since 2026-09-23:** Epic 254 (Datasets & ML) — [254-epic-datasets-and-terrain-ml](../specs/254-epic-datasets-and-terrain-ml/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
+
 Owner specs: 114 (direct terrain reconstruction), 125 (minimap DXT1 inversion),
 126 (minimap terrain reconstruction), 111 (minimap lighting calibration), 139 (clean-signal
 reconstruction), 140 (paste/fractal/tileset evidence).

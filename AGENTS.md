@@ -154,7 +154,8 @@ Never claim runtime, visual, FPS, GPU, audible, or real-client proof from compil
 
 ## 9. Governance — Scope Fidelity, Receipts & Spec Hygiene (Spec 224; added 2026-09-06)
 
-Owner spec: `wow-viewer/specs/224-speckit-governance/spec.md`. These rules are **binding on every
+Owner: Epic 251 (`wow-viewer/specs/251-epic-viewer-ux-and-code-health/spec.md`, item U-02); origin
+spec `wow-viewer/specs/archived/224-speckit-governance/spec.md`. These rules are **binding on every
 agent and harness**. Violating them is a process failure, not a style choice.
 
 ### 9.1 Scope freeze
@@ -187,23 +188,30 @@ the spec in the same change or add a dated amendment note. Code and spec agree a
   active registry; implemented-spec detail is not reloaded into session context.
 - Run the `speckit-cleanup` skill on the first session of each month (or on operator request): audit
   tasks against real code, un-check receipt-less tasks, archive closed specs, compress memory banks,
-  update the ledger below, and write a dated report under `specs/224-speckit-governance/evidence/`.
+  update the ledger below, and write a dated report under
+  `specs/251-epic-viewer-ux-and-code-health/evidence/` (reports before 2026-09-23 live under
+  `specs/archived/224-speckit-governance/evidence/`).
 
 **Cleanup ledger**
-- Last cleanup: 2026-09-11 (224-T201 receipt/symbol audit **COMPLETE** — all 5 active specs carrying
+- Last cleanup: 2026-09-23 — full reconciliation (operator-directed): 137 specs audited against code;
+  16 complete, 104 folded, 13 superseded, 4 cold; all archived to `specs/archived/` and replaced by
+  Epics 248–254; backlog awaiting operator triage in `specs/TRIAGE.md`. Receipt:
+  `specs/archived/reconciliation-2026-09-23/README.md`.
+- Previous: 2026-09-11 (224-T201 receipt/symbol audit **COMPLETE** — all 5 active specs carrying
   checked tasks audited). 227 clean (2026-09-10); 232 had 8 stale checks corrected to `[ ]`
   (2026-09-10); 233 clean (3/3 receipts, 14 checks verified); 231 clean (0 un-checked — T001
   contradiction resolved to PASS via `inventory-v3-baseline.md`, T074 flagged as
   "receipt not in evidence/"); **223 had 16 receipt-less pre-§9.2 checks un-checked** (T101–T107,
   Gate A, T201, T202, T301, T302, Gate B, T401, T501, T502) and listed for operator decision.
-  See `specs/224-speckit-governance/evidence/cleanup-2026-09-11.md`.
+  See `specs/archived/224-speckit-governance/evidence/cleanup-2026-09-11.md`.
 - Next cleanup due: 2026-10-01 (monthly cadence)
 
 ---
 
 ## 10. Source Decomposition — God-Class Freeze (Spec 228; added 2026-09-06)
 
-Owner spec: `wow-viewer/specs/228-source-decomposition/spec.md`. The `ViewerApp_*` partial-class
+Owner: Epic 251 item U-01 (origin spec `wow-viewer/specs/archived/228-source-decomposition/spec.md`;
+measured 2026-09-23: `WorldScene.cs` 17,153 lines, `ViewerApp.cs` 16,746 lines). The `ViewerApp_*` partial-class
 split FAILED to contain growth: partial classes share one state space, so every session still loads
 ~33k lines of god-class context. Binding rules:
 
@@ -218,11 +226,11 @@ split FAILED to contain growth: partial classes share one state space, so every 
 
 ---
 
-## 11. UI Standardization (Spec 227; added 2026-09-06)
+## 11. UI Standardization (Spec 227; added 2026-09-06; owner now Epic 251 items U-10–U-19)
 
 - Every sidebar/workbench surface uses the `SharedUiWidgets` primitives — no bespoke section
   styling. A styling mismatch (e.g., Archaeology) is a defect, not a theme.
 - Every data surface has exactly one authoritative home (Spec 223 FR-3); the
-  [UI re-audit](wow-viewer/specs/227-ui-reaudit/spec.md) inventory v2 is the enforcement artifact.
+  [UI re-audit](wow-viewer/specs/archived/227-ui-reaudit/spec.md) inventory v2 is the enforcement artifact.
 - New UI features must register a row in the inventory (Spec 223 FR-9) AND follow §10 (owned
   service class) in the same change.

@@ -1,6 +1,6 @@
 # Implementation Plan: Renderer Improvements Convergence
 
-**Branch**: `036-renderer-improvements` | **Date**: 2026-06-01 | **Spec**: [spec.md](./spec.md)
+**Branch**: `036-renderer-improvements` | **Date**: 2026-06-01 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/036-renderer-improvements/spec.md`
 

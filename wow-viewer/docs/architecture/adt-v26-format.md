@@ -2,10 +2,10 @@
 
 **Naming (2026-09-16)**: these are **DAT files**: the raw terrain project files that the client's ADTs are built from (the
 wiki's ADT/v22 page now also describes versions 22/23/26 as DAT files). The repo paths
-(`adt-v26-format.md`, `specs/237-adt-v26-terrain/`, and code names such as `AdtV26`) keep "ADT" to avoid churn. The format
+(`adt-v26-format.md`, `specs/archived/237-adt-v26-terrain/`, and code names such as `AdtV26`) keep "ADT" to avoid churn. The format
 name is **DAT v26**.
 
-**Status**: living document, first written 2026-09-16. Owner spec: [237 ADT v26](../../specs/237-adt-v26-terrain/spec.md).
+**Status**: living document, first written 2026-09-16. Owner spec: [237 ADT v26](../../specs/archived/237-adt-v26-terrain/spec.md).
 **Confidence key**: **MEASURED** = proven on the real corpus with evidence linked; *open* = observed but not explained;
 *hypothesis* = carried over from the wiki v22/v23 relatives and not yet tested on v26.
 
@@ -42,7 +42,7 @@ matches the shipped ocean floor in that region. **MEASURED**
 The horizontal vertex grid is the same size as an ADT tile's (129 × 129 outer + 128 × 128 inner, i.e. 16 × 16 chunks of
 8 × 8 cells), so the extra precision is in height values, not in vertex count. The viewer's default display scale is ÷36
 (File → DAT v26 Height Scale).
-- Evidence and reproducible scripts: [specs/237-adt-v26-terrain/evidence/](../../specs/237-adt-v26-terrain/evidence/phase0-first-look-2026-09-16.md).
+- Evidence and reproducible scripts: [specs/archived/237-adt-v26-terrain/evidence/](../../specs/archived/237-adt-v26-terrain/evidence/phase0-first-look-2026-09-16.md).
 
 ## File layout
 
@@ -89,8 +89,8 @@ Notes:
   currently renders v22 layer 0 only.
 - `ALYR` flag `0x100` gates the nested `AMAP` on v22 as well as v23 (measured 2382/2383).
 
-Evidence: [first-v22-dat-render-2026-09-20.md](../../specs/237-adt-v26-terrain/evidence/first-v22-dat-render-2026-09-20.md) ·
-[real-v23-dat-icecrown-2026-09-20.md](../../specs/237-adt-v26-terrain/evidence/real-v23-dat-icecrown-2026-09-20.md)
+Evidence: [first-v22-dat-render-2026-09-20.md](../../specs/archived/237-adt-v26-terrain/evidence/first-v22-dat-render-2026-09-20.md) ·
+[real-v23-dat-icecrown-2026-09-20.md](../../specs/archived/237-adt-v26-terrain/evidence/real-v23-dat-icecrown-2026-09-20.md)
 
 ## Chunks
 

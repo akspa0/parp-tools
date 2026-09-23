@@ -1,6 +1,6 @@
 # Implementation Plan: V16 Liquid Supervision Truth Repair
 
-**Branch**: `002-v16-liquid-supervision-truth-repair` | **Date**: 2026-05-20 | **Spec**: [spec.md](./spec.md)
+**Branch**: `002-v16-liquid-supervision-truth-repair` | **Date**: 2026-05-20 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `wow-viewer/specs/002-v16-liquid-supervision-truth-repair/spec.md`
 

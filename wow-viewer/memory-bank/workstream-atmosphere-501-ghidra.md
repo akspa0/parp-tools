@@ -1,5 +1,7 @@
 # 5.0.1 Atmosphere & Physics — Ghidra Evidence
 
+> **Owner since 2026-09-23:** Epic 249 (sky/fog/lighting) and 252 (physics W-20, weather W-21) — [249-epic-renderer-performance-and-correctness](../specs/249-epic-renderer-performance-and-correctness/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
+
 Last verified: 2026-09-02 against the Ghidra project `Mists of Pandaria 5.0.1.15464`,
 program `/Wow.exe`, PE x86, image base `0x00400000`, **38,405 functions**
 (matches the spec 197 baseline). Project path
@@ -135,8 +137,8 @@ cross-references**, not from ~90 decompilations. That is far cheaper, but it see
 where direct xrefs to `FUN_00c29680` see ~90 — the difference is call sites inside regions Ghidra has
 not resolved into functions, plus hoisted string operands. Neither number is the subsystem size.
 
-See [`214-mop-physics-domino/evidence/physics-adapter-contract.md`](../specs/214-mop-physics-domino/evidence/physics-adapter-contract.md)
-and [`domino-caller-map.md`](../specs/214-mop-physics-domino/evidence/domino-caller-map.md).
+See [`214-mop-physics-domino/evidence/physics-adapter-contract.md`](../specs/archived/214-mop-physics-domino/evidence/physics-adapter-contract.md)
+and [`domino-caller-map.md`](../specs/archived/214-mop-physics-domino/evidence/domino-caller-map.md).
 
 ## Atmosphere data chain — measured
 

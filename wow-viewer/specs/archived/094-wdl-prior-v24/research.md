@@ -1,6 +1,6 @@
 # Research: 094-wdl-prior-v24
 
-**Purpose**: Resolve the open questions in [`./spec.md`](./spec.md) and document the technical decisions that need to be made before implementation.
+**Purpose**: Resolve the open questions in [`./spec.md`](spec.md) and document the technical decisions that need to be made before implementation.
 **Created**: 2026-07-06
 
 ## Q1: C# Python shim form
