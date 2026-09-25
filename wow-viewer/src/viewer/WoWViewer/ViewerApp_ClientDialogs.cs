@@ -229,7 +229,7 @@ public partial class ViewerApp
         }
 
         AddOrUpdateKnownGoodClientPath(mpqDataSource.GamePath, _dbcBuild);
-        SaveViewerSettings();
+        _settings.SaveViewerSettings();
         _statusMessage = $"Saved known-good client path: {mpqDataSource.GamePath}";
     }
 
@@ -265,7 +265,7 @@ public partial class ViewerApp
 
         if (removed > 0)
         {
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
             _statusMessage = $"Removed known-good client path: {gamePath}";
         }
     }

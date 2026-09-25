@@ -285,5 +285,48 @@ internal interface IViewerAppHost
     void OpenPm4Workbench(Pm4WorkbenchTab tab);
     bool ShouldIncludeWlBodyInUiList(WlLiquidBody body);
     bool IsWlListIsolationActive { get; }
+    ref int ActiveBottomTabIndex { get; }
+    ref string ActiveDatasetVersionRoot { get; }
+    ref WorkbenchTab ActiveTopTab { get; }
+    ref int ActiveUtilitiesTabIndex { get; }
+    ref bool ArcheologyApplyToNextCapture { get; }
+    ref bool ArcheologyApplyToVideoRecording { get; }
+    ref int ArcheologyMaxUniqueId { get; }
+    ref int ArcheologyMinUniqueId { get; }
+    ref bool ArcheologyPlaybackLoop { get; }
+    ref float ArcheologyPlaybackSpeed { get; }
+    ref int ArcheologyScopeIndex { get; }
+    ref float CameraSpeed { get; }
+    ref string CaptureOutputDir { get; }
+    List<WoWViewer.Terrain.ClientBuildOption> ClientBuildOptions { get; }
+    ref string DatasetCatalogRoot { get; }
+    ref bool EnableMultisample { get; }
+    ref bool EnableTerrainBackfaceCulling { get; }
+    ref bool HasExplicitWmoMliqRotationOverride { get; }
+    ref List<KnownGoodClientPath> KnownGoodClientPaths { get; }
+    ref Vector2 MinimapPanOffset { get; }
+    ref float MinimapZoom { get; }
+    ref bool OpenForgetKnownGoodClientConfirm { get; }
+    ref string? PendingForgetKnownGoodClientDisplayName { get; }
+    ref string? PendingForgetKnownGoodClientPath { get; }
+    ref Vector3 Pm4SavedOverlayRotationDegrees { get; }
+    ref Vector3 Pm4SavedOverlayScale { get; }
+    ref Vector3 Pm4SavedOverlayTranslation { get; }
+    ref Dictionary<string, Pm4WmoMatchEntry> Pm4WmoMatchEntries { get; }
+    ref Pm4WmoMatchStore? Pm4WmoMatchStore { get; }
+    Dictionary<string, SavedPm4ObjectMatchSelection> SavedPm4ObjectMatches { get; }
+    ref int SelectedBuildOptionIndex { get; }
+    ref string SelectedDatasetVersionRoot { get; }
+    ref TextureFilteringMode TextureFilteringMode { get; }
+    ref float UiFontScale { get; }
+    ref UiThemeKind UiTheme { get; }
+    ref int VideoCaptureContainerIndex { get; }
+    ref int VideoCaptureFps { get; }
+    ref bool VideoCaptureIncludeUi { get; }
+    ref string VideoEncoderExecutable { get; }
+    int FindBuildOptionIndex(string? buildVersion);
+    void NormalizeWorkbenchStateAfterLoad();
+    void RefreshClientBuildOptions();
+    void RefreshDatasetCatalog();
     // HOST-IFACE-END
 }

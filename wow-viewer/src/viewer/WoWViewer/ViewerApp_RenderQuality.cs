@@ -65,7 +65,7 @@ public partial class ViewerApp
                 {
                     _textureFilteringMode = mode;
                     ApplyRenderQualitySettings(refreshTextures: true);
-                    SaveViewerSettings();
+                    _settings.SaveViewerSettings();
                 }
 
                 if (selected)
@@ -82,7 +82,7 @@ public partial class ViewerApp
             {
                 _enableMultisample = enabled;
                 ApplyRenderQualitySettings(refreshTextures: false);
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
 
             ImGui.TextDisabled($"Swapchain sample buffers: {_sampleBufferCount}");
@@ -101,7 +101,7 @@ public partial class ViewerApp
         {
             _enableTerrainBackfaceCulling = terrainCull;
             ApplyRenderQualitySettings(refreshTextures: false);
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Terrain chunk winding is generated locally, so this can safely skip underside fragments in the normal terrain pass.");

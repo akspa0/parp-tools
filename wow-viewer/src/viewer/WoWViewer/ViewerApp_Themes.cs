@@ -5,7 +5,7 @@ namespace WoWViewer;
 
 public partial class ViewerApp
 {
-    private enum UiThemeKind
+    internal enum UiThemeKind
     {
         ModernSlate = 0,
         PreAlphaBrass = 1,
@@ -61,7 +61,7 @@ public partial class ViewerApp
         _gl.ClearColor(clearColor.X, clearColor.Y, clearColor.Z, clearColor.W);
 
         if (persist)
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
     }
 
     private void DrawUiThemeSettingsContent()

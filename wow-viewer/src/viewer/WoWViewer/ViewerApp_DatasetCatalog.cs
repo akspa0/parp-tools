@@ -23,7 +23,7 @@ public partial class ViewerApp
         if (ImGui.Button("Refresh dataset catalog##dataset_catalog_refresh"))
         {
             RefreshDatasetCatalog();
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         if (_datasetVersions.Count == 0)
@@ -47,7 +47,7 @@ public partial class ViewerApp
                 if (ImGui.Selectable($"{entry.DisplayName}##dataset_version_{i}", selected))
                 {
                     _selectedDatasetVersionRoot = entry.RootPath;
-                    SaveViewerSettings();
+                    _settings.SaveViewerSettings();
                 }
 
                 if (selected)
@@ -124,7 +124,7 @@ public partial class ViewerApp
             _camera.Pitch = savedPitch;
             _selectedDatasetVersionRoot = entry.RootPath;
             _activeDatasetVersionRoot = entry.RootPath;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
             _statusMessage = $"Activated dataset version: {entry.DisplayName}";
         }
         catch (Exception ex)

@@ -1282,7 +1282,7 @@ public partial class ViewerApp
             ImGui.SetTooltip(tooltip);
 
         if (ImGui.IsItemDeactivatedAfterEdit())
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
 
         ImGui.Separator();
     }
@@ -1373,14 +1373,14 @@ public partial class ViewerApp
             }
 
             if (ImGui.IsItemDeactivatedAfterEdit())
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
 
             ImGui.SameLine();
             if (ImGui.SmallButton("Auto"))
             {
                 _terrainManager.DetailedTileCountOverride = 0;
                 _savedDetailedAdtTileCountOverride = 0;
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
 
             int retainedTileRadius = _terrainManager.RetainedTileRadius;
@@ -1798,7 +1798,7 @@ public partial class ViewerApp
         _terrainWeakSignalRestoreCandidateMaxHeight = TerrainWeakSignalRestoreService.ClampTerrainWeakSignalRestoreZ(maxHeight);
         _terrainWeakSignalRestore.GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
         _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-        SaveViewerSettings();
+        _settings.SaveViewerSettings();
     }
 
     private void DrawModelInfoPanelContent()
@@ -2783,7 +2783,7 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Restore Weak-Signal Terrain", ref weakSignalRestore))
             {
                 if (_terrainWeakSignalRestore.SetTerrainWeakSignalRestoreEnabled(weakSignalRestore))
-                    SaveViewerSettings();
+                    _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Amplify weak, era-compressed terrain on the camera tile and its four direct neighbors, then clamp the actual motion to weak per-cell signal regions across the ADT instead of picking one whole chunk or one whole texture bucket.");
@@ -2796,7 +2796,7 @@ public partial class ViewerApp
                 _terrainWeakSignalRestoreCandidateMinHeight = TerrainWeakSignalRestoreService.ClampTerrainWeakSignalRestoreZ(restoreRangeMin);
                 _terrainWeakSignalRestore.GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Early-era buried terrain tends to sit around -10..10. Later-era ocean-floor-compressed data can need something closer to -5000..10.");
@@ -2807,7 +2807,7 @@ public partial class ViewerApp
                 _terrainWeakSignalRestoreCandidateMaxHeight = TerrainWeakSignalRestoreService.ClampTerrainWeakSignalRestoreZ(restoreRangeMax);
                 _terrainWeakSignalRestore.GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Use this with the minimum bound to switch between early 0-floor data and later ocean-floor-compressed tiles.");
@@ -2835,7 +2835,7 @@ public partial class ViewerApp
             {
                 _terrainWeakSignalRestoreUseAutoFactor = weakSignalAuto;
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Use the WDL-backed whole-tile auto estimate, then clamp the resulting deformation to weak per-cell signal regions across the ADT. Turn this off to A/B the manual restore control instead.");
@@ -3569,7 +3569,7 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Filter UniqueId Range", ref uniqueIdFilterEnabled))
         {
             _worldScene.UniqueIdFilterEnabled = uniqueIdFilterEnabled;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         ImGui.SameLine();
@@ -3581,13 +3581,13 @@ public partial class ViewerApp
             {
                 _worldScene.UniqueIdVisibilityScope = UniqueIdVisibilityScope.PerMap;
                 _archeologyScopeIndex = 0;
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.Selectable("Camera Tile", currentScope == UniqueIdVisibilityScope.CameraTile))
             {
                 _worldScene.UniqueIdVisibilityScope = UniqueIdVisibilityScope.CameraTile;
                 _archeologyScopeIndex = 1;
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             ImGui.EndCombo();
         }
@@ -3632,7 +3632,7 @@ public partial class ViewerApp
             {
                 _archeologyMinUniqueId = visibleMin;
                 _archeologyMaxUniqueId = visibleMax;
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
 
             string status = _worldScene.UniqueIdFilterEnabled
@@ -3650,7 +3650,7 @@ public partial class ViewerApp
             _worldScene.ResetUniqueIdFilter();
             _archeologyMinUniqueId = -1;
             _archeologyMaxUniqueId = -1;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
     }
 
@@ -3708,11 +3708,11 @@ public partial class ViewerApp
 
         // Capture speed reference
         if (ImGui.SliderFloat("Speed (uniqueIds/sec)", ref _archeologyPlaybackSpeed, 1f, 5000f, "%.0f"))
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
 
         ImGui.SameLine();
         if (ImGui.Checkbox("Loop", ref _archeologyPlaybackLoop))
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
 
         ImGui.Spacing();
 
@@ -3814,14 +3814,14 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Apply to next capture", ref applyToNextCapture))
         {
             _archeologyApplyToNextCapture = applyToNextCapture;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         bool applyToVideo = _archeologyApplyToVideoRecording;
         if (ImGui.Checkbox("Apply to video recording", ref applyToVideo))
         {
             _archeologyApplyToVideoRecording = applyToVideo;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         if (_archeologyApplyToVideoRecording)
@@ -3832,7 +3832,7 @@ public partial class ViewerApp
         if (ImGui.Button("Apply playback to next capture"))
         {
             _archeologyApplyToNextCapture = true;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
             _statusMessage = "Archeology playback will apply to the next queued capture.";
         }
         if (ImGui.IsItemHovered())
@@ -3938,7 +3938,7 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Enable Temporal Stratigraphy Restoration", ref restoreEnabled))
         {
             _terrainWeakSignalRestore.SetTerrainWeakSignalRestoreEnabled(restoreEnabled);
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         if (_terrainWeakSignalRestoreEnabled)
@@ -3952,7 +3952,7 @@ public partial class ViewerApp
             {
                 _stratigraphyUnhideDevMeshes = unhideHoles;
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Renders intact full-scale geometry hidden behind MCNK HoleMask flags (dev caves, subterranean paths, Outland blockouts).");
@@ -3963,7 +3963,7 @@ public partial class ViewerApp
             {
                 _stratigraphyStitchBoundaries = stitch;
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Smoothly feathers height deltas at borders adjoining full-scale active terrain to prevent cliff edge artifacts.");
@@ -3973,7 +3973,7 @@ public partial class ViewerApp
             {
                 _stratigraphyPreserveNegativeFloor = preserveFloor;
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("When minimum Z is negative, anchors scaling to the negative floor so sunken basins and deep valleys scale downward naturally.");
@@ -3984,7 +3984,7 @@ public partial class ViewerApp
             {
                 _stratigraphyPolarityInverted = invertPolarity;
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Inverts scale factor (-1x) so developmental terrain compressed against a ceiling reconstructs downward without massive vertical wall spikes.");
@@ -3997,7 +3997,7 @@ public partial class ViewerApp
             {
                 _stratigraphyAnchorMode = (WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode)anchorModeIndex;
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
 
             bool useAutoFit = _stratigraphyUseNeighborAutoFit;
@@ -4005,7 +4005,7 @@ public partial class ViewerApp
             {
                 _stratigraphyUseNeighborAutoFit = useAutoFit;
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Samples boundary vertices from adjacent active terrain within 1-3 chunks and calculates the optimal scale factor, polarity, and Z offset minimizing seam error.");
@@ -4015,7 +4015,7 @@ public partial class ViewerApp
             {
                 _stratigraphyUseWdlMagnetization = useWdl;
                 _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Uses low-frequency 17x17 WDL heights as macro topographical guides, adding high-frequency ADT weak signals as micro-relief.");
@@ -4028,7 +4028,7 @@ public partial class ViewerApp
                 {
                     _stratigraphyWdlMagnetizationStrength = strength;
                     _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-                    SaveViewerSettings();
+                    _settings.SaveViewerSettings();
                 }
             }
         }
@@ -4125,7 +4125,7 @@ public partial class ViewerApp
         _terrainWeakSignalRestoreManualFactor = Math.Clamp(factor, 1f, 512f);
         _terrainWeakSignalRestoreUseAutoFactor = false;
         _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
-        SaveViewerSettings();
+        _settings.SaveViewerSettings();
     }
 
     private void DrawRightSidebar()
@@ -4950,14 +4950,14 @@ public partial class ViewerApp
                 _savedDetailedAdtTileCountOverride = _terrainManager.DetailedTileCountOverride;
             }
             if (ImGui.IsItemDeactivatedAfterEdit())
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
 
             ImGui.SameLine();
             if (ImGui.SmallButton("Auto##WorldLodAdtDetail"))
             {
                 _terrainManager.DetailedTileCountOverride = 0;
                 _savedDetailedAdtTileCountOverride = 0;
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
 
             int retainedTileRadius = _terrainManager.RetainedTileRadius;
@@ -5021,13 +5021,13 @@ public partial class ViewerApp
                 _savedDetailedAdtTileCountOverride = _terrainManager.DetailedTileCountOverride;
             }
             if (ImGui.IsItemDeactivatedAfterEdit())
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             ImGui.SameLine();
             if (ImGui.SmallButton("Auto"))
             {
                 _terrainManager.DetailedTileCountOverride = 0;
                 _savedDetailedAdtTileCountOverride = 0;
-                SaveViewerSettings();
+                _settings.SaveViewerSettings();
             }
         }
 

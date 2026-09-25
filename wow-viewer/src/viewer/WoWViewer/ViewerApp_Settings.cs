@@ -142,7 +142,7 @@ public partial class ViewerApp
         {
             _defaultFogStart = normalizedStart;
             _defaultFogEnd = normalizedEnd;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
     }
 
@@ -157,7 +157,7 @@ public partial class ViewerApp
             {
                 ImGui.GetIO().FontGlobalScale = _uiFontScale;
             }
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Scales all UI text, labels, inspector panels, and menus across the entire application.");
@@ -168,35 +168,35 @@ public partial class ViewerApp
         {
             _uiFontScale = 1.0f;
             if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("120%"))
         {
             _uiFontScale = 1.20f;
             if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("135%"))
         {
             _uiFontScale = 1.35f;
             if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("150%"))
         {
             _uiFontScale = 1.50f;
             if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("175%"))
         {
             _uiFontScale = 1.75f;
             if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         ImGui.Spacing();
@@ -206,7 +206,7 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Use Tabbed UI", ref useTabUi))
         {
             _useTabUi = useTabUi;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Toggle between the modern tabbed workbench and legacy dockspace layout.");
@@ -215,7 +215,7 @@ public partial class ViewerApp
         if (ImGui.Checkbox("Show Minimap", ref showMinimap))
         {
             _showMinimapWindow = showMinimap;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         ImGui.Spacing();
@@ -228,7 +228,7 @@ public partial class ViewerApp
         {
             if (_sceneCursorRenderer != null)
                 _sceneCursorRenderer.Style = (CursorStyle)currentStyle;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Authentic WoW Gauntlet loads Interface\\Cursor\\Cursor.mdx. Procedural meshes render OpenSCAD 3D primitives.");
@@ -282,21 +282,21 @@ public partial class ViewerApp
         if (ImGui.DragFloat("Camera Speed", ref cameraSpeed, 1f, 1f, 500f, "%.0f"))
         {
             _cameraSpeed = cameraSpeed;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         float fovDegrees = Math.Clamp(_fovDegrees, 20f, 90f);
         if (ImGui.DragFloat("FOV", ref fovDegrees, 0.5f, 20f, 90f, "%.0f°"))
         {
             _fovDegrees = fovDegrees;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
 
         if (ImGui.Button("Reset Camera Defaults"))
         {
             _cameraSpeed = 50f;
             _fovDegrees = 45f;
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
         }
     }
 }

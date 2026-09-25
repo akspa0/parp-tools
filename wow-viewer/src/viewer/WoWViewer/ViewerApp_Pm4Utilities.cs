@@ -1855,7 +1855,7 @@ public partial class ViewerApp
         _pm4SavedOverlayTranslation = _worldScene.Pm4Overlay.Pm4OverlayTranslation;
         _pm4SavedOverlayRotationDegrees = _worldScene.Pm4Overlay.Pm4OverlayRotationDegrees;
         _pm4SavedOverlayScale = _worldScene.Pm4Overlay.Pm4OverlayScale;
-        SaveViewerSettings();
+        _settings.SaveViewerSettings();
 
         _statusMessage = $"Saved PM4 alignment: T=({_pm4SavedOverlayTranslation.X:F2}, {_pm4SavedOverlayTranslation.Y:F2}, {_pm4SavedOverlayTranslation.Z:F2}) Rot=({_pm4SavedOverlayRotationDegrees.X:F2}, {_pm4SavedOverlayRotationDegrees.Y:F2}, {_pm4SavedOverlayRotationDegrees.Z:F2})° S=({_pm4SavedOverlayScale.X:F3}, {_pm4SavedOverlayScale.Y:F3}, {_pm4SavedOverlayScale.Z:F3})";
     }
@@ -2230,7 +2230,7 @@ public partial class ViewerApp
             EvidenceSource = candidate.EvidenceSource,
         };
 
-        SaveViewerSettings();
+        _settings.SaveViewerSettings();
         _statusMessage = $"Saved PM4 object match: CK24=0x{objectMatch.Ck24:X6} part={objectMatch.ObjectPartId} -> {candidate.Kind} uid={candidate.UniqueId}.";
     }
 
@@ -2240,7 +2240,7 @@ public partial class ViewerApp
         string key = BuildSavedPm4ObjectMatchKey(mapName, objectMatch.TileX, objectMatch.TileY, objectMatch.Ck24, objectMatch.ObjectPartId);
         if (_savedPm4ObjectMatches.Remove(key))
         {
-            SaveViewerSettings();
+            _settings.SaveViewerSettings();
             _statusMessage = $"Cleared saved PM4 object match for CK24=0x{objectMatch.Ck24:X6} part={objectMatch.ObjectPartId}.";
         }
     }
@@ -2259,7 +2259,7 @@ public partial class ViewerApp
         return false;
     }
 
-    private static string BuildSavedPm4ObjectMatchKey(string mapName, int tileX, int tileY, uint ck24, int objectPartId)
+    internal static string BuildSavedPm4ObjectMatchKey(string mapName, int tileX, int tileY, uint ck24, int objectPartId)
     {
         return $"{mapName.Trim().ToLowerInvariant()}|{tileX}|{tileY}|{ck24:X6}|{objectPartId}";
     }
