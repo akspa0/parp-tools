@@ -430,7 +430,7 @@ public partial class ViewerApp
         return (wowX, wowY, positionZ);
     }
 
-    private static float GetWorldFacingDegrees(float yawDegrees)
+    internal static float GetWorldFacingDegrees(float yawDegrees)
     {
         // Compass heading from camera yaw. True North is yaw = 0 (so N/S land correctly), but
         // the yaw increases in the opposite rotational sense to the compass, which swapped
@@ -443,7 +443,7 @@ public partial class ViewerApp
         return degrees;
     }
 
-    private static string GetWorldFacingLabel(float degrees)
+    internal static string GetWorldFacingLabel(float degrees)
     {
         string[] labels =
         {

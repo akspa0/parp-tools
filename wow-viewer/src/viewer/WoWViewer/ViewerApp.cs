@@ -180,10 +180,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
     private bool _fullscreenMinimap = false; // M key toggles fullscreen minimap
     private Vector2 _minimapPanOffset = Vector2.Zero; // Pan offset for click-and-drag
-    private bool _minimapDragging = false;
     private (int tileX, int tileY)? _pendingMinimapTeleportTile;
     private int _pendingMinimapTeleportClickCount;
-    private DateTime _pendingMinimapTeleportLastClickUtc = DateTime.MinValue;
     private Rendering.LoadingScreen? _loadingScreen;
 
     // Output directories (next to the executable)
@@ -638,6 +636,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly SynthesizedMinimapExportService _synthesizedMinimapExport;
     private readonly MlTrainingService _mlTraining;
     private readonly TerrainAnalysisService _terrainAnalysis;
+    private readonly MinimapAndStatusService _minimapAndStatus;
 
     public ViewerApp()
     {
@@ -686,6 +685,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _synthesizedMinimapExport = new SynthesizedMinimapExportService(this);
         _mlTraining = new MlTrainingService(this);
         _terrainAnalysis = new TerrainAnalysisService(this);
+        _minimapAndStatus = new MinimapAndStatusService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1027,6 +1027,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisAlphaTexture => ref _terrainAnalysisAlphaTexture;
     ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisGlobalTexture => ref _terrainAnalysisGlobalTexture;
     ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisLocalTexture => ref _terrainAnalysisLocalTexture;
+    ref double IViewerAppHost.CurrentFps => ref _currentFps;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1282,7 +1283,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         // M key toggles fullscreen minimap (only when terrain is loaded)
         bool mPressed = kb.IsKeyPressed(Key.M);
         if (canSceneConsumeKeyboard && mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
-            ToggleFullscreenMinimap();
+            _minimapAndStatus.ToggleFullscreenMinimap();
         _mKeyWasPressed = mPressed;
 
         // Arrow keys and spacebar for MDX animation control
@@ -1712,7 +1713,7 @@ void main() {
 
             _viewerChrome.DrawBottomBar();
 
-            DrawStatusBar();
+            _minimapAndStatus.DrawStatusBar();
 
             // Floating windows: when tab system is active, only the tools that
             // aren't yet routed into a sub-tab render as floating windows.
@@ -1740,7 +1741,7 @@ void main() {
 
                 // Minimap panel
                 if (_shellLayout.IsShellPanelActive(ShellPanelId.Minimap) && !_fullscreenMinimap)
-                    DrawMinimapWindow();
+                    _minimapAndStatus.DrawMinimapWindow();
 
                 // Perf (floating window) - legacy mode only; tabbed mode uses Utilities > Perf
                 if (_showPerfWindow && !_useTabUi)
@@ -1775,7 +1776,7 @@ void main() {
 
         // Fullscreen minimap overlay (M key toggle)
         if (_fullscreenMinimap && (_worldScene != null || _vlmTerrainManager != null))
-            DrawFullscreenMinimap();
+            _minimapAndStatus.DrawFullscreenMinimap();
 
         // Modal dialogs
         if (_showFolderInput)

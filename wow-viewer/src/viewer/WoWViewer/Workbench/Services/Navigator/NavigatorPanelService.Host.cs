@@ -46,6 +46,7 @@ using System.IO;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Runtime.World.Passes;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.MinimapAndStatusService;
 
 namespace WoWViewer;
 

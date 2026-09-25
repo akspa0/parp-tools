@@ -70,6 +70,7 @@ using System.IO;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Runtime.World.Minimap;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.MinimapAndStatusService;
 using static WoWViewer.InvestigationService;
 using static WoWViewer.ThemesService;
 
@@ -475,5 +476,6 @@ internal interface IViewerAppHost
     ref TerrainAnalysisPreviewTexture? TerrainAnalysisAlphaTexture { get; }
     ref TerrainAnalysisPreviewTexture? TerrainAnalysisGlobalTexture { get; }
     ref TerrainAnalysisPreviewTexture? TerrainAnalysisLocalTexture { get; }
+    ref double CurrentFps { get; }
     // HOST-IFACE-END
 }
