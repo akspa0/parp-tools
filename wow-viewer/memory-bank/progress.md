@@ -2,6 +2,21 @@
 
 Last updated: 2026-09-25
 
+## 2026-09-25 — U-01 ViewerApp campaign: 42,973 → 2,512 lines (E3 + T010–T012, code only)
+
+Operator direction: "make ViewerApp as concise as possible". 54 behaviour-preserving steps moved every
+cohesive feature cluster out of the `ViewerApp` partial class into 51 owned services + 3 static helpers under
+`src/viewer/WoWViewer/Workbench/Services/` (menu bar, converter/export dialogs, loaders, data-source session,
+settings, shell layout, hover/pick, PM4 workbench, archaeology, editor/workbench/inspector panels, capture,
+camera paths, …). One `IViewerAppHost` (414 members, `ref` properties for ImGui `ref` fields) implemented in
+`ViewerApp_Host.cs`; services built in the `ViewerApp()` constructor. `ViewerApp.cs` 16,746 → 1,725; 24
+partial files removed. Every step: line-multiset audit, full-solution build, commit only on 0 errors;
+end-to-end audit shows only boilerplate lines changed. Tests: same 26 environmental failures. Warnings:
++24 CS0618 (obsolete `ShellPanelId` uses now reported outside its declaring type), −4 CS0169 (reporting
+change bisected to `4f3f722`, source identical). Found: terrain-analysis UI is unreferenced (dead).
+Runtime not claimed — smoke is U01-T007/T013. Receipt:
+`specs/251-epic-viewer-ux-and-code-health/evidence/u01-viewerapp-extraction-2026-09-25.md`.
+
 ## 2026-09-25 — U-01 E1: PM4 overlay extracted from `WorldScene` (code only)
 
 Epic 251 U01-T002. 387 members + 42 top-level PM4 types moved verbatim (Roslyn member map +

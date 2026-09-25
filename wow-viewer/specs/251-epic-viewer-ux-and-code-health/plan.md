@@ -78,3 +78,17 @@ of them by `ref`. Each extraction therefore:
 5. Only declaration visibility changes (`private` → `internal`) where the split needs it.
 6. Receipt per step: line-multiset audit (only intended lines differ), full-solution build,
    warnings and test failure set compared with the step's base.
+
+**Spec-sync 2026-09-25 (ViewerApp campaign as built).** 54 steps took the whole `ViewerApp` partial class
+from 42,973 lines in 29 files to 2,512 in 6 (`ViewerApp.cs` 16,746 → 1,725). As-built shape:
+51 services + 3 static helpers under `Workbench/Services/<Feature>/` (and `UI/ImGuiListLayout.cs`), one
+`IViewerAppHost` (414 members) implemented in `ViewerApp_Host.cs`, services built in the `ViewerApp()`
+constructor. Members from each source file keep that file's `using` directives in their own partial file;
+bridges whose types come from several files sit in `<Service>.Host.cs`. Kept in `ViewerApp` on purpose:
+window lifecycle, shared app-state fields, editor composition that hands `this` to the editor pages and
+adapters. Receipt: [evidence/u01-viewerapp-extraction-2026-09-25.md](evidence/u01-viewerapp-extraction-2026-09-25.md).
+
+How to add viewer behaviour now: put it in the owning service (or a new one under `Workbench/Services/`);
+if it needs app state the service cannot reach, add one member to `IViewerAppHost` and its one-line
+implementation to `ViewerApp_Host.cs`. Do not add members to `ViewerApp` (AGENTS.md §10).
+

@@ -211,7 +211,8 @@ the spec in the same change or add a dated amendment note. Code and spec agree a
 ## 10. Source Decomposition — God-Class Freeze (Spec 228; added 2026-09-06)
 
 Owner: Epic 251 item U-01 (origin spec `wow-viewer/specs/archived/228-source-decomposition/spec.md`;
-measured 2026-09-23: `WorldScene.cs` 17,153 lines, `ViewerApp.cs` 16,746 lines). The `ViewerApp_*` partial-class
+measured 2026-09-23: `WorldScene.cs` 17,153 lines, `ViewerApp.cs` 16,746 lines; re-measured 2026-09-25 after
+U-01 E1/E3 and the ViewerApp campaign: `WorldScene.cs` 8,326, whole `ViewerApp` partial class 2,512 lines in 6 files). The `ViewerApp_*` partial-class
 split FAILED to contain growth: partial classes share one state space, so every session still loads
 ~33k lines of god-class context. Binding rules:
 

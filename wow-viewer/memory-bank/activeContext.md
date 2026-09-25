@@ -18,11 +18,15 @@ on-demand history, never default reading.
 | Lane | Code | Owed (operator) | Next agent step |
 |---|---|---|---|
 | **R-10** modern-data lighting perf (Epic 249) | T002, T004–T006 landed 2026-09-23 | T003 baseline + T007 after-capture on `wow_classic_beta` 1.60.1 `Azeroth`; T008 decides R-10e | none until captures exist |
-| **U-01** god-class decomposition (Epic 251) | **E1 landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`Pm4OverlayScene` + helpers); `WorldScene.cs` 17,175 → 8,326 | U01-T003 E1 smoke (overlay, colours, selection, OBJ export) | E3 `ViewerApp` menu bar + converter dialogs (independent of R-10). E2 `Render()` split waits for R-10's after-capture |
+| **U-01** god-class decomposition (Epic 251) | **E1 + E3 + ViewerApp campaign landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`WorldScene.cs` 17,175 → 8,326); `ViewerApp` class 42,973 lines / 29 files → 2,512 / 6 (51 services + 3 static helpers under `Workbench/Services/`) | U01-T003 E1 smoke; U01-T007 / T013 smoke of every moved ViewerApp surface | E2 `Render()` split waits for R-10's after-capture; E4 selection service is the next agent-owned step |
 
-E1 receipt: [u01-e1-pm4-extraction-2026-09-25.md](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e1-pm4-extraction-2026-09-25.md).
-PM4 overlay code now lives in `Terrain/Pm4/`; callers reach it as `WorldScene.Pm4Overlay.X`. The PM4
-draw blocks inside `WorldScene.Render()` stay there until E2.
+Receipts: [E1](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e1-pm4-extraction-2026-09-25.md) ·
+[ViewerApp campaign](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-viewerapp-extraction-2026-09-25.md).
+**Where code lives now:** viewer features are owned services under `src/viewer/WoWViewer/Workbench/Services/<Feature>/`
+(namespace `WoWViewer`); they reach app state only through `IViewerAppHost` (implemented in
+`ViewerApp_Host.cs`). `ViewerApp.cs` is the shell: fields, composition root, window lifecycle. New behaviour
+goes into the owning service; if it needs more app state, add one `IViewerAppHost` member + its one-line
+implementation. PM4 overlay code lives in `Terrain/Pm4/` (`WorldScene.Pm4Overlay.X`).
 
 All other epic items remain untriaged in [TRIAGE.md](../specs/TRIAGE.md); nothing else is scheduled.
 Receipt for the 2026-09-23 reconciliation:
@@ -52,7 +56,7 @@ sidebar buttons never clicked.
 - Zone music is disabled by policy and still reads `ZoneMusic` as a SoundEntries id.
 - Modern data: the scene-light gate disables WMO instancing (~5.5 FPS, 16,431 WMO draws).
 - v22 DAT blends layer 0 only; `AMAP` codec unidentified.
-- `WorldScene.cs` 8,326 lines (after U-01 E1), `ViewerApp.cs` 16,746 lines — no new members (AGENTS.md §10).
+- `WorldScene.cs` 8,326 lines, `ViewerApp` class 2,512 lines in 6 files (after U-01, 2026-09-25) — no new members (AGENTS.md §10).
 
 ## Non-negotiable constraints
 
@@ -64,7 +68,8 @@ sidebar buttons never clicked.
 
 ## Handoff
 
-**Immediate:** operator runs R10-T003/T007 captures and the U01-T003 E1 smoke. Agent may start
-U-01 E3 (`ViewerApp` menu bar + converter dialogs, same verbatim-move mechanics as E1). Do not start
-any other epic item before it is marked Want. Superseded dashboard:
+**Immediate:** operator runs R10-T003/T007 captures and the U-01 smoke passes (U01-T003 PM4 overlay;
+U01-T007/T013 every moved ViewerApp surface — checklist in the campaign receipt). Next agent-owned U-01 step
+is E4 (selection/hover as a Core service) or E2 once R-10's after-capture exists. Do not start any other epic
+item before it is marked Want. Superseded dashboard:
 [archive/2026-09-23-pre-reconciliation-active-context.md](archive/2026-09-23-pre-reconciliation-active-context.md).
