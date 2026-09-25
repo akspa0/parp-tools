@@ -495,5 +495,7 @@ internal interface IViewerAppHost
     string GetCurrentCaptureMapName();
     CameraPathsService CameraPaths { get; }
     StartupAutomationService StartupAutomation { get; }
+    CaptureAutomationService CaptureAutomation { get; }
+    SettingsWindowService SettingsWindow { get; }
     // HOST-IFACE-END
 }

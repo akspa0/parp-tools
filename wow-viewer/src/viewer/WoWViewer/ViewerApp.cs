@@ -640,6 +640,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly StartupAutomationService _startupAutomation;
     private readonly CameraPathsService _cameraPaths;
     private readonly CaptureAutomationService _captureAutomation;
+    private readonly WorkspacesService _workspaces;
 
     public ViewerApp()
     {
@@ -692,6 +693,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _startupAutomation = new StartupAutomationService(this);
         _cameraPaths = new CameraPathsService(this);
         _captureAutomation = new CaptureAutomationService(this);
+        _workspaces = new WorkspacesService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -845,7 +847,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref IWindow IViewerAppHost.Window => ref _window;
     float IViewerAppHost.ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth) => _viewerChrome.ClampFixedSidebarWidth(width, isLeftSidebar, displayWidth);
     float IViewerAppHost.GetTopChromeHeight() => GetTopChromeHeight();
-    void IViewerAppHost.SetEditorWorkspaceTask(EditorWorkspaceTask task) => SetEditorWorkspaceTask(task);
+    void IViewerAppHost.SetEditorWorkspaceTask(EditorWorkspaceTask task) => _workspaces.SetEditorWorkspaceTask(task);
     ref List<MapDefinition> IViewerAppHost.DiscoveredMaps => ref _discoveredMaps;
     ref Vector3? IViewerAppHost.PendingWorldSpawnOverride => ref _pendingWorldSpawnOverride;
     ref MapDefinition? IViewerAppHost.SelectedMapForPreview => ref _selectedMapForPreview;
@@ -1040,6 +1042,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     WorkbenchPanelsService IViewerAppHost.WorkbenchPanels => _workbenchPanels;
     CameraPathsService IViewerAppHost.CameraPaths => _cameraPaths;
     StartupAutomationService IViewerAppHost.StartupAutomation => _startupAutomation;
+    CaptureAutomationService IViewerAppHost.CaptureAutomation => _captureAutomation;
+    SettingsWindowService IViewerAppHost.SettingsWindow => _settingsWindow;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1279,7 +1283,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             _showRightSidebar = true;
             _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
             if (_workspaceMode == WorkspaceMode.Editor)
-                SetEditorWorkspaceTask(EditorWorkspaceTask.Pm4Evidence);
+                _workspaces.SetEditorWorkspaceTask(EditorWorkspaceTask.Pm4Evidence);
         }
         _pKeyWasPressed = pPressed;
 

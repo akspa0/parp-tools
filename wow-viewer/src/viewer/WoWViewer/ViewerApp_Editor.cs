@@ -776,15 +776,15 @@ public partial class ViewerApp
         ImGui.Text("Editor Tasks & Inspector");
         ImGui.TextDisabled("Select an active editor task to display its specialized inspector.");
 
-        ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
-        ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
+        ImGui.TextDisabled($"Target: {_workspaces.GetWorkspaceTargetSummary()}");
+        ImGui.TextDisabled($"Save: {_workspaces.GetWorkspaceSaveStatusSummary()}");
 
         ImGui.Separator();
 
         // Task selector buttons
         foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
         {
-            bool isAvailable = IsEditorTaskAvailable(task);
+            bool isAvailable = _workspaces.IsEditorTaskAvailable(task);
             if (!isAvailable)
                 ImGui.BeginDisabled();
 
@@ -792,8 +792,8 @@ public partial class ViewerApp
             if (isSelected)
                 ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.26f, 0.59f, 0.98f, 0.8f));
 
-            if (ImGui.Button(GetEditorWorkspaceTaskLabel(task)))
-                SetEditorWorkspaceTask(task);
+            if (ImGui.Button(WorkspacesService.GetEditorWorkspaceTaskLabel(task)))
+                _workspaces.SetEditorWorkspaceTask(task);
 
             if (isSelected)
                 ImGui.PopStyleColor();
@@ -801,7 +801,7 @@ public partial class ViewerApp
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             {
                 ImGui.BeginTooltip();
-                ImGui.TextDisabled(GetEditorWorkspaceTooltip(task));
+                ImGui.TextDisabled(WorkspacesService.GetEditorWorkspaceTooltip(task));
                 ImGui.EndTooltip();
             }
 
@@ -815,7 +815,7 @@ public partial class ViewerApp
         ImGui.Separator();
 
         // Active task inspector
-        DrawEditorWorkspaceInspector();
+        _workspaces.DrawEditorWorkspaceInspector();
 
         ImGui.Separator();
 
