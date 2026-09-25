@@ -668,6 +668,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly LogViewerService _logViewer;
     private readonly RenderQualityService _renderQuality;
     private readonly DatasetCatalogService _datasetCatalog;
+    private readonly WmoGroupsPanelService _wmoGroupsPanel;
 
     public ViewerApp()
     {
@@ -711,6 +712,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _logViewer = new LogViewerService(this);
         _renderQuality = new RenderQualityService(this);
         _datasetCatalog = new DatasetCatalogService(this);
+        _wmoGroupsPanel = new WmoGroupsPanelService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1496,7 +1498,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                 float fogEnd = farPlane;
                 wmoR.RenderWithTransform(Matrix4x4.Identity, view, proj,
                     fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);
-                DrawStandaloneWmoGroupOverlay(wmoR, view, proj, sceneViewportX, sceneViewportY, sceneViewportWidth, sceneViewportHeight);
+                _wmoGroupsPanel.DrawStandaloneWmoGroupOverlay(wmoR, view, proj, sceneViewportX, sceneViewportY, sceneViewportWidth, sceneViewportHeight);
             }
             else
             {
