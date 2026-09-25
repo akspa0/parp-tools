@@ -46,6 +46,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.CaptureAutomationService;
 
 namespace WoWViewer;
 

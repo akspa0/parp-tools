@@ -70,6 +70,7 @@ using System.IO;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Runtime.World.Minimap;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.CaptureAutomationService;
 using static WoWViewer.CameraPathsService;
 using static WoWViewer.MinimapAndStatusService;
 using static WoWViewer.InvestigationService;
@@ -492,5 +493,7 @@ internal interface IViewerAppHost
     void DrawCaptureAutomationContent();
     string GetCurrentCaptureBuildVersion();
     string GetCurrentCaptureMapName();
+    CameraPathsService CameraPaths { get; }
+    StartupAutomationService StartupAutomation { get; }
     // HOST-IFACE-END
 }

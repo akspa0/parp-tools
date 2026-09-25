@@ -12,6 +12,7 @@ using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using Silk.NET.Input;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.CaptureAutomationService;
 
 namespace WoWViewer;
 

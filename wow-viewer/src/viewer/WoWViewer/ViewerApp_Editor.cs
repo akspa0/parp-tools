@@ -317,7 +317,7 @@ public partial class ViewerApp
             {
                 selection.Add(new EditorSelectionEntry(
                     _app._worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? EditorSelectionKind.WorldModel : EditorSelectionKind.Model,
-                    _app.GetCurrentCaptureMapName(),
+                    _app._captureAutomation.GetCurrentCaptureMapName(),
                     selected.TileX,
                     selected.TileY,
                     selected.PlacementEntryIndex,
@@ -327,7 +327,7 @@ public partial class ViewerApp
             }
 
             return new EditorSceneSnapshot(
-                _app.GetCurrentCaptureMapName(),
+                _app._captureAutomation.GetCurrentCaptureMapName(),
                 new EditorCamera(_app._camera.Position, _app._camera.Forward, Vector3.UnitZ),
                 [],
                 selection);

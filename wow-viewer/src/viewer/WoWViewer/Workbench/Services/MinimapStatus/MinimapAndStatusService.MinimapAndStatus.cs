@@ -6,6 +6,7 @@ using WoWViewer.UI;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.World.Minimap;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.CaptureAutomationService;
 
 namespace WoWViewer;
 

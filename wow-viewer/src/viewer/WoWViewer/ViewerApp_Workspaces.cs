@@ -311,11 +311,11 @@ public partial class ViewerApp
         ImGui.Separator();
 
         if (ImGui.Button("Capture Current (No UI)"))
-            QueueCurrentCameraCapture(includeUi: false);
+            _captureAutomation.QueueCurrentCameraCapture(includeUi: false);
 
         ImGui.SameLine();
         if (ImGui.Button("Capture Current (With UI)"))
-            QueueCurrentCameraCapture(includeUi: true);
+            _captureAutomation.QueueCurrentCameraCapture(includeUi: true);
 
         if (ImGui.Button("Open Capture Automation"))
             _cameraPaths.OpenCapturePanelTab(CameraPathsService.CapturePanelTab.Automation);

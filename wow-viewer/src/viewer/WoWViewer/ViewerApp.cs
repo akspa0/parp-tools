@@ -639,6 +639,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly MinimapAndStatusService _minimapAndStatus;
     private readonly StartupAutomationService _startupAutomation;
     private readonly CameraPathsService _cameraPaths;
+    private readonly CaptureAutomationService _captureAutomation;
 
     public ViewerApp()
     {
@@ -690,6 +691,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _minimapAndStatus = new MinimapAndStatusService(this);
         _startupAutomation = new StartupAutomationService(this);
         _cameraPaths = new CameraPathsService(this);
+        _captureAutomation = new CaptureAutomationService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -710,7 +712,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref int IViewerAppHost.MkHarvestViewerValidationCompleted => ref _mkHarvestViewerValidationCompleted;
     ref int IViewerAppHost.MkHarvestViewerValidationFailed => ref _mkHarvestViewerValidationFailed;
     ref int IViewerAppHost.MkHarvestViewerValidationQueued => ref _mkHarvestViewerValidationQueued;
-    ref MkHarvestViewerValidationCapturePlan? IViewerAppHost.PendingMkHarvestViewerValidationCapturePlan => ref _pendingMkHarvestViewerValidationCapturePlan;
+    ref CaptureAutomationService.MkHarvestViewerValidationCapturePlan? IViewerAppHost.PendingMkHarvestViewerValidationCapturePlan => ref _captureAutomation._pendingMkHarvestViewerValidationCapturePlan;
     ref bool IViewerAppHost.ShowTerrainTextureTransferDialog => ref _showTerrainTextureTransferDialog;
     ref bool IViewerAppHost.ShowVlmExportDialog => ref _showVlmExportDialog;
     ref string IViewerAppHost.TerrainTransferOutputDir => ref _terrainTransferOutputDir;
@@ -721,7 +723,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref string IViewerAppHost.VlmOutputDir => ref _vlmOutputDir;
     ref VlmTerrainManager? IViewerAppHost.VlmTerrainManager => ref _vlmTerrainManager;
     void IViewerAppHost.LoadVlmProject(string projectRoot) => _worldLoader.LoadVlmProject(projectRoot);
-    void IViewerAppHost.StitchMkHarvestViewerValidationOutputs(string mapName, string outputDirectory, string noLiquidsOutputDirectory, string noObjectsOutputDirectory, string objectsOnlyOutputDirectory, int requestedResolution) => StitchMkHarvestViewerValidationOutputs(mapName, outputDirectory, noLiquidsOutputDirectory, noObjectsOutputDirectory, objectsOnlyOutputDirectory, requestedResolution);
+    void IViewerAppHost.StitchMkHarvestViewerValidationOutputs(string mapName, string outputDirectory, string noLiquidsOutputDirectory, string noObjectsOutputDirectory, string objectsOnlyOutputDirectory, int requestedResolution) => _captureAutomation.StitchMkHarvestViewerValidationOutputs(mapName, outputDirectory, noLiquidsOutputDirectory, noObjectsOutputDirectory, objectsOnlyOutputDirectory, requestedResolution);
     HashSet<(int tileX, int tileY, int chunkX, int chunkY)> IViewerAppHost.SelectedChunks => _selectedChunks;
     ref WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode IViewerAppHost.StratigraphyAnchorMode => ref _stratigraphyAnchorMode;
     ref bool IViewerAppHost.StratigraphyPolarityInverted => ref _stratigraphyPolarityInverted;
@@ -915,7 +917,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> IViewerAppHost.StratigraphyTileAnalyses => _stratigraphyTileAnalyses;
     ConverterDialogsService IViewerAppHost.ConverterDialogs => _converterDialogs;
     PlacementEditService IViewerAppHost.PlacementEditing => _placementEditing;
-    ref bool IViewerAppHost.TaxiRideCameraEnabled => ref _taxiRideCameraEnabled;
+    ref bool IViewerAppHost.TaxiRideCameraEnabled => ref _captureAutomation._taxiRideCameraEnabled;
     ref bool IViewerAppHost.WlLayerListIsolationEnabled => ref _wlLayerListIsolationEnabled;
     ref string IViewerAppHost.WlLayerSelectedBodyKey => ref _wlLayerSelectedBodyKey;
     void IViewerAppHost.DrawTerrainChunkInvestigationPanel(bool defaultOpen) => _investigation.DrawTerrainChunkInvestigationPanel(defaultOpen);
@@ -935,7 +937,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref float IViewerAppHost.ArcheologyPlaybackSpeed => ref _archeologyPlaybackSpeed;
     ref int IViewerAppHost.ArcheologyScopeIndex => ref _archeologyScopeIndex;
     ref float IViewerAppHost.CameraSpeed => ref _cameraSpeed;
-    ref string IViewerAppHost.CaptureOutputDir => ref _captureOutputDir;
+    ref string IViewerAppHost.CaptureOutputDir => ref _captureAutomation._captureOutputDir;
     List<WoWViewer.Terrain.ClientBuildOption> IViewerAppHost.ClientBuildOptions => _clientBuildOptions;
     ref string IViewerAppHost.DatasetCatalogRoot => ref _datasetCatalog._datasetCatalogRoot;
     ref bool IViewerAppHost.EnableMultisample => ref _renderQuality._enableMultisample;
@@ -958,10 +960,10 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref TextureFilteringMode IViewerAppHost.TextureFilteringMode => ref _renderQuality._textureFilteringMode;
     ref float IViewerAppHost.UiFontScale => ref _uiFontScale;
     ref ThemesService.UiThemeKind IViewerAppHost.UiTheme => ref _themes._uiTheme;
-    ref int IViewerAppHost.VideoCaptureContainerIndex => ref _videoCaptureContainerIndex;
-    ref int IViewerAppHost.VideoCaptureFps => ref _videoCaptureFps;
-    ref bool IViewerAppHost.VideoCaptureIncludeUi => ref _videoCaptureIncludeUi;
-    ref string IViewerAppHost.VideoEncoderExecutable => ref _videoEncoderExecutable;
+    ref int IViewerAppHost.VideoCaptureContainerIndex => ref _captureAutomation._videoCaptureContainerIndex;
+    ref int IViewerAppHost.VideoCaptureFps => ref _captureAutomation._videoCaptureFps;
+    ref bool IViewerAppHost.VideoCaptureIncludeUi => ref _captureAutomation._videoCaptureIncludeUi;
+    ref string IViewerAppHost.VideoEncoderExecutable => ref _captureAutomation._videoEncoderExecutable;
     int IViewerAppHost.FindBuildOptionIndex(string? buildVersion) => _clientDialogs.FindBuildOptionIndex(buildVersion);
     void IViewerAppHost.NormalizeWorkbenchStateAfterLoad() => _workbenchPanels.NormalizeWorkbenchStateAfterLoad();
     void IViewerAppHost.RefreshClientBuildOptions() => _clientDialogs.RefreshClientBuildOptions();
@@ -1036,6 +1038,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.ShowCameraPathWindow => ref _showCameraPathWindow;
     ref bool IViewerAppHost.ShowCaptureAutomationWindow => ref _showCaptureAutomationWindow;
     WorkbenchPanelsService IViewerAppHost.WorkbenchPanels => _workbenchPanels;
+    CameraPathsService IViewerAppHost.CameraPaths => _cameraPaths;
+    StartupAutomationService IViewerAppHost.StartupAutomation => _startupAutomation;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1077,7 +1081,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _sqlSpawnStreaming.TryAutoPopulateAlphaCoreRoot();
         _settings.LoadViewerSettings();
         _themes.ApplyActiveUiTheme();
-        LoadCameraShotPoints();
+        _captureAutomation.LoadCameraShotPoints();
         _renderQuality.DetectRenderQualityCapabilities();
         _renderQuality.ApplyRenderQualitySettings(refreshTextures: false);
 
@@ -1132,9 +1136,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
                 if (_mouseDown && !_shellLayout.IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY))
                 {
-                    if (_taxiRideCameraEnabled)
+                    if (_captureAutomation._taxiRideCameraEnabled)
                     {
-                        AdjustTaxiRideFreeLook(-dx * 0.5f, -dy * 0.5f);
+                        _captureAutomation.AdjustTaxiRideFreeLook(-dx * 0.5f, -dy * 0.5f);
                     }
                     else
                     {
@@ -1162,7 +1166,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         HandleKeyboardInput((float)dt);
         _cameraPaths.UpdateCameraPathPlayback(dt);
         _cameraPaths.UpdateCameraPathPreload();
-        UpdateTaxiRideCamera();
+        _captureAutomation.UpdateTaxiRideCamera();
         _archaeologyPanel.UpdateArcheologyPlayback(dt);
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
@@ -1334,7 +1338,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             }
         }
 
-        if (_taxiRideCameraEnabled || !canSceneConsumeKeyboard)
+        if (_captureAutomation._taxiRideCameraEnabled || !canSceneConsumeKeyboard)
             return;
 
         // Free-fly: WASD moves the camera position, Shift = 5x boost
@@ -1360,9 +1364,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private unsafe void OnRender(double dt)
     {
         _datasetExportDialogs.PromotePendingMlFinalizeAfterExport();
-        PromotePendingMkHarvestViewerValidationCapturePlan();
-        PromotePendingRoofCaptureBatch();
-        PrepareNextCaptureRequest();
+        _captureAutomation.PromotePendingMkHarvestViewerValidationCapturePlan();
+        _captureAutomation.PromotePendingRoofCaptureBatch();
+        _captureAutomation.PrepareNextCaptureRequest();
 
         // FPS tracking
         _frameCount++;
@@ -1425,7 +1429,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         float farPlane = _terrainQuery.GetSceneFarPlane();
         Matrix4x4 view;
         Matrix4x4 proj;
-        if (!TryGetMkHarvestViewerValidationSceneMatrices(aspect, out view, out proj))
+        if (!_captureAutomation.TryGetMkHarvestViewerValidationSceneMatrices(aspect, out view, out proj))
         {
             view = _camera.GetViewMatrix();
             proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
@@ -1528,8 +1532,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         if (hasSceneViewport)
             _gl.Viewport(_window.FramebufferSize);
 
-        CaptureVideoFrameIfNeeded(includeUi: false, dt);
-        CompleteCaptureIfReady(includeUi: false);
+        _captureAutomation.CaptureVideoFrameIfNeeded(includeUi: false, dt);
+        _captureAutomation.CompleteCaptureIfReady(includeUi: false);
 
         // Render ImGui overlay when the native ImGui context is live. Startup capture and
         // teardown can briefly produce frames where the controller still exists but the
@@ -1564,8 +1568,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             _imGui.Render();
         }
 
-        CaptureVideoFrameIfNeeded(includeUi: true, dt);
-        CompleteCaptureIfReady(includeUi: true);
+        _captureAutomation.CaptureVideoFrameIfNeeded(includeUi: true, dt);
+        _captureAutomation.CompleteCaptureIfReady(includeUi: true);
 
         // The scene cursor is drawn LAST, after ImGui and after both capture taps.
         //
@@ -1757,7 +1761,7 @@ void main() {
 
 
                 if (_showCaptureAutomationWindow)
-                    DrawCaptureAutomationWindow();
+                    _captureAutomation.DrawCaptureAutomationWindow();
 
                 if (_showCameraPathWindow)
                     _cameraPaths.DrawCameraPathWindow();
@@ -1777,7 +1781,7 @@ void main() {
 
         }
 
-        if (_activeVideoRecording?.MarketingTourAttempt?.ActivePresentation is FeatureTourPresentation presentation)
+        if (_captureAutomation._activeVideoRecording?.MarketingTourAttempt?.ActivePresentation is FeatureTourPresentation presentation)
             MarketingTourOverlayRenderer.Draw(presentation);
 
         _forceApplyShellPanelLayout = false;
@@ -1975,8 +1979,8 @@ void main() {
         if (_disposed) return;
         _disposed = true;
 
-        StopVideoRecording("Stopped video recording during shutdown.");
-        StopTaxiRideCamera();
+        _captureAutomation.StopVideoRecording("Stopped video recording during shutdown.");
+        _captureAutomation.StopTaxiRideCamera();
         _mlTraining.ShutdownMlTrainingMonitor();
 
         ISceneRenderer? renderer = _renderer;

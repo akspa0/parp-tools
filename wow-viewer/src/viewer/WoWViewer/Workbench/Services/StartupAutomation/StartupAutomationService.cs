@@ -1,5 +1,6 @@
 using System.Globalization;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.CaptureAutomationService;
 
 namespace WoWViewer;
 
