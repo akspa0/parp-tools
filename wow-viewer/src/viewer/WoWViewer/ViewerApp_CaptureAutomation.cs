@@ -24,9 +24,9 @@ public partial class ViewerApp
 {
     private static readonly string CameraShotPointsPath = Path.Combine(SettingsDir, "camera_shot_points.json");
     private const float MkHarvestViewerValidationMaxVisibleMdxBoundsHeight = 24f;
-    private const int DefaultRequiredSettledFrames = 12;
-    private const int DefaultMaxFramesBeforeCapture = 480;
-    private const int DefaultBatchSettledFrames = 2;
+    internal const int DefaultRequiredSettledFrames = 12;
+    internal const int DefaultMaxFramesBeforeCapture = 480;
+    internal const int DefaultBatchSettledFrames = 2;
 
     private readonly List<CameraShotPoint> _cameraShotPoints = new();
     private readonly Queue<PendingCaptureRequest> _captureQueue = new();
@@ -125,7 +125,7 @@ public partial class ViewerApp
         public bool AllowWindowCloseOnCapture { get; init; }
     }
 
-    private sealed class MkHarvestViewerValidationCaptureTile
+    internal sealed class MkHarvestViewerValidationCaptureTile
     {
         public string TileName { get; set; } = string.Empty;
         public int TileX { get; set; }
@@ -152,7 +152,7 @@ public partial class ViewerApp
         public string OutputPath { get; set; } = string.Empty;
     }
 
-    private sealed class MkHarvestViewerValidationCapturePlan
+    internal sealed class MkHarvestViewerValidationCapturePlan
     {
         public string DatasetRoot { get; set; } = string.Empty;
         public string MapName { get; set; } = string.Empty;
@@ -717,7 +717,7 @@ public partial class ViewerApp
                 _mkHarvestViewerValidationFailed++;
 
             string timeoutNote = request.TimedOutWaitingForScene ? " after scene-settle timeout" : string.Empty;
-            AppendMkHarvestLogLine(
+            _datasetExportDialogs.AppendMkHarvestLogLine(
                 $"{(ok ? "Captured" : "FAILED")} WoWViewer validation minimap {request.CaptureLabel ?? request.Shot.Name}{timeoutNote}: {request.OutputPath}");
 
             if (_activeMkHarvestViewerValidationBatch != null)
@@ -866,20 +866,20 @@ public partial class ViewerApp
                 if (string.Equals(returnMapName, plan.MapName, StringComparison.OrdinalIgnoreCase))
                 {
                     plan.RestoreWorldRequested = true;
-                    AppendMkHarvestLogLine($"Restoring world '{plan.MapName}' before running the WoWViewer validation capture batch.");
+                    _datasetExportDialogs.AppendMkHarvestLogLine($"Restoring world '{plan.MapName}' before running the WoWViewer validation capture batch.");
                     ReturnToLastWorldScene();
                     return;
                 }
             }
 
-            AppendMkHarvestLogLine($"Skipping WoWViewer validation captures because world map '{plan.MapName}' is not currently loaded in the viewer.");
+            _datasetExportDialogs.AppendMkHarvestLogLine($"Skipping WoWViewer validation captures because world map '{plan.MapName}' is not currently loaded in the viewer.");
             _pendingMkHarvestViewerValidationCapturePlan = null;
             return;
         }
 
         if (!string.Equals(_terrainManager.MapName, plan.MapName, StringComparison.OrdinalIgnoreCase))
         {
-            AppendMkHarvestLogLine(
+            _datasetExportDialogs.AppendMkHarvestLogLine(
                 $"Skipping WoWViewer validation captures because the current world '{_terrainManager.MapName}' does not match dataset map '{plan.MapName}'.");
             _pendingMkHarvestViewerValidationCapturePlan = null;
             return;
@@ -897,7 +897,7 @@ public partial class ViewerApp
         if (_gl == null)
         {
             _statusMessage = "Cannot run roof capture: GL context not ready";
-            AppendMkHarvestLogLine(_statusMessage);
+            _datasetExportDialogs.AppendMkHarvestLogLine(_statusMessage);
             _pendingRoofCaptureBatch = null;
             return;
         }
@@ -910,14 +910,14 @@ public partial class ViewerApp
             Directory.CreateDirectory(batch.OutputDir);
             batch.Renderer = new Catalog.ScreenshotRenderer(_gl, _dataSource, _texResolver, _dbcBuild);
             _statusMessage = $"Starting roof batch capture: {batch.AssetPaths.Count} assets -> {batch.OutputDir}";
-            AppendMkHarvestLogLine(_statusMessage);
+            _datasetExportDialogs.AppendMkHarvestLogLine(_statusMessage);
         }
 
         // Process one asset per frame
         if (batch.CurrentIndex >= batch.AssetPaths.Count)
         {
             _statusMessage = $"Roof capture complete: {batch.SuccessCount}/{batch.AssetPaths.Count} succeeded -> {batch.OutputDir}";
-            AppendMkHarvestLogLine(_statusMessage);
+            _datasetExportDialogs.AppendMkHarvestLogLine(_statusMessage);
 
             // Write metadata
             string metaPath = Path.Combine(batch.OutputDir, "roof_capture_metadata.json");
@@ -955,7 +955,7 @@ public partial class ViewerApp
         {
             batch.SuccessCount++;
             _statusMessage = $"[RoofCapture] {batch.CurrentIndex + 1}/{batch.AssetPaths.Count} SKIP (existing) {assetPath}";
-            AppendMkHarvestLogLine(_statusMessage);
+            _datasetExportDialogs.AppendMkHarvestLogLine(_statusMessage);
             batch.CurrentIndex++;
             return;
         }
@@ -963,7 +963,7 @@ public partial class ViewerApp
         Directory.CreateDirectory(assetDir);
 
         _statusMessage = $"[RoofCapture] {batch.CurrentIndex + 1}/{batch.AssetPaths.Count} {assetPath}";
-        AppendMkHarvestLogLine(_statusMessage);
+        _datasetExportDialogs.AppendMkHarvestLogLine(_statusMessage);
 
         string? result;
         if (batch.AllAngles)
@@ -1172,7 +1172,7 @@ public partial class ViewerApp
                 });
         }
 
-        AppendMkHarvestLogLine(
+        _datasetExportDialogs.AppendMkHarvestLogLine(
             $"Started WoWViewer validation capture batch for {plan.Tiles.Count} capture(s). Settled frames: {plan.RequiredSettledFrames} (batch-fast: {plan.BatchSettledFrames}, fast-settle enabled: {plan.FastSettleAfterBatchReady}), max frames: {plan.MaxFramesBeforeCapture}. Viewer chrome is hidden, WL liquids are disabled for all variants, object path filters are disabled, MDX objects taller than {MkHarvestViewerValidationMaxVisibleMdxBoundsHeight:F0} world units are suppressed during the batch, the primary output keeps terrain liquids and visible world objects including doodads, the 'noliquids' sub-folder disables terrain liquids, the 'noobjects' sub-folder hides world objects, the 'objectsonly' sub-folder hides terrain, WDL, liquids, and sky while keeping visible world objects, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
     }
 
@@ -1331,7 +1331,7 @@ public partial class ViewerApp
         if (!string.IsNullOrWhiteSpace(statusMessage))
         {
             _statusMessage = statusMessage;
-            AppendMkHarvestLogLine(statusMessage);
+            _datasetExportDialogs.AppendMkHarvestLogLine(statusMessage);
         }
 
         if (batch.ExitAfterCompletion)
@@ -1490,7 +1490,7 @@ public partial class ViewerApp
             }
         }
 
-        AppendMkHarvestLogLine(
+        _datasetExportDialogs.AppendMkHarvestLogLine(
             $"Object-visibility artifacts: updated {updatedTiles} tile json(s), skipped {skippedTiles} tile(s) without matching captures. {(preferDirectObjectsOnlyMask ? "This build prefers direct object-only silhouettes so early underground object bleed-through is preserved." : "This build prefers with/no-object diffs so terrain occlusion wins over terrain-hidden silhouettes." )} Build={buildVersion}.");
     }
 
@@ -1581,7 +1581,7 @@ public partial class ViewerApp
 
         if (bounds.HasValue)
         {
-            AppendMkHarvestLogLine(
+            _datasetExportDialogs.AppendMkHarvestLogLine(
                 $"Stitched {variantLabel} into {outputPath} using tile bounds {bounds.Value.minX:D2},{bounds.Value.minY:D2} -> {bounds.Value.maxX:D2},{bounds.Value.maxY:D2}.");
         }
     }

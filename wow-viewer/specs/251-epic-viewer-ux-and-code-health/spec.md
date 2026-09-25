@@ -106,3 +106,16 @@ feature. Success = the code an edit touches lives in a file well under the ~2,00
 Unchanged from 228/AGENTS.md §10: behaviour-preserving only; extracted classes take state through
 constructors/parameters and never reach back into god-class internals; the god class keeps one field +
 delegation; receipts per §9.2 including an operator smoke of the moved feature.
+
+## Amendment 2026-09-25 — operator direction: make `ViewerApp` concise
+
+**Operator (2026-09-25), verbatim:** *"continue, so that our ViewerApp is as concise as possible, and
+not a giant headache to edit later on. That's been a hindering factor for the project for a long time,
+so making the core of the viewer's code a bit smaller is a welcome change so we can build it out a bit
+more sane."*
+
+**Recorded scope:** U-01 continues past E3 across the whole `ViewerApp` partial class (measured
+2026-09-25: 42,973 lines in 29 files; `ViewerApp.cs` 16,746). Every cohesive feature cluster moves into
+an owned service class, one extraction per step, in the same way as E1: behaviour-preserving,
+verbatim bodies, build + audit + tests per step, receipts per §9.2. No feature, UI or behaviour change
+rides on any step. E2 (`WorldScene.Render()`) still waits for R-10's after-capture.

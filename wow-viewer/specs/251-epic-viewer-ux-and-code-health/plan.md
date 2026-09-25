@@ -58,3 +58,23 @@ static classes; world-scene state is read only through `IPm4OverlayHost`. Caller
 inside `Render()` stay there (qualified) and move with E2. Receipt:
 [evidence/u01-e1-pm4-extraction-2026-09-25.md](evidence/u01-e1-pm4-extraction-2026-09-25.md).
 R-10 (Epic 249) lands **before** E2, so the performance fix is not entangled with a move of the WMO pass.
+
+## ViewerApp extraction technique (U-01, 2026-09-25)
+
+`ViewerApp` is one partial class whose fields are shared by every feature, and ImGui code passes many
+of them by `ref`. Each extraction therefore:
+
+1. Picks a feature cluster with a Roslyn member map (all partial files) plus a closure: members used
+   only by the cluster move with it, including the fields that are its own state.
+2. Moves the members verbatim into `internal sealed class <Feature>Service` under
+   `Workbench/Services/<Feature>/`, namespace `WoWViewer` (same as `ViewerApp`, so every type name in
+   moved code resolves exactly as before).
+3. Reaches remaining app state only through `IViewerAppHost` (`Workbench/Services/IViewerAppHost.cs`),
+   implemented explicitly by `ViewerApp`. Mutable fields are exposed as `ref`-returning properties, so
+   `ImGui.Checkbox(..., ref _flag)` still works. The service re-declares each used member as a private
+   bridge with its old name, so no moved body changes.
+4. `ViewerApp` keeps one field per service, built in the `ViewerApp()` constructor (composition root);
+   remaining references are rewritten to `_service.Member` by a syntax-aware pass.
+5. Only declaration visibility changes (`private` → `internal`) where the split needs it.
+6. Receipt per step: line-multiset audit (only intended lines differ), full-solution build,
+   warnings and test failure set compared with the step's base.

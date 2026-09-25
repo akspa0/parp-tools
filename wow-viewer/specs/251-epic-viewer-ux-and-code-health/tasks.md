@@ -29,3 +29,13 @@ Re-ordered plan approved 2026-09-23. E1 code landed 2026-09-25; E1 smoke (T003) 
 - [ ] U01-T007 E3 operator smoke.
 - [ ] U01-T008 E4 selection/hover service (228 T004–T011).
 - [ ] U01-T009 E4 operator smoke; update AGENTS.md §10 measured line counts.
+
+### U-01 ViewerApp extraction campaign (operator direction 2026-09-25, spec.md amendment)
+
+- [ ] U01-T010 Extraction tooling + `IViewerAppHost` + composition root; converter dialogs
+  (`ConverterDialogsService`) and dataset-export dialogs (`DatasetExportDialogsService`) out of `ViewerApp.cs`.
+- [ ] U01-T011 Remaining `ViewerApp.cs` clusters (terrain tile I/O, chunk clipboard, weak-signal restore,
+  world-objects panel, placement editing, shell layout, data sources, model loading, settings, menu bar).
+- [ ] U01-T012 Over-budget partial files (`ViewerApp_Sidebars`, `ViewerApp_Pm4Utilities`,
+  `ViewerApp_CaptureAutomation`) and the remaining feature partials.
+- [ ] U01-T013 Operator smoke of every moved surface (menus, dialogs, panels, exports, capture).

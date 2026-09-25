@@ -320,7 +320,7 @@ public partial class ViewerApp
 
     private void QueueStartupValidationCaptureBatch(StartupAutomationRequest request)
     {
-        MkHarvestViewerValidationCapturePlan? plan = BuildMkHarvestViewerValidationCapturePlan(
+        MkHarvestViewerValidationCapturePlan? plan = _datasetExportDialogs.BuildMkHarvestViewerValidationCapturePlan(
             request.ValidationDatasetRoot!,
             request.ValidationOutputDir,
             request.ForceValidationRegeneration,
@@ -331,7 +331,7 @@ public partial class ViewerApp
             request.ValidationBatchSettledFrames);
 
         if (!string.IsNullOrWhiteSpace(statusMessage))
-            AppendMkHarvestLogLine(statusMessage);
+            _datasetExportDialogs.AppendMkHarvestLogLine(statusMessage);
 
         if (plan == null)
             return;
@@ -361,7 +361,7 @@ public partial class ViewerApp
 
         _pendingMkHarvestViewerValidationCapturePlan = plan;
         _mkHarvestViewerValidationQueued = plan.Tiles.Count;
-        AppendMkHarvestLogLine(
+        _datasetExportDialogs.AppendMkHarvestLogLine(
             $"Queued startup validation capture batch: {plan.Tiles.Count} capture(s) at {plan.RequestedResolution}px into {plan.OutputDirectory}.");
     }
 
@@ -439,14 +439,14 @@ private void QueueStartupRoofCapture(StartupAutomationRequest request)
 
         List<string> assetPaths;
         string? assetListPath = request.RoofCaptureAssetListPath;
-        AppendMkHarvestLogLine($"[RoofCapture] Asset list path = '{assetListPath}'");
+        _datasetExportDialogs.AppendMkHarvestLogLine($"[RoofCapture] Asset list path = '{assetListPath}'");
         if (!string.IsNullOrWhiteSpace(assetListPath) && File.Exists(assetListPath))
         {
-            AppendMkHarvestLogLine($"[RoofCapture] Reading asset list from {assetListPath}");
+            _datasetExportDialogs.AppendMkHarvestLogLine($"[RoofCapture] Reading asset list from {assetListPath}");
             string json = File.ReadAllText(assetListPath);
             var list = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.List<string>>(json);
             assetPaths = list ?? new List<string>();
-            AppendMkHarvestLogLine($"[RoofCapture] Found {assetPaths.Count} assets");
+            _datasetExportDialogs.AppendMkHarvestLogLine($"[RoofCapture] Found {assetPaths.Count} assets");
         }
         else
         {
@@ -455,7 +455,7 @@ private void QueueStartupRoofCapture(StartupAutomationRequest request)
         }
 
         _statusMessage = $"Queued roof batch capture: {assetPaths.Count} assets -> {outputDir}";
-        AppendMkHarvestLogLine(_statusMessage);
+        _datasetExportDialogs.AppendMkHarvestLogLine(_statusMessage);
 
         _pendingRoofCaptureBatch = new PendingRoofCaptureBatch
         {
