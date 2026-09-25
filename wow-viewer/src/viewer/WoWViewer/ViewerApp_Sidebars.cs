@@ -765,7 +765,7 @@ public partial class ViewerApp
 
         ImGui.Text($"{_discoveredMaps.Count} maps discovered");
         DrawMapSortModeSelector("##mapListSort");
-        var previewWarmup = GetWdlPreviewWarmupStats();
+        var previewWarmup = _wdlPreview.GetWdlPreviewWarmupStats();
         if (previewWarmup.total > 0)
             ImGui.TextDisabled($"WDL previews: {previewWarmup.ready}/{previewWarmup.total} cached, {previewWarmup.loading} warming, {previewWarmup.failed} failed");
         ImGui.Separator();
@@ -812,7 +812,7 @@ public partial class ViewerApp
                         LoadMapAtDefaultSpawn(map);
                 }
 
-                bool canPreview = hasWdl && CanUseWdlPreviewFeature();
+                bool canPreview = hasWdl && _wdlPreview.CanUseWdlPreviewFeature();
                 WdlPreviewWarmState previewState = canPreview && _wdlPreviewCacheService != null
                     ? _wdlPreviewCacheService.GetState(map.Directory)
                     : (canPreview ? WdlPreviewWarmState.Ready : WdlPreviewWarmState.NotQueued);
@@ -821,7 +821,7 @@ public partial class ViewerApp
                 ImGui.SameLine();
                 if (!canSelectSpawn) ImGui.BeginDisabled();
                 if (ImGui.SmallButton($"Spawn##{map.Directory}") && canSelectSpawn)
-                    OpenWdlPreview(map);
+                    _wdlPreview.OpenWdlPreview(map);
                 if (!canSelectSpawn) ImGui.EndDisabled();
 
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))

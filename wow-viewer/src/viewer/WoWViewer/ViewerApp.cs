@@ -222,7 +222,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private MapDefinition? _selectedMapForPreview;
     private Vector2? _selectedSpawnTile; // WDL tile coordinates (0-63)
     private Vector3? _pendingWorldSpawnOverride;
-    private string _wdlPreviewWarmupStatus = string.Empty;
     private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
     private bool _fullscreenMinimap = false; // M key toggles fullscreen minimap
     private Vector2 _minimapPanOffset = Vector2.Zero; // Pan offset for click-and-drag
@@ -234,7 +233,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
     // Output directories (next to the executable)
     private static readonly string OutputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output");
-    private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
+    internal static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
     internal static readonly string ExportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "export");
     private static readonly string ProjectsDir = Path.Combine(OutputDir, "projects");
     private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
@@ -755,6 +754,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly TaxiAndAreaPoiSelectionService _taxiAndAreaPoi;
     private readonly SceneHoverAndPickService _sceneHoverPick;
     private readonly ShellLayoutService _shellLayout;
+    private readonly WdlPreviewService _wdlPreview;
 
     public ViewerApp()
     {
@@ -768,6 +768,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _taxiAndAreaPoi = new TaxiAndAreaPoiSelectionService(this);
         _sceneHoverPick = new SceneHoverAndPickService(this);
         _shellLayout = new ShellLayoutService(this);
+        _wdlPreview = new WdlPreviewService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -922,6 +923,15 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     float IViewerAppHost.ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth) => ClampFixedSidebarWidth(width, isLeftSidebar, displayWidth);
     float IViewerAppHost.GetTopChromeHeight() => GetTopChromeHeight();
     void IViewerAppHost.SetEditorWorkspaceTask(EditorWorkspaceTask task) => SetEditorWorkspaceTask(task);
+    ref List<MapDefinition> IViewerAppHost.DiscoveredMaps => ref _discoveredMaps;
+    ref Vector3? IViewerAppHost.PendingWorldSpawnOverride => ref _pendingWorldSpawnOverride;
+    ref MapDefinition? IViewerAppHost.SelectedMapForPreview => ref _selectedMapForPreview;
+    ref Vector2? IViewerAppHost.SelectedSpawnTile => ref _selectedSpawnTile;
+    ref bool IViewerAppHost.ShowWdlPreview => ref _showWdlPreview;
+    ref WdlPreviewRenderer? IViewerAppHost.WdlPreviewRenderer => ref _wdlPreviewRenderer;
+    void IViewerAppHost.LoadFileFromDataSource(string virtualPath) => LoadFileFromDataSource(virtualPath);
+    void IViewerAppHost.LoadMapAtDefaultSpawn(MapDefinition map) => LoadMapAtDefaultSpawn(map);
+    string? IViewerAppHost.ResolveMapWdtPath(string mapDirectory) => ResolveMapWdtPath(mapDirectory);
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1666,7 +1676,7 @@ void main() {
             if (_useTabUi)
             {
                 if (_showWdlPreview)
-                    DrawWdlPreviewDialog();
+                    _wdlPreview.DrawWdlPreviewDialog();
                 // All other tools are routed into tab sub-tabs. The
                 // _show*Window flags still exist for users who want the
                 // legacy window, but tab system renders its own sub-tab body.
@@ -1682,7 +1692,7 @@ void main() {
 
                 // WDL Preview (floating window)
                 if (_showWdlPreview)
-                    DrawWdlPreviewDialog();
+                    _wdlPreview.DrawWdlPreviewDialog();
 
                 // Minimap panel
                 if (_shellLayout.IsShellPanelActive(ShellPanelId.Minimap) && !_fullscreenMinimap)
@@ -3948,7 +3958,7 @@ void main() {
         }
 
         _autoOpenWorldMapsPanel = _discoveredMaps.Count > 0 && previousDiscoveredMapCount == 0;
-        WarmDiscoveredWdlPreviews();
+        _wdlPreview.WarmDiscoveredWdlPreviews();
     }
 
     private void LoadMpqDataSource(string gamePath, string? listfilePath, string? explicitBuildVersion = null, bool deferWorldReload = false)
@@ -3965,11 +3975,11 @@ void main() {
             _loggedStandaloneMissingSkinPaths.Clear();
             _discoveredMaps.Clear();
             _areaTableService = null;
-            ResetWdlPreviewSupport();
+            _wdlPreview.ResetWdlPreviewSupport();
             _dataSource?.Dispose();
             _dataSource = new MpqDataSource(gamePath, resolvedListfilePath);
             _statusMessage = $"Loaded: {_dataSource.Name}";
-            InitializeWdlPreviewSupport();
+            _wdlPreview.InitializeWdlPreviewSupport();
 
             // Load DBC tables directly from MPQ for replaceable texture resolution
             _texResolver = new ReplaceableTextureResolver();
@@ -4621,8 +4631,8 @@ void main() {
         _lastLooseOverlayPath = selectedFullPath;
         _standaloneSkinPathCache.Clear();
     _loggedStandaloneMissingSkinPaths.Clear();
-        ResetWdlPreviewSupport();
-        InitializeWdlPreviewSupport();
+        _wdlPreview.ResetWdlPreviewSupport();
+        _wdlPreview.InitializeWdlPreviewSupport();
         InitializeMinimapSupport();
         RefreshDiscoveredMaps();
         RefreshFileList();
@@ -4767,19 +4777,6 @@ void main() {
         return null;
     }
 
-    private void InitializeWdlPreviewSupport()
-    {
-        if (_dataSource == null)
-            return;
-
-        string cacheIdentity = BuildWdlPreviewCacheIdentity();
-        string cacheSegment = BuildCacheSegment(cacheIdentity);
-
-        _wdlPreviewCacheService?.Dispose();
-        _wdlPreviewCacheService = new WdlPreviewCacheService(_dataSource, Path.Combine(CacheDir, "wdl-preview", cacheSegment));
-        _wdlPreviewWarmupStatus = string.Empty;
-    }
-
     private void InitializeMinimapSupport()
     {
         _md5Index = null;
@@ -4812,55 +4809,9 @@ void main() {
         _minimapRenderer = null;
         if (_dataSource != null)
         {
-            string minimapCacheSegment = BuildCacheSegment(BuildWdlPreviewCacheIdentity());
+            string minimapCacheSegment = WdlPreviewService.BuildCacheSegment(_wdlPreview.BuildWdlPreviewCacheIdentity());
             _minimapRenderer = new MinimapRenderer(_gl, _dataSource, _md5Index, Path.Combine(CacheDir, "minimap", minimapCacheSegment));
         }
-    }
-
-    private static string BuildCacheSegment(string cacheIdentity)
-    {
-        string cacheSegment = string.IsNullOrWhiteSpace(cacheIdentity)
-            ? "default"
-            : Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(cacheIdentity))).ToLowerInvariant();
-        return string.IsNullOrWhiteSpace(cacheSegment) ? "default" : cacheSegment;
-    }
-
-    private string BuildWdlPreviewCacheIdentity()
-    {
-        if (_dataSource is MpqDataSource mpqDataSource)
-        {
-            var parts = new List<string> { mpqDataSource.GamePath };
-            parts.AddRange(mpqDataSource.OverlayRoots.OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
-            return string.Join("||", parts);
-        }
-
-        return _dataSource?.Name ?? "default";
-    }
-
-    private void ResetWdlPreviewSupport()
-    {
-        _wdlPreviewCacheService?.Dispose();
-        _wdlPreviewCacheService = null;
-        _wdlPreviewWarmupStatus = string.Empty;
-        _wdlPreviewRenderer?.ClearPreview();
-    }
-
-    private void WarmDiscoveredWdlPreviews()
-    {
-        if (_wdlPreviewCacheService == null || _discoveredMaps.Count == 0)
-            return;
-
-        var mapsWithWdl = _discoveredMaps.Where(map => map.HasWdl).ToList();
-        if (mapsWithWdl.Count == 0)
-            return;
-
-        _wdlPreviewCacheService.WarmMaps(mapsWithWdl);
-        _wdlPreviewWarmupStatus = $"Warming {mapsWithWdl.Count} WDL previews in the background.";
-    }
-
-    private bool CanUseWdlPreviewFeature()
-    {
-        return _dataSource != null;
     }
 
     private static IEnumerable<string> EnumerateMapWdtCandidates(string mapDirectory)
@@ -4915,173 +4866,6 @@ void main() {
         _showWdlPreview = false;
 
         LoadFileFromDataSource(resolvedWdtPath);
-    }
-
-    private void LoadSelectedPreviewMapAtSpawn()
-    {
-        if (_selectedMapForPreview == null || !_selectedMapForPreview.HasWdt)
-            return;
-
-        string? resolvedWdtPath = ResolveMapWdtPath(_selectedMapForPreview.Directory);
-        if (string.IsNullOrWhiteSpace(resolvedWdtPath))
-        {
-            _statusMessage = $"Failed to resolve WDT for {_selectedMapForPreview.Directory}.";
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"[WorldLoad] Failed to resolve map WDT for {_selectedMapForPreview.Directory} from spawn preview.");
-            return;
-        }
-
-        _pendingWorldSpawnOverride = _selectedSpawnTile.HasValue && _wdlPreviewRenderer?.HasPreview == true
-            ? _wdlPreviewRenderer.TileToWorldPosition(
-                (int)_selectedSpawnTile.Value.X,
-                (int)_selectedSpawnTile.Value.Y)
-            : null;
-
-        LoadFileFromDataSource(resolvedWdtPath);
-
-        _showWdlPreview = false;
-    }
-
-    private void OpenWdlPreview(MapDefinition map)
-    {
-        if (!map.HasWdt)
-            return;
-
-        if (!map.HasWdl || !CanUseWdlPreviewFeature())
-        {
-            LoadMapAtDefaultSpawn(map);
-            return;
-        }
-
-        _selectedMapForPreview = map;
-        _selectedSpawnTile = null;
-        _showWdlPreview = true;
-
-        if (_wdlPreviewRenderer == null)
-            _wdlPreviewRenderer = new WdlPreviewRenderer(_gl);
-
-        TryLoadSelectedWdlPreviewFromCache(map.Directory);
-
-        if (!_wdlPreviewRenderer.HasPreview && _wdlPreviewCacheService != null)
-        {
-            if (_wdlPreviewCacheService.TryBuildPreviewNow(map.Directory, out var previewData, out var error) && previewData != null)
-            {
-                _wdlPreviewRenderer.LoadPreview(previewData);
-                _wdlPreviewWarmupStatus = string.Empty;
-            }
-            else if (!string.IsNullOrWhiteSpace(error))
-            {
-                _wdlPreviewWarmupStatus = error;
-            }
-        }
-
-        if (_wdlPreviewRenderer.HasPreview)
-        {
-            _showWdlPreview = true;
-            return;
-        }
-
-        if (GetSelectedWdlPreviewState() == WdlPreviewWarmState.Failed)
-        {
-            ViewerLog.Info(ViewerLog.Category.Terrain,
-                $"[WDL] Preview unavailable for {map.Directory}; using default map spawn.");
-            LoadMapAtDefaultSpawn(map);
-            return;
-        }
-    }
-
-    private void TryLoadSelectedWdlPreviewFromCache(string mapDirectory)
-    {
-        if (_wdlPreviewRenderer == null)
-            return;
-
-        if (_wdlPreviewCacheService != null && _wdlPreviewCacheService.TryGetPreview(mapDirectory, out var previewData) && previewData != null)
-        {
-            _wdlPreviewRenderer.LoadPreview(previewData);
-            _wdlPreviewWarmupStatus = string.Empty;
-            return;
-        }
-
-        _wdlPreviewRenderer.ClearPreview();
-
-        if (_wdlPreviewCacheService != null)
-        {
-            _wdlPreviewCacheService.EnsurePrefetch(mapDirectory);
-            var state = _wdlPreviewCacheService.GetState(mapDirectory);
-            _wdlPreviewWarmupStatus = state switch
-            {
-                WdlPreviewWarmState.Ready => string.Empty,
-                WdlPreviewWarmState.Failed => _wdlPreviewCacheService.GetError(mapDirectory) ?? $"Failed to prepare preview for {mapDirectory}.",
-                _ => $"Preparing WDL preview for {mapDirectory}...",
-            };
-            return;
-        }
-
-        if (_dataSource != null)
-        {
-            bool loaded = _wdlPreviewRenderer.LoadWdl(_dataSource, mapDirectory);
-            _wdlPreviewWarmupStatus = loaded ? string.Empty : _wdlPreviewRenderer.LastError ?? string.Empty;
-        }
-    }
-
-    private WdlPreviewWarmState GetSelectedWdlPreviewState()
-    {
-        if (_wdlPreviewRenderer?.HasPreview == true)
-            return WdlPreviewWarmState.Ready;
-
-        if (_selectedMapForPreview == null)
-            return WdlPreviewWarmState.NotQueued;
-
-        if (_wdlPreviewCacheService != null)
-            return _wdlPreviewCacheService.GetState(_selectedMapForPreview.Directory);
-
-        return string.IsNullOrWhiteSpace(_wdlPreviewRenderer?.LastError)
-            ? WdlPreviewWarmState.Loading
-            : WdlPreviewWarmState.Failed;
-    }
-
-    private string? GetSelectedWdlPreviewError()
-    {
-        if (_selectedMapForPreview == null)
-            return null;
-
-        if (_wdlPreviewCacheService != null)
-            return _wdlPreviewCacheService.GetError(_selectedMapForPreview.Directory);
-
-        return _wdlPreviewRenderer?.LastError;
-    }
-
-    private (int total, int ready, int loading, int failed) GetWdlPreviewWarmupStats()
-    {
-        if (_wdlPreviewCacheService == null || _discoveredMaps.Count == 0)
-            return (0, 0, 0, 0);
-
-        int total = 0;
-        int ready = 0;
-        int loading = 0;
-        int failed = 0;
-
-        foreach (var map in _discoveredMaps)
-        {
-            if (!map.HasWdl)
-                continue;
-
-            total++;
-            switch (_wdlPreviewCacheService.GetState(map.Directory))
-            {
-                case WdlPreviewWarmState.Ready:
-                    ready++;
-                    break;
-                case WdlPreviewWarmState.Loading:
-                    loading++;
-                    break;
-                case WdlPreviewWarmState.Failed:
-                    failed++;
-                    break;
-            }
-        }
-
-        return (total, ready, loading, failed);
     }
 
     /// <summary>
@@ -6512,7 +6296,7 @@ void main() {
             // version shadow the 0.5.3 alphaWDT from another, silently feeding the terrain
             // pipeline a WDT that was never from the active client (Spec 222, 2026-09-04).
             Directory.CreateDirectory(CacheDir);
-            string clientCacheSegment = BuildCacheSegment(BuildWdlPreviewCacheIdentity());
+            string clientCacheSegment = WdlPreviewService.BuildCacheSegment(_wdlPreview.BuildWdlPreviewCacheIdentity());
             var cachePath = Path.Combine(CacheDir, clientCacheSegment, _loadedFileName!);
             Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
             File.WriteAllBytes(cachePath, data);

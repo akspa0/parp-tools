@@ -264,10 +264,10 @@ public partial class ViewerApp
             _loggedStandaloneMissingSkinPaths.Clear();
             _discoveredMaps.Clear();
             _areaTableService = null;
-            ResetWdlPreviewSupport();
+            _wdlPreview.ResetWdlPreviewSupport();
             _dataSource?.Dispose();
             _dataSource = new CascDataSource(storages, listfile);
-            InitializeWdlPreviewSupport();
+            _wdlPreview.InitializeWdlPreviewSupport();
 
             _texResolver = new ReplaceableTextureResolver();
             _texResolver.SetDataSource(_dataSource);

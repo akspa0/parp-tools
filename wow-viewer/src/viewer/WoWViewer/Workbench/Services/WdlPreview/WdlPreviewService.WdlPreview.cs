@@ -1,15 +1,16 @@
 using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Terrain;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-/// <summary>
-/// Partial class containing the WDL preview dialog for map spawn point selection.
-/// </summary>
-public partial class ViewerApp
+// WdlPreviewService: members moved from ViewerApp_WdlPreview.cs; this file keeps that file's using directives so every
+// name in the moved code resolves exactly as it did there.
+// Original file note: WDL preview dialog for map spawn point selection.
+internal sealed partial class WdlPreviewService
 {
-    private void DrawWdlPreviewDialog()
+    internal void DrawWdlPreviewDialog()
     {
         if (_selectedMapForPreview == null || _wdlPreviewRenderer == null)
         {

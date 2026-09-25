@@ -206,5 +206,14 @@ internal interface IViewerAppHost
     float ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth);
     float GetTopChromeHeight();
     void SetEditorWorkspaceTask(EditorWorkspaceTask task);
+    ref List<MapDefinition> DiscoveredMaps { get; }
+    ref Vector3? PendingWorldSpawnOverride { get; }
+    ref MapDefinition? SelectedMapForPreview { get; }
+    ref Vector2? SelectedSpawnTile { get; }
+    ref bool ShowWdlPreview { get; }
+    ref WdlPreviewRenderer? WdlPreviewRenderer { get; }
+    void LoadFileFromDataSource(string virtualPath);
+    void LoadMapAtDefaultSpawn(MapDefinition map);
+    string? ResolveMapWdtPath(string mapDirectory);
     // HOST-IFACE-END
 }
