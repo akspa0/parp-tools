@@ -219,7 +219,7 @@ public partial class ViewerApp
 
         // The save queue (per-source output targets, Save Current Source / Save All Pending) is the
         // ONE save path for authored placement edits — shared with Scene > Placements.
-        DrawPlacementSaveQueueActions(includeCurrentSourceSave: true);
+        _placementEditing.DrawPlacementSaveQueueActions(includeCurrentSourceSave: true);
 
         ImGui.Separator();
 
@@ -250,7 +250,7 @@ public partial class ViewerApp
         {
             if (_worldScene.TryUpdateSelectedPlacementPosition(position, out string error))
             {
-                StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, position: position);
+                _placementEditing.StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, position: position);
                 RecordAuthoringSessionOperation(
                     new PlacementMoveOperation(
                         $"move-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
@@ -271,7 +271,7 @@ public partial class ViewerApp
         Vector3 rotation = selected.PlacementRotation;
         if (ImGui.InputFloat3("Rotation", ref rotation, "%.3f"))
         {
-            StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, rotation: rotation);
+            _placementEditing.StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, rotation: rotation);
             RecordAuthoringSessionOperation(
                 new PlacementRotateOperation(
                     $"rotate-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
@@ -287,7 +287,7 @@ public partial class ViewerApp
         float scale = selected.PlacementScale;
         if (ImGui.InputFloat("Scale", ref scale, 0.01f))
         {
-            StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, scale: scale);
+            _placementEditing.StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, scale: scale);
             RecordAuthoringSessionOperation(
                 new PlacementScaleOperation(
                     $"scale-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
@@ -302,7 +302,7 @@ public partial class ViewerApp
 
         if (ImGui.Button("Delete Placement"))
         {
-            StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, delete: true);
+            _placementEditing.StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, delete: true);
             RecordAuthoringSessionOperation(
                 new PlacementDeleteOperation(
                     $"delete-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",

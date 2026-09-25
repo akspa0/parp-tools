@@ -312,7 +312,7 @@ public partial class ViewerApp
         if (ImGui.Button("New Project Folder##publish"))
             StartNewEditorProjectOutputDirectory();
 
-        DrawPlacementSaveQueueActions(includeCurrentSourceSave: false);
+        _placementEditing.DrawPlacementSaveQueueActions(includeCurrentSourceSave: false);
         ImGui.Separator();
 
         if (ImGui.Button("Capture Current (No UI)"))
@@ -393,11 +393,11 @@ public partial class ViewerApp
 
     private string GetWorkspaceSaveStatusSummary()
     {
-        int pendingEditCount = GetPendingPlacementEditCount();
+        int pendingEditCount = _placementEditing.GetPendingPlacementEditCount();
         if (pendingEditCount > 0)
         {
-            int pendingSourceCount = GetPendingPlacementSourceCount();
-            int missingTargets = GetPendingPlacementSourceCountMissingTargets();
+            int pendingSourceCount = _placementEditing.GetPendingPlacementSourceCount();
+            int missingTargets = _placementEditing.GetPendingPlacementSourceCountMissingTargets();
             string pendingSummary = $"{pendingEditCount} pending placement move(s) across {pendingSourceCount} ADT source(s) in {DescribeEditorProjectOutputDirectory()}.";
             return missingTargets > 0
                 ? $"{pendingSummary} {missingTargets} source(s) still need an output .adt path."

@@ -132,5 +132,10 @@ internal interface IViewerAppHost
     string GetEditorProjectName(string? fallbackName = null);
     string? GetEditorProjectSourceKey();
     bool TryPickTerrainChunkUnderMouse(TerrainRenderer renderer, out TerrainRenderer.TerrainChunkInfo info);
+    ref string EditorProjectOutputDir { get; }
+    ref string SelectedPlacementSaveStatus { get; }
+    ref string? SelectedPlacementSaveTargetPath { get; }
+    ref WorldScene? WorldScene { get; }
+    void RefreshSelectedWorldObjectInfo();
     // HOST-IFACE-END
 }

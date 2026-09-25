@@ -5490,7 +5490,7 @@ public partial class ViewerApp
         ImGui.Spacing();
         ImGui.Text("Staged Placement Actions");
         ImGui.Separator();
-        DrawPlacementSaveQueueActions(includeCurrentSourceSave: true);
+        _placementEditing.DrawPlacementSaveQueueActions(includeCurrentSourceSave: true);
 
         ImGui.Spacing();
         ImGui.Text("Quick Export & Conversion");
