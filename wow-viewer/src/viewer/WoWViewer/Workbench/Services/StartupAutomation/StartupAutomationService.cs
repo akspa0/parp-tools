@@ -1,9 +1,25 @@
 using System.Globalization;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-public partial class ViewerApp
+/// <summary>
+/// Startup automation: command-line driven map loads, captures and validation batches.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
+/// </summary>
+internal sealed partial class StartupAutomationService
 {
+    private readonly IViewerAppHost _host;
+
+    internal StartupAutomationService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+    // Host bridge: see StartupAutomationService.Host.cs.
+
     private sealed class StartupAutomationRequest
     {
         public string? GamePath { get; init; }
@@ -32,7 +48,7 @@ public partial class ViewerApp
         public bool RoofCaptureAllAngles { get; init; }
     }
 
-    private sealed class PendingRoofCaptureBatch
+    internal sealed class PendingRoofCaptureBatch
     {
         public required List<string> AssetPaths { get; init; }
         public required string OutputDir { get; init; }
@@ -45,9 +61,9 @@ public partial class ViewerApp
         public List<Dictionary<string, object>> Metadata { get; set; } = new();
     }
 
-    private PendingRoofCaptureBatch? _pendingRoofCaptureBatch;
+    internal PendingRoofCaptureBatch? _pendingRoofCaptureBatch;
 
-    private void ApplyStartupAutomation(string[]? initialArgs)
+    internal void ApplyStartupAutomation(string[]? initialArgs)
     {
         StartupAutomationRequest request = ParseStartupAutomationRequest(initialArgs, out string? legacyPath);
 

@@ -29,6 +29,7 @@ public partial class ViewerApp
     internal const int DefaultBatchSettledFrames = 2;
 
     private readonly List<CameraShotPoint> _cameraShotPoints = new();
+    List<CameraShotPoint> IViewerAppHost.CameraShotPoints => _cameraShotPoints;
     private readonly Queue<PendingCaptureRequest> _captureQueue = new();
     private PendingCaptureRequest? _activeCaptureRequest;
     private MkHarvestViewerValidationCapturePlan? _pendingMkHarvestViewerValidationCapturePlan;
@@ -78,7 +79,7 @@ public partial class ViewerApp
     private static readonly string[] VideoContainerExtensions = { ".mp4", ".mov" };
     private static readonly string[] VideoContainerLabels = { "MP4 (H.264)", "MOV (H.264)" };
 
-    private sealed class CameraShotPoint
+    internal sealed class CameraShotPoint
     {
         public string Name { get; set; } = "shot";
         public string MapName { get; set; } = "unknown";
@@ -118,7 +119,7 @@ public partial class ViewerApp
         public bool ApplyArcheologyPlayback { get; set; }
     }
 
-    private sealed class CaptureQueueOptions
+    internal sealed class CaptureQueueOptions
     {
         public string? OutputPathOverride { get; init; }
         public bool WaitForSceneReady { get; init; }
@@ -523,6 +524,7 @@ public partial class ViewerApp
                 AllowWindowCloseOnCapture = allowWindowCloseOnCapture,
             });
     }
+    void IViewerAppHost.QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture, int captureAfterFrames, bool allowWindowCloseOnCapture) => QueueCurrentCameraCapture(includeUi, exitAfterCapture, captureAfterFrames, allowWindowCloseOnCapture);
 
     private void EnqueueFilteredShotCaptures(bool includeUi)
     {
@@ -554,6 +556,8 @@ public partial class ViewerApp
 
     private void EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture = false)
         => EnqueueShotCapture(shot, includeUi, exitAfterCapture, null);
+    void IViewerAppHost.EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture, CaptureQueueOptions? options) => EnqueueShotCapture(shot, includeUi, exitAfterCapture, options);
+    void IViewerAppHost.EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture) => EnqueueShotCapture(shot, includeUi, exitAfterCapture);
 
     private void EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture, CaptureQueueOptions? options)
     {
@@ -901,18 +905,18 @@ public partial class ViewerApp
 
     private void PromotePendingRoofCaptureBatch()
     {
-        if (_pendingRoofCaptureBatch == null)
+        if (_startupAutomation._pendingRoofCaptureBatch == null)
             return;
 
         if (_gl == null)
         {
             _statusMessage = "Cannot run roof capture: GL context not ready";
             _datasetExportDialogs.AppendMkHarvestLogLine(_statusMessage);
-            _pendingRoofCaptureBatch = null;
+            _startupAutomation._pendingRoofCaptureBatch = null;
             return;
         }
 
-        var batch = _pendingRoofCaptureBatch;
+        var batch = _startupAutomation._pendingRoofCaptureBatch;
 
         // Initialize on first call
         if (batch.Renderer == null)
@@ -936,7 +940,7 @@ public partial class ViewerApp
                 new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
 
             batch.Renderer.Dispose();
-            _pendingRoofCaptureBatch = null;
+            _startupAutomation._pendingRoofCaptureBatch = null;
 
             if (batch.ExitAfterCompletion)
                 _window.Close();
@@ -1503,6 +1507,7 @@ public partial class ViewerApp
         _datasetExportDialogs.AppendMkHarvestLogLine(
             $"Object-visibility artifacts: updated {updatedTiles} tile json(s), skipped {skippedTiles} tile(s) without matching captures. {(preferDirectObjectsOnlyMask ? "This build prefers direct object-only silhouettes so early underground object bleed-through is preserved." : "This build prefers with/no-object diffs so terrain occlusion wins over terrain-hidden silhouettes." )} Build={buildVersion}.");
     }
+    void IViewerAppHost.GenerateMkHarvestViewerValidationObjectArtifacts(string datasetRoot, string withObjectsOutputDirectory, string noObjectsOutputDirectory, string objectsOnlyOutputDirectory) => GenerateMkHarvestViewerValidationObjectArtifacts(datasetRoot, withObjectsOutputDirectory, noObjectsOutputDirectory, objectsOnlyOutputDirectory);
 
     private static bool ShouldPreferDirectObjectsOnlyMask(string buildVersion)
     {

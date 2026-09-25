@@ -477,5 +477,11 @@ internal interface IViewerAppHost
     ref TerrainAnalysisPreviewTexture? TerrainAnalysisGlobalTexture { get; }
     ref TerrainAnalysisPreviewTexture? TerrainAnalysisLocalTexture { get; }
     ref double CurrentFps { get; }
+    List<CameraShotPoint> CameraShotPoints { get; }
+    DatasetExportDialogsService DatasetExportDialogs { get; }
+    void EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture = false);
+    void EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture, CaptureQueueOptions? options);
+    void GenerateMkHarvestViewerValidationObjectArtifacts(string datasetRoot, string withObjectsOutputDirectory, string noObjectsOutputDirectory, string objectsOnlyOutputDirectory);
+    void QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture = false, int captureAfterFrames = 1, bool allowWindowCloseOnCapture = false);
     // HOST-IFACE-END
 }

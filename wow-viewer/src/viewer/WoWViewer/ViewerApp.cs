@@ -637,6 +637,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly MlTrainingService _mlTraining;
     private readonly TerrainAnalysisService _terrainAnalysis;
     private readonly MinimapAndStatusService _minimapAndStatus;
+    private readonly StartupAutomationService _startupAutomation;
 
     public ViewerApp()
     {
@@ -686,6 +687,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _mlTraining = new MlTrainingService(this);
         _terrainAnalysis = new TerrainAnalysisService(this);
         _minimapAndStatus = new MinimapAndStatusService(this);
+        _startupAutomation = new StartupAutomationService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1028,6 +1030,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisGlobalTexture => ref _terrainAnalysisGlobalTexture;
     ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisLocalTexture => ref _terrainAnalysisLocalTexture;
     ref double IViewerAppHost.CurrentFps => ref _currentFps;
+    DatasetExportDialogsService IViewerAppHost.DatasetExportDialogs => _datasetExportDialogs;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1142,7 +1145,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             };
         }
 
-        ApplyStartupAutomation(initialArgs);
+        _startupAutomation.ApplyStartupAutomation(initialArgs);
     }
 
     private void OnUpdate(double dt)
