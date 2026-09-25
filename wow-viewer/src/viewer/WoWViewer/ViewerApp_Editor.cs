@@ -29,9 +29,7 @@ namespace WoWViewer;
 public partial class ViewerApp
 {
     private EditorHost? _editorHost;
-    ref EditorHost? IViewerAppHost.EditorHost => ref _editorHost;
     private EditorSession? _editorSession;
-    ref EditorSession? IViewerAppHost.EditorSession => ref _editorSession;
     private EditorSceneReaderAdapter? _editorSceneReader;
     private EditorLogAdapter? _editorLog;
     private string _reconciliationPm4Path = string.Empty;
@@ -51,7 +49,6 @@ public partial class ViewerApp
             _editorPages = new Workbench.Pages.EditorWorkbenchPages(new Workbench.Pages.ViewerAppContext(this));
         return _editorPages;
     }
-    Workbench.Pages.EditorWorkbenchPages IViewerAppHost.EnsureEditorPages() => EnsureEditorPages();
 
     void Workbench.Pages.IEditorPageHost.DrawTasksAndWorkspace() => _editorPanels.DrawArchaeologyEditorTasksSubTab();
     void Workbench.Pages.IEditorPageHost.DrawObjectLibrary() => _editorPanels.DrawRosettaObjectLibrarySubTab();
@@ -83,7 +80,6 @@ public partial class ViewerApp
         _editorSceneReader = new EditorSceneReaderAdapter(this);
         _editorSession = new EditorSession(new EditorApplierAdapter(this), _editorLog, _editorProjectOutputDir);
     }
-    void IViewerAppHost.EnsureEditorHost() => EnsureEditorHost();
 
     /// <summary>Adapts the live scene into the editor bridge snapshot.</summary>
     private sealed class EditorSceneReaderAdapter : IEditorSceneReader

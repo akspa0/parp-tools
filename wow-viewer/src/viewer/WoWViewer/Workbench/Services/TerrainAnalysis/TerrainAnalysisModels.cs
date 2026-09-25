@@ -9,10 +9,6 @@ using SixLabors.ImageSharp.PixelFormats;
 
 namespace WoWViewer;
 
-public partial class ViewerApp
-{
-}
-
 sealed class TerrainHiddenTileCandidate
 {
     public (int tileX, int tileY) Tile { get; init; }

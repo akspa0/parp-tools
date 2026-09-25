@@ -81,5 +81,4 @@ public partial class ViewerApp
             _ => ViewerKeyContext.Global,
         };
     }
-    ViewerKeyContext IViewerAppHost.GetActiveKeyContext() => GetActiveKeyContext();
 }
