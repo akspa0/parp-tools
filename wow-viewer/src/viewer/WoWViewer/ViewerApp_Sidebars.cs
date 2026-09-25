@@ -24,29 +24,4 @@ public partial class ViewerApp
     private UtilitiesBottomTab? _pendingQuickUtilityPage;
     private UtilitiesBottomTab? _legacyUtilityPage;
     private bool _legacyUtilityScrollPending;
-
-    internal static float GetUniformListRowHeight()
-    {
-        return MathF.Max(ImGui.GetTextLineHeightWithSpacing(), ImGui.GetFrameHeightWithSpacing());
-    }
-
-    internal static void GetVisibleListRange(int itemCount, float rowHeight, out int startIndex, out int endIndex)
-    {
-        if (itemCount <= 0)
-        {
-            startIndex = 0;
-            endIndex = 0;
-            return;
-        }
-
-        float safeRowHeight = MathF.Max(1f, rowHeight);
-        float scrollY = ImGui.GetScrollY();
-        float windowHeight = ImGui.GetWindowHeight();
-        const int overscan = 4;
-
-        startIndex = Math.Max((int)MathF.Floor(scrollY / safeRowHeight) - overscan, 0);
-        endIndex = Math.Min((int)MathF.Ceiling((scrollY + windowHeight) / safeRowHeight) + overscan, itemCount);
-        if (endIndex < startIndex)
-            endIndex = startIndex;
-    }
 }

@@ -14,6 +14,7 @@ using WoWViewer.Population;
 using WoWViewer.UI;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.ImGuiListLayout;
 using static WoWViewer.WorkspacesService;
 
 namespace WoWViewer;
