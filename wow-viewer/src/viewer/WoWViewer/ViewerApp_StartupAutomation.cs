@@ -77,7 +77,7 @@ public partial class ViewerApp
         if (string.IsNullOrWhiteSpace(startupTarget))
             startupTarget = legacyPath;
 
-        PrepareStandaloneCharacterCustomizationForNextLoad(request.CharacterHairVariationId, request.CharacterFacialHairVariationId);
+        _modelLoader.PrepareStandaloneCharacterCustomizationForNextLoad(request.CharacterHairVariationId, request.CharacterFacialHairVariationId);
 
         if (!string.IsNullOrWhiteSpace(startupTarget))
             LoadStartupTarget(startupTarget);
@@ -383,13 +383,13 @@ public partial class ViewerApp
     {
         if (File.Exists(startupTarget))
         {
-            LoadFileFromDisk(Path.GetFullPath(startupTarget));
+            _modelLoader.LoadFileFromDisk(Path.GetFullPath(startupTarget));
             return;
         }
 
         if (_dataSource != null)
         {
-            LoadFileFromDataSource(startupTarget);
+            _modelLoader.LoadFileFromDataSource(startupTarget);
             return;
         }
 

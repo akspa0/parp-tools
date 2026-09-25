@@ -106,7 +106,7 @@ public partial class ViewerApp
         }
 
         string virtualPath = $"World\\Maps\\{mapName}\\{mapName}.wdt";
-        LoadFileFromDataSource(virtualPath);
+        _modelLoader.LoadFileFromDataSource(virtualPath);
 
         float camX = WoWViewer.Rendering.WoWConstants.MapOrigin - (baseTileX + tileCols / 2f) * WoWViewer.Rendering.WoWConstants.ChunkSize;
         float camY = WoWViewer.Rendering.WoWConstants.MapOrigin - (baseTileY + tileRows / 2f) * WoWViewer.Rendering.WoWConstants.ChunkSize;
@@ -1654,7 +1654,7 @@ public partial class ViewerApp
                         ModelPath = _rosettaSelectedAsset.AssetPath,
                         Name = Path.GetFileName(_rosettaSelectedAsset.AssetPath)
                     };
-                    OnCatalogLoadModel(_rosettaSelectedAsset.AssetPath, isWmo, entry);
+                    _modelLoader.OnCatalogLoadModel(_rosettaSelectedAsset.AssetPath, isWmo, entry);
                     _statusMessage = $"Inspecting 3D model: {_rosettaSelectedAsset.AssetPath}";
                 }
                 ImGui.SameLine();

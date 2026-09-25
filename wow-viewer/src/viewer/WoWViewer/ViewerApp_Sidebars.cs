@@ -892,7 +892,7 @@ public partial class ViewerApp
         if (TryGetSelectedBrowserAssetPath(out string selectedAssetPath))
         {
             if (ImGui.Button("Open Selected"))
-                LoadFileFromDataSource(selectedAssetPath);
+                _modelLoader.LoadFileFromDataSource(selectedAssetPath);
 
             ImGui.SameLine();
             if (ImGui.Button("Copy Path"))
@@ -940,7 +940,7 @@ public partial class ViewerApp
                 {
                     _selectedFileIndex = i;
                     if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        LoadFileFromDataSource(file);
+                        _modelLoader.LoadFileFromDataSource(file);
                 }
 
                 if (ImGui.IsItemHovered())
@@ -2161,7 +2161,7 @@ public partial class ViewerApp
 
         if (_renderer is IModelRenderer standaloneModelRenderer)
         {
-            DrawStandaloneCharacterVariationControls(standaloneModelRenderer);
+            _modelLoader.DrawStandaloneCharacterVariationControls(standaloneModelRenderer);
         }
     }
 
@@ -2382,93 +2382,6 @@ public partial class ViewerApp
                 }
             },
             defaultFileName);
-    }
-
-    private void DrawStandaloneCharacterVariationControls(IModelRenderer renderer)
-    {
-        string? modelPath = (renderer as MdxRenderer)?.ModelVirtualPath
-            ?? (renderer as M2Renderer)?.SourceModelPath
-            ?? _standaloneCharacterCustomizationModelPath;
-        if (string.IsNullOrWhiteSpace(modelPath) || _texResolver == null)
-            return;
-
-        string normalizedPath = modelPath.Replace('/', '\\');
-        if (!string.Equals(_standaloneCharacterCustomizationModelPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
-        {
-            bool isM2 = renderer is M2Renderer || (renderer as MdxRenderer)?.IsM2AdapterModel == true;
-            RefreshStandaloneCharacterCustomizationState(normalizedPath, isM2AdapterModel: isM2);
-        }
-
-        if (string.IsNullOrWhiteSpace(_standaloneCharacterCustomizationModelPath))
-            return;
-
-        bool hasHairOptions = _standaloneCharacterHairVariationIds.Count > 0;
-        bool hasFacialOptions = _standaloneCharacterFacialHairVariationIds.Count > 0;
-        if (!hasHairOptions && !hasFacialOptions)
-            return;
-
-        ImGui.Separator();
-        ImGui.Text("Character Variants:");
-        ImGui.TextDisabled("Raw DBC variation ids for standalone classic character MDX inspection.");
-
-        bool changed = false;
-        if (hasHairOptions)
-            changed |= DrawStandaloneCharacterVariationCombo("Hair VariationId", "##StandaloneCharacterHairVariation", _standaloneCharacterHairVariationIds, ref _standaloneCharacterHairVariationOverride);
-
-        if (hasFacialOptions)
-            changed |= DrawStandaloneCharacterVariationCombo("Facial VariationId", "##StandaloneCharacterFacialVariation", _standaloneCharacterFacialHairVariationIds, ref _standaloneCharacterFacialHairVariationOverride);
-
-        if ((_standaloneCharacterHairVariationOverride >= 0 || _standaloneCharacterFacialHairVariationOverride >= 0)
-            && ImGui.Button("Reset Character Variants"))
-        {
-            _standaloneCharacterHairVariationOverride = -1;
-            _standaloneCharacterFacialHairVariationOverride = -1;
-            changed = true;
-        }
-
-        if (changed)
-            ApplyStandaloneCharacterCustomizationOverrides();
-    }
-
-    private static bool DrawStandaloneCharacterVariationCombo(string label, string comboId, IReadOnlyList<int> variationIds, ref int selectedVariationId)
-    {
-        ImGui.Text(label);
-        ImGui.SetNextItemWidth(-1);
-
-        string preview = selectedVariationId >= 0
-            ? $"VariationId {selectedVariationId}"
-            : "Default (VariationId 0)";
-        bool changed = false;
-
-        if (ImGui.BeginCombo(comboId, preview))
-        {
-            bool defaultSelected = selectedVariationId < 0;
-            if (ImGui.Selectable("Default (VariationId 0)", defaultSelected))
-            {
-                selectedVariationId = -1;
-                changed = true;
-            }
-
-            if (defaultSelected)
-                ImGui.SetItemDefaultFocus();
-
-            foreach (int variationId in variationIds)
-            {
-                bool selected = selectedVariationId == variationId;
-                if (ImGui.Selectable($"VariationId {variationId}", selected))
-                {
-                    selectedVariationId = variationId;
-                    changed = true;
-                }
-
-                if (selected)
-                    ImGui.SetItemDefaultFocus();
-            }
-
-            ImGui.EndCombo();
-        }
-
-        return changed;
     }
 
     private void DrawSelectedTaxiControls()
@@ -2844,7 +2757,7 @@ public partial class ViewerApp
 
                 ImGui.SameLine();
                 if (ImGui.Button("Open Override Asset"))
-                    LoadFileFromDataSource(actorOverridePath);
+                    _modelLoader.LoadFileFromDataSource(actorOverridePath);
 
                 if (HasWorldReturnTarget() && _worldScene == null)
                 {
@@ -5555,7 +5468,7 @@ public partial class ViewerApp
                 {
                     _catalogView = new Catalog.AssetCatalogView(_gl);
                     _catalogView.SetDataSource(_dataSource);
-                    _catalogView.OnLoadModelRequested = OnCatalogLoadModel;
+                    _catalogView.OnLoadModelRequested = _modelLoader.OnCatalogLoadModel;
                 }
                 _catalogView.DrawContent();
                 break;

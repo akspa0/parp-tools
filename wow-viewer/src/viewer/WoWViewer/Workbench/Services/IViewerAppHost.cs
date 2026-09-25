@@ -220,5 +220,23 @@ internal interface IViewerAppHost
     ref string CurrentAreaName { get; }
     ref ISceneRenderer? Renderer { get; }
     HashSet<string> ReportedAreaDiagnostics { get; }
+    ref bool AutoFrameModelOnLoad { get; }
+    ref string? DbcBuild { get; }
+    ref float LastWorldSceneCameraPitch { get; }
+    ref Vector3 LastWorldSceneCameraPosition { get; }
+    ref float LastWorldSceneCameraYaw { get; }
+    ref string? LastWorldSceneWdtPath { get; }
+    ref string? LoadedFileName { get; }
+    ref M2StaticRenderModel? LoadedM2Runtime { get; }
+    ref MdxFile? LoadedMdx { get; }
+    ref WmoV14ToV17Converter.WmoV14Data? LoadedWmo { get; }
+    ref Rendering.LoadingScreen? LoadingScreen { get; }
+    HashSet<string> LoggedStandaloneMissingSkinPaths { get; }
+    SqlSpawnStreamingService SqlSpawnStreaming { get; }
+    Dictionary<string, string?> StandaloneSkinPathCache { get; }
+    ref ReplaceableTextureResolver? TexResolver { get; }
+    WdlPreviewService WdlPreview { get; }
+    void FrameCurrentModel();
+    string? TryGetLoadedLocalWdtPath();
     // HOST-IFACE-END
 }

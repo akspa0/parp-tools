@@ -1128,7 +1128,7 @@ public partial class ViewerApp
             return;
         }
 
-        byte[]? bytes = ReadStandaloneFileData(assetPath);
+        byte[]? bytes = _modelLoader.ReadStandaloneFileData(assetPath);
         if (bytes == null || bytes.Length == 0)
         {
             _statusMessage = $"Could not read client asset '{assetPath}' from the loaded data source.";
