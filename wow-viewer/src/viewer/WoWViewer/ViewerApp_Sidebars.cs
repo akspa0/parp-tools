@@ -184,6 +184,7 @@ public partial class ViewerApp
             _modelInspector.DrawModelInfoContent();
         }
     }
+    void IViewerAppHost.DrawUnifiedInspectorContent() => DrawUnifiedInspectorContent();
 
     private void DrawInspectorWorldContextContent()
     {
@@ -728,7 +729,7 @@ public partial class ViewerApp
                 defaultOpen: false,
                 id: "InspectorMcnkFlags"))
         {
-            DrawMcnkFlagOverlayControls();
+            _investigation.DrawMcnkFlagOverlayControls();
         }
 
         InspectorContextSection requested = _pendingInspectorContextSection;
@@ -740,12 +741,12 @@ public partial class ViewerApp
         {
             case InspectorContextSection.SceneInvestigation:
                 if (SharedUiWidgets.SectionHeader("Scene Investigation", defaultOpen: true, id: "InspectorSceneInvestigation"))
-                    DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null);
+                    _investigation.DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null);
                 break;
             case InspectorContextSection.Mcnk:
                 if ((_terrainManager != null || _vlmTerrainManager != null)
                     && SharedUiWidgets.SectionHeader("MCNK Flag Overlay", defaultOpen: true, id: "InspectorMcnkFlagsLegacy"))
-                    DrawMcnkFlagOverlayControls();
+                    _investigation.DrawMcnkFlagOverlayControls();
                 break;
             case InspectorContextSection.WorldContext:
                 if (SharedUiWidgets.SectionHeader("World Context", defaultOpen: true, id: "InspectorWorldContext"))

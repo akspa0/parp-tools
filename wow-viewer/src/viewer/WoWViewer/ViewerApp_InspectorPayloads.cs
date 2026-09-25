@@ -67,7 +67,7 @@ public partial class ViewerApp
 
         // 2. WL* Liquid Selection
         if (string.Equals(_selectedObjectType, "WL liquid", StringComparison.OrdinalIgnoreCase)
-            && TryFindWlLiquidBodyByKey(_wlLayerSelectedBodyKey, out WlLiquidBody? wlBody)
+            && _investigation.TryFindWlLiquidBodyByKey(_wlLayerSelectedBodyKey, out WlLiquidBody? wlBody)
             && wlBody != null)
         {
             builder.ObjectType = "WL";
@@ -389,7 +389,7 @@ public partial class ViewerApp
                 if (_worldScene?.SelectedInstance.HasValue == true)
                     _navigatorPanel.CopyTextToClipboard(_worldScene.SelectedInstance.Value.ModelPath, "Asset Path");
                 else if (string.Equals(_selectedObjectType, "WL liquid", StringComparison.OrdinalIgnoreCase)
-                    && TryFindWlLiquidBodyByKey(_wlLayerSelectedBodyKey, out var wl) && wl != null)
+                    && _investigation.TryFindWlLiquidBodyByKey(_wlLayerSelectedBodyKey, out var wl) && wl != null)
                     _navigatorPanel.CopyTextToClipboard(wl.SourcePath, "WL Source Path");
                 else if (!string.IsNullOrEmpty(_loadedFilePath))
                     _navigatorPanel.CopyTextToClipboard(_loadedFilePath, "Model Path");
@@ -400,7 +400,7 @@ public partial class ViewerApp
                     && _terrainInspection.TryResolvePinnedTerrainChunkInspectionData(chunkInfo, out var chunkData, out var tileTextures, out _)
                     && chunkData != null)
                 {
-                    string summary = BuildTerrainChunkTextureSummary(chunkInfo, chunkData, tileTextures);
+                    string summary = InvestigationService.BuildTerrainChunkTextureSummary(chunkInfo, chunkData, tileTextures);
                     _navigatorPanel.CopyTextToClipboard(summary, "Chunk Texture Summary");
                 }
                 break;
@@ -440,7 +440,7 @@ public partial class ViewerApp
                 break;
 
             case "clear_wl_selection":
-                ClearSelectedWlLiquidBody(clearListIsolation: true);
+                _investigation.ClearSelectedWlLiquidBody(clearListIsolation: true);
                 break;
 
             case "toggle_wl_liquids":

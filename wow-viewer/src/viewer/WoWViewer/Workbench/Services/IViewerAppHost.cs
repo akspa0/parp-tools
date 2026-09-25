@@ -70,6 +70,7 @@ using System.IO;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Runtime.World.Minimap;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.InvestigationService;
 using static WoWViewer.ThemesService;
 
 namespace WoWViewer;
@@ -450,5 +451,7 @@ internal interface IViewerAppHost
     string GetWorkspaceTargetSummary();
     void FocusCameraOnLitLight(int lightIndex, bool closeFullscreenAfterFocus);
     TerrainQueryService TerrainQuery { get; }
+    NavigatorPanelService NavigatorPanel { get; }
+    void DrawUnifiedInspectorContent();
     // HOST-IFACE-END
 }

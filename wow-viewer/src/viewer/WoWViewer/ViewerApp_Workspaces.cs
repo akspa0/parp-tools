@@ -213,17 +213,17 @@ public partial class ViewerApp
     private void DrawEditorInspectWorkspace()
     {
         ImGui.TextWrapped("Use Navigator for map and asset browse. This task keeps selection details, loaded-asset inspection, camera, and utility panels together.");
-        DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null);
+        _investigation.DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null);
         ImGui.Separator();
-        DrawTerrainChunkInvestigationPanel(defaultOpen: _visualInvestigationMode == VisualInvestigationMode.Adt);
+        _investigation.DrawTerrainChunkInvestigationPanel(defaultOpen: _investigation._visualInvestigationMode == InvestigationService.VisualInvestigationMode.Adt);
 
         if (_worldScene != null)
         {
             ImGui.Separator();
-            DrawWlLiquidInvestigationPanel(defaultOpen: _worldScene.WlLoader?.HasData == true);
+            _investigation.DrawWlLiquidInvestigationPanel(defaultOpen: _worldScene.WlLoader?.HasData == true);
 
             ImGui.Separator();
-            DrawLitInvestigationPanel(defaultOpen: _worldScene.LitLoader?.HasData == true || _worldScene.UseLitFogOverride);
+            _investigation.DrawLitInvestigationPanel(defaultOpen: _worldScene.LitLoader?.HasData == true || _worldScene.UseLitFogOverride);
         }
 
         if (_terrainManager != null || _vlmTerrainManager != null)

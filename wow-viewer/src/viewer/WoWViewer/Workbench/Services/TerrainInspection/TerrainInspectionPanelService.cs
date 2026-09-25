@@ -6,6 +6,7 @@ using WowViewer.Core.World;
 using WoWViewer.Terrain;
 using WoWViewer.Rendering;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.InvestigationService;
 
 namespace WoWViewer;
 

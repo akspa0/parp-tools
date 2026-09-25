@@ -42,6 +42,7 @@ using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
 using WowViewer.Core.Runtime.World;
 using System;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.InvestigationService;
 
 namespace WoWViewer;
 

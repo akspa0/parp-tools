@@ -524,7 +524,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _sqlForceStreamRefresh;
     private string _wlLayerSelectedBodyKey = "";
     private bool _wlLayerListIsolationEnabled;
-    private bool _wlPendingScrollToSelectedBody;
     private Vector3 _pm4SavedOverlayTranslation = Vector3.Zero;
     private Vector3 _pm4SavedOverlayRotationDegrees = Vector3.Zero;
     private Vector3 _pm4SavedOverlayScale = Vector3.One;
@@ -663,6 +662,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly AudioPanelService _audioPanel;
     private readonly ThemesService _themes;
     private readonly TerrainInspectionPanelService _terrainInspection;
+    private readonly InvestigationService _investigation;
 
     public ViewerApp()
     {
@@ -700,6 +700,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _audioPanel = new AudioPanelService(this);
         _themes = new ThemesService(this);
         _terrainInspection = new TerrainInspectionPanelService(this);
+        _investigation = new InvestigationService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -813,21 +814,21 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref SceneClusterSelector3D? IViewerAppHost.SceneClusterSelector3D => ref _sceneClusterSelector3D;
     ref SceneCursorRenderer? IViewerAppHost.SceneCursorRenderer => ref _sceneCursorRenderer;
     TaxiAndAreaPoiSelectionService IViewerAppHost.TaxiAndAreaPoi => _taxiAndAreaPoi;
-    ref VisualInvestigationMode IViewerAppHost.VisualInvestigationMode => ref _visualInvestigationMode;
+    ref InvestigationService.VisualInvestigationMode IViewerAppHost.VisualInvestigationMode => ref _investigation._visualInvestigationMode;
     ref WorkspaceMode IViewerAppHost.WorkspaceMode => ref _workspaceMode;
     bool IViewerAppHost.CanSceneConsumeMouse(float x, float y) => _shellLayout.CanSceneConsumeMouse(x, y);
-    void IViewerAppHost.ClearSelectedWlLiquidBody(bool clearListIsolation) => ClearSelectedWlLiquidBody(clearListIsolation);
+    void IViewerAppHost.ClearSelectedWlLiquidBody(bool clearListIsolation) => _investigation.ClearSelectedWlLiquidBody(clearListIsolation);
     float IViewerAppHost.GetSceneFarPlane() => _terrainQuery.GetSceneFarPlane();
     bool IViewerAppHost.IsSceneMouseCaptureBlocked(float x, float y) => _shellLayout.IsSceneMouseCaptureBlocked(x, y);
     void IViewerAppHost.SelectTerrainChunkFromClick(TerrainRenderer.TerrainChunkInfo info) => _terrainInspection.SelectTerrainChunkFromClick(info);
-    void IViewerAppHost.SetSelectedWlLiquidBody(WlLiquidBody body, bool isolateInList, bool focusInspectWorkspace, string? statusMessage) => SetSelectedWlLiquidBody(body, isolateInList, focusInspectWorkspace, statusMessage);
-    bool IViewerAppHost.ShouldShowHoveredAssetInfoForInvestigation(HoveredAssetInfo info) => ShouldShowHoveredAssetInfoForInvestigation(info);
+    void IViewerAppHost.SetSelectedWlLiquidBody(WlLiquidBody body, bool isolateInList, bool focusInspectWorkspace, string? statusMessage) => _investigation.SetSelectedWlLiquidBody(body, isolateInList, focusInspectWorkspace, statusMessage);
+    bool IViewerAppHost.ShouldShowHoveredAssetInfoForInvestigation(HoveredAssetInfo info) => _investigation.ShouldShowHoveredAssetInfoForInvestigation(info);
     bool IViewerAppHost.TogglePm4ObjectCollectionMembership((int tileX, int tileY, uint ck24, int objectPart) key, bool reportStatus, bool removeIfPresent) => _pm4Workbench.TogglePm4ObjectCollectionMembership(key, reportStatus, removeIfPresent);
-    bool IViewerAppHost.TryFindWlLiquidBodyByKey(string bodyKey, out WlLiquidBody? body) => TryFindWlLiquidBodyByKey(bodyKey, out body);
+    bool IViewerAppHost.TryFindWlLiquidBodyByKey(string bodyKey, out WlLiquidBody? body) => _investigation.TryFindWlLiquidBodyByKey(bodyKey, out body);
     bool IViewerAppHost.TryGetSceneViewportRect(out float x, out float y, out float width, out float height) => _shellLayout.TryGetSceneViewportRect(out x, out y, out width, out height);
     bool IViewerAppHost.TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info) => _terrainQuery.TryRaycastTerrain(renderer, rayOrigin, rayDir, maxDistance, out info);
     bool IViewerAppHost.TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info, out Vector3 hitPoint) => _terrainQuery.TryRaycastTerrain(renderer, rayOrigin, rayDir, maxDistance, out info, out hitPoint);
-    bool IViewerAppHost.TryResolveHoveredWlLiquidBody(HoveredAssetInfo hoveredInfo, out WlLiquidBody? body) => TryResolveHoveredWlLiquidBody(hoveredInfo, out body);
+    bool IViewerAppHost.TryResolveHoveredWlLiquidBody(HoveredAssetInfo hoveredInfo, out WlLiquidBody? body) => _investigation.TryResolveHoveredWlLiquidBody(hoveredInfo, out body);
     ref FixedBottomDrawerTab IViewerAppHost.ActiveBottomDrawerTab => ref _activeBottomDrawerTab;
     ref float IViewerAppHost.BottomDrawerHeight => ref _bottomDrawerHeight;
     ref Vector2 IViewerAppHost.DockspaceHostPosition => ref _dockspaceHostPosition;
@@ -914,13 +915,13 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     WorldLoaderService IViewerAppHost.WorldLoader => _worldLoader;
     M2CameraPathDocument IViewerAppHost.CameraPath => _cameraPath;
     ref Terrain.BoundingBoxRenderer? IViewerAppHost.EditorOverlayBb => ref _editorOverlayBb;
-    ref int IViewerAppHost.LastMcnkOverlayChunkCount => ref _lastMcnkOverlayChunkCount;
-    ref int IViewerAppHost.LastMcnkWeakCornerCount => ref _lastMcnkWeakCornerCount;
-    ref McnkOverlayFlags IViewerAppHost.McnkOverlayFlags => ref _mcnkOverlayFlags;
+    ref int IViewerAppHost.LastMcnkOverlayChunkCount => ref _investigation._lastMcnkOverlayChunkCount;
+    ref int IViewerAppHost.LastMcnkWeakCornerCount => ref _investigation._lastMcnkWeakCornerCount;
+    ref InvestigationService.McnkOverlayFlags IViewerAppHost.McnkOverlayFlags => ref _investigation._mcnkOverlayFlags;
     ShellLayoutService IViewerAppHost.ShellLayout => _shellLayout;
     ref bool IViewerAppHost.ShowCameraPathOverlay => ref _showCameraPathOverlay;
-    ref bool IViewerAppHost.ShowMcnkFlagOverlay => ref _showMcnkFlagOverlay;
-    ref bool IViewerAppHost.ShowMcnkWeakCorners => ref _showMcnkWeakCorners;
+    ref bool IViewerAppHost.ShowMcnkFlagOverlay => ref _investigation._showMcnkFlagOverlay;
+    ref bool IViewerAppHost.ShowMcnkWeakCorners => ref _investigation._showMcnkWeakCorners;
     DataSourceSessionService IViewerAppHost.DataSourceSession => _dataSourceSession;
     Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> IViewerAppHost.StratigraphyTileAnalyses => _stratigraphyTileAnalyses;
     ConverterDialogsService IViewerAppHost.ConverterDialogs => _converterDialogs;
@@ -928,11 +929,11 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.TaxiRideCameraEnabled => ref _taxiRideCameraEnabled;
     ref bool IViewerAppHost.WlLayerListIsolationEnabled => ref _wlLayerListIsolationEnabled;
     ref string IViewerAppHost.WlLayerSelectedBodyKey => ref _wlLayerSelectedBodyKey;
-    void IViewerAppHost.DrawTerrainChunkInvestigationPanel(bool defaultOpen) => DrawTerrainChunkInvestigationPanel(defaultOpen);
-    void IViewerAppHost.DrawVisualInvestigationToolbox(bool showWorldObjectRangeControls) => DrawVisualInvestigationToolbox(showWorldObjectRangeControls);
+    void IViewerAppHost.DrawTerrainChunkInvestigationPanel(bool defaultOpen) => _investigation.DrawTerrainChunkInvestigationPanel(defaultOpen);
+    void IViewerAppHost.DrawVisualInvestigationToolbox(bool showWorldObjectRangeControls) => _investigation.DrawVisualInvestigationToolbox(showWorldObjectRangeControls);
     void IViewerAppHost.OpenPm4Workbench(Pm4WorkbenchTab tab) => _pm4Workbench.OpenPm4Workbench(tab);
-    bool IViewerAppHost.ShouldIncludeWlBodyInUiList(WlLiquidBody body) => ShouldIncludeWlBodyInUiList(body);
-    bool IViewerAppHost.IsWlListIsolationActive => IsWlListIsolationActive;
+    bool IViewerAppHost.ShouldIncludeWlBodyInUiList(WlLiquidBody body) => _investigation.ShouldIncludeWlBodyInUiList(body);
+    bool IViewerAppHost.IsWlListIsolationActive => _investigation.IsWlListIsolationActive;
     ref int IViewerAppHost.ActiveBottomTabIndex => ref _activeBottomTabIndex;
     ref string IViewerAppHost.ActiveDatasetVersionRoot => ref _activeDatasetVersionRoot;
     ref WorkbenchTab IViewerAppHost.ActiveTopTab => ref _activeTopTab;
@@ -1023,6 +1024,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ModelInspectorPanelService IViewerAppHost.ModelInspector => _modelInspector;
     TerrainControlsPanelService IViewerAppHost.TerrainControlsPanel => _terrainControlsPanel;
     TerrainQueryService IViewerAppHost.TerrainQuery => _terrainQuery;
+    NavigatorPanelService IViewerAppHost.NavigatorPanel => _navigatorPanel;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1244,7 +1246,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             else if (_worldScene != null)
             {
                 _sceneHoverPick.ClearPendingClickSelection();
-                ClearSelectedWlLiquidBody(clearListIsolation: true);
+                _investigation.ClearSelectedWlLiquidBody(clearListIsolation: true);
                 _worldScene.ClearSelection();
                 _worldScene.ClearTaxiSelection();
                 _worldScene.Pm4Overlay.ClearPm4ObjectSelection();

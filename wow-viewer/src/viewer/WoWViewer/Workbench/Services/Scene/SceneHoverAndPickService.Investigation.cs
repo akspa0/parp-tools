@@ -5,6 +5,7 @@ using WoWViewer.Terrain;
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.Visibility;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.InvestigationService;
 
 namespace WoWViewer;
 
