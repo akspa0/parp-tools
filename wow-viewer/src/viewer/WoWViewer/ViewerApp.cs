@@ -641,6 +641,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly CameraPathsService _cameraPaths;
     private readonly CaptureAutomationService _captureAutomation;
     private readonly WorkspacesService _workspaces;
+    private readonly EditorPanelsService _editorPanels;
 
     public ViewerApp()
     {
@@ -694,6 +695,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _cameraPaths = new CameraPathsService(this);
         _captureAutomation = new CaptureAutomationService(this);
         _workspaces = new WorkspacesService(this);
+        _editorPanels = new EditorPanelsService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1044,6 +1046,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     StartupAutomationService IViewerAppHost.StartupAutomation => _startupAutomation;
     CaptureAutomationService IViewerAppHost.CaptureAutomation => _captureAutomation;
     SettingsWindowService IViewerAppHost.SettingsWindow => _settingsWindow;
+    SynthesizedMinimapExportService IViewerAppHost.SynthesizedMinimapExport => _synthesizedMinimapExport;
+    WorkspacesService IViewerAppHost.Workspaces => _workspaces;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)

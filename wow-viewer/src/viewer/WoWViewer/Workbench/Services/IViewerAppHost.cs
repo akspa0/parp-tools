@@ -497,5 +497,8 @@ internal interface IViewerAppHost
     StartupAutomationService StartupAutomation { get; }
     CaptureAutomationService CaptureAutomation { get; }
     SettingsWindowService SettingsWindow { get; }
+    ref EditorHost? EditorHost { get; }
+    SynthesizedMinimapExportService SynthesizedMinimapExport { get; }
+    WorkspacesService Workspaces { get; }
     // HOST-IFACE-END
 }
