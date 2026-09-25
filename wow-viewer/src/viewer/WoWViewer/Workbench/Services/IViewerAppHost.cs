@@ -469,5 +469,8 @@ internal interface IViewerAppHost
     void DrawRenderQualityContent();
     Workbench.Pages.EditorWorkbenchPages EnsureEditorPages();
     bool IsEditorTaskAvailable(EditorWorkspaceTask task);
+    ref CameraHudRig? CameraHudRig { get; }
+    DatasetCatalogService DatasetCatalog { get; }
+    RenderQualityService RenderQuality { get; }
     // HOST-IFACE-END
 }

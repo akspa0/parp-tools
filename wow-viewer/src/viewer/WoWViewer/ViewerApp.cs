@@ -669,6 +669,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly RenderQualityService _renderQuality;
     private readonly DatasetCatalogService _datasetCatalog;
     private readonly WmoGroupsPanelService _wmoGroupsPanel;
+    private readonly SettingsWindowService _settingsWindow;
 
     public ViewerApp()
     {
@@ -713,6 +714,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _renderQuality = new RenderQualityService(this);
         _datasetCatalog = new DatasetCatalogService(this);
         _wmoGroupsPanel = new WmoGroupsPanelService(this);
+        _settingsWindow = new SettingsWindowService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1048,6 +1050,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ThemesService IViewerAppHost.Themes => _themes;
     ViewerChromeService IViewerAppHost.ViewerChrome => _viewerChrome;
     WorldObjectsPanelService IViewerAppHost.WorldObjectsPanel => _worldObjectsPanel;
+    ref CameraHudRig? IViewerAppHost.CameraHudRig => ref _cameraHudRig;
+    DatasetCatalogService IViewerAppHost.DatasetCatalog => _datasetCatalog;
+    RenderQualityService IViewerAppHost.RenderQuality => _renderQuality;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1781,8 +1786,8 @@ void main() {
             }
 
             // Settings (global configuration window) - must render in BOTH tabbed and legacy modes
-            if (_showSettingsWindow)
-                DrawSettingsWindow();
+            if (_settingsWindow._showSettingsWindow)
+                _settingsWindow.DrawSettingsWindow();
 
             if (!_useTabUi && _showWeakSignalWindow && (_terrainManager != null || _vlmTerrainManager != null))
                 _terrainControlsPanel.DrawWeakSignalWindow();

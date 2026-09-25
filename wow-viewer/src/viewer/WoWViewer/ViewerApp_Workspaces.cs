@@ -272,7 +272,7 @@ public partial class ViewerApp
 
         ImGui.SameLine();
         if (ImGui.Button("Settings..."))
-            _showSettingsWindow = true;
+            _settingsWindow._showSettingsWindow = true;
     }
 
     private void DrawEditorPublishWorkspace()
