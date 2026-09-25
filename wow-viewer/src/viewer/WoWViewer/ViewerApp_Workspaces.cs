@@ -21,7 +21,7 @@ public partial class ViewerApp
         };
     }
 
-    private static string GetEditorWorkspaceTaskLabel(EditorWorkspaceTask task)
+    internal static string GetEditorWorkspaceTaskLabel(EditorWorkspaceTask task)
     {
         return task switch
         {
@@ -60,7 +60,7 @@ public partial class ViewerApp
                     break;
             }
 
-            OpenWorkbenchTab(retainQuickTab
+            _workbenchPanels.OpenWorkbenchTab(retainQuickTab
                 ? WorkbenchTab.Quick
                 : mode switch
                 {
@@ -116,6 +116,7 @@ public partial class ViewerApp
             _ => false,
         };
     }
+    bool IViewerAppHost.IsEditorTaskAvailable(EditorWorkspaceTask task) => IsEditorTaskAvailable(task);
 
 
     private void DrawEditorWorkspaceInspector()
@@ -229,7 +230,7 @@ public partial class ViewerApp
         if (_terrainManager != null || _vlmTerrainManager != null)
             ImGui.Separator();
 
-        if (DrawSelectedObjectInspectorSection())
+        if (_workbenchPanels.DrawSelectedObjectInspectorSection())
         {
             ImGui.Separator();
         }
@@ -255,10 +256,10 @@ public partial class ViewerApp
         if (_useTabUi)
         {
             if (ImGui.Button("Log Viewer"))
-                OpenWorkbenchTab(UtilitiesBottomTab.Log);
+                _workbenchPanels.OpenWorkbenchTab(UtilitiesBottomTab.Log);
 
             if (ImGui.Button("Perf"))
-                OpenWorkbenchTab(UtilitiesBottomTab.Perf);
+                _workbenchPanels.OpenWorkbenchTab(UtilitiesBottomTab.Perf);
         }
         else
         {
@@ -345,7 +346,7 @@ public partial class ViewerApp
         }
     }
 
-    private static string GetEditorWorkspaceTooltip(EditorWorkspaceTask task)
+    internal static string GetEditorWorkspaceTooltip(EditorWorkspaceTask task)
     {
         return task switch
         {

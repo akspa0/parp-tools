@@ -111,4 +111,5 @@ public partial class ViewerApp
 
         ImGui.TextDisabled("Applies live to standalone MDX, standalone WMO, terrain, and world object renderer caches.");
     }
+    void IViewerAppHost.DrawRenderQualityContent() => DrawRenderQualityContent();
 }

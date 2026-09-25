@@ -455,5 +455,19 @@ internal interface IViewerAppHost
     void DrawUnifiedInspectorContent();
     InvestigationService Investigation { get; }
     TerrainInspectionPanelService TerrainInspection { get; }
+    ArchaeologyPanelService ArchaeologyPanel { get; }
+    AudioPanelService AudioPanel { get; }
+    InspectorPayloadsService InspectorPayloads { get; }
+    LightingPanelService LightingPanel { get; }
+    MainMenuBarService MainMenuBar { get; }
+    TaxiPanelService TaxiPanel { get; }
+    ThemesService Themes { get; }
+    ViewerChromeService ViewerChrome { get; }
+    WorldObjectsPanelService WorldObjectsPanel { get; }
+    void DrawLogViewerContent();
+    void DrawMinimapContent(int loadedTileCount, string? mapName, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded);
+    void DrawRenderQualityContent();
+    Workbench.Pages.EditorWorkbenchPages EnsureEditorPages();
+    bool IsEditorTaskAvailable(EditorWorkspaceTask task);
     // HOST-IFACE-END
 }

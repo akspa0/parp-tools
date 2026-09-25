@@ -116,4 +116,5 @@ public partial class ViewerApp
         }
         ImGui.EndChild();
     }
+    void IViewerAppHost.DrawLogViewerContent() => DrawLogViewerContent();
 }

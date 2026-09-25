@@ -59,9 +59,9 @@ public partial class ViewerApp
 
     private ViewerKeyContext GetActiveKeyContext()
     {
-        if (IsWorkbenchUtilityVisible(Workbench.UtilitiesBottomTab.Capture))
+        if (_workbenchPanels.IsWorkbenchUtilityVisible(Workbench.UtilitiesBottomTab.Capture))
             return ViewerKeyContext.Capture;
-        if (IsWorkbenchUtilityVisible(Workbench.UtilitiesBottomTab.Audio))
+        if (_workbenchPanels.IsWorkbenchUtilityVisible(Workbench.UtilitiesBottomTab.Audio))
             return ViewerKeyContext.Audio;
 
         if (!_useTabUi)

@@ -81,7 +81,7 @@ public partial class ViewerApp
         if (_useTabUi)
         {
             _activeUtilitiesTabIndex = (int)Workbench.UtilitiesBottomTab.Capture;
-            OpenWorkbenchTab(Workbench.ToolsBottomTab.Utilities);
+            _workbenchPanels.OpenWorkbenchTab(Workbench.ToolsBottomTab.Utilities);
         }
         else if (tab == CapturePanelTab.Automation)
         {
@@ -97,7 +97,7 @@ public partial class ViewerApp
     private void DrawCapturePanelContent()
     {
         string[] labels = ["Capture Automation", "Camera Path"];
-        _activeCapturePanelTabIndex = DrawPageCombo(
+        _activeCapturePanelTabIndex = WorkbenchPanelsService.DrawPageCombo(
             "##CapturePanelTabs",
             labels,
             _pendingCapturePanelTab.HasValue

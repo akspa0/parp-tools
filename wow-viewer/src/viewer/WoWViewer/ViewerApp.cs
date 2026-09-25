@@ -664,6 +664,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly TerrainInspectionPanelService _terrainInspection;
     private readonly InvestigationService _investigation;
     private readonly InspectorPayloadsService _inspectorPayloads;
+    private readonly WorkbenchPanelsService _workbenchPanels;
 
     public ViewerApp()
     {
@@ -703,6 +704,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _terrainInspection = new TerrainInspectionPanelService(this);
         _investigation = new InvestigationService(this);
         _inspectorPayloads = new InspectorPayloadsService(this);
+        _workbenchPanels = new WorkbenchPanelsService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -976,7 +978,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.VideoCaptureIncludeUi => ref _videoCaptureIncludeUi;
     ref string IViewerAppHost.VideoEncoderExecutable => ref _videoEncoderExecutable;
     int IViewerAppHost.FindBuildOptionIndex(string? buildVersion) => _clientDialogs.FindBuildOptionIndex(buildVersion);
-    void IViewerAppHost.NormalizeWorkbenchStateAfterLoad() => NormalizeWorkbenchStateAfterLoad();
+    void IViewerAppHost.NormalizeWorkbenchStateAfterLoad() => _workbenchPanels.NormalizeWorkbenchStateAfterLoad();
     void IViewerAppHost.RefreshClientBuildOptions() => _clientDialogs.RefreshClientBuildOptions();
     void IViewerAppHost.RefreshDatasetCatalog() => RefreshDatasetCatalog();
     ProjectOutputService IViewerAppHost.ProjectOutput => _projectOutput;
@@ -1029,6 +1031,15 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     NavigatorPanelService IViewerAppHost.NavigatorPanel => _navigatorPanel;
     InvestigationService IViewerAppHost.Investigation => _investigation;
     TerrainInspectionPanelService IViewerAppHost.TerrainInspection => _terrainInspection;
+    ArchaeologyPanelService IViewerAppHost.ArchaeologyPanel => _archaeologyPanel;
+    AudioPanelService IViewerAppHost.AudioPanel => _audioPanel;
+    InspectorPayloadsService IViewerAppHost.InspectorPayloads => _inspectorPayloads;
+    LightingPanelService IViewerAppHost.LightingPanel => _lightingPanel;
+    MainMenuBarService IViewerAppHost.MainMenuBar => _mainMenuBar;
+    TaxiPanelService IViewerAppHost.TaxiPanel => _taxiPanel;
+    ThemesService IViewerAppHost.Themes => _themes;
+    ViewerChromeService IViewerAppHost.ViewerChrome => _viewerChrome;
+    WorldObjectsPanelService IViewerAppHost.WorldObjectsPanel => _worldObjectsPanel;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1692,7 +1703,7 @@ void main() {
             {
                 // 071: left sidebar + right workbench squeeze the 3D viewport.
                 _navigatorPanel.DrawLeftSidebar();
-                DrawRightSidebar();
+                _workbenchPanels.DrawRightSidebar();
             }
             else if (_useDockspaceUi)
             {
@@ -1704,7 +1715,7 @@ void main() {
                 if (_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Left))
                     _navigatorPanel.DrawLegacyLeftSidebar();
                 if (_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Right))
-                    DrawLegacyRightSidebar();
+                    _workbenchPanels.DrawLegacyRightSidebar();
             }
 
             _viewerChrome.DrawFixedSidebarSplitters();
@@ -1882,7 +1893,7 @@ void main() {
         _selectedObjectIndex = idx;
 
         if (_useTabUi && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo or Terrain.ObjectType.WmoDoodad)
-            OpenWorkbenchTab(ModelBottomTab.Info);
+            _workbenchPanels.OpenWorkbenchTab(ModelBottomTab.Info);
 
         // WMO doodads come from MODD, which has no uniqueId — uniqueId identifies an MDDF/MODF
         // placement in an ADT. Showing the MODD table index under a "UniqueId" label asserts a

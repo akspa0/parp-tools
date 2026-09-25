@@ -744,6 +744,7 @@ public partial class ViewerApp
 
         ImGui.SetCursorPosY(controlsHeight + mapSize + 2f);
     }
+    void IViewerAppHost.DrawMinimapContent(int loadedTileCount, string? mapName, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded) => DrawMinimapContent(loadedTileCount, mapName, existingTiles, isTileLoaded);
 
     private void DrawFullscreenMinimap()
     {
