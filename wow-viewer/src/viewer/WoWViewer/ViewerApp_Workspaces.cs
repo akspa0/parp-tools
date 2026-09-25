@@ -289,28 +289,28 @@ public partial class ViewerApp
         ImGui.TextDisabled("Editor saves and map conversions write into timestamped project folders under this root.");
         ImGui.SetNextItemWidth(-80);
         if (ImGui.InputText("##projectOutputRoot", ref _projectOutputRootDir, 512))
-            HandleProjectOutputRootChanged();
+            _projectOutput.HandleProjectOutputRootChanged();
         ImGui.SameLine();
         if (ImGui.Button("Browse##projectOutputRoot"))
         {
             ImGuiPathPicker.Instance.Open(
                 "Select project output root",
                 pickFolder: true,
-                initialPath: GetProjectOutputRootDirectory(),
+                initialPath: _projectOutput.GetProjectOutputRootDirectory(),
                 filterExtension: null,
                 picked =>
                 {
                     if (!string.IsNullOrWhiteSpace(picked))
                     {
                         _projectOutputRootDir = picked;
-                        HandleProjectOutputRootChanged();
+                        _projectOutput.HandleProjectOutputRootChanged();
                     }
                 });
         }
 
-        ImGui.TextWrapped($"Current project folder: {DescribeEditorProjectOutputDirectory()}");
+        ImGui.TextWrapped($"Current project folder: {_projectOutput.DescribeEditorProjectOutputDirectory()}");
         if (ImGui.Button("New Project Folder##publish"))
-            StartNewEditorProjectOutputDirectory();
+            _projectOutput.StartNewEditorProjectOutputDirectory();
 
         _placementEditing.DrawPlacementSaveQueueActions(includeCurrentSourceSave: false);
         ImGui.Separator();
@@ -398,7 +398,7 @@ public partial class ViewerApp
         {
             int pendingSourceCount = _placementEditing.GetPendingPlacementSourceCount();
             int missingTargets = _placementEditing.GetPendingPlacementSourceCountMissingTargets();
-            string pendingSummary = $"{pendingEditCount} pending placement move(s) across {pendingSourceCount} ADT source(s) in {DescribeEditorProjectOutputDirectory()}.";
+            string pendingSummary = $"{pendingEditCount} pending placement move(s) across {pendingSourceCount} ADT source(s) in {_projectOutput.DescribeEditorProjectOutputDirectory()}.";
             return missingTargets > 0
                 ? $"{pendingSummary} {missingTargets} source(s) still need an output .adt path."
                 : pendingSummary;
@@ -408,10 +408,10 @@ public partial class ViewerApp
             return $"Staged placement save target: {_selectedPlacementSaveTargetPath}. Source files stay untouched.";
 
         if (HasWorldEditingContext() && _chunkEdit.GetChunkToolDirtyTileCount() > 0)
-            return $"Chunk tool has {_chunkEdit.GetChunkToolDirtyChunkCount()} edited chunk(s) across {_chunkEdit.GetChunkToolDirtyTileCount()} tile(s). Heightmap outputs can be written into {DescribeEditorProjectOutputDirectory()}. General terrain ADT save is still not implemented.";
+            return $"Chunk tool has {_chunkEdit.GetChunkToolDirtyChunkCount()} edited chunk(s) across {_chunkEdit.GetChunkToolDirtyTileCount()} tile(s). Heightmap outputs can be written into {_projectOutput.DescribeEditorProjectOutputDirectory()}. General terrain ADT save is still not implemented.";
 
         if (HasWorldEditingContext())
-            return $"Staged placement saves are available for translation-only ADT object moves in {DescribeEditorProjectOutputDirectory()}. No general map save pipeline yet.";
+            return $"Staged placement saves are available for translation-only ADT object moves in {_projectOutput.DescribeEditorProjectOutputDirectory()}. No general map save pipeline yet.";
 
         if (_renderer != null || _dataSource != null)
             return "Inspection only. Load a world scene to stage placement saves.";

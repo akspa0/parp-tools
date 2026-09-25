@@ -440,7 +440,7 @@ public partial class ViewerApp
             pickFolder: true,
             initialPath: Path.GetFullPath(DatToLkAdtFolderExporter.DefaultOutputDirectory(map)) is { } d && Directory.Exists(d)
                 ? d
-                : GetProjectOutputRootDirectory(),
+                : _projectOutput.GetProjectOutputRootDirectory(),
             filterExtension: null,
             chosen =>
             {

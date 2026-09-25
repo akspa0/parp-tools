@@ -275,5 +275,7 @@ internal interface IViewerAppHost
     ref bool ShowMcnkWeakCorners { get; }
     DataSourceSessionService DataSourceSession { get; }
     Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> StratigraphyTileAnalyses { get; }
+    ConverterDialogsService ConverterDialogs { get; }
+    PlacementEditService PlacementEditing { get; }
     // HOST-IFACE-END
 }

@@ -351,12 +351,12 @@ public partial class ViewerApp
 
         // Output folder: auto-generate a timestamped project folder; never ask the user.
         string effectiveOutputDir = string.IsNullOrWhiteSpace(_reconciliationOutputDir)
-            ? DescribeEditorProjectOutputDirectory()
+            ? _projectOutput.DescribeEditorProjectOutputDirectory()
             : _reconciliationOutputDir;
         ImGui.TextDisabled($"Will write to: {effectiveOutputDir}");
         if (ImGui.SmallButton("New output folder"))
         {
-            _reconciliationOutputDir = EnsureEditorProjectOutputDirectory(forceNew: true);
+            _reconciliationOutputDir = _projectOutput.EnsureEditorProjectOutputDirectory(forceNew: true);
             _reconciliationStatus = $"Created new output folder: {_reconciliationOutputDir}";
         }
 
@@ -735,7 +735,7 @@ public partial class ViewerApp
             // Auto-generate a timestamped project output folder when none is set, so the user never
             // has to pick one. A custom folder (via Browse) is honored when provided.
             string outputDir = string.IsNullOrWhiteSpace(_reconciliationOutputDir)
-                ? EnsureEditorProjectOutputDirectory(forceNew: false)
+                ? _projectOutput.EnsureEditorProjectOutputDirectory(forceNew: false)
                 : _reconciliationOutputDir;
             if (string.IsNullOrWhiteSpace(outputDir))
             {

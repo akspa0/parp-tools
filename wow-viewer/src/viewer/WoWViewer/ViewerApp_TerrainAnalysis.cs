@@ -403,7 +403,7 @@ public partial class ViewerApp
 
     private string CreateTerrainAnalysisOutputDirectory((int tileX, int tileY) tile)
     {
-        string root = Path.Combine(EnsureEditorProjectOutputDirectory(), "terrain-analysis", $"tile_{tile.tileX}_{tile.tileY}");
+        string root = Path.Combine(_projectOutput.EnsureEditorProjectOutputDirectory(), "terrain-analysis", $"tile_{tile.tileX}_{tile.tileY}");
         Directory.CreateDirectory(root);
 
         string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");

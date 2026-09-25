@@ -2535,7 +2535,7 @@ public partial class ViewerApp
                     string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? "map";
                     string bundleDirectory = Path.Combine(
                         picked,
-                        $"pm4_llm_{SanitizeProjectPathSegment(mapName)}_{DateTime.Now:yyyyMMdd_HHmmss}");
+                        $"pm4_llm_{ProjectOutputService.SanitizeProjectPathSegment(mapName)}_{DateTime.Now:yyyyMMdd_HHmmss}");
                     Directory.CreateDirectory(bundleDirectory);
 
                     Pm4VisibleOverlaySummaryInfo visibleSummary = _worldScene.Pm4Overlay.GetPm4VisibleOverlaySummary();

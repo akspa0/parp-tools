@@ -64,9 +64,9 @@ public partial class ViewerApp
         if (string.IsNullOrWhiteSpace(_synthesizedMinimapOutputDirectory)
             && !string.IsNullOrWhiteSpace(_synthesizedMinimapMapName))
         {
-            string mapSegment = SanitizeProjectPathSegment(_synthesizedMinimapMapName);
+            string mapSegment = ProjectOutputService.SanitizeProjectPathSegment(_synthesizedMinimapMapName);
             _synthesizedMinimapOutputDirectory = Path.Combine(
-                GetProjectOutputRootDirectory(),
+                _projectOutput.GetProjectOutputRootDirectory(),
                 "synthesized-minimaps",
                 mapSegment,
                 $"tod-{TimeOfDayClock.FromHours(_synthesizedMinimapTimeHours).CompactText}");

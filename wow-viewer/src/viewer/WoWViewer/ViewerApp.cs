@@ -205,7 +205,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private static readonly string OutputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output");
     internal static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
     internal static readonly string ExportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "export");
-    private static readonly string ProjectsDir = Path.Combine(OutputDir, "projects");
+    internal static readonly string ProjectsDir = Path.Combine(OutputDir, "projects");
     private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private const int CurrentShellPanelLayoutVersion = 4;
@@ -309,9 +309,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
     private bool _wantExportMapGlbTiles = false;
-    private string _projectOutputRootDir = ProjectsDir;
+    internal string _projectOutputRootDir = ProjectsDir;
     private string _editorProjectOutputDir = string.Empty;
-    private string _editorProjectSourceKey = string.Empty;
     private string? _selectedPlacementSaveTargetPath;
     private string _selectedPlacementSaveStatus = "Select a tile-backed world object to stage a translation-only save.";
 
@@ -723,6 +722,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly DataSourceSessionService _dataSourceSession;
     private readonly TerrainQueryService _terrainQuery;
     private readonly StratigraphyService _stratigraphy;
+    private readonly ProjectOutputService _projectOutput;
 
     public ViewerApp()
     {
@@ -743,6 +743,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _dataSourceSession = new DataSourceSessionService(this);
         _terrainQuery = new TerrainQueryService(this);
         _stratigraphy = new StratigraphyService(this);
+        _projectOutput = new ProjectOutputService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -756,8 +757,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.ShowMapConverterDialog => ref _showMapConverterDialog;
     ref bool IViewerAppHost.ShowWmoConverterDialog => ref _showWmoConverterDialog;
     ref string IViewerAppHost.WmoConvertSourcePath => ref _wmoConvertSourcePath;
-    string IViewerAppHost.GetProjectOutputRootDirectory() => GetProjectOutputRootDirectory();
-    void IViewerAppHost.HandleProjectOutputRootChanged() => HandleProjectOutputRootChanged();
+    string IViewerAppHost.GetProjectOutputRootDirectory() => _projectOutput.GetProjectOutputRootDirectory();
+    void IViewerAppHost.HandleProjectOutputRootChanged() => _projectOutput.HandleProjectOutputRootChanged();
     void IViewerAppHost.LoadWdtTerrain(string wdtPath) => _worldLoader.LoadWdtTerrain(wdtPath);
     ref string IViewerAppHost.MkHarvestDatasetRoot => ref _mkHarvestDatasetRoot;
     ref int IViewerAppHost.MkHarvestViewerValidationCompleted => ref _mkHarvestViewerValidationCompleted;
@@ -819,9 +820,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref string IViewerAppHost.ChunkClipboardStatus => ref _chunkClipboardStatus;
     ref bool IViewerAppHost.ChunkToolEnabled => ref _chunkToolEnabled;
     TerrainTileIoService IViewerAppHost.TerrainTileIo => _terrainTileIo;
-    string IViewerAppHost.EnsureEditorProjectOutputDirectory(bool forceNew) => EnsureEditorProjectOutputDirectory(forceNew);
-    string IViewerAppHost.GetEditorProjectName(string? fallbackName) => GetEditorProjectName(fallbackName);
-    string? IViewerAppHost.GetEditorProjectSourceKey() => GetEditorProjectSourceKey();
+    string IViewerAppHost.EnsureEditorProjectOutputDirectory(bool forceNew) => _projectOutput.EnsureEditorProjectOutputDirectory(forceNew);
+    string IViewerAppHost.GetEditorProjectName(string? fallbackName) => _projectOutput.GetEditorProjectName(fallbackName);
+    string? IViewerAppHost.GetEditorProjectSourceKey() => _projectOutput.GetEditorProjectSourceKey();
     bool IViewerAppHost.TryPickTerrainChunkUnderMouse(TerrainRenderer renderer, out TerrainRenderer.TerrainChunkInfo info) => _terrainQuery.TryPickTerrainChunkUnderMouse(renderer, out info);
     ref string IViewerAppHost.EditorProjectOutputDir => ref _editorProjectOutputDir;
     ref string IViewerAppHost.SelectedPlacementSaveStatus => ref _selectedPlacementSaveStatus;
@@ -966,6 +967,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.ShowMcnkWeakCorners => ref _showMcnkWeakCorners;
     DataSourceSessionService IViewerAppHost.DataSourceSession => _dataSourceSession;
     Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> IViewerAppHost.StratigraphyTileAnalyses => _stratigraphyTileAnalyses;
+    ConverterDialogsService IViewerAppHost.ConverterDialogs => _converterDialogs;
+    PlacementEditService IViewerAppHost.PlacementEditing => _placementEditing;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -2809,126 +2812,6 @@ void main() {
 
         ImGui.End();
         ImGui.PopStyleVar(3);
-    }
-
-    private string GetProjectOutputRootDirectory()
-    {
-        if (string.IsNullOrWhiteSpace(_projectOutputRootDir))
-            _projectOutputRootDir = ProjectsDir;
-
-        return Path.GetFullPath(_projectOutputRootDir);
-    }
-
-    private void HandleProjectOutputRootChanged()
-    {
-        _editorProjectOutputDir = string.Empty;
-        _editorProjectSourceKey = string.Empty;
-        _mapConvertOutputDir = string.Empty;
-        _mapConvertProjectSourceKey = string.Empty;
-        _placementEditing.RefreshProjectManagedPlacementTargets();
-
-        if (!string.IsNullOrWhiteSpace(_mapConvertSourcePath))
-            _converterDialogs.EnsureMapConverterProjectOutputDirectory(forceNew: false);
-    }
-
-    internal static string SanitizeProjectPathSegment(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return "project";
-
-        char[] invalid = Path.GetInvalidFileNameChars();
-        var builder = new StringBuilder(value.Trim().Length);
-        foreach (char c in value.Trim())
-        {
-            builder.Append(Array.IndexOf(invalid, c) >= 0 || char.IsControl(c)
-                ? '_'
-                : char.IsWhiteSpace(c) ? '_' : c);
-        }
-
-        string sanitized = builder.ToString().Trim('.', ' ');
-        return string.IsNullOrWhiteSpace(sanitized) ? "project" : sanitized;
-    }
-
-    internal static string CreateTimestampedProjectOutputDirectory(string rootDirectory, string projectName)
-    {
-        string safeProjectName = SanitizeProjectPathSegment(projectName);
-        string projectRoot = Path.Combine(rootDirectory, safeProjectName);
-        Directory.CreateDirectory(projectRoot);
-
-        string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        string candidate = Path.Combine(projectRoot, timestamp);
-        int suffix = 1;
-        while (Directory.Exists(candidate))
-        {
-            candidate = Path.Combine(projectRoot, $"{timestamp}_{suffix:D2}");
-            suffix++;
-        }
-
-        return candidate;
-    }
-
-    private string GetEditorProjectName(string? fallbackName = null)
-    {
-        if (!string.IsNullOrWhiteSpace(_dataSourceSession.GetCurrentSessionMapName()))
-            return SanitizeProjectPathSegment(_dataSourceSession.GetCurrentSessionMapName()!);
-
-        string? wdtPath = _dataSourceSession.TryGetLoadedLocalWdtPath();
-        if (!string.IsNullOrWhiteSpace(wdtPath))
-            return SanitizeProjectPathSegment(Path.GetFileNameWithoutExtension(wdtPath));
-
-        if (!string.IsNullOrWhiteSpace(_lastWorldSceneWdtPath) && File.Exists(_lastWorldSceneWdtPath))
-            return SanitizeProjectPathSegment(Path.GetFileNameWithoutExtension(_lastWorldSceneWdtPath));
-
-        if (!string.IsNullOrWhiteSpace(fallbackName))
-            return SanitizeProjectPathSegment(fallbackName);
-
-        return "project";
-    }
-
-    private string? GetEditorProjectSourceKey()
-    {
-        string? wdtPath = _dataSourceSession.TryGetLoadedLocalWdtPath();
-        if (!string.IsNullOrWhiteSpace(wdtPath))
-            return Path.GetFullPath(wdtPath);
-
-        if (!string.IsNullOrWhiteSpace(_lastWorldSceneWdtPath) && File.Exists(_lastWorldSceneWdtPath))
-            return Path.GetFullPath(_lastWorldSceneWdtPath);
-
-        if (!string.IsNullOrWhiteSpace(_loadedFilePath) && File.Exists(_loadedFilePath))
-            return Path.GetFullPath(_loadedFilePath);
-
-        string? currentMapName = _dataSourceSession.GetCurrentSessionMapName();
-        return string.IsNullOrWhiteSpace(currentMapName) ? null : $"map:{currentMapName}";
-    }
-
-    private string EnsureEditorProjectOutputDirectory(bool forceNew = false)
-    {
-        string sourceKey = GetEditorProjectSourceKey() ?? $"editor:{GetEditorProjectName()}";
-        if (!forceNew
-            && !string.IsNullOrWhiteSpace(_editorProjectOutputDir)
-            && string.Equals(_editorProjectSourceKey, sourceKey, StringComparison.OrdinalIgnoreCase))
-        {
-            return _editorProjectOutputDir;
-        }
-
-        _editorProjectSourceKey = sourceKey;
-        _editorProjectOutputDir = CreateTimestampedProjectOutputDirectory(GetProjectOutputRootDirectory(), GetEditorProjectName());
-        return _editorProjectOutputDir;
-    }
-
-    private string DescribeEditorProjectOutputDirectory()
-    {
-        if (!string.IsNullOrWhiteSpace(_editorProjectOutputDir))
-            return _editorProjectOutputDir;
-
-        return Path.Combine(GetProjectOutputRootDirectory(), GetEditorProjectName(), "<timestamp>");
-    }
-
-    private void StartNewEditorProjectOutputDirectory()
-    {
-        _editorProjectOutputDir = EnsureEditorProjectOutputDirectory(forceNew: true);
-        _placementEditing.RefreshProjectManagedPlacementTargets();
-        _selectedPlacementSaveStatus = $"Created new project output folder: {_editorProjectOutputDir}";
     }
 
     /// <summary>
