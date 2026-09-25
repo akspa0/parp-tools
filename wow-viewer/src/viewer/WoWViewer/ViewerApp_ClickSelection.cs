@@ -63,19 +63,19 @@ public partial class ViewerApp
 
         var addedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        if (TryPickTaxiNodeByRay(rayOrigin, rayDir, out int taxiNodeIdByRay, out _))
+        if (_taxiAndAreaPoi.TryPickTaxiNodeByRay(rayOrigin, rayDir, out int taxiNodeIdByRay, out _))
             AddTaxiNodeClickSelectionCandidate(addedKeys, taxiNodeIdByRay, "Ray hit");
 
-        if (TryPickTaxiRouteByRay(rayOrigin, rayDir, out int taxiRouteIdByRay, out _))
+        if (_taxiAndAreaPoi.TryPickTaxiRouteByRay(rayOrigin, rayDir, out int taxiRouteIdByRay, out _))
             AddTaxiRouteClickSelectionCandidate(addedKeys, taxiRouteIdByRay, "Ray hit");
 
-        if (TryPickTaxiNodeAtMouse(localX, localY, viewportWidth, viewportHeight, view, proj, out int taxiNodeId))
+        if (_taxiAndAreaPoi.TryPickTaxiNodeAtMouse(localX, localY, viewportWidth, viewportHeight, view, proj, out int taxiNodeId))
             AddTaxiNodeClickSelectionCandidate(addedKeys, taxiNodeId, "Screen-space pick");
 
-        if (TryPickTaxiRouteAtMouse(localX, localY, viewportWidth, viewportHeight, view, proj, out int taxiRouteId))
+        if (_taxiAndAreaPoi.TryPickTaxiRouteAtMouse(localX, localY, viewportWidth, viewportHeight, view, proj, out int taxiRouteId))
             AddTaxiRouteClickSelectionCandidate(addedKeys, taxiRouteId, "Screen-space pick");
 
-        if (TryPickAreaPoiAtMouse(localX, localY, viewportWidth, viewportHeight, view, proj, out int areaPoiId))
+        if (_taxiAndAreaPoi.TryPickAreaPoiAtMouse(localX, localY, viewportWidth, viewportHeight, view, proj, out int areaPoiId))
             AddAreaPoiClickSelectionCandidate(addedKeys, areaPoiId);
 
         HoveredAssetInfo? hoveredInfo = _worldScene.HoveredAssetInfo;
@@ -288,7 +288,7 @@ public partial class ViewerApp
                 () =>
                 {
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
-                    SelectTaxiNode(nodeId, toggle: true);
+                    _taxiAndAreaPoi.SelectTaxiNode(nodeId, toggle: true);
                 }));
     }
 
@@ -315,7 +315,7 @@ public partial class ViewerApp
                 () =>
                 {
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
-                    SelectTaxiRoute(routeId, toggle: false);
+                    _taxiAndAreaPoi.SelectTaxiRoute(routeId, toggle: false);
                 }));
     }
 
@@ -339,7 +339,7 @@ public partial class ViewerApp
                 () =>
                 {
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
-                    SelectAreaPoi(poiId, toggle: true);
+                    _taxiAndAreaPoi.SelectAreaPoi(poiId, toggle: true);
                 }));
     }
 
@@ -361,7 +361,7 @@ public partial class ViewerApp
                     _worldScene?.ClearSelection();
                     _worldScene?.ClearTaxiSelection();
                     _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
-                    ClearSelectedAreaPoiInfo();
+                    _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     SetSelectedWlLiquidBody(
                         selectedBody,
                         isolateInList: true,
@@ -392,7 +392,7 @@ public partial class ViewerApp
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.ClearTaxiSelection();
                     _worldScene.ClearSelection();
-                    ClearSelectedAreaPoiInfo();
+                    _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     UpdateSelectedPm4ObjectInfo(objectKey);
                 }));
     }
@@ -438,7 +438,7 @@ public partial class ViewerApp
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.ClearTaxiSelection();
                     _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
-                    ClearSelectedAreaPoiInfo();
+                    _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     RefreshSelectedWorldObjectInfo();
                 }));
     }

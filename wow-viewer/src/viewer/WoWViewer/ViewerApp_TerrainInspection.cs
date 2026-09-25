@@ -245,7 +245,7 @@ public partial class ViewerApp
         _worldScene?.ClearTaxiSelection();
         _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedWlLiquidBody(clearListIsolation: true);
-        ClearSelectedAreaPoiInfo();
+        _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
         _selectedObjectIndex = -1;
         _selectedObjectType = string.Empty;
         _selectedObjectInfo = string.Empty;

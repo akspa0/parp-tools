@@ -898,12 +898,12 @@ public partial class ViewerApp
             if (ImGui.Button("Copy Path"))
                 CopyTextToClipboard(selectedAssetPath, "asset path");
 
-            if (TryGetTaxiActorOverrideRouteId(out _)
-                && IsTaxiActorModelPath(selectedAssetPath))
+            if (_taxiAndAreaPoi.TryGetTaxiActorOverrideRouteId(out _)
+                && TaxiAndAreaPoiSelectionService.IsTaxiActorModelPath(selectedAssetPath))
             {
                 ImGui.SameLine();
                 if (ImGui.Button("Use For Taxi Override"))
-                    TryApplySelectedBrowserAssetToTaxiOverride();
+                    _taxiAndAreaPoi.TryApplySelectedBrowserAssetToTaxiOverride();
             }
 
             ImGui.TextDisabled(selectedAssetPath);
@@ -1191,7 +1191,7 @@ public partial class ViewerApp
                     bool selected = _selectedAreaPoiId == poi.Id;
                     if (ImGui.Selectable($"[{poi.Id}] {poi.Name}", selected, ImGuiSelectableFlags.AllowDoubleClick))
                     {
-                        SelectAreaPoi(poi.Id, toggle: false);
+                        _taxiAndAreaPoi.SelectAreaPoi(poi.Id, toggle: false);
                         if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                         {
                             _camera.Position = poi.Position + new Vector3(0, 0, 50);
@@ -2488,7 +2488,7 @@ public partial class ViewerApp
                 if (ImGui.SmallButton("Show All"))
                 {
                     _worldScene.ClearTaxiSelection();
-                    ClearSelectedTaxiInfo();
+                    _taxiAndAreaPoi.ClearSelectedTaxiInfo();
                 }
             }
         }
@@ -2519,7 +2519,7 @@ public partial class ViewerApp
         if (!hasTaxiSelection)
             ImGui.BeginDisabled();
         if (ImGui.Button("Focus Selected Taxi"))
-            FocusSelectedTaxi();
+            _taxiAndAreaPoi.FocusSelectedTaxi();
         if (!hasTaxiSelection)
             ImGui.EndDisabled();
 
@@ -2543,7 +2543,7 @@ public partial class ViewerApp
             ImGui.EndDisabled();
 
         if (_taxiRideCameraEnabled)
-            ImGui.TextDisabled($"Ride Camera: {GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}");
+            ImGui.TextDisabled($"Ride Camera: {_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}");
 
         int taxiRideCameraMode = (int)_taxiRideCameraMode;
         string[] taxiRideCameraLabels = { "Cockpit", "Chase" };
@@ -2625,7 +2625,7 @@ public partial class ViewerApp
         {
             string fromName = _worldScene.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
             string toName = _worldScene.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
-            string label = $"{GetTaxiRouteDisplayLabel(route.PathId)} ({route.Waypoints.Count} pts)";
+            string label = $"{_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(route.PathId)} ({route.Waypoints.Count} pts)";
             string searchText = $"{route.PathId} {fromName} {toName} {label}";
             if (!string.IsNullOrWhiteSpace(_taxiRouteFilter)
                 && !searchText.Contains(_taxiRouteFilter, StringComparison.OrdinalIgnoreCase))
@@ -2700,9 +2700,9 @@ public partial class ViewerApp
                     bool isSelected = _worldScene.SelectedTaxiRouteId == entry.Route.PathId;
                     if (ImGui.Selectable(entry.Label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
                     {
-                        SelectTaxiRoute(entry.Route.PathId, toggle: true);
+                        _taxiAndAreaPoi.SelectTaxiRoute(entry.Route.PathId, toggle: true);
                         if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                            FocusSelectedTaxi();
+                            _taxiAndAreaPoi.FocusSelectedTaxi();
                     }
 
                     if (ImGui.IsItemHovered())
@@ -2726,24 +2726,24 @@ public partial class ViewerApp
         else if (_worldScene.SelectedTaxiRouteId >= 0)
             ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
 
-        if (TryGetTaxiActorOverrideRouteId(out int routeId))
+        if (_taxiAndAreaPoi.TryGetTaxiActorOverrideRouteId(out int routeId))
         {
-            IReadOnlyList<TaxiPathLoader.TaxiRoute> candidateRoutes = GetTaxiActorOverrideCandidateRoutes();
+            IReadOnlyList<TaxiPathLoader.TaxiRoute> candidateRoutes = _taxiAndAreaPoi.GetTaxiActorOverrideCandidateRoutes();
 
             if (_worldScene.SelectedTaxiNodeId >= 0)
             {
                 ImGui.TextDisabled($"Selected taxi node: {_worldScene.SelectedTaxiNodeId}");
 
-                string previewLabel = GetTaxiRouteDisplayLabel(routeId);
+                string previewLabel = _taxiAndAreaPoi.GetTaxiRouteDisplayLabel(routeId);
                 if (ImGui.BeginCombo("Override Target Route", previewLabel))
                 {
                     foreach (TaxiPathLoader.TaxiRoute candidateRoute in candidateRoutes)
                     {
                         bool isSelected = candidateRoute.PathId == routeId;
-                        if (ImGui.Selectable(GetTaxiRouteDisplayLabel(candidateRoute.PathId), isSelected))
+                        if (ImGui.Selectable(_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(candidateRoute.PathId), isSelected))
                         {
                             _taxiActorModelOverrideTargetRouteId = candidateRoute.PathId;
-                            SyncTaxiActorModelOverrideInput(candidateRoute.PathId);
+                            _taxiAndAreaPoi.SyncTaxiActorModelOverrideInput(candidateRoute.PathId);
                         }
 
                         if (isSelected)
@@ -2758,12 +2758,12 @@ public partial class ViewerApp
                 ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
             }
 
-            SyncTaxiActorModelOverrideInput(routeId);
+            _taxiAndAreaPoi.SyncTaxiActorModelOverrideInput(routeId);
 
             string resolvedActorModelPath = _worldScene.GetResolvedTaxiActorModelPath(routeId) ?? "not found";
             string? actorOverridePath = _worldScene.GetTaxiActorModelOverride(routeId);
             IReadOnlyList<string> defaultTaxiActorModels = WorldScene.DefaultTaxiActorModelPaths;
-            ImGui.TextWrapped($"Override Route: {GetTaxiRouteDisplayLabel(routeId)}");
+            ImGui.TextWrapped($"Override Route: {_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(routeId)}");
             ImGui.TextWrapped($"Resolved Actor Model: {resolvedActorModelPath}");
             ImGui.TextDisabled($"Override: {actorOverridePath ?? "auto"}");
 
@@ -2777,8 +2777,8 @@ public partial class ViewerApp
                 {
                     _taxiActorModelOverrideInput = defaultTaxiActorModels[0];
                     _taxiActorModelOverrideInputRouteId = routeId;
-                    ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
-                    RefreshSelectedTaxiInfo();
+                    _taxiAndAreaPoi.ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+                    _taxiAndAreaPoi.RefreshSelectedTaxiInfo();
                 }
             }
 
@@ -2789,24 +2789,24 @@ public partial class ViewerApp
                 {
                     _taxiActorModelOverrideInput = defaultTaxiActorModels[1];
                     _taxiActorModelOverrideInputRouteId = routeId;
-                    ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
-                    RefreshSelectedTaxiInfo();
+                    _taxiAndAreaPoi.ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+                    _taxiAndAreaPoi.RefreshSelectedTaxiInfo();
                 }
             }
 
             if (ImGui.Button("Apply Model Override"))
             {
-                ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
-                SyncTaxiActorModelOverrideInput(routeId);
-                RefreshSelectedTaxiInfo();
+                _taxiAndAreaPoi.ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+                _taxiAndAreaPoi.SyncTaxiActorModelOverrideInput(routeId);
+                _taxiAndAreaPoi.RefreshSelectedTaxiInfo();
             }
 
             ImGui.SameLine();
             if (ImGui.Button("Clear Override"))
             {
-                ApplyTaxiActorModelOverride(routeId, null);
-                SyncTaxiActorModelOverrideInput(routeId);
-                RefreshSelectedTaxiInfo();
+                _taxiAndAreaPoi.ApplyTaxiActorModelOverride(routeId, null);
+                _taxiAndAreaPoi.SyncTaxiActorModelOverrideInput(routeId);
+                _taxiAndAreaPoi.RefreshSelectedTaxiInfo();
             }
 
             if (TryGetSelectedBrowserModelPath(out string selectedBrowserModelPath))
@@ -2815,22 +2815,22 @@ public partial class ViewerApp
                 {
                     _taxiActorModelOverrideInput = selectedBrowserModelPath.Replace('/', '\\');
                     _taxiActorModelOverrideInputRouteId = routeId;
-                    ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
-                    RefreshSelectedTaxiInfo();
+                    _taxiAndAreaPoi.ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+                    _taxiAndAreaPoi.RefreshSelectedTaxiInfo();
                 }
 
                 ImGui.SameLine();
                 ImGui.TextDisabled(Path.GetFileName(selectedBrowserModelPath));
             }
 
-            if (TryGetLoadedTaxiActorModelPath(out string loadedModelPath))
+            if (_taxiAndAreaPoi.TryGetLoadedTaxiActorModelPath(out string loadedModelPath))
             {
                 if (ImGui.Button("Use Loaded Model"))
                 {
                     _taxiActorModelOverrideInput = loadedModelPath;
                     _taxiActorModelOverrideInputRouteId = routeId;
-                    ApplyTaxiActorModelOverride(routeId, loadedModelPath);
-                    RefreshSelectedTaxiInfo();
+                    _taxiAndAreaPoi.ApplyTaxiActorModelOverride(routeId, loadedModelPath);
+                    _taxiAndAreaPoi.RefreshSelectedTaxiInfo();
                 }
 
                 ImGui.SameLine();

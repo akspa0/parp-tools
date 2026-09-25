@@ -1597,7 +1597,7 @@ public partial class ViewerApp
         if (!TryAttachTaxiRideCameraToSelectedRoute())
             return false;
 
-        return TryStartCurrentViewVideoRecording(_videoCaptureIncludeUi, GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId));
+        return TryStartCurrentViewVideoRecording(_videoCaptureIncludeUi, _taxiAndAreaPoi.GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId));
     }
 
     private bool TryStartCurrentViewVideoRecording(bool includeUi, string? label = null)
@@ -1883,7 +1883,7 @@ public partial class ViewerApp
         _taxiRideFreeLookPitchOffset = 0f;
         _taxiRideCameraPoseInitialized = false;
         _lastTaxiRideCameraTick = Stopwatch.GetTimestamp();
-        _statusMessage = $"Ride camera attached to {GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}.";
+        _statusMessage = $"Ride camera attached to {_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}.";
         return true;
     }
 

@@ -142,5 +142,16 @@ internal interface IViewerAppHost
     ref SqlWorldPopulationService? SqlPopulationService { get; }
     void DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent);
     void ExportAnimationStateJson(IAnimationController animator, int currentSeq, string currentSeqName, float seqStart, float seqEnd);
+    ref string? LastVirtualPath { get; }
+    Dictionary<string, Dictionary<int, string>> SavedTaxiActorModelOverridesByMap { get; }
+    ref int SelectedAreaPoiId { get; }
+    ref int SelectedObjectIndex { get; }
+    ref string SelectedObjectInfo { get; }
+    ref string SelectedObjectType { get; }
+    ref string TaxiActorModelOverrideInput { get; }
+    ref int TaxiActorModelOverrideInputRouteId { get; }
+    ref int TaxiActorModelOverrideTargetRouteId { get; }
+    void SaveViewerSettings();
+    bool TryGetSelectedBrowserModelPath(out string assetPath);
     // HOST-IFACE-END
 }
