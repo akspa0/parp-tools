@@ -149,7 +149,7 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
         ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
         ImGui.Separator();
-        DrawUiThemeSettingsContent();
+        _themes.DrawUiThemeSettingsContent();
         ImGui.Separator();
         DrawCameraControlsContent();
 
@@ -1191,7 +1191,7 @@ public partial class ViewerApp
         ImGui.Spacing();
         ImGui.Text("UI Theme");
         ImGui.Separator();
-        DrawUiThemeSettingsContent();
+        _themes.DrawUiThemeSettingsContent();
     }
 
     private void DrawEditorQuickSection()

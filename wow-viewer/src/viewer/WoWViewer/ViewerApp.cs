@@ -661,6 +661,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly ViewerChromeService _viewerChrome;
     private readonly LightingPanelService _lightingPanel;
     private readonly AudioPanelService _audioPanel;
+    private readonly ThemesService _themes;
 
     public ViewerApp()
     {
@@ -696,6 +697,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _viewerChrome = new ViewerChromeService(this);
         _lightingPanel = new LightingPanelService(this);
         _audioPanel = new AudioPanelService(this);
+        _themes = new ThemesService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -963,7 +965,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref string IViewerAppHost.SelectedDatasetVersionRoot => ref _selectedDatasetVersionRoot;
     ref TextureFilteringMode IViewerAppHost.TextureFilteringMode => ref _textureFilteringMode;
     ref float IViewerAppHost.UiFontScale => ref _uiFontScale;
-    ref UiThemeKind IViewerAppHost.UiTheme => ref _uiTheme;
+    ref ThemesService.UiThemeKind IViewerAppHost.UiTheme => ref _themes._uiTheme;
     ref int IViewerAppHost.VideoCaptureContainerIndex => ref _videoCaptureContainerIndex;
     ref int IViewerAppHost.VideoCaptureFps => ref _videoCaptureFps;
     ref bool IViewerAppHost.VideoCaptureIncludeUi => ref _videoCaptureIncludeUi;
@@ -1058,7 +1060,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
         _sqlSpawnStreaming.TryAutoPopulateAlphaCoreRoot();
         _settings.LoadViewerSettings();
-        ApplyActiveUiTheme();
+        _themes.ApplyActiveUiTheme();
         LoadCameraShotPoints();
         DetectRenderQualityCapabilities();
         ApplyRenderQualitySettings(refreshTextures: false);

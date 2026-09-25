@@ -1,10 +1,26 @@
 using System.Numerics;
 using ImGuiNET;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-public partial class ViewerApp
+/// <summary>
+/// UI themes: theme selection and ImGui style application.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
+/// </summary>
+internal sealed partial class ThemesService
 {
+    private readonly IViewerAppHost _host;
+
+    internal ThemesService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+    // Host bridge: see ThemesService.Host.cs.
+
     internal enum UiThemeKind
     {
         ModernSlate = 0,
@@ -17,9 +33,9 @@ public partial class ViewerApp
         UiThemeKind.PreAlphaBrass,
     };
 
-    private UiThemeKind _uiTheme = UiThemeKind.ModernSlate;
+    internal UiThemeKind _uiTheme = UiThemeKind.ModernSlate;
 
-    private void ApplyActiveUiTheme()
+    internal void ApplyActiveUiTheme()
     {
         ApplyUiTheme(_uiTheme, persist: false);
     }
@@ -64,7 +80,7 @@ public partial class ViewerApp
             _settings.SaveViewerSettings();
     }
 
-    private void DrawUiThemeSettingsContent()
+    internal void DrawUiThemeSettingsContent()
     {
         ImGui.Text("UI Theme");
         ImGui.TextDisabled("Theme changes chrome and palette first; shell layout changes come later.");

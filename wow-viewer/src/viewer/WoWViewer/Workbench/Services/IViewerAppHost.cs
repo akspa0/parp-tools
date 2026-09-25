@@ -70,6 +70,7 @@ using System.IO;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Runtime.World.Minimap;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.ThemesService;
 
 namespace WoWViewer;
 
