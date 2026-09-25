@@ -31,7 +31,9 @@ public partial class ViewerApp
     private readonly List<CameraShotPoint> _cameraShotPoints = new();
     List<CameraShotPoint> IViewerAppHost.CameraShotPoints => _cameraShotPoints;
     private readonly Queue<PendingCaptureRequest> _captureQueue = new();
+    Queue<PendingCaptureRequest> IViewerAppHost.CaptureQueue => _captureQueue;
     private PendingCaptureRequest? _activeCaptureRequest;
+    ref PendingCaptureRequest? IViewerAppHost.ActiveCaptureRequest => ref _activeCaptureRequest;
     private MkHarvestViewerValidationCapturePlan? _pendingMkHarvestViewerValidationCapturePlan;
     private ActiveMkHarvestViewerValidationBatch? _activeMkHarvestViewerValidationBatch;
     private int _selectedCameraShotIndex = -1;
@@ -93,7 +95,7 @@ public partial class ViewerApp
         public float FovDegrees { get; set; }
     }
 
-    private sealed class PendingCaptureRequest
+    internal sealed class PendingCaptureRequest
     {
         public CameraShotPoint Shot { get; set; } = new();
         public string OutputPath { get; set; } = string.Empty;
@@ -423,6 +425,7 @@ public partial class ViewerApp
 
         ImGui.TextDisabled($"Queued captures: {_captureQueue.Count + (_activeCaptureRequest != null ? 1 : 0)}");
     }
+    void IViewerAppHost.DrawCaptureAutomationContent() => DrawCaptureAutomationContent();
 
     private static (float wowX, float wowY, float wowZ) GetWowCoordinates(float positionX, float positionY, float positionZ)
     {
@@ -718,9 +721,9 @@ public partial class ViewerApp
         if (request.RequiresCameraPathPreload
             && _captureQueue.Count == 0
             && _activeCaptureRequest == null
-            && !_cameraPathVideoCaptureActive)
+            && !_cameraPaths._cameraPathVideoCaptureActive)
         {
-            EndCameraPathPreload();
+            _cameraPaths.EndCameraPathPreload();
         }
 
         if (request.IsMkHarvestViewerValidationCapture)
@@ -762,7 +765,7 @@ public partial class ViewerApp
         request.FramesSinceApplied++;
 
         if (request.RequiresCameraPathPreload
-            && (_cameraPathPreload == null || !_cameraPathPreload.Ready))
+            && (_cameraPaths._cameraPathPreload == null || !_cameraPaths._cameraPathPreload.Ready))
         {
             request.SettledFrames = 0;
             if (request.FramesSinceApplied < request.MaxFramesBeforeCapture)
@@ -770,7 +773,7 @@ public partial class ViewerApp
 
             request.TimedOutWaitingForScene = true;
             ViewerLog.Error(ViewerLog.Category.Export,
-                $"[Capture] Camera-path preload timeout: ready={_cameraPathPreload?.Ready == true} frames={request.FramesSinceApplied}/{request.MaxFramesBeforeCapture}");
+                $"[Capture] Camera-path preload timeout: ready={_cameraPaths._cameraPathPreload?.Ready == true} frames={request.FramesSinceApplied}/{request.MaxFramesBeforeCapture}");
             return true;
         }
 
@@ -2180,6 +2183,7 @@ public partial class ViewerApp
 
         return "standalone";
     }
+    string IViewerAppHost.GetCurrentCaptureMapName() => GetCurrentCaptureMapName();
 
     private string GetCurrentCaptureBuildVersion()
     {
@@ -2187,6 +2191,7 @@ public partial class ViewerApp
             ? "unknown_build"
             : _dbcBuild;
     }
+    string IViewerAppHost.GetCurrentCaptureBuildVersion() => GetCurrentCaptureBuildVersion();
 
     private static string MakeSafePathSegment(string value)
     {

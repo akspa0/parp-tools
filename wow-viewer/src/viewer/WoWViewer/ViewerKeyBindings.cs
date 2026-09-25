@@ -82,10 +82,4 @@ public partial class ViewerApp
         };
     }
     ViewerKeyContext IViewerAppHost.GetActiveKeyContext() => GetActiveKeyContext();
-
-    private bool IsCaptureKeyboardContextActive()
-    {
-        return GetActiveKeyContext() == ViewerKeyContext.Capture
-            && (_showCameraPathWindow || _activeCapturePanelTabIndex == (int)CapturePanelTab.CameraPath);
-    }
 }

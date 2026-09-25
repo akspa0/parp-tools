@@ -638,6 +638,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly TerrainAnalysisService _terrainAnalysis;
     private readonly MinimapAndStatusService _minimapAndStatus;
     private readonly StartupAutomationService _startupAutomation;
+    private readonly CameraPathsService _cameraPaths;
 
     public ViewerApp()
     {
@@ -688,6 +689,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _terrainAnalysis = new TerrainAnalysisService(this);
         _minimapAndStatus = new MinimapAndStatusService(this);
         _startupAutomation = new StartupAutomationService(this);
+        _cameraPaths = new CameraPathsService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -900,13 +902,13 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref string IViewerAppHost.SearchFilter => ref _searchFilter;
     ref int IViewerAppHost.SelectedFileIndex => ref _selectedFileIndex;
     WorldLoaderService IViewerAppHost.WorldLoader => _worldLoader;
-    M2CameraPathDocument IViewerAppHost.CameraPath => _cameraPath;
+    M2CameraPathDocument IViewerAppHost.CameraPath => _cameraPaths._cameraPath;
     ref Terrain.BoundingBoxRenderer? IViewerAppHost.EditorOverlayBb => ref _editorOverlayBb;
     ref int IViewerAppHost.LastMcnkOverlayChunkCount => ref _investigation._lastMcnkOverlayChunkCount;
     ref int IViewerAppHost.LastMcnkWeakCornerCount => ref _investigation._lastMcnkWeakCornerCount;
     ref InvestigationService.McnkOverlayFlags IViewerAppHost.McnkOverlayFlags => ref _investigation._mcnkOverlayFlags;
     ShellLayoutService IViewerAppHost.ShellLayout => _shellLayout;
-    ref bool IViewerAppHost.ShowCameraPathOverlay => ref _showCameraPathOverlay;
+    ref bool IViewerAppHost.ShowCameraPathOverlay => ref _cameraPaths._showCameraPathOverlay;
     ref bool IViewerAppHost.ShowMcnkFlagOverlay => ref _investigation._showMcnkFlagOverlay;
     ref bool IViewerAppHost.ShowMcnkWeakCorners => ref _investigation._showMcnkWeakCorners;
     DataSourceSessionService IViewerAppHost.DataSourceSession => _dataSourceSession;
@@ -1031,6 +1033,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisLocalTexture => ref _terrainAnalysisLocalTexture;
     ref double IViewerAppHost.CurrentFps => ref _currentFps;
     DatasetExportDialogsService IViewerAppHost.DatasetExportDialogs => _datasetExportDialogs;
+    ref bool IViewerAppHost.ShowCameraPathWindow => ref _showCameraPathWindow;
+    ref bool IViewerAppHost.ShowCaptureAutomationWindow => ref _showCaptureAutomationWindow;
+    WorkbenchPanelsService IViewerAppHost.WorkbenchPanels => _workbenchPanels;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1155,8 +1160,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _shellLayout.FlushPendingImGuiMouseButtonEvents();
         HandleSceneMouseWheelInput();
         HandleKeyboardInput((float)dt);
-        UpdateCameraPathPlayback(dt);
-        UpdateCameraPathPreload();
+        _cameraPaths.UpdateCameraPathPlayback(dt);
+        _cameraPaths.UpdateCameraPathPreload();
         UpdateTaxiRideCamera();
         _archaeologyPanel.UpdateArcheologyPlayback(dt);
         _minimapRenderer?.ProcessPendingLoads(
@@ -1218,7 +1223,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         bool vDown = kb.IsKeyPressed(Key.V);
         bool ctrlCDown = ctrlDown && cDown;
         bool ctrlVDown = ctrlDown && vDown;
-        bool cameraPathKeyboardAction = HandleCameraPathKeyboardInput(kb, ctrlDown, shiftDown: kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight));
+        bool cameraPathKeyboardAction = _cameraPaths.HandleCameraPathKeyboardInput(kb, ctrlDown, shiftDown: kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight));
 
         if (_chunkToolEnabled && canSceneConsumeKeyboard)
         {
@@ -1755,7 +1760,7 @@ void main() {
                     DrawCaptureAutomationWindow();
 
                 if (_showCameraPathWindow)
-                    DrawCameraPathWindow();
+                    _cameraPaths.DrawCameraPathWindow();
 
                 // Tool windows extracted from right sidebar
                 if (_showUniqueIdArchaeologyWindow && _worldScene != null)

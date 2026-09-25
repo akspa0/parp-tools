@@ -48,6 +48,7 @@ using WowViewer.Core.Runtime.World.Passes;
 using WoWViewer.UI;
 using WowViewer.Core.IO.Casc;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.CameraPathsService;
 
 namespace WoWViewer;
 

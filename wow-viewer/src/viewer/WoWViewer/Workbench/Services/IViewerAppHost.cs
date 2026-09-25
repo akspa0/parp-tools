@@ -70,6 +70,7 @@ using System.IO;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Runtime.World.Minimap;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.CameraPathsService;
 using static WoWViewer.MinimapAndStatusService;
 using static WoWViewer.InvestigationService;
 using static WoWViewer.ThemesService;
@@ -483,5 +484,13 @@ internal interface IViewerAppHost
     void EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture, CaptureQueueOptions? options);
     void GenerateMkHarvestViewerValidationObjectArtifacts(string datasetRoot, string withObjectsOutputDirectory, string noObjectsOutputDirectory, string objectsOnlyOutputDirectory);
     void QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture = false, int captureAfterFrames = 1, bool allowWindowCloseOnCapture = false);
+    ref PendingCaptureRequest? ActiveCaptureRequest { get; }
+    Queue<PendingCaptureRequest> CaptureQueue { get; }
+    ref bool ShowCameraPathWindow { get; }
+    ref bool ShowCaptureAutomationWindow { get; }
+    WorkbenchPanelsService WorkbenchPanels { get; }
+    void DrawCaptureAutomationContent();
+    string GetCurrentCaptureBuildVersion();
+    string GetCurrentCaptureMapName();
     // HOST-IFACE-END
 }
