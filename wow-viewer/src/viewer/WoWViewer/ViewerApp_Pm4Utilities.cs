@@ -858,7 +858,7 @@ public partial class ViewerApp
             Vector4 colour = clean
                 ? new Vector4(0.72f, 0.76f, 0.84f, 1f)
                 : new Vector4(1.0f, 0.7f, 0.25f, 1f);
-            TextColoredUnformatted(colour, $"  0x{c.SurfaceClass:X2}{(expectedDoodad ? " (doodad)" : "")}".PadRight(20)
+            SceneHoverAndPickService.TextColoredUnformatted(colour, $"  0x{c.SurfaceClass:X2}{(expectedDoodad ? " (doodad)" : "")}".PadRight(20)
                 + $"{c.WithHeight,10}   {c.WithoutHeight,7}");
         }
     }

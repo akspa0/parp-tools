@@ -153,5 +153,32 @@ internal interface IViewerAppHost
     ref int TaxiActorModelOverrideTargetRouteId { get; }
     void SaveViewerSettings();
     bool TryGetSelectedBrowserModelPath(out string assetPath);
+    ref EditorWorkspaceTask EditorWorkspaceTask { get; }
+    ref float FovDegrees { get; }
+    ref GL Gl { get; }
+    ref Pm4ObjectMatchObject? HoveredPm4ObjectMatch { get; }
+    ref int HoveredPm4ObjectMatchCacheMaxMatches { get; }
+    ref (int tileX, int tileY, uint ck24, int objectPart)? HoveredPm4ObjectMatchKey { get; }
+    ref float LastMouseX { get; }
+    ref float LastMouseY { get; }
+    ref int Pm4ObjectMatchMaxMatchesPerObject { get; }
+    ref SceneClusterSelector3D? SceneClusterSelector3D { get; }
+    ref SceneCursorRenderer? SceneCursorRenderer { get; }
+    TaxiAndAreaPoiSelectionService TaxiAndAreaPoi { get; }
+    ref VisualInvestigationMode VisualInvestigationMode { get; }
+    ref WorkspaceMode WorkspaceMode { get; }
+    bool CanSceneConsumeMouse(float x, float y);
+    void ClearSelectedWlLiquidBody(bool clearListIsolation);
+    float GetSceneFarPlane();
+    bool IsSceneMouseCaptureBlocked(float x, float y);
+    void SelectTerrainChunkFromClick(TerrainRenderer.TerrainChunkInfo info);
+    void SetSelectedWlLiquidBody(WlLiquidBody body, bool isolateInList, bool focusInspectWorkspace, string? statusMessage = null);
+    bool ShouldShowHoveredAssetInfoForInvestigation(HoveredAssetInfo info);
+    bool TogglePm4ObjectCollectionMembership((int tileX, int tileY, uint ck24, int objectPart) key, bool reportStatus, bool removeIfPresent = true);
+    bool TryFindWlLiquidBodyByKey(string bodyKey, out WlLiquidBody? body);
+    bool TryGetSceneViewportRect(out float x, out float y, out float width, out float height);
+    bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info);
+    bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info, out Vector3 hitPoint);
+    bool TryResolveHoveredWlLiquidBody(HoveredAssetInfo hoveredInfo, out WlLiquidBody? body);
     // HOST-IFACE-END
 }

@@ -4,10 +4,13 @@ using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Terrain;
 using WoWViewer.Rendering;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-public partial class ViewerApp
+// SceneHoverAndPickService: members moved from ViewerApp_ClickSelection.cs; this file keeps that file's using directives so every
+// name in the moved code resolves exactly as it did there.
+internal sealed partial class SceneHoverAndPickService
 {
     private const int MaxSceneClickSelectionHits = 10;
 
@@ -232,7 +235,7 @@ public partial class ViewerApp
         return true;
     }
 
-    private void DrawClickSelectionOverlay()
+    internal void DrawClickSelectionOverlay()
     {
         if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
         {
@@ -261,7 +264,7 @@ public partial class ViewerApp
         }
     }
 
-    private void ClearPendingClickSelection()
+    internal void ClearPendingClickSelection()
     {
         _clickSelectionCandidates.Clear();
         _clickSelectionSceneHitOverflowCount = 0;
