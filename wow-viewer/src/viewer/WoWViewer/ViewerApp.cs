@@ -465,19 +465,17 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _showRightSidebar = true;
     internal const float DefaultSidebarWidth = 360f;
     internal const float DefaultRightSidebarWidth = 480f;
-    private const float SidebarMinWidth = 280f;
+    internal const float SidebarMinWidth = 280f;
     internal const float SidebarCompactMinWidth = 240f;
     internal const float SidebarMaxWidth = 1080f;
-    private const float SidebarSplitterWidth = 8f;
     internal const float DefaultBottomDrawerHeight = 280f;
     private const float BottomDrawerSplitterHeight = 8f;
-    private const float SceneViewportPreferredMinWidth = 420f;
     internal const float SceneViewportHardMinWidth = 240f;
     internal float _leftSidebarWidth = DefaultSidebarWidth;
     internal float _rightSidebarWidth = DefaultRightSidebarWidth;
     internal float _bottomDrawerHeight = DefaultBottomDrawerHeight;
-    private const float MenuBarHeight = 22f;
-    private const float ToolbarHeight = 32f;
+    internal const float MenuBarHeight = 22f;
+    internal const float ToolbarHeight = 32f;
     internal const float BottomBarHeight = 36f;
     internal const float StatusBarHeight = 24f;
 
@@ -660,6 +658,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly ModelInspectorPanelService _modelInspector;
     private readonly TerrainControlsPanelService _terrainControlsPanel;
     private readonly NavigatorPanelService _navigatorPanel;
+    private readonly ViewerChromeService _viewerChrome;
 
     public ViewerApp()
     {
@@ -692,6 +691,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _modelInspector = new ModelInspectorPanelService(this);
         _terrainControlsPanel = new TerrainControlsPanelService(this);
         _navigatorPanel = new NavigatorPanelService(this);
+        _viewerChrome = new ViewerChromeService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -780,7 +780,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref int IViewerAppHost.CurrentMapId => ref _currentMapId;
     ref bool IViewerAppHost.SqlForceStreamRefresh => ref _sqlForceStreamRefresh;
     ref SqlWorldPopulationService? IViewerAppHost.SqlPopulationService => ref _sqlPopulationService;
-    void IViewerAppHost.DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent) => DrawToolbarPopupButton(label, summary, popupId, drawContent);
+    void IViewerAppHost.DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent) => _viewerChrome.DrawToolbarPopupButton(label, summary, popupId, drawContent);
     void IViewerAppHost.ExportAnimationStateJson(IAnimationController animator, int currentSeq, string currentSeqName, float seqStart, float seqEnd) => _modelInspector.ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
     ref string? IViewerAppHost.LastVirtualPath => ref _lastVirtualPath;
     Dictionary<string, Dictionary<int, string>> IViewerAppHost.SavedTaxiActorModelOverridesByMap => _savedTaxiActorModelOverridesByMap;
@@ -843,7 +843,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.UseDockspaceUi => ref _useDockspaceUi;
     ref bool IViewerAppHost.UseTabUi => ref _useTabUi;
     ref IWindow IViewerAppHost.Window => ref _window;
-    float IViewerAppHost.ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth) => ClampFixedSidebarWidth(width, isLeftSidebar, displayWidth);
+    float IViewerAppHost.ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth) => _viewerChrome.ClampFixedSidebarWidth(width, isLeftSidebar, displayWidth);
     float IViewerAppHost.GetTopChromeHeight() => GetTopChromeHeight();
     void IViewerAppHost.SetEditorWorkspaceTask(EditorWorkspaceTask task) => SetEditorWorkspaceTask(task);
     ref List<MapDefinition> IViewerAppHost.DiscoveredMaps => ref _discoveredMaps;
@@ -1012,6 +1012,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     StratigraphyService IViewerAppHost.Stratigraphy => _stratigraphy;
     ref int IViewerAppHost.PendingMinimapTeleportClickCount => ref _pendingMinimapTeleportClickCount;
     ref (int tileX, int tileY)? IViewerAppHost.PendingMinimapTeleportTile => ref _pendingMinimapTeleportTile;
+    ModelInspectorPanelService IViewerAppHost.ModelInspector => _modelInspector;
+    TerrainControlsPanelService IViewerAppHost.TerrainControlsPanel => _terrainControlsPanel;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1690,12 +1692,12 @@ void main() {
                     DrawLegacyRightSidebar();
             }
 
-            DrawFixedSidebarSplitters();
+            _viewerChrome.DrawFixedSidebarSplitters();
 
             // Toolbar is drawn after sidebars so it stays on top of any edge overlap.
-            DrawToolbar();
+            _viewerChrome.DrawToolbar();
 
-            DrawBottomBar();
+            _viewerChrome.DrawBottomBar();
 
             DrawStatusBar();
 

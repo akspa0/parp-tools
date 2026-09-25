@@ -442,5 +442,10 @@ internal interface IViewerAppHost
     void DrawInteractiveMinimapSurface(string interactionId, Vector2 cursorPos, float mapSize, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded, string? mapName, MinimapTeleportMode teleportMode, out float viewMinTx, out float viewMinTy, out float cellSize);
     void DrawWorkspaceBarsPanelContent();
     void ToggleFullscreenMinimap();
+    ModelInspectorPanelService ModelInspector { get; }
+    TerrainControlsPanelService TerrainControlsPanel { get; }
+    void DrawVisualInvestigationModeButton(VisualInvestigationMode mode, string label, string tooltip);
+    string GetWorkspaceSaveStatusSummary();
+    string GetWorkspaceTargetSummary();
     // HOST-IFACE-END
 }

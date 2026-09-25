@@ -130,6 +130,7 @@ public partial class ViewerApp
         if (selected)
             ImGui.PopStyleColor(3);
     }
+    void IViewerAppHost.DrawVisualInvestigationModeButton(VisualInvestigationMode mode, string label, string tooltip) => DrawVisualInvestigationModeButton(mode, label, tooltip);
 
     private static string GetVisualInvestigationModeLabel(VisualInvestigationMode mode)
     {

@@ -117,13 +117,6 @@ public partial class ViewerApp
         };
     }
 
-    private void DrawWorkspaceToolbarControls()
-    {
-        ImGui.TextDisabled("Unified workspace");
-        ImGui.TextWrapped(GetWorkspaceTargetSummary());
-        ImGui.TextDisabled(GetWorkspaceSaveStatusSummary());
-    }
-
 
     private void DrawEditorWorkspaceInspector()
     {
@@ -391,6 +384,7 @@ public partial class ViewerApp
 
         return "No active target";
     }
+    string IViewerAppHost.GetWorkspaceTargetSummary() => GetWorkspaceTargetSummary();
 
     private string GetWorkspaceSaveStatusSummary()
     {
@@ -419,4 +413,5 @@ public partial class ViewerApp
 
         return "No active world save target.";
     }
+    string IViewerAppHost.GetWorkspaceSaveStatusSummary() => GetWorkspaceSaveStatusSummary();
 }
