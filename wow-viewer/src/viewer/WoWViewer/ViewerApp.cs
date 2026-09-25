@@ -654,6 +654,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly WmoGroupsPanelService _wmoGroupsPanel;
     private readonly SettingsWindowService _settingsWindow;
     private readonly SynthesizedMinimapExportService _synthesizedMinimapExport;
+    private readonly MlTrainingService _mlTraining;
 
     public ViewerApp()
     {
@@ -700,6 +701,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _wmoGroupsPanel = new WmoGroupsPanelService(this);
         _settingsWindow = new SettingsWindowService(this);
         _synthesizedMinimapExport = new SynthesizedMinimapExportService(this);
+        _mlTraining = new MlTrainingService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1795,12 +1797,12 @@ void main() {
             _clientDialogs.DrawBuildSelectionDialog();
         if (_showListfileInput)
             _clientDialogs.DrawListfileInputDialog();
-        if (_showMlTrainingDialog || IsMlTrainingProcessActive())
-            UpdateMlTrainingMonitor();
+        if (_mlTraining._showMlTrainingDialog || _mlTraining.IsMlTrainingProcessActive())
+            _mlTraining.UpdateMlTrainingMonitor();
         if (_showVlmExportDialog)
             _datasetExportDialogs.DrawVlmExportDialog();
-        if (_showMlTrainingDialog)
-            DrawMlTrainingDialog();
+        if (_mlTraining._showMlTrainingDialog)
+            _mlTraining.DrawMlTrainingDialog();
         if (_showTerrainTextureTransferDialog)
             _datasetExportDialogs.DrawTerrainTextureTransferDialog();
         if (_showAlphaFolderImportScope)
@@ -1979,7 +1981,7 @@ void main() {
 
         StopVideoRecording("Stopped video recording during shutdown.");
         StopTaxiRideCamera();
-        ShutdownMlTrainingMonitor();
+        _mlTraining.ShutdownMlTrainingMonitor();
 
         ISceneRenderer? renderer = _renderer;
         WorldScene? worldScene = _worldScene;

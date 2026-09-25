@@ -3,12 +3,28 @@ using System.Globalization;
 using System.Numerics;
 using System.Text.Json;
 using ImGuiNET;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-public partial class ViewerApp
+/// <summary>
+/// ML training panel: dataset preparation, training runs and model finalisation workflow.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
+/// </summary>
+internal sealed partial class MlTrainingService
 {
-    private bool _showMlTrainingDialog;
+    private readonly IViewerAppHost _host;
+
+    internal MlTrainingService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+    // Host bridge: see MlTrainingService.Host.cs.
+
+    internal bool _showMlTrainingDialog;
     private string _mlTrainingPythonExecutable = "python";
     private string _mlTrainingScriptPath = ResolveDefaultMlTrainingScriptPath();
     private string _mlTrainingProfile = "development-map";
@@ -102,7 +118,7 @@ public partial class ViewerApp
             _mlTrainingIncludeMapsText = "Northrend\nLostIsles";
     }
 
-    private bool IsMlTrainingProcessActive()
+    internal bool IsMlTrainingProcessActive()
     {
         try
         {
@@ -114,7 +130,7 @@ public partial class ViewerApp
         }
     }
 
-    private void UpdateMlTrainingMonitor()
+    internal void UpdateMlTrainingMonitor()
     {
         if (_mlTrainingProcess != null)
         {
@@ -160,7 +176,7 @@ public partial class ViewerApp
         _mlTrainingProcess = null;
     }
 
-    private void ShutdownMlTrainingMonitor()
+    internal void ShutdownMlTrainingMonitor()
     {
         if (_mlTrainingProcess == null)
             return;
@@ -431,7 +447,7 @@ public partial class ViewerApp
         return values;
     }
 
-    private void DrawMlTrainingDialog()
+    internal void DrawMlTrainingDialog()
     {
         ImGui.SetNextWindowSize(new Vector2(860, 780), ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("Train V7 Terrain Model", ref _showMlTrainingDialog))
