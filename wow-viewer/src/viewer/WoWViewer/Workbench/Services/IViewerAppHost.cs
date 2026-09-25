@@ -472,5 +472,8 @@ internal interface IViewerAppHost
     ref CameraHudRig? CameraHudRig { get; }
     DatasetCatalogService DatasetCatalog { get; }
     RenderQualityService RenderQuality { get; }
+    ref TerrainAnalysisPreviewTexture? TerrainAnalysisAlphaTexture { get; }
+    ref TerrainAnalysisPreviewTexture? TerrainAnalysisGlobalTexture { get; }
+    ref TerrainAnalysisPreviewTexture? TerrainAnalysisLocalTexture { get; }
     // HOST-IFACE-END
 }

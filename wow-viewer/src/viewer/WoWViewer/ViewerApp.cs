@@ -380,26 +380,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _stratigraphyUseNeighborAutoFit = false;
     private bool _stratigraphyUseWdlMagnetization = false;
     private float _stratigraphyWdlMagnetizationStrength = 1.0f;
-    private (int tileX, int tileY)? _terrainAnalysisPreviewTile;
-    private float _terrainAnalysisPreviewTileMin;
-    private float _terrainAnalysisPreviewTileMax;
-    private float _terrainAnalysisPreviewVisibilityRatio;
-    private float _terrainAnalysisPreviewAmplification = 1f;
     private (int tileX, int tileY)? _terrainAnalysisPreviewCompareTile;
     private float? _terrainAnalysisPreviewSimilarity;
-    private float _terrainAnalysisGlobalMin;
-    private float _terrainAnalysisGlobalMax;
-    private int _terrainAnalysisGlobalTileCount;
-    private TerrainTileScope _terrainAnalysisGlobalScope = TerrainTileScope.LoadedTiles;
-    private bool _terrainAnalysisHasGlobalBounds;
-    private bool _terrainAnalysisFollowCameraTile = true;
-    private string _terrainAnalysisStatus = string.Empty;
-    private int _terrainAnalysisHiddenCompareOffsetX;
-    private int _terrainAnalysisHiddenCompareOffsetY = 2;
-    private float _terrainAnalysisHiddenMinSimilarity = 0.85f;
-    private float _terrainAnalysisHiddenMaxVisibilityRatio = 0.05f;
-    private int _terrainAnalysisHiddenMaxResults = 24;
-    private TerrainTileScope _terrainAnalysisHiddenScope = TerrainTileScope.LoadedTiles;
     private readonly List<TerrainHiddenTileCandidate> _terrainAnalysisHiddenCandidates = new();
     private int _terrainAnalysisHiddenSelectedIndex = -1;
     private string _terrainAnalysisHiddenStatus = string.Empty;
@@ -655,6 +637,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly SettingsWindowService _settingsWindow;
     private readonly SynthesizedMinimapExportService _synthesizedMinimapExport;
     private readonly MlTrainingService _mlTraining;
+    private readonly TerrainAnalysisService _terrainAnalysis;
 
     public ViewerApp()
     {
@@ -702,6 +685,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _settingsWindow = new SettingsWindowService(this);
         _synthesizedMinimapExport = new SynthesizedMinimapExportService(this);
         _mlTraining = new MlTrainingService(this);
+        _terrainAnalysis = new TerrainAnalysisService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1040,6 +1024,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref CameraHudRig? IViewerAppHost.CameraHudRig => ref _cameraHudRig;
     DatasetCatalogService IViewerAppHost.DatasetCatalog => _datasetCatalog;
     RenderQualityService IViewerAppHost.RenderQuality => _renderQuality;
+    ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisAlphaTexture => ref _terrainAnalysisAlphaTexture;
+    ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisGlobalTexture => ref _terrainAnalysisGlobalTexture;
+    ref TerrainAnalysisPreviewTexture? IViewerAppHost.TerrainAnalysisLocalTexture => ref _terrainAnalysisLocalTexture;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
