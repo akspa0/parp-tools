@@ -489,5 +489,4 @@ public partial class ViewerApp
     string IViewerAppHost.GetWorkspaceTargetSummary() => _workspaces.GetWorkspaceTargetSummary();
     string IViewerAppHost.GetWorkspaceSaveStatusSummary() => _workspaces.GetWorkspaceSaveStatusSummary();
     ViewerKeyContext IViewerAppHost.GetActiveKeyContext() => GetActiveKeyContext();
-    // HOST-IMPL-END
 }

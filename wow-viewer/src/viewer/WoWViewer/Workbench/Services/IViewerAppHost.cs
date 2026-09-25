@@ -27,16 +27,12 @@ using WoWViewer.Terrain.Vlm;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
-using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.M2;
-using WoWViewer.Terrain.Vlm;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.Marketing;
 using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;
-using WowViewer.Core.IO.Maps;
-using WoWViewer.Terrain.Vlm;
 using WoWViewer.Workbench;
 using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
 using CoreMdxGeometryFile = WowViewer.Core.Mdx.MdxGeometryFile;
@@ -500,5 +496,4 @@ internal interface IViewerAppHost
     ref EditorHost? EditorHost { get; }
     SynthesizedMinimapExportService SynthesizedMinimapExport { get; }
     WorkspacesService Workspaces { get; }
-    // HOST-IFACE-END
 }
