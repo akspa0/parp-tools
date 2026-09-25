@@ -156,7 +156,7 @@ public partial class ViewerApp
             ClearSelectedTerrainChunk();
         }
 
-        if (TryPickTerrainChunkUnderMouse(renderer, out info))
+        if (_terrainQuery.TryPickTerrainChunkUnderMouse(renderer, out info))
         {
             source = TerrainInspectorTargetSource.Hovered;
             return true;

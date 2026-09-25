@@ -97,7 +97,7 @@ public partial class ViewerApp
             bool useLitFog = _worldScene.UseLitFogOverride;
             if (ImGui.Checkbox("Use LIT fog", ref useLitFog))
                 _worldScene.UseLitFogOverride = useLitFog;
-            ImGui.TextDisabled($"Fog/detail range: {currentFogStart:F0}–{currentFogEnd:F0}; WDL horizon clips at {ComputeSceneFarPlane(currentFogEnd):F0} (+2500).");
+            ImGui.TextDisabled($"Fog/detail range: {currentFogStart:F0}–{currentFogEnd:F0}; WDL horizon clips at {TerrainQueryService.ComputeSceneFarPlane(currentFogEnd):F0} (+2500).");
         }
     }
 

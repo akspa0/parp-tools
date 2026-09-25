@@ -159,13 +159,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         new("Cataclysm (4.x) - 4.0.0.11927", "4.0.0.11927"),
         new("Cataclysm (4.x) - 4.0.1.12304", "4.0.1.12304")
     };
-    private const float MaxTerrainFogDistance = 20000f;
-    private const float MinTerrainFarPlane = 1f;
-    // Keep the WDL horizon visible well past the LIT/DBC fog endpoint.  FogEnd
-    // remains the full-detail/visibility authority; this is projection room for
-    // the low-detail WDL replacement terrain, not a second fog range.
-    private const float TerrainFarPlanePadding = 2500f;
-    private const float MaxTerrainFarPlane = MaxTerrainFogDistance + TerrainFarPlanePadding;
+    internal const float MaxTerrainFogDistance = 20000f;
 
     private readonly List<WoWViewer.Terrain.ClientBuildOption> _clientBuildOptions = new();
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
@@ -728,6 +722,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly StandaloneModelLoaderService _modelLoader;
     private readonly WorldLoaderService _worldLoader;
     private readonly DataSourceSessionService _dataSourceSession;
+    private readonly TerrainQueryService _terrainQuery;
 
     public ViewerApp()
     {
@@ -746,6 +741,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _modelLoader = new StandaloneModelLoaderService(this);
         _worldLoader = new WorldLoaderService(this);
         _dataSourceSession = new DataSourceSessionService(this);
+        _terrainQuery = new TerrainQueryService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -825,7 +821,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     string IViewerAppHost.EnsureEditorProjectOutputDirectory(bool forceNew) => EnsureEditorProjectOutputDirectory(forceNew);
     string IViewerAppHost.GetEditorProjectName(string? fallbackName) => GetEditorProjectName(fallbackName);
     string? IViewerAppHost.GetEditorProjectSourceKey() => GetEditorProjectSourceKey();
-    bool IViewerAppHost.TryPickTerrainChunkUnderMouse(TerrainRenderer renderer, out TerrainRenderer.TerrainChunkInfo info) => TryPickTerrainChunkUnderMouse(renderer, out info);
+    bool IViewerAppHost.TryPickTerrainChunkUnderMouse(TerrainRenderer renderer, out TerrainRenderer.TerrainChunkInfo info) => _terrainQuery.TryPickTerrainChunkUnderMouse(renderer, out info);
     ref string IViewerAppHost.EditorProjectOutputDir => ref _editorProjectOutputDir;
     ref string IViewerAppHost.SelectedPlacementSaveStatus => ref _selectedPlacementSaveStatus;
     ref string? IViewerAppHost.SelectedPlacementSaveTargetPath => ref _selectedPlacementSaveTargetPath;
@@ -863,7 +859,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref WorkspaceMode IViewerAppHost.WorkspaceMode => ref _workspaceMode;
     bool IViewerAppHost.CanSceneConsumeMouse(float x, float y) => _shellLayout.CanSceneConsumeMouse(x, y);
     void IViewerAppHost.ClearSelectedWlLiquidBody(bool clearListIsolation) => ClearSelectedWlLiquidBody(clearListIsolation);
-    float IViewerAppHost.GetSceneFarPlane() => GetSceneFarPlane();
+    float IViewerAppHost.GetSceneFarPlane() => _terrainQuery.GetSceneFarPlane();
     bool IViewerAppHost.IsSceneMouseCaptureBlocked(float x, float y) => _shellLayout.IsSceneMouseCaptureBlocked(x, y);
     void IViewerAppHost.SelectTerrainChunkFromClick(TerrainRenderer.TerrainChunkInfo info) => SelectTerrainChunkFromClick(info);
     void IViewerAppHost.SetSelectedWlLiquidBody(WlLiquidBody body, bool isolateInList, bool focusInspectWorkspace, string? statusMessage) => SetSelectedWlLiquidBody(body, isolateInList, focusInspectWorkspace, statusMessage);
@@ -871,8 +867,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     bool IViewerAppHost.TogglePm4ObjectCollectionMembership((int tileX, int tileY, uint ck24, int objectPart) key, bool reportStatus, bool removeIfPresent) => TogglePm4ObjectCollectionMembership(key, reportStatus, removeIfPresent);
     bool IViewerAppHost.TryFindWlLiquidBodyByKey(string bodyKey, out WlLiquidBody? body) => TryFindWlLiquidBodyByKey(bodyKey, out body);
     bool IViewerAppHost.TryGetSceneViewportRect(out float x, out float y, out float width, out float height) => _shellLayout.TryGetSceneViewportRect(out x, out y, out width, out height);
-    bool IViewerAppHost.TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info) => TryRaycastTerrain(renderer, rayOrigin, rayDir, maxDistance, out info);
-    bool IViewerAppHost.TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info, out Vector3 hitPoint) => TryRaycastTerrain(renderer, rayOrigin, rayDir, maxDistance, out info, out hitPoint);
+    bool IViewerAppHost.TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info) => _terrainQuery.TryRaycastTerrain(renderer, rayOrigin, rayDir, maxDistance, out info);
+    bool IViewerAppHost.TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info, out Vector3 hitPoint) => _terrainQuery.TryRaycastTerrain(renderer, rayOrigin, rayDir, maxDistance, out info, out hitPoint);
     bool IViewerAppHost.TryResolveHoveredWlLiquidBody(HoveredAssetInfo hoveredInfo, out WlLiquidBody? body) => TryResolveHoveredWlLiquidBody(hoveredInfo, out body);
     ref FixedBottomDrawerTab IViewerAppHost.ActiveBottomDrawerTab => ref _activeBottomDrawerTab;
     ref float IViewerAppHost.BottomDrawerHeight => ref _bottomDrawerHeight;
@@ -958,6 +954,15 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref string IViewerAppHost.SearchFilter => ref _searchFilter;
     ref int IViewerAppHost.SelectedFileIndex => ref _selectedFileIndex;
     WorldLoaderService IViewerAppHost.WorldLoader => _worldLoader;
+    M2CameraPathDocument IViewerAppHost.CameraPath => _cameraPath;
+    ref Terrain.BoundingBoxRenderer? IViewerAppHost.EditorOverlayBb => ref _editorOverlayBb;
+    ref int IViewerAppHost.LastMcnkOverlayChunkCount => ref _lastMcnkOverlayChunkCount;
+    ref int IViewerAppHost.LastMcnkWeakCornerCount => ref _lastMcnkWeakCornerCount;
+    ref McnkOverlayFlags IViewerAppHost.McnkOverlayFlags => ref _mcnkOverlayFlags;
+    ShellLayoutService IViewerAppHost.ShellLayout => _shellLayout;
+    ref bool IViewerAppHost.ShowCameraPathOverlay => ref _showCameraPathOverlay;
+    ref bool IViewerAppHost.ShowMcnkFlagOverlay => ref _showMcnkFlagOverlay;
+    ref bool IViewerAppHost.ShowMcnkWeakCorners => ref _showMcnkWeakCorners;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1035,7 +1040,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                     if (_worldScene != null)
                         _sceneHoverPick.PickObjectAtMouse(_lastMouseX, _lastMouseY, addPm4ToCollection: shift);
                     else if (terrainRenderer != null && !shift && !_chunkToolEnabled
-                        && TryPickTerrainChunkUnderMouse(terrainRenderer, out var terrainChunk))
+                        && _terrainQuery.TryPickTerrainChunkUnderMouse(terrainRenderer, out var terrainChunk))
                         SelectTerrainChunkFromClick(terrainChunk);
                 }
             };
@@ -1395,7 +1400,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         float aspect = hasSceneViewport
             ? sceneViewportWidth / Math.Max(sceneViewportHeight, 1f)
             : (float)size.X / Math.Max(size.Y, 1);
-        float farPlane = GetSceneFarPlane();
+        float farPlane = _terrainQuery.GetSceneFarPlane();
         Matrix4x4 view;
         Matrix4x4 proj;
         if (!TryGetMkHarvestViewerValidationSceneMatrices(aspect, out view, out proj))
@@ -1465,7 +1470,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             {
                 // WorldScene / VLM terrain — handles its own lighting
                 _renderer.Render(view, proj);
-                DrawEditorOverlays(view, proj);
+                _terrainQuery.DrawEditorOverlays(view, proj);
                 if (hasSceneViewportRect)
                 {
                     _areaContext.DrawAreaOverlayLabels(
@@ -2978,237 +2983,6 @@ void main() {
 
         _terrainWeakSignalRestoreStatus = $"Successfully exported {exported} restored tile(s) and companion WDL to '{outputMapDir}'.";
         _statusMessage = $"Exported {exported} restored stratigraphy tiles + WDL.";
-    }
-
-    private void DrawEditorOverlays(Matrix4x4 view, Matrix4x4 proj)
-    {
-        var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        bool drawCameraPathOverlay = _showCameraPathOverlay && _cameraPath.Keyframes.Count > 0;
-        if (renderer == null && !drawCameraPathOverlay)
-            return;
-
-        bool drawChunkClipboardOverlay = renderer != null && _chunkClipboardShowOverlay
-            && (_selectedChunks.Count > 0 || _chunkClipboardLockedTargetKey != null || _chunkClipboardCopiedKey != null);
-        bool drawMcnkOverlay = renderer != null && ShouldDrawMcnkFlagOverlay(renderer);
-        if (!drawChunkClipboardOverlay && !drawMcnkOverlay && !drawCameraPathOverlay)
-            return;
-
-        _editorOverlayBb ??= new Terrain.BoundingBoxRenderer(_gl);
-
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthFunc(DepthFunction.Lequal);
-        _gl.DepthMask(false);
-
-        float overlayTime = (float)(System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
-
-        if (drawMcnkOverlay)
-        {
-            _gl.Enable(EnableCap.Blend);
-            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-            _editorOverlayBb.BeginSolidBatch();
-            _editorOverlayBb.BeginBatch();
-            BatchMcnkFlagOverlayGeometry(_editorOverlayBb);
-            _editorOverlayBb.FlushSolidBatch(view, proj);
-            _gl.Disable(EnableCap.Blend);
-        }
-
-        if (drawChunkClipboardOverlay)
-        {
-            if (!drawMcnkOverlay)
-                _editorOverlayBb.BeginBatch();
-
-            if (_selectedChunks.Count > 0)
-            {
-                foreach (var (tx, ty, cx, cy) in _selectedChunks)
-                {
-                    if (renderer.TryGetChunkInfo(tx, ty, cx, cy, out var sel))
-                        _editorOverlayBb.BatchBoxMinMax(sel.BoundsMin, sel.BoundsMax, new Vector3(0f, 1f, 1f));
-                }
-            }
-
-            if (_chunkClipboardLockedTargetKey is { } locked && renderer.TryGetChunkInfo(locked.tileX, locked.tileY, locked.chunkX, locked.chunkY, out var lockedInfo))
-                _editorOverlayBb.BatchHighlightedBoxMinMax(
-                    lockedInfo.BoundsMin,
-                    lockedInfo.BoundsMax,
-                    overlayTime,
-                    new Vector3(1f, 1f, 1f),
-                    new Vector3(1f, 0.8f, 0.1f),
-                    new Vector3(0.1f, 0.9f, 1f));
-
-            if (_chunkClipboardCopiedKey is (int copiedTx, int copiedTy, int copiedCx, int copiedCy) copied && renderer.TryGetChunkInfo(copiedTx, copiedTy, copiedCx, copiedCy, out var copiedInfo))
-                _editorOverlayBb.BatchBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, new Vector3(1f, 1f, 0f));
-        }
-
-        if (drawCameraPathOverlay)
-        {
-            if (!drawMcnkOverlay && !drawChunkClipboardOverlay)
-                _editorOverlayBb.BeginBatch();
-            DrawCameraPathOverlay(_editorOverlayBb);
-        }
-
-        _editorOverlayBb.FlushBatch(view, proj);
-
-        _gl.DepthMask(true);
-    }
-
-    private bool TryPickTerrainChunkUnderMouse(TerrainRenderer renderer, out TerrainRenderer.TerrainChunkInfo info)
-    {
-        info = default;
-
-        if (!_shellLayout.TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
-            return false;
-
-        var mouse = ImGui.GetMousePos();
-        float mouseX = mouse.X;
-        float mouseY = mouse.Y;
-        if (mouseX < vpX || mouseX > vpX + vpW || mouseY < vpY || mouseY > vpY + vpH)
-            return false;
-
-        float aspect = vpW / Math.Max(vpH, 1f);
-        var view = _camera.GetViewMatrix();
-        float farPlane = GetSceneFarPlane();
-        var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
-
-        float localX = mouseX - vpX;
-        float localY = mouseY - vpY;
-        float ndcX = (localX / vpW) * 2f - 1f;
-        float ndcY = 1f - (localY / vpH) * 2f;
-
-        var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
-        return TryRaycastTerrain(renderer, rayOrigin, rayDir, farPlane, out info);
-    }
-
-    private bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info)
-    {
-        return TryRaycastTerrain(renderer, rayOrigin, rayDir, maxDistance, out info, out _);
-    }
-
-    private bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info, out Vector3 hitPoint)
-    {
-        info = default;
-        hitPoint = default;
-
-        const float step = 16f;
-        int maxSteps = (int)MathF.Ceiling(maxDistance / step);
-        maxSteps = Math.Clamp(maxSteps, 16, 1024);
-
-        float prevT = 0f;
-        float prevD = float.NaN;
-
-        for (int i = 0; i <= maxSteps; i++)
-        {
-            float t = i * step;
-            var p = rayOrigin + rayDir * t;
-
-            if (!TrySampleTerrainHeightLoaded(renderer, p.X, p.Y, out float height, out var curInfo))
-                continue;
-
-            float d = p.Z - height;
-            if (!float.IsNaN(prevD))
-            {
-                if (prevD > 0f && d <= 0f)
-                {
-                    float a = prevT;
-                    float b = t;
-                    TerrainRenderer.TerrainChunkInfo best = curInfo;
-                    for (int it = 0; it < 10; it++)
-                    {
-                        float m = (a + b) * 0.5f;
-                        var pm = rayOrigin + rayDir * m;
-                        if (!TrySampleTerrainHeightLoaded(renderer, pm.X, pm.Y, out float hm, out var mi))
-                        {
-                            a = m;
-                            continue;
-                        }
-
-                        best = mi;
-                        float dm = pm.Z - hm;
-                        if (dm > 0f)
-                            a = m;
-                        else
-                            b = m;
-                    }
-
-                    float hitDistance = (a + b) * 0.5f;
-                    hitPoint = rayOrigin + rayDir * hitDistance;
-                    info = best;
-                    return true;
-                }
-            }
-
-            prevT = t;
-            prevD = d;
-        }
-
-        return false;
-    }
-
-    private float GetSceneFarPlane()
-    {
-        if (_terrainManager != null)
-            return ComputeSceneFarPlane(_terrainManager.Lighting.FogEnd);
-
-        if (_vlmTerrainManager != null)
-            return ComputeSceneFarPlane(_vlmTerrainManager.Lighting.FogEnd);
-
-        return 10000f;
-    }
-
-    internal static float ComputeSceneFarPlane(float fogEnd)
-    {
-        float safeFogEnd = float.IsFinite(fogEnd) && fogEnd > 0f ? fogEnd : 1500f;
-        return Math.Clamp(safeFogEnd + TerrainFarPlanePadding, MinTerrainFarPlane, MaxTerrainFarPlane);
-    }
-
-    private bool TrySampleTerrainHeightLoaded(TerrainRenderer renderer, float worldX, float worldY, out float height, out TerrainRenderer.TerrainChunkInfo info)
-    {
-        height = 0f;
-        info = default;
-
-        var ci = renderer.GetChunkInfoAt(worldX, worldY);
-        if (!ci.HasValue)
-            return false;
-
-        info = ci.Value;
-        if (!TryGetChunkDataLoadedOnly(info.TileX, info.TileY, info.ChunkX, info.ChunkY, out var chunk))
-            return false;
-
-        float localX = chunk.WorldPosition.Y - worldY;
-        float localY = chunk.WorldPosition.X - worldX;
-        localX = Math.Clamp(localX, 0f, WoWConstants.ChunkSize);
-        localY = Math.Clamp(localY, 0f, WoWConstants.ChunkSize);
-
-        height = TerrainChunkMath.SampleHeightOuterGrid(chunk, localX, localY);
-        return true;
-    }
-
-    private bool TryGetChunkDataLoadedOnly(int tileX, int tileY, int chunkX, int chunkY, out Terrain.TerrainChunkData chunk)
-    {
-        chunk = new Terrain.TerrainChunkData();
-
-        List<Terrain.TerrainChunkData>? chunks = null;
-        if (_terrainManager != null)
-        {
-            if (!_terrainManager.TryGetTileLoadResult(tileX, tileY, out var tile))
-                return false;
-            chunks = tile.Chunks;
-        }
-        else if (_vlmTerrainManager != null)
-        {
-            if (!_vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var tile))
-                return false;
-            chunks = tile.Chunks;
-        }
-
-        if (chunks == null || chunks.Count == 0)
-            return false;
-
-        var found = chunks.FirstOrDefault(c => c != null && c.ChunkX == chunkX && c.ChunkY == chunkY);
-        if (found == null || found.Heights == null || found.Heights.Length < 145)
-            return false;
-
-        chunk = found;
-        return true;
     }
 
     private string GetProjectOutputRootDirectory()

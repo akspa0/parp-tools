@@ -264,5 +264,14 @@ internal interface IViewerAppHost
     ref string SearchFilter { get; }
     ref int SelectedFileIndex { get; }
     WorldLoaderService WorldLoader { get; }
+    M2CameraPathDocument CameraPath { get; }
+    ref Terrain.BoundingBoxRenderer? EditorOverlayBb { get; }
+    ref int LastMcnkOverlayChunkCount { get; }
+    ref int LastMcnkWeakCornerCount { get; }
+    ref McnkOverlayFlags McnkOverlayFlags { get; }
+    ShellLayoutService ShellLayout { get; }
+    ref bool ShowCameraPathOverlay { get; }
+    ref bool ShowMcnkFlagOverlay { get; }
+    ref bool ShowMcnkWeakCorners { get; }
     // HOST-IFACE-END
 }

@@ -1195,12 +1195,12 @@ public partial class ViewerApp
         float centerY = WoWConstants.MapOrigin - ((tile.TileY + 0.5f) * WoWConstants.ChunkSize);
         float targetGroundHeight = 0f;
         if (_terrainManager != null
-            && TrySampleTerrainHeightLoaded(_terrainManager.Renderer, centerX, centerY, out float loadedTerrainHeight, out _))
+            && _terrainQuery.TrySampleTerrainHeightLoaded(_terrainManager.Renderer, centerX, centerY, out float loadedTerrainHeight, out _))
         {
             targetGroundHeight = loadedTerrainHeight;
         }
         else if (_vlmTerrainManager != null
-            && TrySampleTerrainHeightLoaded(_vlmTerrainManager.Renderer, centerX, centerY, out float loadedVlmTerrainHeight, out _))
+            && _terrainQuery.TrySampleTerrainHeightLoaded(_vlmTerrainManager.Renderer, centerX, centerY, out float loadedVlmTerrainHeight, out _))
         {
             targetGroundHeight = loadedVlmTerrainHeight;
         }
@@ -1240,12 +1240,12 @@ public partial class ViewerApp
         float centerY = WoWConstants.MapOrigin - ((tileY + 0.5f) * WoWConstants.ChunkSize);
         float targetGroundHeight = 0f;
         if (_terrainManager != null
-            && TrySampleTerrainHeightLoaded(_terrainManager.Renderer, centerX, centerY, out float loadedTerrainHeight, out _))
+            && _terrainQuery.TrySampleTerrainHeightLoaded(_terrainManager.Renderer, centerX, centerY, out float loadedTerrainHeight, out _))
         {
             targetGroundHeight = loadedTerrainHeight;
         }
         else if (_vlmTerrainManager != null
-            && TrySampleTerrainHeightLoaded(_vlmTerrainManager.Renderer, centerX, centerY, out float loadedVlmTerrainHeight, out _))
+            && _terrainQuery.TrySampleTerrainHeightLoaded(_vlmTerrainManager.Renderer, centerX, centerY, out float loadedVlmTerrainHeight, out _))
         {
             targetGroundHeight = loadedVlmTerrainHeight;
         }
@@ -1260,7 +1260,7 @@ public partial class ViewerApp
         Vector3 eye = new(centerX, centerY, targetGroundHeight + 2048f);
         Vector3 target = new(centerX, centerY, targetGroundHeight);
         view = Matrix4x4.CreateLookAt(eye, target, Vector3.UnitX);
-        proj = Matrix4x4.CreateOrthographic(worldSpanX, worldSpanY, 0.1f, GetSceneFarPlane());
+        proj = Matrix4x4.CreateOrthographic(worldSpanX, worldSpanY, 0.1f, _terrainQuery.GetSceneFarPlane());
         return true;
     }
 
