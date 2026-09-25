@@ -2,23 +2,37 @@ using ImGuiNET;
 using WoWViewer.Audio;
 using WoWViewer.Terrain;
 using WowViewer.Core.Audio;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
 /// <summary>
+/// Audio panel: zone ambience/music and sound-emitter controls.
 /// Viewer controls for proving the active client's resident audio path.
 /// This is intentionally a small diagnostic surface; camera transport and
 /// MIDI/DLS synthesis remain separate Spec 148 slices.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
 /// </summary>
-public partial class ViewerApp
+internal sealed partial class AudioPanelService
 {
+    private readonly IViewerAppHost _host;
+
+    internal AudioPanelService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+    // Host bridge: see AudioPanelService.Host.cs.
+
     private int _audioPreviewSoundEntryId;
     private bool _audioPreviewLoop = true;
     private float _audioMasterGain = 1f;
     private float _audioEmitterGain = 1f;
     private string _audioPanelMessage = "Select a resident SoundEntries ID or enter one manually.";
 
-    private void DrawAudioContent()
+    internal void DrawAudioContent()
     {
         WorldScene? scene = _worldScene;
         if (scene is null)
