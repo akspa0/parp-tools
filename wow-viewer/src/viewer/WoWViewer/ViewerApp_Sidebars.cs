@@ -1002,6 +1002,7 @@ public partial class ViewerApp
     private bool _quickUtilitiesExpanded;
     private UtilitiesBottomTab? _pendingQuickUtilityPage;
     private UtilitiesBottomTab? _legacyUtilityPage;
+    ref UtilitiesBottomTab? IViewerAppHost.LegacyUtilityPage => ref _legacyUtilityPage;
     private bool _legacyUtilityScrollPending;
 
     private enum InspectorContextSection
@@ -4532,6 +4533,11 @@ public partial class ViewerApp
         _showRightSidebar = true;
         _workbenchOpen = true;
     }
+    void IViewerAppHost.OpenWorkbenchTab(UtilitiesBottomTab tab) => OpenWorkbenchTab(tab);
+    void IViewerAppHost.OpenWorkbenchTab(ToolsBottomTab tab) => OpenWorkbenchTab(tab);
+    void IViewerAppHost.OpenWorkbenchTab(WorldBottomTab tab) => OpenWorkbenchTab(tab);
+    void IViewerAppHost.OpenWorkbenchTab(ModelBottomTab tab) => OpenWorkbenchTab(tab);
+    void IViewerAppHost.OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex) => OpenWorkbenchTab(topTab, bottomIndex);
 
     private void OpenWorkbenchTab(ModelBottomTab tab)
     {
@@ -4601,19 +4607,6 @@ public partial class ViewerApp
         _activeUtilitiesTabIndex = (int)tab;
         _quickUtilitiesExpanded = true;
         OpenWorkbenchTab(WorkbenchTab.Quick);
-    }
-
-    /// <summary>
-    /// Legacy-sidebar adapter for View/Tools utility menu entries. It reveals
-    /// the same utility dispatcher inside the existing right sidebar instead
-    /// of creating a new floating window.
-    /// </summary>
-    private void OpenLegacyWorkbenchUtility(UtilitiesBottomTab tab)
-    {
-        _activeUtilitiesTabIndex = Math.Clamp((int)tab, 0, (int)UtilitiesBottomTab.Audio);
-        _legacyUtilityPage = tab;
-        _showRightSidebar = true;
-        _workbenchOpen = true;
     }
 
     /// <summary>Used by keyboard/capture routing to identify the visible utility page.</summary>
@@ -5170,7 +5163,7 @@ public partial class ViewerApp
         ImGui.Separator();
         if (ImGui.Button("Map Converter...##Quick"))
         {
-            PrepareMapConverterDialogInputs();
+            _mainMenuBar.PrepareMapConverterDialogInputs();
             _showMapConverterDialog = true;
         }
         ImGui.SameLine();
@@ -5241,7 +5234,7 @@ public partial class ViewerApp
             ImGui.TextDisabled("Converts modern ADT/WDT to Alpha-era formats.");
             if (ImGui.Button("Launch Map Converter"))
             {
-                PrepareMapConverterDialogInputs();
+                _mainMenuBar.PrepareMapConverterDialogInputs();
                 _showMapConverterDialog = true;
             }
             ImGui.SameLine();
@@ -5253,7 +5246,7 @@ public partial class ViewerApp
             ImGui.TextDisabled("Converts WMO v17 to v14 (Alpha) and vice versa.");
             if (ImGui.Button("Launch WMO Converter"))
             {
-                PrepareWmoConverterDialogInputs();
+                _mainMenuBar.PrepareWmoConverterDialogInputs();
                 _showWmoConverterDialog = true;
             }
             ImGui.SameLine();

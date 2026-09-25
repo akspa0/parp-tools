@@ -72,6 +72,7 @@ public partial class ViewerApp
                 $"tod-{TimeOfDayClock.FromHours(_synthesizedMinimapTimeHours).CompactText}");
         }
     }
+    void IViewerAppHost.PrepareSynthesizedMinimapExportDialogInputs() => PrepareSynthesizedMinimapExportDialogInputs();
 
     private void DrawSynthesizedMinimapExportDialog()
     {

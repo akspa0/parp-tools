@@ -11,6 +11,7 @@ public partial class ViewerApp
     private string _selectedDatasetVersionRoot = string.Empty;
     private string _activeDatasetVersionRoot = string.Empty;
     private bool _wantSelectDatasetCatalogRoot;
+    ref bool IViewerAppHost.WantSelectDatasetCatalogRoot => ref _wantSelectDatasetCatalogRoot;
 
     private void DrawDatasetVersionSettingsContent()
     {

@@ -9,6 +9,7 @@ namespace WoWViewer;
 public partial class ViewerApp
 {
     private bool _showSettingsWindow;
+    ref bool IViewerAppHost.ShowSettingsWindow => ref _showSettingsWindow;
 
     private void DrawSettingsWindow()
     {

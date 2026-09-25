@@ -43,6 +43,13 @@ using CoreMdxGeometryFile = WowViewer.Core.Mdx.MdxGeometryFile;
 using CoreMdxSummary = WowViewer.Core.Mdx.MdxSummary;
 using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
 using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
+using WowViewer.Core.Mdx;
+using System;
+using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Passes;
+using WoWViewer.UI;
+using System.Globalization;
+using WowViewer.Core.IO.Casc;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
@@ -338,5 +345,31 @@ internal interface IViewerAppHost
     ref bool ShowFolderInput { get; }
     ref bool ShowListfileInput { get; }
     ref bool ShowRosettaDatastoreDialog { get; }
+    CascAhdrSourceService CascAhdrSource { get; }
+    ClientDialogsService ClientDialogs { get; }
+    ref UtilitiesBottomTab? LegacyUtilityPage { get; }
+    ref bool ShowFileBrowser { get; }
+    ref bool ShowLogViewer { get; }
+    ref bool ShowPerfWindow { get; }
+    ref bool ShowSettingsWindow { get; }
+    ref bool ShowSynthesizedMinimapExportDialog { get; }
+    ref bool WantExportGlb { get; }
+    ref bool WantExportGlbCollision { get; }
+    ref bool WantExportMapGlbTiles { get; }
+    ref bool WantOpenFile { get; }
+    ref bool WantSelectDatasetCatalogRoot { get; }
+    ref bool WantTerrainExport { get; }
+    ref bool WantTerrainImport { get; }
+    ref bool WorkbenchOpen { get; }
+    ViewerKeyContext GetActiveKeyContext();
+    void OpenCapturePanelTab(CapturePanelTab tab);
+    void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = -1);
+    void OpenWorkbenchTab(ModelBottomTab tab);
+    void OpenWorkbenchTab(WorldBottomTab tab);
+    void OpenWorkbenchTab(ToolsBottomTab tab);
+    void OpenWorkbenchTab(UtilitiesBottomTab tab);
+    void PrepareSynthesizedMinimapExportDialogInputs();
+    void ResetCamera();
+    void SetWorkspaceMode(WorkspaceMode mode);
     // HOST-IFACE-END
 }

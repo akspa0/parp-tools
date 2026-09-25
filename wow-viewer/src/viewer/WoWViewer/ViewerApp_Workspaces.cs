@@ -74,6 +74,7 @@ public partial class ViewerApp
             _editorWorkspaceTask = EditorWorkspaceTask.Inspect;
         }
     }
+    void IViewerAppHost.SetWorkspaceMode(WorkspaceMode mode) => SetWorkspaceMode(mode);
 
     private void SetEditorWorkspaceTask(EditorWorkspaceTask task)
     {

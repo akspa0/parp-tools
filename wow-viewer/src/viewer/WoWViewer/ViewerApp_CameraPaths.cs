@@ -16,7 +16,7 @@ namespace WoWViewer;
 
 public partial class ViewerApp
 {
-    private enum CapturePanelTab
+    internal enum CapturePanelTab
     {
         Automation,
         CameraPath,
@@ -92,6 +92,7 @@ public partial class ViewerApp
             _showCameraPathWindow = true;
         }
     }
+    void IViewerAppHost.OpenCapturePanelTab(CapturePanelTab tab) => OpenCapturePanelTab(tab);
 
     private void DrawCapturePanelContent()
     {
