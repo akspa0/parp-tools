@@ -84,5 +84,27 @@ internal interface IViewerAppHost
     ref VlmTerrainManager? VlmTerrainManager { get; }
     void LoadVlmProject(string projectRoot);
     void StitchMkHarvestViewerValidationOutputs(string mapName, string outputDirectory, string noLiquidsOutputDirectory, string noObjectsOutputDirectory, string objectsOnlyOutputDirectory, int requestedResolution);
+    HashSet<(int tileX, int tileY, int chunkX, int chunkY)> SelectedChunks { get; }
+    ref WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode StratigraphyAnchorMode { get; }
+    ref bool StratigraphyPolarityInverted { get; }
+    ref bool StratigraphyPreserveNegativeFloor { get; }
+    ref bool StratigraphyUnhideDevMeshes { get; }
+    ref bool StratigraphyUseNeighborAutoFit { get; }
+    ref bool StratigraphyUseWdlMagnetization { get; }
+    ref float StratigraphyWdlMagnetizationStrength { get; }
+    ref TerrainManager? TerrainManager { get; }
+    ref TerrainTileScope TerrainTileScope { get; }
+    ref bool TerrainWeakSignalRestoreAllLoadedTiles { get; }
+    ref float TerrainWeakSignalRestoreCandidateMaxHeight { get; }
+    ref float TerrainWeakSignalRestoreCandidateMinHeight { get; }
+    ref bool TerrainWeakSignalRestoreEnabled { get; }
+    ref float TerrainWeakSignalRestoreManualFactor { get; }
+    ref string TerrainWeakSignalRestoreStatus { get; }
+    ref bool TerrainWeakSignalRestoreUseAutoFactor { get; }
+    ref bool TerrainWeakSignalRestoreUseTextureSubdivisions { get; }
+    ref WdlPreviewCacheService? WdlPreviewCacheService { get; }
+    (int tileX, int tileY) GetCameraTile();
+    string? GetCurrentSessionMapName();
+    IReadOnlyList<(int tileX, int tileY)> GetTileScopeList(TerrainTileScope scope);
     // HOST-IFACE-END
 }

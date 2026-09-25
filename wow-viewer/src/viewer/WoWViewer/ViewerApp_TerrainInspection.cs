@@ -105,7 +105,7 @@ public partial class ViewerApp
 
         var context = builder.AddSection("Chunk Context");
         AppendTerrainCameraContext(context, chunkData, chunkInfo);
-        if (TryBuildTerrainWeakSignalTextureGuidance(chunkData, out TerrainWeakSignalTextureGuidance? guidance)
+        if (_terrainWeakSignalRestore.TryBuildTerrainWeakSignalTextureGuidance(chunkData, out TerrainWeakSignalRestoreService.TerrainWeakSignalTextureGuidance? guidance)
             && guidance != null)
         {
             context.Row(

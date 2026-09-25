@@ -516,7 +516,7 @@ public partial class ViewerApp
     /// <summary>Shared world load for adapters that are not WDT-driven (mirrors the Rosetta datastore path).</summary>
     private void LoadTerrainFromAdapter(ITerrainAdapter adapter, string mapName, string modelInfoHeader)
     {
-        ResetTerrainWeakSignalRestoreSessionState(preserveToggle: true);
+        _terrainWeakSignalRestore.ResetTerrainWeakSignalRestoreSessionState(preserveToggle: true);
         InvalidatePm4DerivedReports();
         _worldScene?.Dispose();
         _worldScene = null;

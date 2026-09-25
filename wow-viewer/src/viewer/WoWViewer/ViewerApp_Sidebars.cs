@@ -1808,7 +1808,7 @@ public partial class ViewerApp
             _terrainTileRangeStartY = tileY;
             _terrainTileRangeEndY = tileY;
             _terrainTileScope = TerrainTileScope.RectRange;
-            MarkTerrainWeakSignalRestoreDirty();
+            _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
         }
         else if (_terrainWorkbenchTileSelectionActive && ImGui.IsMouseDown(ImGuiMouseButton.Left)
             && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float dragTileX, out float dragTileY)
@@ -1819,7 +1819,7 @@ public partial class ViewerApp
             _terrainTileRangeEndX = (int)MathF.Floor(dragTileX);
             _terrainTileRangeEndY = (int)MathF.Floor(dragTileY);
             _terrainTileScope = TerrainTileScope.RectRange;
-            MarkTerrainWeakSignalRestoreDirty();
+            _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
         }
         else if (_terrainWorkbenchTileSelectionActive && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
@@ -1838,7 +1838,7 @@ public partial class ViewerApp
         if (ImGui.SmallButton("Use Camera Tile"))
         {
             _terrainWorkbenchFocusedTile = GetCameraTile();
-            MarkTerrainWeakSignalRestoreDirty();
+            _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("Clear Tile Range"))
@@ -1848,7 +1848,7 @@ public partial class ViewerApp
             _terrainTileRangeEndX = focusedTile.tileX;
             _terrainTileRangeStartY = focusedTile.tileY;
             _terrainTileRangeEndY = focusedTile.tileY;
-            MarkTerrainWeakSignalRestoreDirty();
+            _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
         }
     }
 
@@ -1893,7 +1893,7 @@ public partial class ViewerApp
 
             if (!ImGui.GetIO().KeyCtrl)
                 ClearSelectedChunksForTile(focusedTile.tileX, focusedTile.tileY);
-            MarkTerrainWeakSignalRestoreDirty();
+            _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
         }
         else if (_terrainWorkbenchChunkSelectionActive && ImGui.IsMouseDown(ImGuiMouseButton.Left) && _terrainWorkbenchChunkSelectionAnchor is { } anchor)
         {
@@ -1911,7 +1911,7 @@ public partial class ViewerApp
                     _selectedChunks.Add((focusedTile.tileX, focusedTile.tileY, selectedChunkX, selectedChunkY));
             }
             _chunkClipboardStatus = $"Selected {_selectedChunks.Count} chunk(s) via terrain workbench.";
-            MarkTerrainWeakSignalRestoreDirty();
+            _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
         }
         else if (_terrainWorkbenchChunkSelectionActive && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
@@ -1925,15 +1925,15 @@ public partial class ViewerApp
     private void ClearSelectedChunksForTile(int tileX, int tileY)
     {
         _selectedChunks.RemoveWhere(chunk => chunk.tileX == tileX && chunk.tileY == tileY);
-        MarkTerrainWeakSignalRestoreDirty();
+        _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
     }
 
     private void ApplyTerrainWeakSignalRestoreQuickRange(float minHeight, float maxHeight)
     {
-        _terrainWeakSignalRestoreCandidateMinHeight = ClampTerrainWeakSignalRestoreZ(minHeight);
-        _terrainWeakSignalRestoreCandidateMaxHeight = ClampTerrainWeakSignalRestoreZ(maxHeight);
-        GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
-        MarkTerrainWeakSignalRestoreDirty();
+        _terrainWeakSignalRestoreCandidateMinHeight = TerrainWeakSignalRestoreService.ClampTerrainWeakSignalRestoreZ(minHeight);
+        _terrainWeakSignalRestoreCandidateMaxHeight = TerrainWeakSignalRestoreService.ClampTerrainWeakSignalRestoreZ(maxHeight);
+        _terrainWeakSignalRestore.GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
+        _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
         SaveViewerSettings();
     }
 
@@ -3016,7 +3016,7 @@ public partial class ViewerApp
             bool weakSignalRestore = _terrainWeakSignalRestoreEnabled;
             if (ImGui.Checkbox("Restore Weak-Signal Terrain", ref weakSignalRestore))
             {
-                if (SetTerrainWeakSignalRestoreEnabled(weakSignalRestore))
+                if (_terrainWeakSignalRestore.SetTerrainWeakSignalRestoreEnabled(weakSignalRestore))
                     SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -3027,9 +3027,9 @@ public partial class ViewerApp
             float restoreRangeMin = _terrainWeakSignalRestoreCandidateMinHeight;
             if (ImGui.InputFloat("Restore Range Min Z", ref restoreRangeMin, 10f, 100f, "%.1f"))
             {
-                _terrainWeakSignalRestoreCandidateMinHeight = ClampTerrainWeakSignalRestoreZ(restoreRangeMin);
-                GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestoreCandidateMinHeight = TerrainWeakSignalRestoreService.ClampTerrainWeakSignalRestoreZ(restoreRangeMin);
+                _terrainWeakSignalRestore.GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -3038,9 +3038,9 @@ public partial class ViewerApp
             float restoreRangeMax = _terrainWeakSignalRestoreCandidateMaxHeight;
             if (ImGui.InputFloat("Restore Range Max Z", ref restoreRangeMax, 10f, 100f, "%.1f"))
             {
-                _terrainWeakSignalRestoreCandidateMaxHeight = ClampTerrainWeakSignalRestoreZ(restoreRangeMax);
-                GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestoreCandidateMaxHeight = TerrainWeakSignalRestoreService.ClampTerrainWeakSignalRestoreZ(restoreRangeMax);
+                _terrainWeakSignalRestore.GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -3068,14 +3068,14 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Auto Restore Scale", ref weakSignalAuto))
             {
                 _terrainWeakSignalRestoreUseAutoFactor = weakSignalAuto;
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Use the WDL-backed whole-tile auto estimate, then clamp the resulting deformation to weak per-cell signal regions across the ADT. Turn this off to A/B the manual restore control instead.");
 
             var wdlGuideTile = GetCameraTile();
-            if (TryGetTerrainWeakSignalWdlTile(wdlGuideTile.tileX, wdlGuideTile.tileY, out var wdlGuide) && wdlGuide != null)
+            if (_terrainWeakSignalRestore.TryGetTerrainWeakSignalWdlTile(wdlGuideTile.tileX, wdlGuideTile.tileY, out var wdlGuide) && wdlGuide != null)
             {
                 ImGui.TextDisabled($"WDL guide ({wdlGuideTile.tileX}, {wdlGuideTile.tileY}): {wdlGuide.MinZ:F1}..{wdlGuide.MaxZ:F1}, center {wdlGuide.Height17[8, 8]:F1}, 17x17 + 16x16 samples");
             }
@@ -3089,7 +3089,7 @@ public partial class ViewerApp
                 DrawStratigraphyFactorControl();
             }
 
-            string restoreScopeSummary = GetTerrainWeakSignalRestoreScopeSummary();
+            string restoreScopeSummary = _terrainWeakSignalRestore.GetTerrainWeakSignalRestoreScopeSummary();
             ImGui.TextDisabled($"Candidates: {restoreScopeSummary}, whole-tile factor with per-cell weak-signal clamp, source Z in {_terrainWeakSignalRestoreCandidateMinHeight:0.#}..{_terrainWeakSignalRestoreCandidateMaxHeight:0.#}.");
 
             if (!string.IsNullOrWhiteSpace(_terrainWeakSignalRestoreStatus))
@@ -4271,7 +4271,7 @@ public partial class ViewerApp
         bool restoreEnabled = _terrainWeakSignalRestoreEnabled;
         if (ImGui.Checkbox("Enable Temporal Stratigraphy Restoration", ref restoreEnabled))
         {
-            SetTerrainWeakSignalRestoreEnabled(restoreEnabled);
+            _terrainWeakSignalRestore.SetTerrainWeakSignalRestoreEnabled(restoreEnabled);
             SaveViewerSettings();
         }
 
@@ -4285,7 +4285,7 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Unhide Dev Meshes (Bypass HoleMask)", ref unhideHoles))
             {
                 _stratigraphyUnhideDevMeshes = unhideHoles;
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -4296,7 +4296,7 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Stitch Active Boundaries", ref stitch))
             {
                 _stratigraphyStitchBoundaries = stitch;
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -4306,7 +4306,7 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Preserve Negative Elevation Floor", ref preserveFloor))
             {
                 _stratigraphyPreserveNegativeFloor = preserveFloor;
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -4317,7 +4317,7 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Invert Polarity (Negative Scaling / Dragon Isles Fix)", ref invertPolarity))
             {
                 _stratigraphyPolarityInverted = invertPolarity;
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -4330,7 +4330,7 @@ public partial class ViewerApp
             if (ImGui.Combo("Anchor Datum", ref anchorModeIndex, anchorModeLabels, anchorModeLabels.Length))
             {
                 _stratigraphyAnchorMode = (WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode)anchorModeIndex;
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
 
@@ -4338,7 +4338,7 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Auto-Fit to Neighbor Mesh Heights (1-3 Chunk Radius)", ref useAutoFit))
             {
                 _stratigraphyUseNeighborAutoFit = useAutoFit;
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -4348,7 +4348,7 @@ public partial class ViewerApp
             if (ImGui.Checkbox("Magnetize to WDL Macro-Lattice", ref useWdl))
             {
                 _stratigraphyUseWdlMagnetization = useWdl;
-                MarkTerrainWeakSignalRestoreDirty();
+                _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                 SaveViewerSettings();
             }
             if (ImGui.IsItemHovered())
@@ -4361,7 +4361,7 @@ public partial class ViewerApp
                 if (ImGui.SliderFloat("WDL Magnet Strength", ref strength, 0f, 1f, "%.2f"))
                 {
                     _stratigraphyWdlMagnetizationStrength = strength;
-                    MarkTerrainWeakSignalRestoreDirty();
+                    _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
                     SaveViewerSettings();
                 }
             }
@@ -4458,7 +4458,7 @@ public partial class ViewerApp
     {
         _terrainWeakSignalRestoreManualFactor = Math.Clamp(factor, 1f, 512f);
         _terrainWeakSignalRestoreUseAutoFactor = false;
-        MarkTerrainWeakSignalRestoreDirty();
+        _terrainWeakSignalRestore.MarkTerrainWeakSignalRestoreDirty();
         SaveViewerSettings();
     }
 
