@@ -590,23 +590,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     // Terrain-derived minimap export state. This is intentionally separate from the retired
     // VLM/MK dataset workflow: it invokes the direct client terrain synthesis command.
     private bool _showSynthesizedMinimapExportDialog;
-    private string _synthesizedMinimapClientRoot = string.Empty;
-    private string _synthesizedMinimapMapName = string.Empty;
-    private string _synthesizedMinimapOutputDirectory = string.Empty;
-    private float _synthesizedMinimapTimeHours = 12f;
-    private int _synthesizedMinimapHour = 12;
-    private int _synthesizedMinimapMinute;
-    private int _synthesizedMinimapResolution = 256;
-    private bool _synthesizedMinimapEmitTiles = true;
-    private bool _synthesizedMinimapEmitWholeMap = true;
-    private bool _synthesizedMinimapIncludeWmos;
-    private bool _synthesizedMinimapBakeMcsh;
-    private bool _synthesizedMinimapCastShadows = true;
-    private bool _synthesizedMinimapRunning;
-    private bool _synthesizedMinimapDone;
-    private string? _synthesizedMinimapError;
-    private readonly List<string> _synthesizedMinimapLog = new();
-    private bool _synthesizedMinimapScrollToBottom;
 
     // ML Dataset build state
     private bool _showVlmExportDialog = false;
@@ -670,6 +653,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly DatasetCatalogService _datasetCatalog;
     private readonly WmoGroupsPanelService _wmoGroupsPanel;
     private readonly SettingsWindowService _settingsWindow;
+    private readonly SynthesizedMinimapExportService _synthesizedMinimapExport;
 
     public ViewerApp()
     {
@@ -715,6 +699,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _datasetCatalog = new DatasetCatalogService(this);
         _wmoGroupsPanel = new WmoGroupsPanelService(this);
         _settingsWindow = new SettingsWindowService(this);
+        _synthesizedMinimapExport = new SynthesizedMinimapExportService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1829,7 +1814,7 @@ void main() {
         if (_showWmoConverterDialog)
             _converterDialogs.DrawWmoConverterDialog();
         if (_showSynthesizedMinimapExportDialog)
-            DrawSynthesizedMinimapExportDialog();
+            _synthesizedMinimapExport.DrawSynthesizedMinimapExportDialog();
         if (_showRosettaDatastoreDialog)
             _clientDialogs.DrawRosettaDatastoreDialog();
 

@@ -1199,7 +1199,7 @@ public partial class ViewerApp
 
             if (ImGui.Button("Configure & Generate Synthesized Minimap..."))
             {
-                PrepareSynthesizedMinimapExportDialogInputs();
+                _synthesizedMinimapExport.PrepareSynthesizedMinimapExportDialogInputs();
                 _showSynthesizedMinimapExportDialog = true;
             }
 
