@@ -375,14 +375,14 @@ public partial class ViewerApp
                 {
                     ObjectInstance inst = _worldScene.SelectedInstance.Value;
                     if (inst.BoundsResolved)
-                        FrameBounds(inst.BoundsMin, inst.BoundsMax, mdxMirrorX: false);
+                        _modelInspector.FrameBounds(inst.BoundsMin, inst.BoundsMax, mdxMirrorX: false);
                     else
                         FramePoint(inst.PlacementPosition, radius: 5f);
                 }
                 break;
 
             case "frame_model":
-                FrameCurrentModel();
+                _modelInspector.FrameCurrentModel();
                 break;
 
             case "copy_asset_path":
@@ -407,7 +407,7 @@ public partial class ViewerApp
 
             case "frame_terrain_chunk":
                 if (TryGetPinnedTerrainChunkInspectionTarget(out var frameChunk, out _))
-                    FrameBounds(frameChunk.BoundsMin, frameChunk.BoundsMax, mdxMirrorX: false);
+                    _modelInspector.FrameBounds(frameChunk.BoundsMin, frameChunk.BoundsMax, mdxMirrorX: false);
                 break;
 
             case "copy_terrain_coordinates":

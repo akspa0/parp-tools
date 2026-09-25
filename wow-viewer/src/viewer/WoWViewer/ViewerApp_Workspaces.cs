@@ -243,7 +243,7 @@ public partial class ViewerApp
 
         ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);
         if (_showModelInfo && ImGui.CollapsingHeader("Model Info", ImGuiTreeNodeFlags.DefaultOpen))
-            DrawModelInfoContent();
+            _modelInspector.DrawModelInfoContent();
 
         ImGui.SetNextItemOpen(true, ImGuiCond.Once);
         if (ImGui.CollapsingHeader("Camera", ImGuiTreeNodeFlags.DefaultOpen))

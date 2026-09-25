@@ -418,10 +418,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _standaloneWmoOverlayIncludeHiddenGroups = true;
     private int _hoveredStandaloneWmoGroupIndex = -1;
     private int _selectedStandaloneWmoGroupIndex = -1;
-    private int _selectedStandaloneWmoDoodadIndex = -1;
-    private int _selectedWorldWmoDoodadIndex = -1;
-    private int _standaloneWmoDoodadGroupFilter = -1;
-    private int _worldWmoDoodadGroupFilter = -1;
     private readonly HashSet<int> _highlightedStandaloneWmoGroupIndices = new();
 
     private sealed class TerrainShadowStudyResult
@@ -563,7 +559,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private int _savedDetailedAdtTileCountOverride;
 
     private bool _autoFrameModelOnLoad = true;
-    private static readonly string[] WmoLiquidRotationLabels = { "0°", "90°", "180°", "270°" };
     private bool _hasExplicitWmoMliqRotationOverride;
 
     // Sky gradient for standalone model viewing
@@ -671,6 +666,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly Pm4WorkbenchService _pm4Workbench;
     private readonly TaxiPanelService _taxiPanel;
     private readonly ArchaeologyPanelService _archaeologyPanel;
+    private readonly ModelInspectorPanelService _modelInspector;
 
     public ViewerApp()
     {
@@ -700,6 +696,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _pm4Workbench = new Pm4WorkbenchService(this);
         _taxiPanel = new TaxiPanelService(this);
         _archaeologyPanel = new ArchaeologyPanelService(this);
+        _modelInspector = new ModelInspectorPanelService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -789,7 +786,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.SqlForceStreamRefresh => ref _sqlForceStreamRefresh;
     ref SqlWorldPopulationService? IViewerAppHost.SqlPopulationService => ref _sqlPopulationService;
     void IViewerAppHost.DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent) => DrawToolbarPopupButton(label, summary, popupId, drawContent);
-    void IViewerAppHost.ExportAnimationStateJson(IAnimationController animator, int currentSeq, string currentSeqName, float seqStart, float seqEnd) => ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
+    void IViewerAppHost.ExportAnimationStateJson(IAnimationController animator, int currentSeq, string currentSeqName, float seqStart, float seqEnd) => _modelInspector.ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
     ref string? IViewerAppHost.LastVirtualPath => ref _lastVirtualPath;
     Dictionary<string, Dictionary<int, string>> IViewerAppHost.SavedTaxiActorModelOverridesByMap => _savedTaxiActorModelOverridesByMap;
     ref int IViewerAppHost.SelectedAreaPoiId => ref _selectedAreaPoiId;
@@ -884,7 +881,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     Dictionary<string, string?> IViewerAppHost.StandaloneSkinPathCache => _standaloneSkinPathCache;
     ref ReplaceableTextureResolver? IViewerAppHost.TexResolver => ref _texResolver;
     WdlPreviewService IViewerAppHost.WdlPreview => _wdlPreview;
-    void IViewerAppHost.FrameCurrentModel() => FrameCurrentModel();
+    void IViewerAppHost.FrameCurrentModel() => _modelInspector.FrameCurrentModel();
     string? IViewerAppHost.TryGetLoadedLocalWdtPath() => _dataSourceSession.TryGetLoadedLocalWdtPath();
     ref DBCD.Providers.IDBCProvider? IViewerAppHost.DbcProvider => ref _dbcProvider;
     ref string? IViewerAppHost.DbdDir => ref _dbdDir;
@@ -1006,6 +1003,14 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref MapListSortMode IViewerAppHost.MapListSortMode => ref _mapListSortMode;
     Pm4WorkbenchService IViewerAppHost.Pm4Workbench => _pm4Workbench;
     ref bool IViewerAppHost.ShowUniqueIdArchaeologyWindow => ref _showUniqueIdArchaeologyWindow;
+    HashSet<int> IViewerAppHost.HighlightedStandaloneWmoGroupIndices => _highlightedStandaloneWmoGroupIndices;
+    ref int IViewerAppHost.HoveredStandaloneWmoGroupIndex => ref _hoveredStandaloneWmoGroupIndex;
+    ref int IViewerAppHost.SelectedStandaloneWmoGroupIndex => ref _selectedStandaloneWmoGroupIndex;
+    ref bool IViewerAppHost.StandaloneWmoGroupLabelsAllEnabled => ref _standaloneWmoGroupLabelsAllEnabled;
+    ref bool IViewerAppHost.StandaloneWmoGroupOverlayEnabled => ref _standaloneWmoGroupOverlayEnabled;
+    ref bool IViewerAppHost.StandaloneWmoOverlayIncludeHiddenGroups => ref _standaloneWmoOverlayIncludeHiddenGroups;
+    void IViewerAppHost.DrawAssetPathActions(string label, string assetPath, string idSuffix) => DrawAssetPathActions(label, assetPath, idSuffix);
+    void IViewerAppHost.FramePoint(Vector3 target, float radius) => FramePoint(target, radius);
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1855,7 +1860,7 @@ void main() {
         _statusMessage = $"Copied {description} to clipboard.";
     }
 
-    private static string NormalizeAssetPathForUi(string assetPath)
+    internal static string NormalizeAssetPathForUi(string assetPath)
         => string.IsNullOrWhiteSpace(assetPath)
             ? string.Empty
             : assetPath.Trim().Replace('/', '\\');
@@ -1875,38 +1880,6 @@ void main() {
         _camera.Position = cameraPosition;
         _camera.Yaw = MathF.Atan2(lookDirection.Y, lookDirection.X) * (180f / MathF.PI);
         _camera.Pitch = MathF.Asin(Math.Clamp(lookDirection.Z, -1f, 1f)) * (180f / MathF.PI);
-    }
-
-    private bool TryFrameStandaloneWmoDoodad(WmoRenderer wmoRenderer, WmoDoodadInfo doodad)
-    {
-        if (wmoRenderer.TryGetDoodadBounds(doodad.Index, Matrix4x4.Identity, out Vector3 boundsMin, out Vector3 boundsMax))
-        {
-            FrameBounds(boundsMin, boundsMax, mdxMirrorX: false);
-            _statusMessage = $"Framed standalone WMO doodad [{doodad.Index}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}.";
-            return true;
-        }
-
-        FramePoint(doodad.LocalPosition, radius: 2f);
-        _statusMessage = $"Framed standalone WMO doodad [{doodad.Index}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}.";
-        return true;
-    }
-
-    private bool TryFrameSelectedWorldWmoDoodad(WmoRenderer wmoRenderer, WmoDoodadInfo doodad)
-    {
-        if (_worldScene?.SelectedInstance is not ObjectInstance selectedInstance)
-            return false;
-
-        if (wmoRenderer.TryGetDoodadBounds(doodad.Index, selectedInstance.Transform, out Vector3 boundsMin, out Vector3 boundsMax))
-        {
-            FrameBounds(boundsMin, boundsMax, mdxMirrorX: false);
-            _statusMessage = $"Framed world WMO doodad [{doodad.Index}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}.";
-            return true;
-        }
-
-        Vector3 worldPosition = Vector3.Transform(doodad.LocalPosition, selectedInstance.Transform);
-        FramePoint(worldPosition, radius: 2f);
-        _statusMessage = $"Framed world WMO doodad [{doodad.Index}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}.";
-        return true;
     }
 
     private void DrawAssetPathActions(string label, string assetPath, string idSuffix)
@@ -1934,16 +1907,6 @@ void main() {
         ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 520f);
         ImGui.TextDisabled(normalizedPath);
         ImGui.PopTextWrapPos();
-    }
-
-    private bool TryGetStandaloneWmoAssetPath(out string assetPath)
-    {
-        assetPath = string.Empty;
-        if (_renderer is not WmoRenderer || string.IsNullOrWhiteSpace(_lastVirtualPath))
-            return false;
-
-        assetPath = NormalizeAssetPathForUi(_lastVirtualPath);
-        return !string.IsNullOrWhiteSpace(assetPath);
     }
 
     private bool TryInspectHoveredSceneAssetInSelection()

@@ -417,5 +417,15 @@ internal interface IViewerAppHost
     void DrawTemporalStratigraphySubTab();
     void DrawTerrainControlsAdjustmentWeakSignalContent();
     void EnsureEditorHost();
+    HashSet<int> HighlightedStandaloneWmoGroupIndices { get; }
+    ref int HoveredStandaloneWmoGroupIndex { get; }
+    ref int SelectedStandaloneWmoGroupIndex { get; }
+    ref bool StandaloneWmoGroupLabelsAllEnabled { get; }
+    ref bool StandaloneWmoGroupOverlayEnabled { get; }
+    ref bool StandaloneWmoOverlayIncludeHiddenGroups { get; }
+    void DrawAssetPathActions(string label, string assetPath, string idSuffix);
+    void FramePoint(Vector3 target, float radius = 2f);
+    void NormalizeStandaloneWmoGroupSelection(WmoRenderer wmoRenderer);
+    void ToggleStandaloneWmoGroupHighlight(int renderGroupIndex);
     // HOST-IFACE-END
 }
