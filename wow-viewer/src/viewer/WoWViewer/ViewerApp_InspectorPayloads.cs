@@ -61,7 +61,7 @@ public partial class ViewerApp
                 .Action("export_pm4_obj", "Export PM4 OBJ")
                 .Action("export_pm4_llm", "Export PM4 LLM Bundle");
 
-            AppendPinnedTerrainChunkInspection(builder);
+            _terrainInspection.AppendPinnedTerrainChunkInspection(builder);
             return builder.Build();
         }
 
@@ -89,7 +89,7 @@ public partial class ViewerApp
                 .Action("clear_wl_selection", "Clear Selection")
                 .Action("toggle_wl_liquids", "Toggle WL Liquids Visibility");
 
-            AppendPinnedTerrainChunkInspection(builder);
+            _terrainInspection.AppendPinnedTerrainChunkInspection(builder);
             return builder.Build();
         }
 
@@ -113,7 +113,7 @@ public partial class ViewerApp
                     break;
             }
 
-            AppendPinnedTerrainChunkInspection(builder);
+            _terrainInspection.AppendPinnedTerrainChunkInspection(builder);
             return builder.Build();
         }
 
@@ -131,14 +131,14 @@ public partial class ViewerApp
         }
 
         // 5. ADT / MCNK Chunk (Pinned, Hovered, or Camera)
-        if (AppendPinnedTerrainChunkInspection(builder, primary: true))
+        if (_terrainInspection.AppendPinnedTerrainChunkInspection(builder, primary: true))
         {
             return builder.Build();
         }
 
         // 6. Active world overview (for a loaded world with no resolved chunk under the
         // cursor/camera, such as a WMO-only map or a streaming gap).
-        if (BuildWorldOverviewInspector(builder))
+        if (_terrainInspection.BuildWorldOverviewInspector(builder))
             return builder.Build();
 
         return builder.Build();
@@ -396,8 +396,8 @@ public partial class ViewerApp
                 break;
 
             case "copy_chunk_texture_summary":
-                if (TryGetPinnedTerrainChunkInspectionTarget(out var chunkInfo, out _)
-                    && TryResolvePinnedTerrainChunkInspectionData(chunkInfo, out var chunkData, out var tileTextures, out _)
+                if (_terrainInspection.TryGetPinnedTerrainChunkInspectionTarget(out var chunkInfo, out _)
+                    && _terrainInspection.TryResolvePinnedTerrainChunkInspectionData(chunkInfo, out var chunkData, out var tileTextures, out _)
                     && chunkData != null)
                 {
                     string summary = BuildTerrainChunkTextureSummary(chunkInfo, chunkData, tileTextures);
@@ -406,17 +406,17 @@ public partial class ViewerApp
                 break;
 
             case "frame_terrain_chunk":
-                if (TryGetPinnedTerrainChunkInspectionTarget(out var frameChunk, out _))
+                if (_terrainInspection.TryGetPinnedTerrainChunkInspectionTarget(out var frameChunk, out _))
                     _modelInspector.FrameBounds(frameChunk.BoundsMin, frameChunk.BoundsMax, mdxMirrorX: false);
                 break;
 
             case "copy_terrain_coordinates":
-                if (TryGetPinnedTerrainChunkInspectionTarget(out var coordinateChunk, out _))
-                    _navigatorPanel.CopyTextToClipboard(BuildTerrainChunkCoordinates(coordinateChunk), "Chunk Coordinates");
+                if (_terrainInspection.TryGetPinnedTerrainChunkInspectionTarget(out var coordinateChunk, out _))
+                    _navigatorPanel.CopyTextToClipboard(TerrainInspectionPanelService.BuildTerrainChunkCoordinates(coordinateChunk), "Chunk Coordinates");
                 break;
 
             case "clear_terrain_chunk_selection":
-                ClearSelectedTerrainChunk();
+                _terrainInspection.ClearSelectedTerrainChunk();
                 break;
 
             case "clear_pm4_selection":

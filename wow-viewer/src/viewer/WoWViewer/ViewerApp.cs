@@ -662,6 +662,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly LightingPanelService _lightingPanel;
     private readonly AudioPanelService _audioPanel;
     private readonly ThemesService _themes;
+    private readonly TerrainInspectionPanelService _terrainInspection;
 
     public ViewerApp()
     {
@@ -698,6 +699,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _lightingPanel = new LightingPanelService(this);
         _audioPanel = new AudioPanelService(this);
         _themes = new ThemesService(this);
+        _terrainInspection = new TerrainInspectionPanelService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -817,7 +819,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     void IViewerAppHost.ClearSelectedWlLiquidBody(bool clearListIsolation) => ClearSelectedWlLiquidBody(clearListIsolation);
     float IViewerAppHost.GetSceneFarPlane() => _terrainQuery.GetSceneFarPlane();
     bool IViewerAppHost.IsSceneMouseCaptureBlocked(float x, float y) => _shellLayout.IsSceneMouseCaptureBlocked(x, y);
-    void IViewerAppHost.SelectTerrainChunkFromClick(TerrainRenderer.TerrainChunkInfo info) => SelectTerrainChunkFromClick(info);
+    void IViewerAppHost.SelectTerrainChunkFromClick(TerrainRenderer.TerrainChunkInfo info) => _terrainInspection.SelectTerrainChunkFromClick(info);
     void IViewerAppHost.SetSelectedWlLiquidBody(WlLiquidBody body, bool isolateInList, bool focusInspectWorkspace, string? statusMessage) => SetSelectedWlLiquidBody(body, isolateInList, focusInspectWorkspace, statusMessage);
     bool IViewerAppHost.ShouldShowHoveredAssetInfoForInvestigation(HoveredAssetInfo info) => ShouldShowHoveredAssetInfoForInvestigation(info);
     bool IViewerAppHost.TogglePm4ObjectCollectionMembership((int tileX, int tileY, uint ck24, int objectPart) key, bool reportStatus, bool removeIfPresent) => _pm4Workbench.TogglePm4ObjectCollectionMembership(key, reportStatus, removeIfPresent);
@@ -1020,6 +1022,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref (int tileX, int tileY)? IViewerAppHost.PendingMinimapTeleportTile => ref _pendingMinimapTeleportTile;
     ModelInspectorPanelService IViewerAppHost.ModelInspector => _modelInspector;
     TerrainControlsPanelService IViewerAppHost.TerrainControlsPanel => _terrainControlsPanel;
+    TerrainQueryService IViewerAppHost.TerrainQuery => _terrainQuery;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1098,7 +1101,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                         _sceneHoverPick.PickObjectAtMouse(_lastMouseX, _lastMouseY, addPm4ToCollection: shift);
                     else if (terrainRenderer != null && !shift && !_chunkToolEnabled
                         && _terrainQuery.TryPickTerrainChunkUnderMouse(terrainRenderer, out var terrainChunk))
-                        SelectTerrainChunkFromClick(terrainChunk);
+                        _terrainInspection.SelectTerrainChunkFromClick(terrainChunk);
                 }
             };
             mouse.MouseUp += (_, btn) =>

@@ -5,11 +5,27 @@ using WowViewer.Core.Runtime.World.Inspection;
 using WowViewer.Core.World;
 using WoWViewer.Terrain;
 using WoWViewer.Rendering;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-public partial class ViewerApp
+/// <summary>
+/// Terrain inspection panel: per-chunk/tile terrain inspection readouts.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
+/// </summary>
+internal sealed partial class TerrainInspectionPanelService
 {
+    private readonly IViewerAppHost _host;
+
+    internal TerrainInspectionPanelService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+    // Host bridge: see TerrainInspectionPanelService.Host.cs.
+
     /// <summary>
     /// The Inspector's terrain target is deliberately independent from the legacy investigation
     /// target. A click pins a chunk until its owning world/map changes; ordinary hover and camera
@@ -20,14 +36,14 @@ public partial class ViewerApp
     private string? _selectedTerrainChunkMapName;
     private int _selectedTerrainChunkMapId = int.MinValue;
 
-    private enum TerrainInspectorTargetSource
+    internal enum TerrainInspectorTargetSource
     {
         Pinned,
         Hovered,
         Camera,
     }
 
-    private bool AppendPinnedTerrainChunkInspection(InspectorContentBuilder builder, bool primary = false)
+    internal bool AppendPinnedTerrainChunkInspection(InspectorContentBuilder builder, bool primary = false)
     {
         if (!TryGetPinnedTerrainChunkInspectionTarget(
                 out TerrainRenderer.TerrainChunkInfo chunkInfo,
@@ -127,7 +143,7 @@ public partial class ViewerApp
         return true;
     }
 
-    private bool TryGetPinnedTerrainChunkInspectionTarget(
+    internal bool TryGetPinnedTerrainChunkInspectionTarget(
         out TerrainRenderer.TerrainChunkInfo info,
         out TerrainInspectorTargetSource source)
     {
@@ -173,7 +189,7 @@ public partial class ViewerApp
         return false;
     }
 
-    private bool TryResolvePinnedTerrainChunkInspectionData(
+    internal bool TryResolvePinnedTerrainChunkInspectionData(
         TerrainRenderer.TerrainChunkInfo chunkInfo,
         out TerrainChunkData? chunkData,
         out IReadOnlyList<string>? tileTextures,
@@ -236,7 +252,7 @@ public partial class ViewerApp
         _statusMessage = $"Pinned ADT chunk tile({info.TileX},{info.TileY}) MCNK({info.ChunkX},{info.ChunkY}) for Inspector.";
     }
 
-    private void SelectTerrainChunkFromClick(TerrainRenderer.TerrainChunkInfo info)
+    internal void SelectTerrainChunkFromClick(TerrainRenderer.TerrainChunkInfo info)
     {
         // A terrain pin is the active selection context only when the click did not resolve to a
         // higher-priority scene object. Clear the old object context so a previous MDX/WMO cannot
@@ -252,7 +268,7 @@ public partial class ViewerApp
         SetSelectedTerrainChunk(info);
     }
 
-    private void ClearSelectedTerrainChunk()
+    internal void ClearSelectedTerrainChunk()
     {
         bool hadSelection = _selectedTerrainChunk.HasValue;
         _selectedTerrainChunk = null;
@@ -377,7 +393,7 @@ public partial class ViewerApp
         return string.IsNullOrWhiteSpace(name) ? "<empty>" : name;
     }
 
-    private static string BuildTerrainChunkCoordinates(TerrainRenderer.TerrainChunkInfo info)
+    internal static string BuildTerrainChunkCoordinates(TerrainRenderer.TerrainChunkInfo info)
     {
         float minWowX = WoWConstants.MapOrigin - info.BoundsMax.Y;
         float maxWowX = WoWConstants.MapOrigin - info.BoundsMin.Y;
@@ -391,7 +407,7 @@ public partial class ViewerApp
     private static string FormatVector(Vector3 value)
         => $"({value.X:F2}, {value.Y:F2}, {value.Z:F2})";
 
-    private bool BuildWorldOverviewInspector(InspectorContentBuilder builder)
+    internal bool BuildWorldOverviewInspector(InspectorContentBuilder builder)
     {
         if (_worldScene == null && _terrainManager == null && _vlmTerrainManager == null)
             return false;

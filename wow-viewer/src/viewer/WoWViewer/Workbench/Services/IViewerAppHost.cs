@@ -449,5 +449,6 @@ internal interface IViewerAppHost
     string GetWorkspaceSaveStatusSummary();
     string GetWorkspaceTargetSummary();
     void FocusCameraOnLitLight(int lightIndex, bool closeFullscreenAfterFocus);
+    TerrainQueryService TerrainQuery { get; }
     // HOST-IFACE-END
 }
