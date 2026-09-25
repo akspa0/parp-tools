@@ -942,14 +942,14 @@ public partial class ViewerApp
 
     private static void BatchChunkTopFaceOverlay(Terrain.BoundingBoxRenderer overlayRenderer, TerrainChunkData chunk, Vector3 color, float alpha)
     {
-        int[] indices = BuildChunkIndices(chunk.HoleMask);
+        int[] indices = TerrainChunkMath.BuildChunkIndices(chunk.HoleMask);
         if (indices.Length < 3)
             return;
 
         const float surfaceLift = 0.18f;
         var positions = new Vector3[145];
         for (int i = 0; i < positions.Length; i++)
-            positions[i] = GetChunkVertexWorldPosition(chunk, chunk.Heights, i) + new Vector3(0f, 0f, surfaceLift);
+            positions[i] = TerrainChunkMath.GetChunkVertexWorldPosition(chunk, chunk.Heights, i) + new Vector3(0f, 0f, surfaceLift);
 
         for (int t = 0; t + 2 < indices.Length; t += 3)
         {
@@ -967,19 +967,19 @@ public partial class ViewerApp
         const float outlineLift = 0.24f;
         var positions = new Vector3[145];
         for (int i = 0; i < positions.Length; i++)
-            positions[i] = GetChunkVertexWorldPosition(chunk, chunk.Heights, i) + new Vector3(0f, 0f, outlineLift);
+            positions[i] = TerrainChunkMath.GetChunkVertexWorldPosition(chunk, chunk.Heights, i) + new Vector3(0f, 0f, outlineLift);
 
         for (int outerCol = 0; outerCol < 8; outerCol++)
-            overlayRenderer.BatchLine(positions[OuterIndex(0, outerCol)], positions[OuterIndex(0, outerCol + 1)], color);
+            overlayRenderer.BatchLine(positions[TerrainChunkMath.OuterIndex(0, outerCol)], positions[TerrainChunkMath.OuterIndex(0, outerCol + 1)], color);
 
         for (int outerRow = 0; outerRow < 8; outerRow++)
-            overlayRenderer.BatchLine(positions[OuterIndex(outerRow, 8)], positions[OuterIndex(outerRow + 1, 8)], color);
+            overlayRenderer.BatchLine(positions[TerrainChunkMath.OuterIndex(outerRow, 8)], positions[TerrainChunkMath.OuterIndex(outerRow + 1, 8)], color);
 
         for (int outerCol = 8; outerCol > 0; outerCol--)
-            overlayRenderer.BatchLine(positions[OuterIndex(8, outerCol)], positions[OuterIndex(8, outerCol - 1)], color);
+            overlayRenderer.BatchLine(positions[TerrainChunkMath.OuterIndex(8, outerCol)], positions[TerrainChunkMath.OuterIndex(8, outerCol - 1)], color);
 
         for (int outerRow = 8; outerRow > 0; outerRow--)
-            overlayRenderer.BatchLine(positions[OuterIndex(outerRow, 0)], positions[OuterIndex(outerRow - 1, 0)], color);
+            overlayRenderer.BatchLine(positions[TerrainChunkMath.OuterIndex(outerRow, 0)], positions[TerrainChunkMath.OuterIndex(outerRow - 1, 0)], color);
     }
 
     private static string DescribeMcnkFlags(int rawFlags)

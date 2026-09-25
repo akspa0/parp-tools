@@ -1284,7 +1284,7 @@ public partial class ViewerApp
                 else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(key.TileX, key.TileY, out var vlmRes))
                     existing = vlmRes.Chunks;
 
-                list = existing != null ? CloneTerrainChunkList(existing) : new List<Terrain.TerrainChunkData>();
+                list = existing != null ? TerrainChunkMath.CloneTerrainChunkList(existing) : new List<Terrain.TerrainChunkData>();
                 destChunksByTile[key] = list;
             }
 
@@ -1292,7 +1292,7 @@ public partial class ViewerApp
             if (chunk != null)
             {
                 int idx = list.IndexOf(chunk);
-                list[idx] = CloneTerrainChunk(
+                list[idx] = TerrainChunkMath.CloneTerrainChunk(
                     chunk,
                     heights: options.IncludeHeights ? rec.Heights : null,
                     normals: options.IncludeHeights ? rec.Normals : null,
