@@ -116,6 +116,7 @@ public partial class ViewerApp
 
         _pendingCapturePanelTab = null;
     }
+    void IViewerAppHost.DrawCapturePanelContent() => DrawCapturePanelContent();
 
     private void DrawCameraPathWindow()
     {

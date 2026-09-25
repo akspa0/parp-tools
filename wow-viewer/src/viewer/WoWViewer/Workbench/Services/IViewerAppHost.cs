@@ -55,6 +55,19 @@ using System.Linq;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using WowViewer.Core.Editor;
+using WowViewer.Core.Editor.Bridge;
+using WowViewer.Core.Editor.Eras;
+using WowViewer.Core.Editor.Logging;
+using WowViewer.Core.Editor.Operations;
+using WowViewer.Core.Editor.Plugins;
+using WowViewer.Core.Editor.Session;
+using WowViewer.Core.PM4.Matching;
+using WowViewer.Core.PM4.Reconciliation;
+using WowViewer.Core.PM4.Services;
+using WowViewer.Core.IO.Terrain;
+using System.IO;
+using WowViewer.Core.IO.Dbc;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
@@ -393,5 +406,16 @@ internal interface IViewerAppHost
     void StopTaxiRideCamera(string? statusMessage = null);
     void StopVideoRecording(string? statusOverride = null);
     bool TryStartCurrentViewVideoRecording(bool includeUi, string? label = null);
+    ref bool ArcheologyPlaybackActive { get; }
+    ref EditorSession? EditorSession { get; }
+    ref MapListSortMode MapListSortMode { get; }
+    Pm4WorkbenchService Pm4Workbench { get; }
+    ref bool ShowUniqueIdArchaeologyWindow { get; }
+    void DrawCapturePanelContent();
+    void DrawMapSortModeSelector(string id);
+    void DrawSynthesizedMinimapExportContent(bool showCloseButton = false);
+    void DrawTemporalStratigraphySubTab();
+    void DrawTerrainControlsAdjustmentWeakSignalContent();
+    void EnsureEditorHost();
     // HOST-IFACE-END
 }

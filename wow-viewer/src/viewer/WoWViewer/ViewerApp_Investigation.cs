@@ -186,9 +186,6 @@ public partial class ViewerApp
         }
     }
 
-    private string _secondaryOverlayMapInput = "";
-    private string _secondaryOverlaySearchFilter = "";
-
     private void DrawTerrainChunkInvestigationPanel(bool defaultOpen)
     {
         if (_terrainManager == null && _vlmTerrainManager == null)

@@ -610,7 +610,7 @@ public partial class ViewerApp
 
         // 069 Phase 7: auto-start playback on first queued capture when enabled.
         if (_archeologyApplyToNextCapture && !_archeologyPlaybackActive && _worldScene != null)
-            StartArcheologyPlayback();
+            _archaeologyPanel.StartArcheologyPlayback();
 
         string mode = includeUi ? "with_ui" : "no_ui";
         _statusMessage = $"Queued capture '{shot.Name}' ({mode}).";
@@ -1624,7 +1624,7 @@ public partial class ViewerApp
         bool startedArcheologyPlayback = false;
         if (_archeologyApplyToVideoRecording && !_archeologyPlaybackActive)
         {
-            StartArcheologyPlayback();
+            _archaeologyPanel.StartArcheologyPlayback();
             startedArcheologyPlayback = _archeologyPlaybackActive;
         }
 
@@ -1708,14 +1708,14 @@ public partial class ViewerApp
         catch (Win32Exception ex)
         {
             if (startedArcheologyPlayback && _archeologyPlaybackActive)
-                StopArcheologyPlayback(restoreRange: true);
+                _archaeologyPanel.StopArcheologyPlayback(restoreRange: true);
             _statusMessage = VideoEncoderExecutableResolver.BuildUnavailableMessage(encoderResolution, ex.Message);
             return false;
         }
         catch (Exception ex)
         {
             if (startedArcheologyPlayback && _archeologyPlaybackActive)
-                StopArcheologyPlayback(restoreRange: true);
+                _archaeologyPanel.StopArcheologyPlayback(restoreRange: true);
             _statusMessage = $"Failed to start video recording: {ex.Message}";
             return false;
         }
@@ -1732,7 +1732,7 @@ public partial class ViewerApp
 
         // 069 Phase 7: stop archeology playback if it was started for video.
         if (recording.StartedArcheologyPlayback && _archeologyPlaybackActive)
-            StopArcheologyPlayback(restoreRange: true);
+            _archaeologyPanel.StopArcheologyPlayback(restoreRange: true);
 
         bool success = false;
         string statusMessage = statusOverride ?? $"Saved video: {recording.OutputPath}";

@@ -252,10 +252,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _useTabUi = true;
     private WorkbenchTab _activeTopTab = WorkbenchTab.Quick;
     private int _activeBottomTabIndex = 0;
-
-    // Experimental pages retain their existing internal selectors while the
-    // top-level destination owns the only visible category switch.
-    private int _activeArcheologyTabIndex = 0;
     private int _activeUtilitiesTabIndex = 0;
     private int _activePm4TabIndex = 0;
 
@@ -271,10 +267,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _archeologyPlaybackActive = false;
     private float _archeologyPlaybackSpeed = 50f; // uniqueIds per second
     private bool _archeologyPlaybackLoop = false;
-    private double _archeologyPlaybackAccumulator = 0.0; // for fractional uniqueId advancement
-    private int _archeologyPlaybackRestoreMin = -1; // saved on Play, restored on Stop
-    private int _archeologyPlaybackRestoreMax = -1;
-    private bool _archeologyPlaybackRestoreFilter = false;
 
     // 069 Phase 7: capture integration flags
     private bool _archeologyApplyToNextCapture = false;
@@ -678,6 +670,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly MainMenuBarService _mainMenuBar;
     private readonly Pm4WorkbenchService _pm4Workbench;
     private readonly TaxiPanelService _taxiPanel;
+    private readonly ArchaeologyPanelService _archaeologyPanel;
 
     public ViewerApp()
     {
@@ -706,6 +699,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _mainMenuBar = new MainMenuBarService(this);
         _pm4Workbench = new Pm4WorkbenchService(this);
         _taxiPanel = new TaxiPanelService(this);
+        _archaeologyPanel = new ArchaeologyPanelService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1008,6 +1002,10 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     void IViewerAppHost.ResetCamera() => ResetCamera();
     ref int IViewerAppHost.ActivePm4TabIndex => ref _activePm4TabIndex;
     void IViewerAppHost.CopyTextToClipboard(string text, string description) => CopyTextToClipboard(text, description);
+    ref bool IViewerAppHost.ArcheologyPlaybackActive => ref _archeologyPlaybackActive;
+    ref MapListSortMode IViewerAppHost.MapListSortMode => ref _mapListSortMode;
+    Pm4WorkbenchService IViewerAppHost.Pm4Workbench => _pm4Workbench;
+    ref bool IViewerAppHost.ShowUniqueIdArchaeologyWindow => ref _showUniqueIdArchaeologyWindow;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1135,63 +1133,12 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         UpdateCameraPathPlayback(dt);
         UpdateCameraPathPreload();
         UpdateTaxiRideCamera();
-        UpdateArcheologyPlayback(dt);
+        _archaeologyPanel.UpdateArcheologyPlayback(dt);
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
             maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
         _sqlSpawnStreaming.UpdateSqlSpawnStreaming();
         _terrainWeakSignalRestore.UpdateTerrainWeakSignalRestoreForCamera();
-    }
-
-    private void UpdateArcheologyPlayback(double dt)
-    {
-        if (!_archeologyPlaybackActive)
-            return;
-
-        if (_worldScene == null)
-        {
-            _archeologyPlaybackActive = false;
-            _archeologyPlaybackAccumulator = 0;
-            _statusMessage = "Archeology playback stopped because the world was unloaded.";
-            return;
-        }
-
-        if (!_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
-        {
-            _archeologyPlaybackActive = false;
-            _archeologyPlaybackAccumulator = 0;
-            _statusMessage = "Archeology playback stopped because no scoped UniqueId range is available.";
-            return;
-        }
-
-        _archeologyPlaybackAccumulator += dt * _archeologyPlaybackSpeed;
-        int advance = (int)Math.Floor(_archeologyPlaybackAccumulator);
-        if (advance <= 0) return;
-        _archeologyPlaybackAccumulator -= advance;
-
-        int currentMax = _worldScene.UniqueIdFilterMax;
-        int newMax = currentMax + advance;
-        if (newMax >= maxId)
-        {
-            if (_archeologyPlaybackLoop)
-            {
-                // Loop: snap back to min
-                int restoreMin = _archeologyPlaybackRestoreMin >= 0 ? _archeologyPlaybackRestoreMin : minId;
-                _worldScene.SetUniqueIdFilterRange(restoreMin, restoreMin);
-                _archeologyPlaybackAccumulator = 0;
-            }
-            else
-            {
-                _worldScene.UniqueIdFilterMax = maxId;
-                _archeologyPlaybackActive = false;
-                _archeologyPlaybackAccumulator = 0;
-                _statusMessage = "Archeology playback reached end of range.";
-            }
-        }
-        else
-        {
-            _worldScene.UniqueIdFilterMax = newMax;
-        }
     }
 
     private (int tileX, int tileY) GetCameraTile()
@@ -1787,7 +1734,7 @@ void main() {
 
                 // Tool windows extracted from right sidebar
                 if (_showUniqueIdArchaeologyWindow && _worldScene != null)
-                    DrawUniqueIdArchaeologyWindow();
+                    _archaeologyPanel.DrawUniqueIdArchaeologyWindow();
 
             }
 

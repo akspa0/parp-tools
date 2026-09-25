@@ -264,6 +264,7 @@ public partial class ViewerApp
         }
         ImGui.EndChild();
     }
+    void IViewerAppHost.DrawSynthesizedMinimapExportContent(bool showCloseButton) => DrawSynthesizedMinimapExportContent(showCloseButton);
 
     private void StartSynthesizedMinimapExport()
     {
