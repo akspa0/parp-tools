@@ -659,6 +659,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly TerrainControlsPanelService _terrainControlsPanel;
     private readonly NavigatorPanelService _navigatorPanel;
     private readonly ViewerChromeService _viewerChrome;
+    private readonly LightingPanelService _lightingPanel;
 
     public ViewerApp()
     {
@@ -692,6 +693,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _terrainControlsPanel = new TerrainControlsPanelService(this);
         _navigatorPanel = new NavigatorPanelService(this);
         _viewerChrome = new ViewerChromeService(this);
+        _lightingPanel = new LightingPanelService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.

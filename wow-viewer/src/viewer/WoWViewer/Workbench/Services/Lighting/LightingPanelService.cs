@@ -2,16 +2,30 @@ using System;
 using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Terrain;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
 /// <summary>
+/// Lighting panel: scene lighting, LIT/Light DBC and global fog controls.
 /// Lighting inspection panel: shows the resolved source, active colors/fog, and spatial LIT entry
 /// diagnostics without allowing the inspection surfaces to alter lighting selection.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
 /// </summary>
-public partial class ViewerApp
+internal sealed partial class LightingPanelService
 {
-    private void DrawLightingContent()
+    private readonly IViewerAppHost _host;
+
+    internal LightingPanelService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+    // Host bridge: see LightingPanelService.Host.cs.
+
+    internal void DrawLightingContent()
     {
         if (_worldScene == null)
         {

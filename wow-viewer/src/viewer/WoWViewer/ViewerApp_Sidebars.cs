@@ -1351,7 +1351,7 @@ public partial class ViewerApp
                 _viewerChrome.DrawRuntimeStatsPanelContent();
                 break;
             case UtilitiesBottomTab.Lighting:
-                DrawLightingContent();
+                _lightingPanel.DrawLightingContent();
                 break;
             case UtilitiesBottomTab.Audio:
                 DrawAudioContent();

@@ -405,6 +405,7 @@ public partial class ViewerApp
 
         ClearPendingMinimapTeleport();
     }
+    void IViewerAppHost.FocusCameraOnLitLight(int lightIndex, bool closeFullscreenAfterFocus) => FocusCameraOnLitLight(lightIndex, closeFullscreenAfterFocus);
 
     internal static float ComputeMinimapSquareSize(float availableWidth, float availableHeight, float minimumSize)
     {

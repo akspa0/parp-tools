@@ -447,5 +447,6 @@ internal interface IViewerAppHost
     void DrawVisualInvestigationModeButton(VisualInvestigationMode mode, string label, string tooltip);
     string GetWorkspaceSaveStatusSummary();
     string GetWorkspaceTargetSummary();
+    void FocusCameraOnLitLight(int lightIndex, bool closeFullscreenAfterFocus);
     // HOST-IFACE-END
 }
