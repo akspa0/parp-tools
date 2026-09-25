@@ -667,6 +667,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly WorkbenchPanelsService _workbenchPanels;
     private readonly LogViewerService _logViewer;
     private readonly RenderQualityService _renderQuality;
+    private readonly DatasetCatalogService _datasetCatalog;
 
     public ViewerApp()
     {
@@ -709,6 +710,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _workbenchPanels = new WorkbenchPanelsService(this);
         _logViewer = new LogViewerService(this);
         _renderQuality = new RenderQualityService(this);
+        _datasetCatalog = new DatasetCatalogService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -943,7 +945,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     bool IViewerAppHost.ShouldIncludeWlBodyInUiList(WlLiquidBody body) => _investigation.ShouldIncludeWlBodyInUiList(body);
     bool IViewerAppHost.IsWlListIsolationActive => _investigation.IsWlListIsolationActive;
     ref int IViewerAppHost.ActiveBottomTabIndex => ref _activeBottomTabIndex;
-    ref string IViewerAppHost.ActiveDatasetVersionRoot => ref _activeDatasetVersionRoot;
+    ref string IViewerAppHost.ActiveDatasetVersionRoot => ref _datasetCatalog._activeDatasetVersionRoot;
     ref WorkbenchTab IViewerAppHost.ActiveTopTab => ref _activeTopTab;
     ref int IViewerAppHost.ActiveUtilitiesTabIndex => ref _activeUtilitiesTabIndex;
     ref bool IViewerAppHost.ArcheologyApplyToNextCapture => ref _archeologyApplyToNextCapture;
@@ -956,7 +958,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref float IViewerAppHost.CameraSpeed => ref _cameraSpeed;
     ref string IViewerAppHost.CaptureOutputDir => ref _captureOutputDir;
     List<WoWViewer.Terrain.ClientBuildOption> IViewerAppHost.ClientBuildOptions => _clientBuildOptions;
-    ref string IViewerAppHost.DatasetCatalogRoot => ref _datasetCatalogRoot;
+    ref string IViewerAppHost.DatasetCatalogRoot => ref _datasetCatalog._datasetCatalogRoot;
     ref bool IViewerAppHost.EnableMultisample => ref _renderQuality._enableMultisample;
     ref bool IViewerAppHost.EnableTerrainBackfaceCulling => ref _renderQuality._enableTerrainBackfaceCulling;
     ref bool IViewerAppHost.HasExplicitWmoMliqRotationOverride => ref _hasExplicitWmoMliqRotationOverride;
@@ -973,7 +975,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref Pm4WmoMatchStore? IViewerAppHost.Pm4WmoMatchStore => ref _pm4WmoMatchStore;
     Dictionary<string, SavedPm4ObjectMatchSelection> IViewerAppHost.SavedPm4ObjectMatches => _savedPm4ObjectMatches;
     ref int IViewerAppHost.SelectedBuildOptionIndex => ref _selectedBuildOptionIndex;
-    ref string IViewerAppHost.SelectedDatasetVersionRoot => ref _selectedDatasetVersionRoot;
+    ref string IViewerAppHost.SelectedDatasetVersionRoot => ref _datasetCatalog._selectedDatasetVersionRoot;
     ref TextureFilteringMode IViewerAppHost.TextureFilteringMode => ref _renderQuality._textureFilteringMode;
     ref float IViewerAppHost.UiFontScale => ref _uiFontScale;
     ref ThemesService.UiThemeKind IViewerAppHost.UiTheme => ref _themes._uiTheme;
@@ -984,7 +986,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     int IViewerAppHost.FindBuildOptionIndex(string? buildVersion) => _clientDialogs.FindBuildOptionIndex(buildVersion);
     void IViewerAppHost.NormalizeWorkbenchStateAfterLoad() => _workbenchPanels.NormalizeWorkbenchStateAfterLoad();
     void IViewerAppHost.RefreshClientBuildOptions() => _clientDialogs.RefreshClientBuildOptions();
-    void IViewerAppHost.RefreshDatasetCatalog() => RefreshDatasetCatalog();
+    void IViewerAppHost.RefreshDatasetCatalog() => _datasetCatalog.RefreshDatasetCatalog();
     ProjectOutputService IViewerAppHost.ProjectOutput => _projectOutput;
     ref string IViewerAppHost.FolderInputBuf => ref _folderInputBuf;
     ref bool IViewerAppHost.PendingKnownGoodClientAttachLooseFolder => ref _pendingKnownGoodClientAttachLooseFolder;

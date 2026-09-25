@@ -47,7 +47,7 @@ public partial class ViewerApp
 
         if (ImGui.CollapsingHeader("Dataset Versions", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            DrawDatasetVersionSettingsContent();
+            _datasetCatalog.DrawDatasetVersionSettingsContent();
         }
 
         ImGui.Separator();
