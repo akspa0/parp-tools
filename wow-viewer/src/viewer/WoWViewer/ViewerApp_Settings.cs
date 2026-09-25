@@ -26,7 +26,7 @@ public partial class ViewerApp
     {
         if (ImGui.CollapsingHeader("Render Quality", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            DrawRenderQualityContent();
+            _renderQuality.DrawRenderQualityContent();
         }
 
         ImGui.Separator();
@@ -119,7 +119,7 @@ public partial class ViewerApp
         if (lighting != null)
             return (lighting.FogStart, lighting.FogEnd);
 
-        return (_defaultFogStart, _defaultFogEnd);
+        return (_renderQuality._defaultFogStart, _renderQuality._defaultFogEnd);
     }
 
     private void SetAuthoritativeFogRange(float start, float end, bool persistAsDefault = true)
@@ -142,8 +142,8 @@ public partial class ViewerApp
 
         if (persistAsDefault)
         {
-            _defaultFogStart = normalizedStart;
-            _defaultFogEnd = normalizedEnd;
+            _renderQuality._defaultFogStart = normalizedStart;
+            _renderQuality._defaultFogEnd = normalizedEnd;
             _settings.SaveViewerSettings();
         }
     }

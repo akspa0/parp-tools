@@ -666,6 +666,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly InspectorPayloadsService _inspectorPayloads;
     private readonly WorkbenchPanelsService _workbenchPanels;
     private readonly LogViewerService _logViewer;
+    private readonly RenderQualityService _renderQuality;
 
     public ViewerApp()
     {
@@ -707,6 +708,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _inspectorPayloads = new InspectorPayloadsService(this);
         _workbenchPanels = new WorkbenchPanelsService(this);
         _logViewer = new LogViewerService(this);
+        _renderQuality = new RenderQualityService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -895,8 +897,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     string? IViewerAppHost.TryGetLoadedLocalWdtPath() => _dataSourceSession.TryGetLoadedLocalWdtPath();
     ref DBCD.Providers.IDBCProvider? IViewerAppHost.DbcProvider => ref _dbcProvider;
     ref string? IViewerAppHost.DbdDir => ref _dbdDir;
-    ref float IViewerAppHost.DefaultFogEnd => ref _defaultFogEnd;
-    ref float IViewerAppHost.DefaultFogStart => ref _defaultFogStart;
+    ref float IViewerAppHost.DefaultFogEnd => ref _renderQuality._defaultFogEnd;
+    ref float IViewerAppHost.DefaultFogStart => ref _renderQuality._defaultFogStart;
     ref MinimapRenderer? IViewerAppHost.MinimapRenderer => ref _minimapRenderer;
     StandaloneModelLoaderService IViewerAppHost.ModelLoader => _modelLoader;
     ref int IViewerAppHost.SavedDetailedAdtTileCountOverride => ref _savedDetailedAdtTileCountOverride;
@@ -955,8 +957,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref string IViewerAppHost.CaptureOutputDir => ref _captureOutputDir;
     List<WoWViewer.Terrain.ClientBuildOption> IViewerAppHost.ClientBuildOptions => _clientBuildOptions;
     ref string IViewerAppHost.DatasetCatalogRoot => ref _datasetCatalogRoot;
-    ref bool IViewerAppHost.EnableMultisample => ref _enableMultisample;
-    ref bool IViewerAppHost.EnableTerrainBackfaceCulling => ref _enableTerrainBackfaceCulling;
+    ref bool IViewerAppHost.EnableMultisample => ref _renderQuality._enableMultisample;
+    ref bool IViewerAppHost.EnableTerrainBackfaceCulling => ref _renderQuality._enableTerrainBackfaceCulling;
     ref bool IViewerAppHost.HasExplicitWmoMliqRotationOverride => ref _hasExplicitWmoMliqRotationOverride;
     ref List<KnownGoodClientPath> IViewerAppHost.KnownGoodClientPaths => ref _knownGoodClientPaths;
     ref Vector2 IViewerAppHost.MinimapPanOffset => ref _minimapPanOffset;
@@ -972,7 +974,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     Dictionary<string, SavedPm4ObjectMatchSelection> IViewerAppHost.SavedPm4ObjectMatches => _savedPm4ObjectMatches;
     ref int IViewerAppHost.SelectedBuildOptionIndex => ref _selectedBuildOptionIndex;
     ref string IViewerAppHost.SelectedDatasetVersionRoot => ref _selectedDatasetVersionRoot;
-    ref TextureFilteringMode IViewerAppHost.TextureFilteringMode => ref _textureFilteringMode;
+    ref TextureFilteringMode IViewerAppHost.TextureFilteringMode => ref _renderQuality._textureFilteringMode;
     ref float IViewerAppHost.UiFontScale => ref _uiFontScale;
     ref ThemesService.UiThemeKind IViewerAppHost.UiTheme => ref _themes._uiTheme;
     ref int IViewerAppHost.VideoCaptureContainerIndex => ref _videoCaptureContainerIndex;
@@ -1084,8 +1086,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _settings.LoadViewerSettings();
         _themes.ApplyActiveUiTheme();
         LoadCameraShotPoints();
-        DetectRenderQualityCapabilities();
-        ApplyRenderQualitySettings(refreshTextures: false);
+        _renderQuality.DetectRenderQualityCapabilities();
+        _renderQuality.ApplyRenderQualitySettings(refreshTextures: false);
 
         // Mouse input for viewport (not consumed by ImGui)
         foreach (var mouse in _input.Mice)
