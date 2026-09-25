@@ -420,7 +420,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _stratigraphyUseNeighborAutoFit = false;
     private bool _stratigraphyUseWdlMagnetization = false;
     private float _stratigraphyWdlMagnetizationStrength = 1.0f;
-    private string _stratigraphySaveOutputDirectory = string.Empty;
     private (int tileX, int tileY)? _terrainAnalysisPreviewTile;
     private float _terrainAnalysisPreviewTileMin;
     private float _terrainAnalysisPreviewTileMax;
@@ -723,6 +722,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly WorldLoaderService _worldLoader;
     private readonly DataSourceSessionService _dataSourceSession;
     private readonly TerrainQueryService _terrainQuery;
+    private readonly StratigraphyService _stratigraphy;
 
     public ViewerApp()
     {
@@ -742,6 +742,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _worldLoader = new WorldLoaderService(this);
         _dataSourceSession = new DataSourceSessionService(this);
         _terrainQuery = new TerrainQueryService(this);
+        _stratigraphy = new StratigraphyService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -963,6 +964,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.ShowCameraPathOverlay => ref _showCameraPathOverlay;
     ref bool IViewerAppHost.ShowMcnkFlagOverlay => ref _showMcnkFlagOverlay;
     ref bool IViewerAppHost.ShowMcnkWeakCorners => ref _showMcnkWeakCorners;
+    DataSourceSessionService IViewerAppHost.DataSourceSession => _dataSourceSession;
+    Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> IViewerAppHost.StratigraphyTileAnalyses => _stratigraphyTileAnalyses;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -2806,183 +2809,6 @@ void main() {
 
         ImGui.End();
         ImGui.PopStyleVar(3);
-    }
-
-    private void AnalyzeActiveCameraTileStratigraphy()
-    {
-        var cameraTile = GetCameraTile();
-        int tileX = cameraTile.tileX;
-        int tileY = cameraTile.tileY;
-
-        IReadOnlyList<Terrain.TerrainChunkData>? chunks = null;
-        if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(tileX, tileY, out var result))
-            chunks = result.Chunks;
-        else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var vlmResult))
-            chunks = vlmResult.Chunks;
-
-        if (chunks == null || chunks.Count == 0)
-        {
-            _terrainWeakSignalRestoreStatus = $"Tile ({tileY}, {tileX}) is not currently loaded.";
-            return;
-        }
-
-        var tileHeightmap = Export.TerrainHeightmapIo.BuildTileHeightmap257(chunks);
-        float[,] lattice257 = WowViewer.Core.IO.Maps.StratigraphyTileExporter.ExpandHeights257(tileHeightmap.Heights);
-
-        var holeMasks = new ushort[256];
-        for (int i = 0; i < Math.Min(chunks.Count, 256); i++)
-            holeMasks[i] = (ushort)chunks[i].HoleMask;
-
-        string tileName = $"tile_{tileX}_{tileY}";
-        var analysis = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyLevelAnalyzer.AnalyzeTile(lattice257, holeMasks, tileX, tileY, tileName);
-        _stratigraphyTileAnalyses[(tileX, tileY)] = analysis;
-
-        _terrainWeakSignalRestoreStatus = $"Tile ({tileY}, {tileX}) analyzed: {analysis.DominantStratum}, {analysis.TotalSurvivingLevels:N0} levels, {analysis.SqueezedChunkCount} squeezed chunks, {analysis.HoledChunkCount} dev mesh chunks.";
-    }
-
-    private void AnalyzeAllLoadedTilesStratigraphy()
-    {
-        var loadedTiles = new HashSet<(int tileX, int tileY)>();
-        if (_terrainManager != null)
-        {
-            foreach (var key in _terrainManager.LoadedTiles)
-                loadedTiles.Add(key);
-        }
-        if (_vlmTerrainManager != null)
-        {
-            foreach (var key in _vlmTerrainManager.LoadedTiles)
-                loadedTiles.Add(key);
-        }
-
-        int count = 0;
-        int squeezedTotal = 0;
-        int holedTotal = 0;
-
-        foreach (var (tileX, tileY) in loadedTiles)
-        {
-            IReadOnlyList<Terrain.TerrainChunkData>? chunks = null;
-            if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(tileX, tileY, out var result))
-                chunks = result.Chunks;
-            else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var vlmResult))
-                chunks = vlmResult.Chunks;
-
-            if (chunks == null || chunks.Count == 0) continue;
-
-            var tileHeightmap = Export.TerrainHeightmapIo.BuildTileHeightmap257(chunks);
-            float[,] lattice257 = WowViewer.Core.IO.Maps.StratigraphyTileExporter.ExpandHeights257(tileHeightmap.Heights);
-
-            var holeMasks = new ushort[256];
-            for (int i = 0; i < Math.Min(chunks.Count, 256); i++)
-                holeMasks[i] = (ushort)chunks[i].HoleMask;
-
-            var analysis = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyLevelAnalyzer.AnalyzeTile(lattice257, holeMasks, tileX, tileY, $"tile_{tileX}_{tileY}");
-            _stratigraphyTileAnalyses[(tileX, tileY)] = analysis;
-
-            count++;
-            squeezedTotal += analysis.SqueezedChunkCount;
-            holedTotal += analysis.HoledChunkCount;
-        }
-
-        _terrainWeakSignalRestoreStatus = $"Analyzed {count} loaded tile(s): {squeezedTotal} squeezed chunks, {holedTotal} dev mesh chunks across scene.";
-    }
-
-    private void OpenStratigraphySaveDialog()
-    {
-        string initial = string.IsNullOrEmpty(_stratigraphySaveOutputDirectory)
-            ? Directory.GetCurrentDirectory()
-            : _stratigraphySaveOutputDirectory;
-
-        ImGuiPathPicker.Instance.Open(
-            "Select Output Directory to Save Restored ADT / WDT Tiles",
-            pickFolder: true,
-            initialPath: initial,
-            filterExtension: null,
-            selectedPath =>
-            {
-                if (!string.IsNullOrEmpty(selectedPath))
-                {
-                    _stratigraphySaveOutputDirectory = selectedPath;
-                    ExportLoadedStratigraphyTiles(selectedPath);
-                }
-            });
-    }
-
-    private void ExportLoadedStratigraphyTiles(string outputDir)
-    {
-        if (string.IsNullOrWhiteSpace(outputDir)) return;
-        Directory.CreateDirectory(outputDir);
-
-        var loadedTiles = new HashSet<(int tileX, int tileY)>();
-        if (_terrainManager != null)
-        {
-            foreach (var key in _terrainManager.LoadedTiles)
-                loadedTiles.Add(key);
-        }
-        if (_vlmTerrainManager != null)
-        {
-            foreach (var key in _vlmTerrainManager.LoadedTiles)
-                loadedTiles.Add(key);
-        }
-
-        string mapName = _terrainManager?.MapName ?? _dataSourceSession.GetCurrentSessionMapName() ?? "CustomMap";
-        string outputMapDir = Path.Combine(outputDir, "World", "Maps", mapName);
-        Directory.CreateDirectory(outputMapDir);
-
-        int exported = 0;
-        foreach (var (tx, ty) in loadedTiles)
-        {
-            IReadOnlyList<Terrain.TerrainChunkData>? chunks = null;
-            if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(tx, ty, out var result))
-                chunks = result.Chunks;
-            else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(tx, ty, out var vlmResult))
-                chunks = vlmResult.Chunks;
-
-            if (chunks == null || chunks.Count == 0) continue;
-
-            var tileHeightmap = Export.TerrainHeightmapIo.BuildTileHeightmap257(chunks);
-            float[,] lattice257 = WowViewer.Core.IO.Maps.StratigraphyTileExporter.ExpandHeights257(tileHeightmap.Heights);
-
-            string outAdtPath = Path.Combine(outputMapDir, $"{mapName}_{tx}_{ty}.adt");
-            float[] flat = WowViewer.Core.IO.Maps.StratigraphyTileExporter.FlattenHeights257(lattice257);
-
-            var blankAdt = WowViewer.Core.IO.Maps.BlankAdtFactory.CreateBlank(mapName, tx, ty);
-            WowViewer.Core.IO.Maps.LkAdtWriter.Write(outAdtPath, blankAdt);
-            WowViewer.Core.IO.Maps.AdtTerrainWriter.Write(outAdtPath, outAdtPath, flat);
-            exported++;
-        }
-
-        // Also write companion modified WDL file
-        try
-        {
-            var wdlDict = new Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.WdlTileData>();
-            foreach (var (tx, ty) in loadedTiles)
-            {
-                IReadOnlyList<Terrain.TerrainChunkData>? chunks = null;
-                if (_terrainManager != null && _terrainManager.TryGetTileLoadResult(tx, ty, out var result))
-                    chunks = result.Chunks;
-                else if (_vlmTerrainManager != null && _vlmTerrainManager.TryGetTileLoadResult(tx, ty, out var vlmResult))
-                    chunks = vlmResult.Chunks;
-
-                if (chunks == null || chunks.Count == 0) continue;
-                var tileHeightmap = Export.TerrainHeightmapIo.BuildTileHeightmap257(chunks);
-                float[,] lattice257 = WowViewer.Core.IO.Maps.StratigraphyTileExporter.ExpandHeights257(tileHeightmap.Heights);
-                wdlDict[(tx, ty)] = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.WdlFileWriter.FromLattice257(lattice257);
-            }
-
-            if (wdlDict.Count > 0)
-            {
-                byte[] wdlBytes = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.WdlFileWriter.Write(wdlDict);
-                string outWdlPath = Path.Combine(outputMapDir, $"{mapName}.wdl");
-                File.WriteAllBytes(outWdlPath, wdlBytes);
-            }
-        }
-        catch (Exception ex)
-        {
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"Failed to write companion WDL: {ex.Message}");
-        }
-
-        _terrainWeakSignalRestoreStatus = $"Successfully exported {exported} restored tile(s) and companion WDL to '{outputMapDir}'.";
-        _statusMessage = $"Exported {exported} restored stratigraphy tiles + WDL.";
     }
 
     private string GetProjectOutputRootDirectory()

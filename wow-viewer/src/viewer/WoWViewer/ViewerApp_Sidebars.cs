@@ -4185,18 +4185,18 @@ public partial class ViewerApp
         // 3. Actions: Analyze, Revert, Save
         if (ImGui.Button("Analyze Active Tile"))
         {
-            AnalyzeActiveCameraTileStratigraphy();
+            _stratigraphy.AnalyzeActiveCameraTileStratigraphy();
         }
         ImGui.SameLine();
         if (ImGui.Button("Analyze All Loaded Tiles"))
         {
-            AnalyzeAllLoadedTilesStratigraphy();
+            _stratigraphy.AnalyzeAllLoadedTilesStratigraphy();
         }
 
         ImGui.Spacing();
         if (ImGui.Button("Save Restored ADT / WDT Tiles..."))
         {
-            OpenStratigraphySaveDialog();
+            _stratigraphy.OpenStratigraphySaveDialog();
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Exports pre-computed loose LK ADT files and monolithic Alpha WDT maps to disk with current stratigraphy restorations applied.");

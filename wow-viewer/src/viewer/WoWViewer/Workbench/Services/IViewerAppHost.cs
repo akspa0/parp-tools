@@ -273,5 +273,7 @@ internal interface IViewerAppHost
     ref bool ShowCameraPathOverlay { get; }
     ref bool ShowMcnkFlagOverlay { get; }
     ref bool ShowMcnkWeakCorners { get; }
+    DataSourceSessionService DataSourceSession { get; }
+    Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> StratigraphyTileAnalyses { get; }
     // HOST-IFACE-END
 }
