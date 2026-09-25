@@ -666,7 +666,7 @@ public partial class ViewerApp
 
         ImGui.BeginDisabled(!Terrain.MapExportFormats.Any);
         if (ImGui.Button($"Export as {Terrain.MapExportFormats.Summary}...", new Vector2(-1f, 0f)))
-            ExportLoadedDatMap();
+            _cascAhdrSource.ExportLoadedDatMap();
         ImGui.EndDisabled();
 
         if (ImGui.IsItemHovered() && Terrain.MapExportFormats.Any)

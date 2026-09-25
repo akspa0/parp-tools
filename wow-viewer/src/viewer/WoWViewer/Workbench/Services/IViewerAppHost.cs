@@ -328,5 +328,15 @@ internal interface IViewerAppHost
     void NormalizeWorkbenchStateAfterLoad();
     void RefreshClientBuildOptions();
     void RefreshDatasetCatalog();
+    ProjectOutputService ProjectOutput { get; }
+    ref string FolderInputBuf { get; }
+    ref bool PendingKnownGoodClientAttachLooseFolder { get; }
+    ref string? PendingKnownGoodClientBuildVersion { get; }
+    ref string? PendingKnownGoodClientPath { get; }
+    ViewerSettingsService Settings { get; }
+    ref bool ShowBuildSelectionDialog { get; }
+    ref bool ShowFolderInput { get; }
+    ref bool ShowListfileInput { get; }
+    ref bool ShowRosettaDatastoreDialog { get; }
     // HOST-IFACE-END
 }

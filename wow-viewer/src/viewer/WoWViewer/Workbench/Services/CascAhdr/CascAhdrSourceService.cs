@@ -5,16 +5,30 @@ using WoWViewer.Terrain;
 using WowViewer.Core.IO.Casc;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps.AdtAhdr;
+using static WoWViewer.ViewerApp;
+using static WoWViewer.ClientDialogsService;
 
 namespace WoWViewer;
 
 /// <summary>
+/// CASC and AHDR/DAT sources: opening CASC installs and AHDR terrain sets, their dialogs, and loading their terrain.
 /// Spec 238 (local CASC install as the data source) and Spec 237 (DAT v26 terrain folder) entry points.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
 /// </summary>
-public partial class ViewerApp
+internal sealed partial class CascAhdrSourceService
 {
-    private bool _wantOpenCascInstall;
-    private bool _wantOpenCascInstallWithCdnFill;
+    private readonly IViewerAppHost _host;
+
+    internal CascAhdrSourceService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+
+    internal bool _wantOpenCascInstall;
+    internal bool _wantOpenCascInstallWithCdnFill;
 
     // Product picker state: shown after a CASC install folder is chosen.
     private string? _cascPickerInstallDir;
@@ -24,9 +38,9 @@ public partial class ViewerApp
     private bool _cascPickerFallbackToOtherProducts;
     private string? _cascPickerError;
     private string? _lastCascProduct;
-    private bool _wantOpenAhdrTerrainFolder;
+    internal bool _wantOpenAhdrTerrainFolder;
     private string? _lastCascInstallPath;
-    private string? _lastAhdrTerrainFolder;
+    internal string? _lastAhdrTerrainFolder;
 
     /// <summary>DAT terrain height display divisor; 36 treats heights as inches (see AhdrTerrainAdapter.HeightDivisor).</summary>
     private float _ahdrHeightDivisor = 36f;
@@ -39,7 +53,7 @@ public partial class ViewerApp
         ("÷100", 100f),
     ];
 
-    private void DrawAhdrHeightScaleMenu()
+    internal void DrawAhdrHeightScaleMenu()
     {
         if (!ImGuiNET.ImGui.BeginMenu("DAT Terrain Height Scale"))
             return;
@@ -57,7 +71,7 @@ public partial class ViewerApp
         ImGuiNET.ImGui.EndMenu();
     }
 
-    private void HandleCascAhdrMenuRequests()
+    internal void HandleCascAhdrMenuRequests()
     {
         if (_wantOpenCascInstall || _wantOpenCascInstallWithCdnFill)
         {
@@ -328,7 +342,7 @@ public partial class ViewerApp
     /// (<see cref="AdtAhdrTileBuilder"/>). A fresh adapter reads the tiles so the live scene's placement lists are
     /// untouched. Reopening the folder with the DAT loader should reproduce the same terrain and objects.
     /// </summary>
-    private void ExportNearbyTilesAsDatV26(int radius)
+    internal void ExportNearbyTilesAsDatV26(int radius)
     {
         if (_terrainManager?.Adapter is not StandardTerrainAdapter || _dataSource is null)
             return;
@@ -424,7 +438,7 @@ public partial class ViewerApp
     /// own draw), so this needs no ViewerApp state field - AGENTS.md section 10. The conversion itself lives in
     /// DatToLkAdtFolderExporter, shared with the adt-ahdr export-lk command.
     /// </summary>
-    private void ExportLoadedDatMap()
+    internal void ExportLoadedDatMap()
     {
         if (_lastAhdrTerrainFolder is not { } source)
         {

@@ -145,20 +145,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private DBCD.Providers.IDBCProvider? _dbcProvider;
     private string? _dbdDir;
     private string? _dbcBuild;
-    private static readonly WoWViewer.Terrain.ClientBuildOption[] FallbackClientBuildOptions =
-    {
-        new("Alpha (0.x) - 0.5.3.3368", "0.5.3.3368"),
-        new("Alpha (0.x) - 0.7.0.3694", "0.7.0.3694"),
-        new("Alpha (0.x) - 0.8.0.3734", "0.8.0.3734"),
-        new("Alpha (0.x) - 0.9.0.3807", "0.9.0.3807"),
-        new("Alpha (0.x) - 0.9.1.3810", "0.9.1.3810"),
-        new("Alpha (0.x) - 0.10.3892", "0.10.3892"),
-        new("Burning Crusade (2.x) - 2.4.3.8606", "2.4.3.8606"),
-        new("Wrath (3.x) - 3.0.1.8303", "3.0.1.8303"),
-        new("Wrath (3.x) - 3.3.5.12340", "3.3.5.12340"),
-        new("Cataclysm (4.x) - 4.0.0.11927", "4.0.0.11927"),
-        new("Cataclysm (4.x) - 4.0.1.12304", "4.0.1.12304")
-    };
     internal const float MaxTerrainFogDistance = 20000f;
 
     private readonly List<WoWViewer.Terrain.ClientBuildOption> _clientBuildOptions = new();
@@ -625,10 +611,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _showFolderInput = false;
     private string _folderInputBuf = "";
     private bool _showBuildSelectionDialog;
-    private string? _pendingGameFolderPath;
     private int _selectedBuildOptionIndex;
-    private string _buildSelectionFilter = "";
-    private string? _buildSelectionHint;
     private bool _showListfileInput = false;
     private bool _showRosettaDatastoreDialog = false;
     private string _lastGameFolderPath = "";
@@ -719,6 +702,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly ProjectOutputService _projectOutput;
     private readonly WorldObjectsPanelService _worldObjectsPanel;
     private readonly ViewerSettingsService _settings;
+    private readonly CascAhdrSourceService _cascAhdrSource;
+    private readonly ClientDialogsService _clientDialogs;
 
     public ViewerApp()
     {
@@ -742,6 +727,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _projectOutput = new ProjectOutputService(this);
         _worldObjectsPanel = new WorldObjectsPanelService(this);
         _settings = new ViewerSettingsService(this);
+        _cascAhdrSource = new CascAhdrSourceService(this);
+        _clientDialogs = new ClientDialogsService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1014,10 +1001,20 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref int IViewerAppHost.VideoCaptureFps => ref _videoCaptureFps;
     ref bool IViewerAppHost.VideoCaptureIncludeUi => ref _videoCaptureIncludeUi;
     ref string IViewerAppHost.VideoEncoderExecutable => ref _videoEncoderExecutable;
-    int IViewerAppHost.FindBuildOptionIndex(string? buildVersion) => FindBuildOptionIndex(buildVersion);
+    int IViewerAppHost.FindBuildOptionIndex(string? buildVersion) => _clientDialogs.FindBuildOptionIndex(buildVersion);
     void IViewerAppHost.NormalizeWorkbenchStateAfterLoad() => NormalizeWorkbenchStateAfterLoad();
-    void IViewerAppHost.RefreshClientBuildOptions() => RefreshClientBuildOptions();
+    void IViewerAppHost.RefreshClientBuildOptions() => _clientDialogs.RefreshClientBuildOptions();
     void IViewerAppHost.RefreshDatasetCatalog() => RefreshDatasetCatalog();
+    ProjectOutputService IViewerAppHost.ProjectOutput => _projectOutput;
+    ref string IViewerAppHost.FolderInputBuf => ref _folderInputBuf;
+    ref bool IViewerAppHost.PendingKnownGoodClientAttachLooseFolder => ref _pendingKnownGoodClientAttachLooseFolder;
+    ref string? IViewerAppHost.PendingKnownGoodClientBuildVersion => ref _pendingKnownGoodClientBuildVersion;
+    ref string? IViewerAppHost.PendingKnownGoodClientPath => ref _pendingKnownGoodClientPath;
+    ViewerSettingsService IViewerAppHost.Settings => _settings;
+    ref bool IViewerAppHost.ShowBuildSelectionDialog => ref _showBuildSelectionDialog;
+    ref bool IViewerAppHost.ShowFolderInput => ref _showFolderInput;
+    ref bool IViewerAppHost.ShowListfileInput => ref _showListfileInput;
+    ref bool IViewerAppHost.ShowRosettaDatastoreDialog => ref _showRosettaDatastoreDialog;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1821,11 +1818,11 @@ void main() {
 
         // Modal dialogs
         if (_showFolderInput)
-            DrawFolderInputDialog();
+            _clientDialogs.DrawFolderInputDialog();
         if (_showBuildSelectionDialog)
-            DrawBuildSelectionDialog();
+            _clientDialogs.DrawBuildSelectionDialog();
         if (_showListfileInput)
-            DrawListfileInputDialog();
+            _clientDialogs.DrawListfileInputDialog();
         if (_showMlTrainingDialog || IsMlTrainingProcessActive())
             UpdateMlTrainingMonitor();
         if (_showVlmExportDialog)
@@ -1847,7 +1844,7 @@ void main() {
         if (_showSynthesizedMinimapExportDialog)
             DrawSynthesizedMinimapExportDialog();
         if (_showRosettaDatastoreDialog)
-            DrawRosettaDatastoreDialog();
+            _clientDialogs.DrawRosettaDatastoreDialog();
 
         _sceneHoverPick.DrawSceneHoverAssetOverlay();
         _sceneHoverPick.DrawClickSelectionOverlay();
@@ -1879,13 +1876,13 @@ void main() {
                 }
 
                 if (ImGui.MenuItem("Open CASC Install (local)..."))
-                    _wantOpenCascInstall = true;
+                    _cascAhdrSource._wantOpenCascInstall = true;
 
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Pick a Battle.net install folder, then the game version to load. Reads only what is on disk.");
 
                 if (ImGui.MenuItem("Open CASC Install (local + CDN fill)..."))
-                    _wantOpenCascInstallWithCdnFill = true;
+                    _cascAhdrSource._wantOpenCascInstallWithCdnFill = true;
 
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("Pick a Battle.net install folder, then the game version to load. Files the build lists but the install does not have on disk are downloaded from Blizzard's CDN for the same build.");
@@ -1894,7 +1891,7 @@ void main() {
                 if (ImGui.BeginMenu("DAT Terrain (v22/23/26)"))
                 {
                     if (ImGui.MenuItem("Open DAT Terrain Folder..."))
-                        _wantOpenAhdrTerrainFolder = true;
+                        _cascAhdrSource._wantOpenAhdrTerrainFolder = true;
 
                     ImGui.Separator();
                     ImGui.TextDisabled("Export format");
@@ -1902,7 +1899,7 @@ void main() {
 
                     bool datLoaded = _terrainManager?.Adapter is AhdrTerrainAdapter;
                     if (ImGui.MenuItem("Export Loaded DAT Map...", null, false, datLoaded && Terrain.MapExportFormats.Any))
-                        ExportLoadedDatMap();
+                        _cascAhdrSource.ExportLoadedDatMap();
 
                     if (ImGui.IsItemHovered())
                     {
@@ -1915,12 +1912,12 @@ void main() {
 
                     ImGui.Separator();
                     if (ImGui.MenuItem("Export Nearby Tiles as DAT v26 (experimental)", null, false, _terrainManager?.Adapter is StandardTerrainAdapter))
-                        ExportNearbyTilesAsDatV26(radius: 2);
+                        _cascAhdrSource.ExportNearbyTilesAsDatV26(radius: 2);
 
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("Writes the ADT tiles within 2 tiles of the camera as DAT v26 files (terrain, texture layers, vertex colours, normals, objects) to output/dat_v26_export. Reopen with Open DAT Terrain Folder to compare.");
 
-                    DrawAhdrHeightScaleMenu();
+                    _cascAhdrSource.DrawAhdrHeightScaleMenu();
                     ImGui.EndMenu();
                 }
 
@@ -1929,10 +1926,10 @@ void main() {
                     foreach (var knownClient in _knownGoodClientPaths)
                     {
                         if (ImGui.MenuItem($"{knownClient.Name}##open_saved_{knownClient.Path}"))
-                            QueueKnownGoodClientAction(knownClient.Path, knownClient.BuildVersion, attachLooseFolder: false);
+                            _clientDialogs.QueueKnownGoodClientAction(knownClient.Path, knownClient.BuildVersion, attachLooseFolder: false);
 
                         if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip(BuildKnownGoodClientTooltip(knownClient));
+                            ImGui.SetTooltip(ClientDialogsService.BuildKnownGoodClientTooltip(knownClient));
                     }
 
                     ImGui.EndMenu();
@@ -1946,10 +1943,10 @@ void main() {
                     foreach (var knownClient in _knownGoodClientPaths)
                     {
                         if (ImGui.MenuItem($"{knownClient.Name}##attach_saved_{knownClient.Path}"))
-                            QueueKnownGoodClientAction(knownClient.Path, knownClient.BuildVersion, attachLooseFolder: true);
+                            _clientDialogs.QueueKnownGoodClientAction(knownClient.Path, knownClient.BuildVersion, attachLooseFolder: true);
 
                         if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip(BuildKnownGoodClientTooltip(knownClient));
+                            ImGui.SetTooltip(ClientDialogsService.BuildKnownGoodClientTooltip(knownClient));
                     }
 
                     ImGui.EndMenu();
@@ -1958,7 +1955,7 @@ void main() {
                 ImGui.Separator();
 
                 if (ImGui.MenuItem("Save Current Game Folder As Known-Good Base", "", false, _dataSource is MpqDataSource))
-                    SaveCurrentGameFolderAsKnownGoodBase();
+                    _clientDialogs.SaveCurrentGameFolderAsKnownGoodBase();
 
                 if (ImGui.BeginMenu("Forget Known-Good Base", _knownGoodClientPaths.Count > 0))
                 {
@@ -1968,7 +1965,7 @@ void main() {
                             _settings.QueueForgetKnownGoodClientPath(knownClient);
 
                         if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip(BuildKnownGoodClientTooltip(knownClient));
+                            ImGui.SetTooltip(ClientDialogsService.BuildKnownGoodClientTooltip(knownClient));
                     }
 
                     ImGui.EndMenu();
@@ -2433,7 +2430,7 @@ void main() {
             if (ImGui.Button("Remove", new Vector2(120f, 0f)))
             {
                 if (!string.IsNullOrWhiteSpace(_pendingForgetKnownGoodClientPath))
-                    ForgetKnownGoodClientPath(_pendingForgetKnownGoodClientPath);
+                    _clientDialogs.ForgetKnownGoodClientPath(_pendingForgetKnownGoodClientPath);
 
                 _settings.ClearPendingForgetKnownGoodClientPath();
                 ImGui.CloseCurrentPopup();
@@ -2581,7 +2578,7 @@ void main() {
                 });
         }
 
-        HandleCascAhdrMenuRequests();
+        _cascAhdrSource.HandleCascAhdrMenuRequests();
 
         if (_wantAttachLooseMapFolder)
         {

@@ -3,15 +3,16 @@ using ImGuiNET;
 using WowViewer.Core.IO.Maps;
 using WoWViewer.DataSources;
 using WoWViewer.Terrain;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-/// <summary>
-/// Partial class containing client selection and lightweight viewer dialogs.
-/// </summary>
-public partial class ViewerApp
+// ClientDialogsService: members moved from ViewerApp_ClientDialogs.cs; this file keeps that file's using directives so every
+// name in the moved code resolves exactly as it did there.
+// Original file note: Partial class containing client selection and lightweight viewer dialogs.
+internal sealed partial class ClientDialogsService
 {
-    private void DrawFolderInputDialog()
+    internal void DrawFolderInputDialog()
     {
         if (!_showFolderInput) return;
         _showFolderInput = false;
@@ -35,7 +36,7 @@ public partial class ViewerApp
             });
     }
 
-    private void DrawBuildSelectionDialog()
+    internal void DrawBuildSelectionDialog()
     {
         ImGui.SetNextWindowSize(new Vector2(560, 220), ImGuiCond.FirstUseEver);
         bool open = _showBuildSelectionDialog;
@@ -159,7 +160,7 @@ public partial class ViewerApp
         _showBuildSelectionDialog = true;
     }
 
-    private void RefreshClientBuildOptions()
+    internal void RefreshClientBuildOptions()
     {
         string? previouslySelected = null;
         if (_clientBuildOptions.Count > 0)
@@ -199,7 +200,7 @@ public partial class ViewerApp
         return null;
     }
 
-    private int FindBuildOptionIndex(string? buildVersion)
+    internal int FindBuildOptionIndex(string? buildVersion)
     {
         if (string.IsNullOrWhiteSpace(buildVersion) || _clientBuildOptions.Count == 0)
             return 0;
@@ -213,14 +214,14 @@ public partial class ViewerApp
         return 0;
     }
 
-    private void QueueKnownGoodClientAction(string gamePath, string? buildVersion, bool attachLooseFolder)
+    internal void QueueKnownGoodClientAction(string gamePath, string? buildVersion, bool attachLooseFolder)
     {
         _pendingKnownGoodClientPath = gamePath;
         _pendingKnownGoodClientBuildVersion = buildVersion;
         _pendingKnownGoodClientAttachLooseFolder = attachLooseFolder;
     }
 
-    private void SaveCurrentGameFolderAsKnownGoodBase()
+    internal void SaveCurrentGameFolderAsKnownGoodBase()
     {
         if (_dataSource is not MpqDataSource mpqDataSource)
         {
@@ -258,7 +259,7 @@ public partial class ViewerApp
             .ToList();
     }
 
-    private void ForgetKnownGoodClientPath(string gamePath)
+    internal void ForgetKnownGoodClientPath(string gamePath)
     {
         int removed = _knownGoodClientPaths.RemoveAll(entry =>
             string.Equals(entry.Path, gamePath, StringComparison.OrdinalIgnoreCase));
@@ -281,14 +282,14 @@ public partial class ViewerApp
             : $"{folderName} [{buildVersion}]";
     }
 
-    private static string BuildKnownGoodClientTooltip(KnownGoodClientPath knownClient)
+    internal static string BuildKnownGoodClientTooltip(KnownGoodClientPath knownClient)
     {
         return string.IsNullOrWhiteSpace(knownClient.BuildVersion)
             ? knownClient.Path
             : $"{knownClient.Path}\nBuild: {knownClient.BuildVersion}";
     }
 
-    private void DrawListfileInputDialog()
+    internal void DrawListfileInputDialog()
     {
         // No longer needed — listfile is auto-downloaded
         _showListfileInput = false;
@@ -323,7 +324,7 @@ public partial class ViewerApp
         return rawBuildId;
     }
 
-    private void DrawRosettaDatastoreDialog()
+    internal void DrawRosettaDatastoreDialog()
     {
         ImGui.SetNextWindowSize(new Vector2(740, 620), ImGuiCond.FirstUseEver);
         bool open = _showRosettaDatastoreDialog;
