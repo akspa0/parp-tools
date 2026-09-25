@@ -277,5 +277,13 @@ internal interface IViewerAppHost
     Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> StratigraphyTileAnalyses { get; }
     ConverterDialogsService ConverterDialogs { get; }
     PlacementEditService PlacementEditing { get; }
+    ref bool TaxiRideCameraEnabled { get; }
+    ref bool WlLayerListIsolationEnabled { get; }
+    ref string WlLayerSelectedBodyKey { get; }
+    void DrawTerrainChunkInvestigationPanel(bool defaultOpen);
+    void DrawVisualInvestigationToolbox(bool showWorldObjectRangeControls);
+    void OpenPm4Workbench(Pm4WorkbenchTab tab);
+    bool ShouldIncludeWlBodyInUiList(WlLiquidBody body);
+    bool IsWlListIsolationActive { get; }
     // HOST-IFACE-END
 }

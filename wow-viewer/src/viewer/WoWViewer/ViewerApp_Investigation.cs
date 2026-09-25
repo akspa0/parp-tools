@@ -866,7 +866,7 @@ public partial class ViewerApp
         }
     }
 
-    private static string GetWlLiquidGroupingModeLabel(WlLiquidLoader.WlBodyGroupingMode mode)
+    internal static string GetWlLiquidGroupingModeLabel(WlLiquidLoader.WlBodyGroupingMode mode)
     {
         return mode switch
         {

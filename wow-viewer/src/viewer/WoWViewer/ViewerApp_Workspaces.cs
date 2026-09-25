@@ -200,7 +200,7 @@ public partial class ViewerApp
         }
 
         ImGui.TextWrapped("This is the first regrouping slice. The current world-object tools still come from the existing inspector surface, but they now live under an explicit object task.");
-        DrawWorldObjectsContentCore();
+        _worldObjectsPanel.DrawWorldObjectsContentCore();
     }
 
     private void DrawEditorPm4Workspace()
