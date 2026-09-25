@@ -299,13 +299,4 @@ public partial class ViewerApp
             SaveViewerSettings();
         }
     }
-
-    /// <summary>
-    /// Apply saved fog defaults to terrain lighting after terrain loads.
-    /// Call this after terrain manager creation.
-    /// </summary>
-    private void ApplyGlobalFogDefaults(TerrainLighting lighting)
-    {
-        (lighting.FogStart, lighting.FogEnd) = TerrainLightingMath.NormalizeFogRange(_defaultFogStart, _defaultFogEnd);
-    }
 }

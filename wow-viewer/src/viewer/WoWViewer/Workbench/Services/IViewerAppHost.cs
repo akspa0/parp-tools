@@ -238,5 +238,22 @@ internal interface IViewerAppHost
     WdlPreviewService WdlPreview { get; }
     void FrameCurrentModel();
     string? TryGetLoadedLocalWdtPath();
+    ref DBCD.Providers.IDBCProvider? DbcProvider { get; }
+    ref string? DbdDir { get; }
+    ref float DefaultFogEnd { get; }
+    ref float DefaultFogStart { get; }
+    ref MinimapRenderer? MinimapRenderer { get; }
+    StandaloneModelLoaderService ModelLoader { get; }
+    ref int SavedDetailedAdtTileCountOverride { get; }
+    Dictionary<string, SavedObjectPathFilterMap> SavedObjectPathFiltersByMap { get; }
+    List<TerrainHiddenTileCandidate> TerrainAnalysisHiddenCandidates { get; }
+    ref int TerrainAnalysisHiddenSelectedIndex { get; }
+    ref string TerrainAnalysisHiddenStatus { get; }
+    ref (int tileX, int tileY)? TerrainAnalysisPreviewCompareTile { get; }
+    ref float? TerrainAnalysisPreviewSimilarity { get; }
+    void ApplyLayoutObjectPreviewModeToScene();
+    void ApplySavedPm4AlignmentToScene();
+    void InvalidatePm4DerivedReports();
+    bool FullLoadMode { get; set; }
     // HOST-IFACE-END
 }

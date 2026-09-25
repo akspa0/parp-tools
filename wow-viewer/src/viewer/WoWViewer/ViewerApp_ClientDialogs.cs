@@ -565,7 +565,7 @@ public partial class ViewerApp
                 }
 
                 // Load directly from Zarr datastore!
-                LoadRosettaDatastoreTerrain(_rosettaLoadedLibrary, currentBuild, currentMap);
+                _worldLoader.LoadRosettaDatastoreTerrain(_rosettaLoadedLibrary, currentBuild, currentMap);
                 _showRosettaDatastoreDialog = false;
             }
         }

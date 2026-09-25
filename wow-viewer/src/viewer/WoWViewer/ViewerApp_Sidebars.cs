@@ -800,7 +800,7 @@ public partial class ViewerApp
                 if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick, new Vector2(labelWidth, 0f)))
                 {
                     if (hasWdt && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        LoadMapAtDefaultSpawn(map);
+                        _worldLoader.LoadMapAtDefaultSpawn(map);
                 }
 
                 if (!hasWdt) ImGui.PopStyleColor();
@@ -809,7 +809,7 @@ public partial class ViewerApp
                 {
                     ImGui.SameLine();
                     if (ImGui.SmallButton($"Load##{map.Directory}"))
-                        LoadMapAtDefaultSpawn(map);
+                        _worldLoader.LoadMapAtDefaultSpawn(map);
                 }
 
                 bool canPreview = hasWdl && _wdlPreview.CanUseWdlPreviewFeature();

@@ -114,7 +114,7 @@ public partial class ViewerApp
             // Preflight before disposing the current dataset-backed renderer. This keeps a bad
             // catalog entry from replacing a working session with an empty one.
             _ = new Terrain.VlmProjectLoader(entry.RootPath);
-            LoadVlmProject(entry.RootPath);
+            _worldLoader.LoadVlmProject(entry.RootPath);
 
             if (_vlmTerrainManager == null)
                 return;
