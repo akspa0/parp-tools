@@ -221,7 +221,7 @@ public partial class ViewerApp
         try
         {
             _statusMessage = $"Opening CASC install {installDir}...";
-            string? listfilePath = ResolveListfilePath(null);
+            string? listfilePath = DataSourceSessionService.ResolveListfilePath(null);
             if (listfilePath is null)
             {
                 _statusMessage = "CASC needs a community listfile (id;path CSV); none could be found or downloaded.";
@@ -258,7 +258,7 @@ public partial class ViewerApp
 
             CommunityListfile listfile = CommunityListfile.Load([listfilePath]);
 
-            ClearActiveSceneForDataSourceReload();
+            _dataSourceSession.ClearActiveSceneForDataSourceReload();
             _lastCascInstallPath = Path.GetFullPath(installDir);
             _standaloneSkinPathCache.Clear();
             _loggedStandaloneMissingSkinPaths.Clear();
@@ -273,7 +273,7 @@ public partial class ViewerApp
             _texResolver.SetDataSource(_dataSource);
             _catalogView?.SetDataSource(_dataSource, _texResolver);
             _dbcProvider = new MpqDBCProvider(_dataSource);
-            InitializeMinimapSupport();
+            _dataSourceSession.InitializeMinimapSupport();
 
             // Spec 239: DB2 tables resolve through the listfile; definitions are picked by the newest
             // product's exact build (WoWDBDefs lists e.g. BUILD 1.60.1.69876 for wow_classic_beta).
@@ -304,7 +304,7 @@ public partial class ViewerApp
 
             try
             {
-                RefreshDiscoveredMaps();
+                _dataSourceSession.RefreshDiscoveredMaps();
             }
             catch (Exception ex)
             {
@@ -312,7 +312,7 @@ public partial class ViewerApp
                 _discoveredMaps = MapDiscoveryService.DiscoverLooseMapsOnly(_dataSource);
             }
 
-            RefreshFileList();
+            _dataSourceSession.RefreshFileList();
 
             _statusMessage = $"Loaded: {_dataSource.Name} (listfile: {listfile.Count} entries, build {_dbcBuild ?? "unknown"}, {_discoveredMaps.Count} maps)";
         }

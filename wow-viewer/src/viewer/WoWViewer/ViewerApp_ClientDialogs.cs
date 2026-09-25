@@ -112,7 +112,7 @@ public partial class ViewerApp
                 _pendingGameFolderPath = null;
                 _showBuildSelectionDialog = false;
                 _buildSelectionHint = null;
-                LoadMpqDataSource(selectedPath, null, buildVersion);
+                _dataSourceSession.LoadMpqDataSource(selectedPath, null, buildVersion);
             }
             else
             {
@@ -180,7 +180,7 @@ public partial class ViewerApp
         _selectedBuildOptionIndex = FindBuildOptionIndex(previouslySelected);
     }
 
-    private static string? ResolveDbdDefinitionsDir()
+    internal static string? ResolveDbdDefinitionsDir()
     {
         string[] dbdSearchPaths =
         {

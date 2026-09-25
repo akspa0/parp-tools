@@ -449,11 +449,11 @@ public partial class ViewerApp
                 ImGui.Separator();
                 ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), "WMO Detection");
 
-                string? clientRoot = GetActiveGamePath();
-                if (!string.IsNullOrWhiteSpace(clientRoot) && GetCurrentSessionMapName() != null)
+                string? clientRoot = _dataSourceSession.GetActiveGamePath();
+                if (!string.IsNullOrWhiteSpace(clientRoot) && _dataSourceSession.GetCurrentSessionMapName() != null)
                 {
                     string matchKey = Pm4WmoGroupMatchService.GetMatchKey(
-                        GetCurrentSessionMapName()!, debugInfo.TileX, debugInfo.TileY, debugInfo.Ck24);
+                        _dataSourceSession.GetCurrentSessionMapName()!, debugInfo.TileX, debugInfo.TileY, debugInfo.Ck24);
 
                     if (_pm4WmoMatchStore == null)
                         _pm4WmoMatchStore = new Pm4WmoMatchStore(AppContext.BaseDirectory);
@@ -484,7 +484,7 @@ public partial class ViewerApp
                         var clusters = _worldScene.Pm4Overlay.GetPm4SurfaceGroupClusters(
                             debugInfo.TileX, debugInfo.TileY, debugInfo.Ck24);
                         _pm4WmoGroupMatchResult = Pm4WmoGroupMatchService.MatchFromPlacement(
-                            clientRoot, GetCurrentSessionMapName()!,
+                            clientRoot, _dataSourceSession.GetCurrentSessionMapName()!,
                             debugInfo.TileX, debugInfo.TileY, debugInfo.Ck24,
                             debugInfo.BoundsMin, debugInfo.BoundsMax, clusters);
                         _pm4WmoMatchStatus = _pm4WmoGroupMatchResult.ErrorMessage ?? "";
@@ -495,7 +495,7 @@ public partial class ViewerApp
                         // Mine the map's own placement ADTs first (split _obj0 and monolithic LK
                         // root files alike — the Museum corpus is hand-made ground truth about
                         // what fits), then fall back to raw client WMO geometry.
-                        var adtMatches = GetCurrentSessionMapName() is { Length: > 0 } shapeMapName
+                        var adtMatches = _dataSourceSession.GetCurrentSessionMapName() is { Length: > 0 } shapeMapName
                             ? Pm4WmoGroupMatchService.SearchAdtPlacementsByShape(
                                 clientRoot, shapeMapName, debugInfo.BoundsMin, debugInfo.BoundsMax)
                             : Array.Empty<Pm4WmoFallbackCandidate>();
@@ -551,7 +551,7 @@ public partial class ViewerApp
         int tileY = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.tileY ?? 0;
         uint ck24 = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.ck24 ?? 0;
         var clusters = _worldScene?.Pm4Overlay.GetPm4SurfaceGroupClusters(tileX, tileY, ck24) ?? Array.Empty<Pm4SurfaceGroupCluster>();
-        string? mapName = GetCurrentSessionMapName();
+        string? mapName = _dataSourceSession.GetCurrentSessionMapName();
         string matchKey = mapName != null
             ? Pm4WmoGroupMatchService.GetMatchKey(mapName, tileX, tileY, ck24)
             : "";

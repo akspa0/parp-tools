@@ -26,7 +26,7 @@ public partial class ViewerApp
     // changes, so values the user typed are not overwritten every frame.
     private string? _synthesizedMinimapPreparedSession;
 
-    private string CurrentSynthesizedMinimapSessionKey() => $"{_dataSource?.Name}|{GetCurrentSessionMapName()}";
+    private string CurrentSynthesizedMinimapSessionKey() => $"{_dataSource?.Name}|{_dataSourceSession.GetCurrentSessionMapName()}";
 
     private void PrepareSynthesizedMinimapExportDialogInputs()
     {
@@ -46,14 +46,14 @@ public partial class ViewerApp
         }
         else
         {
-            string? activeClientRoot = GetActiveGamePath();
+            string? activeClientRoot = _dataSourceSession.GetActiveGamePath();
             if (!string.IsNullOrWhiteSpace(activeClientRoot))
                 _synthesizedMinimapClientRoot = activeClientRoot;
             _synthesizedMinimapCascProducts = string.Empty;
             _synthesizedMinimapCdnFill = false;
         }
 
-        string? activeMapName = GetCurrentSessionMapName();
+        string? activeMapName = _dataSourceSession.GetCurrentSessionMapName();
         if (!string.IsNullOrWhiteSpace(activeMapName))
         {
             if (!string.Equals(activeMapName, _synthesizedMinimapMapName, StringComparison.OrdinalIgnoreCase))
@@ -400,7 +400,7 @@ public partial class ViewerApp
                 startInfo.ArgumentList.Add("--cdn-fill");
 
             // Same listfile and download cache as the viewer, so files the viewer already fetched are not fetched again.
-            if (ResolveListfilePath(null) is { } listfile)
+            if (DataSourceSessionService.ResolveListfilePath(null) is { } listfile)
             {
                 startInfo.ArgumentList.Add("--casc-listfile");
                 startInfo.ArgumentList.Add(Path.GetFullPath(listfile));

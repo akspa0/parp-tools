@@ -330,8 +330,8 @@ public partial class ViewerApp
 
         // Everything is discerned from the loaded session — the user never types or browses a path.
         // The whole map's PM4 corpus on disk IS the guide; placement ADTs are derived per tile.
-        string? mapName = GetCurrentSessionMapName();
-        string? mapDirectory = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
+        string? mapName = _dataSourceSession.GetCurrentSessionMapName();
+        string? mapDirectory = _dataSourceSession.TryResolveCurrentMapDirectory(preferLooseOverlay: true);
 
         if (string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(mapDirectory))
         {
@@ -491,7 +491,7 @@ public partial class ViewerApp
             string fingerprint = string.IsNullOrWhiteSpace(_reconciliationBuildFingerprint)
                 ? "unspecified"
                 : _reconciliationBuildFingerprint;
-            string mapName = GetCurrentSessionMapName() ?? "map";
+            string mapName = _dataSourceSession.GetCurrentSessionMapName() ?? "map";
 
             var allProposals = new List<ReconciliationProposal>();
             int totalSegments = 0;
@@ -560,8 +560,8 @@ public partial class ViewerApp
     private bool TryResolveReconciliationPairs(out List<(int TileX, int TileY, string Pm4Path, string AdtPath)> pairs)
     {
         pairs = [];
-        string? mapName = GetCurrentSessionMapName();
-        string? mapDirectory = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
+        string? mapName = _dataSourceSession.GetCurrentSessionMapName();
+        string? mapDirectory = _dataSourceSession.TryResolveCurrentMapDirectory(preferLooseOverlay: true);
 
         if (string.IsNullOrWhiteSpace(mapName) || string.IsNullOrWhiteSpace(mapDirectory))
         {

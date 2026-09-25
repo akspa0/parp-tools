@@ -255,5 +255,14 @@ internal interface IViewerAppHost
     void ApplySavedPm4AlignmentToScene();
     void InvalidatePm4DerivedReports();
     bool FullLoadMode { get; set; }
+    ref bool AutoOpenWorldMapsPanel { get; }
+    ref AssetCatalogView? CatalogView { get; }
+    ref string ExtensionFilter { get; }
+    ref List<string> FilteredFiles { get; }
+    ref string LastGameFolderPath { get; }
+    ref string LastLooseOverlayPath { get; }
+    ref string SearchFilter { get; }
+    ref int SelectedFileIndex { get; }
+    WorldLoaderService WorldLoader { get; }
     // HOST-IFACE-END
 }

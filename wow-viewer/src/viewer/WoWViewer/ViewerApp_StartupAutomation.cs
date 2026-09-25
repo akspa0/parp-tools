@@ -59,7 +59,7 @@ public partial class ViewerApp
                 return;
             }
 
-            LoadMpqDataSource(request.GamePath, request.ListfilePath, request.BuildVersion);
+            _dataSourceSession.LoadMpqDataSource(request.GamePath, request.ListfilePath, request.BuildVersion);
         }
 
         if (!string.IsNullOrWhiteSpace(request.LooseMapOverlayPath))
@@ -70,7 +70,7 @@ public partial class ViewerApp
                 return;
             }
 
-            AttachLooseMapOverlay(request.LooseMapOverlayPath);
+            _dataSourceSession.AttachLooseMapOverlay(request.LooseMapOverlayPath);
         }
 
         string? startupTarget = request.WorldPath;

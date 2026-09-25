@@ -860,14 +860,14 @@ public partial class ViewerApp
         MkHarvestViewerValidationCapturePlan plan = _pendingMkHarvestViewerValidationCapturePlan;
         if (_terrainManager == null)
         {
-            if (!plan.RestoreWorldRequested && HasWorldReturnTarget())
+            if (!plan.RestoreWorldRequested && _dataSourceSession.HasWorldReturnTarget())
             {
                 string returnMapName = Path.GetFileNameWithoutExtension(_lastWorldSceneWdtPath!);
                 if (string.Equals(returnMapName, plan.MapName, StringComparison.OrdinalIgnoreCase))
                 {
                     plan.RestoreWorldRequested = true;
                     _datasetExportDialogs.AppendMkHarvestLogLine($"Restoring world '{plan.MapName}' before running the WoWViewer validation capture batch.");
-                    ReturnToLastWorldScene();
+                    _dataSourceSession.ReturnToLastWorldScene();
                     return;
                 }
             }

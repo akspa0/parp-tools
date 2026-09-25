@@ -876,7 +876,7 @@ public partial class ViewerApp
                 if (ImGui.Selectable(filter.label, _extensionFilter == filter.value))
                 {
                     _extensionFilter = filter.value;
-                    RefreshFileList();
+                    _dataSourceSession.RefreshFileList();
                 }
             }
             ImGui.EndCombo();
@@ -886,7 +886,7 @@ public partial class ViewerApp
         if (ImGui.InputText("Search", ref search, 256))
         {
             _searchFilter = search;
-            RefreshFileList();
+            _dataSourceSession.RefreshFileList();
         }
 
         if (TryGetSelectedBrowserAssetPath(out string selectedAssetPath))
@@ -909,10 +909,10 @@ public partial class ViewerApp
             ImGui.TextDisabled(selectedAssetPath);
         }
 
-        if (HasWorldReturnTarget() && _worldScene == null)
+        if (_dataSourceSession.HasWorldReturnTarget() && _worldScene == null)
         {
             if (ImGui.Button("Return To Last World"))
-                ReturnToLastWorldScene();
+                _dataSourceSession.ReturnToLastWorldScene();
         }
 
         ImGui.Text($"{_filteredFiles.Count} files");
@@ -2759,11 +2759,11 @@ public partial class ViewerApp
                 if (ImGui.Button("Open Override Asset"))
                     _modelLoader.LoadFileFromDataSource(actorOverridePath);
 
-                if (HasWorldReturnTarget() && _worldScene == null)
+                if (_dataSourceSession.HasWorldReturnTarget() && _worldScene == null)
                 {
                     ImGui.SameLine();
                     if (ImGui.Button("Return To Last World"))
-                        ReturnToLastWorldScene();
+                        _dataSourceSession.ReturnToLastWorldScene();
                 }
             }
         }
