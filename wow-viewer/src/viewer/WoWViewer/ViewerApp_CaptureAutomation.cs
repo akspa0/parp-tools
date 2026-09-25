@@ -43,23 +43,33 @@ public partial class ViewerApp
     private int _videoCaptureContainerIndex;
     private bool _taxiRideCameraEnabled;
     private int _taxiRideCameraRouteId = -1;
+    ref int IViewerAppHost.TaxiRideCameraRouteId => ref _taxiRideCameraRouteId;
     private WorldScene? _taxiRideCameraScene;
+    ref WorldScene? IViewerAppHost.TaxiRideCameraScene => ref _taxiRideCameraScene;
     private TaxiRideCameraMode _taxiRideCameraMode = TaxiRideCameraMode.Cockpit;
+    ref TaxiRideCameraMode IViewerAppHost.TaxiRideCameraMode => ref _taxiRideCameraMode;
     private float _taxiRideChaseDistance = 42f;
+    ref float IViewerAppHost.TaxiRideChaseDistance => ref _taxiRideChaseDistance;
     private float _taxiRideChaseHeight = 16f;
-    private float _taxiRideLookAhead = 28f;
+    ref float IViewerAppHost.TaxiRideChaseHeight => ref _taxiRideChaseHeight;
     private float _taxiRideCockpitHeight = 10f;
+    ref float IViewerAppHost.TaxiRideCockpitHeight => ref _taxiRideCockpitHeight;
     private float _taxiRideFreeLookYawOffset;
+    ref float IViewerAppHost.TaxiRideFreeLookYawOffset => ref _taxiRideFreeLookYawOffset;
     private float _taxiRideFreeLookPitchOffset;
+    ref float IViewerAppHost.TaxiRideFreeLookPitchOffset => ref _taxiRideFreeLookPitchOffset;
     private bool _taxiRideCameraPoseInitialized;
+    ref bool IViewerAppHost.TaxiRideCameraPoseInitialized => ref _taxiRideCameraPoseInitialized;
     private Vector3 _taxiRideCameraSmoothedPosition;
     private Vector3 _taxiRideCameraSmoothedForward;
     private long _lastTaxiRideCameraTick;
+    ref long IViewerAppHost.LastTaxiRideCameraTick => ref _lastTaxiRideCameraTick;
     private ActiveVideoRecording? _activeVideoRecording;
+    ref ActiveVideoRecording? IViewerAppHost.ActiveVideoRecording => ref _activeVideoRecording;
 
     private const float TaxiRideCameraSmoothingHz = 12f;
 
-    private enum TaxiRideCameraMode
+    internal enum TaxiRideCameraMode
     {
         Cockpit = 0,
         Chase = 1,
@@ -216,7 +226,7 @@ public partial class ViewerApp
         public bool FastSettleAfterBatchReady { get; init; }
     }
 
-    private sealed class ActiveVideoRecording
+    internal sealed class ActiveVideoRecording
     {
         public required Process EncoderProcess { get; init; }
         public required Stream EncoderInput { get; init; }
@@ -1586,20 +1596,6 @@ public partial class ViewerApp
         }
     }
 
-    private bool TryStartTaxiRideVideoCapture()
-    {
-        if (_worldScene == null || _worldScene.SelectedTaxiRouteId < 0)
-        {
-            _statusMessage = "Select a taxi route before starting ride capture.";
-            return false;
-        }
-
-        if (!TryAttachTaxiRideCameraToSelectedRoute())
-            return false;
-
-        return TryStartCurrentViewVideoRecording(_videoCaptureIncludeUi, _taxiAndAreaPoi.GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId));
-    }
-
     private bool TryStartCurrentViewVideoRecording(bool includeUi, string? label = null)
     {
         if (_activeVideoRecording != null)
@@ -1724,6 +1720,7 @@ public partial class ViewerApp
             return false;
         }
     }
+    bool IViewerAppHost.TryStartCurrentViewVideoRecording(bool includeUi, string? label) => TryStartCurrentViewVideoRecording(includeUi, label);
 
     private void StopVideoRecording(string? statusOverride = null)
     {
@@ -1802,6 +1799,7 @@ public partial class ViewerApp
 
         _statusMessage = statusMessage;
     }
+    void IViewerAppHost.StopVideoRecording(string? statusOverride) => StopVideoRecording(statusOverride);
 
     private void CaptureVideoFrameIfNeeded(bool includeUi, double dt)
     {
@@ -1862,31 +1860,6 @@ public partial class ViewerApp
         }
     }
 
-    private bool TryAttachTaxiRideCameraToSelectedRoute()
-    {
-        if (_worldScene == null || _worldScene.SelectedTaxiRouteId < 0)
-        {
-            _statusMessage = "Select a taxi route before enabling the ride camera.";
-            return false;
-        }
-
-        // A camera path and a taxi ride both own the camera. Cancel any
-        // pending path warmup/playback before attaching the ride route.
-        StopCameraPathPlayback();
-        _worldScene.ShowTaxi = true;
-        _worldScene.ShowTaxiActors = true;
-        _taxiRideCameraRouteId = _worldScene.SelectedTaxiRouteId;
-        _taxiRideCameraScene = _worldScene;
-        _worldScene.ActiveTaxiRideRouteId = _taxiRideCameraRouteId;
-        _taxiRideCameraEnabled = true;
-        _taxiRideFreeLookYawOffset = 0f;
-        _taxiRideFreeLookPitchOffset = 0f;
-        _taxiRideCameraPoseInitialized = false;
-        _lastTaxiRideCameraTick = Stopwatch.GetTimestamp();
-        _statusMessage = $"Ride camera attached to {_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}.";
-        return true;
-    }
-
     private void StopTaxiRideCamera(string? statusMessage = null)
     {
         _taxiRideCameraEnabled = false;
@@ -1902,6 +1875,7 @@ public partial class ViewerApp
         if (!string.IsNullOrWhiteSpace(statusMessage))
             _statusMessage = statusMessage;
     }
+    void IViewerAppHost.StopTaxiRideCamera(string? statusMessage) => StopTaxiRideCamera(statusMessage);
 
     private void AdjustTaxiRideFreeLook(float deltaYawDegrees, float deltaPitchDegrees)
     {

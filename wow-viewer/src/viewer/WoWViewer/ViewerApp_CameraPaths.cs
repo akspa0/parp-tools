@@ -672,6 +672,7 @@ public partial class ViewerApp
         if (_captureQueue.Count == 0 && _activeCaptureRequest == null)
             EndCameraPathPreload();
     }
+    void IViewerAppHost.StopCameraPathPlayback() => StopCameraPathPlayback();
 
     private void UpdateCameraPathPlayback(double dt)
     {

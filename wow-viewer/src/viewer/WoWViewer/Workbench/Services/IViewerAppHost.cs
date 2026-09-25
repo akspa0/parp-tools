@@ -50,6 +50,11 @@ using WowViewer.Core.Runtime.World.Passes;
 using WoWViewer.UI;
 using System.Globalization;
 using WowViewer.Core.IO.Casc;
+using System.ComponentModel;
+using System.Linq;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
@@ -372,5 +377,21 @@ internal interface IViewerAppHost
     void ResetCamera();
     void SetWorkspaceMode(WorkspaceMode mode);
     ref int ActivePm4TabIndex { get; }
+    ref ActiveVideoRecording? ActiveVideoRecording { get; }
+    ref long LastTaxiRideCameraTick { get; }
+    ref TaxiRideCameraMode TaxiRideCameraMode { get; }
+    ref bool TaxiRideCameraPoseInitialized { get; }
+    ref int TaxiRideCameraRouteId { get; }
+    ref WorldScene? TaxiRideCameraScene { get; }
+    ref float TaxiRideChaseDistance { get; }
+    ref float TaxiRideChaseHeight { get; }
+    ref float TaxiRideCockpitHeight { get; }
+    ref float TaxiRideFreeLookPitchOffset { get; }
+    ref float TaxiRideFreeLookYawOffset { get; }
+    void CopyTextToClipboard(string text, string description);
+    void StopCameraPathPlayback();
+    void StopTaxiRideCamera(string? statusMessage = null);
+    void StopVideoRecording(string? statusOverride = null);
+    bool TryStartCurrentViewVideoRecording(bool includeUi, string? label = null);
     // HOST-IFACE-END
 }

@@ -537,8 +537,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private string _taxiActorModelOverrideInput = "";
     private int _taxiActorModelOverrideInputRouteId = -1;
     private int _taxiActorModelOverrideTargetRouteId = -1;
-    private string _taxiRouteFilter = "";
-    private int _taxiRouteListGroupingMode = 1;
     private bool _layoutObjectPreviewMode;
     private bool _layoutObjectPreviewStateCaptured;
     private bool _layoutObjectPreviewSavedObjectsVisible = true;
@@ -679,6 +677,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly ClientDialogsService _clientDialogs;
     private readonly MainMenuBarService _mainMenuBar;
     private readonly Pm4WorkbenchService _pm4Workbench;
+    private readonly TaxiPanelService _taxiPanel;
 
     public ViewerApp()
     {
@@ -706,6 +705,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _clientDialogs = new ClientDialogsService(this);
         _mainMenuBar = new MainMenuBarService(this);
         _pm4Workbench = new Pm4WorkbenchService(this);
+        _taxiPanel = new TaxiPanelService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1007,6 +1007,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.WorkbenchOpen => ref _workbenchOpen;
     void IViewerAppHost.ResetCamera() => ResetCamera();
     ref int IViewerAppHost.ActivePm4TabIndex => ref _activePm4TabIndex;
+    void IViewerAppHost.CopyTextToClipboard(string text, string description) => CopyTextToClipboard(text, description);
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
