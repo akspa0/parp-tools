@@ -1388,7 +1388,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
                 ClearSelectedWlLiquidBody(clearListIsolation: true);
                 _worldScene.ClearSelection();
                 _worldScene.ClearTaxiSelection();
-                _worldScene.ClearPm4ObjectSelection();
+                _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                 ClearSelectedAreaPoiInfo();
                 _selectedObjectIndex = -1;
                 _selectedObjectType = "";
@@ -2663,8 +2663,8 @@ void main() {
                         _lastLooseOverlayPath = Path.GetDirectoryName(pm4Path);
                         if (_worldScene != null)
                         {
-                            if (_worldScene.LoadLoosePm4File(pm4Path))
-                                _statusMessage = _worldScene.Pm4Status;
+                            if (_worldScene.Pm4Overlay.LoadLoosePm4File(pm4Path))
+                                _statusMessage = _worldScene.Pm4Overlay.Pm4Status;
                             else
                                 _statusMessage = $"Failed to decode loose PM4/PD4 file: {pm4Path}";
                         }
@@ -9182,35 +9182,35 @@ void main() {
         ImGui.Separator();
         DrawPopulationSubTabContent();
 
-        bool showPm4Overlay = _worldScene.ShowPm4Overlay;
+        bool showPm4Overlay = _worldScene.Pm4Overlay.ShowPm4Overlay;
         if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
-            _worldScene.ShowPm4Overlay = showPm4Overlay;
-        if (ImGui.IsItemHovered() && _worldScene.ShowPm4Overlay)
-            ImGui.SetTooltip(_worldScene.Pm4Status);
+            _worldScene.Pm4Overlay.ShowPm4Overlay = showPm4Overlay;
+        if (ImGui.IsItemHovered() && _worldScene.Pm4Overlay.ShowPm4Overlay)
+            ImGui.SetTooltip(_worldScene.Pm4Overlay.Pm4Status);
 
         DrawToolbarPopupButton("PM4 Actions", string.Empty, "##Pm4OverlayActionsPopup", () =>
         {
             if (ImGui.Button("PM4 Workbench"))
             {
-                OpenPm4Workbench(_worldScene.HasSelectedPm4Object ? Pm4WorkbenchTab.Selection : Pm4WorkbenchTab.Overlay);
+                OpenPm4Workbench(_worldScene.Pm4Overlay.HasSelectedPm4Object ? Pm4WorkbenchTab.Selection : Pm4WorkbenchTab.Overlay);
                 ImGui.CloseCurrentPopup();
             }
 
             if (ImGui.Button("Reload PM4"))
             {
-                _worldScene.ReloadPm4Overlay();
+                _worldScene.Pm4Overlay.ReloadPm4Overlay();
                 ImGui.CloseCurrentPopup();
             }
         });
 
-        if (_worldScene.IsPm4Loading)
-            ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Status}");
-        else if (_worldScene.Pm4LoadAttempted)
-            ImGui.TextDisabled($"PM4: {_worldScene.Pm4VisibleObjectCount}/{_worldScene.Pm4ObjectCount} visible objects, {_worldScene.Pm4VisibleLineCount}/{_worldScene.Pm4LineCount} lines, {_worldScene.Pm4VisibleTriangleCount}/{_worldScene.Pm4TriangleCount} tris");
+        if (_worldScene.Pm4Overlay.IsPm4Loading)
+            ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Overlay.Pm4Status}");
+        else if (_worldScene.Pm4Overlay.Pm4LoadAttempted)
+            ImGui.TextDisabled($"PM4: {_worldScene.Pm4Overlay.Pm4VisibleObjectCount}/{_worldScene.Pm4Overlay.Pm4ObjectCount} visible objects, {_worldScene.Pm4Overlay.Pm4VisibleLineCount}/{_worldScene.Pm4Overlay.Pm4LineCount} lines, {_worldScene.Pm4Overlay.Pm4VisibleTriangleCount}/{_worldScene.Pm4Overlay.Pm4TriangleCount} tris");
         else
             ImGui.TextDisabled("PM4 stays lightweight here. Use the inspector workbench for overlay tuning, object matches, and correlation.");
-        if (_worldScene.Pm4LoadAttempted)
-            ImGui.TextDisabled($"PM4 status: {_worldScene.Pm4Status}");
+        if (_worldScene.Pm4Overlay.Pm4LoadAttempted)
+            ImGui.TextDisabled($"PM4 status: {_worldScene.Pm4Overlay.Pm4Status}");
         ImGui.TextDisabled("PM4 settings and deep analysis live in Inspector > PM4 Workbench.");
 
         ImGui.Separator();
@@ -10386,7 +10386,7 @@ void main() {
 
         ClearSelectedWlLiquidBody(clearListIsolation: true);
         _worldScene.ClearTaxiSelection();
-        _worldScene.ClearPm4ObjectSelection();
+        _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedAreaPoiInfo();
         RefreshSelectedWorldObjectInfo();
         return true;
@@ -10601,8 +10601,8 @@ void main() {
         InitializeMinimapSupport();
         RefreshDiscoveredMaps();
         RefreshFileList();
-        if (_worldScene != null && (_worldScene.ShowPm4Overlay || _worldScene.Pm4LoadAttempted))
-            _worldScene.ReloadPm4Overlay();
+        if (_worldScene != null && (_worldScene.Pm4Overlay.ShowPm4Overlay || _worldScene.Pm4Overlay.Pm4LoadAttempted))
+            _worldScene.Pm4Overlay.ReloadPm4Overlay();
 
         string? overlayBuildHint = TryDetectLooseOverlayBuildHint(normalizedRoot);
         if (!string.IsNullOrWhiteSpace(overlayBuildHint) && !string.Equals(_dbcBuild, overlayBuildHint, StringComparison.OrdinalIgnoreCase))
@@ -13340,7 +13340,7 @@ void main() {
         int nextNodeId = toggle && _worldScene.SelectedTaxiNodeId == nodeId ? -1 : nodeId;
         _worldScene.SelectedTaxiNodeId = nextNodeId;
         _worldScene.ClearSelection();
-        _worldScene.ClearPm4ObjectSelection();
+        _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedAreaPoiInfo();
 
         if (nextNodeId < 0)
@@ -13360,7 +13360,7 @@ void main() {
         int nextRouteId = toggle && _worldScene.SelectedTaxiRouteId == pathId ? -1 : pathId;
         _worldScene.SelectedTaxiRouteId = nextRouteId;
         _worldScene.ClearSelection();
-        _worldScene.ClearPm4ObjectSelection();
+        _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedAreaPoiInfo();
 
         if (nextRouteId < 0)
@@ -13449,7 +13449,7 @@ void main() {
         _selectedAreaPoiId = nextPoiId;
         _worldScene.ClearSelection();
         _worldScene.ClearTaxiSelection();
-        _worldScene.ClearPm4ObjectSelection();
+        _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
 
         if (nextPoiId < 0)
         {
@@ -14643,7 +14643,7 @@ void main() {
             float ndcY = 1f - (localY / vpH) * 2f; // flip Y
 
             var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
-            var hoveredPm4Key = _worldScene.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
+            var hoveredPm4Key = _worldScene.Pm4Overlay.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
 
             if (addPm4ToCollection)
             {
@@ -14651,7 +14651,7 @@ void main() {
                 // the normal-click path picks PM4 inside TryHandleSceneClickSelection
                 // (a duplicate outer pick here doubled the per-click cost on dense maps).
                 if (clickSw != null) clickPickStartTicks = clickSw.ElapsedTicks;
-                _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out _);
+                _worldScene.Pm4Overlay.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out _);
                 if (clickSw != null) clickPickMs = (clickSw.ElapsedTicks - clickPickStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
                 ClearPendingClickSelection();
@@ -14660,7 +14660,7 @@ void main() {
                 ClearSelectedAreaPoiInfo();
 
                 var collectionPm4Key = hoveredPm4Key ?? pm4HitKey;
-                if (collectionPm4Key.HasValue && _worldScene.SelectPm4Object(collectionPm4Key.Value))
+                if (collectionPm4Key.HasValue && _worldScene.Pm4Overlay.SelectPm4Object(collectionPm4Key.Value))
                 {
                     TogglePm4ObjectCollectionMembership(collectionPm4Key.Value, reportStatus: true);
                     UpdateSelectedPm4ObjectInfo(collectionPm4Key);
@@ -14683,7 +14683,7 @@ void main() {
             ClearSelectedWlLiquidBody(clearListIsolation: true);
             _worldScene.ClearSelection();
             _worldScene.ClearTaxiSelection();
-            _worldScene.ClearPm4ObjectSelection();
+            _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
             ClearSelectedAreaPoiInfo();
             _selectedObjectIndex = -1;
             _selectedObjectType = "";
@@ -14711,7 +14711,7 @@ void main() {
 
         _selectedObjectType = "PM4";
 
-        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
+        if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
         {
             string nearestRef = float.IsNaN(debugInfo.NearestPositionRefDistance)
                 ? "n/a"
@@ -14737,7 +14737,7 @@ void main() {
                 $"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}\n" +
                 $"Center: ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})\n" +
                 $"Nearest MPRL: {nearestRef}\n" +
-                $"Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2})";
+                $"Offset: ({_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.Z:F2})";
             return;
         }
 
@@ -14750,7 +14750,7 @@ void main() {
             $"Tile: ({selectedPm4.tileX}, {selectedPm4.tileY})\n" +
             $"CK24: 0x{selectedPm4.ck24:X6} (viewerPart={selectedPm4.objectPart})\n" +
             $"Viewer Part: assigned during the current overlay build; not a raw PM4 field\n" +
-            $"Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2})";
+            $"Offset: ({_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.Z:F2})";
     }
 
     private void UpdateWorldSceneWireframeReveal(Matrix4x4 view, Matrix4x4 proj)
@@ -15050,7 +15050,7 @@ void main() {
             return true;
         }
 
-        if (_worldScene == null || !_worldScene.TryBuildPm4ObjectMatch(objectKey, maxMatches, out Pm4ObjectMatchObject hoveredMatch))
+        if (_worldScene == null || !_worldScene.Pm4Overlay.TryBuildPm4ObjectMatch(objectKey, maxMatches, out Pm4ObjectMatchObject hoveredMatch))
             return false;
 
         _hoveredPm4ObjectMatch = hoveredMatch;

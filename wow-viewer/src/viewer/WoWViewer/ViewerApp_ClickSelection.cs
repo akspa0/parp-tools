@@ -87,17 +87,17 @@ public partial class ViewerApp
             AddWlLiquidClickSelectionCandidate(addedKeys, hoveredWlBody);
         }
 
-        var hoveredPm4Key = _worldScene.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
+        var hoveredPm4Key = _worldScene.Pm4Overlay.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
         if (hoveredPm4Key.HasValue)
             AddPm4ClickSelectionCandidate(addedKeys, hoveredPm4Key.Value, null, "Hovered PM4 object");
 
-        bool pm4Hit = _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out _, out float pm4HitDistance) && pm4HitKey.HasValue;
+        bool pm4Hit = _worldScene.Pm4Overlay.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out _, out float pm4HitDistance) && pm4HitKey.HasValue;
         if (pm4Hit)
             AddPm4ClickSelectionCandidate(addedKeys, pm4HitKey.Value, pm4HitDistance, "Ray hit");
 
         // If PM4 overlay is on and we hit a PM4 object, skip scene object picking
         // (PM4 objects are behind scene WMO/M2 visually, so the ray hits both)
-        if (!pm4Hit || !_worldScene.ShowPm4Overlay)
+        if (!pm4Hit || !_worldScene.Pm4Overlay.ShowPm4Overlay)
         {
             if (_worldScene.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
             {
@@ -360,7 +360,7 @@ public partial class ViewerApp
 
                     _worldScene?.ClearSelection();
                     _worldScene?.ClearTaxiSelection();
-                    _worldScene?.ClearPm4ObjectSelection();
+                    _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
                     ClearSelectedAreaPoiInfo();
                     SetSelectedWlLiquidBody(
                         selectedBody,
@@ -386,7 +386,7 @@ public partial class ViewerApp
                 distance,
                 () =>
                 {
-                    if (_worldScene == null || !_worldScene.SelectPm4Object(objectKey))
+                    if (_worldScene == null || !_worldScene.Pm4Overlay.SelectPm4Object(objectKey))
                         return;
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
@@ -437,7 +437,7 @@ public partial class ViewerApp
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.ClearTaxiSelection();
-                    _worldScene.ClearPm4ObjectSelection();
+                    _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                     ClearSelectedAreaPoiInfo();
                     RefreshSelectedWorldObjectInfo();
                 }));

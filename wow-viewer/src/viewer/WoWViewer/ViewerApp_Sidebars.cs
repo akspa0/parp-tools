@@ -218,26 +218,26 @@ public partial class ViewerApp
                         _worldScene.ShowBoundingBoxes = showBB;
 
                     ImGui.SameLine();
-                    bool showPm4 = _worldScene.ShowPm4Overlay;
+                    bool showPm4 = _worldScene.Pm4Overlay.ShowPm4Overlay;
                     if (ImGui.Checkbox("PM4", ref showPm4))
-                        _worldScene.ShowPm4Overlay = showPm4;
+                        _worldScene.Pm4Overlay.ShowPm4Overlay = showPm4;
                     ImGui.SameLine();
                     if (ImGui.SmallButton("Inspect##inspect_pm4_btn"))
                     {
-                        _worldScene.ShowPm4Overlay = true;
+                        _worldScene.Pm4Overlay.ShowPm4Overlay = true;
                         OpenPm4Workbench(Pm4WorkbenchTab.Selection);
                     }
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("Enable PM4 overlay and focus PM4 selection & collision inspector");
 
-                    if (_worldScene.IsPm4Loading)
+                    if (_worldScene.Pm4Overlay.IsPm4Loading)
                     {
                         ImGui.SameLine();
                         ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "loading");
                     }
-                    else if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
+                    else if (_worldScene.Pm4Overlay.ShowPm4Overlay && ImGui.IsItemHovered())
                     {
-                        ImGui.SetTooltip(_worldScene.Pm4Status);
+                        ImGui.SetTooltip(_worldScene.Pm4Overlay.Pm4Status);
                     }
                 }
 
@@ -531,11 +531,11 @@ public partial class ViewerApp
                 _worldScene.ShowBoundingBoxes = showBB;
 
             ImGui.SameLine();
-            bool showPm4 = _worldScene.ShowPm4Overlay;
+            bool showPm4 = _worldScene.Pm4Overlay.ShowPm4Overlay;
             if (ImGui.Checkbox("PM4 Overlay", ref showPm4))
-                _worldScene.ShowPm4Overlay = showPm4;
+                _worldScene.Pm4Overlay.ShowPm4Overlay = showPm4;
 
-            if (_worldScene.IsPm4Loading)
+            if (_worldScene.Pm4Overlay.IsPm4Loading)
                 ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "PM4 overlay is loading...");
         }
     }
@@ -745,8 +745,8 @@ public partial class ViewerApp
         if (!string.IsNullOrWhiteSpace(_currentAreaName))
             ImGui.TextDisabled($"Area: {_currentAreaName}");
 
-        if (_worldScene != null && (_worldScene.ShowPm4Overlay || _worldScene.Pm4LoadAttempted))
-            ImGui.TextDisabled($"PM4: {_worldScene.Pm4VisibleObjectCount}/{_worldScene.Pm4ObjectCount} visible objects");
+        if (_worldScene != null && (_worldScene.Pm4Overlay.ShowPm4Overlay || _worldScene.Pm4Overlay.Pm4LoadAttempted))
+            ImGui.TextDisabled($"PM4: {_worldScene.Pm4Overlay.Pm4VisibleObjectCount}/{_worldScene.Pm4Overlay.Pm4ObjectCount} visible objects");
 
         if (ImGui.Button(_fullscreenMinimap ? "Exit Full Minimap" : "Full Minimap"))
             ToggleFullscreenMinimap();
@@ -1331,7 +1331,7 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
         ImGui.Separator();
 
-        bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
+        bool hasSelectedPm4 = _worldScene?.Pm4Overlay.HasSelectedPm4Object == true;
         bool hasSelectedObject = DrawSelectedObjectSummaryContent();
         if (!hasSelectedObject)
         {
@@ -1395,7 +1395,7 @@ public partial class ViewerApp
 
     private bool DrawSelectedObjectSummaryContent()
     {
-        bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
+        bool hasSelectedPm4 = _worldScene?.Pm4Overlay.HasSelectedPm4Object == true;
         if (string.IsNullOrEmpty(_selectedObjectInfo)
             || hasSelectedPm4
             || _selectedObjectType.StartsWith("Taxi", StringComparison.OrdinalIgnoreCase))
@@ -2078,7 +2078,7 @@ public partial class ViewerApp
 
     private bool DrawSelectedObjectInspectorSection(bool defaultOpen = true)
     {
-        bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
+        bool hasSelectedPm4 = _worldScene?.Pm4Overlay.HasSelectedPm4Object == true;
         if (string.IsNullOrEmpty(_selectedObjectInfo) || hasSelectedPm4)
             return false;
 
@@ -5351,11 +5351,11 @@ public partial class ViewerApp
             if (ImGui.Checkbox("World Bounding Boxes", ref showBoundingBoxes))
                 _worldScene.ShowBoundingBoxes = showBoundingBoxes;
 
-            bool showPm4Overlay = _worldScene.ShowPm4Overlay;
+            bool showPm4Overlay = _worldScene.Pm4Overlay.ShowPm4Overlay;
             if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
-                _worldScene.ShowPm4Overlay = showPm4Overlay;
-            if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
-                ImGui.SetTooltip(_worldScene.Pm4Status);
+                _worldScene.Pm4Overlay.ShowPm4Overlay = showPm4Overlay;
+            if (_worldScene.Pm4Overlay.ShowPm4Overlay && ImGui.IsItemHovered())
+                ImGui.SetTooltip(_worldScene.Pm4Overlay.Pm4Status);
         }
 
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;

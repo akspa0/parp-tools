@@ -23,10 +23,10 @@ public partial class ViewerApp
         var builder = new InspectorContentBuilder();
 
         // 1. PM4 Selection
-        if (_worldScene?.HasSelectedPm4Object == true && _worldScene.SelectedPm4ObjectKey is { } pm4Key)
+        if (_worldScene?.Pm4Overlay.HasSelectedPm4Object == true && _worldScene.Pm4Overlay.SelectedPm4ObjectKey is { } pm4Key)
         {
             builder.ObjectType = "PM4";
-            if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug))
+            if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug))
             {
                 float z = BitConverter.UInt32BitsToSingle(debug.Ck24 << 8);
                 builder.Headline = debug.Ck24 == 0
@@ -420,7 +420,7 @@ public partial class ViewerApp
                 break;
 
             case "clear_pm4_selection":
-                _worldScene?.ClearPm4ObjectSelection();
+                _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
                 break;
 
             case "open_pm4_workbench":

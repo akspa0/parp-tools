@@ -243,7 +243,7 @@ public partial class ViewerApp
         // keep the Inspector on an unrelated detail surface after the operator clicks the ground.
         _worldScene?.ClearSelection();
         _worldScene?.ClearTaxiSelection();
-        _worldScene?.ClearPm4ObjectSelection();
+        _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedWlLiquidBody(clearListIsolation: true);
         ClearSelectedAreaPoiInfo();
         _selectedObjectIndex = -1;

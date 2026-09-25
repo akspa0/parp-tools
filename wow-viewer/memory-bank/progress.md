@@ -1,6 +1,17 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-23
+Last updated: 2026-09-25
+
+## 2026-09-25 — U-01 E1: PM4 overlay extracted from `WorldScene` (code only)
+
+Epic 251 U01-T002. 387 members + 42 top-level PM4 types moved verbatim (Roslyn member map +
+reference closure) into `src/viewer/WoWViewer/Terrain/Pm4/`: `Pm4OverlayScene` (3 partial files:
+state/load/cache, selection, reports), five static helper classes, model files, and
+`IPm4OverlayHost` (13 members, implemented explicitly by `WorldScene`). `WorldScene.cs`
+17,175 → 8,326 lines; every new file < 2,000. Callers use `WorldScene.Pm4Overlay.X` (278 receiver-only
+lines in 7 `ViewerApp*` files). Solution build 0 errors, no new warnings in touched files; test
+failure set identical to `HEAD` (26 environmental). Runtime not claimed — U01-T003 smoke is operator-owned.
+Receipt: `specs/251-epic-viewer-ux-and-code-health/evidence/u01-e1-pm4-extraction-2026-09-25.md`.
 
 ## 2026-09-23 — Spec reconciliation: 137 specs audited against code, archived, replaced by 7 epics
 

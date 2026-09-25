@@ -366,9 +366,9 @@ public partial class ViewerApp
 
     private string GetWorkspaceTargetSummary()
     {
-        if (_worldScene?.HasSelectedPm4Object == true && _worldScene.SelectedPm4ObjectKey.HasValue)
+        if (_worldScene?.Pm4Overlay.HasSelectedPm4Object == true && _worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
         {
-            var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
+            var selectedPm4 = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
             return $"PM4 CK24 0x{selectedPm4.ck24:X6} part {selectedPm4.objectPart}";
         }
 

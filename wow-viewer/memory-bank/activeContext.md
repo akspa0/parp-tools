@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-23 · Branch: `v0.6.0-dev`
+Last updated: 2026-09-25 · Branch: `v0.6.0-dev`
 
 ## Fresh-chat route
 
@@ -13,22 +13,27 @@ Last updated: 2026-09-23 · Branch: `v0.6.0-dev`
 [Progress ledger](progress.md), [memory archive](archive/README.md) and `specs/archived/` are
 on-demand history, never default reading.
 
-## Current lane — backlog triage (operator-owned)
+## Current lanes — operator P1s (both marked Want 2026-09-23)
 
-On 2026-09-23 every open spec (137) was audited against the code and archived; open residue now lives
-in 7 epics. **Nothing is scheduled.** The operator marks each item Want / Drop / Later in TRIAGE.md;
-then each epic gets phased tasks and a chosen implementation approach (operator directive: flag
-wanted/unwanted first, approach second). Receipt:
+| Lane | Code | Owed (operator) | Next agent step |
+|---|---|---|---|
+| **R-10** modern-data lighting perf (Epic 249) | T002, T004–T006 landed 2026-09-23 | T003 baseline + T007 after-capture on `wow_classic_beta` 1.60.1 `Azeroth`; T008 decides R-10e | none until captures exist |
+| **U-01** god-class decomposition (Epic 251) | **E1 landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`Pm4OverlayScene` + helpers); `WorldScene.cs` 17,175 → 8,326 | U01-T003 E1 smoke (overlay, colours, selection, OBJ export) | E3 `ViewerApp` menu bar + converter dialogs (independent of R-10). E2 `Render()` split waits for R-10's after-capture |
+
+E1 receipt: [u01-e1-pm4-extraction-2026-09-25.md](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e1-pm4-extraction-2026-09-25.md).
+PM4 overlay code now lives in `Terrain/Pm4/`; callers reach it as `WorldScene.Pm4Overlay.X`. The PM4
+draw blocks inside `WorldScene.Render()` stay there until E2.
+
+All other epic items remain untriaged in [TRIAGE.md](../specs/TRIAGE.md); nothing else is scheduled.
+Receipt for the 2026-09-23 reconciliation:
 [reconciliation README](../specs/archived/reconciliation-2026-09-23/README.md).
 
-**Operator P1 (2026-09-23):** R-10 modern-data lighting performance (Epic 249 amendment: whole-scene
-light gate + self-lit WMOs + linear `QueryAffecting` + all-MDX light collection) and U-01 god-class
-decomposition (Epic 251 amendment: E1 PM4 overlay out of `WorldScene` → E2 `Render()` passes → E3
-`ViewerApp` menu/dialogs → E4 selection). Both approaches await operator approval; R-10 first.
-
-**Next bounded action (agent):** once TRIAGE.md has decisions, record them as dated amendments in each
-epic's `spec.md` and run `speckit-tasks` for the Want items only. Start with the quick-win shortlist
-if the operator marks those Want.
+**Linux build note (agent sessions):** the viewer builds and tests on Linux with
+`-p:EnableWindowsTargeting=true` after `git submodule update --init` of the six `wow-viewer/libs/*`
+submodules. 26 tests fail on `HEAD` there for environmental reasons (missing `test_data/`,
+Windows-path expectations) — compare against that set, not zero. One Curation test rewrites
+`data-harvester/tests/fixtures/spec122_curation_manifest/.../curation_run.json` with the local path;
+revert it before staging.
 
 ## Release state
 
@@ -47,7 +52,7 @@ sidebar buttons never clicked.
 - Zone music is disabled by policy and still reads `ZoneMusic` as a SoundEntries id.
 - Modern data: the scene-light gate disables WMO instancing (~5.5 FPS, 16,431 WMO draws).
 - v22 DAT blends layer 0 only; `AMAP` codec unidentified.
-- `WorldScene.cs` 17,153 lines, `ViewerApp.cs` 16,746 lines — no new members (AGENTS.md §10).
+- `WorldScene.cs` 8,326 lines (after U-01 E1), `ViewerApp.cs` 16,746 lines — no new members (AGENTS.md §10).
 
 ## Non-negotiable constraints
 
@@ -59,6 +64,7 @@ sidebar buttons never clicked.
 
 ## Handoff
 
-**Immediate:** wait for triage decisions in `specs/TRIAGE.md`. Do not start implementation on any
-epic item before it is marked Want. Superseded dashboard:
+**Immediate:** operator runs R10-T003/T007 captures and the U01-T003 E1 smoke. Agent may start
+U-01 E3 (`ViewerApp` menu bar + converter dialogs, same verbatim-move mechanics as E1). Do not start
+any other epic item before it is marked Want. Superseded dashboard:
 [archive/2026-09-23-pre-reconciliation-active-context.md](archive/2026-09-23-pre-reconciliation-active-context.md).

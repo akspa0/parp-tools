@@ -48,4 +48,13 @@ After E1–E4 both files would sit near 8,000–9,000 lines. Remaining work cont
 
 Mechanics per step: move code verbatim first (no logic edits in the same change); replace the
 god-class members with one field + delegating calls; build; run the full test suite; operator smoke.
+
+**Spec-sync 2026-09-25 (E1 as built).** E1 moved ~8,850 lines (not ~5,500: the measured map missed
+the PM4 structs/records declared before and after the class). `WorldScene.cs` 17,175 → 8,326.
+Shape: `Pm4OverlayScene` is one class over three partial files by responsibility (state/load/cache,
+selection, reports) so every moved body stayed verbatim; pure static code went to five separate
+static classes; world-scene state is read only through `IPm4OverlayHost`. Callers use
+`WorldScene.Pm4Overlay.X` rather than ~88 pass-through members on `WorldScene`. The PM4 draw blocks
+inside `Render()` stay there (qualified) and move with E2. Receipt:
+[evidence/u01-e1-pm4-extraction-2026-09-25.md](evidence/u01-e1-pm4-extraction-2026-09-25.md).
 R-10 (Epic 249) lands **before** E2, so the performance fix is not entangled with a move of the WMO pass.

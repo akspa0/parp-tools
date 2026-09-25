@@ -18,10 +18,10 @@ Implementation tasks are generated **after** triage. Nothing is checked without 
 
 ## U-01 — God-class decomposition (operator P1, 2026-09-23)
 
-Blocked on operator approval of the re-ordered plan (spec.md amendment 2026-09-23).
+Re-ordered plan approved 2026-09-23. E1 code landed 2026-09-25; E1 smoke (T003) is operator-owned.
 
 - [x] U01-T001 Operator approves the E1→E4 order and dropping the 227-T004 gate. — Approved 2026-09-23 ("Approve re-order"). Receipt: operator answer in session.
-- [ ] U01-T002 E1 PM4 overlay extraction: verbatim move, delegation, build + tests, line-count receipt.
+- [x] U01-T002 E1 PM4 overlay extraction: verbatim move, delegation, build + tests, line-count receipt. — 2026-09-25: `WorldScene.cs` 17,175 → 8,326; build 0 errors, test failure set unchanged (26 pre-existing, environmental). Runtime not claimed. Receipt: [evidence/u01-e1-pm4-extraction-2026-09-25.md](evidence/u01-e1-pm4-extraction-2026-09-25.md).
 - [ ] U01-T003 E1 operator smoke (PM4 overlay, colours, selection, OBJ export).
 - [ ] U01-T004 E2 `Render()` pass split (after R-10 lands).
 - [ ] U01-T005 E2 operator smoke on a legacy and a modern map.
