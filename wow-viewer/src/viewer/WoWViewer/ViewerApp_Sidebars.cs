@@ -167,10 +167,10 @@ public partial class ViewerApp
     /// </summary>
     private void DrawUnifiedInspectorContent()
     {
-        var content = BuildInspectorContent();
+        var content = _inspectorPayloads.BuildInspectorContent();
         if (content.HasContent)
         {
-            InspectorContentHost.Draw(content, HandleInspectorAction);
+            InspectorContentHost.Draw(content, _inspectorPayloads.HandleInspectorAction);
         }
         else
         {

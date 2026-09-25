@@ -663,6 +663,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly ThemesService _themes;
     private readonly TerrainInspectionPanelService _terrainInspection;
     private readonly InvestigationService _investigation;
+    private readonly InspectorPayloadsService _inspectorPayloads;
 
     public ViewerApp()
     {
@@ -701,6 +702,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _themes = new ThemesService(this);
         _terrainInspection = new TerrainInspectionPanelService(this);
         _investigation = new InvestigationService(this);
+        _inspectorPayloads = new InspectorPayloadsService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1025,6 +1027,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     TerrainControlsPanelService IViewerAppHost.TerrainControlsPanel => _terrainControlsPanel;
     TerrainQueryService IViewerAppHost.TerrainQuery => _terrainQuery;
     NavigatorPanelService IViewerAppHost.NavigatorPanel => _navigatorPanel;
+    InvestigationService IViewerAppHost.Investigation => _investigation;
+    TerrainInspectionPanelService IViewerAppHost.TerrainInspection => _terrainInspection;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)

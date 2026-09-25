@@ -9,16 +9,32 @@ using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WoWViewer.Workbench;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
+using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-public partial class ViewerApp
+/// <summary>
+/// Inspector payloads: builds the structured inspector content for selected scene objects.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
+/// </summary>
+internal sealed partial class InspectorPayloadsService
 {
+    private readonly IViewerAppHost _host;
+
+    internal InspectorPayloadsService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+    // Host bridge: see InspectorPayloadsService.Host.cs.
+
     /// <summary>
     /// Builds the UI-agnostic <see cref="InspectorContent"/> payload describing the current selection
     /// or active camera/terrain context (Spec 223 Phase 1: US2a, US3).
     /// </summary>
-    private InspectorContent BuildInspectorContent()
+    internal InspectorContent BuildInspectorContent()
     {
         var builder = new InspectorContentBuilder();
 
@@ -342,7 +358,7 @@ public partial class ViewerApp
             .Action("copy_asset_path", "Copy Model Path");
     }
 
-    private void HandleInspectorAction(InspectorAction action)
+    internal void HandleInspectorAction(InspectorAction action)
     {
         switch (action.Id)
         {

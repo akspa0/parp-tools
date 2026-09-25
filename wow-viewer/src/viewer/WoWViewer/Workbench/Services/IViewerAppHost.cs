@@ -453,5 +453,7 @@ internal interface IViewerAppHost
     TerrainQueryService TerrainQuery { get; }
     NavigatorPanelService NavigatorPanel { get; }
     void DrawUnifiedInspectorContent();
+    InvestigationService Investigation { get; }
+    TerrainInspectionPanelService TerrainInspection { get; }
     // HOST-IFACE-END
 }
