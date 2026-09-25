@@ -665,6 +665,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly InvestigationService _investigation;
     private readonly InspectorPayloadsService _inspectorPayloads;
     private readonly WorkbenchPanelsService _workbenchPanels;
+    private readonly LogViewerService _logViewer;
 
     public ViewerApp()
     {
@@ -705,6 +706,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _investigation = new InvestigationService(this);
         _inspectorPayloads = new InspectorPayloadsService(this);
         _workbenchPanels = new WorkbenchPanelsService(this);
+        _logViewer = new LogViewerService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1745,7 +1747,7 @@ void main() {
 
                 // Log Viewer (floating window) - legacy mode only; tabbed mode uses Utilities > Log
                 if (_showLogViewer && !_useTabUi)
-                    DrawLogViewer();
+                    _logViewer.DrawLogViewer();
 
                 // WDL Preview (floating window)
                 if (_showWdlPreview)
