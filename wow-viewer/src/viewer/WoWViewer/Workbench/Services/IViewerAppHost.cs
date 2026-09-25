@@ -106,5 +106,18 @@ internal interface IViewerAppHost
     (int tileX, int tileY) GetCameraTile();
     string? GetCurrentSessionMapName();
     IReadOnlyList<(int tileX, int tileY)> GetTileScopeList(TerrainTileScope scope);
+    ref TerrainTileScope MapGlbScope { get; }
+    ref Md5TranslateIndex? Md5Index { get; }
+    ref bool ShowAlphaFolderImportScope { get; }
+    ref bool ShowHeightmapFolderImportScope { get; }
+    ref bool ShowMccvFolderImportScope { get; }
+    ref string StatusMessage { get; }
+    ref TerrainExportKind TerrainExportKind { get; }
+    ref TerrainImportKind TerrainImportKind { get; }
+    ref int TerrainTileRangeEndX { get; }
+    ref int TerrainTileRangeEndY { get; }
+    ref int TerrainTileRangeStartX { get; }
+    ref int TerrainTileRangeStartY { get; }
+    TerrainWeakSignalRestoreService TerrainWeakSignalRestore { get; }
     // HOST-IFACE-END
 }

@@ -1742,7 +1742,7 @@ public partial class ViewerApp
 
         if (_terrainTileScope == TerrainTileScope.RectRange)
         {
-            GetTerrainTileRange(out int startX, out int startY, out int endX, out int endY);
+            _terrainTileIo.GetTerrainTileRange(out int startX, out int startY, out int endX, out int endY);
             Vector2 min = new(
                 cursorPos.X + (startY - viewMinTy) * cellSize,
                 cursorPos.Y + (startX - viewMinTx) * cellSize);

@@ -236,7 +236,7 @@ public partial class ViewerApp
 
     private void RefreshTerrainAnalysisCurrentTile((int tileX, int tileY) tile)
     {
-        var chunks = LoadTileChunksForExport(tile.tileX, tile.tileY);
+        var chunks = _terrainTileIo.LoadTileChunksForExport(tile.tileX, tile.tileY);
         if (chunks == null || chunks.Count == 0)
         {
             _terrainAnalysisStatus = $"No terrain data available for tile ({tile.tileY}, {tile.tileX}).";
@@ -300,7 +300,7 @@ public partial class ViewerApp
         var scope = _terrainAnalysisGlobalScope == TerrainTileScope.WholeMap
             ? TerrainTileScope.WholeMap
             : TerrainTileScope.LoadedTiles;
-        var tiles = GetTileScopeList(scope);
+        var tiles = _terrainTileIo.GetTileScopeList(scope);
         if (tiles.Count == 0)
         {
             _terrainAnalysisHasGlobalBounds = false;
@@ -315,7 +315,7 @@ public partial class ViewerApp
 
         foreach (var tile in tiles)
         {
-            var chunks = LoadTileChunksForExport(tile.tileX, tile.tileY);
+            var chunks = _terrainTileIo.LoadTileChunksForExport(tile.tileX, tile.tileY);
             if (!TryGetChunkHeightRange(chunks, out float tileMin, out float tileMax))
                 continue;
 
@@ -421,7 +421,7 @@ public partial class ViewerApp
 
     private void SaveTerrainAnalysisPreviewSet((int tileX, int tileY) tile)
     {
-        var chunks = LoadTileChunksForExport(tile.tileX, tile.tileY);
+        var chunks = _terrainTileIo.LoadTileChunksForExport(tile.tileX, tile.tileY);
         if (chunks == null || chunks.Count == 0)
         {
             _terrainAnalysisStatus = $"No terrain data available to save for tile ({tile.tileY}, {tile.tileX}).";
@@ -491,7 +491,7 @@ public partial class ViewerApp
             return;
         }
 
-        IReadOnlyList<(int tileX, int tileY)> tiles = GetTileScopeList(_terrainAnalysisHiddenScope);
+        IReadOnlyList<(int tileX, int tileY)> tiles = _terrainTileIo.GetTileScopeList(_terrainAnalysisHiddenScope);
         if (tiles.Count == 0)
         {
             _terrainAnalysisHiddenStatus = "No tiles are available for hidden-terrain scanning.";
@@ -585,7 +585,7 @@ public partial class ViewerApp
     {
         summary = new TerrainHiddenTileSummary();
 
-        IReadOnlyList<Terrain.TerrainChunkData>? chunks = LoadTileChunksForExport(tile.tileX, tile.tileY);
+        IReadOnlyList<Terrain.TerrainChunkData>? chunks = _terrainTileIo.LoadTileChunksForExport(tile.tileX, tile.tileY);
         if (chunks == null || chunks.Count == 0)
             return false;
 
