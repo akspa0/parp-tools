@@ -424,19 +424,19 @@ public partial class ViewerApp
                 break;
 
             case "open_pm4_workbench":
-                OpenPm4Workbench(Pm4WorkbenchTab.Selection);
+                _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
                 break;
 
             case "export_pm4_json":
-                ExportPm4ObjectsJson();
+                _pm4Workbench.ExportPm4ObjectsJson();
                 break;
 
             case "export_pm4_obj":
-                ExportPm4ObjectsObjSet();
+                _pm4Workbench.ExportPm4ObjectsObjSet();
                 break;
 
             case "export_pm4_llm":
-                ExportPm4LlmEvidenceBundle();
+                _pm4Workbench.ExportPm4LlmEvidenceBundle();
                 break;
 
             case "clear_wl_selection":

@@ -553,38 +553,18 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private Vector3 _pm4SavedOverlayTranslation = Vector3.Zero;
     private Vector3 _pm4SavedOverlayRotationDegrees = Vector3.Zero;
     private Vector3 _pm4SavedOverlayScale = Vector3.One;
-    private float _pm4TranslationStepUnits = 10f;
-    private float _pm4RotationStepDegrees = 90f;
-    private float _pm4ScaleStepUnits = 0.1f;
     private ShellPanelId? _pendingFocusedShellPanel;
-    private Pm4WorkbenchTab? _pendingPm4WorkbenchTab;
-    private Pm4ObjectMatchReport? _pm4ObjectMatchReport;
-    private Pm4ObjectMatchObject? _selectedPm4ObjectMatch;
-    private (int tileX, int tileY, uint ck24, int objectPart)? _selectedPm4ObjectMatchKey;
-    private int _selectedPm4ObjectMatchCacheMaxMatches = -1;
     private Pm4ObjectMatchObject? _hoveredPm4ObjectMatch;
     private (int tileX, int tileY, uint ck24, int objectPart)? _hoveredPm4ObjectMatchKey;
     private int _hoveredPm4ObjectMatchCacheMaxMatches = -1;
-    private readonly List<(int tileX, int tileY, uint ck24, int objectPart)> _pm4ObjectCollection = new();
     private int _pm4ObjectMatchMaxMatchesPerObject = 5;
-    private int _selectedPm4ObjectMatchObjectIndex = -1;
-    private int _selectedPm4ObjectMatchCandidateIndex;
     private readonly Dictionary<string, SavedPm4ObjectMatchSelection> _savedPm4ObjectMatches = new(StringComparer.OrdinalIgnoreCase);
-    private Pm4WmoMatchResult? _pm4WmoGroupMatchResult;
     private Pm4WmoMatchStore? _pm4WmoMatchStore;
     private Dictionary<string, Pm4WmoMatchEntry> _pm4WmoMatchEntries = new(StringComparer.OrdinalIgnoreCase);
-    private string _pm4WmoMatchStatus = "";
-    private Pm4WmoCorrelationReport? _pm4WmoCorrelationReport;
-    private int _pm4WmoCorrelationMaxMatchesPerPlacement = 8;
-    private int _selectedPm4WmoCorrelationPlacementIndex = -1;
-    private int _selectedPm4WmoCorrelationMatchIndex;
-    private bool _pm4WmoCorrelationNearOnly = true;
-    private string _pm4WmoCorrelationModelFilter = string.Empty;
     private bool _showCaptureAutomationWindow = false;
     private bool _showCameraPathWindow;
     private bool _showUniqueIdArchaeologyWindow;
     private bool _showWeakSignalWindow;
-    private string _pm4SceneFilter = "";
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -698,6 +678,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly CascAhdrSourceService _cascAhdrSource;
     private readonly ClientDialogsService _clientDialogs;
     private readonly MainMenuBarService _mainMenuBar;
+    private readonly Pm4WorkbenchService _pm4Workbench;
 
     public ViewerApp()
     {
@@ -724,6 +705,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _cascAhdrSource = new CascAhdrSourceService(this);
         _clientDialogs = new ClientDialogsService(this);
         _mainMenuBar = new MainMenuBarService(this);
+        _pm4Workbench = new Pm4WorkbenchService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -846,7 +828,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     void IViewerAppHost.SelectTerrainChunkFromClick(TerrainRenderer.TerrainChunkInfo info) => SelectTerrainChunkFromClick(info);
     void IViewerAppHost.SetSelectedWlLiquidBody(WlLiquidBody body, bool isolateInList, bool focusInspectWorkspace, string? statusMessage) => SetSelectedWlLiquidBody(body, isolateInList, focusInspectWorkspace, statusMessage);
     bool IViewerAppHost.ShouldShowHoveredAssetInfoForInvestigation(HoveredAssetInfo info) => ShouldShowHoveredAssetInfoForInvestigation(info);
-    bool IViewerAppHost.TogglePm4ObjectCollectionMembership((int tileX, int tileY, uint ck24, int objectPart) key, bool reportStatus, bool removeIfPresent) => TogglePm4ObjectCollectionMembership(key, reportStatus, removeIfPresent);
+    bool IViewerAppHost.TogglePm4ObjectCollectionMembership((int tileX, int tileY, uint ck24, int objectPart) key, bool reportStatus, bool removeIfPresent) => _pm4Workbench.TogglePm4ObjectCollectionMembership(key, reportStatus, removeIfPresent);
     bool IViewerAppHost.TryFindWlLiquidBodyByKey(string bodyKey, out WlLiquidBody? body) => TryFindWlLiquidBodyByKey(bodyKey, out body);
     bool IViewerAppHost.TryGetSceneViewportRect(out float x, out float y, out float width, out float height) => _shellLayout.TryGetSceneViewportRect(out x, out y, out width, out height);
     bool IViewerAppHost.TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info) => _terrainQuery.TryRaycastTerrain(renderer, rayOrigin, rayDir, maxDistance, out info);
@@ -924,8 +906,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref (int tileX, int tileY)? IViewerAppHost.TerrainAnalysisPreviewCompareTile => ref _terrainAnalysisPreviewCompareTile;
     ref float? IViewerAppHost.TerrainAnalysisPreviewSimilarity => ref _terrainAnalysisPreviewSimilarity;
     void IViewerAppHost.ApplyLayoutObjectPreviewModeToScene() => ApplyLayoutObjectPreviewModeToScene();
-    void IViewerAppHost.ApplySavedPm4AlignmentToScene() => ApplySavedPm4AlignmentToScene();
-    void IViewerAppHost.InvalidatePm4DerivedReports() => InvalidatePm4DerivedReports();
+    void IViewerAppHost.ApplySavedPm4AlignmentToScene() => _pm4Workbench.ApplySavedPm4AlignmentToScene();
+    void IViewerAppHost.InvalidatePm4DerivedReports() => _pm4Workbench.InvalidatePm4DerivedReports();
     bool IViewerAppHost.FullLoadMode { get => FullLoadMode; set => FullLoadMode = value; }
     ref bool IViewerAppHost.AutoOpenWorldMapsPanel => ref _autoOpenWorldMapsPanel;
     ref AssetCatalogView? IViewerAppHost.CatalogView => ref _catalogView;
@@ -954,7 +936,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref string IViewerAppHost.WlLayerSelectedBodyKey => ref _wlLayerSelectedBodyKey;
     void IViewerAppHost.DrawTerrainChunkInvestigationPanel(bool defaultOpen) => DrawTerrainChunkInvestigationPanel(defaultOpen);
     void IViewerAppHost.DrawVisualInvestigationToolbox(bool showWorldObjectRangeControls) => DrawVisualInvestigationToolbox(showWorldObjectRangeControls);
-    void IViewerAppHost.OpenPm4Workbench(Pm4WorkbenchTab tab) => OpenPm4Workbench(tab);
+    void IViewerAppHost.OpenPm4Workbench(Pm4WorkbenchTab tab) => _pm4Workbench.OpenPm4Workbench(tab);
     bool IViewerAppHost.ShouldIncludeWlBodyInUiList(WlLiquidBody body) => ShouldIncludeWlBodyInUiList(body);
     bool IViewerAppHost.IsWlListIsolationActive => IsWlListIsolationActive;
     ref int IViewerAppHost.ActiveBottomTabIndex => ref _activeBottomTabIndex;
@@ -1024,6 +1006,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.WantTerrainImport => ref _wantTerrainImport;
     ref bool IViewerAppHost.WorkbenchOpen => ref _workbenchOpen;
     void IViewerAppHost.ResetCamera() => ResetCamera();
+    ref int IViewerAppHost.ActivePm4TabIndex => ref _activePm4TabIndex;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1792,7 +1775,7 @@ void main() {
 
                 // Perf (floating window) - legacy mode only; tabbed mode uses Utilities > Perf
                 if (_showPerfWindow && !_useTabUi)
-                    DrawPerfWindow();
+                    _pm4Workbench.DrawPerfWindow();
 
 
                 if (_showCaptureAutomationWindow)

@@ -371,5 +371,6 @@ internal interface IViewerAppHost
     void PrepareSynthesizedMinimapExportDialogInputs();
     void ResetCamera();
     void SetWorkspaceMode(WorkspaceMode mode);
+    ref int ActivePm4TabIndex { get; }
     // HOST-IFACE-END
 }

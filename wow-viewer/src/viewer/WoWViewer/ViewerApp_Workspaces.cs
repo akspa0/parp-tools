@@ -214,7 +214,7 @@ public partial class ViewerApp
 
         ImGui.TextWrapped("PM4 stays evidence-first here. This workspace groups overlay tuning, selected-object inspection, graph, and correlation without implying save ownership.");
         ImGui.Separator();
-        DrawPm4WorkbenchInspector();
+        _pm4Workbench.DrawPm4WorkbenchInspector();
     }
 
     private void DrawEditorInspectWorkspace()

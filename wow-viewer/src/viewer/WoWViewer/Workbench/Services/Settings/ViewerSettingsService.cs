@@ -44,6 +44,7 @@ using CoreMdxSummary = WowViewer.Core.Mdx.MdxSummary;
 using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
 using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
 using static WoWViewer.ViewerApp;
+using static WoWViewer.Pm4WorkbenchService;
 
 namespace WoWViewer;
 

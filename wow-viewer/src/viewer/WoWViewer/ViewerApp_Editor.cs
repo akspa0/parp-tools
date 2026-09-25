@@ -92,8 +92,8 @@ public partial class ViewerApp
     void Workbench.Pages.IEditorPageHost.DrawTerrainLab() => DrawTerrainLabSubTab();
     void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => DrawArchaeologyEditorImportsSubTab();
     void Workbench.Pages.IEditorPageHost.DrawConverters() => DrawConvertersSubTabContent();
-    void Workbench.Pages.IEditorPageHost.DrawPm4Exports() => DrawPm4ExportCommandSet();
-    void Workbench.Pages.IEditorPageHost.DrawPm4Workbench() => DrawPm4WorkbenchInspector();
+    void Workbench.Pages.IEditorPageHost.DrawPm4Exports() => _pm4Workbench.DrawPm4ExportCommandSet();
+    void Workbench.Pages.IEditorPageHost.DrawPm4Workbench() => _pm4Workbench.DrawPm4WorkbenchInspector();
     void Workbench.Pages.IEditorPageHost.DrawNewMapCreator() => _newMapCreatorService.Draw(LoadGeneratedNewMap);
 
     private readonly Workbench.Services.NewMapCreatorService _newMapCreatorService = new();
