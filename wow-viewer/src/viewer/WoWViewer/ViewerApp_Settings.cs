@@ -153,7 +153,7 @@ public partial class ViewerApp
         if (ImGui.SliderFloat("Text Font Size", ref fontScale, 0.85f, 2.20f, "%.2fx"))
         {
             _uiFontScale = fontScale;
-            if (HasImGuiContext())
+            if (ShellLayoutService.HasImGuiContext())
             {
                 ImGui.GetIO().FontGlobalScale = _uiFontScale;
             }
@@ -167,35 +167,35 @@ public partial class ViewerApp
         if (ImGui.SmallButton("100%"))
         {
             _uiFontScale = 1.0f;
-            if (HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("120%"))
         {
             _uiFontScale = 1.20f;
-            if (HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("135%"))
         {
             _uiFontScale = 1.35f;
-            if (HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("150%"))
         {
             _uiFontScale = 1.50f;
-            if (HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("175%"))
         {
             _uiFontScale = 1.75f;
-            if (HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             SaveViewerSettings();
         }
 

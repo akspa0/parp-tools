@@ -103,7 +103,7 @@ public partial class ViewerApp
         if (wmoRenderer.GroupRenderCount == 0)
             return;
 
-        bool canInteract = CanSceneConsumeMouse(_lastMouseX, _lastMouseY)
+        bool canInteract = _shellLayout.CanSceneConsumeMouse(_lastMouseX, _lastMouseY)
             && _lastMouseX >= viewportX && _lastMouseX <= viewportX + viewportWidth
             && _lastMouseY >= viewportY && _lastMouseY <= viewportY + viewportHeight;
 

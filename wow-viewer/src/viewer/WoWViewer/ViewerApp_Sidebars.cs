@@ -581,7 +581,7 @@ public partial class ViewerApp
 
     private void DrawLegacyLeftSidebar()
     {
-        if (!HasAnyShellPanelsInLane(ShellPanelLane.Left))
+        if (!_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Left))
             return;
 
         var io = ImGui.GetIO();
@@ -962,7 +962,7 @@ public partial class ViewerApp
 
     private void DrawLegacyRightSidebar()
     {
-        if (!HasAnyShellPanelsInLane(ShellPanelLane.Right))
+        if (!_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Right))
             return;
 
         var io = ImGui.GetIO();
@@ -1238,7 +1238,7 @@ public partial class ViewerApp
     {
         foreach (var panel in ShellPanelDefinitions)
         {
-            if (panel.Lane != lane || !IsShellPanelActive(panel.Id))
+            if (panel.Lane != lane || !_shellLayout.IsShellPanelActive(panel.Id))
                 continue;
 
             float defaultHeight = lane == ShellPanelLane.Left
@@ -1248,7 +1248,7 @@ public partial class ViewerApp
             if (_pendingFocusedShellPanel == panel.Id)
                 ImGui.SetNextWindowFocus();
 
-            PrepareDockableShellPanelWindow(
+            _shellLayout.PrepareDockableShellPanelWindow(
                 panel.Id,
                 new Vector2(panel.DefaultWidth, defaultHeight),
                 new Vector2(panel.CompactMinWidth, 220f),
@@ -1256,7 +1256,7 @@ public partial class ViewerApp
 
             if (ImGui.Begin(panel.WindowName))
             {
-                CaptureDockPanelState(panel.Id);
+                _shellLayout.CaptureDockPanelState(panel.Id);
                 DrawShellPanelContent(panel.Id);
             }
 
@@ -1970,8 +1970,8 @@ public partial class ViewerApp
         if (panelHeight <= 0f)
             return;
 
-        bool hasLeft = _useTabUi || IsShellPanelActive(ShellPanelId.Navigator);
-        bool hasRight = _useTabUi || IsShellPanelActive(ShellPanelId.Inspector);
+        bool hasLeft = _useTabUi || _shellLayout.IsShellPanelActive(ShellPanelId.Navigator);
+        bool hasRight = _useTabUi || _shellLayout.IsShellPanelActive(ShellPanelId.Inspector);
 
         if (hasLeft)
         {
@@ -2062,10 +2062,10 @@ public partial class ViewerApp
         float otherSidebarWidth = 0f;
         if (isLeftSidebar)
         {
-            if (IsShellPanelActive(ShellPanelId.Inspector))
+            if (_shellLayout.IsShellPanelActive(ShellPanelId.Inspector))
                 otherSidebarWidth = _rightSidebarWidth;
         }
-        else if (IsShellPanelActive(ShellPanelId.Navigator))
+        else if (_shellLayout.IsShellPanelActive(ShellPanelId.Navigator))
         {
             otherSidebarWidth = _leftSidebarWidth;
         }

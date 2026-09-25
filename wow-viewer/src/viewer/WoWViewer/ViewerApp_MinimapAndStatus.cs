@@ -624,18 +624,18 @@ public partial class ViewerApp
         bool hasWorldLoaded = TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName);
 
         var io = ImGui.GetIO();
-        var panel = GetShellPanelDefinition(ShellPanelId.Minimap);
+        var panel = ShellLayoutService.GetShellPanelDefinition(ShellPanelId.Minimap);
 
         if (!_useDockspaceUi)
         {
-            float rightOffset = IsShellPanelActive(ShellPanelId.Inspector) ? _rightSidebarWidth + 20 : 20;
+            float rightOffset = _shellLayout.IsShellPanelActive(ShellPanelId.Inspector) ? _rightSidebarWidth + 20 : 20;
             ImGui.SetNextWindowSize(new Vector2(panel.DefaultWidth, panel.DefaultWidth), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSizeConstraints(new Vector2(panel.MinWidth, panel.MinWidth), new Vector2(panel.MaxWidth, panel.MaxWidth));
             ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - panel.DefaultWidth - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
         }
         else
         {
-            PrepareDockableShellPanelWindow(
+            _shellLayout.PrepareDockableShellPanelWindow(
                 ShellPanelId.Minimap,
                 new Vector2(panel.DefaultWidth, panel.DefaultWidth),
                 new Vector2(panel.CompactMinWidth, panel.CompactMinWidth),
@@ -650,7 +650,7 @@ public partial class ViewerApp
         }
 
         if (_useDockspaceUi)
-            CaptureDockPanelState(ShellPanelId.Minimap);
+            _shellLayout.CaptureDockPanelState(ShellPanelId.Minimap);
 
         DrawMinimapContent(loadedTileCount, mapName, existingTiles, isTileLoaded);
         ImGui.End();

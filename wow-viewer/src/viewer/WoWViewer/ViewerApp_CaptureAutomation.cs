@@ -845,7 +845,7 @@ public partial class ViewerApp
 
     private bool HasCaptureFramebufferReady(bool includeUi)
     {
-        if (!includeUi && TryGetSceneFramebufferViewport(out _, out _, out uint sceneWidth, out uint sceneHeight))
+        if (!includeUi && _shellLayout.TryGetSceneFramebufferViewport(out _, out _, out uint sceneWidth, out uint sceneHeight))
             return sceneWidth > 0 && sceneHeight > 0;
 
         Vector2D<int> framebufferSize = _window.FramebufferSize;
@@ -2068,7 +2068,7 @@ public partial class ViewerApp
         readX = 0;
         readY = 0;
 
-        if (!includeUi && TryGetSceneFramebufferViewport(out readX, out readY, out uint sceneWidth, out uint sceneHeight))
+        if (!includeUi && _shellLayout.TryGetSceneFramebufferViewport(out readX, out readY, out uint sceneWidth, out uint sceneHeight))
         {
             width = (int)sceneWidth;
             height = (int)sceneHeight;

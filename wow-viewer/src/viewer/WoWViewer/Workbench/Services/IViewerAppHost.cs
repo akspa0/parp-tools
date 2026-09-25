@@ -180,5 +180,31 @@ internal interface IViewerAppHost
     bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info);
     bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info, out Vector3 hitPoint);
     bool TryResolveHoveredWlLiquidBody(HoveredAssetInfo hoveredInfo, out WlLiquidBody? body);
+    ref FixedBottomDrawerTab ActiveBottomDrawerTab { get; }
+    ref float BottomDrawerHeight { get; }
+    ref Vector2 DockspaceHostPosition { get; }
+    ref Vector2 DockspaceHostSize { get; }
+    ref bool ForceApplyShellPanelLayout { get; }
+    ref bool FullscreenMinimap { get; }
+    ref bool HideUiChrome { get; }
+    ref ImGuiController ImGui { get; }
+    ref float LeftSidebarWidth { get; }
+    ref string ModelInfo { get; }
+    ref ShellPanelId? PendingFocusedShellPanel { get; }
+    ref FixedBottomDrawerTab? PendingRightSidebarSection { get; }
+    HashSet<ShellPanelId> PendingShellPanelLayoutRestore { get; }
+    ref float RightSidebarWidth { get; }
+    Dictionary<ShellPanelId, SavedShellPanelLayout> SavedShellPanelLayouts { get; }
+    ref bool ShowLeftSidebar { get; }
+    ref bool ShowMinimapWindow { get; }
+    ref bool ShowModelInfo { get; }
+    ref bool ShowRightSidebar { get; }
+    ref bool ShowWorkspaceBarsPanel { get; }
+    ref bool UseDockspaceUi { get; }
+    ref bool UseTabUi { get; }
+    ref IWindow Window { get; }
+    float ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth);
+    float GetTopChromeHeight();
+    void SetEditorWorkspaceTask(EditorWorkspaceTask task);
     // HOST-IFACE-END
 }

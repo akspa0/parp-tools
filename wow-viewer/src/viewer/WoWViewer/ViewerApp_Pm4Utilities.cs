@@ -19,7 +19,7 @@ public partial class ViewerApp
 
     private void OpenPm4Workbench(Pm4WorkbenchTab tab)
     {
-        FocusShellPanel(ShellPanelId.Pm4Workbench);
+        _shellLayout.FocusShellPanel(ShellPanelId.Pm4Workbench);
         _pendingPm4WorkbenchTab = tab;
         _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
         _pendingRightSidebarSection = FixedBottomDrawerTab.Pm4;
