@@ -126,7 +126,7 @@ public partial class ViewerApp
                     continue;
 
                 wmoRenderer.GetRenderGroupBounds(renderGroupIndex, out Vector3 boundsMin, out Vector3 boundsMax);
-                float hitDistance = RayAabbIntersect(rayOrigin, rayDir,
+                float hitDistance = SceneViewportMath.RayAabbIntersect(rayOrigin, rayDir,
                     boundsMin - new Vector3(StandaloneWmoGroupPickPadding),
                     boundsMax + new Vector3(StandaloneWmoGroupPickPadding));
                 if (hitDistance >= 0f && hitDistance < hoveredDistance)
@@ -232,7 +232,7 @@ public partial class ViewerApp
             if (!_standaloneWmoOverlayIncludeHiddenGroups && !effectiveVisible)
                 continue;
 
-            if (!TryProjectWorldToViewport(
+            if (!SceneViewportMath.TryProjectWorldToViewport(
                     wmoRenderer.GetRenderGroupCenter(renderGroupIndex),
                     view,
                     proj,

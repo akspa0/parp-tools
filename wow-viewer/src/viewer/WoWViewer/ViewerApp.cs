@@ -5805,7 +5805,7 @@ void main() {
         var drawList = ImGui.GetForegroundDrawList();
         foreach (AreaOverlayRegion region in scene.AreaOverlayRegions)
         {
-            if (!TryProjectWorldToViewport(
+            if (!SceneViewportMath.TryProjectWorldToViewport(
                     region.LabelPosition,
                     view,
                     proj,
@@ -7652,7 +7652,7 @@ void main() {
             if (!_worldScene.IsTaxiNodeVisible(node))
                 continue;
 
-            if (!TryProjectWorldToViewport(node.Position + new Vector3(0f, 0f, 50f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
+            if (!SceneViewportMath.TryProjectWorldToViewport(node.Position + new Vector3(0f, 0f, 50f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
                 continue;
 
             float dx = projected.X - localX;
@@ -7687,7 +7687,7 @@ void main() {
             if (!_worldScene.TryGetTaxiRouteSelectionPoint(route.PathId, out Vector3 selectionPoint))
                 continue;
 
-            if (!TryProjectWorldToViewport(selectionPoint + new Vector3(0f, 0f, 30f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
+            if (!SceneViewportMath.TryProjectWorldToViewport(selectionPoint + new Vector3(0f, 0f, 30f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
                 continue;
 
             float distSq = Vector2.DistanceSquared(projected, pointer);
@@ -7711,13 +7711,13 @@ void main() {
 
             for (int i = 0; i < route.Waypoints.Count - 1; i++)
             {
-                if (!TryProjectWorldToViewport(route.Waypoints[i], view, proj, viewportWidth, viewportHeight, out Vector2 a)
-                    || !TryProjectWorldToViewport(route.Waypoints[i + 1], view, proj, viewportWidth, viewportHeight, out Vector2 b))
+                if (!SceneViewportMath.TryProjectWorldToViewport(route.Waypoints[i], view, proj, viewportWidth, viewportHeight, out Vector2 a)
+                    || !SceneViewportMath.TryProjectWorldToViewport(route.Waypoints[i + 1], view, proj, viewportWidth, viewportHeight, out Vector2 b))
                 {
                     continue;
                 }
 
-                float distSq = DistanceSquaredPointToSegment(pointer, a, b);
+                float distSq = SceneViewportMath.DistanceSquaredPointToSegment(pointer, a, b);
                 if (distSq > bestLineDistSq)
                     continue;
 
@@ -7741,7 +7741,7 @@ void main() {
             if (!_worldScene.IsTaxiNodeVisible(node))
                 continue;
 
-            float localDistance = RayAabbIntersect(
+            float localDistance = SceneViewportMath.RayAabbIntersect(
                 rayOrigin,
                 rayDir,
                 node.Position - new Vector3(TaxiNodePickHalfWidth, TaxiNodePickHalfWidth, TaxiNodePickBottomPadding),
@@ -7770,7 +7770,7 @@ void main() {
 
             if (_worldScene.TryGetTaxiRouteSelectionPoint(route.PathId, out Vector3 selectionPoint))
             {
-                float handleDistance = RayAabbIntersect(
+                float handleDistance = SceneViewportMath.RayAabbIntersect(
                     rayOrigin,
                     rayDir,
                     selectionPoint - new Vector3(TaxiRouteHandlePickHalfWidth, TaxiRouteHandlePickHalfWidth, TaxiRouteHandlePickBottomPadding),
@@ -7791,7 +7791,7 @@ void main() {
                     - new Vector3(TaxiRouteSegmentPickHalfWidth, TaxiRouteSegmentPickHalfWidth, TaxiRouteSegmentPickHalfWidth);
                 Vector3 segmentMax = Vector3.Max(route.Waypoints[index], route.Waypoints[index + 1])
                     + new Vector3(TaxiRouteSegmentPickHalfWidth, TaxiRouteSegmentPickHalfWidth, TaxiRouteSegmentPickHalfWidth);
-                float segmentDistance = RayAabbIntersect(rayOrigin, rayDir, segmentMin, segmentMax);
+                float segmentDistance = SceneViewportMath.RayAabbIntersect(rayOrigin, rayDir, segmentMin, segmentMax);
                 if (segmentDistance < 0f || segmentDistance >= hitDistance)
                     continue;
 
@@ -7815,7 +7815,7 @@ void main() {
 
         foreach (AreaPoiLoader.AreaPoiEntry poi in _worldScene.PoiLoader.Entries)
         {
-            if (!TryProjectWorldToViewport(poi.Position + new Vector3(0f, 0f, 56f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
+            if (!SceneViewportMath.TryProjectWorldToViewport(poi.Position + new Vector3(0f, 0f, 56f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
                 continue;
 
             float distSq = Vector2.DistanceSquared(projected, pointer);
@@ -7827,50 +7827,6 @@ void main() {
         }
 
         return poiId >= 0;
-    }
-
-    private static float DistanceSquaredPointToSegment(Vector2 point, Vector2 start, Vector2 end)
-    {
-        Vector2 segment = end - start;
-        float segmentLengthSq = segment.LengthSquared();
-        if (segmentLengthSq <= 0.0001f)
-            return Vector2.DistanceSquared(point, start);
-
-        float t = Vector2.Dot(point - start, segment) / segmentLengthSq;
-        t = Math.Clamp(t, 0f, 1f);
-        Vector2 closest = start + segment * t;
-        return Vector2.DistanceSquared(point, closest);
-    }
-
-    private static float RayAabbIntersect(Vector3 origin, Vector3 dir, Vector3 boundsMin, Vector3 boundsMax)
-    {
-        float tmin = 0f;
-        float tmax = float.MaxValue;
-
-        if (!UpdateRayAabbInterval(origin.X, dir.X, boundsMin.X, boundsMax.X, ref tmin, ref tmax)
-            || !UpdateRayAabbInterval(origin.Y, dir.Y, boundsMin.Y, boundsMax.Y, ref tmin, ref tmax)
-            || !UpdateRayAabbInterval(origin.Z, dir.Z, boundsMin.Z, boundsMax.Z, ref tmin, ref tmax))
-        {
-            return -1f;
-        }
-
-        return tmin >= 0f ? tmin : tmax >= 0f ? tmax : -1f;
-    }
-
-    private static bool UpdateRayAabbInterval(float origin, float direction, float min, float max, ref float tmin, ref float tmax)
-    {
-        if (MathF.Abs(direction) < 0.0001f)
-            return origin >= min && origin <= max;
-
-        float invDir = 1f / direction;
-        float t1 = (min - origin) * invDir;
-        float t2 = (max - origin) * invDir;
-        if (t1 > t2)
-            (t1, t2) = (t2, t1);
-
-        tmin = MathF.Max(tmin, t1);
-        tmax = MathF.Min(tmax, t2);
-        return tmax >= tmin;
     }
 
     private void FocusSelectedTaxi()
@@ -7999,28 +7955,6 @@ void main() {
         return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".m2", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool TryProjectWorldToViewport(Vector3 worldPosition, Matrix4x4 view, Matrix4x4 proj, float viewportWidth, float viewportHeight, out Vector2 projected)
-    {
-        Vector4 clip = Vector4.Transform(Vector4.Transform(new Vector4(worldPosition, 1f), view), proj);
-        if (clip.W <= 0.0001f)
-        {
-            projected = Vector2.Zero;
-            return false;
-        }
-
-        Vector3 ndc = new Vector3(clip.X, clip.Y, clip.Z) / clip.W;
-        if (ndc.Z < -1f || ndc.Z > 1f)
-        {
-            projected = Vector2.Zero;
-            return false;
-        }
-
-        projected = new Vector2(
-            (ndc.X * 0.5f + 0.5f) * viewportWidth,
-            (1f - (ndc.Y * 0.5f + 0.5f)) * viewportHeight);
-        return true;
     }
 
     private void PickObjectAtMouse(float mouseX, float mouseY, bool addPm4ToCollection = false)
@@ -9254,17 +9188,6 @@ void main() {
         y = framebufferSize.Y - viewportBottom;
         width = (uint)Math.Max(1, viewportRight - viewportLeft);
         height = (uint)Math.Max(1, viewportBottom - viewportTop);
-        return true;
-    }
-
-    private static bool TryProjectToScreen(Vector3 worldPos, Matrix4x4 viewProj, int screenW, int screenH, out float sx, out float sy)
-    {
-        var clip = Vector4.Transform(new Vector4(worldPos, 1f), viewProj);
-        if (clip.W <= 0) { sx = sy = 0; return false; }
-        float ndcX = clip.X / clip.W;
-        float ndcY = clip.Y / clip.W;
-        sx = (ndcX * 0.5f + 0.5f) * screenW;
-        sy = (1f - (ndcY * 0.5f + 0.5f)) * screenH;
         return true;
     }
 
