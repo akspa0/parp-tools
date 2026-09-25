@@ -68,6 +68,7 @@ using WowViewer.Core.PM4.Services;
 using WowViewer.Core.IO.Terrain;
 using System.IO;
 using WowViewer.Core.IO.Dbc;
+using WowViewer.Core.Runtime.World.Minimap;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
@@ -427,5 +428,12 @@ internal interface IViewerAppHost
     void FramePoint(Vector3 target, float radius = 2f);
     void NormalizeStandaloneWmoGroupSelection(WmoRenderer wmoRenderer);
     void ToggleStandaloneWmoGroupHighlight(int renderGroupIndex);
+    ChunkEditService ChunkEdit { get; }
+    ref bool LayoutObjectPreviewMode { get; }
+    ref bool ShowWeakSignalWindow { get; }
+    StratigraphyService Stratigraphy { get; }
+    void ClampMinimapPanOffset();
+    void DrawAuthoritativeFogControls(bool showDescription = true);
+    bool TryGetActiveMinimapState(out List<(int tx, int ty)>? existingTiles, out Func<int, int, bool>? isTileLoaded, out int loadedTileCount, out string? mapName);
     // HOST-IFACE-END
 }

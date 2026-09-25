@@ -347,14 +347,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private int _terrainTileRangeStartY;
     private int _terrainTileRangeEndX = 63;
     private int _terrainTileRangeEndY = 63;
-    private (int tileX, int tileY)? _terrainWorkbenchFocusedTile;
-    private bool _terrainWorkbenchTileSelectionActive;
-    private bool _terrainWorkbenchMapPanActive;
-    private Vector2 _terrainWorkbenchMapDragStart;
-    private Vector2 _terrainWorkbenchMapPanOrigin;
-    private (int tileX, int tileY)? _terrainWorkbenchTileSelectionAnchor;
-    private bool _terrainWorkbenchChunkSelectionActive;
-    private (int chunkX, int chunkY)? _terrainWorkbenchChunkSelectionAnchor;
 
     private bool _chunkToolEnabled;
     private ChunkClipboard? _chunkClipboard;
@@ -382,7 +374,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private string _terrainWeakSignalRestoreStatus = string.Empty;
     private readonly Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> _stratigraphyTileAnalyses = new();
     private bool _stratigraphyUnhideDevMeshes = true;
-    private bool _stratigraphyStitchBoundaries = true;
     private bool _stratigraphyPreserveNegativeFloor = true;
     private bool _stratigraphyPolarityInverted = false;
     private WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode _stratigraphyAnchorMode = WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode.LowestZ_Floor;
@@ -667,6 +658,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly TaxiPanelService _taxiPanel;
     private readonly ArchaeologyPanelService _archaeologyPanel;
     private readonly ModelInspectorPanelService _modelInspector;
+    private readonly TerrainControlsPanelService _terrainControlsPanel;
 
     public ViewerApp()
     {
@@ -697,6 +689,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _taxiPanel = new TaxiPanelService(this);
         _archaeologyPanel = new ArchaeologyPanelService(this);
         _modelInspector = new ModelInspectorPanelService(this);
+        _terrainControlsPanel = new TerrainControlsPanelService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -1011,6 +1004,10 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.StandaloneWmoOverlayIncludeHiddenGroups => ref _standaloneWmoOverlayIncludeHiddenGroups;
     void IViewerAppHost.DrawAssetPathActions(string label, string assetPath, string idSuffix) => DrawAssetPathActions(label, assetPath, idSuffix);
     void IViewerAppHost.FramePoint(Vector3 target, float radius) => FramePoint(target, radius);
+    ChunkEditService IViewerAppHost.ChunkEdit => _chunkEdit;
+    ref bool IViewerAppHost.LayoutObjectPreviewMode => ref _layoutObjectPreviewMode;
+    ref bool IViewerAppHost.ShowWeakSignalWindow => ref _showWeakSignalWindow;
+    StratigraphyService IViewerAppHost.Stratigraphy => _stratigraphy;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1748,7 +1745,7 @@ void main() {
                 DrawSettingsWindow();
 
             if (!_useTabUi && _showWeakSignalWindow && (_terrainManager != null || _vlmTerrainManager != null))
-                DrawWeakSignalWindow();
+                _terrainControlsPanel.DrawWeakSignalWindow();
 
         }
 
@@ -1999,15 +1996,6 @@ void main() {
     }
 
     private bool _disposed;
-
-    private void SetLayoutObjectPreviewMode(bool enabled)
-    {
-        if (_layoutObjectPreviewMode == enabled)
-            return;
-
-        _layoutObjectPreviewMode = enabled;
-        ApplyLayoutObjectPreviewModeToScene();
-    }
 
     private void ApplyLayoutObjectPreviewModeToScene()
     {

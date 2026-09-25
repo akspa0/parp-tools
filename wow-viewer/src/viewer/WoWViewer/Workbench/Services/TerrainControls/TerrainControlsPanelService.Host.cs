@@ -1,0 +1,95 @@
+using System.Diagnostics;
+using System.Numerics;
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Text.Json;
+using ImGuiNET;
+using WowViewer.Core.IO.Mdx;
+using WoWViewer.DataSources;
+using WoWViewer.Export;
+using WoWViewer.Logging;
+using WoWViewer.Rendering;
+using WoWViewer.Catalog;
+using WoWViewer.Capture;
+using WoWViewer.Population;
+using WoWViewer.Terrain;
+using Silk.NET.Input;
+using Silk.NET.Maths;
+using Silk.NET.OpenGL;
+using Silk.NET.OpenGL.Extensions.ImGui;
+using Silk.NET.Windowing;
+using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Maps;
+using WoWViewer.Terrain.Vlm;
+using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Chunked;
+using WowViewer.Core.IO.M2Era1121;
+using WowViewer.Core.M2;
+using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.World.Visibility;
+using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
+using WowViewer.Core.IO.Converters;
+using WoWViewer.Workbench;
+using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
+using CoreMdxGeometryFile = WowViewer.Core.Mdx.MdxGeometryFile;
+using CoreMdxSummary = WowViewer.Core.Mdx.MdxSummary;
+using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
+using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
+using WoWViewer.UI;
+using WowViewer.Core.Runtime.World.Minimap;
+using System;
+using static WoWViewer.ViewerApp;
+
+namespace WoWViewer;
+
+// TerrainControlsPanelService host bridge. Bridged member types are declared across ViewerApp partial files, so this
+// file carries those files' using directives; the moved members keep their original usings.
+internal sealed partial class TerrainControlsPanelService
+{
+    // Host bridge (same names as the former ViewerApp members).
+    private ref Camera _camera => ref _host.Camera;
+    private ref string _chunkClipboardStatus => ref _host.ChunkClipboardStatus;
+    private ChunkEditService _chunkEdit => _host.ChunkEdit;
+    private ref bool _layoutObjectPreviewMode => ref _host.LayoutObjectPreviewMode;
+    private ref Vector2 _minimapPanOffset => ref _host.MinimapPanOffset;
+    private ref MinimapRenderer? _minimapRenderer => ref _host.MinimapRenderer;
+    private ref float _minimapZoom => ref _host.MinimapZoom;
+    private ref ISceneRenderer? _renderer => ref _host.Renderer;
+    private HashSet<(int tileX, int tileY, int chunkX, int chunkY)> _selectedChunks => _host.SelectedChunks;
+    private ViewerSettingsService _settings => _host.Settings;
+    private ref bool _showWeakSignalWindow => ref _host.ShowWeakSignalWindow;
+    private StratigraphyService _stratigraphy => _host.Stratigraphy;
+    private ref WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode _stratigraphyAnchorMode => ref _host.StratigraphyAnchorMode;
+    private ref bool _stratigraphyPolarityInverted => ref _host.StratigraphyPolarityInverted;
+    private ref bool _stratigraphyPreserveNegativeFloor => ref _host.StratigraphyPreserveNegativeFloor;
+    private Dictionary<(int tileX, int tileY), WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyTileAnalysis> _stratigraphyTileAnalyses => _host.StratigraphyTileAnalyses;
+    private ref bool _stratigraphyUnhideDevMeshes => ref _host.StratigraphyUnhideDevMeshes;
+    private ref bool _stratigraphyUseNeighborAutoFit => ref _host.StratigraphyUseNeighborAutoFit;
+    private ref bool _stratigraphyUseWdlMagnetization => ref _host.StratigraphyUseWdlMagnetization;
+    private ref float _stratigraphyWdlMagnetizationStrength => ref _host.StratigraphyWdlMagnetizationStrength;
+    private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
+    private TerrainTileIoService _terrainTileIo => _host.TerrainTileIo;
+    private ref int _terrainTileRangeEndX => ref _host.TerrainTileRangeEndX;
+    private ref int _terrainTileRangeEndY => ref _host.TerrainTileRangeEndY;
+    private ref int _terrainTileRangeStartX => ref _host.TerrainTileRangeStartX;
+    private ref int _terrainTileRangeStartY => ref _host.TerrainTileRangeStartY;
+    private ref TerrainTileScope _terrainTileScope => ref _host.TerrainTileScope;
+    private TerrainWeakSignalRestoreService _terrainWeakSignalRestore => _host.TerrainWeakSignalRestore;
+    private ref float _terrainWeakSignalRestoreCandidateMaxHeight => ref _host.TerrainWeakSignalRestoreCandidateMaxHeight;
+    private ref float _terrainWeakSignalRestoreCandidateMinHeight => ref _host.TerrainWeakSignalRestoreCandidateMinHeight;
+    private ref bool _terrainWeakSignalRestoreEnabled => ref _host.TerrainWeakSignalRestoreEnabled;
+    private ref float _terrainWeakSignalRestoreManualFactor => ref _host.TerrainWeakSignalRestoreManualFactor;
+    private ref string _terrainWeakSignalRestoreStatus => ref _host.TerrainWeakSignalRestoreStatus;
+    private ref bool _terrainWeakSignalRestoreUseAutoFactor => ref _host.TerrainWeakSignalRestoreUseAutoFactor;
+    private ref VlmTerrainManager? _vlmTerrainManager => ref _host.VlmTerrainManager;
+    private ref WorldScene? _worldScene => ref _host.WorldScene;
+    private void ApplyLayoutObjectPreviewModeToScene() => _host.ApplyLayoutObjectPreviewModeToScene();
+    private void ClampMinimapPanOffset() => _host.ClampMinimapPanOffset();
+    private void DrawAuthoritativeFogControls(bool showDescription = true) => _host.DrawAuthoritativeFogControls(showDescription);
+    private (int tileX, int tileY) GetCameraTile() => _host.GetCameraTile();
+    private bool TryGetActiveMinimapState(out List<(int tx, int ty)>? existingTiles, out Func<int, int, bool>? isTileLoaded, out int loadedTileCount, out string? mapName) => _host.TryGetActiveMinimapState(out existingTiles, out isTileLoaded, out loadedTileCount, out mapName);
+}

@@ -23,7 +23,7 @@ public partial class ViewerApp
         HasBakedShadows = 0x20000,
     }
 
-    private static readonly string[] WorldObjectVisibilityProfileLabels =
+    internal static readonly string[] WorldObjectVisibilityProfileLabels =
     [
         "Quality",
         "Balanced",

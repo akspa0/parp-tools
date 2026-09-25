@@ -14,7 +14,7 @@ namespace WoWViewer;
 public partial class ViewerApp
 {
     private const float MinimapTileCount = 64f;
-    private const float MinimapWorldTileSize = WoWConstants.ChunkSize;
+    internal const float MinimapWorldTileSize = WoWConstants.ChunkSize;
     // One pointer state per minimap surface id (sidebar / cartography / fullscreen). A shared
     // instance let the other surfaces consume or clear click sequences, which permanently broke
     // the 3-click teleport (2026-09-09 operator report).
@@ -59,6 +59,7 @@ public partial class ViewerApp
 
         return false;
     }
+    bool IViewerAppHost.TryGetActiveMinimapState(out List<(int tx, int ty)>? existingTiles, out Func<int, int, bool>? isTileLoaded, out int loadedTileCount, out string? mapName) => TryGetActiveMinimapState(out existingTiles, out isTileLoaded, out loadedTileCount, out mapName);
 
     /// <summary>
     /// Cartography (Spec 222): index of the layer whose footprint is being dragged on the minimap,
@@ -442,7 +443,7 @@ public partial class ViewerApp
         HandleMinimapInteraction(interactionId, cursorPos, mapSize, viewMinTx, viewMinTy, cellSize, teleportMode);
     }
 
-    private static bool TryGetMinimapClickTarget(Vector2 mousePos, Vector2 cursorPos, float cellSize, float viewMinTx, float viewMinTy, out float clickTileX, out float clickTileY)
+    internal static bool TryGetMinimapClickTarget(Vector2 mousePos, Vector2 cursorPos, float cellSize, float viewMinTx, float viewMinTy, out float clickTileX, out float clickTileY)
     {
         clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
         clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
@@ -475,6 +476,7 @@ public partial class ViewerApp
             Math.Clamp(_minimapPanOffset.X, minPanX, maxPanX),
             Math.Clamp(_minimapPanOffset.Y, minPanY, maxPanY));
     }
+    void IViewerAppHost.ClampMinimapPanOffset() => ClampMinimapPanOffset();
 
     private void ToggleFullscreenMinimap()
     {

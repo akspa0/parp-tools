@@ -158,7 +158,7 @@ public partial class ViewerApp
 
         ImGui.TextWrapped("Terrain actions are live-scene only in the current viewer. Use this workspace to make target and save status explicit.");
 
-        DrawSharedChunkClipboardSection(renderer, withHeader: true, headerTitle: "Chunk Clipboard");
+        _terrainControlsPanel.DrawSharedChunkClipboardSection(renderer, withHeader: true, headerTitle: "Chunk Clipboard");
 
         ImGui.Separator();
         ImGui.Text("Terrain Import / Export");
@@ -189,7 +189,7 @@ public partial class ViewerApp
         }
 
         ImGui.Separator();
-        DrawTerrainControlsContent();
+        _terrainControlsPanel.DrawTerrainControlsContent();
     }
 
     private void DrawEditorObjectsWorkspace()

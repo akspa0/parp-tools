@@ -101,6 +101,7 @@ public partial class ViewerApp
             ImGui.TextDisabled($"Fog/detail range: {currentFogStart:F0}–{currentFogEnd:F0}; WDL horizon clips at {TerrainQueryService.ComputeSceneFarPlane(currentFogEnd):F0} (+2500).");
         }
     }
+    void IViewerAppHost.DrawAuthoritativeFogControls(bool showDescription) => DrawAuthoritativeFogControls(showDescription);
 
     /// <summary>
     /// Returns the range owned by the user-facing fog editor. WorldScene composes
