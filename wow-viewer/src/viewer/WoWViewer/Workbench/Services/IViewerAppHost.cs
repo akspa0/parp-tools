@@ -119,5 +119,18 @@ internal interface IViewerAppHost
     ref int TerrainTileRangeStartX { get; }
     ref int TerrainTileRangeStartY { get; }
     TerrainWeakSignalRestoreService TerrainWeakSignalRestore { get; }
+    ref Camera Camera { get; }
+    ref ChunkClipboard? ChunkClipboard { get; }
+    ref (int tileX, int tileY, int chunkX, int chunkY)? ChunkClipboardCopiedKey { get; }
+    ref (int tileX, int tileY, int chunkX, int chunkY)? ChunkClipboardLockedTargetKey { get; }
+    ref ChunkClipboardSet? ChunkClipboardSet { get; }
+    ref bool ChunkClipboardShowOverlay { get; }
+    ref string ChunkClipboardStatus { get; }
+    ref bool ChunkToolEnabled { get; }
+    TerrainTileIoService TerrainTileIo { get; }
+    string EnsureEditorProjectOutputDirectory(bool forceNew = false);
+    string GetEditorProjectName(string? fallbackName = null);
+    string? GetEditorProjectSourceKey();
+    bool TryPickTerrainChunkUnderMouse(TerrainRenderer renderer, out TerrainRenderer.TerrainChunkInfo info);
     // HOST-IFACE-END
 }

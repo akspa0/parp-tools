@@ -407,8 +407,8 @@ public partial class ViewerApp
         if (HasWorldEditingContext() && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
             return $"Staged placement save target: {_selectedPlacementSaveTargetPath}. Source files stay untouched.";
 
-        if (HasWorldEditingContext() && GetChunkToolDirtyTileCount() > 0)
-            return $"Chunk tool has {GetChunkToolDirtyChunkCount()} edited chunk(s) across {GetChunkToolDirtyTileCount()} tile(s). Heightmap outputs can be written into {DescribeEditorProjectOutputDirectory()}. General terrain ADT save is still not implemented.";
+        if (HasWorldEditingContext() && _chunkEdit.GetChunkToolDirtyTileCount() > 0)
+            return $"Chunk tool has {_chunkEdit.GetChunkToolDirtyChunkCount()} edited chunk(s) across {_chunkEdit.GetChunkToolDirtyTileCount()} tile(s). Heightmap outputs can be written into {DescribeEditorProjectOutputDirectory()}. General terrain ADT save is still not implemented.";
 
         if (HasWorldEditingContext())
             return $"Staged placement saves are available for translation-only ADT object moves in {DescribeEditorProjectOutputDirectory()}. No general map save pipeline yet.";

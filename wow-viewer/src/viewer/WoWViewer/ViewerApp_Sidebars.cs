@@ -3679,112 +3679,12 @@ public partial class ViewerApp
         if (withHeader)
         {
             if (ImGui.CollapsingHeader(headerTitle, ImGuiTreeNodeFlags.DefaultOpen))
-                DrawChunkClipboardContent(renderer);
+                _chunkEdit.DrawChunkClipboardContent(renderer);
         }
         else
         {
-            DrawChunkClipboardContent(renderer);
+            _chunkEdit.DrawChunkClipboardContent(renderer);
         }
-    }
-
-    private void DrawChunkClipboardContent(TerrainRenderer renderer)
-    {
-        ImGui.Checkbox("Enable Chunk Tool", ref _chunkToolEnabled);
-        ImGui.SameLine();
-        ImGui.Checkbox("Show Overlay", ref _chunkClipboardShowOverlay);
-
-        ImGui.TextDisabled("Shift+LMB: toggle selection | Ctrl+LMB: lock paste target | Ctrl+C/Ctrl+V: copy/paste");
-
-        ImGui.Checkbox("Copy Target: Use Mouse", ref _chunkClipboardUseMouse);
-        ImGui.Checkbox("Paste Relative Heights", ref _chunkClipboardPasteRelativeHeights);
-        ImGui.Checkbox("Include Alpha/Shadow", ref _chunkClipboardIncludeAlphaShadow);
-        ImGui.Checkbox("Include Textures", ref _chunkClipboardIncludeTextures);
-
-        ImGui.SetNextItemWidth(160f);
-        string[] rotLabels = { "0°", "90°", "180°", "270°" };
-        ImGui.Combo("Paste Rotation", ref _chunkClipboardSelectionRotation, rotLabels, rotLabels.Length);
-
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Clear Locked Target##chunkTargetClear"))
-        {
-            _chunkClipboardLockedTargetKey = null;
-            _chunkClipboardStatus = "Cleared locked paste target.";
-        }
-
-        ImGui.TextDisabled($"Selected: {_selectedChunks.Count}");
-        if (_selectedChunks.Count > 0)
-        {
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Clear##chunkSelClear"))
-                _selectedChunks.Clear();
-        }
-
-        if (_chunkClipboardLockedTargetKey is { } locked)
-            ImGui.Text($"Locked Paste Target: tile({locked.tileX},{locked.tileY}) chunk({locked.chunkX},{locked.chunkY})");
-        else
-            ImGui.TextDisabled("Locked Paste Target: (none)  (Ctrl+LMB to set)");
-
-        var targetChunk = GetChunkClipboardTarget(renderer);
-        bool hasChunk = targetChunk.HasValue;
-        string targetLabel = _chunkClipboardUseMouse ? "Mouse" : "Camera";
-        if (targetChunk is { } c)
-        {
-            ImGui.TextDisabled($"Copy Target ({targetLabel}): tile({c.TileX},{c.TileY}) chunk({c.ChunkX},{c.ChunkY})");
-        }
-        else
-        {
-            ImGui.TextDisabled($"Copy Target ({targetLabel}): (none loaded)");
-        }
-
-        if (!hasChunk) ImGui.BeginDisabled();
-        if (ImGui.Button(_selectedChunks.Count > 0 ? "Copy Selection" : "Copy Chunk"))
-        {
-            if (_selectedChunks.Count > 0)
-                CopySelectedChunks(renderer);
-            else
-                CopyChunkAtTarget(renderer);
-        }
-        if (!hasChunk) ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        bool canPaste = (_chunkClipboardSet != null || _chunkClipboard != null);
-        if (!canPaste) ImGui.BeginDisabled();
-        if (ImGui.Button(_chunkClipboardSet != null ? "Paste Selection" : "Paste Chunk"))
-        {
-            if (_chunkClipboardSet != null)
-                PasteClipboardSetAtTarget(renderer);
-            else
-                PasteChunkAtTarget(renderer);
-        }
-        if (!canPaste) ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        bool canInvert = _selectedChunks.Count > 0 || hasChunk;
-        if (!canInvert) ImGui.BeginDisabled();
-        if (ImGui.Button(_selectedChunks.Count > 0 ? "Invert Z Selection" : "Invert Z Chunk"))
-            InvertSelectedChunkHeights(renderer);
-        if (!canInvert) ImGui.EndDisabled();
-
-        ImGui.TextDisabled($"Edited tiles: {GetChunkToolDirtyTileCount()}  Edited chunks: {GetChunkToolDirtyChunkCount()}");
-        ImGui.TextDisabled("Saves reusable 257x257 L16 heightmaps plus a manifest under the editor project output folder. Source terrain files stay untouched.");
-
-        bool canSaveEdited = GetChunkToolDirtyTileCount() > 0;
-        if (!canSaveEdited) ImGui.BeginDisabled();
-        if (ImGui.Button("Save Edited Heightmaps"))
-            SaveChunkToolHeightmapOutputs();
-        if (!canSaveEdited) ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        if (!canSaveEdited) ImGui.BeginDisabled();
-        if (ImGui.SmallButton("Clear Dirty##chunkToolDirtyClear"))
-            ClearChunkToolDirtyTracking();
-        if (!canSaveEdited) ImGui.EndDisabled();
-
-        if (!string.IsNullOrWhiteSpace(_chunkClipboardLastSaveFolder))
-            ImGui.TextWrapped($"Last heightmap output: {_chunkClipboardLastSaveFolder}");
-
-        if (!string.IsNullOrWhiteSpace(_chunkClipboardStatus))
-            ImGui.TextWrapped(_chunkClipboardStatus);
     }
 
 
