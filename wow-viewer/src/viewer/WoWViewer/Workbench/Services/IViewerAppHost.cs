@@ -435,5 +435,12 @@ internal interface IViewerAppHost
     void ClampMinimapPanOffset();
     void DrawAuthoritativeFogControls(bool showDescription = true);
     bool TryGetActiveMinimapState(out List<(int tx, int ty)>? existingTiles, out Func<int, int, bool>? isTileLoaded, out int loadedTileCount, out string? mapName);
+    ref int PendingMinimapTeleportClickCount { get; }
+    ref (int tileX, int tileY)? PendingMinimapTeleportTile { get; }
+    void DrawDockedShellPanelsForLane(ShellPanelLane lane, float sidebarHeight);
+    void DrawFixedSidebarWidthControl(string label, ref float width, bool isLeftSidebar, float displayWidth, string tooltip);
+    void DrawInteractiveMinimapSurface(string interactionId, Vector2 cursorPos, float mapSize, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded, string? mapName, MinimapTeleportMode teleportMode, out float viewMinTx, out float viewMinTy, out float cellSize);
+    void DrawWorkspaceBarsPanelContent();
+    void ToggleFullscreenMinimap();
     // HOST-IFACE-END
 }

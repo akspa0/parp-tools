@@ -1083,7 +1083,7 @@ public partial class ViewerApp
     private void ImportSelectedClientCameraPath()
     {
         string assetPath;
-        if (!TryGetSelectedBrowserAssetPath(out assetPath))
+        if (!_navigatorPanel.TryGetSelectedBrowserAssetPath(out assetPath))
         {
             assetPath = _cameraPathImportPath.Trim();
             if (string.IsNullOrWhiteSpace(assetPath))

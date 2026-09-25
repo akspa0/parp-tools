@@ -377,7 +377,7 @@ public partial class ViewerApp
                     if (inst.BoundsResolved)
                         _modelInspector.FrameBounds(inst.BoundsMin, inst.BoundsMax, mdxMirrorX: false);
                     else
-                        FramePoint(inst.PlacementPosition, radius: 5f);
+                        _navigatorPanel.FramePoint(inst.PlacementPosition, radius: 5f);
                 }
                 break;
 
@@ -387,12 +387,12 @@ public partial class ViewerApp
 
             case "copy_asset_path":
                 if (_worldScene?.SelectedInstance.HasValue == true)
-                    CopyTextToClipboard(_worldScene.SelectedInstance.Value.ModelPath, "Asset Path");
+                    _navigatorPanel.CopyTextToClipboard(_worldScene.SelectedInstance.Value.ModelPath, "Asset Path");
                 else if (string.Equals(_selectedObjectType, "WL liquid", StringComparison.OrdinalIgnoreCase)
                     && TryFindWlLiquidBodyByKey(_wlLayerSelectedBodyKey, out var wl) && wl != null)
-                    CopyTextToClipboard(wl.SourcePath, "WL Source Path");
+                    _navigatorPanel.CopyTextToClipboard(wl.SourcePath, "WL Source Path");
                 else if (!string.IsNullOrEmpty(_loadedFilePath))
-                    CopyTextToClipboard(_loadedFilePath, "Model Path");
+                    _navigatorPanel.CopyTextToClipboard(_loadedFilePath, "Model Path");
                 break;
 
             case "copy_chunk_texture_summary":
@@ -401,7 +401,7 @@ public partial class ViewerApp
                     && chunkData != null)
                 {
                     string summary = BuildTerrainChunkTextureSummary(chunkInfo, chunkData, tileTextures);
-                    CopyTextToClipboard(summary, "Chunk Texture Summary");
+                    _navigatorPanel.CopyTextToClipboard(summary, "Chunk Texture Summary");
                 }
                 break;
 
@@ -412,7 +412,7 @@ public partial class ViewerApp
 
             case "copy_terrain_coordinates":
                 if (TryGetPinnedTerrainChunkInspectionTarget(out var coordinateChunk, out _))
-                    CopyTextToClipboard(BuildTerrainChunkCoordinates(coordinateChunk), "Chunk Coordinates");
+                    _navigatorPanel.CopyTextToClipboard(BuildTerrainChunkCoordinates(coordinateChunk), "Chunk Coordinates");
                 break;
 
             case "clear_terrain_chunk_selection":

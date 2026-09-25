@@ -192,7 +192,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     internal static readonly string ExportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "export");
     internal static readonly string ProjectsDir = Path.Combine(OutputDir, "projects");
     internal static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
-    private const int MinimapTeleportConfirmClicks = 3;
+    internal const int MinimapTeleportConfirmClicks = 3;
 
     // File browser state
     private List<string> _filteredFiles = new();
@@ -659,6 +659,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly ArchaeologyPanelService _archaeologyPanel;
     private readonly ModelInspectorPanelService _modelInspector;
     private readonly TerrainControlsPanelService _terrainControlsPanel;
+    private readonly NavigatorPanelService _navigatorPanel;
 
     public ViewerApp()
     {
@@ -690,6 +691,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _archaeologyPanel = new ArchaeologyPanelService(this);
         _modelInspector = new ModelInspectorPanelService(this);
         _terrainControlsPanel = new TerrainControlsPanelService(this);
+        _navigatorPanel = new NavigatorPanelService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -790,7 +792,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref int IViewerAppHost.TaxiActorModelOverrideInputRouteId => ref _taxiActorModelOverrideInputRouteId;
     ref int IViewerAppHost.TaxiActorModelOverrideTargetRouteId => ref _taxiActorModelOverrideTargetRouteId;
     void IViewerAppHost.SaveViewerSettings() => _settings.SaveViewerSettings();
-    bool IViewerAppHost.TryGetSelectedBrowserModelPath(out string assetPath) => TryGetSelectedBrowserModelPath(out assetPath);
+    bool IViewerAppHost.TryGetSelectedBrowserModelPath(out string assetPath) => _navigatorPanel.TryGetSelectedBrowserModelPath(out assetPath);
     ref EditorWorkspaceTask IViewerAppHost.EditorWorkspaceTask => ref _editorWorkspaceTask;
     ref float IViewerAppHost.FovDegrees => ref _fovDegrees;
     ref GL IViewerAppHost.Gl => ref _gl;
@@ -991,7 +993,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.WorkbenchOpen => ref _workbenchOpen;
     void IViewerAppHost.ResetCamera() => ResetCamera();
     ref int IViewerAppHost.ActivePm4TabIndex => ref _activePm4TabIndex;
-    void IViewerAppHost.CopyTextToClipboard(string text, string description) => CopyTextToClipboard(text, description);
+    void IViewerAppHost.CopyTextToClipboard(string text, string description) => _navigatorPanel.CopyTextToClipboard(text, description);
     ref bool IViewerAppHost.ArcheologyPlaybackActive => ref _archeologyPlaybackActive;
     ref MapListSortMode IViewerAppHost.MapListSortMode => ref _mapListSortMode;
     Pm4WorkbenchService IViewerAppHost.Pm4Workbench => _pm4Workbench;
@@ -1002,12 +1004,14 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref bool IViewerAppHost.StandaloneWmoGroupLabelsAllEnabled => ref _standaloneWmoGroupLabelsAllEnabled;
     ref bool IViewerAppHost.StandaloneWmoGroupOverlayEnabled => ref _standaloneWmoGroupOverlayEnabled;
     ref bool IViewerAppHost.StandaloneWmoOverlayIncludeHiddenGroups => ref _standaloneWmoOverlayIncludeHiddenGroups;
-    void IViewerAppHost.DrawAssetPathActions(string label, string assetPath, string idSuffix) => DrawAssetPathActions(label, assetPath, idSuffix);
-    void IViewerAppHost.FramePoint(Vector3 target, float radius) => FramePoint(target, radius);
+    void IViewerAppHost.DrawAssetPathActions(string label, string assetPath, string idSuffix) => _navigatorPanel.DrawAssetPathActions(label, assetPath, idSuffix);
+    void IViewerAppHost.FramePoint(Vector3 target, float radius) => _navigatorPanel.FramePoint(target, radius);
     ChunkEditService IViewerAppHost.ChunkEdit => _chunkEdit;
     ref bool IViewerAppHost.LayoutObjectPreviewMode => ref _layoutObjectPreviewMode;
     ref bool IViewerAppHost.ShowWeakSignalWindow => ref _showWeakSignalWindow;
     StratigraphyService IViewerAppHost.Stratigraphy => _stratigraphy;
+    ref int IViewerAppHost.PendingMinimapTeleportClickCount => ref _pendingMinimapTeleportClickCount;
+    ref (int tileX, int tileY)? IViewerAppHost.PendingMinimapTeleportTile => ref _pendingMinimapTeleportTile;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1670,7 +1674,7 @@ void main() {
             if (_useTabUi)
             {
                 // 071: left sidebar + right workbench squeeze the 3D viewport.
-                DrawLeftSidebar();
+                _navigatorPanel.DrawLeftSidebar();
                 DrawRightSidebar();
             }
             else if (_useDockspaceUi)
@@ -1681,7 +1685,7 @@ void main() {
             if (!_useTabUi)
             {
                 if (_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Left))
-                    DrawLegacyLeftSidebar();
+                    _navigatorPanel.DrawLegacyLeftSidebar();
                 if (_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Right))
                     DrawLegacyRightSidebar();
             }
@@ -1827,99 +1831,6 @@ void main() {
 
         ImGui.End();
         ImGui.PopStyleVar(3);
-    }
-
-    private bool TryGetSelectedBrowserAssetPath(out string assetPath)
-    {
-        assetPath = string.Empty;
-        if (_selectedFileIndex < 0 || _selectedFileIndex >= _filteredFiles.Count)
-            return false;
-
-        assetPath = _filteredFiles[_selectedFileIndex];
-        return !string.IsNullOrWhiteSpace(assetPath);
-    }
-
-    private bool TryGetSelectedBrowserModelPath(out string assetPath)
-    {
-        if (TryGetSelectedBrowserAssetPath(out assetPath) && TaxiAndAreaPoiSelectionService.IsTaxiActorModelPath(assetPath))
-            return true;
-
-        assetPath = string.Empty;
-        return false;
-    }
-
-    private void CopyTextToClipboard(string text, string description)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return;
-
-        ImGui.SetClipboardText(text);
-        _statusMessage = $"Copied {description} to clipboard.";
-    }
-
-    internal static string NormalizeAssetPathForUi(string assetPath)
-        => string.IsNullOrWhiteSpace(assetPath)
-            ? string.Empty
-            : assetPath.Trim().Replace('/', '\\');
-
-    private bool CanLoadAssetFromDataSource(string assetPath)
-        => _dataSource != null
-            && !string.IsNullOrWhiteSpace(assetPath)
-            && !Path.IsPathRooted(assetPath);
-
-    private void FramePoint(Vector3 target, float radius = 2f)
-    {
-        float effectiveRadius = MathF.Max(radius, 1f);
-        float distance = MathF.Max(effectiveRadius * 4f, 12f);
-        Vector3 cameraPosition = target + new Vector3(-distance, 0f, effectiveRadius * 1.2f);
-        Vector3 lookDirection = Vector3.Normalize(target - cameraPosition);
-
-        _camera.Position = cameraPosition;
-        _camera.Yaw = MathF.Atan2(lookDirection.Y, lookDirection.X) * (180f / MathF.PI);
-        _camera.Pitch = MathF.Asin(Math.Clamp(lookDirection.Z, -1f, 1f)) * (180f / MathF.PI);
-    }
-
-    private void DrawAssetPathActions(string label, string assetPath, string idSuffix)
-    {
-        string normalizedPath = NormalizeAssetPathForUi(assetPath);
-        if (string.IsNullOrWhiteSpace(normalizedPath))
-        {
-            ImGui.TextDisabled($"{label}: unavailable");
-            return;
-        }
-
-        ImGui.Text(label);
-        if (ImGui.SmallButton($"Copy Path##{idSuffix}"))
-            CopyTextToClipboard(normalizedPath, "asset path");
-
-        ImGui.SameLine();
-        bool canLoad = CanLoadAssetFromDataSource(normalizedPath);
-        if (!canLoad)
-            ImGui.BeginDisabled();
-        if (ImGui.SmallButton($"Load Asset##{idSuffix}"))
-            _modelLoader.LoadFileFromDataSource(normalizedPath);
-        if (!canLoad)
-            ImGui.EndDisabled();
-
-        ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 520f);
-        ImGui.TextDisabled(normalizedPath);
-        ImGui.PopTextWrapPos();
-    }
-
-    private bool TryInspectHoveredSceneAssetInSelection()
-    {
-        if (_worldScene?.HoveredAssetInfo is not HoveredAssetInfo info || !info.HasSceneObject)
-            return false;
-
-        if (!_worldScene.SelectSceneObject(info.SceneObjectType, info.SceneObjectIndex, info.ParentWmoIndex))
-            return false;
-
-        ClearSelectedWlLiquidBody(clearListIsolation: true);
-        _worldScene.ClearTaxiSelection();
-        _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
-        _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
-        RefreshSelectedWorldObjectInfo();
-        return true;
     }
 
     private void RefreshSelectedWorldObjectInfo()

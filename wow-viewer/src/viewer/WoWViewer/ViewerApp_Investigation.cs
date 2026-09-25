@@ -165,7 +165,7 @@ public partial class ViewerApp
         ImGui.TextWrapped(info.DisplayName);
 
         if (!string.IsNullOrWhiteSpace(info.SourcePath))
-            DrawAssetPathActions("Asset Path", info.SourcePath, "HoveredInvestigationAsset");
+            _navigatorPanel.DrawAssetPathActions("Asset Path", info.SourcePath, "HoveredInvestigationAsset");
 
         if (!string.IsNullOrWhiteSpace(info.DetailLine))
             ImGui.TextDisabled(info.DetailLine);
@@ -176,7 +176,7 @@ public partial class ViewerApp
         {
             if (ImGui.SmallButton("Inspect Hovered In Scene"))
             {
-                if (TryInspectHoveredSceneAssetInSelection())
+                if (_navigatorPanel.TryInspectHoveredSceneAssetInSelection())
                     _statusMessage = $"Selected hovered {info.AssetKind}: {info.DisplayName}";
             }
         }
@@ -336,7 +336,7 @@ public partial class ViewerApp
             ImGui.TextDisabled($"Metadata patterns: {focusedBody.MetadataPatternCount}  non-zero words/block: {focusedBody.MetadataNonZeroMin}..{focusedBody.MetadataNonZeroMax}");
 
             if (ImGui.SmallButton("Copy WL Summary"))
-                CopyTextToClipboard(BuildWlLiquidSummary(focusedBody), "WL liquid summary");
+                _navigatorPanel.CopyTextToClipboard(BuildWlLiquidSummary(focusedBody), "WL liquid summary");
         }
         else
         {
@@ -507,7 +507,7 @@ public partial class ViewerApp
             ImGui.TextDisabled($"Fog start/end: {litSample.FogStart:F1} / {litSample.FogEnd:F1}  scaler={litSample.FogStartScalar:F3}");
 
             if (ImGui.SmallButton("Copy LIT Sample Summary"))
-                CopyTextToClipboard(BuildLitSampleSummary(loader, litSample), "LIT lighting summary");
+                _navigatorPanel.CopyTextToClipboard(BuildLitSampleSummary(loader, litSample), "LIT lighting summary");
         }
 
         int selectedIndex = _worldScene.SelectedLitLightIndex;

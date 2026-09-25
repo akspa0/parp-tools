@@ -269,7 +269,7 @@ public partial class ViewerApp
         ImGui.TextDisabled(BuildSceneBookmarkText(CreateCameraShotPoint("current")));
 
         if (ImGui.Button("Copy Current Scene Bookmark"))
-            CopyTextToClipboard(BuildSceneBookmarkText(CreateCameraShotPoint("current")), "scene bookmark");
+            _navigatorPanel.CopyTextToClipboard(BuildSceneBookmarkText(CreateCameraShotPoint("current")), "scene bookmark");
 
         if (ImGui.Button("Log Current Scene Bookmark"))
             LogSceneBookmark(CreateCameraShotPoint("current"));
@@ -381,7 +381,7 @@ public partial class ViewerApp
             ImGui.TextDisabled(BuildSceneBookmarkText(selectedShot));
 
             if (ImGui.Button("Copy Selected Scene Bookmark"))
-                CopyTextToClipboard(BuildSceneBookmarkText(selectedShot), "scene bookmark");
+                _navigatorPanel.CopyTextToClipboard(BuildSceneBookmarkText(selectedShot), "scene bookmark");
 
             ImGui.SameLine();
             if (ImGui.Button("Log Selected Scene Bookmark"))

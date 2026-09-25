@@ -21,7 +21,7 @@ public partial class ViewerApp
     private readonly Dictionary<string, MinimapInteractionState> _minimapInteractionStates = new();
     private readonly MinimapDonorToolService _donorToolService = new();
 
-    private enum MinimapTeleportMode
+    internal enum MinimapTeleportMode
     {
         Armed,
         Immediate,
@@ -406,7 +406,7 @@ public partial class ViewerApp
         ClearPendingMinimapTeleport();
     }
 
-    private static float ComputeMinimapSquareSize(float availableWidth, float availableHeight, float minimumSize)
+    internal static float ComputeMinimapSquareSize(float availableWidth, float availableHeight, float minimumSize)
     {
         return MathF.Max(minimumSize, MathF.Min(availableWidth, availableHeight));
     }
@@ -442,6 +442,7 @@ public partial class ViewerApp
 
         HandleMinimapInteraction(interactionId, cursorPos, mapSize, viewMinTx, viewMinTy, cellSize, teleportMode);
     }
+    void IViewerAppHost.DrawInteractiveMinimapSurface(string interactionId, Vector2 cursorPos, float mapSize, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded, string? mapName, MinimapTeleportMode teleportMode, out float viewMinTx, out float viewMinTy, out float cellSize) => DrawInteractiveMinimapSurface(interactionId, cursorPos, mapSize, existingTiles, isTileLoaded, mapName, teleportMode, out viewMinTx, out viewMinTy, out cellSize);
 
     internal static bool TryGetMinimapClickTarget(Vector2 mousePos, Vector2 cursorPos, float cellSize, float viewMinTx, float viewMinTy, out float clickTileX, out float clickTileY)
     {
@@ -486,6 +487,7 @@ public partial class ViewerApp
         else
             _minimapDragging = false;
     }
+    void IViewerAppHost.ToggleFullscreenMinimap() => ToggleFullscreenMinimap();
 
     private void ClearPendingMinimapTeleport()
     {
