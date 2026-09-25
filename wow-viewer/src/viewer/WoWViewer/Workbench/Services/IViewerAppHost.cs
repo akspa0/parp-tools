@@ -215,5 +215,10 @@ internal interface IViewerAppHost
     void LoadFileFromDataSource(string virtualPath);
     void LoadMapAtDefaultSpawn(MapDefinition map);
     string? ResolveMapWdtPath(string mapDirectory);
+    ref AreaTableService? AreaTableService { get; }
+    ref WowViewer.Core.World.AreaLookupResult? CurrentAreaLookup { get; }
+    ref string CurrentAreaName { get; }
+    ref ISceneRenderer? Renderer { get; }
+    HashSet<string> ReportedAreaDiagnostics { get; }
     // HOST-IFACE-END
 }

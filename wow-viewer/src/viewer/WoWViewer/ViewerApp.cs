@@ -180,16 +180,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder (MPQ) first, then Open File for standalone assets.";
     private AreaTableService? _areaTableService;
     private string _currentAreaName = "";
-    private string _currentZoneName = "";
     private WowViewer.Core.World.AreaLookupResult? _currentAreaLookup;
-    private Vector3 _lastAreaLookupCameraPosition = new(float.NaN);
-    private int _areaLookupTick;
-    private int _lastAreaLookupLoadedTileCount = -1;
-    private int _lastAreaLookupMapId = int.MinValue;
-    private TerrainRenderer? _areaOverlayRenderer;
-    private AreaTableService? _areaOverlayAreaTableService;
-    private int _areaOverlayRevision = int.MinValue;
-    private int _areaOverlayMapId = int.MinValue;
     private int _currentMapId = -1; // MapID of the currently loaded world
     private string? _lastWorldSceneWdtPath;
     private Vector3 _lastWorldSceneCameraPosition;
@@ -755,6 +746,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly SceneHoverAndPickService _sceneHoverPick;
     private readonly ShellLayoutService _shellLayout;
     private readonly WdlPreviewService _wdlPreview;
+    private readonly AreaContextService _areaContext;
 
     public ViewerApp()
     {
@@ -769,6 +761,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _sceneHoverPick = new SceneHoverAndPickService(this);
         _shellLayout = new ShellLayoutService(this);
         _wdlPreview = new WdlPreviewService(this);
+        _areaContext = new AreaContextService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -932,6 +925,11 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     void IViewerAppHost.LoadFileFromDataSource(string virtualPath) => LoadFileFromDataSource(virtualPath);
     void IViewerAppHost.LoadMapAtDefaultSpawn(MapDefinition map) => LoadMapAtDefaultSpawn(map);
     string? IViewerAppHost.ResolveMapWdtPath(string mapDirectory) => ResolveMapWdtPath(mapDirectory);
+    ref AreaTableService? IViewerAppHost.AreaTableService => ref _areaTableService;
+    ref WowViewer.Core.World.AreaLookupResult? IViewerAppHost.CurrentAreaLookup => ref _currentAreaLookup;
+    ref string IViewerAppHost.CurrentAreaName => ref _currentAreaName;
+    ref ISceneRenderer? IViewerAppHost.Renderer => ref _renderer;
+    HashSet<string> IViewerAppHost.ReportedAreaDiagnostics => _reportedAreaDiagnostics;
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -1396,9 +1394,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             // camera. Batched terrain owns one GPU mesh per tile, so the area lookup must use the
             // resident chunk-info index instead of the legacy per-chunk GPU mesh list.
             var areaChunkRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-            UpdateCurrentAreaContext(areaChunkRenderer);
+            _areaContext.UpdateCurrentAreaContext(areaChunkRenderer);
             _worldScene?.SetCurrentAreaLookup(_currentAreaLookup);
-            UpdateAreaOverlay(areaChunkRenderer);
+            _areaContext.UpdateAreaOverlay(areaChunkRenderer);
 
             // Render the scene
             if (_renderer is IModelRenderer modelRenderer)
@@ -1442,7 +1440,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                 DrawEditorOverlays(view, proj);
                 if (hasSceneViewportRect)
                 {
-                    DrawAreaOverlayLabels(
+                    _areaContext.DrawAreaOverlayLabels(
                         view,
                         proj,
                         sceneViewportX,
@@ -5402,181 +5400,6 @@ void main() {
 
         ViewerLog.Error(ViewerLog.Category.General,
             $"[DataSourceRead] Failed to read requested='{requestedPath}' resolved='{resolvedPath}' ext={ext} source={_dataSource?.GetType().Name ?? "<null>"} exists(requested)={requestedExists} exists(resolved)={resolvedExists} indexedRequested='{indexedRequested}' indexedResolved='{indexedResolved}'");
-    }
-
-    private void ReportAreaLookupDiagnostic(int areaId)
-    {
-        if (_areaTableService == null)
-            return;
-
-        string diagnostic = _areaTableService.DescribeLookup(areaId, _currentMapId);
-        if (_reportedAreaDiagnostics.Add(diagnostic))
-            ViewerLog.Important(ViewerLog.Category.General, diagnostic);
-    }
-
-    private void UpdateCurrentAreaContext(TerrainRenderer? renderer)
-    {
-        if (_areaTableService == null)
-        {
-            _currentAreaLookup = null;
-            _currentAreaName = string.Empty;
-            _currentZoneName = string.Empty;
-            return;
-        }
-
-        int loadedTileCount = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
-        bool cameraMoved = float.IsNaN(_lastAreaLookupCameraPosition.X)
-            || Vector3.DistanceSquared(_camera.Position, _lastAreaLookupCameraPosition) >= 16f;
-        bool mapChanged = _currentMapId != _lastAreaLookupMapId;
-        bool residencyChanged = loadedTileCount != _lastAreaLookupLoadedTileCount;
-
-        if (++_areaLookupTick < 10 && !cameraMoved && !mapChanged && !residencyChanged)
-            return;
-
-        _areaLookupTick = 0;
-        _lastAreaLookupCameraPosition = _camera.Position;
-        _lastAreaLookupLoadedTileCount = loadedTileCount;
-        _lastAreaLookupMapId = _currentMapId;
-
-        // 1. Check if camera is inside a placed WMO group in the world scene
-        if (_worldScene != null && _worldScene.TryGetWmoGroupAt(_camera.Position, out var wmoInst, out var wmoR, out int renderGroupIndex))
-        {
-            uint wmoGroupId = wmoR.GetRenderGroupAreaId(renderGroupIndex);
-            string? rawGroupName = wmoR.GetRenderGroupRawName(renderGroupIndex);
-            var wmoArea = _areaTableService.ResolveWmoArea(wmoR.WmoId, renderGroupIndex, wmoGroupId, _currentMapId, rawGroupName);
-            if (wmoArea.Reason == WowViewer.Core.World.AreaResolutionReason.Resolved)
-            {
-                _currentAreaLookup = wmoArea;
-                _currentZoneName = _currentAreaLookup.ZoneText ?? string.Empty;
-                _currentAreaName = _currentAreaLookup.SubzoneText ?? _currentAreaLookup.ZoneText ?? string.Empty;
-                return;
-            }
-        }
-        else if (_renderer is WmoRenderer standaloneWmo)
-        {
-            int standaloneGroupIndex = standaloneWmo.FindGroupContainingPoint(_camera.Position);
-            if (standaloneGroupIndex >= 0)
-            {
-                uint wmoGroupId = standaloneWmo.GetRenderGroupAreaId(standaloneGroupIndex);
-                string? rawGroupName = standaloneWmo.GetRenderGroupRawName(standaloneGroupIndex);
-                var wmoArea = _areaTableService.ResolveWmoArea(standaloneWmo.WmoId, standaloneGroupIndex, wmoGroupId, _currentMapId, rawGroupName);
-                if (wmoArea.Reason == WowViewer.Core.World.AreaResolutionReason.Resolved)
-                {
-                    _currentAreaLookup = wmoArea;
-                    _currentZoneName = _currentAreaLookup.ZoneText ?? string.Empty;
-                    _currentAreaName = _currentAreaLookup.SubzoneText ?? _currentAreaLookup.ZoneText ?? string.Empty;
-                    return;
-                }
-            }
-        }
-
-        // 2. Fall back to terrain chunk under camera
-        if (renderer == null)
-        {
-            _currentAreaLookup = WowViewer.Core.World.AreaLookupResult.Unresolved(0, _currentMapId, WowViewer.Core.World.AreaResolutionReason.NoTerrainChunk);
-            _currentAreaName = string.Empty;
-            _currentZoneName = string.Empty;
-            return;
-        }
-
-        var chunk = renderer.GetChunkInfoAt(_camera.Position.X, _camera.Position.Y);
-        _currentAreaLookup = chunk is null
-            ? WowViewer.Core.World.AreaLookupResult.Unresolved(0, _currentMapId, WowViewer.Core.World.AreaResolutionReason.NoTerrainChunk)
-            : _areaTableService.ResolveArea(chunk.Value.AreaId, _currentMapId);
-
-        _currentZoneName = _currentAreaLookup.ZoneText ?? string.Empty;
-        _currentAreaName = _currentAreaLookup.SubzoneText ?? _currentAreaLookup.ZoneText ?? string.Empty;
-
-        if (_currentAreaLookup.Reason != WowViewer.Core.World.AreaResolutionReason.Resolved)
-            ReportAreaLookupDiagnostic(_currentAreaLookup.RawAreaId);
-    }
-
-    private void UpdateAreaOverlay(TerrainRenderer? renderer)
-    {
-        if (_worldScene == null || !_worldScene.ShowAreaRegionOverlay)
-            return;
-
-        if (_areaTableService == null || renderer == null)
-        {
-            _worldScene.SetAreaOverlay(new AreaOverlayBuildResult(
-                Array.Empty<AreaOverlayRegion>(),
-                0,
-                0));
-            _areaOverlayRenderer = renderer;
-            _areaOverlayAreaTableService = _areaTableService;
-            _areaOverlayRevision = int.MinValue;
-            _areaOverlayMapId = _currentMapId;
-            return;
-        }
-
-        if (ReferenceEquals(_areaOverlayRenderer, renderer)
-            && ReferenceEquals(_areaOverlayAreaTableService, _areaTableService)
-            && _areaOverlayRevision == renderer.ResidentChunkRevision
-            && _areaOverlayMapId == _currentMapId)
-        {
-            return;
-        }
-
-        AreaOverlayBuildResult result = AreaOverlayRegionBuilder.Build(
-            renderer.EnumerateResidentChunkInfos(),
-            _areaTableService,
-            _currentMapId);
-        _worldScene.SetAreaOverlay(result);
-        _areaOverlayRenderer = renderer;
-        _areaOverlayAreaTableService = _areaTableService;
-        _areaOverlayRevision = renderer.ResidentChunkRevision;
-        _areaOverlayMapId = _currentMapId;
-    }
-
-    private void DrawAreaOverlayLabels(
-        Matrix4x4 view,
-        Matrix4x4 proj,
-        float viewportX,
-        float viewportY,
-        float viewportWidth,
-        float viewportHeight)
-    {
-        if (_worldScene is not { ShowAreaRegionOverlay: true } scene || scene.AreaOverlayRegions.Count == 0)
-            return;
-
-        var drawList = ImGui.GetForegroundDrawList();
-        foreach (AreaOverlayRegion region in scene.AreaOverlayRegions)
-        {
-            if (!SceneViewportMath.TryProjectWorldToViewport(
-                    region.LabelPosition,
-                    view,
-                    proj,
-                    viewportWidth,
-                    viewportHeight,
-                    out Vector2 projected))
-            {
-                continue;
-            }
-
-            if (projected.X < -80f || projected.X > viewportWidth + 80f
-                || projected.Y < -40f || projected.Y > viewportHeight + 40f)
-            {
-                continue;
-            }
-
-            string label = $"{(region.Kind == AreaOverlayRegionKind.Zone ? "Zone" : "Subzone")}: {region.Name}";
-            Vector2 textSize = ImGui.CalcTextSize(label);
-            Vector2 textPos = new(
-                viewportX + projected.X - textSize.X * 0.5f,
-                viewportY + projected.Y - textSize.Y - 16f);
-            Vector2 rectMin = textPos - new Vector2(8f, 5f);
-            Vector2 rectMax = textPos + textSize + new Vector2(8f, 5f);
-            Vector4 color = new(region.Color, 1f);
-            Vector4 background = new(region.Color * 0.32f + new Vector3(0.05f), 0.92f);
-
-            drawList.AddCircleFilled(
-                new(viewportX + projected.X, viewportY + projected.Y),
-                4f,
-                ImGui.ColorConvertFloat4ToU32(color));
-            drawList.AddRectFilled(rectMin, rectMax, ImGui.ColorConvertFloat4ToU32(background), 4f);
-            drawList.AddRect(rectMin, rectMax, ImGui.ColorConvertFloat4ToU32(color), 4f, ImDrawFlags.None, 1.5f);
-            drawList.AddText(textPos, ImGui.ColorConvertFloat4ToU32(new Vector4(0.98f, 0.99f, 1f, 1f)), label);
-        }
     }
 
     private static ModelContainerKind DetectModelContainer(byte[] modelBytes)
