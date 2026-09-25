@@ -524,7 +524,7 @@ public partial class ViewerApp
         _terrainManager = null;
         _vlmTerrainManager?.Dispose();
         _vlmTerrainManager = null;
-        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        _sqlSpawnStreaming.ResetSqlSpawnStreamingState(clearSceneSpawns: false);
 
         _loadingScreen?.Enable(_dataSource);
         PresentLoadingFrame();

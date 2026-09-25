@@ -659,20 +659,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _layoutObjectPreviewSavedWmosVisible = true;
     private bool _layoutObjectPreviewSavedDoodadsVisible = true;
     private WorldObjectVisibilityProfile _layoutObjectPreviewSavedVisibilityProfile = WorldObjectVisibilityProfile.Performance;
-    private string _sqlAlphaCoreRoot = "";
     private SqlWorldPopulationService? _sqlPopulationService;
-    private bool _sqlIncludeCreatures = true;
-    private bool _sqlIncludeGameObjects = true;
-    private int _sqlMaxSpawns = 2000;
-    private float _sqlGameObjectMdxScaleMultiplier = 1.0f;
-    private bool _sqlUseAoiFilter = true;
-    private int _sqlAoiTileRadius = 3;
-    private bool _sqlStreamWithCamera = true;
-    private string _sqlSpawnStatus = "Not loaded";
-    private string _sqlServiceRoot = "";
-    private List<WorldSpawnRecord>? _sqlMapSpawnsCache;
-    private int _sqlMapSpawnsCacheMapId = -1;
-    private (int tileX, int tileY)? _sqlLastCameraTile;
     private bool _sqlForceStreamRefresh;
     private string _wlLayerSelectedBodyKey = "";
     private bool _wlLayerListIsolationEnabled;
@@ -812,6 +799,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly TerrainTileIoService _terrainTileIo;
     private readonly ChunkEditService _chunkEdit;
     private readonly PlacementEditService _placementEditing;
+    private readonly SqlSpawnStreamingService _sqlSpawnStreaming;
 
     public ViewerApp()
     {
@@ -821,6 +809,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _terrainTileIo = new TerrainTileIoService(this);
         _chunkEdit = new ChunkEditService(this);
         _placementEditing = new PlacementEditService(this);
+        _sqlSpawnStreaming = new SqlSpawnStreamingService(this);
     }
 
     // IViewerAppHost: the ViewerApp state and behaviour the extracted services may use.
@@ -906,6 +895,11 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     ref string? IViewerAppHost.SelectedPlacementSaveTargetPath => ref _selectedPlacementSaveTargetPath;
     ref WorldScene? IViewerAppHost.WorldScene => ref _worldScene;
     void IViewerAppHost.RefreshSelectedWorldObjectInfo() => RefreshSelectedWorldObjectInfo();
+    ref int IViewerAppHost.CurrentMapId => ref _currentMapId;
+    ref bool IViewerAppHost.SqlForceStreamRefresh => ref _sqlForceStreamRefresh;
+    ref SqlWorldPopulationService? IViewerAppHost.SqlPopulationService => ref _sqlPopulationService;
+    void IViewerAppHost.DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent) => DrawToolbarPopupButton(label, summary, popupId, drawContent);
+    void IViewerAppHost.ExportAnimationStateJson(IAnimationController animator, int currentSeq, string currentSeqName, float seqStart, float seqEnd) => ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
     // HOST-IMPL-END
 
     public void Run(string[]? initialArgs = null)
@@ -944,7 +938,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _sceneClusterSelector3D = new SceneClusterSelector3D(_gl);
         _cameraHudRig = new CameraHudRig(_gl);
 
-        TryAutoPopulateAlphaCoreRoot();
+        _sqlSpawnStreaming.TryAutoPopulateAlphaCoreRoot();
         LoadViewerSettings();
         ApplyActiveUiTheme();
         LoadCameraShotPoints();
@@ -1023,126 +1017,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         ApplyStartupAutomation(initialArgs);
     }
 
-    private void TryAutoPopulateAlphaCoreRoot()
-    {
-        if (!string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
-            return;
-
-        string[] candidates =
-        {
-            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core")),
-            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "external", "alpha-core")),
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "external", "alpha-core"))
-        };
-
-        foreach (var candidate in candidates)
-        {
-            string worldDir = Path.Combine(candidate, "etc", "databases", "world");
-            string dbcDir = Path.Combine(candidate, "etc", "databases", "dbc");
-            if (Directory.Exists(worldDir) && Directory.Exists(dbcDir))
-            {
-                _sqlAlphaCoreRoot = candidate;
-                _sqlSpawnStatus = $"Auto-detected alpha-core SQL root: {candidate}";
-                return;
-            }
-        }
-    }
-
-    private void DrawSelectedSqlGameObjectAnimationControls()
-    {
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
-            return;
-        if (_worldScene.SelectedObjectType != Terrain.ObjectType.Mdx)
-            return;
-        if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
-            return;
-
-        var inst = _worldScene.SelectedInstance.Value;
-        var spawn = _sqlMapSpawnsCache.FirstOrDefault(s =>
-            s.SpawnType == WorldSpawnType.GameObject &&
-            s.SpawnId == inst.UniqueId &&
-            (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
-        if (spawn == null)
-            return;
-
-        var mdxRenderer = _worldScene.Assets.GetMdx(inst.ModelKey);
-        var animator = mdxRenderer?.Animator;
-
-        ImGui.Separator();
-        ImGui.TextColored(new Vector4(0.85f, 1f, 0.85f, 1f), "SQL GameObject Animation");
-        ImGui.TextDisabled($"SpawnId: {spawn.SpawnId}  Entry: {spawn.EntryId}  Type: {spawn.GameObjectType}");
-
-        if (animator == null || !animator.HasAnimation || animator.Sequences.Count == 0)
-        {
-            ImGui.TextDisabled("This gameobject model has no animation sequences.");
-            return;
-        }
-
-        int currentSeq = animator.CurrentSequence;
-        string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count
-            ? animator.Sequences[currentSeq].Name
-            : "None";
-        if (string.IsNullOrWhiteSpace(currentSeqName))
-            currentSeqName = $"Sequence {currentSeq}";
-
-        if (ImGui.BeginCombo("##sqlgo_anim_seq", currentSeqName))
-        {
-            for (int s = 0; s < animator.Sequences.Count; s++)
-            {
-                bool selected = s == currentSeq;
-                string seqName = animator.Sequences[s].Name;
-                if (string.IsNullOrWhiteSpace(seqName))
-                    seqName = $"Sequence {s}";
-                if (ImGui.Selectable(seqName, selected))
-                    animator.SetSequence(s);
-                if (selected) ImGui.SetItemDefaultFocus();
-            }
-            ImGui.EndCombo();
-        }
-
-var seq = animator.Sequences[animator.CurrentSequence];
-        float seqStart = seq.Time.Start;
-        float seqEnd = seq.Time.End;
-
-        bool isPlaying = animator.IsPlaying;
-        if (ImGui.Button(isPlaying ? "Pause GO Anim" : "Play GO Anim"))
-            animator.IsPlaying = !isPlaying;
-
-        ImGui.SameLine();
-        if (ImGui.Button("Stop GO Anim"))
-        {
-            animator.IsPlaying = false;
-            animator.CurrentFrame = seqStart;
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Prev Key"))
-        {
-            animator.IsPlaying = false;
-            animator.StepToPrevKeyframe();
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Next Key"))
-        {
-            animator.IsPlaying = false;
-            animator.StepToNextKeyframe();
-        }
-
-        float currentFrame = Math.Clamp(animator.CurrentFrame, seqStart, seqEnd);
-        if (ImGui.SliderFloat("GO Frame", ref currentFrame, seqStart, seqEnd, "%.0f"))
-        {
-            animator.IsPlaying = false;
-            animator.CurrentFrame = currentFrame;
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export JSON##GO"))
-            ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
-
-        ImGui.TextDisabled("Note: this affects all visible instances using the same MDX model renderer.");
-    }
-
     private void OnUpdate(double dt)
     {
         SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
@@ -1157,7 +1031,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
             maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
-        UpdateSqlSpawnStreaming();
+        _sqlSpawnStreaming.UpdateSqlSpawnStreaming();
         _terrainWeakSignalRestore.UpdateTerrainWeakSignalRestoreForCamera();
     }
 
@@ -1212,38 +1086,11 @@ var seq = animator.Sequences[animator.CurrentSequence];
         }
     }
 
-    private void UpdateSqlSpawnStreaming()
-    {
-        if (_worldScene == null || !_sqlStreamWithCamera || !_sqlUseAoiFilter)
-            return;
-
-        if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
-            return;
-
-        var camTile = GetCameraTile();
-        if (_sqlForceStreamRefresh || _sqlLastCameraTile == null || _sqlLastCameraTile.Value != camTile)
-        {
-            _sqlLastCameraTile = camTile;
-            ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: false);
-            _sqlForceStreamRefresh = false;
-        }
-    }
-
     private (int tileX, int tileY) GetCameraTile()
     {
         int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
         int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
         return (tileX, tileY);
-    }
-
-    private void ResetSqlSpawnStreamingState(bool clearSceneSpawns)
-    {
-        _sqlMapSpawnsCache = null;
-        _sqlMapSpawnsCacheMapId = -1;
-        _sqlLastCameraTile = null;
-        _sqlForceStreamRefresh = false;
-        if (clearSceneSpawns && _worldScene != null)
-            _worldScene.ClearExternalSpawns();
     }
 
     private bool _mKeyWasPressed = false;
@@ -3535,7 +3382,7 @@ void main() {
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
         ImGui.Separator();
-        DrawPopulationSubTabContent();
+        _sqlSpawnStreaming.DrawPopulationSubTabContent();
 
         bool showPm4Overlay = _worldScene.Pm4Overlay.ShowPm4Overlay;
         if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
@@ -4005,120 +3852,6 @@ void main() {
 
     }
 
-    private void LoadSqlSpawnsForCurrentMap()
-    {
-        if (_worldScene == null)
-        {
-            _sqlSpawnStatus = "No world loaded.";
-            return;
-        }
-
-        if (_currentMapId < 0)
-        {
-            _sqlSpawnStatus = "Current map ID unavailable.";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
-        {
-            _sqlSpawnStatus = "Enter alpha-core root path first.";
-            return;
-        }
-
-        try
-        {
-            if (_sqlPopulationService == null ||
-                !string.Equals(_sqlServiceRoot, _sqlAlphaCoreRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                _sqlPopulationService?.Dispose();
-                _sqlPopulationService = new SqlWorldPopulationService(_sqlAlphaCoreRoot);
-                _sqlServiceRoot = _sqlAlphaCoreRoot;
-            }
-
-            var (ok, message) = _sqlPopulationService.Validate();
-            if (!ok)
-            {
-                _sqlSpawnStatus = message;
-                return;
-            }
-
-            _sqlSpawnStatus = "Parsing SQL and building spawn list...";
-
-            int requestedMax = (_sqlUseAoiFilter || _sqlStreamWithCamera) ? 0 : _sqlMaxSpawns;
-            var mapSpawns = _sqlPopulationService
-                .LoadMapSpawnsAsync(_currentMapId, requestedMax, _sqlIncludeCreatures, _sqlIncludeGameObjects)
-                .GetAwaiter()
-                .GetResult();
-
-            _sqlMapSpawnsCache = mapSpawns.ToList();
-            _sqlMapSpawnsCacheMapId = _currentMapId;
-            _sqlLastCameraTile = null;
-            _sqlForceStreamRefresh = true;
-
-            ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
-        }
-        catch (Exception ex)
-        {
-            _sqlSpawnStatus = $"Error: {ex.Message}";
-        }
-    }
-
-    private void ApplySqlSpawnsToScene(IReadOnlyList<WorldSpawnRecord> mapSpawns, bool updateStatus)
-    {
-        if (_worldScene == null)
-            return;
-
-        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
-
-        IReadOnlyList<WorldSpawnRecord> finalSpawns = mapSpawns;
-        if (_sqlUseAoiFilter)
-            finalSpawns = FilterSpawnsToCameraAoi(mapSpawns, _sqlAoiTileRadius, _sqlMaxSpawns);
-        else if (_sqlMaxSpawns > 0 && mapSpawns.Count > _sqlMaxSpawns)
-            finalSpawns = mapSpawns.Take(_sqlMaxSpawns).ToList();
-
-        _worldScene.SetExternalSpawns(finalSpawns);
-
-        if (updateStatus)
-        {
-            _sqlSpawnStatus = _sqlUseAoiFilter
-                ? $"Loaded {finalSpawns.Count}/{mapSpawns.Count} SQL spawns for map {_currentMapId} (AOI radius {_sqlAoiTileRadius} tiles{(_sqlStreamWithCamera ? ", streaming" : "")})."
-                : $"Loaded {finalSpawns.Count} SQL spawns for map {_currentMapId}.";
-        }
-    }
-
-    private List<WorldSpawnRecord> FilterSpawnsToCameraAoi(IReadOnlyList<WorldSpawnRecord> spawns, int tileRadius, int maxCount)
-    {
-        if (spawns.Count == 0) return new List<WorldSpawnRecord>();
-
-        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
-        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
-
-        var inRange = new List<(WorldSpawnRecord spawn, float distSq)>();
-        foreach (var spawn in spawns)
-        {
-            var pos = SqlSpawnCoordinateConverter.ToRendererPosition(spawn.PositionWow);
-            float spawnTileX = (WoWConstants.MapOrigin - pos.X) / WoWConstants.ChunkSize;
-            float spawnTileY = (WoWConstants.MapOrigin - pos.Y) / WoWConstants.ChunkSize;
-
-            if (MathF.Abs(spawnTileX - camTileX) > tileRadius || MathF.Abs(spawnTileY - camTileY) > tileRadius)
-                continue;
-
-            float dx = pos.X - _camera.Position.X;
-            float dy = pos.Y - _camera.Position.Y;
-            float dz = pos.Z - _camera.Position.Z;
-            inRange.Add((spawn, dx * dx + dy * dy + dz * dz));
-        }
-
-        inRange.Sort((a, b) => a.distSq.CompareTo(b.distSq));
-
-        int take = maxCount > 0 ? Math.Min(maxCount, inRange.Count) : inRange.Count;
-        var result = new List<WorldSpawnRecord>(take);
-        for (int i = 0; i < take; i++)
-            result.Add(inRange[i].spawn);
-
-        return result;
-    }
-
 
     private void RefreshFileList()
     {
@@ -4492,7 +4225,7 @@ void main() {
         _terrainManager = null;
         _vlmTerrainManager?.Dispose();
         _vlmTerrainManager = null;
-        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        _sqlSpawnStreaming.ResetSqlSpawnStreamingState(clearSceneSpawns: false);
         _renderer = null;
         _loadedWmo = null;
         _loadedMdx = null;
@@ -7137,7 +6870,7 @@ void main() {
         _terrainManager = null;
         _vlmTerrainManager?.Dispose();
         _vlmTerrainManager = null;
-        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        _sqlSpawnStreaming.ResetSqlSpawnStreamingState(clearSceneSpawns: false);
     }
 
     private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
@@ -7228,7 +6961,7 @@ void main() {
         _terrainManager = null;
         _vlmTerrainManager?.Dispose();
         _vlmTerrainManager = null;
-        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        _sqlSpawnStreaming.ResetSqlSpawnStreamingState(clearSceneSpawns: false);
 
         // Show loading screen (replicates Alpha client's EnableLoadingScreen)
         _loadingScreen?.Enable(_dataSource);
@@ -7385,7 +7118,7 @@ void main() {
         _terrainManager = null;
         _vlmTerrainManager?.Dispose();
         _vlmTerrainManager = null;
-        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        _sqlSpawnStreaming.ResetSqlSpawnStreamingState(clearSceneSpawns: false);
 
         // Show loading screen
         _loadingScreen?.Enable(_dataSource);

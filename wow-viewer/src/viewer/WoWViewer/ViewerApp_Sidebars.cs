@@ -1409,7 +1409,7 @@ public partial class ViewerApp
         }
 
         DrawSelectedWmoControls();
-        DrawSelectedSqlGameObjectAnimationControls();
+        _sqlSpawnStreaming.DrawSelectedSqlGameObjectAnimationControls();
         return true;
     }
 
@@ -4872,11 +4872,11 @@ public partial class ViewerApp
         if (_worldScene?.SelectedInstance.HasValue == true && _worldScene.SelectedObjectType == Terrain.ObjectType.Mdx)
         {
             ImGui.Separator();
-            DrawSelectedSqlGameObjectAnimationControls();
+            _sqlSpawnStreaming.DrawSelectedSqlGameObjectAnimationControls();
 
             // Also show animation controls for non-SQL world MDX instances
             var inst = _worldScene.SelectedInstance.Value;
-            if (!HasSqlGameObjectForSelectedInstance())
+            if (!_sqlSpawnStreaming.HasSqlGameObjectForSelectedInstance())
             {
                 var mdxRenderer = _worldScene.Assets.GetMdx(inst.ModelKey);
                 if (mdxRenderer?.Animator != null && mdxRenderer.Animator.HasAnimation && mdxRenderer.Animator.Sequences.Count > 0)
@@ -4885,22 +4885,6 @@ public partial class ViewerApp
                 }
             }
         }
-    }
-
-    private bool HasSqlGameObjectForSelectedInstance()
-    {
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
-            return false;
-        if (_worldScene.SelectedObjectType != Terrain.ObjectType.Mdx)
-            return false;
-        if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
-            return false;
-
-        var inst = _worldScene.SelectedInstance.Value;
-        return _sqlMapSpawnsCache.Any(s =>
-            s.SpawnType == WorldSpawnType.GameObject &&
-            s.SpawnId == inst.UniqueId &&
-            (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
     }
 
     private void DrawWorldMdxAnimationControls(IAnimationController animator)
@@ -5035,70 +5019,6 @@ public partial class ViewerApp
             ImGui.EndCombo();
         }
         return selected;
-    }
-
-
-    private void DrawPopulationSubTabContent()
-    {
-        if (_worldScene == null)
-        {
-            ImGui.TextDisabled("Load a world to use SQL Population.");
-            return;
-        }
-
-        ImGui.TextDisabled("Optional alpha-core SQL population. This is separate from ADT/WMO/MDX placement data.");
-        ImGui.InputTextWithHint("##populationSqlRoot", "Path to alpha-core root (example: external/alpha-core)", ref _sqlAlphaCoreRoot, 1024);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("WoWViewer reads NPC/GameObject spawns from alpha-core SQL dumps (etc/databases/world + dbc).");
-
-        DrawToolbarPopupButton("SQL Actions", string.Empty, "##PopulationSqlActionsPopup", () =>
-        {
-            if (ImGui.Button("Use Submodule Path"))
-            {
-                string candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core"));
-                _sqlAlphaCoreRoot = candidate;
-                ImGui.CloseCurrentPopup();
-            }
-
-            bool canLoadSql = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
-            if (!canLoadSql)
-                ImGui.BeginDisabled();
-            if (ImGui.Button("Load SQL Spawns (Current Map)"))
-            {
-                LoadSqlSpawnsForCurrentMap();
-                ImGui.CloseCurrentPopup();
-            }
-            if (!canLoadSql)
-                ImGui.EndDisabled();
-
-            if (ImGui.Button("Clear SQL Spawns"))
-            {
-                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
-                _sqlSpawnStatus = "Cleared SQL spawns.";
-                ImGui.CloseCurrentPopup();
-            }
-        });
-
-        bool settingsChanged = false;
-        settingsChanged |= ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures);
-        ImGui.SameLine();
-        settingsChanged |= ImGui.Checkbox("GameObject Spawns", ref _sqlIncludeGameObjects);
-        settingsChanged |= ImGui.Checkbox("AOI Tile Filter", ref _sqlUseAoiFilter);
-        if (_sqlUseAoiFilter)
-            settingsChanged |= ImGui.SliderInt("AOI Tile Radius", ref _sqlAoiTileRadius, 1, 16);
-        settingsChanged |= ImGui.Checkbox("Stream With Camera", ref _sqlStreamWithCamera);
-        settingsChanged |= ImGui.SliderInt("Max SQL Spawns", ref _sqlMaxSpawns, 100, 20000);
-        settingsChanged |= ImGui.SliderFloat("GO MDX Scale", ref _sqlGameObjectMdxScaleMultiplier, 0.10f, 3.00f, "%.2fx");
-        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
-        if (settingsChanged && _sqlMapSpawnsCache != null)
-        {
-            _sqlForceStreamRefresh = true;
-            if (!_sqlStreamWithCamera || !_sqlUseAoiFilter)
-                ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
-        }
-
-        ImGui.TextDisabled($"Status: {_sqlSpawnStatus}");
-        ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawnWmoCount} WMO)");
     }
 
     // (DrawQuickControlsPopoutBody removed — Quick is now a direct workbench destination.)

@@ -88,7 +88,7 @@ public partial class ViewerApp
 
     void Workbench.Pages.IEditorPageHost.DrawTasksAndWorkspace() => DrawArchaeologyEditorTasksSubTab();
     void Workbench.Pages.IEditorPageHost.DrawObjectLibrary() => DrawRosettaObjectLibrarySubTab();
-    void Workbench.Pages.IEditorPageHost.DrawPopulation() => DrawPopulationSubTabContent();
+    void Workbench.Pages.IEditorPageHost.DrawPopulation() => _sqlSpawnStreaming.DrawPopulationSubTabContent();
     void Workbench.Pages.IEditorPageHost.DrawTerrainLab() => DrawTerrainLabSubTab();
     void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => DrawArchaeologyEditorImportsSubTab();
     void Workbench.Pages.IEditorPageHost.DrawConverters() => DrawConvertersSubTabContent();

@@ -137,5 +137,10 @@ internal interface IViewerAppHost
     ref string? SelectedPlacementSaveTargetPath { get; }
     ref WorldScene? WorldScene { get; }
     void RefreshSelectedWorldObjectInfo();
+    ref int CurrentMapId { get; }
+    ref bool SqlForceStreamRefresh { get; }
+    ref SqlWorldPopulationService? SqlPopulationService { get; }
+    void DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent);
+    void ExportAnimationStateJson(IAnimationController animator, int currentSeq, string currentSeqName, float seqStart, float seqEnd);
     // HOST-IFACE-END
 }
