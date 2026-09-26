@@ -27,7 +27,7 @@ Re-ordered plan approved 2026-09-23. E1 and E3 code landed 2026-09-25, then the 
 - [ ] U01-T005 E2 operator smoke on a legacy and a modern map.
 - [x] U01-T006 E3 `ViewerApp` menu bar + converter dialogs. — 2026-09-25: `MainMenuBarService`, `ConverterDialogsService`, `DatasetExportDialogsService`, `WorldObjectsPanelService`; runtime not claimed. Receipt: [evidence/u01-viewerapp-extraction-2026-09-25.md](evidence/u01-viewerapp-extraction-2026-09-25.md).
 - [ ] U01-T007 E3 operator smoke.
-- [ ] U01-T008 E4 selection/hover service (228 T004–T011).
+- [x] U01-T008 E4 selection/hover service (228 T004–T011). — 2026-09-26: 228 T004–T010 done (pure `WorldSceneSelectionService` in Core.Runtime, 20 tests incl. randomized equivalence, viewer adapter, `WorldScene` seam); 228 T011 smoke is U01-T009. Runtime not claimed. Receipt: [evidence/u01-e4-selection-2026-09-26.md](evidence/u01-e4-selection-2026-09-26.md).
 - [ ] U01-T009 E4 operator smoke; update AGENTS.md §10 measured line counts.
 
 ### U-01 ViewerApp extraction campaign (operator direction 2026-09-25, spec.md amendment)

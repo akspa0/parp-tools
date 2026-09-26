@@ -112,21 +112,6 @@ public sealed partial class Pm4OverlayScene
         return true;
     }
 
-    internal bool ShouldPreferPm4HoverBrush(float pm4DistanceSq, float pm4Depth, float sceneDistanceSq, float sceneDepth)
-    {
-        if (_pm4OverlayIgnoreDepth)
-            return true;
-
-        const float depthEpsilon = 0.0025f;
-        if (sceneDepth + depthEpsilon < pm4Depth)
-            return false;
-
-        if (pm4Depth + depthEpsilon < sceneDepth)
-            return true;
-
-        return pm4DistanceSq <= sceneDistanceSq;
-    }
-
     public bool SelectPm4ObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
     {
         if (TryPickPm4ObjectByRay(rayOrigin, rayDir, out var bestKey, out var bestGroupKey, out _))

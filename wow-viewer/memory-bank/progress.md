@@ -1,6 +1,16 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
+
+## 2026-09-26 — U-01 E4: world-scene selection policy into Core (code only)
+
+Archived 228 T004–T010: pure `WorldSceneSelectionService` + records in
+`Core.Runtime/World/Selection/` (click ranking, hover-by-ray with WMO fall-through, liquids, brush choice,
+scene-vs-PM4 arbitration, hover-range policy); viewer adapter `Terrain/Scene/Selection/`; `WorldScene`
+decision code replaced by the seam (8,326 → 8,275), overlay's brush rule moved to Core. 20 new tests incl.
+600-trial randomized equivalence against the old algorithm; solution build 0 errors; test failure set
+unchanged. Hover/click smoke is U01-T009 (operator). Receipt:
+`specs/251-epic-viewer-ux-and-code-health/evidence/u01-e4-selection-2026-09-26.md`.
 
 ## 2026-09-25 — U-01 ViewerApp campaign: 42,973 → 2,512 lines (E3 + T010–T012, code only)
 

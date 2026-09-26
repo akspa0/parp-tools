@@ -81,6 +81,7 @@ using static WoWViewer.Terrain.Pm4OverlayCacheCodec;
 using static WoWViewer.Terrain.Pm4OverlayGeometry;
 using static WoWViewer.Terrain.Pm4OverlayCoordinates;
 using static WoWViewer.Terrain.Pm4OverlayColors;
+using WowViewer.Core.Runtime.World.Selection;
 
 namespace WoWViewer.Terrain;
 
@@ -7059,20 +7060,18 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         bool hasPm4RayHit = _pm4Overlay._showPm4Overlay
             && _pm4Overlay.TryBuildHoveredPm4InfoByRay(rayOrigin, rayDir, out pm4RayInfo, out pm4RayDistance);
 
-        if (hasSceneRayHit || hasPm4RayHit)
+        WorldSceneHoverSource raySource = WorldSceneSelectionService.ChooseHoverRaySource(
+            hasSceneRayHit, sceneRayDistance, hasPm4RayHit, pm4RayDistance, _pm4Overlay._pm4OverlayIgnoreDepth);
+        if (raySource == WorldSceneHoverSource.Pm4)
         {
-            const float rayDistanceEpsilon = 0.01f;
-            if (hasPm4RayHit && (!hasSceneRayHit || _pm4Overlay._pm4OverlayIgnoreDepth || pm4RayDistance < sceneRayDistance - rayDistanceEpsilon))
-            {
-                _hoveredAssetInfo = pm4RayInfo.WithPreciseRayHit();
-                return;
-            }
+            _hoveredAssetInfo = pm4RayInfo.WithPreciseRayHit();
+            return;
+        }
 
-            if (hasSceneRayHit)
-            {
-                _hoveredAssetInfo = sceneRayInfo.WithPreciseRayHit();
-                return;
-            }
+        if (raySource == WorldSceneHoverSource.Scene)
+        {
+            _hoveredAssetInfo = sceneRayInfo.WithPreciseRayHit();
+            return;
         }
 
         bool hasSceneBrushHit = TryBuildHoveredSceneInfo(
@@ -7102,7 +7101,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
                 out pm4BrushDistanceSq,
                 out pm4BrushDepth);
 
-        if (hasPm4BrushHit && (!hasSceneBrushHit || _pm4Overlay.ShouldPreferPm4HoverBrush(pm4BrushDistanceSq, pm4BrushDepth, sceneBrushDistanceSq, sceneBrushDepth)))
+        WorldSceneHoverSource brushSource = WorldSceneSelectionService.ChooseHoverBrushSource(
+            hasSceneBrushHit, sceneBrushDistanceSq, sceneBrushDepth,
+            hasPm4BrushHit, pm4BrushDistanceSq, pm4BrushDepth, _pm4Overlay._pm4OverlayIgnoreDepth);
+        if (brushSource == WorldSceneHoverSource.Pm4)
         {
             _hoveredAssetInfo = new HoveredAssetInfo(
                 pm4BrushInfo.AssetKind,
@@ -7150,31 +7152,17 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         out float bestDepth)
     {
         info = default;
-        float currentBestDistanceSq = float.MaxValue;
-        float currentBestDepth = float.MaxValue;
         bestDistanceSq = float.MaxValue;
         bestDepth = float.MaxValue;
 
-        HoveredAssetInfo? bestInfo = null;
-        int hitCount = 0;
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer;
+        var candidateInfos = new List<HoveredAssetInfo>();
+        var brushCandidates = new List<WorldSceneBrushCandidate>();
 
         void ConsiderCandidate(HoveredAssetInfo candidateInfo, float distanceSq, float depth)
         {
-            if (!IsHoverPickPositionAllowed(candidateInfo.WorldPosition))
-                return;
-
-            hitCount++;
-
-            const float distanceEpsilon = 0.01f;
-            if (!bestInfo.HasValue
-                || distanceSq < currentBestDistanceSq - distanceEpsilon
-                || (MathF.Abs(distanceSq - currentBestDistanceSq) <= distanceEpsilon && depth < currentBestDepth))
-            {
-                bestInfo = candidateInfo;
-                currentBestDistanceSq = distanceSq;
-                currentBestDepth = depth;
-            }
+            brushCandidates.Add(new WorldSceneBrushCandidate(candidateInfos.Count, distanceSq, depth, candidateInfo.WorldPosition));
+            candidateInfos.Add(candidateInfo);
         }
 
         if (_wmosVisible)
@@ -7222,12 +7210,21 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
             }
         }
 
-        if (!bestInfo.HasValue)
+        // Range check, cursor-distance/depth choice and the eligible count live in the Core selection
+        // service (Spec 228; Epic 251 U-01 E4). Candidates keep their WMO, MDX, liquid order.
+        WorldSceneBrushResult brush = WorldSceneSelectionService.SelectBrush(
+            new WorldSceneSelectionPolicy(
+                _limitHoveredAssetRange,
+                ComputeEffectiveHoveredAssetMaxDistance(),
+                _limitHoveredAssetRange ? _pm4Overlay.GetPm4LoadAnchorCameraPosition() : Vector3.Zero),
+            brushCandidates);
+        if (brush.Status != WorldSceneSelectionStatus.Hit)
             return false;
 
-        HoveredAssetInfo bestCandidate = bestInfo.Value;
-        bestDistanceSq = currentBestDistanceSq;
-        bestDepth = currentBestDepth;
+        HoveredAssetInfo bestCandidate = candidateInfos[brush.BestId];
+        int hitCount = brush.EligibleCount;
+        bestDistanceSq = brush.BestScreenDistanceSq;
+        bestDepth = brush.BestDepth;
         info = new HoveredAssetInfo(
             bestCandidate.AssetKind,
             bestCandidate.DisplayName,
@@ -7252,30 +7249,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         // picker so WMO doodads participate in hover and an enclosing WMO AABB cannot hide them.
         var sceneHits = new List<SceneObjectPickHit>();
         CollectSceneObjectPickHits(rayOrigin, rayDir, sceneHits, logHits: false);
-        var visibleSceneHits = sceneHits
-            .Where(hit => hit.ObjectType switch
-            {
-                ObjectType.Wmo or ObjectType.WmoDoodad => _wmosVisible,
-                ObjectType.Mdx => _doodadsVisible,
-                _ => false,
-            })
-            .ToList();
-        IReadOnlyList<SceneObjectPickHit> filteredSceneHits = ApplyWmoContainerFallThrough(visibleSceneHits);
-        SceneObjectPickHit? bestSceneHit = filteredSceneHits
-            .Where(hit => IsHoverPickDistanceAllowed(hit.Distance))
-            .OrderBy(static hit => hit.Distance)
-            .Cast<SceneObjectPickHit?>()
-            .FirstOrDefault();
 
-        if (bestSceneHit.HasValue)
-        {
-            SceneObjectPickHit hit = bestSceneHit.Value;
-            info = hit.ObjectType == ObjectType.WmoDoodad
-                ? BuildHoveredWmoDoodadInfo(hit)
-                : BuildHoveredScenePickHitInfo(hit);
-            distance = hit.Distance;
-        }
-
+        var liquidTargets = new List<WorldSceneRayTarget>();
         if (_showWlLiquids && _wlLoader != null)
         {
             Vector3 padding = new(2f, 2f, 1f);
@@ -7285,44 +7260,34 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
                 if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.BodyKey))
                     continue;
 
-                float t = RayAABBIntersect(rayOrigin, rayDir, body.BoundsMin - padding, body.BoundsMax + padding);
-                if (t < 0f || !IsHoverPickDistanceAllowed(t) || t >= distance)
-                    continue;
-
-                info = BuildHoveredWlLiquidInfo(body);
-                distance = t;
+                liquidTargets.Add(new WorldSceneRayTarget(i, RayAABBIntersect(rayOrigin, rayDir, body.BoundsMin - padding, body.BoundsMax + padding)));
             }
         }
 
-        return distance < float.MaxValue;
-    }
+        // Visibility, WMO container fall-through, range and nearest-first live in the Core
+        // selection service (Spec 228; Epic 251 U-01 E4).
+        WorldSceneHoverRayResult hover = WorldSceneSelectionAdapter.ResolveHoverRay(
+            sceneHits,
+            new WorldSceneSelectionPolicy(_limitHoveredAssetRange, ComputeEffectiveHoveredAssetMaxDistance(), Vector3.Zero),
+            _wmosVisible,
+            _doodadsVisible,
+            liquidTargets);
 
-    private static IReadOnlyList<SceneObjectPickHit> ApplyWmoContainerFallThrough(IReadOnlyList<SceneObjectPickHit> hits)
-    {
-        if (hits.Count <= 1)
-            return hits;
-
-        var candidates = new WmoContainerFallThroughFilter.CandidateObject[hits.Count];
-        for (int index = 0; index < hits.Count; index++)
+        if (hover.Target == WorldSceneHoverRayTarget.SceneObject)
         {
-            SceneObjectPickHit hit = hits[index];
-            candidates[index] = new WmoContainerFallThroughFilter.CandidateObject(
-                index,
-                hit.ObjectType == ObjectType.Wmo,
-                hit.BoundsMin,
-                hit.BoundsMax,
-                hit.SelectionPoint);
+            SceneObjectPickHit hit = sceneHits[hover.Id];
+            info = hit.ObjectType == ObjectType.WmoDoodad
+                ? BuildHoveredWmoDoodadInfo(hit)
+                : BuildHoveredScenePickHitInfo(hit);
+            distance = hit.Distance;
+        }
+        else if (hover.Target == WorldSceneHoverRayTarget.LiquidBody)
+        {
+            info = BuildHoveredWlLiquidInfo(_wlLoader!.Bodies[hover.Id]);
+            distance = hover.Distance;
         }
 
-        IReadOnlyList<WmoContainerFallThroughFilter.CandidateObject> filtered =
-            WmoContainerFallThroughFilter.ApplyFallThrough(candidates);
-        if (filtered.Count == hits.Count)
-            return hits;
-
-        var result = new List<SceneObjectPickHit>(filtered.Count);
-        foreach (WmoContainerFallThroughFilter.CandidateObject candidate in filtered)
-            result.Add(hits[candidate.Id]);
-        return result;
+        return distance < float.MaxValue;
     }
 
     private static HoveredAssetInfo BuildHoveredScenePickHitInfo(in SceneObjectPickHit hit)
@@ -7531,25 +7496,12 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         AppendWmoDoodadPickHits(rayOrigin, rayDir, hits, clickedChunkKey, clickedWorldPoint);
         AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _mdxInstances, ObjectType.Mdx, new Vector3(0.1f, 0.1f, 0.1f), clickedChunkKey, clickedWorldPoint);
 
-        if (clickedChunkKey.HasValue && hits.Any(static hit => hit.SharesClickedChunk))
-            hits.RemoveAll(static hit => !hit.SharesClickedChunk);
-
-        hits.Sort(static (left, right) =>
-        {
-            int clickedChunkCompare = right.SharesClickedChunk.CompareTo(left.SharesClickedChunk);
-            if (clickedChunkCompare != 0)
-                return clickedChunkCompare;
-
-            int chunkDistanceCompare = left.ChunkGridDistance.CompareTo(right.ChunkGridDistance);
-            if (chunkDistanceCompare != 0)
-                return chunkDistanceCompare;
-
-            int centroidCompare = left.SelectionPointDistanceSq.CompareTo(right.SelectionPointDistanceSq);
-            if (centroidCompare != 0)
-                return centroidCompare;
-
-            return left.Distance.CompareTo(right.Distance);
-        });
+        // Range limit, clicked-chunk filter and click ranking live in the Core selection service
+        // (Spec 228; Epic 251 U-01 E4).
+        WorldSceneSelectionAdapter.RankClickHits(
+            hits,
+            clickedChunkKey.HasValue,
+            new WorldSceneSelectionPolicy(_limitHoveredAssetRange, ComputeEffectiveHoveredAssetMaxDistance(), Vector3.Zero));
 
         if (!logHits || hits.Count == 0)
             return;
@@ -7577,7 +7529,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
             if (ShouldHideObjectInstanceByUniqueId(instance))
                 continue;
 
-            if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, instance, padding, out float distance) || !IsHoverPickDistanceAllowed(distance))
+            if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, instance, padding, out float distance))
                 continue;
 
             Vector3 selectionPoint = GetSceneObjectSelectionPoint(instance);
@@ -7637,9 +7589,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
 
             foreach (var dh in doodadHitsScratch)
             {
-                if (!IsHoverPickDistanceAllowed(dh.distance))
-                    continue;
-
                 bool sharesClickedChunk = clickedChunkKey.HasValue
                     && TryGetTerrainChunkKey(dh.hitPoint.X, dh.hitPoint.Y, out var chunkKey)
                     && chunkKey == clickedChunkKey.Value;
@@ -7744,7 +7693,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         if (!_limitHoveredAssetRange)
             return true;
 
-        return distance <= ComputeEffectiveHoveredAssetMaxDistance();
+        return new WorldSceneSelectionPolicy(true, ComputeEffectiveHoveredAssetMaxDistance(), Vector3.Zero).IsDistanceAllowed(distance);
     }
 
     private bool IsHoverPickPositionAllowed(Vector3 worldPosition)
@@ -7753,7 +7702,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
             return true;
 
         Vector3 cameraPosition = _pm4Overlay.GetPm4LoadAnchorCameraPosition();
-        return Vector3.Distance(cameraPosition, worldPosition) <= ComputeEffectiveHoveredAssetMaxDistance();
+        return new WorldSceneSelectionPolicy(true, ComputeEffectiveHoveredAssetMaxDistance(), cameraPosition).IsPositionAllowed(worldPosition);
     }
 
     /// <summary>

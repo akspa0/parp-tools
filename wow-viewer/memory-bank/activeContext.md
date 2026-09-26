@@ -1,6 +1,6 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-25 · Branch: `v0.6.0-dev`
+Last updated: 2026-09-26 · Branch: `v0.6.0-dev`
 
 ## Fresh-chat route
 
@@ -18,10 +18,11 @@ on-demand history, never default reading.
 | Lane | Code | Owed (operator) | Next agent step |
 |---|---|---|---|
 | **R-10** modern-data lighting perf (Epic 249) | T002, T004–T006 landed 2026-09-23 | T003 baseline + T007 after-capture on `wow_classic_beta` 1.60.1 `Azeroth`; T008 decides R-10e | none until captures exist |
-| **U-01** god-class decomposition (Epic 251) | **E1 + E3 + ViewerApp campaign landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`WorldScene.cs` 17,175 → 8,326); `ViewerApp` class 42,973 lines / 29 files → 2,512 / 6 (51 services + 3 static helpers under `Workbench/Services/`) | U01-T003 E1 smoke; U01-T007 / T013 smoke of every moved ViewerApp surface | E2 `Render()` split waits for R-10's after-capture; E4 selection service is the next agent-owned step |
+| **U-01** god-class decomposition (Epic 251) | **E1 + E3 + ViewerApp campaign landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`WorldScene.cs` 17,175 → 8,326); `ViewerApp` class 42,973 lines / 29 files → 2,512 / 6 (51 services + 3 static helpers under `Workbench/Services/`) | U01-T003 E1 smoke; U01-T007 / T013 smoke of every moved ViewerApp surface; U01-T009 E4 hover/click smoke | E4 code landed 2026-09-26 (selection policy → `Core.Runtime/World/Selection`); E2 `Render()` split waits for R-10's after-capture |
 
 Receipts: [E1](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e1-pm4-extraction-2026-09-25.md) ·
-[ViewerApp campaign](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-viewerapp-extraction-2026-09-25.md).
+[ViewerApp campaign](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-viewerapp-extraction-2026-09-25.md) ·
+[E4 selection](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e4-selection-2026-09-26.md).
 **Where code lives now:** viewer features are owned services under `src/viewer/WoWViewer/Workbench/Services/<Feature>/`
 (namespace `WoWViewer`); they reach app state only through `IViewerAppHost` (implemented in
 `ViewerApp_Host.cs`). `ViewerApp.cs` is the shell: fields, composition root, window lifecycle. New behaviour
@@ -69,7 +70,7 @@ sidebar buttons never clicked.
 ## Handoff
 
 **Immediate:** operator runs R10-T003/T007 captures and the U-01 smoke passes (U01-T003 PM4 overlay;
-U01-T007/T013 every moved ViewerApp surface — checklist in the campaign receipt). Next agent-owned U-01 step
-is E4 (selection/hover as a Core service) or E2 once R-10's after-capture exists. Do not start any other epic
+U01-T007/T013 every moved ViewerApp surface — checklist in the campaign receipt). U01-T009 E4 hover/click smoke is owed too.
+Next agent-owned U-01 step is E2 once R-10's after-capture exists. Do not start any other epic
 item before it is marked Want. Superseded dashboard:
 [archive/2026-09-23-pre-reconciliation-active-context.md](archive/2026-09-23-pre-reconciliation-active-context.md).

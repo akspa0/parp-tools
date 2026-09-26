@@ -92,3 +92,10 @@ How to add viewer behaviour now: put it in the owning service (or a new one unde
 if it needs app state the service cannot reach, add one member to `IViewerAppHost` and its one-line
 implementation to `ViewerApp_Host.cs`. Do not add members to `ViewerApp` (AGENTS.md §10).
 
+**Spec-sync 2026-09-26 (E4 as built).** Follows archived 228 T004–T010 and its data model. Beyond the
+click/hover-ray ranking, the service also owns the brush (screen-space) choice and both scene-vs-PM4
+arbitration rules, because the data model names PM4 depth preference and hover range as explicit policy
+inputs; the hover-range filter moved from hit collection into the service. Hit collection and
+`HoveredAssetInfo` formatting stay in the viewer. Receipt:
+[evidence/u01-e4-selection-2026-09-26.md](evidence/u01-e4-selection-2026-09-26.md).
+
