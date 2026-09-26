@@ -119,3 +119,11 @@ more sane."*
 an owned service class, one extraction per step, in the same way as E1: behaviour-preserving,
 verbatim bodies, build + audit + tests per step, receipts per §9.2. No feature, UI or behaviour change
 rides on any step. E2 (`WorldScene.Render()`) still waits for R-10's after-capture.
+
+## Amendment 2026-09-26 — WorldScene decomposition spun out
+
+Operator: *"yes, write up a spec for that, so we can get the WorldScene cut down too."* The remaining
+`WorldScene.cs` split beyond E1/E2/E4 is specified in
+[Spec 255](../255-worldscene-decomposition/spec.md) (plan awaiting operator approval). E2 stays tracked
+here as U01-T004/T005 and is listed as the last step of Spec 255.
+

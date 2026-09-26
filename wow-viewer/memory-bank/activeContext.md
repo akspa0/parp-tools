@@ -71,6 +71,7 @@ sidebar buttons never clicked.
 
 **Immediate:** operator runs R10-T003/T007 captures and the U-01 smoke passes (U01-T003 PM4 overlay;
 U01-T007/T013 every moved ViewerApp surface — checklist in the campaign receipt). U01-T009 E4 hover/click smoke is owed too.
-Next agent-owned U-01 step is E2 once R-10's after-capture exists. Do not start any other epic
+Next agent-owned U-01 work: [Spec 255 WorldScene decomposition](../specs/255-worldscene-decomposition/spec.md)
+steps W0–W7 once the operator approves its plan (T001); W8/W9 and E2 wait for R-10's after-capture. Do not start any other epic
 item before it is marked Want. Superseded dashboard:
 [archive/2026-09-23-pre-reconciliation-active-context.md](archive/2026-09-23-pre-reconciliation-active-context.md).

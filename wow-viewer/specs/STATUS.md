@@ -29,6 +29,12 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 | [253 PM4/PD4 Navmesh](253-epic-pm4-navmesh-research/spec.md) | Decode, field naming, matching, placement restore, generation | P-01…P-11 | Triage pending |
 | [254 Datasets, Client Datastore & Terrain ML](254-epic-datasets-and-terrain-ml/spec.md) | Multi-build datastore, v50/v60 models, archaeology tooling | D-01…D-30, D-9x | Triage pending |
 
+## Active specs
+
+| Spec | Scope | Status |
+|---|---|---|
+| [255 WorldScene Decomposition](255-worldscene-decomposition/spec.md) | Split `WorldScene.cs` (8,275 lines) into owned scene services, continuing Epic 251 U-01 | **Draft — plan awaiting operator approval (T001)**; render-path steps gated on R-10 |
+
 ## Operator verification owed on shipped code
 
 Each epic's `tasks.md` carries a **verification sweep** (V-tasks): proof-only checks on code that
