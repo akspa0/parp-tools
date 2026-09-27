@@ -122,5 +122,8 @@ internal interface IWorldSceneHost
     Dictionary<(int, int), List<ObjectInstance>> TileWmoInstances { get; }
     SkyDomeRenderer SkyDome { get; }
     ref List<ObjectInstance> SkyboxInstances { get; }
+    List<ObjectInstance> ExternalMdxInstances { get; }
+    List<ObjectInstance> ExternalSkyboxInstances { get; }
+    List<ObjectInstance> ExternalWmoInstances { get; }
     // HOST-IFACE-END
 }

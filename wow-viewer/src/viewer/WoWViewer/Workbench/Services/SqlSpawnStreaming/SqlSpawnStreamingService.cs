@@ -229,7 +229,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         _sqlLastCameraTile = null;
         _sqlForceStreamRefresh = false;
         if (clearSceneSpawns && _worldScene != null)
-            _worldScene.ClearExternalSpawns();
+            _worldScene.ExternalSpawns.ClearExternalSpawns();
     }
 
     private void LoadSqlSpawnsForCurrentMap()
@@ -295,7 +295,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         if (_worldScene == null)
             return;
 
-        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
+        _worldScene.ExternalSpawns.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
 
         IReadOnlyList<WorldSpawnRecord> finalSpawns = mapSpawns;
         if (_sqlUseAoiFilter)
@@ -303,7 +303,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         else if (_sqlMaxSpawns > 0 && mapSpawns.Count > _sqlMaxSpawns)
             finalSpawns = mapSpawns.Take(_sqlMaxSpawns).ToList();
 
-        _worldScene.SetExternalSpawns(finalSpawns);
+        _worldScene.ExternalSpawns.SetExternalSpawns(finalSpawns);
 
         if (updateStatus)
         {
@@ -414,7 +414,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         settingsChanged |= ImGui.Checkbox("Stream With Camera", ref _sqlStreamWithCamera);
         settingsChanged |= ImGui.SliderInt("Max SQL Spawns", ref _sqlMaxSpawns, 100, 20000);
         settingsChanged |= ImGui.SliderFloat("GO MDX Scale", ref _sqlGameObjectMdxScaleMultiplier, 0.10f, 3.00f, "%.2fx");
-        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
+        _worldScene.ExternalSpawns.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
         if (settingsChanged && _sqlMapSpawnsCache != null)
         {
             _sqlForceStreamRefresh = true;
@@ -423,6 +423,6 @@ var seq = animator.Sequences[animator.CurrentSequence];
         }
 
         ImGui.TextDisabled($"Status: {_sqlSpawnStatus}");
-        ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawnWmoCount} WMO)");
+        ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawns.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawns.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawns.ExternalSpawnWmoCount} WMO)");
     }
 }

@@ -214,6 +214,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     public SceneSelectionState Selection => _selection;
     private readonly SceneAtmosphere _atmosphere;
     public SceneAtmosphere Atmosphere => _atmosphere;
+    private readonly ExternalSpawnLayer _externalSpawns;
+    public ExternalSpawnLayer ExternalSpawns => _externalSpawns;
     // SCENE-SERVICES-END
 
     // IWorldSceneHost (Spec 255): the scene state the services read, implemented explicitly.
@@ -247,6 +249,9 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     Dictionary<(int, int), List<ObjectInstance>> IWorldSceneHost.TileWmoInstances => _tileWmoInstances;
     SkyDomeRenderer IWorldSceneHost.SkyDome => _skyDome;
     ref List<ObjectInstance> IWorldSceneHost.SkyboxInstances => ref _skyboxInstances;
+    List<ObjectInstance> IWorldSceneHost.ExternalMdxInstances => _externalMdxInstances;
+    List<ObjectInstance> IWorldSceneHost.ExternalSkyboxInstances => _externalSkyboxInstances;
+    List<ObjectInstance> IWorldSceneHost.ExternalWmoInstances => _externalWmoInstances;
     // WORLD-SCENE-HOST-IMPL-END
 
     private Vector3 _lastRenderedCameraPosition;
@@ -391,10 +396,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     public int WmoInstanceCount => _wmoInstances.Count;
     public int UniqueMdxModels => _assets.MdxModelsLoaded;
     public int UniqueWmoModels => _assets.WmoModelsLoaded;
-    public int ExternalSpawnMdxCount => _externalMdxInstances.Count;
-    public int ExternalSpawnWmoCount => _externalWmoInstances.Count;
-    public int ExternalSpawnInstanceCount => ExternalSpawnMdxCount + ExternalSpawnWmoCount;
-    public float SqlGameObjectMdxScaleMultiplier { get; set; } = 1.0f;
     public TerrainManager Terrain => _terrainManager;
     public WorldAssetManager Assets => _assets;
     public bool IsWmoBased => _terrainManager.Adapter.IsWmoBased;
@@ -830,6 +831,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _objectFilters = new SceneObjectFilters(this);
         _selection = new SceneSelectionState(this);
         _atmosphere = new SceneAtmosphere(this);
+        _externalSpawns = new ExternalSpawnLayer(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -874,6 +876,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _objectFilters = new SceneObjectFilters(this);
         _selection = new SceneSelectionState(this);
         _atmosphere = new SceneAtmosphere(this);
+        _externalSpawns = new ExternalSpawnLayer(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -2176,136 +2179,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         node.UpdateLocalBoundsForStreaming(instance.LocalBoundsMin, instance.LocalBoundsMax, instance.BoundsResolved);
     }
 
-    public void ClearExternalSpawns()
-    {
-        _externalMdxInstances.Clear();
-        _externalSkyboxInstances.Clear();
-        _externalWmoInstances.Clear();
-        _instancesDirty = true;
-    }
-
-    public void SetExternalSpawns(IEnumerable<WorldSpawnRecord> spawns)
-    {
-        _externalMdxInstances.Clear();
-        _externalSkyboxInstances.Clear();
-        _externalWmoInstances.Clear();
-
-        foreach (var spawn in spawns)
-        {
-            if (string.IsNullOrWhiteSpace(spawn.ModelPath))
-                continue;
-
-            string modelPath = spawn.ModelPath.Replace('/', '\\');
-            bool isWmo = modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
-
-            string key = WorldAssetManager.NormalizeKey(modelPath);
-            float orientationRadians = spawn.OrientationWowRadians;
-            float yawOffsetRadians = spawn.SpawnType == WorldSpawnType.Creature ? MathF.PI : 0f;
-            float finalYawRadians = orientationRadians + yawOffsetRadians;
-            float finalYawDegrees = finalYawRadians * (180f / MathF.PI);
-            float baseScale = spawn.EffectiveScale > 0 ? spawn.EffectiveScale : 1.0f;
-            float mdxScale = baseScale;
-            if (spawn.SpawnType == WorldSpawnType.GameObject)
-                mdxScale *= SqlGameObjectMdxScaleMultiplier > 0 ? SqlGameObjectMdxScaleMultiplier : 1.0f;
-
-            var pos = SqlSpawnCoordinateConverter.ToRendererPosition(spawn.PositionWow);
-            var (tileX, tileY) = ComputeTileCoordinates(pos);
-
-            if (isWmo)
-            {
-                var transform = Matrix4x4.CreateRotationZ(finalYawRadians)
-                    * Matrix4x4.CreateTranslation(pos);
-
-                Vector3 localMin, localMax, worldMin, worldMax;
-                if (_assets.TryGetWmoPlacementBounds(key, out localMin, out localMax))
-                {
-                    TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
-                }
-                else
-                {
-                    localMin = localMax = Vector3.Zero;
-                    worldMin = pos - new Vector3(2f);
-                    worldMax = pos + new Vector3(2f);
-                }
-
-                _externalWmoInstances.Add(new ObjectInstance
-                {
-                    ModelKey = key,
-                    Transform = transform,
-                    BoundsMin = worldMin,
-                    BoundsMax = worldMax,
-                    LocalBoundsMin = localMin,
-                    LocalBoundsMax = localMax,
-                    BoundsResolved = localMin != Vector3.Zero || localMax != Vector3.Zero,
-                    ModelName = Path.GetFileName(modelPath),
-                    ModelPath = modelPath,
-                    PlacementPosition = pos,
-                    PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
-                    PlacementScale = 1.0f,
-                    UniqueId = spawn.SpawnId,
-                    PlacementEntryIndex = -1,
-                    TileX = tileX,
-                    TileY = tileY,
-                    HasTileCoordinate = true
-                });
-            }
-            else
-            {
-                var transform = Matrix4x4.CreateScale(mdxScale)
-                    * Matrix4x4.CreateRotationZ(finalYawRadians)
-                    * Matrix4x4.CreateTranslation(pos);
-
-                Vector3 bbMin, bbMax;
-                Vector3 localMin = Vector3.Zero;
-                Vector3 localMax = Vector3.Zero;
-                bool boundsResolved = false;
-                if (_assets.TryGetMdxBounds(key, out var modelMin, out var modelMax))
-                {
-                    localMin = modelMin;
-                    localMax = modelMax;
-                    boundsResolved = true;
-                    TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
-                }
-                else
-                {
-                    bbMin = pos - new Vector3(2f);
-                    bbMax = pos + new Vector3(2f);
-                }
-
-                var instance = new ObjectInstance
-                {
-                    ModelKey = key,
-                    Transform = transform,
-                    BoundsMin = bbMin,
-                    BoundsMax = bbMax,
-                    LocalBoundsMin = localMin,
-                    LocalBoundsMax = localMax,
-                    BoundsResolved = boundsResolved,
-                    ModelName = Path.GetFileName(modelPath),
-                    ModelPath = modelPath,
-                    PlacementPosition = pos,
-                    PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
-                    PlacementScale = mdxScale,
-                    UniqueId = spawn.SpawnId,
-                    PlacementEntryIndex = -1,
-                    TileX = tileX,
-                    TileY = tileY,
-                    HasTileCoordinate = true
-                };
-
-                if (SceneAtmosphere.IsSkyboxModelPath(modelPath))
-                    _externalSkyboxInstances.Add(instance);
-                else
-                    _externalMdxInstances.Add(instance);
-            }
-        }
-
-        ViewerLog.Info(ViewerLog.Category.Terrain,
-            $"SQL spawns injected: {_externalMdxInstances.Count} MDX, {_externalSkyboxInstances.Count} skybox, {_externalWmoInstances.Count} WMO");
-
-        _instancesDirty = true;
-    }
-
     /// <summary>
     /// Transform an axis-aligned bounding box through a matrix by transforming all 8 corners
     /// and computing the new AABB that encloses them.
@@ -2646,13 +2519,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
 
             remaining -= rowSize;
         }
-    }
-
-    private static (int tileX, int tileY) ComputeTileCoordinates(Vector3 rendererPosition)
-    {
-        int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - rendererPosition.X) / WoWConstants.ChunkSize);
-        int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - rendererPosition.Y) / WoWConstants.ChunkSize);
-        return (tileX, tileY);
     }
 
     private void PrepareSceneGraphFrameVisibility(
