@@ -147,3 +147,26 @@ What changed: the `WorldScene` WMO candidate loop again uses the whole-scene gat
 while the gate is whole-scene), R-10a counters (batched now reads 0 whenever lights exist), R-10c light
 culling, R-10d spatial index. R-10's goal (recover modern-data FPS) is still open; any re-introduction of
 per-placement instancing needs the operator's before/after capture first.
+
+## Amendment 2026-09-27 — R-39 CASC minimap streaming cost (operator)
+
+Operator report: *"it's a lot improved, but reading the minimap from CASC seems to lag the whole program. I
+think that's our biggest bottleneck now, and it's only CASC clients that have that issue."* Operator
+approved three of the four options offered (not "Measure first"):
+
+- **R-39a Write the disk tile cache** — `MinimapRenderer.TrySaveCachedBitmap` exists but has no caller, so
+  every session re-reads and re-decodes every tile. Persist each tile after its first successful read.
+- **R-39b Cut per-tile allocations** — decode into one array instead of ImageSharp image + copy, and upload
+  DXT-compressed BLPs to the GPU as-is where possible.
+- **R-39c Throttle and deprioritize** — minimap worker at lowest thread priority, pause it while world assets
+  are loading, and try the modern `world/minimaps/…` path first on CASC.
+
+Cause (code reading, not measured): the WDL far-terrain requests a minimap tile for every visible WDL tile;
+each tile allocated the file bytes, a decoded ImageSharp image and an RGBA copy (large-object heap), which
+forces gen2 collections — costlier on CASC, whose data source keeps a 768 MB managed byte cache.
+Constraints: no format-reader change (the BLP library is not modified; Core's existing
+`BlpSummaryReader` supplies the mip table); display sampling unchanged (level 0, linear, no mipmaps).
+
+Spec-sync 2026-09-27 (R-39a): the cache stores each tile's source BLP bytes (`<hash>.blp`) instead of the
+PNG the offered option named — a PNG would force a full RGBA decode on every cached load and undo R-39b.
+PNG tiles from earlier builds are still read. Receipt: `evidence/r39-casc-minimap-2026-09-27.md`.

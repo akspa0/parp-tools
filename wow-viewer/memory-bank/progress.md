@@ -2,6 +2,16 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — R-39 CASC minimap streaming cost (code only)
+
+Operator: after the R-10 revert, reading the minimap from CASC lags the whole program. Approved and
+implemented in `MinimapRenderer`: tile BLP bytes cached on disk (the PNG writer had no caller), DXT BLP2
+level 0 uploaded compressed (no CPU decode) and other encodings decoded to one array, worker on a
+lowest-priority thread with bounded pause while world assets load, CASC tries `world/minimaps` first.
+Synthetic equivalence check: compressed-path pixels and single-array decode byte-identical to the old
+route. Build 0 errors, same 26 test failures. Lag/GC/visual not claimed (R39-T005). Receipt:
+`specs/249-epic-renderer-performance-and-correctness/evidence/r39-casc-minimap-2026-09-27.md`.
+
 ## 2026-09-27 — R-10 per-placement WMO batch gate reverted (code only)
 
 Operator: modern rendering under 1 FPS since R-10. Code reading: R-10b sent every unlit portal-less WMO

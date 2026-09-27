@@ -30,3 +30,11 @@ Blocked on operator approval of the proposed R-10 scope (spec.md amendment 2026-
 - [ ] R10-T007 Build + focused tests; operator after-capture on the same map/camera; receipt in `evidence/`.
 - [ ] R10-T008 Decide R-10e from the after-capture (self-lit WMO share).
 - [x] R10-T009 Revert the per-placement WMO batch gate at the `WorldScene` call site (operator 2026-09-27: "Revert the gate now"). Receipt: [evidence/r10-gate-revert-2026-09-27.md](evidence/r10-gate-revert-2026-09-27.md). FPS recovery **not claimed** — operator check owed.
+
+## R-39 — CASC minimap streaming cost (operator 2026-09-27)
+
+- [x] R39-T001 Disk tile cache written after the first successful read; read back before any data-source read. Spec-sync: caches the tile's BLP bytes (`<hash>.blp`), not PNG, so cached tiles keep the R39-T002 upload; old PNGs still read. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
+- [x] R39-T002 Per-tile allocations cut: DXT BLP2 level 0 uploaded compressed; other encodings decoded to one array. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
+- [x] R39-T003 Minimap worker on a lowest-priority thread; paused (bounded, ≤ 1 s per tile) while world assets load; CASC tries `world/minimaps/…` first. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
+- [x] R39-T004 Build + tests; receipt in `evidence/`. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
+- [ ] R39-T005 Operator check on a CASC client: no whole-program lag while minimap/WDL tiles stream (GC gen2 count in the heap line); minimap looks unchanged; second session loads tiles from the cache.
