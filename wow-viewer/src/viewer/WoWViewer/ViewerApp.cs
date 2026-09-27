@@ -822,9 +822,11 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _cameraPaths.UpdateCameraPathPreload();
         _captureAutomation.UpdateTaxiRideCamera();
         _archaeologyPanel.UpdateArcheologyPlayback(dt);
+        // Spec 256 amendment: ready tiles upload by time budget, not one per frame — at 4 FPS one per
+        // frame left thousands of decoded tiles waiting. A tile upload is well under 1 ms.
         _minimapRenderer?.ProcessPendingLoads(
-            maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
-            maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
+            maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 32 : 16,
+            maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 2.0);
         _sqlSpawnStreaming.UpdateSqlSpawnStreaming();
         _terrainWeakSignalRestore.UpdateTerrainWeakSignalRestoreForCamera();
     }
