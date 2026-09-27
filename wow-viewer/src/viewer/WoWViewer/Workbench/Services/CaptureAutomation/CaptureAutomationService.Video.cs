@@ -293,9 +293,9 @@ internal sealed partial class CaptureAutomationService
     {
         _taxiRideCameraEnabled = false;
         _taxiRideCameraRouteId = -1;
-        _taxiRideCameraScene?.ActiveTaxiRideRouteId = -1;
+        _taxiRideCameraScene?.TaxiActors.ActiveTaxiRideRouteId = -1;
         if (_worldScene != null)
-            _worldScene.ActiveTaxiRideRouteId = -1;
+            _worldScene.TaxiActors.ActiveTaxiRideRouteId = -1;
         _taxiRideCameraScene = null;
         _taxiRideFreeLookYawOffset = 0f;
         _taxiRideFreeLookPitchOffset = 0f;
@@ -336,7 +336,7 @@ internal sealed partial class CaptureAutomationService
             return;
         }
 
-        if (_worldScene.GetTaxiRoute(_taxiRideCameraRouteId) == null)
+        if (_worldScene.TaxiActors.GetTaxiRoute(_taxiRideCameraRouteId) == null)
         {
             StopTaxiRideCamera("Ride camera detached because its taxi route is no longer loaded.");
             return;
@@ -348,7 +348,7 @@ internal sealed partial class CaptureAutomationService
             : (float)((now - _lastTaxiRideCameraTick) / (double)Stopwatch.Frequency);
         _lastTaxiRideCameraTick = now;
 
-        if (!_worldScene.TryGetTaxiActorPose(_taxiRideCameraRouteId, out TaxiActorPose pose))
+        if (!_worldScene.TaxiActors.TryGetTaxiActorPose(_taxiRideCameraRouteId, out TaxiActorPose pose))
             return;
 
         Vector3 forward = pose.Forward.LengthSquared() > 0.0001f

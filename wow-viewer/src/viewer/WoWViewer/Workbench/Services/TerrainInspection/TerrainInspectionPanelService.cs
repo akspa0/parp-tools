@@ -259,7 +259,7 @@ internal sealed partial class TerrainInspectionPanelService
         // higher-priority scene object. Clear the old object context so a previous MDX/WMO cannot
         // keep the Inspector on an unrelated detail surface after the operator clicks the ground.
         _worldScene?.ClearSelection();
-        _worldScene?.ClearTaxiSelection();
+        _worldScene?.TaxiActors.ClearTaxiSelection();
         _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedWlLiquidBody(clearListIsolation: true);
         _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();

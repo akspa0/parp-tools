@@ -28,26 +28,26 @@ internal sealed partial class TaxiPanelService
         if (_worldScene == null)
             return;
 
-        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0)
+        if (_worldScene.TaxiActors.TaxiLoader != null && _worldScene.TaxiActors.TaxiLoader.Routes.Count > 0)
         {
-            bool showTaxi = _worldScene.ShowTaxi;
-            if (ImGui.Checkbox($"Show Taxi Paths ({_worldScene.TaxiLoader.Routes.Count})", ref showTaxi))
-                _worldScene.ShowTaxi = showTaxi;
+            bool showTaxi = _worldScene.TaxiActors.ShowTaxi;
+            if (ImGui.Checkbox($"Show Taxi Paths ({_worldScene.TaxiActors.TaxiLoader.Routes.Count})", ref showTaxi))
+                _worldScene.TaxiActors.ShowTaxi = showTaxi;
 
-            if (_worldScene.ShowTaxi && (_worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0))
+            if (_worldScene.TaxiActors.ShowTaxi && (_worldScene.TaxiActors.SelectedTaxiNodeId >= 0 || _worldScene.TaxiActors.SelectedTaxiRouteId >= 0))
             {
                 ImGui.SameLine();
                 if (ImGui.SmallButton("Show All"))
                 {
-                    _worldScene.ClearTaxiSelection();
+                    _worldScene.TaxiActors.ClearTaxiSelection();
                     _taxiAndAreaPoi.ClearSelectedTaxiInfo();
                 }
             }
         }
-        else if (!_worldScene.TaxiLoadAttempted)
+        else if (!_worldScene.TaxiActors.TaxiLoadAttempted)
         {
             if (ImGui.Button("Load Taxi Paths"))
-                _worldScene.ShowTaxi = true;
+                _worldScene.TaxiActors.ShowTaxi = true;
 
             ImGui.TextDisabled("Load taxi paths to enable viewport picking, route browsing, and actor overrides.");
             return;
@@ -58,7 +58,7 @@ internal sealed partial class TaxiPanelService
             return;
         }
 
-        bool hasTaxiSelection = _worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0;
+        bool hasTaxiSelection = _worldScene.TaxiActors.SelectedTaxiNodeId >= 0 || _worldScene.TaxiActors.SelectedTaxiRouteId >= 0;
         if (hasTaxiSelection && !string.IsNullOrWhiteSpace(_selectedObjectInfo))
         {
             ImGui.Separator();
@@ -75,10 +75,10 @@ internal sealed partial class TaxiPanelService
         if (!hasTaxiSelection)
             ImGui.EndDisabled();
 
-        bool hasSelectedTaxiRoute = _worldScene.SelectedTaxiRouteId >= 0;
+        bool hasSelectedTaxiRoute = _worldScene.TaxiActors.SelectedTaxiRouteId >= 0;
         bool rideCameraAttachedToSelection = _taxiRideCameraEnabled
             && hasSelectedTaxiRoute
-            && _taxiRideCameraRouteId == _worldScene.SelectedTaxiRouteId;
+            && _taxiRideCameraRouteId == _worldScene.TaxiActors.SelectedTaxiRouteId;
         bool rideCameraActive = _taxiRideCameraEnabled && _taxiRideCameraRouteId >= 0;
 
         bool canToggleRideCamera = hasSelectedTaxiRoute || _taxiRideCameraEnabled;
@@ -149,22 +149,22 @@ internal sealed partial class TaxiPanelService
             ImGui.TextDisabled(Path.GetFileName(_activeVideoRecording.OutputPath));
         }
 
-        bool showTaxiActors = _worldScene.ShowTaxiActors;
+        bool showTaxiActors = _worldScene.TaxiActors.ShowTaxiActors;
         if (ImGui.Checkbox("Show Animated Taxi Actor", ref showTaxiActors))
-            _worldScene.ShowTaxiActors = showTaxiActors;
+            _worldScene.TaxiActors.ShowTaxiActors = showTaxiActors;
 
-        float speedMultiplier = _worldScene.TaxiActorSpeedMultiplier;
-        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, WorldScene.TaxiActorMinSpeedSetting, WorldScene.TaxiActorMaxSpeedSetting, "%.2f"))
-            _worldScene.TaxiActorSpeedMultiplier = speedMultiplier;
+        float speedMultiplier = _worldScene.TaxiActors.TaxiActorSpeedMultiplier;
+        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, TaxiActorScene.TaxiActorMinSpeedSetting, TaxiActorScene.TaxiActorMaxSpeedSetting, "%.2f"))
+            _worldScene.TaxiActors.TaxiActorSpeedMultiplier = speedMultiplier;
         ImGui.TextDisabled("0.10 = 100% speed, 0.01 = 10%, 0.50 = 500%.");
 
-        float scaleMultiplier = _worldScene.TaxiActorScaleMultiplier;
+        float scaleMultiplier = _worldScene.TaxiActors.TaxiActorScaleMultiplier;
         if (ImGui.SliderFloat("Taxi Actor Scale", ref scaleMultiplier, 0.05f, 5f, "%.2fx"))
-            _worldScene.TaxiActorScaleMultiplier = scaleMultiplier;
+            _worldScene.TaxiActors.TaxiActorScaleMultiplier = scaleMultiplier;
 
         ImGui.Separator();
         string[] taxiGroupingLabels = { "None", "From Node", "To Node" };
-        ImGui.Text($"Routes ({_worldScene.TaxiLoader.Routes.Count})");
+        ImGui.Text($"Routes ({_worldScene.TaxiActors.TaxiLoader.Routes.Count})");
         ImGui.SetNextItemWidth(140f);
         ImGui.Combo("Group By", ref _taxiRouteListGroupingMode, taxiGroupingLabels, taxiGroupingLabels.Length);
 
@@ -173,10 +173,10 @@ internal sealed partial class TaxiPanelService
             _taxiRouteFilter = taxiRouteFilter;
 
         var routeEntries = new List<(TaxiPathLoader.TaxiRoute Route, string FromName, string ToName, string Label, string GroupKey)>();
-        foreach (TaxiPathLoader.TaxiRoute route in _worldScene.TaxiLoader.Routes)
+        foreach (TaxiPathLoader.TaxiRoute route in _worldScene.TaxiActors.TaxiLoader.Routes)
         {
-            string fromName = _worldScene.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
-            string toName = _worldScene.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
+            string fromName = _worldScene.TaxiActors.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
+            string toName = _worldScene.TaxiActors.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
             string label = $"{_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(route.PathId)} ({route.Waypoints.Count} pts)";
             string searchText = $"{route.PathId} {fromName} {toName} {label}";
             if (!string.IsNullOrWhiteSpace(_taxiRouteFilter)
@@ -216,8 +216,8 @@ internal sealed partial class TaxiPanelService
             return left.Route.PathId.CompareTo(right.Route.PathId);
         });
 
-        if (routeEntries.Count != _worldScene.TaxiLoader.Routes.Count)
-            ImGui.TextDisabled($"Showing {routeEntries.Count} of {_worldScene.TaxiLoader.Routes.Count} routes");
+        if (routeEntries.Count != _worldScene.TaxiActors.TaxiLoader.Routes.Count)
+            ImGui.TextDisabled($"Showing {routeEntries.Count} of {_worldScene.TaxiActors.TaxiLoader.Routes.Count} routes");
 
         if (ImGui.BeginChild("##TaxiRouteSidebarList", new Vector2(0, 220f), true))
         {
@@ -249,7 +249,7 @@ internal sealed partial class TaxiPanelService
                         ImGui.TextDisabled($"{currentGroupKey} ({groupCounts![currentGroupKey]})");
                     }
 
-                    bool isSelected = _worldScene.SelectedTaxiRouteId == entry.Route.PathId;
+                    bool isSelected = _worldScene.TaxiActors.SelectedTaxiRouteId == entry.Route.PathId;
                     if (ImGui.Selectable(entry.Label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
                     {
                         _taxiAndAreaPoi.SelectTaxiRoute(entry.Route.PathId, toggle: true);
@@ -273,18 +273,18 @@ internal sealed partial class TaxiPanelService
             ImGui.EndChild();
         }
 
-        if (_worldScene.SelectedTaxiNodeId >= 0)
-            ImGui.TextDisabled($"Selected taxi node: {_worldScene.SelectedTaxiNodeId}");
-        else if (_worldScene.SelectedTaxiRouteId >= 0)
-            ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
+        if (_worldScene.TaxiActors.SelectedTaxiNodeId >= 0)
+            ImGui.TextDisabled($"Selected taxi node: {_worldScene.TaxiActors.SelectedTaxiNodeId}");
+        else if (_worldScene.TaxiActors.SelectedTaxiRouteId >= 0)
+            ImGui.TextDisabled($"Selected taxi route: {_worldScene.TaxiActors.SelectedTaxiRouteId}");
 
         if (_taxiAndAreaPoi.TryGetTaxiActorOverrideRouteId(out int routeId))
         {
             IReadOnlyList<TaxiPathLoader.TaxiRoute> candidateRoutes = _taxiAndAreaPoi.GetTaxiActorOverrideCandidateRoutes();
 
-            if (_worldScene.SelectedTaxiNodeId >= 0)
+            if (_worldScene.TaxiActors.SelectedTaxiNodeId >= 0)
             {
-                ImGui.TextDisabled($"Selected taxi node: {_worldScene.SelectedTaxiNodeId}");
+                ImGui.TextDisabled($"Selected taxi node: {_worldScene.TaxiActors.SelectedTaxiNodeId}");
 
                 string previewLabel = _taxiAndAreaPoi.GetTaxiRouteDisplayLabel(routeId);
                 if (ImGui.BeginCombo("Override Target Route", previewLabel))
@@ -305,16 +305,16 @@ internal sealed partial class TaxiPanelService
                     ImGui.EndCombo();
                 }
             }
-            else if (_worldScene.SelectedTaxiRouteId >= 0)
+            else if (_worldScene.TaxiActors.SelectedTaxiRouteId >= 0)
             {
-                ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
+                ImGui.TextDisabled($"Selected taxi route: {_worldScene.TaxiActors.SelectedTaxiRouteId}");
             }
 
             _taxiAndAreaPoi.SyncTaxiActorModelOverrideInput(routeId);
 
-            string resolvedActorModelPath = _worldScene.GetResolvedTaxiActorModelPath(routeId) ?? "not found";
-            string? actorOverridePath = _worldScene.GetTaxiActorModelOverride(routeId);
-            IReadOnlyList<string> defaultTaxiActorModels = WorldScene.DefaultTaxiActorModelPaths;
+            string resolvedActorModelPath = _worldScene.TaxiActors.GetResolvedTaxiActorModelPath(routeId) ?? "not found";
+            string? actorOverridePath = _worldScene.TaxiActors.GetTaxiActorModelOverride(routeId);
+            IReadOnlyList<string> defaultTaxiActorModels = TaxiActorScene.DefaultTaxiActorModelPaths;
             ImGui.TextWrapped($"Override Route: {_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(routeId)}");
             ImGui.TextWrapped($"Resolved Actor Model: {resolvedActorModelPath}");
             ImGui.TextDisabled($"Override: {actorOverridePath ?? "auto"}");
@@ -406,7 +406,7 @@ internal sealed partial class TaxiPanelService
                 }
             }
         }
-        else if (_worldScene.SelectedTaxiNodeId >= 0)
+        else if (_worldScene.TaxiActors.SelectedTaxiNodeId >= 0)
             ImGui.TextDisabled("No connected routes were found for this taxi node.");
         else
             ImGui.TextDisabled("Select a taxi route from the list or click one in the viewport to configure the animated actor.");

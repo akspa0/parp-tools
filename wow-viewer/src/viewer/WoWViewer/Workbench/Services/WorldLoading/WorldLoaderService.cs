@@ -498,8 +498,8 @@ internal sealed partial class WorldLoaderService
                 _terrainManager.UpdateAOI(startPos, _camera.Forward);
 
             int poiCount = _worldScene.PoiLoader?.Entries.Count ?? 0;
-            int taxiNodeCount = _worldScene.TaxiLoader?.Nodes.Count ?? 0;
-            int taxiRouteCount = _worldScene.TaxiLoader?.Routes.Count ?? 0;
+            int taxiNodeCount = _worldScene.TaxiActors.TaxiLoader?.Nodes.Count ?? 0;
+            int taxiRouteCount = _worldScene.TaxiActors.TaxiLoader?.Routes.Count ?? 0;
             _modelInfo = $"Type: {wdtType} World\n" +
                          $"Map: {_terrainManager.MapName}\n\n" +
                          $"Tiles: {_terrainManager.LoadedTileCount}\n" +

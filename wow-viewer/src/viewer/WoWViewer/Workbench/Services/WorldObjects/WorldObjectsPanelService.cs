@@ -258,13 +258,13 @@ internal sealed partial class WorldObjectsPanelService
 
         ImGui.Separator();
 
-        string taxiSummary = _worldScene.SelectedTaxiRouteId >= 0
-            ? $"route {_worldScene.SelectedTaxiRouteId}"
-            : _worldScene.SelectedTaxiNodeId >= 0
-                ? $"node {_worldScene.SelectedTaxiNodeId}"
+        string taxiSummary = _worldScene.TaxiActors.SelectedTaxiRouteId >= 0
+            ? $"route {_worldScene.TaxiActors.SelectedTaxiRouteId}"
+            : _worldScene.TaxiActors.SelectedTaxiNodeId >= 0
+                ? $"node {_worldScene.TaxiActors.SelectedTaxiNodeId}"
                 : _taxiRideCameraEnabled
                     ? "ride active"
-                    : _worldScene.ShowTaxi
+                    : _worldScene.TaxiActors.ShowTaxi
                         ? "visible"
                         : string.Empty;
         // Taxi panel is accessed via the Utilities workbench tab only.

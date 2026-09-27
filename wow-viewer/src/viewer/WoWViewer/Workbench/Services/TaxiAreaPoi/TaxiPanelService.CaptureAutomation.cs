@@ -29,7 +29,7 @@ internal sealed partial class TaxiPanelService
 
     private bool TryStartTaxiRideVideoCapture()
     {
-        if (_worldScene == null || _worldScene.SelectedTaxiRouteId < 0)
+        if (_worldScene == null || _worldScene.TaxiActors.SelectedTaxiRouteId < 0)
         {
             _statusMessage = "Select a taxi route before starting ride capture.";
             return false;
@@ -43,7 +43,7 @@ internal sealed partial class TaxiPanelService
 
     private bool TryAttachTaxiRideCameraToSelectedRoute()
     {
-        if (_worldScene == null || _worldScene.SelectedTaxiRouteId < 0)
+        if (_worldScene == null || _worldScene.TaxiActors.SelectedTaxiRouteId < 0)
         {
             _statusMessage = "Select a taxi route before enabling the ride camera.";
             return false;
@@ -52,11 +52,11 @@ internal sealed partial class TaxiPanelService
         // A camera path and a taxi ride both own the camera. Cancel any
         // pending path warmup/playback before attaching the ride route.
         StopCameraPathPlayback();
-        _worldScene.ShowTaxi = true;
-        _worldScene.ShowTaxiActors = true;
-        _taxiRideCameraRouteId = _worldScene.SelectedTaxiRouteId;
+        _worldScene.TaxiActors.ShowTaxi = true;
+        _worldScene.TaxiActors.ShowTaxiActors = true;
+        _taxiRideCameraRouteId = _worldScene.TaxiActors.SelectedTaxiRouteId;
         _taxiRideCameraScene = _worldScene;
-        _worldScene.ActiveTaxiRideRouteId = _taxiRideCameraRouteId;
+        _worldScene.TaxiActors.ActiveTaxiRideRouteId = _taxiRideCameraRouteId;
         _taxiRideCameraEnabled = true;
         _taxiRideFreeLookYawOffset = 0f;
         _taxiRideFreeLookPitchOffset = 0f;

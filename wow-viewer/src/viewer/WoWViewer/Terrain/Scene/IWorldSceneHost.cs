@@ -111,5 +111,11 @@ internal interface IWorldSceneHost
     bool ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst);
     IModelRenderer? TryGetQueuedMdx(string modelKey);
     WmoRenderer? TryGetQueuedWmo(string modelKey);
+    ref IDataSource? DataSource { get; }
+    ref string? DbcBuild { get; }
+    ref DBCD.Providers.IDBCProvider? DbcProvider { get; }
+    ref string? DbdDir { get; }
+    ref int MapId { get; }
+    List<ObjectInstance> TaxiActorInstances { get; }
     // HOST-IFACE-END
 }

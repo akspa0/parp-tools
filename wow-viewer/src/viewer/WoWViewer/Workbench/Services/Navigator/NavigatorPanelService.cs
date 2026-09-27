@@ -147,7 +147,7 @@ internal sealed partial class NavigatorPanelService
             return false;
 
         ClearSelectedWlLiquidBody(clearListIsolation: true);
-        _worldScene.ClearTaxiSelection();
+        _worldScene.TaxiActors.ClearTaxiSelection();
         _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
         _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
         RefreshSelectedWorldObjectInfo();

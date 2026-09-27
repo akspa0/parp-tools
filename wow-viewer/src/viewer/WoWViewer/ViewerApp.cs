@@ -917,7 +917,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                 _sceneHoverPick.ClearPendingClickSelection();
                 _investigation.ClearSelectedWlLiquidBody(clearListIsolation: true);
                 _worldScene.ClearSelection();
-                _worldScene.ClearTaxiSelection();
+                _worldScene.TaxiActors.ClearTaxiSelection();
                 _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                 _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                 _selectedObjectIndex = -1;

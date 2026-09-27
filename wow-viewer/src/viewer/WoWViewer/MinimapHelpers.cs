@@ -225,11 +225,11 @@ internal static class MinimapHelpers
         }
 
         // Taxi paths
-        if (worldScene?.TaxiLoader != null && worldScene.ShowTaxi)
+        if (worldScene?.TaxiActors.TaxiLoader != null && worldScene.TaxiActors.ShowTaxi)
         {
-            foreach (var route in worldScene.TaxiLoader.Routes)
+            foreach (var route in worldScene.TaxiActors.TaxiLoader.Routes)
             {
-                if (!worldScene.IsTaxiRouteVisible(route)) continue;
+                if (!worldScene.TaxiActors.IsTaxiRouteVisible(route)) continue;
                 for (int i = 0; i < route.Waypoints.Count - 1; i++)
                 {
                     var a = route.Waypoints[i];
@@ -241,9 +241,9 @@ internal static class MinimapHelpers
                     drawList.AddLine(new Vector2(ax, ay), new Vector2(bx, by), 0xFFFFFF00, 1.5f);
                 }
             }
-            foreach (var node in worldScene.TaxiLoader.Nodes)
+            foreach (var node in worldScene.TaxiActors.TaxiLoader.Nodes)
             {
-                if (!worldScene.IsTaxiNodeVisible(node)) continue;
+                if (!worldScene.TaxiActors.IsTaxiNodeVisible(node)) continue;
                 float nx = cursorPos.X + ((WoWConstants.MapOrigin - node.Position.Y) / MinimapWorldTileSize - viewMinTy) * cellSize;
                 float ny = cursorPos.Y + ((WoWConstants.MapOrigin - node.Position.X) / MinimapWorldTileSize - viewMinTx) * cellSize;
                 if (nx >= cursorPos.X && nx <= cursorPos.X + mapSize && ny >= cursorPos.Y && ny <= cursorPos.Y + mapSize)

@@ -85,35 +85,8 @@ using WowViewer.Core.Runtime.World.Selection;
 
 namespace WoWViewer.Terrain;
 
-/// <summary>
-/// Combines terrain (WDT/ADT), WMO placements (MODF), and MDX placements (MDDF)
-/// into a single world scene — the same way the game client renders a map.
-/// 
-/// Uses <see cref="WorldAssetManager"/> to ensure each model is loaded exactly once.
-/// Instances are lightweight structs holding only a model key + transform.
-/// </summary>
-public readonly record struct TaxiActorPose(
-    int RouteId,
-    Vector3 Position,
-    Vector3 Forward,
-    float YawRadians,
-    float Scale,
-    string ModelPath);
-
 public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
 {
-    private const float TaxiActorHeadingSampleWindow = 18f;
-    private const float TaxiActorHeadingSmoothingHz = 8f;
-    public const float TaxiActorNormalSpeedSetting = 0.10f;
-    public const float TaxiActorMinSpeedSetting = 0.01f;
-    public const float TaxiActorMaxSpeedSetting = 0.50f;
-    private static readonly string[] TaxiActorDefaultModelCandidates =
-    {
-        @"Creature\Gryphon\Gryphon.mdx",
-        @"Creature\FelBat\BatTaxi.mdx",
-    };
-
-    public static IReadOnlyList<string> DefaultTaxiActorModelPaths => TaxiActorDefaultModelCandidates;
 
     private static float DecodeRawMprlPackedAngleRadians(MprlEntry positionRef)
     {
@@ -246,6 +219,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     // one field per service, built first in each constructor.
     private readonly SceneHoverPickController _hoverPick;
     public SceneHoverPickController HoverPick => _hoverPick;
+    private readonly TaxiActorScene _taxiActors;
+    public TaxiActorScene TaxiActors => _taxiActors;
     // SCENE-SERVICES-END
 
     // IWorldSceneHost (Spec 255): the scene state the services read, implemented explicitly.
@@ -268,6 +243,12 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     bool IWorldSceneHost.ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst) => ShouldHideObjectInstanceByUniqueId(in inst);
     IModelRenderer? IWorldSceneHost.TryGetQueuedMdx(string modelKey) => TryGetQueuedMdx(modelKey);
     WmoRenderer? IWorldSceneHost.TryGetQueuedWmo(string modelKey) => TryGetQueuedWmo(modelKey);
+    ref IDataSource? IWorldSceneHost.DataSource => ref _dataSource;
+    ref string? IWorldSceneHost.DbcBuild => ref _dbcBuild;
+    ref DBCD.Providers.IDBCProvider? IWorldSceneHost.DbcProvider => ref _dbcProvider;
+    ref string? IWorldSceneHost.DbdDir => ref _dbdDir;
+    ref int IWorldSceneHost.MapId => ref _mapId;
+    List<ObjectInstance> IWorldSceneHost.TaxiActorInstances => _taxiActorInstances;
     // WORLD-SCENE-HOST-IMPL-END
 
     private Vector3 _lastRenderedCameraPosition;
@@ -852,18 +833,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     public AreaPoiLoader? PoiLoader => _poiLoader;
     public bool PoiLoadAttempted => _poiLoadAttempted;
 
-    // Taxi paths (lazy-loaded on first toggle)
-    private TaxiPathLoader? _taxiLoader;
-    private bool _showTaxi = false;
-    private bool _taxiLoadAttempted = false;
-    public bool ShowTaxi
-    {
-        get => _showTaxi;
-        set { _showTaxi = value; if (value && !_taxiLoadAttempted) LazyLoadTaxi(); }
-    }
-    public TaxiPathLoader? TaxiLoader => _taxiLoader;
-    public bool TaxiLoadAttempted => _taxiLoadAttempted;
-
     // AreaTriggers (lazy-loaded on first toggle)
     private AreaTriggerLoader? _areaTriggerLoader;
     private bool _showAreaTriggers = false;
@@ -1197,154 +1166,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     private static bool FogRangesEqual(float leftStart, float leftEnd, float rightStart, float rightEnd)
         => MathF.Abs(leftStart - rightStart) < 0.001f && MathF.Abs(leftEnd - rightEnd) < 0.001f;
 
-    // Taxi selection: -1 = show all (or none if !_showTaxi)
-    private int _selectedTaxiNodeId = -1;
-    private int _selectedTaxiRouteId = -1;
-    private readonly Dictionary<int, string> _taxiActorModelOverrideByPath = new();
-    private readonly Dictionary<int, float> _taxiActorTravelByPath = new();
-    private readonly Dictionary<int, TaxiActorPose> _taxiActorPoseByPath = new();
-    private readonly Dictionary<int, Vector3> _taxiActorSmoothedForwardByPath = new();
-    private long _lastTaxiActorTick;
-    private bool _taxiActorClockInitialized;
-    private int _activeTaxiRideRouteId = -1;
-    private bool _showTaxiActors = true;
-    private float _taxiActorSpeedMultiplier = TaxiActorNormalSpeedSetting;
-    private float _taxiActorScaleMultiplier = 1.0f;
-    private const float TaxiActorBaseUnitsPerSecond = 650f;
-    private const float TaxiActorHoverOffset = 12f;
-    public int SelectedTaxiNodeId { get => _selectedTaxiNodeId; set { _selectedTaxiNodeId = value; _selectedTaxiRouteId = -1; } }
-    public int SelectedTaxiRouteId { get => _selectedTaxiRouteId; set { _selectedTaxiRouteId = value; _selectedTaxiNodeId = -1; } }
-    public void ClearTaxiSelection() { _selectedTaxiNodeId = -1; _selectedTaxiRouteId = -1; }
-    /// <summary>
-    /// Route currently carrying the ride camera. This is deliberately separate
-    /// from selection and visibility state: an active ride must keep its pose
-    /// alive while the operator browses or hides taxi presentation controls.
-    /// </summary>
-    public int ActiveTaxiRideRouteId
-    {
-        get => _activeTaxiRideRouteId;
-        set => _activeTaxiRideRouteId = value >= 0 ? value : -1;
-    }
-
-    public bool ShowTaxiActors { get => _showTaxiActors; set => _showTaxiActors = value; }
-    public float TaxiActorSpeedMultiplier
-    {
-        get => _taxiActorSpeedMultiplier;
-        set
-        {
-            float normalized = float.IsFinite(value) ? value : TaxiActorNormalSpeedSetting;
-            _taxiActorSpeedMultiplier = Math.Clamp(normalized, TaxiActorMinSpeedSetting, TaxiActorMaxSpeedSetting);
-        }
-    }
-
-    public float TaxiActorScaleMultiplier
-    {
-        get => _taxiActorScaleMultiplier;
-        set => _taxiActorScaleMultiplier = Math.Max(0f, value);
-    }
-
-    public bool IsTaxiRouteVisible(TaxiPathLoader.TaxiRoute route)
-    {
-        if (_selectedTaxiRouteId >= 0) return route.PathId == _selectedTaxiRouteId;
-        if (_selectedTaxiNodeId >= 0) return route.FromNodeId == _selectedTaxiNodeId || route.ToNodeId == _selectedTaxiNodeId;
-        return true; // no selection = show all
-    }
-
-    public bool IsTaxiNodeVisible(TaxiPathLoader.TaxiNode node)
-    {
-        if (_selectedTaxiNodeId >= 0) return node.Id == _selectedTaxiNodeId;
-        if (_selectedTaxiRouteId >= 0)
-        {
-            var route = _taxiLoader?.Routes.FirstOrDefault(r => r.PathId == _selectedTaxiRouteId);
-            return route != null && (route.FromNodeId == node.Id || route.ToNodeId == node.Id);
-        }
-        return true; // no selection = show all
-    }
-
-    public TaxiPathLoader.TaxiNode? GetTaxiNode(int nodeId)
-        => _taxiLoader?.Nodes.FirstOrDefault(node => node.Id == nodeId);
-
-    public TaxiPathLoader.TaxiRoute? GetTaxiRoute(int pathId)
-        => _taxiLoader?.Routes.FirstOrDefault(route => route.PathId == pathId);
-
-    public string? GetTaxiActorModelOverride(int pathId)
-        => _taxiActorModelOverrideByPath.TryGetValue(pathId, out string? modelPath) ? modelPath : null;
-
-    public void SetTaxiActorModelOverride(int pathId, string? modelPath)
-    {
-        string normalizedPath = string.IsNullOrWhiteSpace(modelPath)
-            ? string.Empty
-            : modelPath.Trim().Replace('/', '\\');
-
-        if (string.IsNullOrWhiteSpace(normalizedPath))
-        {
-            _taxiActorModelOverrideByPath.Remove(pathId);
-            return;
-        }
-
-        _taxiActorModelOverrideByPath[pathId] = normalizedPath;
-        _assets.QueueMdxLoad(WorldAssetManager.NormalizeKey(normalizedPath));
-    }
-
-    public string? GetResolvedTaxiActorModelPath(int pathId)
-    {
-        if (_taxiActorModelOverrideByPath.TryGetValue(pathId, out string? overrideModelPath)
-            && !string.IsNullOrWhiteSpace(overrideModelPath))
-        {
-            return overrideModelPath;
-        }
-
-        TaxiPathLoader.TaxiRoute? route = GetTaxiRoute(pathId);
-        if (route == null)
-            return ResolveDefaultTaxiActorModelPath();
-
-        TaxiPathLoader.TaxiNode? mountNode = ResolveTaxiActorNode(route);
-        if (!string.IsNullOrWhiteSpace(mountNode?.MountModelPath))
-            return mountNode.MountModelPath.Replace('/', '\\');
-
-        return ResolveDefaultTaxiActorModelPath();
-    }
-
-    private string ResolveDefaultTaxiActorModelPath()
-    {
-        if (_dataSource != null)
-        {
-            foreach (string candidate in TaxiActorDefaultModelCandidates)
-            {
-                if (_dataSource.FileExists(candidate))
-                    return candidate;
-            }
-        }
-
-        return TaxiActorDefaultModelCandidates[0];
-    }
-
-    public bool TryGetTaxiActorPose(int pathId, out TaxiActorPose pose)
-        => _taxiActorPoseByPath.TryGetValue(pathId, out pose);
-
-    public bool TryGetSelectedTaxiActorPose(out TaxiActorPose pose)
-    {
-        if (_selectedTaxiRouteId < 0)
-        {
-            pose = default;
-            return false;
-        }
-
-        return _taxiActorPoseByPath.TryGetValue(_selectedTaxiRouteId, out pose);
-    }
-
-    public bool TryGetTaxiRouteSelectionPoint(int pathId, out Vector3 point)
-    {
-        TaxiPathLoader.TaxiRoute? route = GetTaxiRoute(pathId);
-        if (route == null)
-        {
-            point = Vector3.Zero;
-            return false;
-        }
-
-        return TryGetTaxiRouteSelectionPoint(route, out point);
-    }
-
     /// <summary>
     /// Store DBC credentials for lazy loading of POI, Taxi, and Lighting.
     /// </summary>
@@ -1585,307 +1406,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _poiLoader.Load(_dbcProvider, _dbdDir, _dbcBuild, _terrainManager.MapName);
     }
 
-    private void LazyLoadTaxi()
-    {
-        _taxiLoadAttempted = true;
-        if (_dbcProvider == null || _dbdDir == null || _dbcBuild == null || _mapId < 0) return;
-        _taxiLoader = new TaxiPathLoader();
-        var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
-        _taxiLoader.Load(dbcd, _dbcBuild, _mapId);
-        _taxiActorTravelByPath.Clear();
-        _taxiActorPoseByPath.Clear();
-        _taxiActorSmoothedForwardByPath.Clear();
-        _taxiActorClockInitialized = false;
-    }
-
-    private void UpdateTaxiActorInstances()
-    {
-        _taxiActorInstances.Clear();
-
-        bool hasTaxiSelection = _selectedTaxiNodeId >= 0 || _selectedTaxiRouteId >= 0;
-        if (_taxiLoader == null
-            || !TaxiRideSimulationPolicy.ShouldSimulateRoute(
-                _activeTaxiRideRouteId,
-                _activeTaxiRideRouteId,
-                _showTaxi,
-                _showTaxiActors,
-                hasTaxiSelection,
-                routeVisible: true))
-        {
-            _taxiActorPoseByPath.Clear();
-            _taxiActorSmoothedForwardByPath.Clear();
-            _taxiActorClockInitialized = false;
-            return;
-        }
-
-        long now = Stopwatch.GetTimestamp();
-        float deltaSeconds = 0f;
-        if (_taxiActorClockInitialized)
-            deltaSeconds = (float)((now - _lastTaxiActorTick) / (double)Stopwatch.Frequency);
-        _lastTaxiActorTick = now;
-        _taxiActorClockInitialized = true;
-
-        float distanceStep = TaxiActorBaseUnitsPerSecond * _taxiActorSpeedMultiplier * Math.Max(0f, deltaSeconds);
-        var activePathIds = new HashSet<int>();
-
-        foreach (var route in _taxiLoader.Routes)
-        {
-            bool routeVisible = IsTaxiRouteVisible(route);
-            if (!TaxiRideSimulationPolicy.ShouldSimulateRoute(
-                    route.PathId,
-                    _activeTaxiRideRouteId,
-                    _showTaxi,
-                    _showTaxiActors,
-                    hasTaxiSelection,
-                    routeVisible)
-                || route.Waypoints.Count < 2)
-                continue;
-
-            TaxiPathLoader.TaxiNode? mountNode = ResolveTaxiActorNode(route);
-            float scale = mountNode?.MountScale > 0.01f ? mountNode.MountScale : 1.0f;
-
-            scale *= _taxiActorScaleMultiplier;
-
-            float routeLength = GetRouteLength(route.Waypoints);
-            if (routeLength <= 1f)
-                continue;
-
-            activePathIds.Add(route.PathId);
-
-            float travel = _taxiActorTravelByPath.TryGetValue(route.PathId, out float existingTravel)
-                ? existingTravel
-                : 0f;
-            if (distanceStep > 0f)
-                travel = (travel + distanceStep) % routeLength;
-            _taxiActorTravelByPath[route.PathId] = travel;
-
-            SampleRoute(route.Waypoints, travel, out Vector3 actorPosition, out Vector3 actorDirection);
-            actorPosition.Z += TaxiActorHoverOffset;
-
-            Vector3 sampledForward = SampleSmoothedTaxiRouteDirection(route.Waypoints, travel, routeLength);
-            Vector3 actorForward = sampledForward;
-            if (_taxiActorSmoothedForwardByPath.TryGetValue(route.PathId, out Vector3 previousForward)
-                && previousForward.LengthSquared() > 0.0001f)
-            {
-                float blend = 1f - MathF.Exp(-TaxiActorHeadingSmoothingHz * Math.Max(0f, deltaSeconds));
-                if (blend <= 0f)
-                {
-                    actorForward = previousForward;
-                }
-                else if (blend < 0.999f)
-                {
-                    Vector3 blendedForward = Vector3.Lerp(previousForward, sampledForward, blend);
-                    actorForward = blendedForward.LengthSquared() > 0.0001f
-                        ? Vector3.Normalize(blendedForward)
-                        : sampledForward;
-                }
-            }
-
-            if (actorForward.LengthSquared() <= 0.0001f)
-            {
-                actorForward = actorDirection.LengthSquared() > 0.0001f
-                    ? Vector3.Normalize(actorDirection)
-                    : Vector3.UnitX;
-            }
-
-            _taxiActorSmoothedForwardByPath[route.PathId] = actorForward;
-
-            float yawRadians = ComputeTaxiActorYawRadians(actorForward);
-            string modelPath = GetResolvedTaxiActorModelPath(route.PathId)?.Replace('/', '\\') ?? string.Empty;
-
-            _taxiActorPoseByPath[route.PathId] = new TaxiActorPose(
-                route.PathId,
-                actorPosition,
-                actorForward,
-                yawRadians,
-                scale,
-                modelPath);
-
-            // Pose simulation is independent of asset availability. A ride
-            // camera can follow a route while its model is still queued or
-            // unavailable; only the render instance needs a non-empty model key.
-            if (string.IsNullOrWhiteSpace(modelPath))
-                continue;
-
-            string key = WorldAssetManager.NormalizeKey(modelPath);
-            _assets.QueueMdxLoad(key);
-
-            var transform = Matrix4x4.CreateScale(scale)
-                * Matrix4x4.CreateRotationZ(yawRadians)
-                * Matrix4x4.CreateTranslation(actorPosition);
-
-            Vector3 boundsMin;
-            Vector3 boundsMax;
-            Vector3 localMin = Vector3.Zero;
-            Vector3 localMax = Vector3.Zero;
-            bool boundsResolved = false;
-            if (_assets.TryGetMdxBounds(key, out Vector3 modelMin, out Vector3 modelMax))
-            {
-                localMin = modelMin;
-                localMax = modelMax;
-                boundsResolved = true;
-                TransformBounds(modelMin, modelMax, transform, out boundsMin, out boundsMax);
-            }
-            else
-            {
-                boundsMin = actorPosition - new Vector3(2f);
-                boundsMax = actorPosition + new Vector3(2f);
-            }
-
-            _taxiActorInstances.Add(new ObjectInstance
-            {
-                ModelKey = key,
-                Transform = transform,
-                BoundsMin = boundsMin,
-                BoundsMax = boundsMax,
-                LocalBoundsMin = localMin,
-                LocalBoundsMax = localMax,
-                BoundsResolved = boundsResolved,
-                ModelName = Path.GetFileName(modelPath),
-                ModelPath = modelPath,
-                PlacementPosition = actorPosition,
-                PlacementRotation = new Vector3(0f, 0f, yawRadians * (180f / MathF.PI)),
-                PlacementScale = scale,
-                UniqueId = -route.PathId
-            });
-        }
-
-        foreach (int stalePathId in _taxiActorTravelByPath.Keys.Except(activePathIds).ToList())
-            _taxiActorTravelByPath.Remove(stalePathId);
-
-        foreach (int stalePathId in _taxiActorPoseByPath.Keys.Except(activePathIds).ToList())
-            _taxiActorPoseByPath.Remove(stalePathId);
-
-        foreach (int stalePathId in _taxiActorSmoothedForwardByPath.Keys.Except(activePathIds).ToList())
-            _taxiActorSmoothedForwardByPath.Remove(stalePathId);
-    }
-
-    private TaxiPathLoader.TaxiNode? ResolveTaxiActorNode(TaxiPathLoader.TaxiRoute route)
-    {
-        if (_taxiLoader == null)
-            return null;
-
-        if (_selectedTaxiNodeId >= 0)
-        {
-            var selectedNode = GetTaxiNode(_selectedTaxiNodeId);
-            if (selectedNode != null && (route.FromNodeId == selectedNode.Id || route.ToNodeId == selectedNode.Id))
-                return selectedNode;
-        }
-
-        var fromNode = GetTaxiNode(route.FromNodeId);
-        if (fromNode != null && !string.IsNullOrWhiteSpace(fromNode.MountModelPath))
-            return fromNode;
-
-        var toNode = GetTaxiNode(route.ToNodeId);
-        if (toNode != null && !string.IsNullOrWhiteSpace(toNode.MountModelPath))
-            return toNode;
-
-        return fromNode ?? toNode;
-    }
-
-    private static bool TryGetTaxiRouteSelectionPoint(TaxiPathLoader.TaxiRoute route, out Vector3 point)
-    {
-        if (route.Waypoints.Count == 0)
-        {
-            point = Vector3.Zero;
-            return false;
-        }
-
-        float routeLength = GetRouteLength(route.Waypoints);
-        if (routeLength <= 1f)
-        {
-            point = route.Waypoints[route.Waypoints.Count / 2];
-            return true;
-        }
-
-        SampleRoute(route.Waypoints, routeLength * 0.5f, out point, out _);
-        return true;
-    }
-
-    private static float GetRouteLength(List<Vector3> waypoints)
-    {
-        float total = 0f;
-        for (int i = 0; i < waypoints.Count - 1; i++)
-            total += Vector3.Distance(waypoints[i], waypoints[i + 1]);
-        return total;
-    }
-
-    private static void SampleRoute(List<Vector3> waypoints, float distance, out Vector3 position, out Vector3 direction)
-    {
-        float remaining = distance;
-        for (int i = 0; i < waypoints.Count - 1; i++)
-        {
-            Vector3 start = waypoints[i];
-            Vector3 end = waypoints[i + 1];
-            Vector3 segment = end - start;
-            float segmentLength = segment.Length();
-            if (segmentLength <= 0.001f)
-                continue;
-
-            if (remaining <= segmentLength)
-            {
-                float t = remaining / segmentLength;
-                position = Vector3.Lerp(start, end, t);
-                direction = Vector3.Normalize(segment);
-                return;
-            }
-
-            remaining -= segmentLength;
-        }
-
-        position = waypoints[^1];
-        direction = waypoints[^1] - waypoints[^2];
-        if (direction.LengthSquared() > 0.0001f)
-            direction = Vector3.Normalize(direction);
-    }
-
-    private static Vector3 SampleSmoothedTaxiRouteDirection(List<Vector3> waypoints, float distance, float routeLength)
-    {
-        if (waypoints.Count < 2)
-            return Vector3.UnitX;
-
-        float sampleWindow = MathF.Min(TaxiActorHeadingSampleWindow, MathF.Max(1f, routeLength * 0.1f));
-        float behindDistance = WrapTaxiRouteDistance(distance - sampleWindow * 0.5f, routeLength);
-        float aheadDistance = WrapTaxiRouteDistance(distance + sampleWindow * 0.5f, routeLength);
-
-        SampleRoute(waypoints, behindDistance, out Vector3 behindPosition, out Vector3 behindDirection);
-        SampleRoute(waypoints, aheadDistance, out Vector3 aheadPosition, out Vector3 aheadDirection);
-
-        Vector3 tangent = aheadPosition - behindPosition;
-        if (tangent.LengthSquared() > 0.0001f)
-            return Vector3.Normalize(tangent);
-
-        Vector3 fallback = aheadDirection.LengthSquared() > 0.0001f ? aheadDirection : behindDirection;
-        if (fallback.LengthSquared() > 0.0001f)
-            return Vector3.Normalize(fallback);
-
-        return Vector3.UnitX;
-    }
-
-    private static float WrapTaxiRouteDistance(float distance, float routeLength)
-    {
-        if (routeLength <= 0f)
-            return 0f;
-
-        while (distance < 0f)
-            distance += routeLength;
-
-        while (distance >= routeLength)
-            distance -= routeLength;
-
-        return distance;
-    }
-
-    private static float ComputeTaxiActorYawRadians(Vector3 actorForward)
-    {
-        Vector3 horizontalForward = new Vector3(actorForward.X, actorForward.Y, 0f);
-        if (horizontalForward.LengthSquared() <= 0.0001f)
-            return 0f;
-
-        horizontalForward = Vector3.Normalize(horizontalForward);
-        return MathF.Atan2(horizontalForward.Y, horizontalForward.X);
-    }
-
     private void LazyLoadAreaTriggers()
     {
         _areaTriggerLoadAttempted = true;
@@ -1920,6 +1440,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _dbcBuild = buildVersion;
         _minimapRenderer = minimapRenderer;
         _hoverPick = new SceneHoverPickController(this);
+        _taxiActors = new TaxiActorScene(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -1960,6 +1481,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _dbcBuild = buildVersion;
         _minimapRenderer = minimapRenderer;
         _hoverPick = new SceneHoverPickController(this);
+        _taxiActors = new TaxiActorScene(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -4755,7 +4277,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
             ProcessDeferredAssetLoads();
             _assets.ProcessDeferredWmoDoodadLoads();
         });
-        frame.TaxiActorUpdateMs = MeasureDurationMs(UpdateTaxiActorInstances);
+        frame.TaxiActorUpdateMs = MeasureDurationMs(_taxiActors.UpdateTaxiActorInstances);
 
         // Extract camera position for sky dome
         Matrix4x4.Invert(view, out var viewInvSky);
@@ -6237,7 +5759,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                 }
 
                 // Taxi paths — filtered by selection
-                if (_showTaxi && _taxiLoader != null)
+                if (_taxiActors._showTaxi && _taxiActors._taxiLoader != null)
                 {
                     var nodeColor = new Vector3(1f, 1f, 0f);
                     var lineColor = new Vector3(0f, 1f, 1f);
@@ -6245,12 +5767,12 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     var selectedRouteColor = new Vector3(1f, 1f, 1f);
                     var nodeBoxColor = new Vector3(1f, 0.92f, 0.35f);
                     var routeBoxColor = new Vector3(1f, 0.78f, 0.28f);
-                    int visibleRouteCount = _taxiLoader.Routes.Count(IsTaxiRouteVisible);
-                    bool showRouteHandles = _selectedTaxiNodeId >= 0 || _selectedTaxiRouteId >= 0 || visibleRouteCount <= 32;
+                    int visibleRouteCount = _taxiActors._taxiLoader.Routes.Count(_taxiActors.IsTaxiRouteVisible);
+                    bool showRouteHandles = _taxiActors._selectedTaxiNodeId >= 0 || _taxiActors._selectedTaxiRouteId >= 0 || visibleRouteCount <= 32;
 
-                    foreach (var node in _taxiLoader.Nodes)
+                    foreach (var node in _taxiActors._taxiLoader.Nodes)
                     {
-                        if (!IsTaxiNodeVisible(node)) continue;
+                        if (!_taxiActors.IsTaxiNodeVisible(node)) continue;
                         _bbRenderer.BatchPin(node.Position, 64f, 12f, nodeColor);
                         poiTaxiPreparedCount++;
                         _bbRenderer.BatchBoxMinMax(
@@ -6260,27 +5782,27 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         poiTaxiPreparedCount++;
                     }
 
-                    foreach (var route in _taxiLoader.Routes)
+                    foreach (var route in _taxiActors._taxiLoader.Routes)
                     {
-                        if (!IsTaxiRouteVisible(route)) continue;
-                        Vector3 routeColor = route.PathId == _selectedTaxiRouteId ? selectedRouteColor : lineColor;
+                        if (!_taxiActors.IsTaxiRouteVisible(route)) continue;
+                        Vector3 routeColor = route.PathId == _taxiActors._selectedTaxiRouteId ? selectedRouteColor : lineColor;
                         for (int i = 0; i < route.Waypoints.Count - 1; i++)
                         {
                             _bbRenderer.BatchLine(route.Waypoints[i], route.Waypoints[i + 1], routeColor);
                             poiTaxiPreparedCount++;
                         }
 
-                        if (showRouteHandles && TryGetTaxiRouteSelectionPoint(route, out Vector3 selectionPoint))
+                        if (showRouteHandles && TaxiActorScene.TryGetTaxiRouteSelectionPoint(route, out Vector3 selectionPoint))
                         {
-                            float pinHeight = route.PathId == _selectedTaxiRouteId ? 64f : 52f;
-                            float headSize = route.PathId == _selectedTaxiRouteId ? 12f : 10f;
+                            float pinHeight = route.PathId == _taxiActors._selectedTaxiRouteId ? 64f : 52f;
+                            float headSize = route.PathId == _taxiActors._selectedTaxiRouteId ? 12f : 10f;
                             _bbRenderer.BatchPin(selectionPoint, pinHeight, headSize,
-                                route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeHandleColor);
+                                route.PathId == _taxiActors._selectedTaxiRouteId ? selectedRouteColor : routeHandleColor);
                             poiTaxiPreparedCount++;
                             _bbRenderer.BatchBoxMinMax(
                                 selectionPoint - new Vector3(34f, 34f, 20f),
                                 selectionPoint + new Vector3(34f, 34f, 72f),
-                                route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeBoxColor);
+                                route.PathId == _taxiActors._selectedTaxiRouteId ? selectedRouteColor : routeBoxColor);
                             poiTaxiPreparedCount++;
                         }
                     }
@@ -6505,10 +6027,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.PoiTaxi,
                         poiTaxiMs,
-                        _bbRenderer != null && (_showPoi || _showTaxi),
+                        _bbRenderer != null && (_showPoi || _taxiActors._showTaxi),
                         poiTaxiPreparedCount,
                         poiTaxiPreparedCount,
-                        _bbRenderer != null && (_showPoi || _showTaxi) ? "not_cached" : "disabled");
+                        _bbRenderer != null && (_showPoi || _taxiActors._showTaxi) ? "not_cached" : "disabled");
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.AreaTriggers,
                         areaTriggersMs,

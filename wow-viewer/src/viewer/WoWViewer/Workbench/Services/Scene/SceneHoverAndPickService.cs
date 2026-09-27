@@ -142,7 +142,7 @@ internal sealed partial class SceneHoverAndPickService
                 if (clickSw != null) clickPickMs = (clickSw.ElapsedTicks - clickPickStartTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
                 ClearPendingClickSelection();
-                _worldScene.ClearTaxiSelection();
+                _worldScene.TaxiActors.ClearTaxiSelection();
                 _worldScene.ClearSelection();
                 _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
 
@@ -169,7 +169,7 @@ internal sealed partial class SceneHoverAndPickService
             ClearPendingClickSelection();
             ClearSelectedWlLiquidBody(clearListIsolation: true);
             _worldScene.ClearSelection();
-            _worldScene.ClearTaxiSelection();
+            _worldScene.TaxiActors.ClearTaxiSelection();
             _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
             _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
             _selectedObjectIndex = -1;

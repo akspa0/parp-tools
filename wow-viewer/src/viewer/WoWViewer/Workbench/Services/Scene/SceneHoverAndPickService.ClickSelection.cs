@@ -273,10 +273,10 @@ internal sealed partial class SceneHoverAndPickService
 
     private void AddTaxiNodeClickSelectionCandidate(HashSet<string> addedKeys, int nodeId, string source)
     {
-        if (_worldScene?.TaxiLoader == null)
+        if (_worldScene?.TaxiActors.TaxiLoader == null)
             return;
 
-        var node = _worldScene.GetTaxiNode(nodeId);
+        var node = _worldScene.TaxiActors.GetTaxiNode(nodeId);
         if (node == null)
             return;
 
@@ -297,15 +297,15 @@ internal sealed partial class SceneHoverAndPickService
 
     private void AddTaxiRouteClickSelectionCandidate(HashSet<string> addedKeys, int routeId, string source)
     {
-        if (_worldScene?.TaxiLoader == null)
+        if (_worldScene?.TaxiActors.TaxiLoader == null)
             return;
 
-        var route = _worldScene.GetTaxiRoute(routeId);
+        var route = _worldScene.TaxiActors.GetTaxiRoute(routeId);
         if (route == null)
             return;
 
-        string fromName = _worldScene.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
-        string toName = _worldScene.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
+        string fromName = _worldScene.TaxiActors.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
+        string toName = _worldScene.TaxiActors.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
 
         TryAddClickSelectionCandidate(
             addedKeys,
@@ -362,7 +362,7 @@ internal sealed partial class SceneHoverAndPickService
                         return;
 
                     _worldScene?.ClearSelection();
-                    _worldScene?.ClearTaxiSelection();
+                    _worldScene?.TaxiActors.ClearTaxiSelection();
                     _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     SetSelectedWlLiquidBody(
@@ -393,7 +393,7 @@ internal sealed partial class SceneHoverAndPickService
                         return;
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
-                    _worldScene.ClearTaxiSelection();
+                    _worldScene.TaxiActors.ClearTaxiSelection();
                     _worldScene.ClearSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     UpdateSelectedPm4ObjectInfo(objectKey);
@@ -439,7 +439,7 @@ internal sealed partial class SceneHoverAndPickService
                         return;
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
-                    _worldScene.ClearTaxiSelection();
+                    _worldScene.TaxiActors.ClearTaxiSelection();
                     _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     RefreshSelectedWorldObjectInfo();
