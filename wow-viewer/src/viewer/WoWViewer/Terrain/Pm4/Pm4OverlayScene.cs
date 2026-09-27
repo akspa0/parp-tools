@@ -118,7 +118,7 @@ public sealed partial class Pm4OverlayScene
     private bool IsHoverPickPositionAllowed(Vector3 worldPosition) => _host.IsHoverPickPositionAllowed(worldPosition);
     private FrustumCuller _frustumCuller => _host.FrustumCuller;
     private const float NoCullRadius = WorldScene.NoCullRadius;
-    internal static Vector3 ConvertMprlPositionToWorld(Vector3 refPos) => WorldScene.ConvertMprlPositionToWorld(refPos);
+    internal static Vector3 ConvertMprlPositionToWorld(Vector3 refPos) => Pm4OverlayMprlHelpers.ConvertMprlPositionToWorld(refPos);
     private static float RayAABBIntersect(Vector3 origin, Vector3 dir, Vector3 bmin, Vector3 bmax) => WorldScene.RayAABBIntersect(origin, dir, bmin, bmax);
     private static void TransformBounds(Vector3 min, Vector3 max, Matrix4x4 m, out Vector3 outMin, out Vector3 outMax)
         => WorldScene.TransformBounds(min, max, m, out outMin, out outMax);
