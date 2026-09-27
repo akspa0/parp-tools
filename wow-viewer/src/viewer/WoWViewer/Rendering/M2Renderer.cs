@@ -175,14 +175,15 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
         }
     }
 
-    // Static legacy-backed M2s can use the shared world batch path. The native
-    // runtime backend owns a different shader/state path, so keep it isolated
-    // until a backend-specific batch key exists.
-    public bool RequiresUnbatchedWorldRender => _legacyRenderer is null || _legacyRenderer.RequiresUnbatchedWorldRender;
+    // Spec 256 P3: the native backend batches too. Every batched draw (RenderInstance, the instanced
+    // path) binds its own program and sets all of its uniforms, so it cannot inherit another backend's
+    // state; wireframe stays per instance, as for MdxRenderer.
+    public bool RequiresUnbatchedWorldRender => _legacyRenderer?.RequiresUnbatchedWorldRender ?? _wireframe;
 
     public bool SupportsGpuInstancedOpaque
         => _legacyRenderer is IGpuInstancedModelRenderer gpuRenderer
-            && gpuRenderer.SupportsGpuInstancedOpaque;
+            ? gpuRenderer.SupportsGpuInstancedOpaque
+            : NativeSupportsGpuInstancedOpaque;
 
     public IAnimationController? Animator => _legacyRenderer?.Animator ?? _runtimeAnimator;
 
@@ -409,19 +410,27 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
         {
             gpuRenderer.BeginGpuInstanceBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
                 lightDir, lightColor, ambientColor);
+            return;
         }
+
+        if (_legacyRenderer == null)
+            BeginNativeGpuInstanceBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
     }
 
     public void QueueGpuInstance(Matrix4x4 modelMatrix, float fadeAlpha = 1.0f)
     {
         if (_legacyRenderer is IGpuInstancedModelRenderer gpuRenderer)
             gpuRenderer.QueueGpuInstance(modelMatrix, fadeAlpha);
+        else if (_legacyRenderer == null)
+            QueueNativeGpuInstance(modelMatrix, fadeAlpha);
     }
 
     public void EndGpuInstanceBatch()
     {
         if (_legacyRenderer is IGpuInstancedModelRenderer gpuRenderer)
             gpuRenderer.EndGpuInstanceBatch();
+        else if (_legacyRenderer == null)
+            EndNativeGpuInstanceBatch();
     }
 
 public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
@@ -549,6 +558,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
         _disposed = true;
         _sections.Clear();
+        DeleteInstanceBuffer();
 
         ReleaseOwnedTextures();
 
@@ -566,6 +576,8 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
     {
         if (_gl == null || _runtimeModel == null)
             return;
+
+        CreateInstanceBuffer(); // Spec 256 P3
 
         foreach (M2StaticRenderSection section in _runtimeModel.Sections)
         {
@@ -616,6 +628,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
                 _gl.EnableVertexAttribArray(3);
             }
 
+            ConfigureInstanceAttributes(); // bound VAO; left disabled until an instanced draw
             _gl.BindVertexArray(0);
 
             var buffers = new SectionBuffers(section.SectionIndex, section.SkinSectionId, vao, vbo, ebo, section.Vertices.Count, (uint)indices.Length, section.Material)
@@ -746,6 +759,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             return;
 
         _gl.UseProgram(_shaderProgram);
+        _gl.Uniform1(_uInstanced, 0);
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&modelMatrix);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
@@ -803,21 +817,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             Vector3 baseColor = _wireframe
                 ? (_wireframeColorOverride ?? WireframeLineColor)
                 : ComputeSectionColor(section, fadeAlpha);
-            _gl.Uniform3(_uBaseColor, baseColor.X, baseColor.Y, baseColor.Z);
-            _gl.Uniform1(_uUnshaded, section.Material.IsUnshaded ? 1 : 0);
-            _gl.Uniform1(_uHasTexture, (!_wireframe && section.HasTexture) ? 1 : 0);
-            _gl.Uniform1(_uUvSet, section.UvSet);
-            _gl.Uniform1(_uGeneratedTexCoord, section.GeneratedTexCoord ? 1 : 0);
-            _gl.Uniform1(_uAlphaCutout, (!_wireframe && section.AlphaCutout) ? 1 : 0);
-            _gl.Uniform1(_uAlpha, Math.Clamp(fadeAlpha * section.AnimatedAlpha, 0.0f, 1.0f));
-            _gl.Uniform1(_uHasUvTransform, section.HasAnimatedUvTransform ? 1 : 0);
-            _gl.Uniform2(_uUvTranslation, section.AnimatedUvTranslation.X, section.AnimatedUvTranslation.Y);
-            _gl.Uniform2(_uUvScale, section.AnimatedUvScale.X, section.AnimatedUvScale.Y);
-            _gl.Uniform2(_uUvRotation, section.AnimatedUvRotation.X, section.AnimatedUvRotation.Y);
-
-            _gl.ActiveTexture(TextureUnit.Texture0);
-            _gl.BindTexture(TextureTarget.Texture2D, (!_wireframe && section.HasTexture) ? section.TextureId : 0u);
-            _gl.Uniform1(_uTexture0, 0);
+            ApplySectionUniforms(section, baseColor, Math.Clamp(fadeAlpha * section.AnimatedAlpha, 0.0f, 1.0f));
 
             _gl.BindVertexArray(section.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, section.IndexCount, DrawElementsType.UnsignedInt, null);
@@ -831,6 +831,26 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.DepthMask(true);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+    }
+
+    // Per-section material uniforms and texture, shared by RenderCore and the instanced draw.
+    private void ApplySectionUniforms(SectionBuffers section, Vector3 baseColor, float alpha)
+    {
+        _gl!.Uniform3(_uBaseColor, baseColor.X, baseColor.Y, baseColor.Z);
+        _gl.Uniform1(_uUnshaded, section.Material.IsUnshaded ? 1 : 0);
+        _gl.Uniform1(_uHasTexture, (!_wireframe && section.HasTexture) ? 1 : 0);
+        _gl.Uniform1(_uUvSet, section.UvSet);
+        _gl.Uniform1(_uGeneratedTexCoord, section.GeneratedTexCoord ? 1 : 0);
+        _gl.Uniform1(_uAlphaCutout, (!_wireframe && section.AlphaCutout) ? 1 : 0);
+        _gl.Uniform1(_uAlpha, alpha);
+        _gl.Uniform1(_uHasUvTransform, section.HasAnimatedUvTransform ? 1 : 0);
+        _gl.Uniform2(_uUvTranslation, section.AnimatedUvTranslation.X, section.AnimatedUvTranslation.Y);
+        _gl.Uniform2(_uUvScale, section.AnimatedUvScale.X, section.AnimatedUvScale.Y);
+        _gl.Uniform2(_uUvRotation, section.AnimatedUvRotation.X, section.AnimatedUvRotation.Y);
+
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, (!_wireframe && section.HasTexture) ? section.TextureId : 0u);
+        _gl.Uniform1(_uTexture0, 0);
     }
 
     private void ConfigureBlendMode(WowViewer.Core.M2.M2BlendMode blendMode)
@@ -882,11 +902,19 @@ layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aTexCoord0;
 layout (location = 3) in vec2 aTexCoord1;
+// Spec 256 P3: per-instance model matrix (four rows as columns, as uModel is uploaded) and fade.
+layout (location = 4) in vec4 aInstanceModel0;
+layout (location = 5) in vec4 aInstanceModel1;
+layout (location = 6) in vec4 aInstanceModel2;
+layout (location = 7) in vec4 aInstanceModel3;
+layout (location = 8) in float aInstanceFade;
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
+uniform int uInstanced;
 
+out float vInstanceFade;
 out vec3 vWorldPos;
 out vec3 vNormal;
 out vec3 vViewNormal;
@@ -895,9 +923,13 @@ out vec2 vTexCoord1;
 
 void main()
 {
-    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    mat4 model = uInstanced == 1
+        ? mat4(aInstanceModel0, aInstanceModel1, aInstanceModel2, aInstanceModel3)
+        : uModel;
+    vInstanceFade = uInstanced == 1 ? aInstanceFade : 1.0;
+    vec4 worldPos = model * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
-    vNormal = normalize(mat3(uModel) * aNormal);
+    vNormal = normalize(mat3(model) * aNormal);
     vViewNormal = mat3(uView) * vNormal;
     vTexCoord0 = aTexCoord0;
     vTexCoord1 = aTexCoord1;
@@ -933,6 +965,7 @@ uniform vec2 uUvRotation;
 
 in vec2 vTexCoord0;
 in vec2 vTexCoord1;
+in float vInstanceFade;
 
 out vec4 FragColor;
 
@@ -970,12 +1003,14 @@ void main()
         float diff = nDotL * 0.5 + 0.5;
         diffuseStrength = diff * diff;
     }
-    vec3 litColor = (uBaseColor * textureSample.rgb) * (uAmbientColor + (uLightColor * diffuseStrength));
+    // vInstanceFade is 1.0 outside instanced draws, so both factors below are then exact no-ops; in an
+    // instanced draw they apply the fade exactly as ComputeSectionColor / RenderCore do per instance.
+    vec3 litColor = (uBaseColor * clamp(vInstanceFade, 0.1, 1.0) * textureSample.rgb) * (uAmbientColor + (uLightColor * diffuseStrength));
     float distanceToCamera = distance(vWorldPos, uCameraPos);
     float fogRange = max(uFogEnd - uFogStart, 0.001);
     float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
     vec3 finalColor = mix(uFogColor, litColor, fogFactor);
-    FragColor = vec4(finalColor, textureSample.a * uAlpha);
+    FragColor = vec4(finalColor, textureSample.a * clamp(uAlpha * vInstanceFade, 0.0, 1.0));
 }
 """;
 
@@ -1015,6 +1050,7 @@ void main()
         _uUvTranslation = _gl.GetUniformLocation(_shaderProgram, "uUvTranslation");
         _uUvScale = _gl.GetUniformLocation(_shaderProgram, "uUvScale");
         _uUvRotation = _gl.GetUniformLocation(_shaderProgram, "uUvRotation");
+        _uInstanced = _gl.GetUniformLocation(_shaderProgram, "uInstanced");
         _shaderInitialized = true;
     }
 

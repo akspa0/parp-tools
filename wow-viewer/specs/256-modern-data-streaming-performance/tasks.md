@@ -26,7 +26,7 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 
 ## P3 — Native M2 instancing (after T032; scope from T015)
 - [x] T040 Decide: native instanced path vs legacy route default (operator). Receipt: operator 2026-09-27 chose "Start P3 instancing" offered as "one instanced draw on the native renderer" → native instanced path.
-- [ ] T041 Implement the chosen path with existing gates.
+- [x] T041 Implement the chosen path with existing gates. Receipt: [evidence/p3-native-instancing-2026-09-27.md](evidence/p3-native-instancing-2026-09-27.md).
 - [ ] T042 Build + tests + receipt; operator capture + visual A/B.
 
 ## Amendment — minimap upload budget
