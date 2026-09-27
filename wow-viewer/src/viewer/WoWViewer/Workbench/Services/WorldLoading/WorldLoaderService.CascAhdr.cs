@@ -47,7 +47,7 @@ internal sealed partial class WorldLoaderService
             _terrainManager.DetailedTileCountOverride = _savedDetailedAdtTileCountOverride;
             ApplyGlobalFogDefaults(_terrainManager.Lighting);
             _renderer = _worldScene;
-            _worldScene.EnableLitFallback($"{mapName} loaded directly; LIT/analytical lighting enabled.");
+            _worldScene.Atmosphere.EnableLitFallback($"{mapName} loaded directly; LIT/analytical lighting enabled.");
 
             var startPos = _terrainManager.GetInitialCameraPosition();
             _camera.Position = startPos;

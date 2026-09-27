@@ -197,9 +197,9 @@ internal static class MinimapHelpers
 
         // LIT markers are a diagnostic layer only. They deliberately share the same loaded source
         // and selected index as the Lighting panel and never change fog or lighting selection.
-        if (worldScene?.ShowLitMinimapMarkers == true && worldScene.LitLoader is { HasData: true } lit)
+        if (worldScene?.Atmosphere.ShowLitMinimapMarkers == true && worldScene.Atmosphere.LitLoader is { HasData: true } lit)
         {
-            float timeOfDay = worldScene.LastLitSample?.TimeOfDay ?? 0.5f;
+            float timeOfDay = worldScene.Atmosphere.LastLitSample?.TimeOfDay ?? 0.5f;
             for (int lightIndex = 0; lightIndex < lit.Lights.Count; lightIndex++)
             {
                 LitLoader.LitLight light = lit.Lights[lightIndex];
@@ -207,7 +207,7 @@ internal static class MinimapHelpers
                     continue;
 
                 uint color = ToImGuiColor(lit.EvaluateOverlayColor(light, timeOfDay));
-                bool selected = lightIndex == worldScene.SelectedLitLightIndex;
+                bool selected = lightIndex == worldScene.Atmosphere.SelectedLitLightIndex;
                 float coverageRadius = Math.Clamp(
                     MathF.Max(3f, MathF.Max(light.Radius, light.Dropoff) / MinimapWorldTileSize * cellSize),
                     3f,
@@ -366,7 +366,7 @@ internal static class MinimapHelpers
         out int lightIndex)
     {
         lightIndex = -1;
-        if (worldScene?.ShowLitMinimapMarkers != true || worldScene.LitLoader is not { HasData: true } lit)
+        if (worldScene?.Atmosphere.ShowLitMinimapMarkers != true || worldScene.Atmosphere.LitLoader is not { HasData: true } lit)
             return false;
 
         float bestDistanceSquared = float.MaxValue;

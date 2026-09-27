@@ -47,20 +47,20 @@ internal sealed partial class LightingPanelService
     {
         ImGui.SeparatorText("LIT source");
 
-        bool loaded = scene.LitLoader is { HasData: true };
+        bool loaded = scene.Atmosphere.LitLoader is { HasData: true };
         ImGui.TextColored(
             loaded ? new Vector4(0.45f, 0.85f, 0.45f, 1f) : new Vector4(0.85f, 0.55f, 0.35f, 1f),
-            loaded ? "LOADED" : (scene.LitLoadAttempted ? "NOT LOADED" : "NOT ATTEMPTED"));
+            loaded ? "LOADED" : (scene.Atmosphere.LitLoadAttempted ? "NOT LOADED" : "NOT ATTEMPTED"));
 
-        ImGui.TextWrapped(scene.LitStatus);
+        ImGui.TextWrapped(scene.Atmosphere.LitStatus);
 
-        if (scene.LitLoader is { } lit)
+        if (scene.Atmosphere.LitLoader is { } lit)
         {
             ImGui.Text($"Version: {DescribeLitVersion(lit.Version)}");
             ImGui.Text($"Lights: {lit.Lights.Count}");
         }
 
-        string? source = scene.SelectedLitSourcePath;
+        string? source = scene.Atmosphere.SelectedLitSourcePath;
         ImGui.Text("Source:");
         ImGui.SameLine();
         if (string.IsNullOrWhiteSpace(source))
@@ -68,7 +68,7 @@ internal sealed partial class LightingPanelService
         else
             ImGui.TextWrapped(source);
 
-        var available = scene.AvailableLitSourcePaths;
+        var available = scene.Atmosphere.AvailableLitSourcePaths;
         if (available.Count > 1)
         {
             string currentSource = source ?? available[0];
@@ -83,7 +83,7 @@ internal sealed partial class LightingPanelService
                         StringComparison.OrdinalIgnoreCase);
                     if (ImGui.Selectable(candidate, selected))
                     {
-                        scene.ReloadLit(candidate);
+                        scene.Atmosphere.ReloadLit(candidate);
                         ImGui.EndCombo();
                         return;
                     }
@@ -103,34 +103,34 @@ internal sealed partial class LightingPanelService
             ImGui.TreePop();
         }
 
-        if (scene.LitAutoFallbackActive)
+        if (scene.Atmosphere.LitAutoFallbackActive)
         {
             ImGui.TextColored(
                 new Vector4(0.75f, 0.85f, 0.45f, 1f),
                 "Automatic fallback: LIT override enabled");
-            ImGui.TextWrapped(scene.LitAutoFallbackReason);
+            ImGui.TextWrapped(scene.Atmosphere.LitAutoFallbackReason);
         }
 
         // These toggles lazy-load the LIT, so they double as the way to force a load attempt.
-        bool showLitLights = scene.ShowLitLights;
+        bool showLitLights = scene.Atmosphere.ShowLitLights;
         if (ImGui.Checkbox("Show LIT lights", ref showLitLights))
-            scene.ShowLitLights = showLitLights;
+            scene.Atmosphere.ShowLitLights = showLitLights;
 
-        bool showLitMinimapMarkers = scene.ShowLitMinimapMarkers;
+        bool showLitMinimapMarkers = scene.Atmosphere.ShowLitMinimapMarkers;
         if (ImGui.Checkbox("Show LIT minimap markers", ref showLitMinimapMarkers))
-            scene.ShowLitMinimapMarkers = showLitMinimapMarkers;
+            scene.Atmosphere.ShowLitMinimapMarkers = showLitMinimapMarkers;
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Shows positional LIT entries in the regular and full-screen minimaps. This does not change lighting or fog.");
 
-        bool useLitFog = scene.UseLitFogOverride;
+        bool useLitFog = scene.Atmosphere.UseLitFogOverride;
         if (ImGui.Checkbox("Use LIT fog override", ref useLitFog))
-            scene.UseLitFogOverride = useLitFog;
+            scene.Atmosphere.UseLitFogOverride = useLitFog;
     }
 
     private void DrawLitEntriesSection(WorldScene scene)
     {
         ImGui.SeparatorText("LIT entries");
-        if (scene.LitLoader is not { HasData: true } lit)
+        if (scene.Atmosphere.LitLoader is not { HasData: true } lit)
         {
             ImGui.TextDisabled("No loaded LIT entries to map.");
             ImGui.TextDisabled("Enable a LIT visualization above to request the existing lazy load.");
@@ -153,10 +153,10 @@ internal sealed partial class LightingPanelService
             if (!light.IsNavigable)
                 label += " (not mappable)";
 
-            bool selected = scene.SelectedLitLightIndex == index;
+            bool selected = scene.Atmosphere.SelectedLitLightIndex == index;
             if (ImGui.Selectable(label, selected, ImGuiSelectableFlags.AllowDoubleClick))
             {
-                scene.SelectedLitLightIndex = index;
+                scene.Atmosphere.SelectedLitLightIndex = index;
                 if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                     FocusCameraOnLitLight(index, closeFullscreenAfterFocus: false);
             }
@@ -186,7 +186,7 @@ internal sealed partial class LightingPanelService
     {
         ImGui.SeparatorText("Last LIT sample");
 
-        if (scene.LastLitSample is not { } sample)
+        if (scene.Atmosphere.LastLitSample is not { } sample)
         {
             ImGui.TextDisabled("No LIT sample evaluated yet.");
             ImGui.TextDisabled("Enable a LIT toggle above and move the camera in a lit world.");
@@ -213,7 +213,7 @@ internal sealed partial class LightingPanelService
         ImGui.TextColored(new Vector4(0.45f, 0.85f, 0.45f, 1f), "GLOBAL VIEWER LIGHT ACTIVE");
         ImGui.TextDisabled("Always present; local DBC/LIT profiles may overlay it but cannot replace its availability.");
 
-        if (scene.LightService is { } dbcLighting)
+        if (scene.Atmosphere.LightService is { } dbcLighting)
         {
             Vector4 statusColor = dbcLighting.HasActiveLocalOverlay
                 ? new Vector4(0.45f, 0.85f, 0.45f, 1f)
@@ -252,17 +252,17 @@ internal sealed partial class LightingPanelService
         DrawColorRow("Light", lighting.LightColor);
         DrawColorRow("Ambient", lighting.AmbientColor);
         DrawColorRow("Fog", lighting.FogColor);
-        ImGui.Text($"Active fog start: {scene.ActiveFogStart:F1}   end: {scene.ActiveFogEnd:F1}");
-        ImGui.TextDisabled($"Source: {scene.ActiveFogRangeSource}{(scene.ActiveFogRangeAdjusted ? " (normalized to stay visible)" : string.Empty)}");
+        ImGui.Text($"Active fog start: {scene.Atmosphere.ActiveFogStart:F1}   end: {scene.Atmosphere.ActiveFogEnd:F1}");
+        ImGui.TextDisabled($"Source: {scene.Atmosphere.ActiveFogRangeSource}{(scene.Atmosphere.ActiveFogRangeAdjusted ? " (normalized to stay visible)" : string.Empty)}");
 
         ImGui.SeparatorText("Active fog range");
         DrawAuthoritativeFogControls(showDescription: true);
 
-        if (scene.HasUserFogRangeOverride)
+        if (scene.Atmosphere.HasUserFogRangeOverride)
         {
             ImGui.SameLine();
             if (ImGui.SmallButton("Reset to lighting recommendation"))
-                scene.ClearUserFogRangeOverride();
+                scene.Atmosphere.ClearUserFogRangeOverride();
         }
     }
 

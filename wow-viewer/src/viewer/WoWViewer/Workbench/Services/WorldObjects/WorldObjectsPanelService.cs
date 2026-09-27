@@ -434,39 +434,39 @@ internal sealed partial class WorldObjectsPanelService
             }
         }
 
-        if (_worldScene.LitLoader != null && _worldScene.LitLoader.HasData)
+        if (_worldScene.Atmosphere.LitLoader != null && _worldScene.Atmosphere.LitLoader.HasData)
         {
-            bool showLitLights = _worldScene.ShowLitLights;
-            if (ImGui.Checkbox($"LIT Lights ({_worldScene.LitLoader.Lights.Count})", ref showLitLights))
-                _worldScene.ShowLitLights = showLitLights;
+            bool showLitLights = _worldScene.Atmosphere.ShowLitLights;
+            if (ImGui.Checkbox($"LIT Lights ({_worldScene.Atmosphere.LitLoader.Lights.Count})", ref showLitLights))
+                _worldScene.Atmosphere.ShowLitLights = showLitLights;
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Alpha-era lights.lit placement overlay. Pins show light origins; boxes show approximate influence radius.");
 
-            bool useLitFogOverride = _worldScene.UseLitFogOverride;
+            bool useLitFogOverride = _worldScene.Atmosphere.UseLitFogOverride;
             if (ImGui.Checkbox("Use LIT Lighting Override", ref useLitFogOverride))
-                _worldScene.UseLitFogOverride = useLitFogOverride;
+                _worldScene.Atmosphere.UseLitFogOverride = useLitFogOverride;
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Experimental: apply the selected LIT profile over the viewer's always-present global lighting path.");
 
-            if (_worldScene.LastLitSample != null)
-                ImGui.TextDisabled($"LIT sample: {_worldScene.LastLitSample.DominantLightName}  fogEnd={_worldScene.LastLitSample.FogEnd:F1}");
+            if (_worldScene.Atmosphere.LastLitSample != null)
+                ImGui.TextDisabled($"LIT sample: {_worldScene.Atmosphere.LastLitSample.DominantLightName}  fogEnd={_worldScene.Atmosphere.LastLitSample.FogEnd:F1}");
             else
-                ImGui.TextDisabled(_worldScene.LitStatus);
+                ImGui.TextDisabled(_worldScene.Atmosphere.LitStatus);
         }
-        else if (!_worldScene.LitLoadAttempted)
+        else if (!_worldScene.Atmosphere.LitLoadAttempted)
         {
             DrawToolbarPopupButton("LIT Actions", "load", "##LitActionsPopup", () =>
             {
                 if (ImGui.Button("Load LIT Lights"))
                 {
-                    _worldScene.ShowLitLights = true;
+                    _worldScene.Atmosphere.ShowLitLights = true;
                     ImGui.CloseCurrentPopup();
                 }
             });
         }
         else
         {
-            ImGui.TextDisabled(_worldScene.LitStatus);
+            ImGui.TextDisabled(_worldScene.Atmosphere.LitStatus);
         }
 
         bool objectFogEnabled = _worldScene.ObjectFogEnabled;

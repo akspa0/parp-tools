@@ -314,7 +314,7 @@ internal sealed partial class MinimapAndStatusService
 
             if (hitLitMarker)
             {
-                _worldScene!.SelectedLitLightIndex = litLightIndex;
+                _worldScene!.Atmosphere.SelectedLitLightIndex = litLightIndex;
                 if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                     FocusCameraOnLitLight(litLightIndex, closeFullscreenAfterFocus: true);
                 else
@@ -374,7 +374,7 @@ internal sealed partial class MinimapAndStatusService
 
     internal void FocusCameraOnLitLight(int lightIndex, bool closeFullscreenAfterFocus)
     {
-        if (_worldScene?.LitLoader is not { HasData: true } lit
+        if (_worldScene?.Atmosphere.LitLoader is not { HasData: true } lit
             || lightIndex < 0
             || lightIndex >= lit.Lights.Count)
         {
@@ -391,7 +391,7 @@ internal sealed partial class MinimapAndStatusService
 
         float distance = MathF.Max(80f, MathF.Min(MathF.Max(light.Radius, light.Dropoff), 250f));
         float height = MathF.Max(50f, distance * 0.58f);
-        _worldScene.SelectedLitLightIndex = lightIndex;
+        _worldScene.Atmosphere.SelectedLitLightIndex = lightIndex;
         _camera.Position = light.Position + new Vector3(distance, 0f, height);
         _camera.Yaw = 180f;
         _camera.Pitch = -30f;

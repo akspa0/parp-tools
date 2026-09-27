@@ -235,7 +235,7 @@ internal sealed partial class WorkspacesService
             _investigation.DrawWlLiquidInvestigationPanel(defaultOpen: _worldScene.WlLoader?.HasData == true);
 
             ImGui.Separator();
-            _investigation.DrawLitInvestigationPanel(defaultOpen: _worldScene.LitLoader?.HasData == true || _worldScene.UseLitFogOverride);
+            _investigation.DrawLitInvestigationPanel(defaultOpen: _worldScene.Atmosphere.LitLoader?.HasData == true || _worldScene.Atmosphere.UseLitFogOverride);
         }
 
         if (_terrainManager != null || _vlmTerrainManager != null)

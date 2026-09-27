@@ -480,11 +480,11 @@ internal sealed partial class WorldLoaderService
                 int mapId = curMapDef?.HasDbcEntry == true ? curMapDef.Id : -1;
                 _worldScene.SetDbcCredentials(_dbcProvider, _dbdDir, _dbcBuild, mapId);
 
-                _worldScene.LoadLighting(_dbcProvider, _dbdDir, _dbcBuild, mapId);
+                _worldScene.Atmosphere.LoadLighting(_dbcProvider, _dbdDir, _dbcBuild, mapId);
             }
             else
             {
-                _worldScene.EnableLitFallback(
+                _worldScene.Atmosphere.EnableLitFallback(
                     "No Light DBC provider is available for this client; LIT is enabled automatically.");
             }
 
@@ -575,7 +575,7 @@ internal sealed partial class WorldLoaderService
             ApplySavedPm4AlignmentToScene();
             ApplySavedObjectPathFiltersForCurrentMap();
 
-            _worldScene.EnableLitFallback(
+            _worldScene.Atmosphere.EnableLitFallback(
                 "Rosetta Zarr map loaded directly; LIT/analytical lighting enabled.");
 
             // Full-load mode: load all tiles synchronously during loading screen

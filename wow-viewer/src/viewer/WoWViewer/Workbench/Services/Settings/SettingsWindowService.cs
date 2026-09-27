@@ -110,9 +110,9 @@ internal sealed partial class SettingsWindowService
 
         if (lighting != null && _worldScene != null)
         {
-            bool useLitFog = _worldScene.UseLitFogOverride;
+            bool useLitFog = _worldScene.Atmosphere.UseLitFogOverride;
             if (ImGui.Checkbox("Use LIT fog", ref useLitFog))
-                _worldScene.UseLitFogOverride = useLitFog;
+                _worldScene.Atmosphere.UseLitFogOverride = useLitFog;
             ImGui.TextDisabled($"Fog/detail range: {currentFogStart:F0}–{currentFogEnd:F0}; WDL horizon clips at {TerrainQueryService.ComputeSceneFarPlane(currentFogEnd):F0} (+2500).");
         }
     }
@@ -124,11 +124,11 @@ internal sealed partial class SettingsWindowService
     /// </summary>
     private (float FogStart, float FogEnd) GetAuthoritativeFogRange(TerrainLighting? lighting = null)
     {
-        if (_worldScene is { HasUserFogRangeOverride: true } scene)
-            return (scene.UserFogStart, scene.UserFogEnd);
+        if (_worldScene is { Atmosphere.HasUserFogRangeOverride: true } scene)
+            return (scene.Atmosphere.UserFogStart, scene.Atmosphere.UserFogEnd);
 
         if (_worldScene != null)
-            return (_worldScene.ActiveFogStart, _worldScene.ActiveFogEnd);
+            return (_worldScene.Atmosphere.ActiveFogStart, _worldScene.Atmosphere.ActiveFogEnd);
 
         if (lighting != null)
             return (lighting.FogStart, lighting.FogEnd);
@@ -142,7 +142,7 @@ internal sealed partial class SettingsWindowService
 
         if (_worldScene != null)
         {
-            _worldScene.SetUserFogRangeOverride(normalizedStart, normalizedEnd);
+            _worldScene.Atmosphere.SetUserFogRangeOverride(normalizedStart, normalizedEnd);
         }
         else
         {

@@ -421,9 +421,9 @@ internal sealed partial class InvestigationService
         if (!ImGui.CollapsingHeader("LIT Lighting Investigation", flags))
             return;
 
-        bool showLitLights = _worldScene.ShowLitLights;
+        bool showLitLights = _worldScene.Atmosphere.ShowLitLights;
         if (ImGui.Checkbox("Show LIT Overlay", ref showLitLights))
-            _worldScene.ShowLitLights = showLitLights;
+            _worldScene.Atmosphere.ShowLitLights = showLitLights;
 
         bool showAreaRegions = _worldScene.ShowAreaRegionOverlay;
         if (ImGui.Checkbox("Show Area Boundaries", ref showAreaRegions))
@@ -441,16 +441,16 @@ internal sealed partial class InvestigationService
         }
 
         ImGui.SameLine();
-        bool useLitFogOverride = _worldScene.UseLitFogOverride;
+        bool useLitFogOverride = _worldScene.Atmosphere.UseLitFogOverride;
         if (ImGui.Checkbox("Use LIT Lighting Override", ref useLitFogOverride))
-            _worldScene.UseLitFogOverride = useLitFogOverride;
+            _worldScene.Atmosphere.UseLitFogOverride = useLitFogOverride;
 
-        if (_worldScene.LitAutoFallbackActive)
-            ImGui.TextDisabled($"Automatic LIT fallback: {_worldScene.LitAutoFallbackReason}");
+        if (_worldScene.Atmosphere.LitAutoFallbackActive)
+            ImGui.TextDisabled($"Automatic LIT fallback: {_worldScene.Atmosphere.LitAutoFallbackReason}");
 
-        IReadOnlyList<string> sourcePaths = _worldScene.AvailableLitSourcePaths;
-        string currentSourcePath = _worldScene.SelectedLitSourcePath
-            ?? _worldScene.LitLoader?.SourcePath
+        IReadOnlyList<string> sourcePaths = _worldScene.Atmosphere.AvailableLitSourcePaths;
+        string currentSourcePath = _worldScene.Atmosphere.SelectedLitSourcePath
+            ?? _worldScene.Atmosphere.LitLoader?.SourcePath
             ?? string.Empty;
         if (sourcePaths.Count > 1)
         {
@@ -465,7 +465,7 @@ internal sealed partial class InvestigationService
                         StringComparison.OrdinalIgnoreCase);
                     if (ImGui.Selectable(sourcePath, isSelectedSource))
                     {
-                        _worldScene.ReloadLit(sourcePath);
+                        _worldScene.Atmosphere.ReloadLit(sourcePath);
                         ImGui.EndCombo();
                         return;
                     }
@@ -478,18 +478,18 @@ internal sealed partial class InvestigationService
             }
         }
 
-        if (!_worldScene.LitLoadAttempted)
+        if (!_worldScene.Atmosphere.LitLoadAttempted)
         {
             ImGui.TextDisabled("All .lit profiles directly inside World\\<map> or World\\Maps\\<map> are discovered and lazy-loaded when present.");
             if (ImGui.Button("Load LIT Lighting"))
-                _worldScene.ShowLitLights = true;
+                _worldScene.Atmosphere.ShowLitLights = true;
             return;
         }
 
-        LitLoader? loader = _worldScene.LitLoader;
+        LitLoader? loader = _worldScene.Atmosphere.LitLoader;
         if (loader == null || !loader.HasData)
         {
-            ImGui.TextDisabled(_worldScene.LitStatus);
+            ImGui.TextDisabled(_worldScene.Atmosphere.LitStatus);
             return;
         }
 
@@ -497,7 +497,7 @@ internal sealed partial class InvestigationService
         ImGui.TextDisabled($"Version: 0x{loader.Version:X8}  RawCount: {loader.RawLightCount}  Parsed lights: {loader.Lights.Count}");
         ImGui.TextDisabled("Runtime LIT uses clear group 0. Global diffuse/ambient/sky/fog are applied together; local-zone coordinates and sky-band placement remain diagnostic-only.");
 
-        LitLoader.LitLightingSample? litSample = _worldScene.LastLitSample;
+        LitLoader.LitLightingSample? litSample = _worldScene.Atmosphere.LastLitSample;
         if (litSample != null)
         {
             ImGui.Separator();
@@ -513,7 +513,7 @@ internal sealed partial class InvestigationService
                 _navigatorPanel.CopyTextToClipboard(BuildLitSampleSummary(loader, litSample), "LIT lighting summary");
         }
 
-        int selectedIndex = _worldScene.SelectedLitLightIndex;
+        int selectedIndex = _worldScene.Atmosphere.SelectedLitLightIndex;
         if (selectedIndex < 0 || selectedIndex >= loader.Lights.Count)
             selectedIndex = 0;
 
@@ -535,7 +535,7 @@ internal sealed partial class InvestigationService
                 ImGui.TableSetColumnIndex(0);
                 bool isSelected = selectedIndex == i;
                 if (ImGui.Selectable($"##lit_sel_{i}", isSelected, ImGuiSelectableFlags.SpanAllColumns))
-                    _worldScene.SelectedLitLightIndex = i;
+                    _worldScene.Atmosphere.SelectedLitLightIndex = i;
 
                 ImGui.TableSetColumnIndex(1);
                 ImGui.TextUnformatted(light.IsDefaultLight ? "Default" : "Local");
@@ -550,7 +550,7 @@ internal sealed partial class InvestigationService
 
                 ImGui.TableSetColumnIndex(4);
                 if (ImGui.Selectable($"{light.DisplayName}##lit_label_{i}", isSelected, ImGuiSelectableFlags.SpanAllColumns))
-                    _worldScene.SelectedLitLightIndex = i;
+                    _worldScene.Atmosphere.SelectedLitLightIndex = i;
 
                 if (ImGui.IsItemHovered())
                 {
@@ -566,7 +566,7 @@ internal sealed partial class InvestigationService
             ImGui.EndTable();
         }
 
-        selectedIndex = Math.Clamp(_worldScene.SelectedLitLightIndex >= 0 ? _worldScene.SelectedLitLightIndex : selectedIndex, 0, loader.Lights.Count - 1);
+        selectedIndex = Math.Clamp(_worldScene.Atmosphere.SelectedLitLightIndex >= 0 ? _worldScene.Atmosphere.SelectedLitLightIndex : selectedIndex, 0, loader.Lights.Count - 1);
         LitLoader.LitLight selectedLight = loader.Lights[selectedIndex];
         DrawLitLightDetails(selectedLight, litSample?.TimeOfDay ?? (_terrainManager?.Lighting.GameTime ?? 0f) * 2880f);
     }

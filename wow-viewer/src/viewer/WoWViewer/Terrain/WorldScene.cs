@@ -217,6 +217,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     public SceneObjectFilters ObjectFilters => _objectFilters;
     private readonly SceneSelectionState _selection;
     public SceneSelectionState Selection => _selection;
+    private readonly SceneAtmosphere _atmosphere;
+    public SceneAtmosphere Atmosphere => _atmosphere;
     // SCENE-SERVICES-END
 
     // IWorldSceneHost (Spec 255): the scene state the services read, implemented explicitly.
@@ -248,6 +250,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     SceneHoverPickController IWorldSceneHost.HoverPick => _hoverPick;
     Dictionary<(int, int), List<ObjectInstance>> IWorldSceneHost.TileMdxInstances => _tileMdxInstances;
     Dictionary<(int, int), List<ObjectInstance>> IWorldSceneHost.TileWmoInstances => _tileWmoInstances;
+    SkyDomeRenderer IWorldSceneHost.SkyDome => _skyDome;
+    ref List<ObjectInstance> IWorldSceneHost.SkyboxInstances => ref _skyboxInstances;
     // WORLD-SCENE-HOST-IMPL-END
 
     private Vector3 _lastRenderedCameraPosition;
@@ -617,10 +621,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     private bool _showWlLiquids = true; // Auto-enable by default
     private bool _wlLoadAttempted = false;
     private IDataSource? _dataSource;
-    private bool _clientStarsProbeComplete;
-    private string? _clientStarsFallbackModelPath;
-    private string? _activeLightSkyboxSourcePath;
-    private string? _activeLightSkyboxModelKey;
     public bool ShowWlLiquids
     {
         get => _showWlLiquids;
@@ -732,83 +732,12 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         reason = message;
         return false;
     }
-
-    // DBC Lighting
-    private LightService? _lightService;
-    public LightService? LightService => _lightService;
     private long _lastAutomaticTimeTick;
     private bool _automaticTimeTickInitialized;
-
-    // Alpha LIT lighting (lazy-loaded on first request)
-    private LitLoader? _litLoader;
-    private bool _showLitLights;
     private bool _showAreaRegionOverlay;
     private IReadOnlyList<AreaOverlayRegion> _areaOverlayRegions = Array.Empty<AreaOverlayRegion>();
     private int _areaOverlayResidentChunkCount;
     private int _areaOverlayUnresolvedChunkCount;
-    private bool _showLitMinimapMarkers;
-    private bool _litLoadAttempted;
-    private bool _useLitFogOverride;
-    private bool _litAutoFallback;
-    private string _litAutoFallbackReason = string.Empty;
-    // Local Light* spatial selection is retained for diagnostics, but its
-    // renderer application remains opt-in until the native local-zone
-    // transform/falloff contract is proven for the active build.
-    private bool _useLocalDbcLightingOverlay;
-    private bool _hasGlobalViewerFogRange;
-    private float _globalViewerFogStart;
-    private float _globalViewerFogEnd;
-    private bool _hasPreLitFogRange;
-    private float _preLitFogStart;
-    private float _preLitFogEnd;
-    private bool _hasUserFogRangeOverride;
-    private float _userFogStart = TerrainLightingMath.DefaultFogStart;
-    private float _userFogEnd = TerrainLightingMath.DefaultFogEnd;
-    private float _activeFogStart = TerrainLightingMath.DefaultFogStart;
-    private float _activeFogEnd = TerrainLightingMath.DefaultFogEnd;
-    private string _activeFogRangeSource = "Fallback";
-    private bool _activeFogRangeAdjusted;
-    private string _litStatus = "LIT not loaded.";
-    private int _selectedLitLightIndex = -1;
-    private string? _selectedLitSourcePath;
-    private LitLoader.LitLightingSample? _lastLitSample;
-    public bool ShowLitLights
-    {
-        get => _showLitLights;
-        set
-        {
-            _showLitLights = value;
-            if (value && !_litLoadAttempted)
-                LazyLoadLit();
-        }
-    }
-
-    /// <summary>Shows loaded positional LIT entries on shared minimap surfaces without changing lighting.</summary>
-    public bool ShowLitMinimapMarkers
-    {
-        get => _showLitMinimapMarkers;
-        set
-        {
-            _showLitMinimapMarkers = value;
-            if (value && !_litLoadAttempted)
-                LazyLoadLit();
-        }
-    }
-
-    public bool UseLitFogOverride
-    {
-        get => _useLitFogOverride;
-        set
-        {
-            if (_useLitFogOverride == value)
-                return;
-            if (!value)
-                RestorePreLitFogRange(_terrainManager?.Lighting);
-            _useLitFogOverride = value;
-            if (value && !_litLoadAttempted)
-                LazyLoadLit();
-        }
-    }
 
     public bool ShowAreaRegionOverlay
     {
@@ -827,111 +756,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _areaOverlayResidentChunkCount = result.ResidentChunkCount;
         _areaOverlayUnresolvedChunkCount = result.UnresolvedChunkCount;
     }
-
-    public bool UseLocalDbcLightingOverlay
-    {
-        get => _useLocalDbcLightingOverlay;
-        set => _useLocalDbcLightingOverlay = value;
-    }
-
-    public LitLoader? LitLoader => _litLoader;
-    public bool LitLoadAttempted => _litLoadAttempted;
-    public string LitStatus => _litStatus;
-    public bool LitAutoFallbackActive => _litAutoFallback;
-    public string LitAutoFallbackReason => _litAutoFallbackReason;
-    public int SelectedLitLightIndex { get => _selectedLitLightIndex; set => _selectedLitLightIndex = value; }
-    public string? SelectedLitSourcePath => _selectedLitSourcePath ?? _litLoader?.SourcePath;
-    public IReadOnlyList<string> AvailableLitSourcePaths => _litLoader?.AvailableSourcePaths ?? Array.Empty<string>();
-    public LitLoader.LitLightingSample? LastLitSample => _lastLitSample;
-
-    /// <summary>User-selected fog range that is intentionally independent from lighting recommendations.</summary>
-    public bool HasUserFogRangeOverride => _hasUserFogRangeOverride;
-
-    public float UserFogStart => _userFogStart;
-
-    public float UserFogEnd => _userFogEnd;
-
-    public float ActiveFogStart => _activeFogStart;
-
-    public float ActiveFogEnd => _activeFogEnd;
-
-    public string ActiveFogRangeSource => _activeFogRangeSource;
-
-    public bool ActiveFogRangeAdjusted => _activeFogRangeAdjusted;
-
-    public void SetUserFogRangeOverride(float fogStart, float fogEnd)
-    {
-        (_userFogStart, _userFogEnd) = TerrainLightingMath.NormalizeFogRange(fogStart, fogEnd);
-        _hasUserFogRangeOverride = true;
-    }
-
-    public void ClearUserFogRangeOverride()
-    {
-        _hasUserFogRangeOverride = false;
-    }
-
-    private void CapturePreLitFogRange(TerrainLighting lighting)
-    {
-        if (_hasPreLitFogRange)
-            return;
-
-        _preLitFogStart = lighting.FogStart;
-        _preLitFogEnd = lighting.FogEnd;
-        _hasPreLitFogRange = true;
-    }
-
-    private void RestoreGlobalViewerFogRange(TerrainLighting lighting)
-    {
-        if (!_hasGlobalViewerFogRange)
-        {
-            _globalViewerFogStart = lighting.FogStart;
-            _globalViewerFogEnd = lighting.FogEnd;
-            _hasGlobalViewerFogRange = true;
-        }
-
-        lighting.FogStart = _globalViewerFogStart;
-        lighting.FogEnd = _globalViewerFogEnd;
-    }
-
-    private void RestorePreLitFogRange(TerrainLighting? lighting)
-    {
-        if (!_hasPreLitFogRange)
-            return;
-        if (lighting != null)
-        {
-            lighting.FogStart = _preLitFogStart;
-            lighting.FogEnd = _preLitFogEnd;
-        }
-        _hasPreLitFogRange = false;
-    }
-
-    private void ResolveActiveFogRange(TerrainLighting lighting, string recommendationSource)
-    {
-        float rawRecommendedStart = lighting.FogStart;
-        float rawRecommendedEnd = lighting.FogEnd;
-        float fallbackStart = _hasPreLitFogRange ? _preLitFogStart : TerrainLightingMath.DefaultFogStart;
-        float fallbackEnd = _hasPreLitFogRange ? _preLitFogEnd : TerrainLightingMath.DefaultFogEnd;
-        (float recommendedStart, float recommendedEnd) = TerrainLightingMath.NormalizeFogRange(
-            rawRecommendedStart,
-            rawRecommendedEnd,
-            fallbackStart,
-            fallbackEnd);
-
-        (float activeStart, float activeEnd) = _hasUserFogRangeOverride
-            ? TerrainLightingMath.NormalizeFogRange(_userFogStart, _userFogEnd, recommendedStart, recommendedEnd)
-            : (recommendedStart, recommendedEnd);
-
-        _activeFogRangeAdjusted = !FogRangesEqual(rawRecommendedStart, rawRecommendedEnd, recommendedStart, recommendedEnd)
-            || (_hasUserFogRangeOverride && !FogRangesEqual(_userFogStart, _userFogEnd, activeStart, activeEnd));
-        _activeFogRangeSource = _hasUserFogRangeOverride ? "User override" : recommendationSource;
-        _activeFogStart = activeStart;
-        _activeFogEnd = activeEnd;
-        lighting.FogStart = activeStart;
-        lighting.FogEnd = activeEnd;
-    }
-
-    private static bool FogRangesEqual(float leftStart, float leftEnd, float rightStart, float rightEnd)
-        => MathF.Abs(leftStart - rightStart) < 0.001f && MathF.Abs(leftEnd - rightEnd) < 0.001f;
 
     /// <summary>
     /// Store DBC credentials for lazy loading of POI, Taxi, and Lighting.
@@ -966,57 +790,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _wlLoader.LoadAll();
         if (_wlLoader.HasData)
             _terrainManager.LiquidRenderer.AddWlBodies(_wlLoader.Bodies);
-    }
-
-    private void LazyLoadLit()
-    {
-        _litLoadAttempted = true;
-        _lastLitSample = null;
-
-        if (_dataSource == null)
-        {
-            _litStatus = "LIT unavailable: no data source.";
-            return;
-        }
-
-        _litLoader = new LitLoader(_dataSource, _terrainManager.MapName, _selectedLitSourcePath);
-        if (_litLoader.Load())
-        {
-            _litStatus = _litLoader.Status;
-            _selectedLitSourcePath = _litLoader.SourcePath;
-            if (_selectedLitLightIndex < 0 && _litLoader.Lights.Count > 0)
-                _selectedLitLightIndex = 0;
-            return;
-        }
-
-        _litStatus = _litLoader.Status;
-    }
-
-    public void ReloadLit(string? sourcePath = null)
-    {
-        _selectedLitSourcePath = string.IsNullOrWhiteSpace(sourcePath) ? null : sourcePath;
-        _selectedLitLightIndex = -1;
-        _litLoader = null;
-        _litLoadAttempted = false;
-        _litStatus = "LIT reload queued.";
-        LazyLoadLit();
-    }
-
-    /// <summary>
-    /// Activates the map's LIT lighting source when no usable map-scoped Light DBC profile exists.
-    /// This is an automatic default only; the user can still turn the override off in the UI.
-    /// </summary>
-    public void EnableLitFallback(string reason)
-    {
-        _litAutoFallback = true;
-        _litAutoFallbackReason = string.IsNullOrWhiteSpace(reason)
-            ? "No usable map-scoped Light DBC profile is available."
-            : reason.Trim();
-
-        if (!_useLitFogOverride)
-            UseLitFogOverride = true;
-        else if (!_litLoadAttempted)
-            LazyLoadLit();
     }
 
     private static bool TryComputeExpectedMprlYawRadians(IReadOnlyList<MprlEntry> positionRefs, out float yawRadians)
@@ -1181,21 +954,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _areaTriggerLoader.Load(_dbcProvider, _dbdDir, _dbcBuild, _mapId);
     }
 
-    /// <summary>
-    /// Load the exact-build Light* DBC chain for zone-based lighting, with the flattened
-    /// LightData table retained only as a later-build compatibility fallback.
-    /// </summary>
-    public void LoadLighting(DBCD.Providers.IDBCProvider dbcProvider, string dbdDir, string build, int mapId)
-    {
-        _lightService = new LightService();
-        _lightService.Load(dbcProvider, dbdDir, build, mapId);
-        if (!_lightService.HasUsableLightingForMap)
-        {
-            EnableLitFallback(
-                $"No usable Light DBC profile exists for map {mapId}; LIT is enabled automatically.");
-        }
-    }
-
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
         string? buildVersion = null,
@@ -1210,6 +968,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _taxiActors = new TaxiActorScene(this);
         _objectFilters = new SceneObjectFilters(this);
         _selection = new SceneSelectionState(this);
+        _atmosphere = new SceneAtmosphere(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -1253,6 +1012,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _taxiActors = new TaxiActorScene(this);
         _objectFilters = new SceneObjectFilters(this);
         _selection = new SceneSelectionState(this);
+        _atmosphere = new SceneAtmosphere(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -1431,7 +1191,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                 HasTileCoordinate = false
             };
 
-            if (IsSkyboxModelPath(modelPath))
+            if (SceneAtmosphere.IsSkyboxModelPath(modelPath))
                 _skyboxInstances.Add(instance);
             else
                 _mdxInstances.Add(instance);
@@ -1584,7 +1344,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                 HasTileCoordinate = true
             };
 
-            if (IsSkyboxModelPath(modelPath))
+            if (SceneAtmosphere.IsSkyboxModelPath(modelPath))
                 tileSkyboxes.Add(instance);
             else
                 tileMdx.Add(instance);
@@ -2672,7 +2432,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     HasTileCoordinate = true
                 };
 
-                if (IsSkyboxModelPath(modelPath))
+                if (SceneAtmosphere.IsSkyboxModelPath(modelPath))
                     _externalSkyboxInstances.Add(instance);
                 else
                     _externalMdxInstances.Add(instance);
@@ -3606,29 +3366,29 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         LitLoader.LitLightingSample? litSample = null;
                         string fogRecommendationSource;
                         AdvanceAutomaticTimeOfDay(lighting);
-                        if (_lightService != null)
+                        if (_atmosphere._lightService != null)
                         {
                             // Light.dbc and LIT use the same native 0..2880 clock. Keep the DBC
                             // overlay on the same frame/time as the global terrain lighting.
-                            _lightService.TimeOfDay = lighting.TimeOfDayUnits;
-                            _lightService.Update(camPos);
+                            _atmosphere._lightService.TimeOfDay = lighting.TimeOfDayUnits;
+                            _atmosphere._lightService.Update(camPos);
                         }
-                        UpdateActiveSkyboxModel();
+                        _atmosphere.UpdateActiveSkyboxModel();
 
-                        if (_litLoader != null && _litLoader.HasData)
-                            litSample = _litLoader.EvaluateLighting(camPos, lighting.GameTime);
+                        if (_atmosphere._litLoader != null && _atmosphere._litLoader.HasData)
+                            litSample = _atmosphere._litLoader.EvaluateLighting(camPos, lighting.GameTime);
 
                         // The viewer global sun is unconditional. DBC/LightData colors and fog
                         // are spatial overlays; a missing record is therefore an identity case,
                         // never a reason to darken the terrain or retain a departed zone's fog.
-                        RestoreGlobalViewerFogRange(lighting);
+                        _atmosphere.RestoreGlobalViewerFogRange(lighting);
                         lighting.ClearExternalLighting();
                         lighting.Update();
                         _skyDome.UpdateFromLighting(lighting.GameTime, lighting.LightDirection);
                         fogRecommendationSource = "Global viewer light";
 
-                        if (_useLocalDbcLightingOverlay
-                            && _lightService is { HasActiveLocalOverlay: true } localLighting)
+                        if (_atmosphere._useLocalDbcLightingOverlay
+                            && _atmosphere._lightService is { HasActiveLocalOverlay: true } localLighting)
                         {
                             (float dbcFogStart, float dbcFogEnd) =
                                 TerrainLightingMath.ComputeClientFogRange(
@@ -3675,9 +3435,9 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             _skyDome.SkyFogColor = lighting.FogColor;
                         }
 
-                        if (_useLitFogOverride && litSample != null)
+                        if (_atmosphere._useLitFogOverride && litSample != null)
                         {
-                            CapturePreLitFogRange(lighting);
+                            _atmosphere.CapturePreLitFogRange(lighting);
                             // LIT tracks 0/1/7 are the global diffuse, ambient, and fog colors.
                             // Apply the profile as one coherent source; silently mixing DBC colors
                             // with LIT fog produced a profile that no client file actually authored.
@@ -3695,12 +3455,12 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             _skyDome.SkyFogColor = litSample.FogColor;
                         }
 
-                        ResolveActiveFogRange(lighting, fogRecommendationSource);
+                        _atmosphere.ResolveActiveFogRange(lighting, fogRecommendationSource);
                         _skyDome.UpdateFromLighting(lighting.GameTime, lighting.LightDirection);
                         fogColor = lighting.FogColor;
                         fogStart = lighting.FogStart;
                         fogEnd = lighting.FogEnd;
-                        _lastLitSample = litSample;
+                        _atmosphere._lastLitSample = litSample;
                     });
 
                     _lastHoverPickFogEnd = fogEnd;
@@ -3727,7 +3487,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
 
                     // Also set clear color to horizon color so any gaps match the sky
                     _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
-                    frame.SkyboxBackdropMs = MeasureDurationMs(() => RenderSkyboxBackdrop(view, proj, camPos, fogColor, fogStart, fogEnd, lighting));
+                    frame.SkyboxBackdropMs = MeasureDurationMs(() => _atmosphere.RenderSkyboxBackdrop(view, proj, camPos, fogColor, fogStart, fogEnd, lighting));
                 },
                 () =>
                 {
@@ -5169,19 +4929,19 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                 }
                 });
 
-                if (_showLitLights && _litLoader != null && _litLoader.HasData)
+                if (_atmosphere._showLitLights && _atmosphere._litLoader != null && _atmosphere._litLoader.HasData)
                 {
-                    int highlightedLightIndex = _selectedLitLightIndex >= 0
-                        ? _selectedLitLightIndex
-                        : _lastLitSample?.DominantLightIndex ?? -1;
+                    int highlightedLightIndex = _atmosphere._selectedLitLightIndex >= 0
+                        ? _atmosphere._selectedLitLightIndex
+                        : _atmosphere._lastLitSample?.DominantLightIndex ?? -1;
 
-                    for (int lightIndex = 0; lightIndex < _litLoader.Lights.Count; lightIndex++)
+                    for (int lightIndex = 0; lightIndex < _atmosphere._litLoader.Lights.Count; lightIndex++)
                     {
-                        LitLoader.LitLight light = _litLoader.Lights[lightIndex];
+                        LitLoader.LitLight light = _atmosphere._litLoader.Lights[lightIndex];
                         if (!light.HasMeaningfulPosition)
                             continue;
 
-                        Vector3 lightColor = _litLoader.EvaluateOverlayColor(light, lighting.GameTime);
+                        Vector3 lightColor = _atmosphere._litLoader.EvaluateOverlayColor(light, lighting.GameTime);
                         bool isHighlighted = lightIndex == highlightedLightIndex;
                         float pinHeight = isHighlighted ? 60f : 36f;
                         float headSize = isHighlighted ? 8f : 5f;
@@ -5347,158 +5107,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         RecordRenderRegionBreakdown(
             frame, preCoordinatorMs, postCoordinatorMs, frameTimer.Elapsed.TotalMilliseconds);
         FinalizeRenderFrameStats(frame, frameTimer, view);
-    }
-
-    private void RenderSkyboxBackdrop(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
-        Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
-    {
-        bool renderedActiveClientSky = false;
-        if (_skyDome.NightVisibility > 0.001f
-            && TryGetQueuedMdx(_activeLightSkyboxModelKey ?? string.Empty) is { } lightSkyboxRenderer)
-        {
-            lightSkyboxRenderer.UpdateAnimation();
-            lightSkyboxRenderer.RenderBackdrop(Matrix4x4.CreateTranslation(cameraPos), view, proj,
-                fogColor, fogStart, fogEnd, cameraPos,
-                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-            renderedActiveClientSky = true;
-        }
-
-        if (_skyboxInstances.Count == 0)
-            return;
-
-        ObjectInstance? nearestSkybox = null;
-        float nearestDistSq = float.MaxValue;
-        foreach (var inst in _skyboxInstances)
-        {
-            float distSq = Vector3.DistanceSquared(cameraPos, inst.PlacementPosition);
-            if (distSq >= nearestDistSq)
-                continue;
-
-            nearestDistSq = distSq;
-            nearestSkybox = inst;
-        }
-
-        if (!nearestSkybox.HasValue)
-            return;
-
-        var skybox = nearestSkybox.Value;
-        if (renderedActiveClientSky
-            && string.Equals(skybox.ModelKey, _activeLightSkyboxModelKey, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var renderer = TryGetQueuedMdx(skybox.ModelKey);
-        if (renderer == null)
-            return;
-
-        renderer.UpdateAnimation();
-        renderer.RenderBackdrop(CreateSkyboxBackdropTransform(skybox.Transform, cameraPos), view, proj,
-            fogColor, fogStart, fogEnd, cameraPos,
-            lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-    }
-
-    private static Matrix4x4 CreateSkyboxBackdropTransform(Matrix4x4 placementTransform, Vector3 cameraPos)
-    {
-        placementTransform.M41 = cameraPos.X;
-        placementTransform.M42 = cameraPos.Y;
-        placementTransform.M43 = cameraPos.Z;
-        return placementTransform;
-    }
-
-    internal static bool IsSkyboxModelPath(string modelPath)
-    {
-        return WorldSkyboxBackdropClassifier.IsBackdropModelPath(modelPath);
-    }
-
-    private void UpdateActiveSkyboxModel()
-    {
-        string? sourcePath = _lightService?.ActiveSkyboxModelPath;
-        sourcePath = ResolveClientSkyboxPath(sourcePath);
-        if (string.IsNullOrWhiteSpace(sourcePath))
-            sourcePath = ResolveClientStarsFallback();
-
-        if (string.Equals(sourcePath, _activeLightSkyboxSourcePath, StringComparison.OrdinalIgnoreCase))
-            return;
-
-        _activeLightSkyboxSourcePath = sourcePath;
-        _activeLightSkyboxModelKey = string.IsNullOrWhiteSpace(sourcePath)
-            ? null
-            : WorldAssetManager.NormalizeKey(sourcePath);
-
-        if (string.IsNullOrWhiteSpace(_activeLightSkyboxModelKey))
-            return;
-
-        _assets.PrioritizeMdxLoad(_activeLightSkyboxModelKey);
-        ViewerLog.Info(
-            ViewerLog.Category.Mdx,
-            $"[Sky] Active client sky model: {sourcePath} (source={(_lightService?.ActiveSkyboxModelPath is null ? "client-stars fallback" : "LightSkybox DBC")})");
-    }
-
-    private string? ResolveClientSkyboxPath(string? sourcePath)
-    {
-        if (string.IsNullOrWhiteSpace(sourcePath) || _dataSource == null)
-            return null;
-
-        if (_dataSource.FileExists(sourcePath))
-            return sourcePath;
-
-        if (!string.IsNullOrWhiteSpace(Path.GetExtension(sourcePath)))
-            return null;
-
-        foreach (string extension in new[] { ".m2", ".mdx", ".mdl" })
-        {
-            string candidate = sourcePath + extension;
-            if (_dataSource.FileExists(candidate))
-                return candidate;
-        }
-
-        return null;
-    }
-
-    private string? ResolveClientStarsFallback()
-    {
-        if (_clientStarsProbeComplete)
-            return _clientStarsFallbackModelPath;
-
-        _clientStarsProbeComplete = true;
-        if (_dataSource == null)
-            return null;
-
-        string[] candidates =
-        [
-            @"Environments\Stars\Stars.m2",
-            @"Environments\Stars\Stars.mdx",
-            @"Environments\Stars\Stars.mdl",
-        ];
-        foreach (string path in candidates)
-        {
-            if (!_dataSource.FileExists(path))
-                continue;
-
-            _clientStarsFallbackModelPath = path;
-            ViewerLog.Info(ViewerLog.Category.Mdx, $"[Sky] Discovered client stars fallback: {path}");
-            return path;
-        }
-
-        // Some extracted clients retain a World prefix around the same asset.
-        foreach (string path in new[]
-        {
-            @"World\Environments\Stars\Stars.m2",
-            @"World\Environments\Stars\Stars.mdx",
-            @"World\Environments\Stars\Stars.mdl",
-        })
-        {
-            if (_dataSource.FileExists(path))
-            {
-                _clientStarsFallbackModelPath = path;
-                ViewerLog.Info(ViewerLog.Category.Mdx, $"[Sky] Discovered client stars fallback: {path}");
-                return path;
-            }
-        }
-
-        ViewerLog.Debug(ViewerLog.Category.Mdx, "[Sky] Client stars fallback was not present in the data source file list.");
-        return null;
     }
 
     public void ToggleWireframe()

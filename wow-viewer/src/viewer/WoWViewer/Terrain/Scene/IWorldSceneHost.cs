@@ -120,5 +120,7 @@ internal interface IWorldSceneHost
     SceneHoverPickController HoverPick { get; }
     Dictionary<(int, int), List<ObjectInstance>> TileMdxInstances { get; }
     Dictionary<(int, int), List<ObjectInstance>> TileWmoInstances { get; }
+    SkyDomeRenderer SkyDome { get; }
+    ref List<ObjectInstance> SkyboxInstances { get; }
     // HOST-IFACE-END
 }
