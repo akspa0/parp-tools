@@ -692,6 +692,13 @@ public class WorldAssetManager : IDisposable
     /// <summary>Per-phase load timings (Spec 256 P0); timing only, no behaviour.</summary>
     public ModelLoadPhaseStats LoadPhases { get; } = new();
 
+    // Spec 256 D4: doodad models shared by every world WMO this manager creates.
+    private readonly WmoDoodadModelShare _wmoDoodadModels = new();
+
+    public int SharedWmoDoodadModelCount => _wmoDoodadModels.ModelCount;
+
+    public long SharedWmoDoodadModelHits => _wmoDoodadModels.SharedHits;
+
     public int ProcessPendingLoads(int maxLoads = 2, double maxBudgetMs = 6.0)
     {
         if (maxLoads <= 0 || maxBudgetMs <= 0)
@@ -783,7 +790,12 @@ public class WorldAssetManager : IDisposable
             if (loadsCompleted >= maxLoads || remainingBudgetMs <= 0)
                 break;
 
-            loadsCompleted += renderer.ProcessDeferredDoodadLoads(maxLoads - loadsCompleted, remainingBudgetMs);
+            // Spec 256 D5: doodad model loads were untimed inside DeferredAssetLoads.
+            long loadStart = Stopwatch.GetTimestamp();
+            int loads = renderer.ProcessDeferredDoodadLoads(maxLoads - loadsCompleted, remainingBudgetMs);
+            if (loads > 0)
+                LoadPhases.Mark(ModelLoadPhase.WmoDoodadLoad, loadStart);
+            loadsCompleted += loads;
         }
 
         return loadsCompleted;
@@ -1682,7 +1694,10 @@ private int _mdxLoadFailCount = 0;
             WmoRenderer renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion,
                 deferInitialDoodadLoads: true,
                 deferInitialMaterialTextureLoads: true,
-                enableRuntimeGroupVisibility: _enableRuntimeWmoGroupVisibility);
+                enableRuntimeGroupVisibility: _enableRuntimeWmoGroupVisibility)
+            {
+                DoodadModelShare = _wmoDoodadModels,
+            };
             renderer.SetRuntimeGroupLiquidsVisible(_enableRuntimeWmoGroupLiquids);
             LoadPhases.Mark(ModelLoadPhase.WmoGpuCreate, phaseStart);
             return renderer;

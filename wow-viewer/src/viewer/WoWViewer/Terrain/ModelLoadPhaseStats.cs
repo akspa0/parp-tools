@@ -34,6 +34,12 @@ public enum ModelLoadPhase
     /// (a model load, or queueing a model for prefetch). Counted on its own, not only inside a load.
     /// </summary>
     SkinListScan = 8,
+
+    /// <summary>
+    /// Loading WMO doodad models in one WMO's deferred doodad step (Spec 256 D5); usually one model, cache
+    /// hits are free and not counted.
+    /// </summary>
+    WmoDoodadLoad = 9,
 }
 
 /// <summary>
@@ -42,7 +48,7 @@ public enum ModelLoadPhase
 /// </summary>
 public sealed class ModelLoadPhaseStats
 {
-    public const int PhaseCount = 9;
+    public const int PhaseCount = 10;
 
     private readonly long[] _count = new long[PhaseCount];
     private readonly double[] _totalMs = new double[PhaseCount];

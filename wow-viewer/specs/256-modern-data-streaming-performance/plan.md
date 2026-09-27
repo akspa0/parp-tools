@@ -97,3 +97,17 @@ the same searches; and a missing path was retried inside the model's directory. 
 
 Visible effect: surfaces whose texture was previously guessed from look-alike file names now show the error
 texture. The legacy `ModelRenderer` (MDX) keeps its own search and is unchanged by this amendment.
+
+## Amendment 2026-09-27 — D: WMO doodad loads; P3 started (operator: "Fix building doodad loads, Start P3 instancing")
+
+Capture `evidence/capture-t073-2026-09-27.md`. D brings WMO doodad M2 loads to the world path's P1/P2 state:
+
+| Step | Change |
+|---|---|
+| D1 | `WmoRenderer.ResolveBestSkinPath` uses a `SkinPathIndex` (same result as the whole-list scan) |
+| D2 | Doodad M2 loads skip the adapter parse when the native renderer is preferred (as P1) |
+| D3 | World WMO doodad M2s stream their textures (P2b), like world M2s |
+| D4 | One doodad model cache shared, reference-counted, by all world WMOs of a `WorldAssetManager`; cache hits do not use the per-frame doodad load allowance |
+| D5 | Doodad load time in Runtime Stats (new load phase) |
+
+Standalone/screenshot WMO renderers keep their own caches. P3 (T040–T042) starts after D's build/receipt.

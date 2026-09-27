@@ -131,6 +131,11 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
 
 // Doodad support
     private readonly Dictionary<string, IModelRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Spec 256 D4: world WMOs share doodad models through their WorldAssetManager (null: this WMO's own
+    // cache only, as before). A shared or cached hit does not use the per-frame doodad load allowance.
+    internal WmoDoodadModelShare? DoodadModelShare { get; init; }
+    private bool _lastDoodadLoadWasCacheHit;
     private readonly Dictionary<string, M2RouteDecision?> _doodadRouteDecisions = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<DoodadInstance> _doodadInstances = new();
     private readonly List<string> _doodadNames = new(); // resolved from MODN
@@ -2884,7 +2889,8 @@ void main() {
             foreach (int idx in indices)
                 _doodadInstances[idx].Renderer = renderer;
 
-            loadsCompleted++;
+            if (!_lastDoodadLoadWasCacheHit)
+                loadsCompleted++;
         }
 
         return loadsCompleted;
@@ -2897,11 +2903,21 @@ void main() {
     {
         string normalized = NormalizeDoodadPath(modelPath).ToLowerInvariant();
 
+        _lastDoodadLoadWasCacheHit = true;
         if (_doodadModelCache.TryGetValue(normalized, out var cached))
         {
             _lastLoadResult = cached != null ? DoodadLoadResult.Loaded : DoodadLoadResult.NotFound;
             return cached;
         }
+
+        if (DoodadModelShare != null && DoodadModelShare.TryAcquire(normalized, out IModelRenderer? shared))
+        {
+            _doodadModelCache[normalized] = shared;
+            _lastLoadResult = shared != null ? DoodadLoadResult.Loaded : DoodadLoadResult.NotFound;
+            return shared;
+        }
+
+        _lastDoodadLoadWasCacheHit = false;
 
         IModelRenderer? renderer = null;
         _lastLoadResult = DoodadLoadResult.NotFound;
@@ -2925,6 +2941,7 @@ void main() {
                     ViewerLog.Trace($"  Doodad not found: {modelPath}");
 
                 _doodadModelCache[normalized] = null;
+                DoodadModelShare?.Add(normalized, null);
                 return null;
             }
 
@@ -2955,6 +2972,7 @@ void main() {
         }
 
         _doodadModelCache[normalized] = renderer;
+        DoodadModelShare?.Add(normalized, renderer);
         return renderer;
     }
 
@@ -2986,7 +3004,9 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
                 MdxFile? adapted = null;
                 try
                 {
-                    adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
+                    // Spec 256 D2 (as P1): the native renderer ignores the adapter model, so skip the second parse.
+                    if (!WowViewerM2RuntimeBridge.PreferNativeStaticRenderer)
+                        adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
                 }
                 catch (Exception adapterEx)
                 {
@@ -3008,7 +3028,8 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
                     _dataSource,
                     _texResolver,
                     _buildVersion,
-                    resolvedModelPath);
+                    resolvedModelPath,
+                    deferInitialTextureLoads: _deferInitialDoodadLoads); // Spec 256 D3: world WMOs stream textures (P2b)
             }
             catch (Exception ex)
             {
@@ -3044,7 +3065,8 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
                         dataSource: _dataSource,
                         texResolver: _texResolver,
                         buildVersion: _buildVersion,
-                        sourceModelPath: resolvedModelPath);
+                        sourceModelPath: resolvedModelPath,
+                        deferInitialTextureLoads: _deferInitialDoodadLoads);
                 }
                 catch (Exception ex)
                 {
@@ -3228,9 +3250,11 @@ private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string re
         if (_bestSkinPathCache.TryGetValue(resolvedModelPath, out string? cachedPath))
             return cachedPath;
 
-        string? bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(
-            resolvedModelPath,
-            _dataSource?.GetFileList(".skin") ?? Array.Empty<string>());
+        // Spec 256 D1: with a shared cache, the indexed lookup (same result as the whole-list scan).
+        IReadOnlyList<string> skinFiles = _dataSource?.GetFileList(".skin") ?? Array.Empty<string>();
+        string? bestSkinPath = DoodadModelShare != null
+            ? DoodadModelShare.SkinIndex.FindBestSkin(resolvedModelPath, skinFiles)
+            : WarcraftNetM2Adapter.FindSkinInFileList(resolvedModelPath, skinFiles);
 
         _bestSkinPathCache[resolvedModelPath] = bestSkinPath;
         return bestSkinPath;
@@ -3737,9 +3761,14 @@ void main() {
         // Dispose liquid meshes
         DisposeLiquidMeshes();
 
-        // Dispose cached doodad renderers
-        foreach (var renderer in _doodadModelCache.Values)
-            renderer?.Dispose();
+        // Dispose cached doodad renderers (shared ones: release this WMO's reference)
+        foreach (var pair in _doodadModelCache)
+        {
+            if (DoodadModelShare != null)
+                DoodadModelShare.Release(pair.Key);
+            else
+                pair.Value?.Dispose();
+        }
         _doodadModelCache.Clear();
         _doodadInstances.Clear();
         _loggedMissingDoodadSkinPaths.Clear();

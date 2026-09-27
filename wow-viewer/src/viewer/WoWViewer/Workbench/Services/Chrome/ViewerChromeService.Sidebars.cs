@@ -761,6 +761,8 @@ internal sealed partial class ViewerChromeService
             + $"  GPU create {phases.AverageMs(ModelLoadPhase.GpuCreate):0.0}/{phases.MaxMs(ModelLoadPhase.GpuCreate):0} ({phases.Count(ModelLoadPhase.GpuCreate)})");
         ImGui.TextWrapped($"  WMO parse {phases.AverageMs(ModelLoadPhase.WmoParse):0.0}/{phases.MaxMs(ModelLoadPhase.WmoParse):0}"
             + $"  WMO GPU create {phases.AverageMs(ModelLoadPhase.WmoGpuCreate):0.0}/{phases.MaxMs(ModelLoadPhase.WmoGpuCreate):0} ({phases.Count(ModelLoadPhase.WmoGpuCreate)})");
+        ImGui.TextWrapped($"  WMO doodad load {phases.AverageMs(ModelLoadPhase.WmoDoodadLoad):0.0}/{phases.MaxMs(ModelLoadPhase.WmoDoodadLoad):0} ({phases.Count(ModelLoadPhase.WmoDoodadLoad)})"
+            + $"  shared doodad models {_worldScene.Assets.SharedWmoDoodadModelCount}, hits {_worldScene.Assets.SharedWmoDoodadModelHits}");
         ImGui.TextWrapped($"  .skin list scans: {phases.Count(ModelLoadPhase.SkinListScan)}  avg {phases.AverageMs(ModelLoadPhase.SkinListScan):0.0}"
             + $"  max {phases.MaxMs(ModelLoadPhase.SkinListScan):0} ms  total {phases.TotalMs(ModelLoadPhase.SkinListScan) / 1000.0:0.0} s");
         var streamed = M2TextureStreamer.Stats;

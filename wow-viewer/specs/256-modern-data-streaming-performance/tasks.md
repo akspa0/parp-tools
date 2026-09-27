@@ -25,7 +25,7 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 - [ ] T032 Build + tests + receipt; operator capture (load time to settled scene, frame times while streaming).
 
 ## P3 — Native M2 instancing (after T032; scope from T015)
-- [ ] T040 Decide: native instanced path vs legacy route default (operator).
+- [x] T040 Decide: native instanced path vs legacy route default (operator). Receipt: operator 2026-09-27 chose "Start P3 instancing" offered as "one instanced draw on the native renderer" → native instanced path.
 - [ ] T041 Implement the chosen path with existing gates.
 - [ ] T042 Build + tests + receipt; operator capture + visual A/B.
 
@@ -40,8 +40,13 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 - [x] T070 P2a shared reference-counted native M2 texture cache. `c9cf7b6`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
 - [x] T071 P2b off-thread texture read/decode; render-thread upload. `6a326d3`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
 - [x] T072 P2c DXT BLP compressed upload with authored mips. `bad4884`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
-- [ ] T073 Build + tests + receipt per step; operator capture (GPU create ms, DeferredAssetLoads, visual check). *(build/tests/receipt done — [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md); capture owed)*
+- [x] T073 Build + tests + receipt per step; operator capture (GPU create ms, DeferredAssetLoads, visual check). Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md); capture [evidence/capture-t073-2026-09-27.md](evidence/capture-t073-2026-09-27.md) (M2 GPU create ≈ 57 → ≈ 0.1 ms).
 
 ## Amendment — missing textures bind the error texture (operator 2026-09-27)
 - [x] T080 Native M2: no naming-convention / `.blp`-scan / fallback-slot search; database resolution only; missing → `Textures\ShaneCube.blp` or generated checker (shared per data source); resolver `Resolve` drops its directory search. Receipt: [evidence/missing-texture-2026-09-27.md](evidence/missing-texture-2026-09-27.md).
 - [ ] T081 Operator capture: M2 load / GPU create ms and deferred loads at the baseline spot; visual check of where the error texture now appears.
+
+## Amendment D — WMO doodad loads (operator 2026-09-27: "Fix building doodad loads")
+- [x] T090 D1–D5 per plan amendment D; build + tests + receipt. Receipt: [evidence/d-wmo-doodads-2026-09-27.md](evidence/d-wmo-doodads-2026-09-27.md).
+- [ ] T091 Operator capture: DeferredAssetLoads while streaming; doodad load phase line.
+- [ ] T092 Split `Rendering/WmoRenderer.cs` (3,794 lines before D; over the ~2,000 budget) — AGENTS.md §10.
