@@ -2,6 +2,15 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — Spec 256 drafted from a measured baseline (docs only)
+
+Operator corrected the R-10-revert report (idle FPS up, loading "as if from an HDD") and sent a Runtime Stats
+screenshot: 4 FPS, 266.6 ms world CPU, 98 ms/frame model loading, M2 load ≈ 55 ms / WMO ≈ 21 ms, 0 of 5,169
+M2s instanced, 59.7 GiB allocated. Code reading found a per-model scan of every `.skin` file, a discarded
+second M2 parse, native M2s never instanced (native route is the default), and loading paced to one model per
+slow frame (since 2026-09-12). Spec 256 (P0 measure → P1 exact cuts → P2 off-thread loading → P3 native M2
+instancing) awaits approval. Baseline: `specs/256-modern-data-streaming-performance/evidence/baseline-2026-09-27.md`.
+
 ## 2026-09-27 — R-39 reverted (code only)
 
 Operator: performance even worse after R-39. Code reverted to `c2e9517` (byte-identical minimap/app files).
