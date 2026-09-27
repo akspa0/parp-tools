@@ -8,8 +8,6 @@ using SereniaBLPLib;
 using Silk.NET.OpenGL;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using WowViewer.Core.Blp;
-using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Files;
 
 namespace WoWViewer.Rendering;
@@ -25,11 +23,6 @@ public class MinimapRenderer : IDisposable
     // contention while the render thread is resolving world assets.
     private const int BackgroundWorkerCount = 1;
 
-    // Epic 249 R-39c: while world assets are still loading the worker waits in short steps, but never
-    // longer than this per tile, so continuous streaming cannot starve the minimap entirely.
-    private const int WorldLoadDeferStepMs = 50;
-    private const int WorldLoadMaxDeferMs = 1000;
-
     private readonly GL _gl;
     private readonly IDataSource _dataSource;
     private readonly Md5TranslateIndex? _md5Index;
@@ -41,10 +34,7 @@ public class MinimapRenderer : IDisposable
     private readonly ConcurrentDictionary<string, string?> _resolvedTilePathCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _requestSignal = new(0);
     private readonly CancellationTokenSource _disposeCts = new();
-    private readonly Thread[] _loaderThreads;
-    private readonly bool _compressedUploadSupported;
-    private readonly bool _preferModernTilePath;
-    private volatile bool _deferBackgroundReads;
+    private readonly Task[] _loaderTasks;
     private int _completedRequestCount;
     private int _uploadedTileCount;
     private int _failedTileCount;
@@ -60,25 +50,8 @@ public class MinimapRenderer : IDisposable
         _cacheRoot = cacheRoot;
         Directory.CreateDirectory(_cacheRoot);
 
-        // R-39b: DXT tiles go to the GPU compressed when the context has S3TC (checked here, on the
-        // thread that owns the GL context). R-39c: modern CASC clients keep minimaps under world/minimaps.
-        _compressedUploadSupported = gl.IsExtensionPresent("GL_EXT_texture_compression_s3tc");
-        _preferModernTilePath = dataSource is CascDataSource;
-
-        // R-39c: a dedicated lowest-priority thread, not a thread-pool task, so tile reads and decodes
-        // yield the CPU to the render thread.
-        _loaderThreads = Enumerable.Range(0, BackgroundWorkerCount)
-            .Select(_ =>
-            {
-                var thread = new Thread(() => BackgroundLoadLoop(_disposeCts.Token))
-                {
-                    IsBackground = true,
-                    Priority = ThreadPriority.Lowest,
-                    Name = "MinimapTileLoader",
-                };
-                thread.Start();
-                return thread;
-            })
+        _loaderTasks = Enumerable.Range(0, BackgroundWorkerCount)
+            .Select(_ => Task.Run(() => BackgroundLoadLoop(_disposeCts.Token), _disposeCts.Token))
             .ToArray();
     }
 
@@ -117,13 +90,8 @@ public class MinimapRenderer : IDisposable
         return 0;
     }
 
-    /// <param name="worldAssetsLoading">
-    /// True while world assets are still queued; the background reader then holds off (bounded) so tile
-    /// reads do not compete with world streaming (Epic 249 R-39c).
-    /// </param>
-    public int ProcessPendingLoads(int maxLoads = 2, double maxBudgetMs = 5.0, bool worldAssetsLoading = false)
+    public int ProcessPendingLoads(int maxLoads = 2, double maxBudgetMs = 5.0)
     {
-        _deferBackgroundReads = worldAssetsLoading;
         if (Volatile.Read(ref _readyUploadCount) == 0 || maxLoads <= 0)
             return 0;
 
@@ -163,13 +131,13 @@ public class MinimapRenderer : IDisposable
         _requestSignal.Release();
     }
 
-    private void BackgroundLoadLoop(CancellationToken cancellationToken)
+    private async Task BackgroundLoadLoop(CancellationToken cancellationToken)
     {
         try
         {
             while (true)
             {
-                _requestSignal.Wait(cancellationToken);
+                await _requestSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
 
                 while (_pendingRequests.TryDequeue(out MinimapTileRequest request))
                 {
@@ -182,22 +150,10 @@ public class MinimapRenderer : IDisposable
                         continue;
                     }
 
-                    WaitWhileWorldAssetsLoad(cancellationToken);
                     Interlocked.Increment(ref _inflightRequestCount);
                     try
                     {
-                        DecodedMinimapTile? tile = null;
-                        try
-                        {
-                            tile = LoadTileData(request.MapName, request.Tx, request.Ty, request.CacheKey);
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
-                        {
-                            // On a dedicated thread an escaping exception would end the process; the
-                            // pool task this replaced just stopped loading. Record the tile as failed.
-                            ViewerLog.Trace($"[MinimapRenderer] Tile read failed {request.CacheKey}: {ex.Message}");
-                        }
-
+                        DecodedMinimapTile? tile = LoadTileData(request.MapName, request.Tx, request.Ty, request.CacheKey);
                         _readyUploads.Enqueue(new DecodedMinimapTileUpload(request.CacheKey, tile));
                         Interlocked.Increment(ref _readyUploadCount);
                     }
@@ -212,32 +168,14 @@ public class MinimapRenderer : IDisposable
         catch (OperationCanceledException)
         {
         }
-        catch (ObjectDisposedException)
-        {
-            // Disposed while this thread was still waiting (Dispose joins for at most one second).
-        }
-    }
-
-    private void WaitWhileWorldAssetsLoad(CancellationToken cancellationToken)
-    {
-        for (int waitedMs = 0; _deferBackgroundReads && waitedMs < WorldLoadMaxDeferMs; waitedMs += WorldLoadDeferStepMs)
-        {
-            if (cancellationToken.WaitHandle.WaitOne(WorldLoadDeferStepMs))
-                cancellationToken.ThrowIfCancellationRequested();
-        }
     }
 
     private DecodedMinimapTile? LoadTileData(string mapName, int tx, int ty, string cacheKey)
     {
-        if (TryLoadCachedTile(cacheKey, out DecodedMinimapTile? cachedTile) && cachedTile != null)
+        if (TryLoadCachedBitmap(cacheKey, out DecodedMinimapTile? cachedTile) && cachedTile != null)
             return cachedTile;
 
-        byte[]? data = null;
-        if (_preferModernTilePath)
-            data = TryReadTileData(GetModernTilePath(mapName, tx, ty));
-
-        if (data == null || data.Length == 0)
-            data = TryReadTileData(cacheKey);
+        byte[]? data = TryReadTileData(cacheKey);
         if (data == null || data.Length == 0)
         {
             foreach (string candidatePath in EnumerateTileCandidates(mapName, tx, ty, cacheKey))
@@ -251,45 +189,10 @@ public class MinimapRenderer : IDisposable
         if (data == null || data.Length == 0)
             return null;
 
-        DecodedMinimapTile? tile = DecodeTile(data, cacheKey);
-        if (tile != null)
-            TrySaveCachedTile(cacheKey, data);
-
-        return tile;
-    }
-
-    /// <summary>
-    /// Epic 249 R-39b: DXT BLP2 tiles keep their compressed level 0 for a direct GPU upload (no CPU decode);
-    /// other encodings decode into a single pixel array. The previous route decoded into an ImageSharp image
-    /// and copied it out again — two large-object allocations per tile.
-    /// </summary>
-    private DecodedMinimapTile? DecodeTile(byte[] data, string cacheKey)
-    {
         try
         {
-            BlpSummary? summary = null;
-            try
-            {
-                using var summaryStream = new MemoryStream(data, writable: false);
-                summary = BlpSummaryReader.Read(summaryStream, cacheKey);
-            }
-            catch (Exception)
-            {
-                // Header the summary reader rejects: fall through to the library decode used before R-39.
-            }
-
-            if (summary != null && _compressedUploadSupported && TryGetCompressedLevel0(summary, data, out DecodedMinimapTile? compressed))
-                return compressed;
-
             using var ms = new MemoryStream(data);
             using var blp = new BlpFile(ms);
-            if (summary is { Format: BlpFormat.Blp2 })
-            {
-                // Same bytes BlpFile.GetImage(0) would wrap: it swaps to BGRA only for ARGB8888 BLP2.
-                byte[] pixels = blp.GetPixels(0, out int width, out int height, bgra: summary.Compression == BlpCompressionType.Uncompressed);
-                return new DecodedMinimapTile(width, height, pixels);
-            }
-
             using Image<Rgba32> image = blp.GetImage(0);
             return ConvertImage(image);
         }
@@ -299,36 +202,6 @@ public class MinimapRenderer : IDisposable
             return null;
         }
     }
-
-    private static bool TryGetCompressedLevel0(BlpSummary summary, byte[] data, out DecodedMinimapTile? tile)
-    {
-        tile = null;
-        if (summary.Format != BlpFormat.Blp2 || summary.Compression != BlpCompressionType.Dxtc)
-            return false;
-
-        BlpMipMapEntry? level0 = summary.MipMaps.FirstOrDefault(static mip => mip.Level == 0);
-        if (level0 is not { IsInBounds: true })
-            return false;
-
-        // Same format choice as SereniaBLPLib's decoder. Its DXT1 decode yields alpha 0 for the
-        // transparent block mode whatever the header's alpha depth, which is GL's RGBA DXT1 behaviour.
-        (InternalFormat format, int blockBytes) = summary.AlphaDepthBits > 1
-            ? (summary.PixelFormat == WowViewer.Core.Blp.BlpPixelFormat.Dxt5
-                ? (InternalFormat.CompressedRgbaS3TCDxt5Ext, 16)
-                : (InternalFormat.CompressedRgbaS3TCDxt3Ext, 16))
-            : (InternalFormat.CompressedRgbaS3TCDxt1Ext, 8);
-
-        long expectedBytes = (long)((summary.Width + 3) / 4) * ((summary.Height + 3) / 4) * blockBytes;
-        if (level0.SizeBytes < expectedBytes || level0.Offset + expectedBytes > data.Length)
-            return false;
-
-        tile = new DecodedMinimapTile(summary.Width, summary.Height, data, (int)level0.Offset, (int)expectedBytes, format);
-        return true;
-    }
-
-    // The path modern CASC clients use; identical to the world/minimaps candidate in EnumerateTileCandidates.
-    private static string GetModernTilePath(string mapName, int x, int y)
-        => $"world/minimaps/{mapName.ToLowerInvariant()}/map{x:D2}_{y:D2}.blp";
 
     private byte[]? TryReadTileData(string plainPath)
     {
@@ -450,11 +323,7 @@ public class MinimapRenderer : IDisposable
         return builder.ToString();
     }
 
-    /// <summary>
-    /// A tile ready for upload: RGBA pixels, or (when <see cref="CompressedFormat"/> is set) the DXT
-    /// level-0 block data at <see cref="Offset"/>/<see cref="Length"/> inside the BLP bytes.
-    /// </summary>
-    private sealed record DecodedMinimapTile(int Width, int Height, byte[] Pixels, int Offset = 0, int Length = 0, InternalFormat? CompressedFormat = null);
+    private sealed record DecodedMinimapTile(int Width, int Height, byte[] Pixels);
     private readonly record struct DecodedMinimapTileUpload(string CacheKey, DecodedMinimapTile? Tile);
     private readonly record struct MinimapTileRequest(string MapName, int Tx, int Ty, string CacheKey);
 
@@ -472,18 +341,8 @@ public class MinimapRenderer : IDisposable
         uint tex = _gl.GenTexture();
         _gl.BindTexture(TextureTarget.Texture2D, tex);
         fixed (byte* ptr = tile.Pixels)
-        {
-            if (tile.CompressedFormat is InternalFormat compressedFormat)
-            {
-                _gl.CompressedTexImage2D(TextureTarget.Texture2D, 0, compressedFormat,
-                    (uint)tile.Width, (uint)tile.Height, 0, (uint)tile.Length, ptr + tile.Offset);
-            }
-            else
-            {
-                _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
-                    (uint)tile.Width, (uint)tile.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
-            }
-        }
+            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
+                (uint)tile.Width, (uint)tile.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
 
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
@@ -491,31 +350,6 @@ public class MinimapRenderer : IDisposable
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         return tex;
-    }
-
-    /// <summary>
-    /// Epic 249 R-39a: the tile's source BLP bytes cached on disk (<c>&lt;hash&gt;.blp</c>) are decoded the
-    /// same way as a fresh read; PNG tiles written by earlier builds are still read.
-    /// </summary>
-    private bool TryLoadCachedTile(string plainPath, out DecodedMinimapTile? tile)
-    {
-        tile = null;
-        string blpPath = GetCachePath(plainPath, ".blp");
-        if (File.Exists(blpPath))
-        {
-            try
-            {
-                tile = DecodeTile(File.ReadAllBytes(blpPath), plainPath);
-                if (tile != null)
-                    return true;
-            }
-            catch (IOException ex)
-            {
-                ViewerLog.Trace($"[MinimapRenderer] Failed to read cached tile {blpPath}: {ex.Message}");
-            }
-        }
-
-        return TryLoadCachedBitmap(plainPath, out tile);
     }
 
     private bool TryLoadCachedBitmap(string plainPath, out DecodedMinimapTile? tile)
@@ -538,12 +372,9 @@ public class MinimapRenderer : IDisposable
         }
     }
 
-    private void TrySaveCachedTile(string plainPath, byte[] blpBytes)
+    private void TrySaveCachedBitmap(string plainPath, Image<Rgba32> image)
     {
-        string cachePath = GetCachePath(plainPath, ".blp");
-        if (File.Exists(cachePath))
-            return;
-
+        string cachePath = GetCachePath(plainPath);
         string? cacheDirectory = Path.GetDirectoryName(cachePath);
         if (!string.IsNullOrEmpty(cacheDirectory))
             Directory.CreateDirectory(cacheDirectory);
@@ -551,7 +382,7 @@ public class MinimapRenderer : IDisposable
         string tempPath = cachePath + ".tmp";
         try
         {
-            File.WriteAllBytes(tempPath, blpBytes);
+            image.SaveAsPng(tempPath);
             File.Move(tempPath, cachePath, overwrite: true);
         }
         catch (Exception ex)
@@ -562,21 +393,26 @@ public class MinimapRenderer : IDisposable
         }
     }
 
-    private string GetCachePath(string plainPath, string extension = ".png")
+    private string GetCachePath(string plainPath)
     {
         string normalized = plainPath.Replace('\\', '/').ToLowerInvariant();
         string hash = Convert.ToHexString(SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
-        return Path.Combine(_cacheRoot, hash + extension);
+        return Path.Combine(_cacheRoot, hash + ".png");
     }
 
     public void Dispose()
     {
         _disposeCts.Cancel();
-        for (int i = 0; i < _loaderThreads.Length; i++)
+        for (int i = 0; i < _loaderTasks.Length; i++)
             _requestSignal.Release();
 
-        foreach (Thread thread in _loaderThreads)
-            thread.Join(TimeSpan.FromSeconds(1));
+        try
+        {
+            Task.WaitAll(_loaderTasks, TimeSpan.FromSeconds(1));
+        }
+        catch (AggregateException)
+        {
+        }
 
         foreach (var tex in _textureCache.Values)
         {

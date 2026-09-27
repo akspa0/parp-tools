@@ -170,3 +170,15 @@ Constraints: no format-reader change (the BLP library is not modified; Core's ex
 Spec-sync 2026-09-27 (R-39a): the cache stores each tile's source BLP bytes (`<hash>.blp`) instead of the
 PNG the offered option named — a PNG would force a full RGBA decode on every cached load and undo R-39b.
 PNG tiles from earlier builds are still read. Receipt: `evidence/r39-casc-minimap-2026-09-27.md`.
+
+## Amendment 2026-09-27 (later) — R-39 code reverted (operator)
+
+Operator report after R-39: *"performance is somehow EVEN WORSE!"*. The R-39 code (`09a1013`) is reverted;
+`MinimapRenderer.cs` and `ViewerApp.cs` are byte-identical to `c2e9517`, the build the operator described as
+"a lot improved". Not measured, so the cause is a hypothesis: the new loader ran at `ThreadPriority.Lowest`
+and allocates heavily. In .NET's workstation GC the thread that triggers a collection does the work while
+every managed thread (the render thread included) is suspended, so a lowest-priority thread can hold the
+whole process in a GC while anything at normal priority runs; it can also hold a lock the render thread
+needs (priority inversion). Two consecutive unmeasured changes made things worse, so R-39 restarts from
+measurement: per-tile read / decode / upload time and GC counts in the frame stats, captured by the
+operator on a CASC client, before any further minimap change.

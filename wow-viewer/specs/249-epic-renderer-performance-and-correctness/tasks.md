@@ -33,8 +33,9 @@ Blocked on operator approval of the proposed R-10 scope (spec.md amendment 2026-
 
 ## R-39 — CASC minimap streaming cost (operator 2026-09-27)
 
-- [x] R39-T001 Disk tile cache written after the first successful read; read back before any data-source read. Spec-sync: caches the tile's BLP bytes (`<hash>.blp`), not PNG, so cached tiles keep the R39-T002 upload; old PNGs still read. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
-- [x] R39-T002 Per-tile allocations cut: DXT BLP2 level 0 uploaded compressed; other encodings decoded to one array. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
-- [x] R39-T003 Minimap worker on a lowest-priority thread; paused (bounded, ≤ 1 s per tile) while world assets load; CASC tries `world/minimaps/…` first. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
-- [x] R39-T004 Build + tests; receipt in `evidence/`. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
-- [ ] R39-T005 Operator check on a CASC client: no whole-program lag while minimap/WDL tiles stream (GC gen2 count in the heap line); minimap looks unchanged; second session loads tiles from the cache.
+- [ ] R39-T001 **Reverted 2026-09-27 (operator: performance worse).** Disk tile cache written after the first successful read; read back before any data-source read. Spec-sync: caches the tile's BLP bytes (`<hash>.blp`), not PNG, so cached tiles keep the R39-T002 upload; old PNGs still read. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
+- [ ] R39-T002 **Reverted 2026-09-27 (operator: performance worse).** Per-tile allocations cut: DXT BLP2 level 0 uploaded compressed; other encodings decoded to one array. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
+- [ ] R39-T003 **Reverted 2026-09-27 (operator: performance worse).** Minimap worker on a lowest-priority thread; paused (bounded, ≤ 1 s per tile) while world assets load; CASC tries `world/minimaps/…` first. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
+- [ ] R39-T004 **Reverted 2026-09-27 (operator: performance worse).** Build + tests; receipt in `evidence/`. Receipt: [evidence/r39-casc-minimap-2026-09-27.md](evidence/r39-casc-minimap-2026-09-27.md).
+- [ ] R39-T006 Measure first (awaiting operator go-ahead): per-tile read/decode/upload ms and GC gen0/1/2 counts in frame stats; operator capture on a CASC client.
+- [ ] R39-T005 (superseded by the revert) Operator check on a CASC client: no whole-program lag while minimap/WDL tiles stream (GC gen2 count in the heap line); minimap looks unchanged; second session loads tiles from the cache.

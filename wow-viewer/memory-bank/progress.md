@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — R-39 reverted (code only)
+
+Operator: performance even worse after R-39. Code reverted to `c2e9517` (byte-identical minimap/app files).
+Hypothesis, not measured: lowest-priority loader thread triggering workstation GCs / holding locks the render
+thread needs. Next minimap work starts from measurement (R39-T006).
+
 ## 2026-09-27 — R-39 CASC minimap streaming cost (code only)
 
 Operator: after the R-10 revert, reading the minimap from CASC lags the whole program. Approved and

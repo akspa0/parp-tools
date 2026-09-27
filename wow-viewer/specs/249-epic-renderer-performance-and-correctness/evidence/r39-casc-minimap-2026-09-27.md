@@ -1,3 +1,6 @@
+> **Reverted 2026-09-27** after the operator reported worse performance; code restored to `c2e9517`. This
+> receipt records what was tried. See the spec amendment "R-39 code reverted".
+
 # Receipt — R-39 CASC minimap streaming cost (2026-09-27)
 
 Operator-approved R-39a/b/c (spec amendment 2026-09-27). Covers **R39-T001–T004**. No FPS, lag, GC or

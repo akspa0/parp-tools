@@ -824,8 +824,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _archaeologyPanel.UpdateArcheologyPlayback(dt);
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
-            maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5,
-            worldAssetsLoading: (_worldScene?.PendingAssetLoadCount ?? 0) > 0);
+            maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
         _sqlSpawnStreaming.UpdateSqlSpawnStreaming();
         _terrainWeakSignalRestore.UpdateTerrainWeakSignalRestoreForCamera();
     }
