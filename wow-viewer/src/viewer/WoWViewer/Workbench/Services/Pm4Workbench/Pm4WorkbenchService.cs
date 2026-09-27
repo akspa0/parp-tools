@@ -763,44 +763,6 @@ internal sealed partial class Pm4WorkbenchService
     }
 
 
-    internal void DrawPerfWindow()
-    {
-        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
-        // Workbench sub-tab uses DrawPerfContent directly.
-        ImGui.SetNextWindowSize(new Vector2(360, 0), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Perf", ref _showPerfWindow, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.End();
-            return;
-        }
-        DrawPerfContent();
-        ImGui.End();
-    }
-
-    /// <summary>
-    /// Utilities &gt; Perf. Frame timing over time is the primary content here: this is where anyone
-    /// chasing a stutter looks first. Memory/GC and asset counters stay on Runtime Stats so the two
-    /// pages do not duplicate each other.
-    /// </summary>
-    internal void DrawPerfContent()
-    {
-        // Frame history first, and outside the terrain guard: frame timing is meaningful whenever a
-        // world is loaded, not only when a terrain renderer exists.
-        DrawFrameHistoryContent();
-
-        var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (terrainRenderer == null)
-        {
-            if (_worldScene == null)
-                ImGui.TextDisabled("Load a world to see frame timing and terrain stats.");
-            return;
-        }
-
-        ImGui.Separator();
-        ImGui.Text($"Chunks: {terrainRenderer.ChunksRendered} rendered, {terrainRenderer.ChunksCulled} culled");
-        ImGui.TextDisabled("Chunk counts are for the last terrain Render() call.");
-    }
-
     // -- PM4 outliner: Region -> Tile -> Object -------------------------------
     private string _pm4OutlinerFilter = string.Empty;
     private bool _pm4OutlinerNamedOnly;

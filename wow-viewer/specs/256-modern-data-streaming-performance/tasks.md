@@ -48,5 +48,6 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 
 ## Amendment D — WMO doodad loads (operator 2026-09-27: "Fix building doodad loads")
 - [x] T090 D1–D5 per plan amendment D; build + tests + receipt. Receipt: [evidence/d-wmo-doodads-2026-09-27.md](evidence/d-wmo-doodads-2026-09-27.md).
-- [ ] T091 Operator capture: DeferredAssetLoads while streaming; doodad load phase line.
+- [x] T091 Operator capture: DeferredAssetLoads while streaming; doodad load phase line. Receipt: [evidence/capture-d-p3-2026-09-27.md](evidence/capture-d-p3-2026-09-27.md) (DeferredAssetLoads median 68.3 → 7.6 ms).
 - [ ] T092 Split `Rendering/WmoRenderer.cs` (3,794 lines before D; over the ~2,000 budget) — AGENTS.md §10.
+- [x] T093 Perf panel code moved out of `Pm4WorkbenchService` into `PerfPanelService` (operator 2026-09-27). Receipt: [evidence/perf-panel-move-2026-09-27.md](evidence/perf-panel-move-2026-09-27.md).

@@ -613,6 +613,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly ClientDialogsService _clientDialogs;
     private readonly MainMenuBarService _mainMenuBar;
     private readonly Pm4WorkbenchService _pm4Workbench;
+    private readonly PerfPanelService _perfPanel;
     private readonly TaxiPanelService _taxiPanel;
     private readonly ArchaeologyPanelService _archaeologyPanel;
     private readonly ModelInspectorPanelService _modelInspector;
@@ -667,6 +668,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _clientDialogs = new ClientDialogsService(this);
         _mainMenuBar = new MainMenuBarService(this);
         _pm4Workbench = new Pm4WorkbenchService(this);
+        _perfPanel = new PerfPanelService(this);
         _taxiPanel = new TaxiPanelService(this);
         _archaeologyPanel = new ArchaeologyPanelService(this);
         _modelInspector = new ModelInspectorPanelService(this);
@@ -1415,7 +1417,7 @@ void main() {
 
                 // Perf (floating window) - legacy mode only; tabbed mode uses Utilities > Perf
                 if (_showPerfWindow && !_useTabUi)
-                    _pm4Workbench.DrawPerfWindow();
+                    _perfPanel.DrawPerfWindow();
 
                 if (_showCaptureAutomationWindow)
                     _captureAutomation.DrawCaptureAutomationWindow();

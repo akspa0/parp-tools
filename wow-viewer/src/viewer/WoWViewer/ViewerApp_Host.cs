@@ -377,6 +377,7 @@ public partial class ViewerApp
     ref bool IViewerAppHost.ArcheologyPlaybackActive => ref _archeologyPlaybackActive;
     ref MapListSortMode IViewerAppHost.MapListSortMode => ref _mapListSortMode;
     Pm4WorkbenchService IViewerAppHost.Pm4Workbench => _pm4Workbench;
+    PerfPanelService IViewerAppHost.PerfPanel => _perfPanel;
     ref bool IViewerAppHost.ShowUniqueIdArchaeologyWindow => ref _showUniqueIdArchaeologyWindow;
     HashSet<int> IViewerAppHost.HighlightedStandaloneWmoGroupIndices => _highlightedStandaloneWmoGroupIndices;
     ref int IViewerAppHost.HoveredStandaloneWmoGroupIndex => ref _hoveredStandaloneWmoGroupIndex;

@@ -17,9 +17,9 @@ using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
-// Pm4WorkbenchService: members moved from ViewerApp_Sidebars.cs; this file keeps that file's using directives so every
-// name in the moved code resolves exactly as it did there.
-internal sealed partial class Pm4WorkbenchService
+// Utilities > Perf: frame history, submission counters and the scene render switches. Moved out of
+// Pm4WorkbenchService (2026-09-27, operator: these are whole-scene rendering, not PM4); unchanged otherwise.
+internal sealed partial class PerfPanelService
 {
 
     // Snapshot state for the frame-history view. Snapshot() allocates, so it is refreshed on a

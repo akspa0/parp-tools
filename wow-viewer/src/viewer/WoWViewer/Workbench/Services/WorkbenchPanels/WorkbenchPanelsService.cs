@@ -1301,7 +1301,7 @@ internal sealed partial class WorkbenchPanelsService
                 DrawLogViewerContent();
                 break;
             case UtilitiesBottomTab.Perf:
-                _pm4Workbench.DrawPerfContent();
+                _perfPanel.DrawPerfContent();
                 break;
             case UtilitiesBottomTab.RenderQuality:
                 DrawRenderQualityContent();

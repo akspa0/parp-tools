@@ -93,6 +93,7 @@ internal sealed partial class WorkbenchPanelsService
     private ref ShellPanelId? _pendingFocusedShellPanel => ref _host.PendingFocusedShellPanel;
     private PlacementEditService _placementEditing => _host.PlacementEditing;
     private Pm4WorkbenchService _pm4Workbench => _host.Pm4Workbench;
+    private PerfPanelService _perfPanel => _host.PerfPanel;
     private ref ISceneRenderer? _renderer => ref _host.Renderer;
     private ref float _rightSidebarWidth => ref _host.RightSidebarWidth;
     private ref int _savedDetailedAdtTileCountOverride => ref _host.SavedDetailedAdtTileCountOverride;

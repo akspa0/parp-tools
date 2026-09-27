@@ -70,7 +70,6 @@ internal sealed partial class Pm4WorkbenchService
     private Dictionary<string, SavedPm4ObjectMatchSelection> _savedPm4ObjectMatches => _host.SavedPm4ObjectMatches;
     private ViewerSettingsService _settings => _host.Settings;
     private ShellLayoutService _shellLayout => _host.ShellLayout;
-    private ref bool _showPerfWindow => ref _host.ShowPerfWindow;
     private ref bool _showRightSidebar => ref _host.ShowRightSidebar;
     private ref string _statusMessage => ref _host.StatusMessage;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
