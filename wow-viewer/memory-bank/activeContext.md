@@ -17,7 +17,7 @@ on-demand history, never default reading.
 
 | Lane | Code | Owed (operator) | Next agent step |
 |---|---|---|---|
-| **R-10** modern-data lighting perf (Epic 249) | T002, T004–T006 landed 2026-09-23 | T003 baseline + T007 after-capture on `wow_classic_beta` 1.60.1 `Azeroth`; T008 decides R-10e | none until captures exist |
+| **R-10** modern-data lighting perf (Epic 249) | T002, T005, T006 landed 2026-09-23; **T004's per-placement WMO gate reverted 2026-09-27** (operator saw <1 FPS; T009) | check FPS after the revert on `wow_classic_beta` 1.60.1 `Azeroth` (0 WMO placements batched while lights exist); T003/T007 captures | redesign WMO instancing only after a before/after capture |
 | **U-01** god-class decomposition (Epic 251) | **E1 + E3 + ViewerApp campaign landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`WorldScene.cs` 17,175 → 8,326); `ViewerApp` class 42,973 lines / 29 files → 2,512 / 6 (51 services + 3 static helpers under `Workbench/Services/`) | U01-T003 E1 smoke; U01-T007 / T013 smoke of every moved ViewerApp surface; U01-T009 E4 hover/click smoke; **Spec 255 T018** smoke of W0–W7 | E4 landed 2026-09-26; **Spec 255 W0–W7 landed 2026-09-27** (`WorldScene.cs` 8,275 → 4,922; 7 scene services + PM4 helpers). W8/W9 and E2 `Render()` split wait for R-10's after-capture |
 
 Receipts: [E1](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e1-pm4-extraction-2026-09-25.md) ·
@@ -58,7 +58,7 @@ sidebar buttons never clicked.
 - No map save pipeline exists (`MapSaveService` absent; `EditorSession.SaveAll()` writes nothing).
 - Editor undo reverses only 2 of 5+ operation kinds.
 - Zone music is disabled by policy and still reads `ZoneMusic` as a SoundEntries id.
-- Modern data: the scene-light gate disables WMO instancing (~5.5 FPS, 16,431 WMO draws).
+- Modern data: the scene-light gate disables WMO instancing (~5.5 FPS, 16,431 WMO draws pre-R-10); R-10's per-placement gate made it worse (<1 FPS, operator) and was reverted 2026-09-27.
 - v22 DAT blends layer 0 only; `AMAP` codec unidentified.
 - `WorldScene.cs` 4,922 lines (after Spec 255 W0–W7, 2026-09-27), `ViewerApp` class 2,512 lines in 6 files — no new members (AGENTS.md §10).
 

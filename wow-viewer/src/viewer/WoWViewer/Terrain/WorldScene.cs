@@ -3147,18 +3147,17 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             if (renderer != null)
                                 _worldFrameWmoRenderers.Add(renderer);
 
-                            // Epic 249 R-10b: the batch decision is per placement. A placement a scene
-                            // light reaches keeps the per-placement path and its own light set; one no
-                            // light reaches is instanced. (Previously any active light anywhere disabled
-                            // WMO instancing for the whole scene.)
-                            bool canBatch = renderer is IGpuInstancedWmoRenderer gpuRenderer
+                            // Local scene lights are selected against each placement's world bounds.
+                            // Keep WMO shell instancing disabled while any scene light is active rather
+                            // than uploading one approximated light set for every placement in a batch.
+                            // Epic 249 R-10 amendment 2026-09-27: the per-placement gate (R-10b) was
+                            // reverted after the operator reported modern-data FPS below 1; the
+                            // instanced shell skips group culling and draws every doodad in range, so
+                            // it is not a win for unlit placements. reachedByLight stays false.
+                            bool canBatch = _sceneLightManager.Count == 0
+                                && renderer is IGpuInstancedWmoRenderer gpuRenderer
                                 && gpuRenderer.SupportsGpuInstancedOpaque;
                             bool reachedByLight = false;
-                            if (canBatch && _sceneLightManager.Count > 0)
-                            {
-                                renderer!.GetWorldBounds(visible.Instance.Transform, out Vector3 placementMin, out Vector3 placementMax);
-                                reachedByLight = _sceneLightManager.AnyAffecting(placementMin, placementMax);
-                            }
 
                             wmoBatchCandidates.Add(new(
                                 visible.Instance.ModelKey,
@@ -3204,7 +3203,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             foreach (int visibleIndex in batch.VisibleIndices)
                                 instances.Add(frame.Visibility.VisibleWmos[visibleIndex]);
 
-                            // Only placements no scene light reaches are batched, so the exact local
+                            // Batches only form when no scene light is active, so the exact local
                             // light set for every instance here is empty.
                             gpuRenderer.BeginGpuInstanceBatch(
                                  view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,

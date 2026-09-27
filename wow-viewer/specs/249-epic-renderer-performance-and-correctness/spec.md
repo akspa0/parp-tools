@@ -128,3 +128,22 @@ issue's measured root causes, not only 242's gate:
 Unchanged from 242: FR-002 no approximated light sets on lit placements; FR-005 no terrain/M2/portal/
 reader behaviour change; FR-006 no new `WorldScene`/`ViewerApp` members; FR-007 real before/after receipt
 on `wow_classic_beta` 1.60.1 `Azeroth` (operator-run).
+
+## Amendment 2026-09-27 — R-10b call-site gate reverted (operator)
+
+Operator report: *"the performance for the modern rendering is atrocious, under 1fps most of the time. The
+improvements we did the other day, made things worse, not better (WMO instancing?)"*. Operator decision on
+the options offered: **"Revert the gate now"**.
+
+Reason (code reading; not measured): before R-10b, any active light kept every WMO on the per-placement
+path, which on modern data meant every placement (lights are always present). R-10b sent every unlit,
+portal-less placement to the GPU-instanced shell instead — including models with a single placement — and
+that route (`WmoRenderer.EndGpuInstanceBatch` / `CollectOpaqueDoodadsForPlacement`) submits every group of
+every instance without group frustum admission and every doodad within the 6,000-unit range without the
+visible-group filter. On modern data that is plausibly more GPU/draw work than it saves.
+
+What changed: the `WorldScene` WMO candidate loop again uses the whole-scene gate
+(`canBatch = _sceneLightManager.Count == 0 && …`). Kept: the Core planner's lit partition + tests (unused
+while the gate is whole-scene), R-10a counters (batched now reads 0 whenever lights exist), R-10c light
+culling, R-10d spatial index. R-10's goal (recover modern-data FPS) is still open; any re-introduction of
+per-placement instancing needs the operator's before/after capture first.

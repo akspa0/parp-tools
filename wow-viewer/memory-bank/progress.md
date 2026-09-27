@@ -2,6 +2,14 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — R-10 per-placement WMO batch gate reverted (code only)
+
+Operator: modern rendering under 1 FPS since R-10. Code reading: R-10b sent every unlit portal-less WMO
+(even single-placement models) to the instanced shell, which skips group frustum admission and submits every
+doodad in range. Operator chose "Revert the gate now": `WorldScene` WMO candidate loop back to the pre-R-10
+whole-scene gate; counters, light culling and spatial index kept. Build 0 errors, same 26 test failures.
+FPS not claimed. Receipt: `specs/249-epic-renderer-performance-and-correctness/evidence/r10-gate-revert-2026-09-27.md`.
+
 ## 2026-09-27 — Spec 255 W0–W7: WorldScene independent clusters extracted (code only)
 
 Operator approved Spec 255 as written (T001). Nine behaviour-preserving commits moved 253 members + 9 types
