@@ -483,7 +483,10 @@ public class ReplaceableTextureResolver
     }
 
     /// <summary>
-    /// Resolve a replaceable texture ID to a BLP path for the given model.
+    /// Resolve a replaceable texture ID to a BLP path for the given model, from the client database records
+    /// only. Null when no record names a texture: callers bind the missing-texture placeholder, as the
+    /// client does, instead of searching the model's directory for a look-alike (Spec 256 amendment
+    /// 2026-09-27).
     /// </summary>
     public string? Resolve(string modelPath, uint replaceableId, int displayIndex = 0, int? hairVariationId = null, int? facialHairVariationId = null)
     {
@@ -504,9 +507,7 @@ public class ReplaceableTextureResolver
 
         int modelId = FindModelId(modelPath);
         if (modelId == 0)
-        {
-            return ResolveFromCreatureDirectory(normalizedPath, replaceableId);
-        }
+            return null;
 
         // Try creature TextureVariation first (covers ReplaceableId 1-3 and 11-13)
         string? result = ResolveFromCreatureDisplay(modelId, normalizedPath, replaceableId, displayIndex);
@@ -518,9 +519,7 @@ public class ReplaceableTextureResolver
 
         // Try ItemDisplayInfo for NPC equipped items
         result = ResolveFromItemDisplay(modelId, replaceableId);
-        if (result != null) return result;
-
-        return ResolveFromCreatureDirectory(normalizedPath, replaceableId);
+        return result;
     }
 
     private static readonly string[] CreatureVariantSuffixes = new[]
@@ -541,117 +540,6 @@ public class ReplaceableTextureResolver
             }
         }
         return name;
-    }
-
-    private string? ResolveFromCreatureDirectory(string modelPath, uint replaceableId)
-    {
-        if (_dataSource == null)
-            return null;
-
-        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? string.Empty;
-        string modelBase = Path.GetFileNameWithoutExtension(modelPath) ?? string.Empty;
-        if (string.IsNullOrEmpty(modelDir) || string.IsNullOrEmpty(modelBase))
-            return null;
-
-        string folderBase = Path.GetFileName(modelDir) ?? string.Empty;
-        string strippedBase = StripVariantSuffix(modelBase);
-
-        List<string> candidateBases = new() { modelBase };
-        if (!string.IsNullOrEmpty(folderBase) && !candidateBases.Contains(folderBase, StringComparer.OrdinalIgnoreCase))
-            candidateBases.Add(folderBase);
-        if (!string.IsNullOrEmpty(strippedBase) && !candidateBases.Contains(strippedBase, StringComparer.OrdinalIgnoreCase))
-            candidateBases.Add(strippedBase);
-
-        string[] suffixes = (replaceableId == 1 || replaceableId >= 11)
-            ? new[] { "Skin", "_Skin", "Body", "_Body", "Bark", "_Bark", "Trunk", "_Trunk", "" }
-            : new[] { "Detail", "_Detail", "Extra", "_Extra", "Leaf", "_Leaf", "Leaves", "_Leaves", "Pelvis", "Underwear", "" };
-
-        foreach (string basePrefix in candidateBases)
-        {
-            foreach (string suffix in suffixes)
-            {
-                string candidate = Path.Combine(modelDir, basePrefix + suffix + ".blp");
-                if (TextureExistsInDataSource(candidate))
-                    return candidate;
-
-                for (int i = 0; i <= 3; i++)
-                {
-                    candidate = Path.Combine(modelDir, $"{basePrefix}{suffix}{i:D2}.blp");
-                    if (TextureExistsInDataSource(candidate))
-                        return candidate;
-                }
-            }
-        }
-
-        // Directory scan fallback
-        var files = _dataSource.GetFileList(".blp");
-        string modelDirLower = modelDir.ToLowerInvariant();
-        string modelBaseLower = modelBase.ToLowerInvariant();
-        string folderBaseLower = folderBase.ToLowerInvariant();
-        string strippedBaseLower = strippedBase.ToLowerInvariant();
-
-        var dirCandidates = files
-            .Where(f =>
-            {
-                string fLower = f.ToLowerInvariant();
-                string fDir = Path.GetDirectoryName(fLower)?.Replace('/', '\\') ?? "";
-                return fDir == modelDirLower;
-            })
-            .OrderBy(f => f.Length)
-            .ToList();
-
-        if (dirCandidates.Count > 0)
-        {
-            var scoredCandidates = dirCandidates
-                .Select(c =>
-                {
-                    string fname = Path.GetFileNameWithoutExtension(c).ToLowerInvariant();
-                    int score = 0;
-
-                    if (replaceableId == 1 || replaceableId >= 11)
-                    {
-                        if (fname.Contains("skin")) score += 100;
-                        if (fname.Contains("body") || fname.Contains("bark") || fname.Contains("trunk")) score += 80;
-                        if (fname.StartsWith(modelBaseLower)) score += 60;
-                        else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 40;
-                        if (fname.Contains("detail") || fname.Contains("extra") || fname.Contains("hair") || fname.Contains("facial")) score -= 60;
-                    }
-                    else if (replaceableId == 2 || replaceableId == 8)
-                    {
-                        if (fname.Contains("pelvis") || fname.Contains("naked") || fname.Contains("underwear")) score += 100;
-                        if (fname.Contains("extra") || fname.Contains("detail") || fname.Contains("leaf") || fname.Contains("leaves")) score += 80;
-                        if (fname.StartsWith(modelBaseLower)) score += 50;
-                        else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 30;
-                    }
-                    else
-                    {
-                        if (fname.StartsWith(modelBaseLower)) score += 50;
-                        else if (fname.StartsWith(folderBaseLower)) score += 30;
-                    }
-
-                    return new { Path = c, Score = score };
-                })
-                .OrderByDescending(c => c.Score)
-                .ThenBy(c => c.Path.Length)
-                .ToList();
-
-            foreach (var candidate in scoredCandidates)
-            {
-                if (candidate.Score <= 0 && scoredCandidates[0].Score > 0)
-                    break;
-
-                if (TextureExistsInDataSource(candidate.Path))
-                    return candidate.Path;
-            }
-
-            foreach (var c in dirCandidates)
-            {
-                if (TextureExistsInDataSource(c))
-                    return c;
-            }
-        }
-
-        return null;
     }
 
     public IReadOnlyList<ReplaceableResolutionCandidate> GetReplaceableResolutionCandidates(string modelPath, uint replaceableId, int displayIndex = 0, int? hairVariationId = null, int? facialHairVariationId = null)
@@ -734,7 +622,7 @@ public class ReplaceableTextureResolver
             _ => null,
         };
 
-        return resolved ?? ResolveFromCharacterDirectory(modelPath, replaceableId, hairVariationId, facialHairVariationId);
+        return resolved;
     }
 
     private string? TryResolveCharacterSkinExtraTexture(string modelPath, int raceId, int sexId, int variationIndex, int colorIndex)
@@ -1069,16 +957,6 @@ public class ReplaceableTextureResolver
         if (name.Contains("facial", StringComparison.Ordinal) || name.Contains("beard", StringComparison.Ordinal)) score -= 60;
         if (name.Contains("pelvis", StringComparison.Ordinal) || name.Contains("naked", StringComparison.Ordinal) || name.Contains("skin", StringComparison.Ordinal)) score -= 120;
         return score;
-    }
-
-    private string? ResolveFromCharacterDirectory(string modelPath, uint replaceableId, int? hairVariationId, int? facialHairVariationId)
-    {
-        if (_dataSource == null)
-            return null;
-
-        return GetCharacterDirectoryResolutionCandidates(modelPath, replaceableId, hairVariationId, facialHairVariationId)
-            .FirstOrDefault(static candidate => candidate.Exists)
-            .Path;
     }
 
     private void AddCharacterDirectoryCandidates(List<ReplaceableResolutionCandidate> candidates, string modelPath, uint replaceableId, int? hairVariationId, int? facialHairVariationId)

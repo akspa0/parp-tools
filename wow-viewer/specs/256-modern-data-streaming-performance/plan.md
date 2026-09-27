@@ -79,3 +79,21 @@ texture cache per renderer (a texture shared by 40 models is decoded and uploade
 
 Order P2a → P2b → P2c, one commit each, each revertible. The original P2 text (off-thread model parsing)
 is deferred: parse is ≈ 6 ms per M2, so textures come first.
+
+## Amendment 2026-09-27 — missing textures bind the error texture (operator: "we should just point to the missing or error blp for missing textures, instead of searching for missing textures, that's what the real engine does. good god, why is that literally wasting time...")
+
+A native M2 texture that cannot be loaded used to trigger searches across the data source: replaceable slots
+with no database record probed ~135 naming-convention paths (each a read attempt) and then filtered the full
+`.blp` file list; `ReplaceableTextureResolver.Resolve` ran the same directory search, plus a full `.blp`
+list scan for characters; sections with no loadable texture then retried replaceable slots 11 and 1 through
+the same searches; and a missing path was retried inside the model's directory. Change:
+
+| Where | Before | After |
+|---|---|---|
+| `M2Renderer.ResolveReplaceableTexture` | database → naming probes → `.blp` scan → hardcoded defaults | database only |
+| `ReplaceableTextureResolver.Resolve` | database → creature/character directory search | database only (diagnostic candidate listing unchanged) |
+| Section with no loadable texture | slots 11, then 1 (full searches), else untextured | `Textures\ShaneCube.blp` (the client error texture), else a generated magenta/black checker; one shared GL texture per data source |
+| Texture path with a directory, not in the data source | retried as `<model dir>\<file>` and `<model dir>\<path>` | missing (bare file names still resolve next to the model) |
+
+Visible effect: surfaces whose texture was previously guessed from look-alike file names now show the error
+texture. The legacy `ModelRenderer` (MDX) keeps its own search and is unchanged by this amendment.

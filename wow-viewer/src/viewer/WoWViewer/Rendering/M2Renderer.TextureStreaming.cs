@@ -15,8 +15,8 @@ public sealed partial class M2Renderer
     internal IDataSource? TextureDataSource => _dataSource;
 
     // Render thread (constructor / reload). Per section: the first candidate is taken from the caches when
-    // it is already loaded (as the synchronous path would); otherwise the section's remaining candidates,
-    // then the replaceable fallback slots, go to a worker in the same order the synchronous loop tries them.
+    // it is already loaded (as the synchronous path would); otherwise the section's candidates go to a worker
+    // in the same order the synchronous loop tries them. No candidate, or none loads → missing texture.
     private void StreamSectionTextures()
     {
         for (int sectionIndex = 0; sectionIndex < _sections.Count; sectionIndex++)
@@ -26,14 +26,7 @@ public sealed partial class M2Renderer
             List<M2TextureStreamer.Candidate> candidates = BuildStreamingCandidates(section.Material);
             if (candidates.Count == 0)
             {
-                // No own candidate: go straight to the fallback slots (still off the constructor's path).
-                section.TexturePending = StreamFallbackStage(new M2TextureStreamer.Request
-                {
-                    Owner = this,
-                    Generation = _textureGeneration,
-                    SectionListIndex = sectionIndex,
-                    Candidates = candidates,
-                });
+                ApplyMissingTexture(section);
                 continue;
             }
 
@@ -64,8 +57,7 @@ public sealed partial class M2Renderer
         }
     }
 
-    // Same candidates, order and clamp rules as TryLoadMaterialTexture. The fallback slots are NOT resolved
-    // here: TryLoadMaterialTexture only resolves them after every candidate failed (see StreamFallbackStage).
+    // Same candidates, order and clamp rules as TryLoadMaterialTexture.
     private List<M2TextureStreamer.Candidate> BuildStreamingCandidates(M2StaticRenderMaterial material)
     {
         var candidates = new List<M2TextureStreamer.Candidate>();
@@ -81,35 +73,10 @@ public sealed partial class M2Renderer
 
             bool clampS = (candidate.TextureFlags & 0x1u) == 0;
             bool clampT = (candidate.TextureFlags & 0x2u) == 0;
-            candidates.Add(new M2TextureStreamer.Candidate(resolvedPath, clampS, clampT, candidate.UvSet, candidate.GeneratedTexCoord, FallbackSlot: 0));
+            candidates.Add(new M2TextureStreamer.Candidate(resolvedPath, clampS, clampT, candidate.UvSet, candidate.GeneratedTexCoord));
         }
 
         return candidates;
-    }
-
-    // Stage 1 = slot 11, stage 2 = slot 1, each resolved only once the previous stage failed — the order and
-    // laziness of TryLoadMaterialTexture's fallback loop. Returns false when no stage is left.
-    private bool StreamFallbackStage(M2TextureStreamer.Request failed)
-    {
-        for (int stage = failed.Stage + 1; stage <= 2; stage++)
-        {
-            uint slot = stage == 1 ? 11u : 1u;
-            string? fallbackPath = ResolveReplaceableTexture(slot);
-            if (string.IsNullOrWhiteSpace(fallbackPath))
-                continue;
-
-            M2TextureStreamer.Enqueue(new M2TextureStreamer.Request
-            {
-                Owner = this,
-                Generation = failed.Generation,
-                SectionListIndex = failed.SectionListIndex,
-                Candidates = [new M2TextureStreamer.Candidate(fallbackPath, false, false, 0, false, FallbackSlot: slot)],
-                Stage = stage,
-            });
-            return true;
-        }
-
-        return false;
     }
 
     /// <summary>Render thread: applies a finished request. Returns true when it uploaded new pixels.</summary>
@@ -131,8 +98,8 @@ public sealed partial class M2Renderer
         SectionBuffers section = _sections[request.SectionListIndex];
         if (result.CandidateIndex < 0)
         {
-            // No candidate of this stage loaded: try the next fallback slot, else draw untextured as before.
-            section.TexturePending = StreamFallbackStage(request);
+            // No candidate loaded: the missing-texture placeholder, as in TryLoadMaterialTexture.
+            ApplyMissingTexture(section);
             return false;
         }
 
@@ -163,7 +130,6 @@ public sealed partial class M2Renderer
                     SectionListIndex = request.SectionListIndex,
                     Candidates = request.Candidates,
                     ForceDecode = true,
-                    Stage = request.Stage,
                 });
             }
 
@@ -175,7 +141,7 @@ public sealed partial class M2Renderer
             : UploadTexture(result.Pixels!, (uint)result.Width, (uint)result.Height, candidate.ClampS, candidate.ClampT);
         if (textureId == 0)
         {
-            section.TexturePending = false;
+            ApplyMissingTexture(section);
             return false;
         }
 
@@ -190,8 +156,6 @@ public sealed partial class M2Renderer
         _loadedTextureCache[BuildTextureCacheKey(resolvedPath, candidate.ClampS, candidate.ClampT)] = textureId;
         KeepOneReference(textureId);
         ApplySectionTexture(section, candidate, textureId);
-        if (candidate.FallbackSlot != 0)
-            ViewerLog.Info(ViewerLog.Category.Mdx, $"[M2] Applied fallback texture {Path.GetFileName(candidate.TexturePath)} (slot #{candidate.FallbackSlot}) for section in {Path.GetFileName(SourceModelPath)}");
     }
 
     private static void ApplySectionTexture(SectionBuffers section, M2TextureStreamer.Candidate candidate, uint textureId)

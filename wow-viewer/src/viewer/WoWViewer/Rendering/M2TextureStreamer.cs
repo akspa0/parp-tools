@@ -13,7 +13,7 @@ namespace WoWViewer.Rendering;
 internal static class M2TextureStreamer
 {
     /// <summary>One texture candidate of a section, in the order the synchronous loader would try it.</summary>
-    internal readonly record struct Candidate(string TexturePath, bool ClampS, bool ClampT, int UvSet, bool GeneratedTexCoord, uint FallbackSlot);
+    internal readonly record struct Candidate(string TexturePath, bool ClampS, bool ClampT, int UvSet, bool GeneratedTexCoord);
 
     /// <summary>A section's remaining candidates, handed to a worker.</summary>
     internal sealed class Request
@@ -23,13 +23,6 @@ internal static class M2TextureStreamer
         public required int SectionListIndex { get; init; }
         public required IReadOnlyList<Candidate> Candidates { get; init; }
         public bool ForceDecode { get; init; }
-
-        /// <summary>
-        /// 0 = the material's own candidates; 1 = replaceable fallback slot 11; 2 = slot 1. Fallback slots are
-        /// resolved only after the previous stage failed, as in the synchronous loader: resolving them is
-        /// expensive (naming-convention probes and a scan of every .blp in the data source).
-        /// </summary>
-        public int Stage { get; init; }
     }
 
     /// <summary>The first candidate that resolved (and, unless another model already decoded it, its pixels).</summary>

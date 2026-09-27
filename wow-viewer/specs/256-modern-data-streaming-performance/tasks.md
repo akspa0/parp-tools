@@ -41,3 +41,7 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 - [x] T071 P2b off-thread texture read/decode; render-thread upload. `6a326d3`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
 - [x] T072 P2c DXT BLP compressed upload with authored mips. `bad4884`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
 - [ ] T073 Build + tests + receipt per step; operator capture (GPU create ms, DeferredAssetLoads, visual check). *(build/tests/receipt done — [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md); capture owed)*
+
+## Amendment — missing textures bind the error texture (operator 2026-09-27)
+- [x] T080 Native M2: no naming-convention / `.blp`-scan / fallback-slot search; database resolution only; missing → `Textures\ShaneCube.blp` or generated checker (shared per data source); resolver `Resolve` drops its directory search. Receipt: [evidence/missing-texture-2026-09-27.md](evidence/missing-texture-2026-09-27.md).
+- [ ] T081 Operator capture: M2 load / GPU create ms and deferred loads at the baseline spot; visual check of where the error texture now appears.
