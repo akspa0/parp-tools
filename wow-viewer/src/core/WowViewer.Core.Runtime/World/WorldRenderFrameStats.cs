@@ -61,6 +61,19 @@ public readonly record struct WorldRenderFrameStats(
     public WmoAdmissionStats WmoAdmission { get; init; }
 
     /// <summary>
+    /// Garbage-collection pause time that fell inside this frame's render call, and the collections
+    /// that completed during it (Spec 256 P0). Kept out of the stage sum: a pause lands inside
+    /// whichever stage or gap was running, so adding it would count that time twice.
+    /// </summary>
+    public double GcPauseMs { get; init; }
+
+    public int GcGen0Collections { get; init; }
+
+    public int GcGen1Collections { get; init; }
+
+    public int GcGen2Collections { get; init; }
+
+    /// <summary>
     /// Opaque model submission broken out by render path and by the gate that stopped each
     /// instance short of GPU instancing, plus the draw calls the pass actually issued.
     /// </summary>

@@ -751,6 +751,32 @@ internal sealed partial class ViewerChromeService
         }
         ImGui.Text($"Asset misses: failed retry suppress={_worldScene.Assets.SuppressedFailedMdxRetryCount}  known missing M2 skins={_worldScene.Assets.KnownMissingM2SkinCount}  duplicate skin logs={_worldScene.Assets.SuppressedMissingM2SkinLogCount}");
 
+        // Spec 256 P0: where one model load spends its time, and the whole-list skin scan on its own.
+        ModelLoadPhaseStats phases = _worldScene.Assets.LoadPhases;
+        ImGui.Text($"Load phases avg/max ms (count): read {phases.AverageMs(ModelLoadPhase.ModelRead):0.0}/{phases.MaxMs(ModelLoadPhase.ModelRead):0}"
+            + $"  skin list {phases.AverageMs(ModelLoadPhase.SkinCandidates):0.0}/{phases.MaxMs(ModelLoadPhase.SkinCandidates):0}"
+            + $"  skin read {phases.AverageMs(ModelLoadPhase.SkinRead):0.0}/{phases.MaxMs(ModelLoadPhase.SkinRead):0}");
+        ImGui.Text($"  M2 native parse {phases.AverageMs(ModelLoadPhase.NativeParse):0.0}/{phases.MaxMs(ModelLoadPhase.NativeParse):0}"
+            + $"  adapter parse {phases.AverageMs(ModelLoadPhase.AdapterParse):0.0}/{phases.MaxMs(ModelLoadPhase.AdapterParse):0}"
+            + $"  GPU create {phases.AverageMs(ModelLoadPhase.GpuCreate):0.0}/{phases.MaxMs(ModelLoadPhase.GpuCreate):0} ({phases.Count(ModelLoadPhase.GpuCreate)})");
+        ImGui.Text($"  WMO parse {phases.AverageMs(ModelLoadPhase.WmoParse):0.0}/{phases.MaxMs(ModelLoadPhase.WmoParse):0}"
+            + $"  WMO GPU create {phases.AverageMs(ModelLoadPhase.WmoGpuCreate):0.0}/{phases.MaxMs(ModelLoadPhase.WmoGpuCreate):0} ({phases.Count(ModelLoadPhase.WmoGpuCreate)})");
+        ImGui.Text($"  .skin list scans: {phases.Count(ModelLoadPhase.SkinListScan)}  avg {phases.AverageMs(ModelLoadPhase.SkinListScan):0.0}"
+            + $"  max {phases.MaxMs(ModelLoadPhase.SkinListScan):0} ms  total {phases.TotalMs(ModelLoadPhase.SkinListScan) / 1000.0:0.0} s");
+        if (ImGui.SmallButton("Reset load phases"))
+            phases.Reset();
+
+        // Why opaque models were not instanced this frame (gates already recorded per frame).
+        WorldModelSubmissionStats opaqueGates = renderStats.OpaqueModelSubmission;
+        ImGui.Text($"Opaque model gates: batching off {opaqueGates.GatedBatchingDisabled}  route needs unbatched {opaqueGates.GatedRouteRequiresUnbatchedRender}"
+            + $"  no GPU instancing {opaqueGates.GatedGpuInstancingUnsupported}  fade {opaqueGates.GatedOpaqueFadeBelowThreshold}  no renderer {opaqueGates.GatedRendererUnavailable}");
+
+        if (_dataSource is CascDataSource cascDataSource)
+        {
+            (long prefetchCompleted, long cacheHits, long cachedBytes) = cascDataSource.Stats;
+            ImGui.Text($"CASC prefetch done {prefetchCompleted}  cache hits {cacheHits}  cached {FormatBytes(cachedBytes)}");
+        }
+
         if (_dataSource is MpqDataSource mpqDataSource)
         {
             var mpqStats = mpqDataSource.GetStatsSnapshot();

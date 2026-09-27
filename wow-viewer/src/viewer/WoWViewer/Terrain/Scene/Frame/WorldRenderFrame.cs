@@ -133,8 +133,18 @@ internal sealed class WorldRenderFrame
     public double PrepareObjectPhaseMs { get; set; }
     public List<WorldOverlayOwnerFrameStats> OverlayOwners { get; } = new(WorldOverlayOwners.All.Count);
 
+    // Spec 256 P0: GC state when this frame's render call began (Reset runs first in Render).
+    private TimeSpan _gcPauseAtFrameStart;
+    private int _gcGen0AtFrameStart;
+    private int _gcGen1AtFrameStart;
+    private int _gcGen2AtFrameStart;
+
     public void Reset()
     {
+        _gcPauseAtFrameStart = GC.GetTotalPauseDuration();
+        _gcGen0AtFrameStart = GC.CollectionCount(0);
+        _gcGen1AtFrameStart = GC.CollectionCount(1);
+        _gcGen2AtFrameStart = GC.CollectionCount(2);
         Visibility.Reset();
         ObjectPasses.Reset();
         VisibleWmoRendererCache.Clear();
@@ -262,6 +272,10 @@ internal sealed class WorldRenderFrame
             new WorldRenderStageStats(PrepareObjectPhaseMs))
         {
             OverlayOwners = OverlayOwners.ToArray(),
+            GcPauseMs = (GC.GetTotalPauseDuration() - _gcPauseAtFrameStart).TotalMilliseconds,
+            GcGen0Collections = GC.CollectionCount(0) - _gcGen0AtFrameStart,
+            GcGen1Collections = GC.CollectionCount(1) - _gcGen1AtFrameStart,
+            GcGen2Collections = GC.CollectionCount(2) - _gcGen2AtFrameStart,
             WmoAdmission = WmoAdmission.ToStats(),
             OpaqueModelSubmission = OpaqueModelSubmission.ToStats(),
             TransparentModelSubmission = TransparentModelSubmission.ToStats(),

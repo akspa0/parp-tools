@@ -104,6 +104,12 @@ internal sealed partial class Pm4WorkbenchService
         ImGui.TextColored(
             unaccountedDominates ? new Vector4(1f, 0.55f, 0.2f, 1f) : new Vector4(0.7f, 0.7f, 0.7f, 1f),
             $"UNACCOUNTED (not covered by any stage timer): median {unaccounted.MedianMs:0.00}  p99 {unaccounted.P99Ms:0.00}  max {unaccounted.MaxMs:0.00} ms");
+
+        // Spec 256 P0: GC pauses inside the render call. Shown beside, not subtracted from, the
+        // stages: a pause lands inside whatever stage or gap was running at the time.
+        WorldRenderTimingDistribution gcPause = snapshot.GcPause;
+        ImGui.Text(
+            $"GC pause inside frames: median {gcPause.MedianMs:0.00}  p99 {gcPause.P99Ms:0.00}  max {gcPause.MaxMs:0.00} ms  (total {gcPause.MeanMs * gcPause.SampleCount:0} ms over {gcPause.SampleCount} frames)");
         if (unaccountedDominates)
         {
             ImGui.TextWrapped(
@@ -236,11 +242,11 @@ internal sealed partial class Pm4WorkbenchService
                 if (hitch.IsDominatedByUnaccountedTime)
                 {
                     ImGui.TextColored(new Vector4(1f, 0.55f, 0.2f, 1f),
-                        $"frame {hitch.FrameIndex}: {hitch.TotalCpuMs:0.0} ms  <- UNACCOUNTED ({hitch.UnaccountedMs:0.0} ms, no timer)");
+                        $"frame {hitch.FrameIndex}: {hitch.TotalCpuMs:0.0} ms  <- UNACCOUNTED ({hitch.UnaccountedMs:0.0} ms, no timer)  GC {hitch.GcPauseMs:0.0} ms");
                 }
                 else
                 {
-                    ImGui.Text($"frame {hitch.FrameIndex}: {hitch.TotalCpuMs:0.0} ms  <- {hitch.DominantStage} ({hitch.DominantStageMs:0.0} ms)");
+                    ImGui.Text($"frame {hitch.FrameIndex}: {hitch.TotalCpuMs:0.0} ms  <- {hitch.DominantStage} ({hitch.DominantStageMs:0.0} ms)  GC {hitch.GcPauseMs:0.0} ms");
                 }
             }
             ImGui.TreePop();

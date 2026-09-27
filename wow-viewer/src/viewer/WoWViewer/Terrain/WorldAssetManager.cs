@@ -689,6 +689,9 @@ public class WorldAssetManager : IDisposable
     /// </summary>
     public DeferredLoadBudget LoadBudget { get; } = new();
 
+    /// <summary>Per-phase load timings (Spec 256 P0); timing only, no behaviour.</summary>
+    public ModelLoadPhaseStats LoadPhases { get; } = new();
+
     public int ProcessPendingLoads(int maxLoads = 2, double maxBudgetMs = 6.0)
     {
         if (maxLoads <= 0 || maxBudgetMs <= 0)
@@ -1248,6 +1251,7 @@ private int _mdxLoadFailCount = 0;
     private IModelRenderer? LoadMdxModel(string normalizedKey)
     {
         var stopwatch = Stopwatch.StartNew();
+        long phaseStart = Stopwatch.GetTimestamp();
         try
         {
             string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
@@ -1281,6 +1285,7 @@ private int _mdxLoadFailCount = 0;
             }
 
             bool isM2Family = WarcraftNetM2Adapter.IsM2FamilyContainer(data);
+            phaseStart = LoadPhases.Mark(ModelLoadPhase.ModelRead, phaseStart);
 
             // Match the final main-branch behavior first: adapt M2 + skin directly into the runtime model.
             // Keep byte-level conversion only as a fallback when the direct adapter path fails.
@@ -1299,12 +1304,14 @@ private int _mdxLoadFailCount = 0;
                         candidatePaths.Add(bestSkinPath);
                 }
 
+                phaseStart = LoadPhases.Mark(ModelLoadPhase.SkinCandidates, phaseStart);
                 Exception? lastSkinError = null;
                 bool anySkinFound = false;
 
                 foreach (var skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     var skinBytes = ReadFileData(skinPath);
+                    phaseStart = LoadPhases.Mark(ModelLoadPhase.SkinRead, phaseStart);
                     if (skinBytes == null || skinBytes.Length == 0)
                         continue;
 
@@ -1315,6 +1322,7 @@ private int _mdxLoadFailCount = 0;
                     {
                         ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
                         M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(data, skinBytes, resolvedModelPath, skinPath);
+                        phaseStart = LoadPhases.Mark(ModelLoadPhase.NativeParse, phaseStart);
                         MdxFile? adapted = null;
                         try
                         {
@@ -1326,13 +1334,15 @@ private int _mdxLoadFailCount = 0;
                                 $"[M2] M2->MDX adapter fallback failed for {Path.GetFileName(resolvedModelPath)}: {adapterEx.Message} (native renderer will be used)");
                         }
 
+                        phaseStart = LoadPhases.Mark(ModelLoadPhase.AdapterParse, phaseStart);
+
                         var route = M2RouteDecision.Create(normalizedKey, buildProfileId, M2RouteType.AdapterSkin, M2RouteType.AdapterSkin, skinPath);
                         _mdxRouteDecisions[normalizedKey] = route;
                         M2RouteDiagnostics.LogRouteDecision(route);
 
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        return WowViewerM2RuntimeBridge.CreateRenderer(
+                        M2Renderer createdRenderer = WowViewerM2RuntimeBridge.CreateRenderer(
                             _gl,
                             runtimeModel,
                             adapted,
@@ -1342,6 +1352,8 @@ private int _mdxLoadFailCount = 0;
                             _buildVersion,
                             resolvedModelPath,
                             deferInitialTextureLoads: true);
+                        LoadPhases.Mark(ModelLoadPhase.GpuCreate, phaseStart);
+                        return createdRenderer;
                     }
                     catch (Exception ex)
                     {
@@ -1607,7 +1619,9 @@ private int _mdxLoadFailCount = 0;
         if (_bestSkinPathCache.TryGetValue(resolvedModelPath, out var cachedPath))
             return cachedPath;
 
+        long scanStart = Stopwatch.GetTimestamp();
         string? resolvedPath = WarcraftNetM2Adapter.FindSkinInFileList(resolvedModelPath, _dataSource?.GetFileList(".skin") ?? Array.Empty<string>());
+        LoadPhases.Mark(ModelLoadPhase.SkinListScan, scanStart);
         _bestSkinPathCache[resolvedModelPath] = resolvedPath;
         return resolvedPath;
     }
@@ -1649,11 +1663,14 @@ private int _mdxLoadFailCount = 0;
     private WmoRenderer? LoadWmoModel(string normalizedKey)
     {
         var stopwatch = Stopwatch.StartNew();
+        long phaseStart = Stopwatch.GetTimestamp();
         try
         {
             WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoDataModel(normalizedKey);
             if (wmo == null)
                 return null;
+
+            phaseStart = LoadPhases.Mark(ModelLoadPhase.WmoParse, phaseStart);
 
             string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
             WmoRenderer renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion,
@@ -1661,6 +1678,7 @@ private int _mdxLoadFailCount = 0;
                 deferInitialMaterialTextureLoads: true,
                 enableRuntimeGroupVisibility: _enableRuntimeWmoGroupVisibility);
             renderer.SetRuntimeGroupLiquidsVisible(_enableRuntimeWmoGroupLiquids);
+            LoadPhases.Mark(ModelLoadPhase.WmoGpuCreate, phaseStart);
             return renderer;
         }
         catch (Exception ex)

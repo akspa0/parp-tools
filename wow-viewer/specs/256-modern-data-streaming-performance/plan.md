@@ -1,6 +1,8 @@
 # Plan — Spec 256 Modern-Data Streaming & M2 Submission Performance
 
-**Status**: proposed 2026-09-27, awaiting operator approval (T001). Nothing below is authorised until then.
+**Status**: approved 2026-09-27 (T001; operator: "Approve Spec 256 plus the minimap budget", replying to the offer to
+start with P0 and P1). P0 and P1 land as **separate commits** so the operator can capture the P0-only build
+before P1; the revert-on-regression rule applies to each.
 
 Phases run in order; each ends with an operator capture on the baseline map/camera
 (`wow_classic_beta` 1.60.1, `Azeroth`, tile (48,41)) and a receipt. A phase whose capture shows no gain or a
@@ -54,3 +56,11 @@ whether the legacy route looks right on modern data.
 | Off-thread parsing races shared caches or GL | prepare step touches no GL and only thread-safe caches; create step unchanged on the render thread |
 | Instanced native M2s look different | per-model A/B captures; gates keep uncertain cases unbatched |
 | Another regression like R-10/R-39 | every phase is measured by the operator before the next; revert on regression |
+
+## Amendment 2026-09-27 — minimap upload budget (operator: "plus the minimap budget")
+
+`ViewerApp` drains decoded minimap tiles with `MinimapRenderer.ProcessPendingLoads(maxLoads: 1, maxBudgetMs: 1.5)`
+unless the Minimap window or fullscreen minimap is open, so tiles appear at one per frame (≈ 4/s at 4 FPS;
+5,285 pending in the operator's capture). Change: upload by time budget instead — up to 16 tiles within 2 ms
+per frame normally, 32 within 6 ms with the minimap window/fullscreen open. Tile decode, reads and display
+are unchanged; only how many ready tiles are uploaded per frame.

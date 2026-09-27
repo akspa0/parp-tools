@@ -59,7 +59,8 @@ public readonly record struct WorldRenderHitch(
     double TotalCpuMs,
     WorldRenderStage DominantStage,
     double DominantStageMs,
-    double UnaccountedMs)
+    double UnaccountedMs,
+    double GcPauseMs = 0)
 {
     /// <summary>True when uninstrumented time exceeds the largest instrumented stage.</summary>
     public bool IsDominatedByUnaccountedTime => UnaccountedMs > DominantStageMs;
@@ -86,7 +87,8 @@ public sealed record WorldRenderFrameHistorySnapshot(
     WorldRenderTimingDistribution Unaccounted,
     IReadOnlyDictionary<WorldRenderStage, WorldRenderTimingDistribution> Stages,
     IReadOnlyList<WorldRenderHitch> Hitches,
-    double RecorderOverheadMsPerFrame)
+    double RecorderOverheadMsPerFrame,
+    WorldRenderTimingDistribution GcPause = default)
 {
     /// <summary>
     /// Stages ordered by worst observed frame, not by p99.
@@ -129,6 +131,7 @@ public sealed class WorldRenderFrameHistory
     private readonly double[] _totalMs;
     private readonly double[] _stageMs;      // _capacity * StageCount, stride-indexed
     private readonly double[] _unaccountedMs; // total minus the sum of all stages, per frame
+    private readonly double[] _gcPauseMs;     // GC pause inside the frame (Spec 256); not in the stage sum
     private readonly bool[] _cameraMoved;
     private readonly long[] _frameIndex;
     private readonly double[] _scratch;      // reused by percentile queries; never touched by Record
@@ -146,6 +149,7 @@ public sealed class WorldRenderFrameHistory
         _totalMs = new double[capacity];
         _stageMs = new double[capacity * StageCount];
         _unaccountedMs = new double[capacity];
+        _gcPauseMs = new double[capacity];
         _cameraMoved = new bool[capacity];
         _frameIndex = new long[capacity];
         _scratch = new double[capacity];
@@ -202,6 +206,7 @@ public sealed class WorldRenderFrameHistory
         for (int stage = 0; stage < StageCount; stage++)
             stageSum += _stageMs[baseIndex + stage];
         _unaccountedMs[slot] = Math.Max(0, stats.TotalCpuMs - stageSum);
+        _gcPauseMs[slot] = stats.GcPauseMs;
 
         _next = slot + 1 == _capacity ? 0 : slot + 1;
         if (_count < _capacity)
@@ -271,6 +276,8 @@ public sealed class WorldRenderFrameHistory
         WorldRenderTimingDistribution total = Describe(_totalMs, 0, 1, oldest, hitchThresholdMs);
         WorldRenderTimingDistribution unaccounted =
             Describe(_unaccountedMs, 0, 1, oldest, hitchThresholdMs);
+        WorldRenderTimingDistribution gcPause =
+            Describe(_gcPauseMs, 0, 1, oldest, hitchThresholdMs);
 
         var stages = new Dictionary<WorldRenderStage, WorldRenderTimingDistribution>(StageCount);
         for (int stage = 0; stage < StageCount; stage++)
@@ -301,7 +308,7 @@ public sealed class WorldRenderFrameHistory
             }
 
             hitches.Add(new WorldRenderHitch(
-                _frameIndex[slot], frameMs, (WorldRenderStage)dominant, dominantMs, _unaccountedMs[slot]));
+                _frameIndex[slot], frameMs, (WorldRenderStage)dominant, dominantMs, _unaccountedMs[slot], _gcPauseMs[slot]));
         }
 
         return new WorldRenderFrameHistorySnapshot(
@@ -314,7 +321,8 @@ public sealed class WorldRenderFrameHistory
             unaccounted,
             stages,
             hitches,
-            RecorderOverheadMsPerFrame);
+            RecorderOverheadMsPerFrame,
+            gcPause);
     }
 
     /// <summary>
