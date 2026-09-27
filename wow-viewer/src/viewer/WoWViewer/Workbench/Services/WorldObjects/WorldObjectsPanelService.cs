@@ -710,10 +710,10 @@ internal sealed partial class WorldObjectsPanelService
         modelPath = string.Empty;
         isWmo = false;
 
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
             return false;
 
-        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        ObjectInstance selected = _worldScene.Selection.SelectedInstance.Value;
         if (string.IsNullOrWhiteSpace(selected.ModelPath))
             return false;
 

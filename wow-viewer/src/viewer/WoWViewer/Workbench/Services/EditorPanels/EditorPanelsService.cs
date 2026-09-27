@@ -159,20 +159,20 @@ internal sealed partial class EditorPanelsService
 
         ImGui.Separator();
 
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
         {
             ImGui.TextDisabled("Select a tile-backed world object to edit its placement.");
             return;
         }
 
-        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        ObjectInstance selected = _worldScene.Selection.SelectedInstance.Value;
         if (!selected.HasTileCoordinate || selected.PlacementEntryIndex < 0)
         {
             ImGui.TextDisabled("The selected object is not backed by a writable ADT placement.");
             return;
         }
 
-        if (!_worldScene.TryGetSelectedPlacementSourceData(out string sourcePath, out _))
+        if (!_worldScene.Selection.TryGetSelectedPlacementSourceData(out string sourcePath, out _))
         {
             ImGui.TextDisabled("The selected placement source ADT could not be resolved from the current data source.");
             return;
@@ -184,9 +184,9 @@ internal sealed partial class EditorPanelsService
         Vector3 position = selected.PlacementPosition;
         if (ImGui.InputFloat3("Position", ref position, "%.3f"))
         {
-            if (_worldScene.TryUpdateSelectedPlacementPosition(position, out string error))
+            if (_worldScene.Selection.TryUpdateSelectedPlacementPosition(position, out string error))
             {
-                _placementEditing.StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, position: position);
+                _placementEditing.StageAuthoringPlacementEdit(_worldScene.Selection.SelectedObjectType, selected, sourcePath, position: position);
                 RecordAuthoringSessionOperation(
                     new PlacementMoveOperation(
                         $"move-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
@@ -207,7 +207,7 @@ internal sealed partial class EditorPanelsService
         Vector3 rotation = selected.PlacementRotation;
         if (ImGui.InputFloat3("Rotation", ref rotation, "%.3f"))
         {
-            _placementEditing.StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, rotation: rotation);
+            _placementEditing.StageAuthoringPlacementEdit(_worldScene.Selection.SelectedObjectType, selected, sourcePath, rotation: rotation);
             RecordAuthoringSessionOperation(
                 new PlacementRotateOperation(
                     $"rotate-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
@@ -223,7 +223,7 @@ internal sealed partial class EditorPanelsService
         float scale = selected.PlacementScale;
         if (ImGui.InputFloat("Scale", ref scale, 0.01f))
         {
-            _placementEditing.StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, scale: scale);
+            _placementEditing.StageAuthoringPlacementEdit(_worldScene.Selection.SelectedObjectType, selected, sourcePath, scale: scale);
             RecordAuthoringSessionOperation(
                 new PlacementScaleOperation(
                     $"scale-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
@@ -238,7 +238,7 @@ internal sealed partial class EditorPanelsService
 
         if (ImGui.Button("Delete Placement"))
         {
-            _placementEditing.StageAuthoringPlacementEdit(_worldScene.SelectedObjectType, selected, sourcePath, delete: true);
+            _placementEditing.StageAuthoringPlacementEdit(_worldScene.Selection.SelectedObjectType, selected, sourcePath, delete: true);
             RecordAuthoringSessionOperation(
                 new PlacementDeleteOperation(
                     $"delete-{selected.UniqueId}-{DateTime.UtcNow.Ticks}",
@@ -251,7 +251,7 @@ internal sealed partial class EditorPanelsService
     }
 
     private AdtPlacementKind AuthoringPlacementKind()
-        => _worldScene?.SelectedObjectType == Terrain.ObjectType.Wmo
+        => _worldScene?.Selection.SelectedObjectType == Terrain.ObjectType.Wmo
             ? AdtPlacementKind.WorldModel
             : AdtPlacementKind.Model;
 

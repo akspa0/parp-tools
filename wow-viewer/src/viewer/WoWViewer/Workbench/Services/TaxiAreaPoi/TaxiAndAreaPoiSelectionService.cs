@@ -159,7 +159,7 @@ internal sealed class TaxiAndAreaPoiSelectionService
 
         int nextNodeId = toggle && _worldScene.TaxiActors.SelectedTaxiNodeId == nodeId ? -1 : nodeId;
         _worldScene.TaxiActors.SelectedTaxiNodeId = nextNodeId;
-        _worldScene.ClearSelection();
+        _worldScene.Selection.ClearSelection();
         _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedAreaPoiInfo();
 
@@ -179,7 +179,7 @@ internal sealed class TaxiAndAreaPoiSelectionService
 
         int nextRouteId = toggle && _worldScene.TaxiActors.SelectedTaxiRouteId == pathId ? -1 : pathId;
         _worldScene.TaxiActors.SelectedTaxiRouteId = nextRouteId;
-        _worldScene.ClearSelection();
+        _worldScene.Selection.ClearSelection();
         _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedAreaPoiInfo();
 
@@ -267,7 +267,7 @@ internal sealed class TaxiAndAreaPoiSelectionService
 
         int nextPoiId = toggle && _selectedAreaPoiId == poiId ? -1 : poiId;
         _selectedAreaPoiId = nextPoiId;
-        _worldScene.ClearSelection();
+        _worldScene.Selection.ClearSelection();
         _worldScene.TaxiActors.ClearTaxiSelection();
         _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
 

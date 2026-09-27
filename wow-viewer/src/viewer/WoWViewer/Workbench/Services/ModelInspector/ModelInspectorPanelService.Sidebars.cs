@@ -472,10 +472,10 @@ internal sealed partial class ModelInspectorPanelService
 
     internal void DrawSelectedWmoControls()
     {
-        if (_worldScene == null || _worldScene.SelectedObjectType != Terrain.ObjectType.Wmo || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || _worldScene.Selection.SelectedObjectType != Terrain.ObjectType.Wmo || !_worldScene.Selection.SelectedInstance.HasValue)
             return;
 
-        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        ObjectInstance selected = _worldScene.Selection.SelectedInstance.Value;
         string normalizedKey = WorldAssetManager.NormalizeKey(selected.ModelPath);
         WmoRenderer? wmoRenderer = _worldScene.Assets.GetWmo(normalizedKey);
         if (wmoRenderer == null)
@@ -642,13 +642,13 @@ internal sealed partial class ModelInspectorPanelService
 
         DrawModelAnimationControls();
 
-        if (_worldScene?.SelectedInstance.HasValue == true && _worldScene.SelectedObjectType == Terrain.ObjectType.Mdx)
+        if (_worldScene?.Selection.SelectedInstance.HasValue == true && _worldScene.Selection.SelectedObjectType == Terrain.ObjectType.Mdx)
         {
             ImGui.Separator();
             _sqlSpawnStreaming.DrawSelectedSqlGameObjectAnimationControls();
 
             // Also show animation controls for non-SQL world MDX instances
-            var inst = _worldScene.SelectedInstance.Value;
+            var inst = _worldScene.Selection.SelectedInstance.Value;
             if (!_sqlSpawnStreaming.HasSqlGameObjectForSelectedInstance())
             {
                 var mdxRenderer = _worldScene.Assets.GetMdx(inst.ModelKey);

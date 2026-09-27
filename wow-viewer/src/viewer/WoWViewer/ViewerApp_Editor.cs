@@ -91,10 +91,10 @@ public partial class ViewerApp
         public EditorSceneSnapshot Capture()
         {
             var selection = new List<EditorSelectionEntry>();
-            if (_app._worldScene?.SelectedInstance is ObjectInstance selected)
+            if (_app._worldScene?.Selection.SelectedInstance is ObjectInstance selected)
             {
                 selection.Add(new EditorSelectionEntry(
-                    _app._worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? EditorSelectionKind.WorldModel : EditorSelectionKind.Model,
+                    _app._worldScene.Selection.SelectedObjectType == Terrain.ObjectType.Wmo ? EditorSelectionKind.WorldModel : EditorSelectionKind.Model,
                     _app._captureAutomation.GetCurrentCaptureMapName(),
                     selected.TileX,
                     selected.TileY,
@@ -127,7 +127,7 @@ public partial class ViewerApp
                     _app._archaeologyPanel.MaterializeReconciliationOutput(reconciliation);
                     break;
                 case PlacementMoveOperation move:
-                    _app._worldScene?.TryUpdateSelectedPlacementPosition(move.NewPosition, out _);
+                    _app._worldScene?.Selection.TryUpdateSelectedPlacementPosition(move.NewPosition, out _);
                     break;
                 default:
                     break;

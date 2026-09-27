@@ -361,7 +361,7 @@ internal sealed partial class SceneHoverAndPickService
                     if (!TryFindWlLiquidBodyByKey(body.BodyKey, out WlLiquidBody? selectedBody) || selectedBody == null)
                         return;
 
-                    _worldScene?.ClearSelection();
+                    _worldScene?.Selection.ClearSelection();
                     _worldScene?.TaxiActors.ClearTaxiSelection();
                     _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
@@ -394,7 +394,7 @@ internal sealed partial class SceneHoverAndPickService
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.TaxiActors.ClearTaxiSelection();
-                    _worldScene.ClearSelection();
+                    _worldScene.Selection.ClearSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     UpdateSelectedPm4ObjectInfo(objectKey);
                 }));
@@ -426,16 +426,16 @@ internal sealed partial class SceneHoverAndPickService
                         return;
 
                     // Toggle off / deselect if already selected
-                    if (_worldScene.SelectedObjectType == hit.ObjectType && _worldScene.SelectedObjectIndex == hit.ObjectIndex)
+                    if (_worldScene.Selection.SelectedObjectType == hit.ObjectType && _worldScene.Selection.SelectedObjectIndex == hit.ObjectIndex)
                     {
-                        _worldScene.ClearSelection();
+                        _worldScene.Selection.ClearSelection();
                         _selectedObjectIndex = -1;
                         _selectedObjectType = "";
                         _selectedObjectInfo = "";
                         return;
                     }
 
-                    if (!_worldScene.SelectSceneObject(hit.ObjectType, hit.ObjectIndex, hit.ParentWmoIndex))
+                    if (!_worldScene.Selection.SelectSceneObject(hit.ObjectType, hit.ObjectIndex, hit.ParentWmoIndex))
                         return;
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);

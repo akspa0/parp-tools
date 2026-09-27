@@ -258,7 +258,7 @@ internal sealed partial class TerrainInspectionPanelService
         // A terrain pin is the active selection context only when the click did not resolve to a
         // higher-priority scene object. Clear the old object context so a previous MDX/WMO cannot
         // keep the Inspector on an unrelated detail surface after the operator clicks the ground.
-        _worldScene?.ClearSelection();
+        _worldScene?.Selection.ClearSelection();
         _worldScene?.TaxiActors.ClearTaxiSelection();
         _worldScene?.Pm4Overlay.ClearPm4ObjectSelection();
         ClearSelectedWlLiquidBody(clearListIsolation: true);

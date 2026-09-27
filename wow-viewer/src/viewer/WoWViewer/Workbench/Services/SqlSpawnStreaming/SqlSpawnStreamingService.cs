@@ -112,14 +112,14 @@ internal sealed class SqlSpawnStreamingService
 
     internal void DrawSelectedSqlGameObjectAnimationControls()
     {
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
             return;
-        if (_worldScene.SelectedObjectType != Terrain.ObjectType.Mdx)
+        if (_worldScene.Selection.SelectedObjectType != Terrain.ObjectType.Mdx)
             return;
         if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
             return;
 
-        var inst = _worldScene.SelectedInstance.Value;
+        var inst = _worldScene.Selection.SelectedInstance.Value;
         var spawn = _sqlMapSpawnsCache.FirstOrDefault(s =>
             s.SpawnType == WorldSpawnType.GameObject &&
             s.SpawnId == inst.UniqueId &&
@@ -348,14 +348,14 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
     internal bool HasSqlGameObjectForSelectedInstance()
     {
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
             return false;
-        if (_worldScene.SelectedObjectType != Terrain.ObjectType.Mdx)
+        if (_worldScene.Selection.SelectedObjectType != Terrain.ObjectType.Mdx)
             return false;
         if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
             return false;
 
-        var inst = _worldScene.SelectedInstance.Value;
+        var inst = _worldScene.Selection.SelectedInstance.Value;
         return _sqlMapSpawnsCache.Any(s =>
             s.SpawnType == WorldSpawnType.GameObject &&
             s.SpawnId == inst.UniqueId &&

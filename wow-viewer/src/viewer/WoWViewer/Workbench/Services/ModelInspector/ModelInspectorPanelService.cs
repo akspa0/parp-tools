@@ -83,7 +83,7 @@ internal sealed partial class ModelInspectorPanelService
 
     private bool TryFrameSelectedWorldWmoDoodad(WmoRenderer wmoRenderer, WmoDoodadInfo doodad)
     {
-        if (_worldScene?.SelectedInstance is not ObjectInstance selectedInstance)
+        if (_worldScene?.Selection.SelectedInstance is not ObjectInstance selectedInstance)
             return false;
 
         if (wmoRenderer.TryGetDoodadBounds(doodad.Index, selectedInstance.Transform, out Vector3 boundsMin, out Vector3 boundsMax))

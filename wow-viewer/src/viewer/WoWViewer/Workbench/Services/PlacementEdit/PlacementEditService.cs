@@ -139,16 +139,16 @@ internal sealed class PlacementEditService
         ImGui.Text("Selected Placement Move");
         ImGui.TextDisabled("Translation-only save for existing ADT MDDF/MODF placements, grouped by source ADT when multiple moves are staged.");
 
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
         {
             DrawPlacementSaveQueueActions(includeCurrentSourceSave: false);
             ImGui.TextDisabled(_selectedPlacementSaveStatus);
             return;
         }
 
-        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        ObjectInstance selected = _worldScene.Selection.SelectedInstance.Value;
         bool editable = selected.HasTileCoordinate && selected.PlacementEntryIndex >= 0
-            && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo;
+            && _worldScene.Selection.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo;
 
         if (!editable)
         {
@@ -166,7 +166,7 @@ internal sealed class PlacementEditService
             {
                 _selectedPlacementSaveStatus = sourceError;
             }
-            else if (_worldScene.TryUpdateSelectedPlacementPosition(editedPosition, out string error))
+            else if (_worldScene.Selection.TryUpdateSelectedPlacementPosition(editedPosition, out string error))
             {
                 _selectedPlacementEditedPosition = editedPosition;
                 _selectedPlacementDirty = !PositionsNearlyEqual(_selectedPlacementEditedPosition, _selectedPlacementOriginalPosition);
@@ -193,7 +193,7 @@ internal sealed class PlacementEditService
 
         if (_selectedPlacementDirty && ImGui.Button("Reset Preview"))
         {
-            if (_worldScene.TryUpdateSelectedPlacementPosition(_selectedPlacementOriginalPosition, out string error))
+            if (_worldScene.Selection.TryUpdateSelectedPlacementPosition(_selectedPlacementOriginalPosition, out string error))
             {
                 _selectedPlacementEditedPosition = _selectedPlacementOriginalPosition;
                 _selectedPlacementDirty = false;
@@ -225,20 +225,20 @@ internal sealed class PlacementEditService
 
     private void SyncSelectedPlacementEditState()
     {
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
         {
             ResetSelectedPlacementEditState("Select a tile-backed world object to stage a translation-only save.");
             return;
         }
 
-        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        ObjectInstance selected = _worldScene.Selection.SelectedInstance.Value;
         if (!selected.HasTileCoordinate || selected.PlacementEntryIndex < 0)
         {
             ResetSelectedPlacementEditState("The selected object is not backed by a writable ADT tile placement.");
             return;
         }
 
-        Terrain.ObjectType selectedType = _worldScene.SelectedObjectType;
+        Terrain.ObjectType selectedType = _worldScene.Selection.SelectedObjectType;
         if (selectedType is not (Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo))
         {
             ResetSelectedPlacementEditState("Only MDDF and MODF tile placements are supported by the current save seam.");
@@ -313,7 +313,7 @@ internal sealed class PlacementEditService
 
     private void ChooseSelectedPlacementSavePath()
     {
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
             return;
 
         if (!EnsureSelectedPlacementSourcePath(out string sourcePath, out string error))
@@ -338,7 +338,7 @@ internal sealed class PlacementEditService
                 initialDir = existingDir;
             defaultFileName = Path.GetFileName(_selectedPlacementSaveTargetPath);
         }
-        else if (_worldScene.TryGetSelectedPlacementWritablePath(out string? writablePath) && !string.IsNullOrWhiteSpace(writablePath))
+        else if (_worldScene.Selection.TryGetSelectedPlacementWritablePath(out string? writablePath) && !string.IsNullOrWhiteSpace(writablePath))
         {
             string? writableDir = Path.GetDirectoryName(writablePath);
             if (!string.IsNullOrWhiteSpace(writableDir) && Directory.Exists(writableDir))
@@ -600,13 +600,13 @@ internal sealed class PlacementEditService
         if (!string.IsNullOrWhiteSpace(sourcePath))
             return true;
 
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
         {
             error = "No tile-backed world object is selected.";
             return false;
         }
 
-        if (!_worldScene.TryGetSelectedPlacementSourceData(out sourcePath, out _))
+        if (!_worldScene.Selection.TryGetSelectedPlacementSourceData(out sourcePath, out _))
         {
             error = "The selected placement source ADT could not be read from the current data source.";
             return false;
@@ -671,13 +671,13 @@ internal sealed class PlacementEditService
 
     private void UpsertSelectedPlacementEdit()
     {
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
             return;
 
         if (!EnsureSelectedPlacementSourcePath(out string sourcePath, out _))
             return;
 
-        PlacementEditKey key = CreatePlacementEditKey(_worldScene.SelectedObjectType, _worldScene.SelectedInstance.Value);
+        PlacementEditKey key = CreatePlacementEditKey(_worldScene.Selection.SelectedObjectType, _worldScene.Selection.SelectedInstance.Value);
         _stagedPlacementEdits[key] = new StagedPlacementEdit
         {
             Key = key,
@@ -701,11 +701,11 @@ internal sealed class PlacementEditService
     private bool TryGetSelectedPlacementKey(out PlacementEditKey key)
     {
         key = default;
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
             return false;
 
-        ObjectInstance selected = _worldScene.SelectedInstance.Value;
-        Terrain.ObjectType selectedType = _worldScene.SelectedObjectType;
+        ObjectInstance selected = _worldScene.Selection.SelectedInstance.Value;
+        Terrain.ObjectType selectedType = _worldScene.Selection.SelectedObjectType;
         if (!selected.HasTileCoordinate || selected.PlacementEntryIndex < 0 || selectedType is not (Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo))
             return false;
 

@@ -916,7 +916,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             {
                 _sceneHoverPick.ClearPendingClickSelection();
                 _investigation.ClearSelectedWlLiquidBody(clearListIsolation: true);
-                _worldScene.ClearSelection();
+                _worldScene.Selection.ClearSelection();
                 _worldScene.TaxiActors.ClearTaxiSelection();
                 _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                 _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
@@ -1519,7 +1519,7 @@ void main() {
         if (_worldScene == null)
             return;
 
-        ObjectInstance? selected = _worldScene.SelectedInstance;
+        ObjectInstance? selected = _worldScene.Selection.SelectedInstance;
         if (!selected.HasValue)
         {
             _selectedObjectIndex = -1;
@@ -1531,13 +1531,13 @@ void main() {
         _selectedAreaPoiId = -1;
 
         ObjectInstance inst = selected.Value;
-        string type = _worldScene.SelectedObjectType switch
+        string type = _worldScene.Selection.SelectedObjectType switch
         {
             Terrain.ObjectType.Wmo => "WMO",
             Terrain.ObjectType.WmoDoodad => "WMO Doodad",
             _ => "MDX"
         };
-        int idx = _worldScene.SelectedObjectIndex;
+        int idx = _worldScene.Selection.SelectedObjectIndex;
         float wowX = WoWConstants.MapOrigin - inst.PlacementPosition.Y;
         float wowY = WoWConstants.MapOrigin - inst.PlacementPosition.X;
         float wowZ = inst.PlacementPosition.Z;
@@ -1545,13 +1545,13 @@ void main() {
         _selectedObjectType = type;
         _selectedObjectIndex = idx;
 
-        if (_useTabUi && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo or Terrain.ObjectType.WmoDoodad)
+        if (_useTabUi && _worldScene.Selection.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo or Terrain.ObjectType.WmoDoodad)
             _workbenchPanels.OpenWorkbenchTab(ModelBottomTab.Info);
 
         // WMO doodads come from MODD, which has no uniqueId — uniqueId identifies an MDDF/MODF
         // placement in an ADT. Showing the MODD table index under a "UniqueId" label asserts a
         // relationship that does not exist. Label it for what it is.
-        string identityLine = _worldScene.SelectedObjectType == Terrain.ObjectType.WmoDoodad
+        string identityLine = _worldScene.Selection.SelectedObjectType == Terrain.ObjectType.WmoDoodad
             ? $"Doodad def: {inst.PlacementEntryIndex} (MODD index, WMO-local; MODD has no uniqueId)\n"
             : $"UniqueId: {inst.UniqueId}\n";
 

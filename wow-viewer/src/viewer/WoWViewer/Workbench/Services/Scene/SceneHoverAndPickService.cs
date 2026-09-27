@@ -143,7 +143,7 @@ internal sealed partial class SceneHoverAndPickService
 
                 ClearPendingClickSelection();
                 _worldScene.TaxiActors.ClearTaxiSelection();
-                _worldScene.ClearSelection();
+                _worldScene.Selection.ClearSelection();
                 _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
 
                 var collectionPm4Key = hoveredPm4Key ?? pm4HitKey;
@@ -168,7 +168,7 @@ internal sealed partial class SceneHoverAndPickService
 
             ClearPendingClickSelection();
             ClearSelectedWlLiquidBody(clearListIsolation: true);
-            _worldScene.ClearSelection();
+            _worldScene.Selection.ClearSelection();
             _worldScene.TaxiActors.ClearTaxiSelection();
             _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
             _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();

@@ -110,10 +110,10 @@ internal sealed partial class InspectorPayloadsService
         }
 
         // 3. Placed World Object Selection
-        if (_worldScene?.SelectedInstance.HasValue == true)
+        if (_worldScene?.Selection.SelectedInstance.HasValue == true)
         {
-            ObjectInstance inst = _worldScene.SelectedInstance.Value;
-            ObjectType objType = _worldScene.SelectedObjectType;
+            ObjectInstance inst = _worldScene.Selection.SelectedInstance.Value;
+            ObjectType objType = _worldScene.Selection.SelectedObjectType;
 
             switch (objType)
             {
@@ -233,10 +233,10 @@ internal sealed partial class InspectorPayloadsService
         var parentSection = builder.AddSection("Parent WMO & Def");
         parentSection.Row("MODD Table Index", $"{inst.PlacementEntryIndex}", isImportant: true);
 
-        if (_worldScene?.TryGetSelectedWmoDoodad(out WmoDoodadInfo doodadInfo, out _, out ObjectInstance parentWmo) == true)
+        if (_worldScene?.Selection.TryGetSelectedWmoDoodad(out WmoDoodadInfo doodadInfo, out _, out ObjectInstance parentWmo) == true)
         {
             parentSection.Row("Parent WMO Model", parentWmo.ModelPath, isImportant: true);
-            parentSection.Row("Parent WMO Index", $"{_worldScene.SelectedWmoParentIndex}");
+            parentSection.Row("Parent WMO Index", $"{_worldScene.Selection.SelectedWmoParentIndex}");
 
             string normKey = WorldAssetManager.NormalizeKey(parentWmo.ModelPath);
             WmoRenderer? wmoRenderer = _worldScene.Assets.GetWmo(normKey);
@@ -363,9 +363,9 @@ internal sealed partial class InspectorPayloadsService
         switch (action.Id)
         {
             case "switch_wmo_doodad_set":
-                if (_worldScene?.SelectedInstance.HasValue == true && _worldScene.SelectedObjectType == ObjectType.Wmo)
+                if (_worldScene?.Selection.SelectedInstance.HasValue == true && _worldScene.Selection.SelectedObjectType == ObjectType.Wmo)
                 {
-                    ObjectInstance inst = _worldScene.SelectedInstance.Value;
+                    ObjectInstance inst = _worldScene.Selection.SelectedInstance.Value;
                     string normKey = WorldAssetManager.NormalizeKey(inst.ModelPath);
                     WmoRenderer? wmo = _worldScene.Assets.GetWmo(normKey);
                     if (wmo != null)
@@ -387,9 +387,9 @@ internal sealed partial class InspectorPayloadsService
                 break;
 
             case "frame_selection":
-                if (_worldScene?.SelectedInstance.HasValue == true)
+                if (_worldScene?.Selection.SelectedInstance.HasValue == true)
                 {
-                    ObjectInstance inst = _worldScene.SelectedInstance.Value;
+                    ObjectInstance inst = _worldScene.Selection.SelectedInstance.Value;
                     if (inst.BoundsResolved)
                         _modelInspector.FrameBounds(inst.BoundsMin, inst.BoundsMax, mdxMirrorX: false);
                     else
@@ -402,8 +402,8 @@ internal sealed partial class InspectorPayloadsService
                 break;
 
             case "copy_asset_path":
-                if (_worldScene?.SelectedInstance.HasValue == true)
-                    _navigatorPanel.CopyTextToClipboard(_worldScene.SelectedInstance.Value.ModelPath, "Asset Path");
+                if (_worldScene?.Selection.SelectedInstance.HasValue == true)
+                    _navigatorPanel.CopyTextToClipboard(_worldScene.Selection.SelectedInstance.Value.ModelPath, "Asset Path");
                 else if (string.Equals(_selectedObjectType, "WL liquid", StringComparison.OrdinalIgnoreCase)
                     && _investigation.TryFindWlLiquidBodyByKey(_wlLayerSelectedBodyKey, out var wl) && wl != null)
                     _navigatorPanel.CopyTextToClipboard(wl.SourcePath, "WL Source Path");

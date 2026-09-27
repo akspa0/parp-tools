@@ -143,7 +143,7 @@ internal sealed partial class NavigatorPanelService
         if (_worldScene?.HoverPick.HoveredAssetInfo is not HoveredAssetInfo info || !info.HasSceneObject)
             return false;
 
-        if (!_worldScene.SelectSceneObject(info.SceneObjectType, info.SceneObjectIndex, info.ParentWmoIndex))
+        if (!_worldScene.Selection.SelectSceneObject(info.SceneObjectType, info.SceneObjectIndex, info.ParentWmoIndex))
             return false;
 
         ClearSelectedWlLiquidBody(clearListIsolation: true);

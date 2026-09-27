@@ -117,5 +117,8 @@ internal interface IWorldSceneHost
     ref string? DbdDir { get; }
     ref int MapId { get; }
     List<ObjectInstance> TaxiActorInstances { get; }
+    SceneHoverPickController HoverPick { get; }
+    Dictionary<(int, int), List<ObjectInstance>> TileMdxInstances { get; }
+    Dictionary<(int, int), List<ObjectInstance>> TileWmoInstances { get; }
     // HOST-IFACE-END
 }
