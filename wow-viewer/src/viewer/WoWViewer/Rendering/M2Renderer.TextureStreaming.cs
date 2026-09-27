@@ -90,7 +90,7 @@ public sealed partial class M2Renderer
         bool stale = _disposed || _gl == null || request.Generation != _textureGeneration || request.SectionListIndex >= _sections.Count;
         if (stale)
         {
-            if (result.Pixels != null && result.CandidateIndex >= 0)
+            if ((result.Pixels != null || result.Compressed != null) && result.CandidateIndex >= 0)
             {
                 M2TextureStreamer.Candidate dropped = request.Candidates[result.CandidateIndex];
                 M2TextureStreamer.ForgetDecoded(M2TextureStreamer.DecodedKey(_dataSource, result.ResolvedPath, dropped.ClampS, dropped.ClampT));
@@ -139,7 +139,9 @@ public sealed partial class M2Renderer
             return false;
         }
 
-        uint textureId = UploadTexture(result.Pixels!, (uint)result.Width, (uint)result.Height, candidate.ClampS, candidate.ClampT);
+        uint textureId = result.Compressed is { } compressed
+            ? UploadCompressedTexture(compressed, candidate.ClampS, candidate.ClampT)
+            : UploadTexture(result.Pixels!, (uint)result.Width, (uint)result.Height, candidate.ClampS, candidate.ClampT);
         if (textureId == 0)
         {
             section.TexturePending = false;
@@ -178,11 +180,20 @@ public sealed partial class M2Renderer
     internal bool TryReadTextureBytesOffThread(string texturePath, out byte[]? bytes, out string resolvedPath)
         => TryReadTextureBytes(texturePath, out bytes, out resolvedPath) && bytes != null && bytes.Length > 0;
 
-    internal bool TryDecodeTextureOffThread(string resolvedPath, bool isPng, byte[]? blpBytes, out byte[]? pixels, out int width, out int height)
+    internal bool TryDecodeTextureOffThread(string resolvedPath, bool isPng, byte[]? blpBytes, out byte[]? pixels, out int width, out int height, out BlpCompressedTexture? compressed)
     {
         pixels = null;
         width = 0;
         height = 0;
+        compressed = null;
+
+        // Spec 256 P2c: DXT BLPs need no decode at all.
+        if (!isPng && blpBytes != null && BlpCompressedTexture.TryCreate(blpBytes, resolvedPath) is { } dxt)
+        {
+            compressed = dxt;
+            return true;
+        }
+
         try
         {
             using Image<Rgba32> image = isPng

@@ -32,6 +32,9 @@ internal static class M2TextureStreamer
         public int CandidateIndex { get; init; } = -1;
         public string ResolvedPath { get; init; } = string.Empty;
         public byte[]? Pixels { get; init; }
+
+        /// <summary>Spec 256 P2c: DXT levels to upload as-is (no pixels decoded).</summary>
+        public BlpCompressedTexture? Compressed { get; init; }
         public int Width { get; init; }
         public int Height { get; init; }
         public bool ResolvedOnly { get; init; }
@@ -199,13 +202,13 @@ internal static class M2TextureStreamer
 
         DecodedKeys.TryAdd(key, 0);
         long decodeStart = Stopwatch.GetTimestamp();
-        if (request.Owner.TryDecodeTextureOffThread(resolvedPath, isPng, blpBytes, out byte[]? pixels, out int width, out int height))
+        if (request.Owner.TryDecodeTextureOffThread(resolvedPath, isPng, blpBytes, out byte[]? pixels, out int width, out int height, out BlpCompressedTexture? compressed))
         {
             double ms = Stopwatch.GetElapsedTime(decodeStart).TotalMilliseconds;
             lock (StatsLock)
                 _decodeMsTotal += ms;
             Interlocked.Increment(ref _decoded);
-            result = new Result { Request = request, CandidateIndex = index, ResolvedPath = resolvedPath, Pixels = pixels, Width = width, Height = height };
+            result = new Result { Request = request, CandidateIndex = index, ResolvedPath = resolvedPath, Pixels = pixels, Width = width, Height = height, Compressed = compressed };
             return true;
         }
 

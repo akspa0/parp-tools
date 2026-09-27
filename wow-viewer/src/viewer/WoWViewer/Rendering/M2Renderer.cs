@@ -127,6 +127,7 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
 
         InitShaders();
         InitBuffers();
+        BlpCompressedTexture.DetectSupport(gl); // Spec 256 P2c, render thread
         LoadSectionTextures();
 
         if (_texResolver != null)
@@ -1619,6 +1620,11 @@ void main()
 
     private unsafe uint LoadTextureFromBlp(byte[] blpData, string name, bool clampS, bool clampT)
     {
+        // Spec 256 P2c: DXT BLPs go to the GPU compressed with their own mip levels (operator-approved
+        // visual change for distant mips); anything else decodes as before.
+        if (BlpCompressedTexture.TryCreate(blpData, name) is { } compressed)
+            return UploadCompressedTexture(compressed, clampS, clampT);
+
         try
         {
             using MemoryStream memoryStream = new(blpData, writable: false);
@@ -1674,6 +1680,33 @@ void main()
         TextureWrapMode wrapT = clampT ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
         RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true, wrapS, wrapT);
         _gl.GenerateMipmap(TextureTarget.Texture2D);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        return textureId;
+    }
+
+    private unsafe uint UploadCompressedTexture(BlpCompressedTexture compressed, bool clampS, bool clampT)
+    {
+        if (_gl == null)
+            return 0;
+
+        uint textureId = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, textureId);
+        fixed (byte* dataPtr = compressed.Data)
+        {
+            for (int level = 0; level < compressed.Levels.Count; level++)
+            {
+                (int width, int height, int offset, int length) = compressed.Levels[level];
+                _gl.CompressedTexImage2D(TextureTarget.Texture2D, level, compressed.Format,
+                    (uint)width, (uint)height, 0, (uint)length, dataPtr + offset);
+            }
+        }
+
+        // Only the levels present in the file: capping the max level keeps a short chain complete.
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureBaseLevel, 0);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLevel, compressed.Levels.Count - 1);
+        TextureWrapMode wrapS = clampS ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
+        TextureWrapMode wrapT = clampT ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
+        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: compressed.Levels.Count > 1, wrapS, wrapT);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         return textureId;
     }
