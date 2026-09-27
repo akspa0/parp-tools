@@ -64,3 +64,18 @@ unless the Minimap window or fullscreen minimap is open, so tiles appear at one 
 5,285 pending in the operator's capture). Change: upload by time budget instead — up to 16 tiles within 2 ms
 per frame normally, 32 within 6 ms with the minimap window/fullscreen open. Tile decode, reads and display
 are unchanged; only how many ready tiles are uploaded per frame.
+
+## Amendment 2026-09-27 — P2 refined from the P1 capture (operator: "Approve P2a and P2b and P2c")
+
+Capture (`evidence/capture-p1-2026-09-27.md`): an M2 load averages 64.5 ms, of which ≈ 57 ms is renderer
+creation; the native `M2Renderer` decodes and uploads every texture synchronously in its constructor, with a
+texture cache per renderer (a texture shared by 40 models is decoded and uploaded 40 times). P2 becomes:
+
+| Step | Change | Identical output? |
+|---|---|---|
+| **P2a** | One reference-counted texture cache shared by all native M2 renderers (key: resolved path + clamp flags) | yes — same pixels, decoded once |
+| **P2b** | Texture bytes read and decoded on background threads; the render thread only uploads; a renderer draws a section once its texture is uploaded | pixels yes; textures can appear a few frames after the geometry |
+| **P2c** | DXT BLP textures uploaded compressed with the BLP's own mip levels instead of CPU decode + `GenerateMipmap` | **no** — distant mips come from the file (operator accepted) |
+
+Order P2a → P2b → P2c, one commit each, each revertible. The original P2 text (off-thread model parsing)
+is deferred: parse is ≈ 6 ms per M2, so textures come first.

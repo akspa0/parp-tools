@@ -19,7 +19,7 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 - [x] T021 Skip the discarded adapter parse when the native renderer is chosen. `4f1e6b4`; Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
 - [ ] T022 Build + tests + receipt; operator capture.
 
-## P2 — Off-thread model loading (after T022)
+## P2 — (original) Off-thread model parsing — deferred by the 2026-09-27 amendment (parse ≈ 6 ms/M2)
 - [ ] T030 Prepare/create split for M2/MDX loads (worker prepare, render-thread create).
 - [ ] T031 Same for WMO loads.
 - [ ] T032 Build + tests + receipt; operator capture (load time to settled scene, frame times while streaming).
@@ -31,7 +31,13 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 
 ## Amendment — minimap upload budget
 - [x] T050 Minimap tile uploads by time budget (16 tiles / 2 ms; 32 / 6 ms with the minimap window open). `b15e553`; Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
-- [ ] T051 Operator: minimap pending count drains quickly on the baseline map; frame time unchanged.
+- [x] T051 Operator: minimap pending count drains quickly on the baseline map. Receipt: operator 2026-09-27 "minimaps are quick now, at least, and fully load"; [evidence/capture-p1-2026-09-27.md](evidence/capture-p1-2026-09-27.md).
 
 ## File budget
 - [ ] T060 Split `Terrain/WorldAssetManager.cs` (2,112 lines; over the ~2,000 budget before this spec, +24 timing/index lines here) — AGENTS.md §10.
+
+## P2 amendment — native M2 textures (operator 2026-09-27: "Approve P2a and P2b and P2c")
+- [ ] T070 P2a shared reference-counted native M2 texture cache.
+- [ ] T071 P2b off-thread texture read/decode; render-thread upload.
+- [ ] T072 P2c DXT BLP compressed upload with authored mips.
+- [ ] T073 Build + tests + receipt per step; operator capture (GPU create ms, DeferredAssetLoads, visual check).

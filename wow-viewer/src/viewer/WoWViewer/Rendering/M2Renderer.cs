@@ -1111,8 +1111,9 @@ void main()
         if (_gl == null)
             return;
 
+        // Spec 256 P2a: textures are shared across native M2s; the last release deletes them.
         foreach (uint textureId in _ownedTextureIds)
-            _gl.DeleteTexture(textureId);
+            M2TextureCache.Release(_gl, _dataSource, textureId);
 
         _ownedTextureIds.Clear();
         _loadedTextureCache.Clear();
@@ -1447,28 +1448,58 @@ void main()
         if (_loadedTextureCache.TryGetValue(cacheKey, out textureId))
             return textureId != 0;
 
-        if (TryLoadTexture(texturePath, clampS, clampT, out textureId, out string resolvedPath))
+        // Spec 256 P2a: another native M2 on this data source may already hold this exact texture.
+        string requestKey = BuildSharedRequestKey(cacheKey);
+        if (M2TextureCache.TryAcquire(_dataSource, requestKey, out textureId))
+        {
+            _loadedTextureCache[cacheKey] = textureId;
+            KeepOneReference(textureId);
+            return true;
+        }
+
+        if (TryLoadTexture(texturePath, clampS, clampT, requestKey, out textureId, out string resolvedPath))
         {
             _loadedTextureCache[cacheKey] = textureId;
             _loadedTextureCache[BuildTextureCacheKey(resolvedPath, clampS, clampT)] = textureId;
-            _ownedTextureIds.Add(textureId);
+            KeepOneReference(textureId);
             return true;
         }
 
         return false;
     }
 
-    private bool TryLoadTexture(string texturePath, bool clampS, bool clampT, out uint textureId, out string resolvedPath)
+    // Resolution of a requested texture path depends on the path, the clamp flags and this model's
+    // directory (EnumerateTexturePathCandidates); the shared cache is already per data source.
+    private string BuildSharedRequestKey(string cacheKey) => $"req|{_modelDir}|{cacheKey}";
+
+    private static string BuildSharedResolvedKey(string resolvedPath, bool clampS, bool clampT)
+        => "res|" + BuildTextureCacheKey(resolvedPath, clampS, clampT);
+
+    // A renderer holds one shared reference per texture; drop any extra acquired through an alias.
+    private void KeepOneReference(uint textureId)
+    {
+        if (!_ownedTextureIds.Add(textureId))
+            M2TextureCache.Release(_gl!, _dataSource, textureId);
+    }
+
+    private bool TryLoadTexture(string texturePath, bool clampS, bool clampT, string requestKey, out uint textureId, out string resolvedPath)
     {
         textureId = 0;
         resolvedPath = texturePath.Replace('/', '\\');
 
         if (TryResolveImagePath(texturePath, ".png", out string pngPath))
         {
+            if (TryAcquireResolved(pngPath, clampS, clampT, requestKey, out textureId))
+            {
+                resolvedPath = pngPath;
+                return true;
+            }
+
             textureId = LoadTextureFromImage(pngPath, clampS, clampT);
             if (textureId != 0)
             {
                 resolvedPath = pngPath;
+                M2TextureCache.Add(_dataSource, textureId, requestKey, BuildSharedResolvedKey(pngPath, clampS, clampT));
                 return true;
             }
         }
@@ -1476,8 +1507,25 @@ void main()
         if (!TryReadTextureBytes(texturePath, out byte[]? blpData, out resolvedPath) || blpData == null || blpData.Length == 0)
             return false;
 
+        if (TryAcquireResolved(resolvedPath, clampS, clampT, requestKey, out textureId))
+            return true;
+
         textureId = LoadTextureFromBlp(blpData, resolvedPath, clampS, clampT);
+        if (textureId != 0)
+            M2TextureCache.Add(_dataSource, textureId, requestKey, BuildSharedResolvedKey(resolvedPath, clampS, clampT));
+
         return textureId != 0;
+    }
+
+    // Another request already decoded and uploaded this file with the same clamp flags: share it and
+    // remember this request as an alias, so the next identical request needs no read.
+    private bool TryAcquireResolved(string resolvedPath, bool clampS, bool clampT, string requestKey, out uint textureId)
+    {
+        if (!M2TextureCache.TryAcquire(_dataSource, BuildSharedResolvedKey(resolvedPath, clampS, clampT), out textureId))
+            return false;
+
+        M2TextureCache.AddAlias(_dataSource, requestKey, textureId);
+        return true;
     }
 
     private bool TryReadTextureBytes(string texturePath, out byte[]? bytes, out string resolvedPath)
