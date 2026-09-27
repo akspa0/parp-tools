@@ -827,6 +827,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 32 : 16,
             maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 2.0);
+        // Spec 256 P2b: upload native M2 textures decoded off-thread (budgeted; at least one per frame).
+        Rendering.M2TextureStreamer.ProcessCompleted(budgetMs: 4.0);
         _sqlSpawnStreaming.UpdateSqlSpawnStreaming();
         _terrainWeakSignalRestore.UpdateTerrainWeakSignalRestoreForCamera();
     }

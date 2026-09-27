@@ -12,7 +12,7 @@ using WowViewer.Core.Runtime.M2;
 
 namespace WoWViewer.Rendering;
 
-public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLightEmitter
+public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLightEmitter
 {
     private readonly GL? _gl;
     private readonly IDataSource? _dataSource;
@@ -26,6 +26,11 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer, ISc
     private readonly List<bool> _sectionVisibility = new();
     private readonly Dictionary<string, uint> _loadedTextureCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> _ownedTextureIds = new();
+
+    // Spec 256 P2b: world-streamed models read/decode textures off the render thread (M2TextureStreamer).
+    private readonly bool _deferTextureLoads;
+    private int _textureGeneration;
+    private bool _disposed;
     private readonly string _modelDir = string.Empty;
     private readonly int? _selectedReplaceableDisplayIndex;
     private int _characterHairVariationId;
@@ -97,8 +102,10 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer, ISc
             $"[M2] wow-viewer runtime metadata + legacy draw backend ready for {Path.GetFileName(SourceModelPath)}: sections={runtimeModel.Sections.Count}, compatibilityFallback={runtimeModel.UsesCompatibilityFallback}");
     }
 
-    public M2Renderer(GL gl, M2StaticRenderModel runtimeModel, string sourceModelPath, IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null)
+    public M2Renderer(GL gl, M2StaticRenderModel runtimeModel, string sourceModelPath, IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null,
+        bool deferTextureLoads = false)
     {
+        _deferTextureLoads = deferTextureLoads;
         ArgumentNullException.ThrowIfNull(gl);
         ArgumentNullException.ThrowIfNull(runtimeModel);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceModelPath);
@@ -539,6 +546,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             _gl.DeleteBuffer(section.Ebo);
         }
 
+        _disposed = true;
         _sections.Clear();
 
         ReleaseOwnedTextures();
@@ -763,7 +771,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
         foreach (SectionBuffers section in _sections)
         {
-            if (!section.Visible)
+            if (!section.Visible || section.TexturePending)
                 continue;
 
             bool transparent = section.Material.IsTransparent;
@@ -1046,6 +1054,12 @@ void main()
         if (_gl == null)
             return;
 
+        if (_deferTextureLoads)
+        {
+            StreamSectionTextures();
+            return;
+        }
+
         foreach (SectionBuffers section in _sections)
         {
             section.AlphaCutout = section.Material.BlendMode == WowViewer.Core.M2.M2BlendMode.AlphaKey;
@@ -1112,6 +1126,7 @@ void main()
             return;
 
         // Spec 256 P2a: textures are shared across native M2s; the last release deletes them.
+        _textureGeneration++; // results still streaming for the old textures are dropped
         foreach (uint textureId in _ownedTextureIds)
             M2TextureCache.Release(_gl, _dataSource, textureId);
 
@@ -1702,6 +1717,9 @@ void main()
         public uint TextureId { get; set; }
 
         public bool HasTexture { get; set; }
+
+        /// <summary>Spec 256 P2b: texture still streaming; the section is not drawn until it resolves.</summary>
+        public bool TexturePending { get; set; }
 
         public int UvSet { get; set; }
 

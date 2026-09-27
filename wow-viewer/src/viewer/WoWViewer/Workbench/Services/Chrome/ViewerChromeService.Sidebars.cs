@@ -763,6 +763,9 @@ internal sealed partial class ViewerChromeService
             + $"  WMO GPU create {phases.AverageMs(ModelLoadPhase.WmoGpuCreate):0.0}/{phases.MaxMs(ModelLoadPhase.WmoGpuCreate):0} ({phases.Count(ModelLoadPhase.WmoGpuCreate)})");
         ImGui.Text($"  .skin list scans: {phases.Count(ModelLoadPhase.SkinListScan)}  avg {phases.AverageMs(ModelLoadPhase.SkinListScan):0.0}"
             + $"  max {phases.MaxMs(ModelLoadPhase.SkinListScan):0} ms  total {phases.TotalMs(ModelLoadPhase.SkinListScan) / 1000.0:0.0} s");
+        var streamed = M2TextureStreamer.Stats;
+        ImGui.Text($"  M2 textures streamed: queued {streamed.Queued}  decoded {streamed.Decoded} (avg {streamed.AvgDecodeMs:0.0} ms)"
+            + $"  shared {streamed.SharedHits}  uploaded {streamed.Uploaded} (avg {streamed.AvgUploadMs:0.0} ms)  pending {M2TextureStreamer.PendingCount}");
         if (ImGui.SmallButton("Reset load phases"))
             phases.Reset();
 

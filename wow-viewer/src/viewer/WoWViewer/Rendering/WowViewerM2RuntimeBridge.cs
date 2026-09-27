@@ -279,7 +279,7 @@ internal static class WowViewerM2RuntimeBridge
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceModelPath);
 
         if (ShouldUseNativeStaticRenderer(adaptedMdx))
-            return new M2Renderer(gl, runtimeModel, sourceModelPath, dataSource, texResolver);
+            return new M2Renderer(gl, runtimeModel, sourceModelPath, dataSource, texResolver, deferTextureLoads: deferInitialTextureLoads);
 
         string resolvedModelDir = modelDir ?? Path.GetDirectoryName(sourceModelPath) ?? string.Empty;
         return new M2Renderer(
