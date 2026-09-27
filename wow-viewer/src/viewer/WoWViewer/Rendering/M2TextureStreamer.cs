@@ -23,6 +23,13 @@ internal static class M2TextureStreamer
         public required int SectionListIndex { get; init; }
         public required IReadOnlyList<Candidate> Candidates { get; init; }
         public bool ForceDecode { get; init; }
+
+        /// <summary>
+        /// 0 = the material's own candidates; 1 = replaceable fallback slot 11; 2 = slot 1. Fallback slots are
+        /// resolved only after the previous stage failed, as in the synchronous loader: resolving them is
+        /// expensive (naming-convention probes and a scan of every .blp in the data source).
+        /// </summary>
+        public int Stage { get; init; }
     }
 
     /// <summary>The first candidate that resolved (and, unless another model already decoded it, its pixels).</summary>

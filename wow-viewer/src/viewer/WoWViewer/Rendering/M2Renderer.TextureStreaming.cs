@@ -25,7 +25,17 @@ public sealed partial class M2Renderer
             section.AlphaCutout = section.Material.BlendMode == WowViewer.Core.M2.M2BlendMode.AlphaKey;
             List<M2TextureStreamer.Candidate> candidates = BuildStreamingCandidates(section.Material);
             if (candidates.Count == 0)
+            {
+                // No own candidate: go straight to the fallback slots (still off the constructor's path).
+                section.TexturePending = StreamFallbackStage(new M2TextureStreamer.Request
+                {
+                    Owner = this,
+                    Generation = _textureGeneration,
+                    SectionListIndex = sectionIndex,
+                    Candidates = candidates,
+                });
                 continue;
+            }
 
             M2TextureStreamer.Candidate first = candidates[0];
             string cacheKey = BuildTextureCacheKey(first.TexturePath, first.ClampS, first.ClampT);
@@ -54,7 +64,8 @@ public sealed partial class M2Renderer
         }
     }
 
-    // Same candidates, order and clamp rules as TryLoadMaterialTexture, including the fallback slots.
+    // Same candidates, order and clamp rules as TryLoadMaterialTexture. The fallback slots are NOT resolved
+    // here: TryLoadMaterialTexture only resolves them after every candidate failed (see StreamFallbackStage).
     private List<M2TextureStreamer.Candidate> BuildStreamingCandidates(M2StaticRenderMaterial material)
     {
         var candidates = new List<M2TextureStreamer.Candidate>();
@@ -73,14 +84,32 @@ public sealed partial class M2Renderer
             candidates.Add(new M2TextureStreamer.Candidate(resolvedPath, clampS, clampT, candidate.UvSet, candidate.GeneratedTexCoord, FallbackSlot: 0));
         }
 
-        foreach (uint slot in new uint[] { 11, 1 })
+        return candidates;
+    }
+
+    // Stage 1 = slot 11, stage 2 = slot 1, each resolved only once the previous stage failed — the order and
+    // laziness of TryLoadMaterialTexture's fallback loop. Returns false when no stage is left.
+    private bool StreamFallbackStage(M2TextureStreamer.Request failed)
+    {
+        for (int stage = failed.Stage + 1; stage <= 2; stage++)
         {
+            uint slot = stage == 1 ? 11u : 1u;
             string? fallbackPath = ResolveReplaceableTexture(slot);
-            if (!string.IsNullOrWhiteSpace(fallbackPath))
-                candidates.Add(new M2TextureStreamer.Candidate(fallbackPath, false, false, 0, false, FallbackSlot: slot));
+            if (string.IsNullOrWhiteSpace(fallbackPath))
+                continue;
+
+            M2TextureStreamer.Enqueue(new M2TextureStreamer.Request
+            {
+                Owner = this,
+                Generation = failed.Generation,
+                SectionListIndex = failed.SectionListIndex,
+                Candidates = [new M2TextureStreamer.Candidate(fallbackPath, false, false, 0, false, FallbackSlot: slot)],
+                Stage = stage,
+            });
+            return true;
         }
 
-        return candidates;
+        return false;
     }
 
     /// <summary>Render thread: applies a finished request. Returns true when it uploaded new pixels.</summary>
@@ -102,7 +131,8 @@ public sealed partial class M2Renderer
         SectionBuffers section = _sections[request.SectionListIndex];
         if (result.CandidateIndex < 0)
         {
-            section.TexturePending = false; // no candidate loaded: drawn untextured, as before
+            // No candidate of this stage loaded: try the next fallback slot, else draw untextured as before.
+            section.TexturePending = StreamFallbackStage(request);
             return false;
         }
 
@@ -133,6 +163,7 @@ public sealed partial class M2Renderer
                     SectionListIndex = request.SectionListIndex,
                     Candidates = request.Candidates,
                     ForceDecode = true,
+                    Stage = request.Stage,
                 });
             }
 

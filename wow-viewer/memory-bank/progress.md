@@ -2,6 +2,13 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — Spec 256 P2b regression fixed (code only)
+
+Operator capture after P2: M2 load predicted 659.8 ms (was 64.5), 2 FPS. Cause: P2b eagerly resolved replaceable
+fallback slots (naming probes + a scan of every `.blp`) for every section; the synchronous loader only does so
+after all candidates fail. Fallback slots now stream as lazy stages (slot 11, then slot 1). Load-phase lines wrap.
+Build 0 errors, same 26 failures. Capture owed.
+
 ## 2026-09-27 — Spec 256 P2a/P2b/P2c: native M2 textures (code only)
 
 Operator capture after P1: GC small (median 4.4 ms), UNACCOUNTED gone, M2 load ≈ 64.5 ms of which ≈ 57 ms in
