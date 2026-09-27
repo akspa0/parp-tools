@@ -139,8 +139,7 @@ internal static class WarcraftNetM2Adapter
     {
         if (files.Count == 0) return null;
 
-        string modelName = Path.GetFileNameWithoutExtension(modelPath).ToLowerInvariant();
-        string modelDir = (Path.GetDirectoryName(modelPath) ?? string.Empty).Replace('/', '\\').ToLowerInvariant();
+        (string modelName, string modelDir) = GetSkinQueryKeys(modelPath);
 
         string? bestPath = null;
         int bestScore = int.MinValue;
@@ -150,17 +149,7 @@ internal static class WarcraftNetM2Adapter
             if (!file.EndsWith(".skin", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            string normalized = file.Replace('/', '\\');
-            string fileName = Path.GetFileName(normalized).ToLowerInvariant();
-            string fileBase = Path.GetFileNameWithoutExtension(normalized).ToLowerInvariant();
-            string fileDir = (Path.GetDirectoryName(normalized) ?? string.Empty).ToLowerInvariant();
-
-            int score = 0;
-            if (fileBase.StartsWith(modelName, StringComparison.OrdinalIgnoreCase)) score += 50;
-            if (fileBase.Equals(modelName + "00", StringComparison.OrdinalIgnoreCase)) score += 50;
-            if (!string.IsNullOrEmpty(modelDir) && fileDir.Equals(modelDir, StringComparison.OrdinalIgnoreCase)) score += 100;
-            if (fileName.Equals(modelName + "00.skin", StringComparison.OrdinalIgnoreCase)) score += 20;
-
+            int score = ScoreSkinCandidate(file, modelName, modelDir, out string normalized);
             if (score > bestScore)
             {
                 bestScore = score;
@@ -169,6 +158,31 @@ internal static class WarcraftNetM2Adapter
         }
 
         return bestScore > 0 ? bestPath : null;
+    }
+
+    /// <summary>Lower-cased model name and directory in the form <see cref="FindSkinInFileList"/> scores against.</summary>
+    internal static (string ModelName, string ModelDir) GetSkinQueryKeys(string modelPath)
+        => (Path.GetFileNameWithoutExtension(modelPath).ToLowerInvariant(),
+            (Path.GetDirectoryName(modelPath) ?? string.Empty).Replace('/', '\\').ToLowerInvariant());
+
+    /// <summary>
+    /// The per-file score used by <see cref="FindSkinInFileList"/> (shared with <see cref="SkinPathIndex"/>
+    /// so both rank candidates identically). A positive score needs the file's base name to start with
+    /// the model name or its directory to equal the model's directory.
+    /// </summary>
+    internal static int ScoreSkinCandidate(string file, string modelName, string modelDir, out string normalized)
+    {
+        normalized = file.Replace('/', '\\');
+        string fileName = Path.GetFileName(normalized).ToLowerInvariant();
+        string fileBase = Path.GetFileNameWithoutExtension(normalized).ToLowerInvariant();
+        string fileDir = (Path.GetDirectoryName(normalized) ?? string.Empty).ToLowerInvariant();
+
+        int score = 0;
+        if (fileBase.StartsWith(modelName, StringComparison.OrdinalIgnoreCase)) score += 50;
+        if (fileBase.Equals(modelName + "00", StringComparison.OrdinalIgnoreCase)) score += 50;
+        if (!string.IsNullOrEmpty(modelDir) && fileDir.Equals(modelDir, StringComparison.OrdinalIgnoreCase)) score += 100;
+        if (fileName.Equals(modelName + "00.skin", StringComparison.OrdinalIgnoreCase)) score += 20;
+        return score;
     }
 
     public static MdxFile BuildRuntimeModel(byte[] m2Bytes, byte[]? skinBytes, string modelPath, string? buildVersion = null)

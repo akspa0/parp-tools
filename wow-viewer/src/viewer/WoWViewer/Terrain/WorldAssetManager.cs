@@ -1326,7 +1326,10 @@ private int _mdxLoadFailCount = 0;
                         MdxFile? adapted = null;
                         try
                         {
-                            adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
+                            // Spec 256 P1: when the native renderer is preferred, CreateRenderer ignores the
+                            // adapter model, so building it only cost a second parse of the same M2.
+                            if (!WowViewerM2RuntimeBridge.PreferNativeStaticRenderer)
+                                adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
                         }
                         catch (Exception adapterEx)
                         {
@@ -1614,13 +1617,16 @@ private int _mdxLoadFailCount = 0;
         return normalizedKey;
     }
 
+    private readonly SkinPathIndex _skinPathIndex = new();
+
     private string? ResolveBestSkinPath(string resolvedModelPath)
     {
         if (_bestSkinPathCache.TryGetValue(resolvedModelPath, out var cachedPath))
             return cachedPath;
 
         long scanStart = Stopwatch.GetTimestamp();
-        string? resolvedPath = WarcraftNetM2Adapter.FindSkinInFileList(resolvedModelPath, _dataSource?.GetFileList(".skin") ?? Array.Empty<string>());
+        // Spec 256 P1: same result as WarcraftNetM2Adapter.FindSkinInFileList, without a whole-list scan per model.
+        string? resolvedPath = _skinPathIndex.FindBestSkin(resolvedModelPath, _dataSource?.GetFileList(".skin") ?? Array.Empty<string>());
         LoadPhases.Mark(ModelLoadPhase.SkinListScan, scanStart);
         _bestSkinPathCache[resolvedModelPath] = resolvedPath;
         return resolvedPath;
