@@ -55,3 +55,20 @@ Expected result: after W0–W7 `WorldScene.cs` ≈ 4,900 lines; after W8, W9 and
 | Hot per-frame paths gain an interface hop per bridged field | bridges are non-virtual private properties over one interface call; W8/W9 get before/after frame-counter captures from the operator |
 | Nested types referenced from `ViewerApp` services by `WorldScene.X` | qualification pass + compiler; W0 moves types first |
 | Nested classes holding a `WorldScene` reference and calling moved members | compiler finds them; receiver-only fix, recorded in the receipt |
+
+## Spec-sync notes
+
+- **2026-09-27 (W0–W7 landed, `WorldScene.cs` 8,275 → 4,922).** Divergences from the table above, all within
+  the approved steps (details in `evidence/w0-w7-extraction-2026-09-27.md`):
+  - W0 moved the four nested types only; top-level public types moved with the step owning their feature
+    (W1/W2/W3). `SelectedSceneObjectKey` lives in `Scene/Selection/`. `IPm4OverlayHost` was not folded.
+  - Service classes are `public sealed` with an `internal` constructor and a public `WorldScene` accessor
+    (`HoverPick`, `TaxiActors`, `ObjectFilters`, `Selection`, `Atmosphere`, `ExternalSpawns`,
+    `TerrainQueries`), matching E1's `Pm4Overlay`; external callers change receiver to that accessor.
+  - Static `WorldScene` dependencies are bridged as explicit same-named members (not `using static`) so name
+    lookup inside moved bodies cannot change; new files keep `WorldScene.cs`'s full using block.
+  - Items left for later steps: shared geometry statics and `ResolveMdxSelectionBounds` (W8), external
+    instance lists (W8), object fog / scene lights / time of day (W9), `SetDbcCredentials` and `_skyDome`.
+  - W6's PM4 helpers went to a new static class `Terrain/Pm4/Pm4OverlayMprlHelpers`; eight of its nine
+    members are unreachable (moved, not deleted — deleting them is not part of this spec).
+  - W7 also took `IsMdxFullyOccludedByTerrain`.

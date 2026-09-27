@@ -1,6 +1,6 @@
 # Spec 255 — WorldScene Decomposition
 
-**Created**: 2026-09-26 · **Branch**: `v0.6.0-dev` · **Status**: Plan approved 2026-09-27 (T001); W0–W7 in progress
+**Created**: 2026-09-26 · **Branch**: `v0.6.0-dev` · **Status**: Plan approved 2026-09-27 (T001); W0–W7 code landed 2026-09-27 (`WorldScene.cs` 8,275 → 4,922; smoke T018 open); W8/W9/E2 gated on R-10
 **Parent**: Epic 251 item U-01 ([spec](../251-epic-viewer-ux-and-code-health/spec.md)); continues its E1/E2/E4
 steps. Governance: AGENTS.md §9 (scope, receipts) and §10 (god-class freeze).
 

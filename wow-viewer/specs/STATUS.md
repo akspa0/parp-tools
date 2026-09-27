@@ -33,7 +33,7 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 
 | Spec | Scope | Status |
 |---|---|---|
-| [255 WorldScene Decomposition](255-worldscene-decomposition/spec.md) | Split `WorldScene.cs` (8,275 lines) into owned scene services, continuing Epic 251 U-01 | **Draft — plan awaiting operator approval (T001)**; render-path steps gated on R-10 |
+| [255 WorldScene Decomposition](255-worldscene-decomposition/spec.md) | Split `WorldScene.cs` (8,275 lines at start) into owned scene services, continuing Epic 251 U-01 | Plan approved 2026-09-27; **W0–W7 landed 2026-09-27** (8,275 → 4,922 lines; smoke T018 owed); W8/W9/E2 gated on R-10 |
 
 ## Operator verification owed on shipped code
 

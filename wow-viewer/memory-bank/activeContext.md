@@ -18,16 +18,19 @@ on-demand history, never default reading.
 | Lane | Code | Owed (operator) | Next agent step |
 |---|---|---|---|
 | **R-10** modern-data lighting perf (Epic 249) | T002, T004–T006 landed 2026-09-23 | T003 baseline + T007 after-capture on `wow_classic_beta` 1.60.1 `Azeroth`; T008 decides R-10e | none until captures exist |
-| **U-01** god-class decomposition (Epic 251) | **E1 + E3 + ViewerApp campaign landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`WorldScene.cs` 17,175 → 8,326); `ViewerApp` class 42,973 lines / 29 files → 2,512 / 6 (51 services + 3 static helpers under `Workbench/Services/`) | U01-T003 E1 smoke; U01-T007 / T013 smoke of every moved ViewerApp surface; U01-T009 E4 hover/click smoke | E4 code landed 2026-09-26 (selection policy → `Core.Runtime/World/Selection`); E2 `Render()` split waits for R-10's after-capture |
+| **U-01** god-class decomposition (Epic 251) | **E1 + E3 + ViewerApp campaign landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`WorldScene.cs` 17,175 → 8,326); `ViewerApp` class 42,973 lines / 29 files → 2,512 / 6 (51 services + 3 static helpers under `Workbench/Services/`) | U01-T003 E1 smoke; U01-T007 / T013 smoke of every moved ViewerApp surface; U01-T009 E4 hover/click smoke; **Spec 255 T018** smoke of W0–W7 | E4 landed 2026-09-26; **Spec 255 W0–W7 landed 2026-09-27** (`WorldScene.cs` 8,275 → 4,922; 7 scene services + PM4 helpers). W8/W9 and E2 `Render()` split wait for R-10's after-capture |
 
 Receipts: [E1](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e1-pm4-extraction-2026-09-25.md) ·
 [ViewerApp campaign](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-viewerapp-extraction-2026-09-25.md) ·
+[Spec 255 W0–W7](../specs/255-worldscene-decomposition/evidence/w0-w7-extraction-2026-09-27.md) ·
 [E4 selection](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e4-selection-2026-09-26.md).
 **Where code lives now:** viewer features are owned services under `src/viewer/WoWViewer/Workbench/Services/<Feature>/`
 (namespace `WoWViewer`); they reach app state only through `IViewerAppHost` (implemented in
 `ViewerApp_Host.cs`). `ViewerApp.cs` is the shell: fields, composition root, window lifecycle. New behaviour
 goes into the owning service; if it needs more app state, add one `IViewerAppHost` member + its one-line
-implementation. PM4 overlay code lives in `Terrain/Pm4/` (`WorldScene.Pm4Overlay.X`).
+implementation. PM4 overlay code lives in `Terrain/Pm4/` (`WorldScene.Pm4Overlay.X`). World-scene features live in
+`Terrain/Scene/<Feature>/` services (`WorldScene.HoverPick`, `.TaxiActors`, `.ObjectFilters`, `.Selection`, `.Atmosphere`,
+`.ExternalSpawns`, `.TerrainQueries`); they read scene state only through `IWorldSceneHost` (explicit impls in `WorldScene.cs`).
 
 All other epic items remain untriaged in [TRIAGE.md](../specs/TRIAGE.md); nothing else is scheduled.
 Receipt for the 2026-09-23 reconciliation:
@@ -57,7 +60,7 @@ sidebar buttons never clicked.
 - Zone music is disabled by policy and still reads `ZoneMusic` as a SoundEntries id.
 - Modern data: the scene-light gate disables WMO instancing (~5.5 FPS, 16,431 WMO draws).
 - v22 DAT blends layer 0 only; `AMAP` codec unidentified.
-- `WorldScene.cs` 8,326 lines, `ViewerApp` class 2,512 lines in 6 files (after U-01, 2026-09-25) — no new members (AGENTS.md §10).
+- `WorldScene.cs` 4,922 lines (after Spec 255 W0–W7, 2026-09-27), `ViewerApp` class 2,512 lines in 6 files — no new members (AGENTS.md §10).
 
 ## Non-negotiable constraints
 
@@ -70,8 +73,9 @@ sidebar buttons never clicked.
 ## Handoff
 
 **Immediate:** operator runs R10-T003/T007 captures and the U-01 smoke passes (U01-T003 PM4 overlay;
-U01-T007/T013 every moved ViewerApp surface — checklist in the campaign receipt). U01-T009 E4 hover/click smoke is owed too.
-Next agent-owned U-01 work: [Spec 255 WorldScene decomposition](../specs/255-worldscene-decomposition/spec.md)
-steps W0–W7 once the operator approves its plan (T001); W8/W9 and E2 wait for R-10's after-capture. Do not start any other epic
+U01-T007/T013 every moved ViewerApp surface — checklist in the campaign receipt). U01-T009 E4 hover/click smoke and
+[Spec 255](../specs/255-worldscene-decomposition/spec.md) T018 (W0–W7 smoke — checklist in its
+[receipt](../specs/255-worldscene-decomposition/evidence/w0-w7-extraction-2026-09-27.md)) are owed too.
+Next agent-owned U-01 work: Spec 255 W8/W9 and E2, after R-10's after-capture (R10-T007). Do not start any other epic
 item before it is marked Want. Superseded dashboard:
 [archive/2026-09-23-pre-reconciliation-active-context.md](archive/2026-09-23-pre-reconciliation-active-context.md).

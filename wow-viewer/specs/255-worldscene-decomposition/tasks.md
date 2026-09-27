@@ -9,15 +9,16 @@ Nothing is checked without a §9.2 receipt in `evidence/`. Runtime claims come o
 
 ## Independent steps (after T001)
 
-- [ ] T010 W0 frame record types to own files; build + audit receipt.
-- [ ] T011 W1 hover/pick/wireframe → `SceneHoverPickController`; build, audit, tests, receipt.
-- [ ] T012 W2 taxi actors & routes → `TaxiActorScene`.
-- [ ] T013 W3 UniqueId/path filters + archaeology layers → `SceneObjectFilters`.
-- [ ] T014 W4 selected-object resolution + placement edit/move → `SceneSelectionState`.
-- [ ] T015 W5 lighting/LIT/fog + skybox → `SceneAtmosphere`.
-- [ ] T016 W6 external spawns → `ExternalSpawnLayer`; PM4 MPRL yaw helpers → `Terrain/Pm4`.
-- [ ] T017 W7 camera-path collision & terrain sampling → `SceneTerrainQueries`.
-- [ ] T018 Operator smoke for W0–W7 (checklist per step in plan.md).
+- [x] T010 W0 frame record types to own files; build + audit receipt. `a5ca359`; Receipt: `evidence/w0-w7-extraction-2026-09-27.md`
+- [x] T011 W1 hover/pick/wireframe → `SceneHoverPickController`; build, audit, tests, receipt. `215bcc1`; Receipt: `evidence/w0-w7-extraction-2026-09-27.md`
+- [x] T012 W2 taxi actors & routes → `TaxiActorScene`. `b1341fb`; Receipt: `evidence/w0-w7-extraction-2026-09-27.md`
+- [x] T013 W3 UniqueId/path filters + archaeology layers → `SceneObjectFilters`. `26e8507`; Receipt: `evidence/w0-w7-extraction-2026-09-27.md`
+- [x] T014 W4 selected-object resolution + placement edit/move → `SceneSelectionState`. `733f7d1`; Receipt: `evidence/w0-w7-extraction-2026-09-27.md`
+- [x] T015 W5 lighting/LIT/fog + skybox → `SceneAtmosphere`. `f046fda`; Receipt: `evidence/w0-w7-extraction-2026-09-27.md`
+- [x] T016 W6 external spawns → `ExternalSpawnLayer`; PM4 MPRL yaw helpers → `Terrain/Pm4`. `0d8c2b2`, `6a8c6e4`; Receipt: `evidence/w0-w7-extraction-2026-09-27.md`
+- [x] T017 W7 camera-path collision & terrain sampling → `SceneTerrainQueries`. `bced801`; Receipt: `evidence/w0-w7-extraction-2026-09-27.md`
+- [ ] T018 Operator smoke for W0–W7 (checklist per step in plan.md; consolidated PowerShell checklist at the end of
+  the W0–W7 receipt).
 
 ## Render-path steps (after R-10 after-capture, Epic 249 R10-T007)
 

@@ -1,6 +1,17 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27
+
+## 2026-09-27 — Spec 255 W0–W7: WorldScene independent clusters extracted (code only)
+
+Operator approved Spec 255 as written (T001). Nine behaviour-preserving commits moved 253 members + 9 types
+out of `WorldScene` (8,275 → 4,922 lines) into `Terrain/Scene/`: frame types (W0), `SceneHoverPickController`
+(W1), `TaxiActorScene` (W2), `SceneObjectFilters` (W3), `SceneSelectionState` (W4), `SceneAtmosphere` (W5),
+`ExternalSpawnLayer` + `Terrain/Pm4/Pm4OverlayMprlHelpers` (W6), `SceneTerrainQueries` (W7). New
+`IWorldSceneHost` (33 members) implemented explicitly by `WorldScene`; callers change receivers only. Each
+step: line-multiset audit, full-solution build 0 errors, compiler warnings identical (`NU1903` count varies
+run to run), same 26 test failures. Found: 8 of the 9 PM4 MPRL helpers are unreachable (moved, not deleted).
+Runtime not claimed — smoke is T018. Receipt: `specs/255-worldscene-decomposition/evidence/w0-w7-extraction-2026-09-27.md`.
 
 ## 2026-09-26 — U-01 E4: world-scene selection policy into Core (code only)
 
