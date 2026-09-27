@@ -216,6 +216,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     public SceneAtmosphere Atmosphere => _atmosphere;
     private readonly ExternalSpawnLayer _externalSpawns;
     public ExternalSpawnLayer ExternalSpawns => _externalSpawns;
+    private readonly SceneTerrainQueries _terrainQueries;
+    public SceneTerrainQueries TerrainQueries => _terrainQueries;
     // SCENE-SERVICES-END
 
     // IWorldSceneHost (Spec 255): the scene state the services read, implemented explicitly.
@@ -832,6 +834,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _selection = new SceneSelectionState(this);
         _atmosphere = new SceneAtmosphere(this);
         _externalSpawns = new ExternalSpawnLayer(this);
+        _terrainQueries = new SceneTerrainQueries(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -877,6 +880,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _selection = new SceneSelectionState(this);
         _atmosphere = new SceneAtmosphere(this);
         _externalSpawns = new ExternalSpawnLayer(this);
+        _terrainQueries = new SceneTerrainQueries(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -2269,20 +2273,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                 return true;
         }
 
-        return _hideTerrainOccludedMdx && IsMdxFullyOccludedByTerrain(inst);
-    }
-
-    private bool IsMdxFullyOccludedByTerrain(in ObjectInstance inst)
-    {
-        if (!TrySampleLoadedTerrainHeight(inst.PlacementPosition.X, inst.PlacementPosition.Y, out float terrainHeight))
-            return false;
-
-        float objectTop = MathF.Max(inst.BoundsMin.Z, inst.BoundsMax.Z);
-        if (!float.IsFinite(objectTop))
-            return false;
-
-        const float terrainOcclusionMargin = 1.0f;
-        return terrainHeight >= objectTop + terrainOcclusionMargin;
+        return _hideTerrainOccludedMdx && _terrainQueries.IsMdxFullyOccludedByTerrain(inst);
     }
 
     private void RebuildSceneLights(WorldRenderFrame frame)
@@ -2321,204 +2312,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _sceneLightManager.AddRange(_sceneLightCollectScratch,
             light => _frustumCuller.TestSphereIgnoringFarPlane(light.Position, light.AttenuationEnd + SceneLightManager.FrustumCullMargin));
         _sceneLightCollectScratch.Clear();
-    }
-
-    /// <summary>
-    /// Resolves a camera-path sample against the loaded world. Terrain collision is
-    /// heightfield-only; WMO collision uses the resident placement bounds as a
-    /// conservative sweep volume. Both are deliberately opt-in because the viewer
-    /// also supports free-fly inspection through geometry.
-    /// </summary>
-    public bool TryResolveCameraPathCollision(
-        Vector3 previousPosition,
-        Vector3 desiredPosition,
-        float clearance,
-        bool terrainCollision,
-        bool wmoCollision,
-        out Vector3 resolvedPosition)
-    {
-        resolvedPosition = desiredPosition;
-        float safeClearance = float.IsFinite(clearance) ? Math.Clamp(clearance, 0f, 32f) : 0f;
-        bool collided = false;
-
-        if (terrainCollision && TrySampleLoadedTerrainHeight(desiredPosition.X, desiredPosition.Y, out float terrainHeight))
-        {
-            float minimumCameraZ = terrainHeight + safeClearance;
-            if (resolvedPosition.Z < minimumCameraZ)
-            {
-                resolvedPosition.Z = minimumCameraZ;
-                collided = true;
-            }
-        }
-
-        if (wmoCollision)
-        {
-            if (_instancesDirty)
-                RebuildInstanceLists();
-
-            Vector3 segmentStart = previousPosition;
-            Vector3 segmentEnd = resolvedPosition;
-            foreach (ObjectInstance instance in _wmoInstances)
-            {
-                if (!AreFiniteOrderedBounds(instance.BoundsMin, instance.BoundsMax))
-                    continue;
-
-                Vector3 boundsMin = instance.BoundsMin - new Vector3(safeClearance);
-                Vector3 boundsMax = instance.BoundsMax + new Vector3(safeClearance);
-                if (!TrySegmentAabb(segmentStart, segmentEnd, boundsMin, boundsMax, out float entryT))
-                    continue;
-
-                bool startInside = IsPointInsideAabb(segmentStart, boundsMin, boundsMax);
-                // A placement AABB is an exterior shell, not an indoor collision mesh.
-                // Preserve paths that start inside a WMO instead of ejecting them from
-                // the entire building; only stop an outside-to-inside sweep here.
-                if (startInside)
-                    continue;
-
-                if (entryT > 0f)
-                {
-                    float stopT = Math.Clamp(entryT - 0.0025f, 0f, 1f);
-                    resolvedPosition = Vector3.Lerp(segmentStart, segmentEnd, stopT);
-                }
-                else if (IsPointInsideAabb(segmentEnd, boundsMin, boundsMax))
-                    resolvedPosition = segmentStart;
-
-                collided = true;
-                segmentEnd = resolvedPosition;
-            }
-        }
-
-        return collided;
-    }
-
-    private static bool IsPointInsideAabb(Vector3 point, Vector3 min, Vector3 max)
-        => point.X >= min.X && point.X <= max.X
-            && point.Y >= min.Y && point.Y <= max.Y
-            && point.Z >= min.Z && point.Z <= max.Z;
-
-    private static bool TrySegmentAabb(Vector3 start, Vector3 end, Vector3 min, Vector3 max, out float entryT)
-    {
-        entryT = 0f;
-        float exitT = 1f;
-        Vector3 delta = end - start;
-        for (int axis = 0; axis < 3; axis++)
-        {
-            float origin = start[axis];
-            float direction = delta[axis];
-            float axisMin = min[axis];
-            float axisMax = max[axis];
-            if (MathF.Abs(direction) < 0.000001f)
-            {
-                if (origin < axisMin || origin > axisMax)
-                    return false;
-                continue;
-            }
-
-            float inverse = 1f / direction;
-            float near = (axisMin - origin) * inverse;
-            float far = (axisMax - origin) * inverse;
-            if (near > far)
-                (near, far) = (far, near);
-            entryT = MathF.Max(entryT, near);
-            exitT = MathF.Min(exitT, far);
-            if (entryT > exitT)
-                return false;
-        }
-
-        return entryT >= 0f && entryT <= 1f;
-    }
-
-    private bool TrySampleLoadedTerrainHeight(float worldX, float worldY, out float height)
-    {
-        height = 0f;
-
-        return TrySampleLoadedTerrainHeight(_terrainManager, _terrainManager.Renderer, worldX, worldY, out height);
-    }
-
-    private static bool TrySampleLoadedTerrainHeight(TerrainManager terrainManager, TerrainRenderer renderer, float worldX, float worldY, out float height)
-    {
-        height = 0f;
-
-        TerrainRenderer.TerrainChunkInfo? chunkInfo = renderer.GetChunkInfoAt(worldX, worldY);
-        if (!chunkInfo.HasValue)
-            return false;
-
-        if (!terrainManager.TryGetTileLoadResult(chunkInfo.Value.TileX, chunkInfo.Value.TileY, out TileLoadResult tile))
-            return false;
-
-        TerrainChunkData? chunk = tile.Chunks.FirstOrDefault(c => c.ChunkX == chunkInfo.Value.ChunkX && c.ChunkY == chunkInfo.Value.ChunkY);
-        if (chunk == null || chunk.Heights == null || chunk.Heights.Length < 145)
-            return false;
-
-        float localX = chunk.WorldPosition.Y - worldY;
-        float localY = chunk.WorldPosition.X - worldX;
-        localX = Math.Clamp(localX, 0f, WoWConstants.ChunkSize);
-        localY = Math.Clamp(localY, 0f, WoWConstants.ChunkSize);
-        height = SampleHeightOuterGrid(chunk, localX, localY);
-        return true;
-    }
-
-    private static float SampleHeightOuterGrid(TerrainChunkData chunk, float localX, float localY)
-    {
-        if (chunk.Heights == null || chunk.Heights.Length < 145)
-            return chunk.WorldPosition.Z;
-
-        float cellSize = WoWConstants.ChunkSize / 16f;
-        float subCellSize = cellSize / 8f;
-
-        Span<float> grid = stackalloc float[9 * 9];
-        grid.Clear();
-
-        for (int i = 0; i < 145; i++)
-        {
-            GetChunkVertexPosition(i, out int row, out int col, out bool isInner);
-            if (isInner)
-                continue;
-
-            int gridY = row / 2;
-            if ((uint)gridY >= 9u || (uint)col >= 9u)
-                continue;
-
-            grid[(gridY * 9) + col] = chunk.Heights[i];
-        }
-
-        float gridX = localX / subCellSize;
-        float gridYFloat = localY / subCellSize;
-        int ix = Math.Clamp((int)MathF.Floor(gridX), 0, 7);
-        int iy = Math.Clamp((int)MathF.Floor(gridYFloat), 0, 7);
-        float fx = Math.Clamp(gridX - ix, 0f, 1f);
-        float fy = Math.Clamp(gridYFloat - iy, 0f, 1f);
-
-        float h00 = grid[(iy * 9) + ix];
-        float h10 = grid[(iy * 9) + (ix + 1)];
-        float h01 = grid[((iy + 1) * 9) + ix];
-        float h11 = grid[((iy + 1) * 9) + (ix + 1)];
-
-        float h0 = h00 + ((h10 - h00) * fx);
-        float h1 = h01 + ((h11 - h01) * fx);
-        return h0 + ((h1 - h0) * fy);
-    }
-
-    private static void GetChunkVertexPosition(int index, out int row, out int col, out bool isInner)
-    {
-        int remaining = index;
-        row = 0;
-        col = 0;
-        isInner = false;
-
-        for (int currentRow = 0; currentRow < 17; currentRow++)
-        {
-            int rowSize = (currentRow % 2 == 0) ? 9 : 8;
-            if (remaining < rowSize)
-            {
-                row = currentRow;
-                col = remaining;
-                isInner = (currentRow % 2 == 1);
-                return;
-            }
-
-            remaining -= rowSize;
-        }
     }
 
     private void PrepareSceneGraphFrameVisibility(

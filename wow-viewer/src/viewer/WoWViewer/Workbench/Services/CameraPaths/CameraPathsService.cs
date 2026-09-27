@@ -733,7 +733,7 @@ internal sealed partial class CameraPathsService
         Vector3 resolvedPosition = sample.Position;
         if (_worldScene != null && (_cameraPath.TerrainCollisionEnabled || _cameraPath.WmoCollisionEnabled))
         {
-            _worldScene.TryResolveCameraPathCollision(
+            _worldScene.TerrainQueries.TryResolveCameraPathCollision(
                 previousPosition,
                 sample.Position,
                 _cameraPath.CollisionClearance,
