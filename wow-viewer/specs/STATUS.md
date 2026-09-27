@@ -34,7 +34,7 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 | Spec | Scope | Status |
 |---|---|---|
 | [255 WorldScene Decomposition](255-worldscene-decomposition/spec.md) | Split `WorldScene.cs` (8,275 lines at start) into owned scene services, continuing Epic 251 U-01 | Plan approved 2026-09-27; **W0–W7 landed 2026-09-27** (8,275 → 4,922 lines; smoke T018 owed); W8/W9/E2 gated on R-10 |
-| [256 Modern-Data Streaming & M2 Submission](256-modern-data-streaming-performance/spec.md) | Name the hidden frame time; off-thread model loading; native M2 instancing (measured baseline: 4 FPS, 98 ms/frame loading, 0 of 5,169 M2s instanced) | Approved 2026-09-27; **P0 (GC/load-phase/gate counters), P1 (skin index, no discarded parse) and minimap upload budget landed**; operator captures owed; P2/P3 next |
+| [256 Modern-Data Streaming & M2 Submission](256-modern-data-streaming-performance/spec.md) | Name the hidden frame time; off-thread model loading; native M2 instancing (measured baseline: 4 FPS, 98 ms/frame loading, 0 of 5,169 M2s instanced) | Approved 2026-09-27; **P0, P1, minimap budget and P2a/b/c (shared, off-thread, compressed native M2 textures) landed**; operator capture owed (T073); P3 next |
 
 ## Operator verification owed on shipped code
 

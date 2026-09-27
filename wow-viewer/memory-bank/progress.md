@@ -2,6 +2,15 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — Spec 256 P2a/P2b/P2c: native M2 textures (code only)
+
+Operator capture after P1: GC small (median 4.4 ms), UNACCOUNTED gone, M2 load ≈ 64.5 ms of which ≈ 57 ms in
+renderer creation — native `M2Renderer` decoded every texture synchronously with a per-model cache. Operator
+approved P2a/b/c: shared refcounted texture cache (`c9cf7b6`), world-streamed models read/decode textures on
+workers with render-thread upload in a 4 ms budget (`6a326d3`; sections draw once textured), DXT BLP2 uploaded
+compressed with the file's mips (`bad4884`). Build 0 errors, same 26 failures; mip-chain check passes. No
+runtime claim. Receipt: `specs/256-modern-data-streaming-performance/evidence/p2abc-2026-09-27.md`.
+
 ## 2026-09-27 — Spec 256 P0, P1 and minimap budget (code only)
 
 Operator approved Spec 256 plus the minimap budget. P0 (`77f6f02`): GC pause + collections per frame in the

@@ -37,7 +37,7 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 - [ ] T060 Split `Terrain/WorldAssetManager.cs` (2,112 lines; over the ~2,000 budget before this spec, +24 timing/index lines here) — AGENTS.md §10.
 
 ## P2 amendment — native M2 textures (operator 2026-09-27: "Approve P2a and P2b and P2c")
-- [ ] T070 P2a shared reference-counted native M2 texture cache.
-- [ ] T071 P2b off-thread texture read/decode; render-thread upload.
-- [ ] T072 P2c DXT BLP compressed upload with authored mips.
-- [ ] T073 Build + tests + receipt per step; operator capture (GPU create ms, DeferredAssetLoads, visual check).
+- [x] T070 P2a shared reference-counted native M2 texture cache. `c9cf7b6`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
+- [x] T071 P2b off-thread texture read/decode; render-thread upload. `6a326d3`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
+- [x] T072 P2c DXT BLP compressed upload with authored mips. `bad4884`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
+- [ ] T073 Build + tests + receipt per step; operator capture (GPU create ms, DeferredAssetLoads, visual check). *(build/tests/receipt done — [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md); capture owed)*
