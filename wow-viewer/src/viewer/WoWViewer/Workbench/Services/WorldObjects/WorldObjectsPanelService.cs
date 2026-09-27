@@ -677,7 +677,7 @@ internal sealed partial class WorldObjectsPanelService
         if (string.IsNullOrWhiteSpace(currentMapName))
             return;
 
-        List<SavedObjectPathFilterEntry> savedEntries = _worldScene.ObjectPathFilters
+        List<SavedObjectPathFilterEntry> savedEntries = _worldScene.ObjectFilters.ObjectPathFilters
             .Where(entry => !string.IsNullOrWhiteSpace(entry.PathPrefix) && (entry.AppliesToWmo || entry.AppliesToMdx))
             .OrderBy(entry => entry.PathPrefix, StringComparer.OrdinalIgnoreCase)
             .Select(entry => new SavedObjectPathFilterEntry
@@ -688,7 +688,7 @@ internal sealed partial class WorldObjectsPanelService
             })
             .ToList();
 
-        if (savedEntries.Count == 0 && _worldScene.ObjectPathFiltersEnabled)
+        if (savedEntries.Count == 0 && _worldScene.ObjectFilters.ObjectPathFiltersEnabled)
         {
             _savedObjectPathFiltersByMap.Remove(currentMapName);
             SaveViewerSettings();
@@ -698,7 +698,7 @@ internal sealed partial class WorldObjectsPanelService
         _savedObjectPathFiltersByMap[currentMapName] = new SavedObjectPathFilterMap
         {
             MapName = currentMapName,
-            Enabled = _worldScene.ObjectPathFiltersEnabled,
+            Enabled = _worldScene.ObjectFilters.ObjectPathFiltersEnabled,
             Filters = savedEntries,
         };
 

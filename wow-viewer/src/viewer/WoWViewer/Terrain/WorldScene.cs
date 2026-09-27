@@ -139,7 +139,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     private bool _wmosVisible = true;
     private bool _doodadsVisible = true;
     private bool _objectFogEnabled = true;
-    private bool _objectPathFiltersEnabled = true;
     private bool _showSelectedObjectBounds = true;
     private float _lastHoverPickFogEnd = 1500f;
     private float _objectStreamingRangeMultiplier = 0.5f;
@@ -190,13 +189,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     private readonly MinimapRenderer? _minimapRenderer;
     private TerrainAssetLoadPolicy _assetLoadPolicy = StreamingTerrainAssetLoadPolicy;
     private bool _wireframeRevealEnabled;
-    private const int UniqueIdLayerGapThreshold = 100;
-    private bool _uniqueIdFilterEnabled;
-    private UniqueIdVisibilityScope _uniqueIdVisibilityScope = UniqueIdVisibilityScope.PerMap;
-    private int _uniqueIdFilterMin = -1;
-    private int _uniqueIdFilterMax = -1;
-    private (int tileX, int tileY)? _uniqueIdFilterTile;
-    private readonly List<ObjectPathFilterEntry> _objectPathFilters = new();
 
     // PM4 debug overlay (Epic 251 U-01 E1): state and behaviour live in Pm4OverlayScene.
     private readonly Pm4OverlayScene _pm4Overlay;
@@ -221,6 +213,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     public SceneHoverPickController HoverPick => _hoverPick;
     private readonly TaxiActorScene _taxiActors;
     public TaxiActorScene TaxiActors => _taxiActors;
+    private readonly SceneObjectFilters _objectFilters;
+    public SceneObjectFilters ObjectFilters => _objectFilters;
     // SCENE-SERVICES-END
 
     // IWorldSceneHost (Spec 255): the scene state the services read, implemented explicitly.
@@ -240,7 +234,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     void IWorldSceneHost.RebuildInstanceLists() => RebuildInstanceLists();
     IModelRenderer? IWorldSceneHost.ResolveVisibleMdxRenderer(WorldRenderFrame frame, string modelKey) => ResolveVisibleMdxRenderer(frame, modelKey);
     WmoRenderer? IWorldSceneHost.ResolveVisibleWmoRenderer(WorldRenderFrame frame, string modelKey) => ResolveVisibleWmoRenderer(frame, modelKey);
-    bool IWorldSceneHost.ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst) => ShouldHideObjectInstanceByUniqueId(in inst);
+    bool IWorldSceneHost.ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst) => _objectFilters.ShouldHideObjectInstanceByUniqueId(in inst);
     IModelRenderer? IWorldSceneHost.TryGetQueuedMdx(string modelKey) => TryGetQueuedMdx(modelKey);
     WmoRenderer? IWorldSceneHost.TryGetQueuedWmo(string modelKey) => TryGetQueuedWmo(modelKey);
     ref IDataSource? IWorldSceneHost.DataSource => ref _dataSource;
@@ -590,144 +584,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     public bool ObjectsVisible { get => _objectsVisible; set => _objectsVisible = value; }
     public bool WmosVisible { get => _wmosVisible; set => _wmosVisible = value; }
     public bool DoodadsVisible { get => _doodadsVisible; set => _doodadsVisible = value; }
-    public bool ObjectPathFiltersEnabled { get => _objectPathFiltersEnabled; set => _objectPathFiltersEnabled = value; }
-    public IReadOnlyList<ObjectPathFilterEntry> ObjectPathFilters => _objectPathFilters;
     public bool ShowSelectedObjectBounds { get => _showSelectedObjectBounds; set => _showSelectedObjectBounds = value; }
-    public bool UniqueIdFilterEnabled { get => _uniqueIdFilterEnabled; set => _uniqueIdFilterEnabled = value; }
-    public UniqueIdVisibilityScope UniqueIdVisibilityScope { get => _uniqueIdVisibilityScope; set => _uniqueIdVisibilityScope = value; }
-    public int UniqueIdFilterMin { get => _uniqueIdFilterMin; set => _uniqueIdFilterMin = value; }
-    public int UniqueIdFilterMax { get => _uniqueIdFilterMax; set => _uniqueIdFilterMax = value; }
-    public (int tileX, int tileY)? UniqueIdFilterTile => _uniqueIdFilterTile;
-
-    public void SetUniqueIdFilterTile(int tileX, int tileY)
-    {
-        _uniqueIdFilterTile = (tileX, tileY);
-    }
-
-    public void SetUniqueIdFilterRange(int minUniqueId, int maxUniqueId)
-    {
-        if (minUniqueId <= maxUniqueId)
-        {
-            _uniqueIdFilterMin = minUniqueId;
-            _uniqueIdFilterMax = maxUniqueId;
-            return;
-        }
-
-        _uniqueIdFilterMin = maxUniqueId;
-        _uniqueIdFilterMax = minUniqueId;
-    }
-
-    public void ResetUniqueIdFilter()
-    {
-        _uniqueIdFilterEnabled = false;
-        _uniqueIdFilterMin = -1;
-        _uniqueIdFilterMax = -1;
-    }
-
-    public bool AddObjectPathFilter(string pathPrefix, bool appliesToWmo, bool appliesToMdx)
-    {
-        string normalizedPrefix = ObjectPathFilterEntry.NormalizePrefix(pathPrefix);
-        if (string.IsNullOrWhiteSpace(normalizedPrefix) || (!appliesToWmo && !appliesToMdx))
-            return false;
-
-        ObjectPathFilterEntry entry = new(normalizedPrefix, appliesToWmo, appliesToMdx);
-        if (_objectPathFilters.Contains(entry))
-            return false;
-
-        _objectPathFilters.Add(entry);
-        _objectPathFilters.Sort(static (left, right) => string.Compare(left.PathPrefix, right.PathPrefix, StringComparison.OrdinalIgnoreCase));
-        return true;
-    }
-
-    public bool RemoveObjectPathFilter(string pathPrefix, bool appliesToWmo, bool appliesToMdx)
-    {
-        string normalizedPrefix = ObjectPathFilterEntry.NormalizePrefix(pathPrefix);
-        if (string.IsNullOrWhiteSpace(normalizedPrefix))
-            return false;
-
-        return _objectPathFilters.RemoveAll(entry =>
-            string.Equals(entry.PathPrefix, normalizedPrefix, StringComparison.OrdinalIgnoreCase)
-            && entry.AppliesToWmo == appliesToWmo
-            && entry.AppliesToMdx == appliesToMdx) > 0;
-    }
-
-    public void ClearObjectPathFilters()
-    {
-        _objectPathFilters.Clear();
-    }
-
-    public bool TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount)
-    {
-        if (_instancesDirty)
-            RebuildInstanceLists();
-
-        minUniqueId = int.MaxValue;
-        maxUniqueId = int.MinValue;
-        instanceCount = 0;
-
-        AccumulateUniqueIdFilterRange(_wmoInstances, ref minUniqueId, ref maxUniqueId, ref instanceCount);
-        AccumulateUniqueIdFilterRange(_mdxInstances, ref minUniqueId, ref maxUniqueId, ref instanceCount);
-
-        if (instanceCount <= 0)
-        {
-            minUniqueId = 0;
-            maxUniqueId = 0;
-            return false;
-        }
-
-        return true;
-    }
-
-    public IReadOnlyList<UniqueIdArchaeologyLayer> GetUniqueIdArchaeologyLayers()
-    {
-        if (_instancesDirty)
-            RebuildInstanceLists();
-
-        var countsById = new SortedDictionary<int, (int wmoCount, int mdxCount)>();
-        AccumulateUniqueIdLayerCandidates(_wmoInstances, isWmo: true, countsById);
-        AccumulateUniqueIdLayerCandidates(_mdxInstances, isWmo: false, countsById);
-
-        if (countsById.Count == 0)
-            return Array.Empty<UniqueIdArchaeologyLayer>();
-
-        var layers = new List<UniqueIdArchaeologyLayer>();
-        int layerNumber = 1;
-        int layerStart = 0;
-        int layerEnd = 0;
-        int previousId = 0;
-        int placementCount = 0;
-        int wmoCount = 0;
-        int mdxCount = 0;
-        bool hasLayer = false;
-
-        foreach ((int uniqueId, (int layerWmoCount, int layerMdxCount) counts) in countsById)
-        {
-            if (!hasLayer)
-            {
-                layerStart = uniqueId;
-                hasLayer = true;
-            }
-            else if (uniqueId - previousId > UniqueIdLayerGapThreshold)
-            {
-                layers.Add(new UniqueIdArchaeologyLayer(layerNumber++, layerStart, layerEnd, placementCount, wmoCount, mdxCount));
-                layerStart = uniqueId;
-                placementCount = 0;
-                wmoCount = 0;
-                mdxCount = 0;
-            }
-
-            layerEnd = uniqueId;
-            previousId = uniqueId;
-            placementCount += counts.layerWmoCount + counts.layerMdxCount;
-            wmoCount += counts.layerWmoCount;
-            mdxCount += counts.layerMdxCount;
-        }
-
-        if (hasLayer)
-            layers.Add(new UniqueIdArchaeologyLayer(layerNumber, layerStart, layerEnd, placementCount, wmoCount, mdxCount));
-
-        return layers;
-    }
 
     public void ApplyTextureSamplingSettings()
     {
@@ -1441,6 +1298,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _minimapRenderer = minimapRenderer;
         _hoverPick = new SceneHoverPickController(this);
         _taxiActors = new TaxiActorScene(this);
+        _objectFilters = new SceneObjectFilters(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -1482,6 +1340,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _minimapRenderer = minimapRenderer;
         _hoverPick = new SceneHoverPickController(this);
         _taxiActors = new TaxiActorScene(this);
+        _objectFilters = new SceneObjectFilters(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -3403,96 +3262,9 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         return MathF.Min(MaxWorldObjectViewDistance, baseDistance * clampedMultiplier);
     }
 
-    private void AccumulateUniqueIdFilterRange(
-        IReadOnlyList<ObjectInstance> instances,
-        ref int minUniqueId,
-        ref int maxUniqueId,
-        ref int instanceCount)
-    {
-        for (int i = 0; i < instances.Count; i++)
-        {
-            ObjectInstance inst = instances[i];
-            if (inst.UniqueId <= 0 || !MatchesUniqueIdFilterScope(inst))
-                continue;
-
-            minUniqueId = Math.Min(minUniqueId, inst.UniqueId);
-            maxUniqueId = Math.Max(maxUniqueId, inst.UniqueId);
-            instanceCount++;
-        }
-    }
-
-    private void AccumulateUniqueIdLayerCandidates(
-        IReadOnlyList<ObjectInstance> instances,
-        bool isWmo,
-        SortedDictionary<int, (int wmoCount, int mdxCount)> countsById)
-    {
-        for (int i = 0; i < instances.Count; i++)
-        {
-            ObjectInstance inst = instances[i];
-            if (inst.UniqueId <= 0 || !MatchesUniqueIdFilterScope(inst))
-                continue;
-
-            countsById.TryGetValue(inst.UniqueId, out (int wmoCount, int mdxCount) counts);
-            counts = isWmo
-                ? (counts.wmoCount + 1, counts.mdxCount)
-                : (counts.wmoCount, counts.mdxCount + 1);
-            countsById[inst.UniqueId] = counts;
-        }
-    }
-
-    private bool MatchesUniqueIdFilterScope(in ObjectInstance inst)
-    {
-        if (_uniqueIdVisibilityScope != UniqueIdVisibilityScope.CameraTile)
-            return true;
-
-        if (!_uniqueIdFilterTile.HasValue || !inst.HasTileCoordinate)
-            return false;
-
-        return inst.TileX == _uniqueIdFilterTile.Value.tileX
-            && inst.TileY == _uniqueIdFilterTile.Value.tileY;
-    }
-
-    private bool ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst)
-    {
-        if (ShouldHideObjectInstanceByPathFilter(inst))
-            return true;
-
-        if (!_uniqueIdFilterEnabled
-            || _uniqueIdFilterMin < 0
-            || _uniqueIdFilterMax < 0
-            || inst.UniqueId <= 0
-            || !MatchesUniqueIdFilterScope(inst))
-        {
-            return false;
-        }
-
-        int minUniqueId = Math.Min(_uniqueIdFilterMin, _uniqueIdFilterMax);
-        int maxUniqueId = Math.Max(_uniqueIdFilterMin, _uniqueIdFilterMax);
-        return inst.UniqueId < minUniqueId || inst.UniqueId > maxUniqueId;
-    }
-
-    private bool ShouldHideObjectInstanceByPathFilter(in ObjectInstance inst)
-    {
-        if (!_objectPathFiltersEnabled || _objectPathFilters.Count == 0 || string.IsNullOrWhiteSpace(inst.ModelPath))
-            return false;
-
-        string normalizedPath = ObjectPathFilterEntry.NormalizePrefix(inst.ModelPath);
-        if (string.IsNullOrWhiteSpace(normalizedPath))
-            return false;
-
-        for (int i = 0; i < _objectPathFilters.Count; i++)
-        {
-            ObjectPathFilterEntry entry = _objectPathFilters[i];
-            if (entry.MatchesModelPath(normalizedPath))
-                return true;
-        }
-
-        return false;
-    }
-
     private bool ShouldHideVisibleMdxInstance(in ObjectInstance inst)
     {
-        if (ShouldHideObjectInstanceByUniqueId(inst))
+        if (_objectFilters.ShouldHideObjectInstanceByUniqueId(inst))
             return true;
 
         if (_maxVisibleMdxBoundsHeight > 0f)
@@ -3908,7 +3680,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     VerticalFieldOfViewRadians: verticalFieldOfViewRadians,
                     VisibilityProfile: _objectVisibilityProfile,
                     IgnoreVisionConeCulling: true),
-                inst => ShouldHideObjectInstanceByUniqueId(inst),
+                inst => _objectFilters.ShouldHideObjectInstanceByUniqueId(inst),
                 (min, max) => _frustumCuller.TestAABB(min, max),
                 modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
                 (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore),
@@ -3949,7 +3721,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     frame.Visibility,
                     pair.Value,
                     context,
-                    inst => ShouldHideObjectInstanceByUniqueId(inst),
+                    inst => _objectFilters.ShouldHideObjectInstanceByUniqueId(inst),
                     (min, max) => _frustumCuller.TestAABB(min, max),
                     modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
                     (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore),
@@ -3969,7 +3741,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     frame.Visibility,
                     bucket.Instances,
                     context,
-                    inst => ShouldHideObjectInstanceByUniqueId(inst),
+                    inst => _objectFilters.ShouldHideObjectInstanceByUniqueId(inst),
                     (min, max) => _frustumCuller.TestAABB(min, max),
                     modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
                     (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore),
@@ -3983,7 +3755,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                 frame.Visibility,
                 _externalWmoInstances,
                 context,
-                inst => ShouldHideObjectInstanceByUniqueId(inst),
+                inst => _objectFilters.ShouldHideObjectInstanceByUniqueId(inst),
                 (min, max) => _frustumCuller.TestAABB(min, max),
                 modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
                 (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore),
@@ -5079,7 +4851,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                 {
                     if (_showSelectedObjectBounds)
                     {
-                        if (SelectedInstance is ObjectInstance selectedInstance && !ShouldHideObjectInstanceByUniqueId(selectedInstance))
+                        if (SelectedInstance is ObjectInstance selectedInstance && !_objectFilters.ShouldHideObjectInstanceByUniqueId(selectedInstance))
                         {
                             // A WMO doodad whose model has not streamed in yet has placeholder
                             // bounds; flag that in the accent color so the operator reads the
@@ -6576,30 +6348,4 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         _pm4Overlay._pm4TileCk24RotationsDegrees.Clear();
         _pm4Overlay._pm4TileCk24Scales.Clear();
     }
-}
-
-public enum UniqueIdVisibilityScope
-{
-    PerMap,
-    CameraTile
-}
-
-public readonly struct UniqueIdArchaeologyLayer
-{
-    public UniqueIdArchaeologyLayer(int layerNumber, int minUniqueId, int maxUniqueId, int placementCount, int wmoCount, int mdxCount)
-    {
-        LayerNumber = layerNumber;
-        MinUniqueId = minUniqueId;
-        MaxUniqueId = maxUniqueId;
-        PlacementCount = placementCount;
-        WmoCount = wmoCount;
-        MdxCount = mdxCount;
-    }
-
-    public int LayerNumber { get; }
-    public int MinUniqueId { get; }
-    public int MaxUniqueId { get; }
-    public int PlacementCount { get; }
-    public int WmoCount { get; }
-    public int MdxCount { get; }
 }

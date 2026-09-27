@@ -108,8 +108,8 @@ internal sealed partial class WorldLoaderService
         if (_worldScene == null)
             return;
 
-        _worldScene.ClearObjectPathFilters();
-        _worldScene.ObjectPathFiltersEnabled = true;
+        _worldScene.ObjectFilters.ClearObjectPathFilters();
+        _worldScene.ObjectFilters.ObjectPathFiltersEnabled = true;
 
         string? currentMapName = GetCurrentSessionMapName();
         if (string.IsNullOrWhiteSpace(currentMapName))
@@ -118,9 +118,9 @@ internal sealed partial class WorldLoaderService
         if (!_savedObjectPathFiltersByMap.TryGetValue(currentMapName, out SavedObjectPathFilterMap? savedMap))
             return;
 
-        _worldScene.ObjectPathFiltersEnabled = savedMap.Enabled;
+        _worldScene.ObjectFilters.ObjectPathFiltersEnabled = savedMap.Enabled;
         foreach (SavedObjectPathFilterEntry filter in savedMap.Filters)
-            _worldScene.AddObjectPathFilter(filter.PathPrefix, filter.AppliesToWmo, filter.AppliesToMdx);
+            _worldScene.ObjectFilters.AddObjectPathFilter(filter.PathPrefix, filter.AppliesToWmo, filter.AppliesToMdx);
     }
 
     private static IEnumerable<string> EnumerateMapWdtCandidates(string mapDirectory)

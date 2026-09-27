@@ -272,7 +272,7 @@ internal sealed partial class CaptureAutomationService
             PreviousWlLiquidsVisible = _worldScene?.ShowWlLiquids ?? true,
             PreviousIgnoreTerrainHolesGlobally = _terrainManager.IgnoreTerrainHolesGlobally,
             PreviousIgnoreVlmTerrainHolesGlobally = _vlmTerrainManager?.IgnoreTerrainHolesGlobally ?? false,
-            PreviousObjectPathFiltersEnabled = _worldScene?.ObjectPathFiltersEnabled ?? true,
+            PreviousObjectPathFiltersEnabled = _worldScene?.ObjectFilters.ObjectPathFiltersEnabled ?? true,
             PreviousObjectStreamingRangeMultiplier = _worldScene?.ObjectStreamingRangeMultiplier ?? 0.5f,
             PreviousMaxVisibleMdxBoundsHeight = _worldScene?.MaxVisibleMdxBoundsHeight ?? 0f,
             PreviousHideTerrainOccludedMdx = _worldScene?.HideTerrainOccludedMdx ?? false,
@@ -312,7 +312,7 @@ internal sealed partial class CaptureAutomationService
             _worldScene.WmosVisible = true;
             _worldScene.DoodadsVisible = false;
             _worldScene.ShowWlLiquids = false;
-            _worldScene.ObjectPathFiltersEnabled = false;
+            _worldScene.ObjectFilters.ObjectPathFiltersEnabled = false;
             _worldScene.ObjectStreamingRangeMultiplier = Math.Max(_worldScene.ObjectStreamingRangeMultiplier, 1.0f);
             _worldScene.MaxVisibleMdxBoundsHeight = MkHarvestViewerValidationMaxVisibleMdxBoundsHeight;
             _worldScene.HideTerrainOccludedMdx = true;
@@ -486,7 +486,7 @@ internal sealed partial class CaptureAutomationService
             _worldScene.WmosVisible = batch.PreviousWmosVisible;
             _worldScene.DoodadsVisible = batch.PreviousDoodadsVisible;
             _worldScene.ShowWlLiquids = batch.PreviousWlLiquidsVisible;
-            _worldScene.ObjectPathFiltersEnabled = batch.PreviousObjectPathFiltersEnabled;
+            _worldScene.ObjectFilters.ObjectPathFiltersEnabled = batch.PreviousObjectPathFiltersEnabled;
             _worldScene.ObjectStreamingRangeMultiplier = batch.PreviousObjectStreamingRangeMultiplier;
             _worldScene.MaxVisibleMdxBoundsHeight = batch.PreviousMaxVisibleMdxBoundsHeight;
             _worldScene.HideTerrainOccludedMdx = batch.PreviousHideTerrainOccludedMdx;

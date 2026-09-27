@@ -30,23 +30,23 @@ internal sealed partial class WorldObjectsPanelService
         ImGui.Separator();
         ImGui.Text("Object Path Filters");
 
-        bool filtersEnabled = _worldScene.ObjectPathFiltersEnabled;
+        bool filtersEnabled = _worldScene.ObjectFilters.ObjectPathFiltersEnabled;
         if (ImGui.Checkbox("Enable Path Filters", ref filtersEnabled))
         {
-            _worldScene.ObjectPathFiltersEnabled = filtersEnabled;
+            _worldScene.ObjectFilters.ObjectPathFiltersEnabled = filtersEnabled;
             PersistObjectPathFiltersForCurrentMap();
         }
 
         ImGui.SameLine();
-        if (_worldScene.ObjectPathFilters.Count == 0)
+        if (_worldScene.ObjectFilters.ObjectPathFilters.Count == 0)
             ImGui.BeginDisabled();
         if (ImGui.SmallButton("Clear All"))
         {
-            _worldScene.ClearObjectPathFilters();
+            _worldScene.ObjectFilters.ClearObjectPathFilters();
             PersistObjectPathFiltersForCurrentMap();
             _statusMessage = "Cleared object path filters for the current map.";
         }
-        if (_worldScene.ObjectPathFilters.Count == 0)
+        if (_worldScene.ObjectFilters.ObjectPathFilters.Count == 0)
             ImGui.EndDisabled();
 
         string filterInput = _objectPathFilterInput;
@@ -68,7 +68,7 @@ internal sealed partial class WorldObjectsPanelService
             ImGui.BeginDisabled();
         if (ImGui.Button("Add Filter"))
         {
-            if (_worldScene.AddObjectPathFilter(_objectPathFilterInput, _objectPathFilterInputAppliesToWmo, _objectPathFilterInputAppliesToMdx))
+            if (_worldScene.ObjectFilters.AddObjectPathFilter(_objectPathFilterInput, _objectPathFilterInputAppliesToWmo, _objectPathFilterInputAppliesToMdx))
             {
                 PersistObjectPathFiltersForCurrentMap();
                 _statusMessage = $"Added object path filter: {_objectPathFilterInput.Trim()}";
@@ -91,7 +91,7 @@ internal sealed partial class WorldObjectsPanelService
                 for (int i = 0; i < prefixCandidates.Count; i++)
                 {
                     string prefix = prefixCandidates[i];
-                    bool alreadyExists = _worldScene.ObjectPathFilters.Any(entry =>
+                    bool alreadyExists = _worldScene.ObjectFilters.ObjectPathFilters.Any(entry =>
                         string.Equals(entry.PathPrefix, prefix, StringComparison.OrdinalIgnoreCase)
                         && entry.AppliesToWmo == selectedIsWmo
                         && entry.AppliesToMdx == !selectedIsWmo);
@@ -100,7 +100,7 @@ internal sealed partial class WorldObjectsPanelService
                         ImGui.BeginDisabled();
 
                     if (ImGui.SmallButton($"{prefix}##QuickObjectPathFilter{i}")
-                        && _worldScene.AddObjectPathFilter(prefix, selectedIsWmo, !selectedIsWmo))
+                        && _worldScene.ObjectFilters.AddObjectPathFilter(prefix, selectedIsWmo, !selectedIsWmo))
                     {
                         PersistObjectPathFiltersForCurrentMap();
                         _statusMessage = $"Added {(selectedIsWmo ? "WMO" : "MDX")} family filter: {prefix}";
@@ -114,13 +114,13 @@ internal sealed partial class WorldObjectsPanelService
             }
         }
 
-        if (_worldScene.ObjectPathFilters.Count == 0)
+        if (_worldScene.ObjectFilters.ObjectPathFilters.Count == 0)
         {
             ImGui.TextDisabled("No path filters are saved for the current map.");
             return;
         }
 
-        ImGui.TextDisabled($"Current map filters: {_worldScene.ObjectPathFilters.Count}");
+        ImGui.TextDisabled($"Current map filters: {_worldScene.ObjectFilters.ObjectPathFilters.Count}");
         if (!ImGui.BeginTable("ObjectPathFiltersTable", 3, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
             return;
 
@@ -129,9 +129,9 @@ internal sealed partial class WorldObjectsPanelService
         ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 72f);
         ImGui.TableHeadersRow();
 
-        for (int i = 0; i < _worldScene.ObjectPathFilters.Count; i++)
+        for (int i = 0; i < _worldScene.ObjectFilters.ObjectPathFilters.Count; i++)
         {
-            ObjectPathFilterEntry entry = _worldScene.ObjectPathFilters[i];
+            ObjectPathFilterEntry entry = _worldScene.ObjectFilters.ObjectPathFilters[i];
             string familyLabel = entry.AppliesToWmo && entry.AppliesToMdx
                 ? "WMO+MDX"
                 : entry.AppliesToWmo
@@ -149,7 +149,7 @@ internal sealed partial class WorldObjectsPanelService
             ImGui.TableSetColumnIndex(2);
             if (ImGui.SmallButton($"Remove##ObjectPathFilter{i}"))
             {
-                _worldScene.RemoveObjectPathFilter(entry.PathPrefix, entry.AppliesToWmo, entry.AppliesToMdx);
+                _worldScene.ObjectFilters.RemoveObjectPathFilter(entry.PathPrefix, entry.AppliesToWmo, entry.AppliesToMdx);
                 PersistObjectPathFiltersForCurrentMap();
                 _statusMessage = $"Removed object path filter: {entry.PathPrefix}";
             }

@@ -82,7 +82,7 @@ internal sealed partial class ArchaeologyPanelService
             return;
         }
 
-        if (!_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
+        if (!_worldScene.ObjectFilters.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
         {
             _archeologyPlaybackActive = false;
             _archeologyPlaybackAccumulator = 0;
@@ -95,7 +95,7 @@ internal sealed partial class ArchaeologyPanelService
         if (advance <= 0) return;
         _archeologyPlaybackAccumulator -= advance;
 
-        int currentMax = _worldScene.UniqueIdFilterMax;
+        int currentMax = _worldScene.ObjectFilters.UniqueIdFilterMax;
         int newMax = currentMax + advance;
         if (newMax >= maxId)
         {
@@ -103,12 +103,12 @@ internal sealed partial class ArchaeologyPanelService
             {
                 // Loop: snap back to min
                 int restoreMin = _archeologyPlaybackRestoreMin >= 0 ? _archeologyPlaybackRestoreMin : minId;
-                _worldScene.SetUniqueIdFilterRange(restoreMin, restoreMin);
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(restoreMin, restoreMin);
                 _archeologyPlaybackAccumulator = 0;
             }
             else
             {
-                _worldScene.UniqueIdFilterMax = maxId;
+                _worldScene.ObjectFilters.UniqueIdFilterMax = maxId;
                 _archeologyPlaybackActive = false;
                 _archeologyPlaybackAccumulator = 0;
                 _statusMessage = "Archeology playback reached end of range.";
@@ -116,7 +116,7 @@ internal sealed partial class ArchaeologyPanelService
         }
         else
         {
-            _worldScene.UniqueIdFilterMax = newMax;
+            _worldScene.ObjectFilters.UniqueIdFilterMax = newMax;
         }
     }
 }

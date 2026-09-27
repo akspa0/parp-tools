@@ -45,7 +45,7 @@ internal sealed partial class ArchaeologyPanelService
 
         int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
         int cameraTileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
-        _worldScene.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
+        _worldScene.ObjectFilters.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
 
         DrawArcheologyRangeSubTab();
         ImGui.Separator();
@@ -58,32 +58,32 @@ internal sealed partial class ArchaeologyPanelService
     {
         int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
         int cameraTileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
-        _worldScene!.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
+        _worldScene!.ObjectFilters.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
 
         ImGui.TextDisabled("Filter by UniqueId range. The 'Camera Tile' scope uses the tile the camera is currently in.");
         ImGui.Spacing();
 
-        bool uniqueIdFilterEnabled = _worldScene!.UniqueIdFilterEnabled;
+        bool uniqueIdFilterEnabled = _worldScene!.ObjectFilters.UniqueIdFilterEnabled;
         if (ImGui.Checkbox("Filter UniqueId Range", ref uniqueIdFilterEnabled))
         {
-            _worldScene.UniqueIdFilterEnabled = uniqueIdFilterEnabled;
+            _worldScene.ObjectFilters.UniqueIdFilterEnabled = uniqueIdFilterEnabled;
             _settings.SaveViewerSettings();
         }
 
         ImGui.SameLine();
-        UniqueIdVisibilityScope currentScope = _worldScene.UniqueIdVisibilityScope;
+        UniqueIdVisibilityScope currentScope = _worldScene.ObjectFilters.UniqueIdVisibilityScope;
         string scopeLabel = currentScope == UniqueIdVisibilityScope.PerMap ? "Per-Map" : "Camera Tile";
         if (ImGui.BeginCombo("##UniqueIdScope", scopeLabel))
         {
             if (ImGui.Selectable("Per-Map", currentScope == UniqueIdVisibilityScope.PerMap))
             {
-                _worldScene.UniqueIdVisibilityScope = UniqueIdVisibilityScope.PerMap;
+                _worldScene.ObjectFilters.UniqueIdVisibilityScope = UniqueIdVisibilityScope.PerMap;
                 _archeologyScopeIndex = 0;
                 _settings.SaveViewerSettings();
             }
             if (ImGui.Selectable("Camera Tile", currentScope == UniqueIdVisibilityScope.CameraTile))
             {
-                _worldScene.UniqueIdVisibilityScope = UniqueIdVisibilityScope.CameraTile;
+                _worldScene.ObjectFilters.UniqueIdVisibilityScope = UniqueIdVisibilityScope.CameraTile;
                 _archeologyScopeIndex = 1;
                 _settings.SaveViewerSettings();
             }
@@ -93,25 +93,25 @@ internal sealed partial class ArchaeologyPanelService
         // On world load, apply sticky range if set.
         if (_archeologyMinUniqueId >= 0 && _archeologyMaxUniqueId >= _archeologyMinUniqueId)
         {
-            if (_worldScene.UniqueIdFilterMin != _archeologyMinUniqueId || _worldScene.UniqueIdFilterMax != _archeologyMaxUniqueId)
+            if (_worldScene.ObjectFilters.UniqueIdFilterMin != _archeologyMinUniqueId || _worldScene.ObjectFilters.UniqueIdFilterMax != _archeologyMaxUniqueId)
             {
-                _worldScene.SetUniqueIdFilterRange(_archeologyMinUniqueId, _archeologyMaxUniqueId);
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(_archeologyMinUniqueId, _archeologyMaxUniqueId);
             }
         }
 
-        if (_worldScene.TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount))
+        if (_worldScene.ObjectFilters.TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount))
         {
             ImGui.Spacing();
-            int configuredMin = _worldScene.UniqueIdFilterMin;
-            int configuredMax = _worldScene.UniqueIdFilterMax;
+            int configuredMin = _worldScene.ObjectFilters.UniqueIdFilterMin;
+            int configuredMax = _worldScene.ObjectFilters.UniqueIdFilterMax;
             int visibleMin = configuredMin >= minUniqueId ? Math.Min(configuredMin, maxUniqueId) : minUniqueId;
             int visibleMax = configuredMax >= minUniqueId ? Math.Max(configuredMin, configuredMax) : maxUniqueId;
 
             bool changed = false;
             if (ImGui.SliderInt("Visible Range Start", ref visibleMin, minUniqueId, maxUniqueId))
             {
-                _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
-                _worldScene.UniqueIdFilterEnabled = true;
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
                 if (_archeologyPlaybackActive)
                     StopArcheologyPlayback(restoreRange: false);
                 changed = true;
@@ -119,8 +119,8 @@ internal sealed partial class ArchaeologyPanelService
 
             if (ImGui.SliderInt("Visible Range End", ref visibleMax, minUniqueId, maxUniqueId))
             {
-                _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
-                _worldScene.UniqueIdFilterEnabled = true;
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
                 if (_archeologyPlaybackActive)
                     StopArcheologyPlayback(restoreRange: false);
                 changed = true;
@@ -133,7 +133,7 @@ internal sealed partial class ArchaeologyPanelService
                 _settings.SaveViewerSettings();
             }
 
-            string status = _worldScene.UniqueIdFilterEnabled
+            string status = _worldScene.ObjectFilters.UniqueIdFilterEnabled
                 ? $"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Visible range: {visibleMin}..{visibleMax}"
                 : $"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Selected visible range: {visibleMin}..{visibleMax} (filter off)";
             ImGui.TextDisabled(status);
@@ -145,7 +145,7 @@ internal sealed partial class ArchaeologyPanelService
 
         if (ImGui.SmallButton("Reset UniqueId Filter"))
         {
-            _worldScene.ResetUniqueIdFilter();
+            _worldScene.ObjectFilters.ResetUniqueIdFilter();
             _archeologyMinUniqueId = -1;
             _archeologyMaxUniqueId = -1;
             _settings.SaveViewerSettings();
@@ -157,7 +157,7 @@ internal sealed partial class ArchaeologyPanelService
         ImGui.TextDisabled("Detected layers (consecutive gap analysis of uniqueId sequence).");
         ImGui.Spacing();
 
-        IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene!.GetUniqueIdArchaeologyLayers();
+        IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene!.ObjectFilters.GetUniqueIdArchaeologyLayers();
         if (detectedLayers.Count == 0)
         {
             ImGui.TextDisabled("No UniqueId data available for the current scope.");
@@ -185,8 +185,8 @@ internal sealed partial class ArchaeologyPanelService
                 ImGui.TableNextColumn();
                 if (ImGui.SmallButton($"Show##uid_layer_{i}"))
                 {
-                    _worldScene.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
-                    _worldScene.UniqueIdFilterEnabled = true;
+                    _worldScene.ObjectFilters.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
+                    _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
                 }
             }
             ImGui.EndTable();
@@ -219,9 +219,9 @@ internal sealed partial class ArchaeologyPanelService
         ImGui.Spacing();
 
         // Status
-        if (_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out int count))
+        if (_worldScene.ObjectFilters.TryGetUniqueIdFilterRange(out int minId, out int maxId, out int count))
         {
-            int currentMax = _worldScene.UniqueIdFilterMax;
+            int currentMax = _worldScene.ObjectFilters.UniqueIdFilterMax;
             int remaining = Math.Max(0, maxId - currentMax);
             float secondsAtCurrentSpeed = _archeologyPlaybackSpeed > 0
                 ? remaining / _archeologyPlaybackSpeed
@@ -270,15 +270,15 @@ internal sealed partial class ArchaeologyPanelService
     internal void StartArcheologyPlayback()
     {
         if (_worldScene == null) return;
-        if (!_worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _)) return;
+        if (!_worldScene.ObjectFilters.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _)) return;
 
         // Save current state so Stop can restore.
-        _archeologyPlaybackRestoreMin = _worldScene.UniqueIdFilterMin;
-        _archeologyPlaybackRestoreMax = _worldScene.UniqueIdFilterMax;
-        _archeologyPlaybackRestoreFilter = _worldScene.UniqueIdFilterEnabled;
+        _archeologyPlaybackRestoreMin = _worldScene.ObjectFilters.UniqueIdFilterMin;
+        _archeologyPlaybackRestoreMax = _worldScene.ObjectFilters.UniqueIdFilterMax;
+        _archeologyPlaybackRestoreFilter = _worldScene.ObjectFilters.UniqueIdFilterEnabled;
         _archeologyPlaybackAccumulator = 0;
         _archeologyPlaybackActive = true;
-        _worldScene.UniqueIdFilterEnabled = true;
+        _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
         _statusMessage = "Archeology playback started.";
     }
 
@@ -288,8 +288,8 @@ internal sealed partial class ArchaeologyPanelService
         _archeologyPlaybackAccumulator = 0;
         if (restoreRange && _worldScene != null && _archeologyPlaybackRestoreMin >= 0)
         {
-            _worldScene.SetUniqueIdFilterRange(_archeologyPlaybackRestoreMin, _archeologyPlaybackRestoreMax);
-            _worldScene.UniqueIdFilterEnabled = _archeologyPlaybackRestoreFilter;
+            _worldScene.ObjectFilters.SetUniqueIdFilterRange(_archeologyPlaybackRestoreMin, _archeologyPlaybackRestoreMax);
+            _worldScene.ObjectFilters.UniqueIdFilterEnabled = _archeologyPlaybackRestoreFilter;
         }
         _archeologyPlaybackRestoreMin = -1;
         _archeologyPlaybackRestoreMax = -1;

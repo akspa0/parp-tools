@@ -637,12 +637,12 @@ internal sealed partial class CaptureAutomationService
 
         // 069 Phase 7: advance archeology playback one step per shot.
         if (request.ApplyArcheologyPlayback && _worldScene != null
-            && _worldScene.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
+            && _worldScene.ObjectFilters.TryGetUniqueIdFilterRange(out int minId, out int maxId, out _))
         {
             int stepSize = Math.Max(1, (maxId - minId) / 32);
-            int newMax = Math.Min(maxId, _worldScene.UniqueIdFilterMax + stepSize);
-            _worldScene.UniqueIdFilterMax = newMax;
-            _worldScene.UniqueIdFilterEnabled = true;
+            int newMax = Math.Min(maxId, _worldScene.ObjectFilters.UniqueIdFilterMax + stepSize);
+            _worldScene.ObjectFilters.UniqueIdFilterMax = newMax;
+            _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
         }
 
         request.Applied = true;
