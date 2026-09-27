@@ -1,7 +1,7 @@
 # Plan — Spec 255 WorldScene Decomposition
 
-**Status**: proposed 2026-09-26, awaiting operator approval (tasks T001). Nothing below is authorised
-until T001 is checked.
+**Status**: approved as written 2026-09-27 (T001; operator: "Approve Spec 255 as written"). W8, W9 and
+E2 stay gated on the R-10 after-capture.
 
 ## Technique (proven by U-01 E1 and the ViewerApp campaign)
 

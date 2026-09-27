@@ -4,7 +4,8 @@ Nothing is checked without a §9.2 receipt in `evidence/`. Runtime claims come o
 
 ## Gate
 
-- [ ] T001 Operator approves the plan (step order W0–W9, targets, R-10 gate for W8/W9) or trims it.
+- [x] T001 Operator approves the plan (step order W0–W9, targets, R-10 gate for W8/W9) or trims it.
+  Receipt: 2026-09-27 operator: "Approve Spec 255 as written" (no trims).
 
 ## Independent steps (after T001)
 
