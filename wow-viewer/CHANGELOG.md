@@ -3,6 +3,35 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.6.0-alpha3 — 2026-09-27
+
+Release (not a pre-release): **rendering performance for modern CASC clients (WoW: Forever)**. On the
+same Azeroth spot the median frame went from 266 ms (≈ 4 FPS) to 77 ms with more of the map loaded; the
+per-frame streaming hitch dropped from ≈ 70 ms to 7.6 ms; every visible native M2 is now GPU-instanced.
+
+Full notes: [`docs/releases/v0.6.0-alpha3.md`](docs/releases/v0.6.0-alpha3.md)
+
+### Performance
+- **Textures**: native M2 textures shared across models, read/decoded off the render thread, and DXT BLPs uploaded compressed with their own mips.
+- **Missing textures** bind the error texture (`ShaneCube.blp`) instead of searching the data source for look-alikes.
+- **Model loading**: indexed `.skin` lookup; skipped the discarded adapter parse; WMO doodads get the same fixes plus one shared copy per model.
+- **GPU instancing** for native M2s (0 → 10,895 instanced in the capture).
+- **Animation**: key frames decoded once per track, allocation-free bone matrices, GPU skinning (≤ 128 bones). *Not yet measured.*
+- **CASC minimap** tiles upload by time budget and now load fully.
+
+### Diagnostics
+- Runtime Stats: per-phase model load timings, GC pauses, CASC and texture-streaming counters.
+
+### Known issues
+- Alpha 0.5.3 MDX models render overbright; cause not yet identified.
+
+## v0.6.0-alpha2 — 2026-09-21
+
+Alpha pre-release: M2 texture wrap fixed across every era, LK ADT output that carries the chunks the
+format requires, first load of **DAT v22** terrain, and DAT maps exportable as LK ADT or Alpha WDT.
+
+Full notes: [`docs/releases/v0.6.0-alpha2.md`](docs/releases/v0.6.0-alpha2.md)
+
 ## v0.6.0-alpha — 2026-09-18
 
 Alpha pre-release on the v0.6 line: **modern data access + experimental terrain formats**. A CASC

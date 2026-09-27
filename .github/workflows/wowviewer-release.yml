@@ -10,7 +10,8 @@ name: WoWViewer release
 # the tag trigger lives here with no path filter and calls the build workflow for the matrix.
 #
 # Release notes come from wow-viewer/docs/releases/<tag>.md. Add that file before tagging;
-# without it the release falls back to GitHub's auto-generated commit notes.
+# without it the release falls back to GitHub's auto-generated commit notes. A suffixed tag
+# (v0.6.0-alpha3) is a pre-release unless its notes file contains a `<!-- release: full -->` line.
 
 on:
   push:
@@ -57,13 +58,18 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # Tags with a suffix (v0.5.4-alpha, v0.6.0-beta, v1.0.0-rc1) are published as GitHub pre-releases.
+          # Tags with a suffix (v0.5.4-alpha, v0.6.0-beta, v1.0.0-rc1) are published as GitHub pre-releases,
+          # unless the notes file opts in to a full release with a `<!-- release: full -->` line.
           prerelease=()
           title="parp-tools WoW Viewer ${TAG}"
-          if [[ "$TAG" == *-* ]]; then
-            prerelease=(--prerelease)
-          fi
           notes="wow-viewer/docs/releases/${TAG}.md"
+          if [[ "$TAG" == *-* ]]; then
+            if [ -f "$notes" ] && grep -qx '<!-- release: full -->' "$notes"; then
+              echo "Notes opt in to a full release."
+            else
+              prerelease=(--prerelease)
+            fi
+          fi
           if [ -f "$notes" ]; then
             echo "Using release notes: $notes"
             gh release create "$TAG" dist/ParpToolsWoWViewer-*.zip \
