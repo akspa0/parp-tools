@@ -2,6 +2,16 @@
 
 Last updated: 2026-09-27
 
+## 2026-09-27 — Spec 256 P0, P1 and minimap budget (code only)
+
+Operator approved Spec 256 plus the minimap budget. P0 (`77f6f02`): GC pause + collections per frame in the
+frame history (beside, not in, the stage sum), per-phase model load timings, the whole-list `.skin` scan timed
+on its own, opaque model gates and CASC counters in Runtime Stats. Minimap (`b15e553`): tiles upload 16 per
+2 ms instead of 1 per frame. P1 (`4f1e6b4`): `SkinPathIndex` gives FindSkinInFileList's result from prefix/
+directory candidates (0 mismatches on 60k/200k synthetic lists); the discarded M2→MDX adapter parse is skipped
+when the native renderer is preferred. Build 0 errors, same 26 failures (+1 new passing test). No runtime claim.
+Receipt: `specs/256-modern-data-streaming-performance/evidence/p0-p1-minimap-2026-09-27.md`.
+
 ## 2026-09-27 — Spec 256 drafted from a measured baseline (docs only)
 
 Operator corrected the R-10-revert report (idle FPS up, loading "as if from an HDD") and sent a Runtime Stats

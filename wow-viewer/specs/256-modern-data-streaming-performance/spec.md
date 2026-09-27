@@ -1,6 +1,6 @@
 # Spec 256 — Modern-Data Streaming & M2 Submission Performance
 
-**Created**: 2026-09-27 · **Branch**: `v0.6.0-dev` · **Status**: Plan approved 2026-09-27 (T001) incl. minimap upload-budget amendment; P0 in progress
+**Created**: 2026-09-27 · **Branch**: `v0.6.0-dev` · **Status**: Plan approved 2026-09-27 (T001) incl. minimap upload-budget amendment; P0, P1 and minimap budget landed 2026-09-27 (operator captures owed: T015, T022, T051)
 **Parent**: Epic 249 (renderer performance). Governance: AGENTS.md §4 (renderer/reader boundaries), §9, §10.
 
 ## Operator direction (2026-09-27)

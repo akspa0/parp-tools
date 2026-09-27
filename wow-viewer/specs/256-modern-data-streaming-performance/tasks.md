@@ -7,16 +7,16 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
   Receipt: 2026-09-27 operator "Approve Spec 256 plus the minimap budget" (reply to the offer to start with P0 and P1).
 
 ## P0 — Name the frame
-- [ ] T010 Stage timings + unattributed remainder in Runtime Stats.
-- [ ] T011 GC pause ms per frame and gen0/1/2 rates.
-- [ ] T012 Per-load phase times (read / skin resolve / native parse / adapter parse / GPU create).
-- [ ] T013 M2 batch-gate counts and CASC read/prefetch/cache counters shown.
-- [ ] T014 Build + tests + receipt.
+- [ ] T010 Stage timings + unattributed remainder in Runtime Stats. *(2026-09-27: existing Perf panel already shows the remainder and its in-Render breakdown; no new stage timer added until T015 shows where GC does not explain it.)*
+- [x] T011 GC pause ms per frame and gen0/1/2 rates. `77f6f02`; Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
+- [x] T012 Per-load phase times (read / skin resolve / native parse / adapter parse / GPU create). `77f6f02`; Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
+- [x] T013 M2 batch-gate counts and CASC read/prefetch/cache counters shown. `77f6f02`; Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
+- [x] T014 Build + tests + receipt. Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
 - [ ] T015 Operator capture at the baseline spot; A/B with `PARP_M2_USE_WOW_VIEWER_RUNTIME_RENDERER=0`.
 
 ## P1 — Exact load-cost cuts (separate commit after P0; operator captures P0-only build and P1 build)
-- [ ] T020 Skin lookup index + equivalence tests.
-- [ ] T021 Skip the discarded adapter parse when the native renderer is chosen.
+- [x] T020 Skin lookup index + equivalence tests (scratch harness; no viewer test project exists). `4f1e6b4`; Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
+- [x] T021 Skip the discarded adapter parse when the native renderer is chosen. `4f1e6b4`; Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
 - [ ] T022 Build + tests + receipt; operator capture.
 
 ## P2 — Off-thread model loading (after T022)
@@ -30,5 +30,8 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 - [ ] T042 Build + tests + receipt; operator capture + visual A/B.
 
 ## Amendment — minimap upload budget
-- [ ] T050 Minimap tile uploads by time budget (16 tiles / 2 ms; 32 / 6 ms with the minimap window open).
+- [x] T050 Minimap tile uploads by time budget (16 tiles / 2 ms; 32 / 6 ms with the minimap window open). `b15e553`; Receipt: [evidence/p0-p1-minimap-2026-09-27.md](evidence/p0-p1-minimap-2026-09-27.md).
 - [ ] T051 Operator: minimap pending count drains quickly on the baseline map; frame time unchanged.
+
+## File budget
+- [ ] T060 Split `Terrain/WorldAssetManager.cs` (2,112 lines; over the ~2,000 budget before this spec, +24 timing/index lines here) — AGENTS.md §10.
