@@ -81,7 +81,7 @@ internal sealed partial class SceneHoverAndPickService
         if (_taxiAndAreaPoi.TryPickAreaPoiAtMouse(localX, localY, viewportWidth, viewportHeight, view, proj, out int areaPoiId))
             AddAreaPoiClickSelectionCandidate(addedKeys, areaPoiId);
 
-        HoveredAssetInfo? hoveredInfo = _worldScene.HoveredAssetInfo;
+        HoveredAssetInfo? hoveredInfo = _worldScene.HoverPick.HoveredAssetInfo;
         if (hoveredInfo.HasValue
             && string.Equals(hoveredInfo.Value.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase)
             && TryResolveHoveredWlLiquidBody(hoveredInfo.Value, out WlLiquidBody? hoveredWlBody)
@@ -90,7 +90,7 @@ internal sealed partial class SceneHoverAndPickService
             AddWlLiquidClickSelectionCandidate(addedKeys, hoveredWlBody);
         }
 
-        var hoveredPm4Key = _worldScene.Pm4Overlay.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
+        var hoveredPm4Key = _worldScene.Pm4Overlay.ShowPm4Overlay ? _worldScene.HoverPick.HoveredAssetInfo?.Pm4ObjectKey : null;
         if (hoveredPm4Key.HasValue)
             AddPm4ClickSelectionCandidate(addedKeys, hoveredPm4Key.Value, null, "Hovered PM4 object");
 
@@ -102,7 +102,7 @@ internal sealed partial class SceneHoverAndPickService
         // (PM4 objects are behind scene WMO/M2 visually, so the ray hits both)
         if (!pm4Hit || !_worldScene.Pm4Overlay.ShowPm4Overlay)
         {
-            if (_worldScene.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
+            if (_worldScene.HoverPick.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
             {
                 // 1. Cull any hits that are behind the clicked terrain point (occluded by terrain)
                 float? terrainDist = clickedWorldPoint.HasValue ? (clickedWorldPoint.Value - rayOrigin).Length() : null;

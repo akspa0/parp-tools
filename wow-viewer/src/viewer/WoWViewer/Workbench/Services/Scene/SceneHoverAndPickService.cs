@@ -130,7 +130,7 @@ internal sealed partial class SceneHoverAndPickService
             float ndcY = 1f - (localY / vpH) * 2f; // flip Y
 
             var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
-            var hoveredPm4Key = _worldScene.Pm4Overlay.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
+            var hoveredPm4Key = _worldScene.Pm4Overlay.ShowPm4Overlay ? _worldScene.HoverPick.HoveredAssetInfo?.Pm4ObjectKey : null;
 
             if (addPm4ToCollection)
             {
@@ -242,24 +242,24 @@ internal sealed partial class SceneHoverAndPickService
 
     internal void UpdateWorldSceneWireframeReveal(Matrix4x4 view, Matrix4x4 proj)
     {
-        if (_worldScene == null || !_worldScene.WireframeRevealEnabled)
+        if (_worldScene == null || !_worldScene.HoverPick.WireframeRevealEnabled)
             return;
 
         if (IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY) || !TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
         {
-            _worldScene.ClearWireframeReveal();
+            _worldScene.HoverPick.ClearWireframeReveal();
             return;
         }
 
         if (_lastMouseX < vpX || _lastMouseX > vpX + vpW || _lastMouseY < vpY || _lastMouseY > vpY + vpH)
         {
-            _worldScene.ClearWireframeReveal();
+            _worldScene.HoverPick.ClearWireframeReveal();
             return;
         }
 
         float localX = _lastMouseX - vpX;
         float localY = _lastMouseY - vpY;
-        _worldScene.UpdateWireframeReveal(view, proj, localX, localY, vpW, vpH);
+        _worldScene.HoverPick.UpdateWireframeReveal(view, proj, localX, localY, vpW, vpH);
     }
 
     internal void UpdateWorldSceneHoveredAssetInfo(Matrix4x4 view, Matrix4x4 proj)
@@ -269,19 +269,19 @@ internal sealed partial class SceneHoverAndPickService
 
         if (IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY) || !TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
         {
-            _worldScene.ClearHoveredAssetInfo();
+            _worldScene.HoverPick.ClearHoveredAssetInfo();
             return;
         }
 
         if (_lastMouseX < vpX || _lastMouseX > vpX + vpW || _lastMouseY < vpY || _lastMouseY > vpY + vpH)
         {
-            _worldScene.ClearHoveredAssetInfo();
+            _worldScene.HoverPick.ClearHoveredAssetInfo();
             return;
         }
 
         float localX = _lastMouseX - vpX;
         float localY = _lastMouseY - vpY;
-        _worldScene.UpdateHoveredAssetInfo(view, proj, localX, localY, vpW, vpH);
+        _worldScene.HoverPick.UpdateHoveredAssetInfo(view, proj, localX, localY, vpW, vpH);
 
         // Operator feedback 2026-09-06: the mouse picked objects many tiles away
         // THROUGH the ground. The hover picker tests object distance but never
@@ -291,7 +291,7 @@ internal sealed partial class SceneHoverAndPickService
         // legitimately put terrain in front of their original bounds, but that must not erase the
         // WL hover identity that the click inspector consumes. Keep terrain occlusion for actual
         // placed scene objects (WMO/M2/PM4) only.
-        if (_worldScene.HoveredAssetInfo is { IsPreciseRayHit: true } hovered
+        if (_worldScene.HoverPick.HoveredAssetInfo is { IsPreciseRayHit: true } hovered
             && !string.Equals(hovered.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase))
         {
             float ndcX = (localX / MathF.Max(vpW, 1f)) * 2f - 1f;
@@ -304,7 +304,7 @@ internal sealed partial class SceneHoverAndPickService
                 float terrainDistance = Vector3.Distance(rayOrigin, terrainHit);
                 float objectDistance = Vector3.Distance(rayOrigin, hovered.WorldPosition);
                 if (objectDistance > terrainDistance + 1f)
-                    _worldScene.ClearHoveredAssetInfo();
+                    _worldScene.HoverPick.ClearHoveredAssetInfo();
             }
         }
     }
@@ -357,7 +357,7 @@ internal sealed partial class SceneHoverAndPickService
         var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
 
         float? hitDistance = null;
-        if (_worldScene?.HoveredAssetInfo is HoveredAssetInfo hoverInfo && hoverInfo.IsPreciseRayHit)
+        if (_worldScene?.HoverPick.HoveredAssetInfo is HoveredAssetInfo hoverInfo && hoverInfo.IsPreciseRayHit)
         {
             hitDistance = (hoverInfo.WorldPosition - rayOrigin).Length();
             _sceneCursorRenderer.State = (hoverInfo.AssetKind.Contains("NPC", StringComparison.OrdinalIgnoreCase)
@@ -422,10 +422,10 @@ internal sealed partial class SceneHoverAndPickService
         if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
             return;
 
-        if (_worldScene != null && !_worldScene.ShowHoveredAssetTooltips)
+        if (_worldScene != null && !_worldScene.HoverPick.ShowHoveredAssetTooltips)
             return;
 
-        if (_worldScene?.HoveredAssetInfo is not HoveredAssetInfo info)
+        if (_worldScene?.HoverPick.HoveredAssetInfo is not HoveredAssetInfo info)
             return;
 
         if (!info.IsPreciseRayHit || !ShouldShowHoveredAssetInfoForInvestigation(info))

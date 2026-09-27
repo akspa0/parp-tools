@@ -158,7 +158,7 @@ internal sealed partial class InvestigationService
             return;
         }
 
-        if (_worldScene.HoveredAssetInfo is not HoveredAssetInfo info || !ShouldShowHoveredAssetInfoForInvestigation(info))
+        if (_worldScene.HoverPick.HoveredAssetInfo is not HoveredAssetInfo info || !ShouldShowHoveredAssetInfoForInvestigation(info))
         {
             ImGui.TextDisabled("Hover a WMO or MDX/M2 placement to inspect its exact asset path.");
             return;
@@ -736,7 +736,7 @@ internal sealed partial class InvestigationService
         if (_worldScene?.WlLoader == null || !_worldScene.WlLoader.HasData)
             return false;
 
-        if (_worldScene.HoveredAssetInfo is HoveredAssetInfo hoveredInfo
+        if (_worldScene.HoverPick.HoveredAssetInfo is HoveredAssetInfo hoveredInfo
             && string.Equals(hoveredInfo.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase)
             && TryResolveHoveredWlLiquidBody(hoveredInfo, out body))
         {

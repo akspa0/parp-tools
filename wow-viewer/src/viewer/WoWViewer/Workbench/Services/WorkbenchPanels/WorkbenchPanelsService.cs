@@ -204,25 +204,25 @@ internal sealed partial class WorkbenchPanelsService
         if (ImGui.Checkbox("Fog Objects", ref objectFogEnabled))
             _worldScene.ObjectFogEnabled = objectFogEnabled;
 
-        bool showHoverTooltips = _worldScene.ShowHoveredAssetTooltips;
+        bool showHoverTooltips = _worldScene.HoverPick.ShowHoveredAssetTooltips;
         if (ImGui.Checkbox("Hover Tooltips", ref showHoverTooltips))
-            _worldScene.ShowHoveredAssetTooltips = showHoverTooltips;
+            _worldScene.HoverPick.ShowHoveredAssetTooltips = showHoverTooltips;
 
-        bool limitHoverPickRange = _worldScene.LimitHoveredAssetRange;
+        bool limitHoverPickRange = _worldScene.HoverPick.LimitHoveredAssetRange;
         if (ImGui.Checkbox("Limit Hover/Pick Range", ref limitHoverPickRange))
-            _worldScene.LimitHoveredAssetRange = limitHoverPickRange;
+            _worldScene.HoverPick.LimitHoveredAssetRange = limitHoverPickRange;
 
-        if (_worldScene.LimitHoveredAssetRange)
+        if (_worldScene.HoverPick.LimitHoveredAssetRange)
         {
-            bool useDynamicHoverRange = _worldScene.UseDynamicHoveredAssetRange;
+            bool useDynamicHoverRange = _worldScene.HoverPick.UseDynamicHoveredAssetRange;
             if (ImGui.Checkbox("Dynamic Hover Range", ref useDynamicHoverRange))
-                _worldScene.UseDynamicHoveredAssetRange = useDynamicHoverRange;
+                _worldScene.HoverPick.UseDynamicHoveredAssetRange = useDynamicHoverRange;
 
-            float hoverPickRange = _worldScene.HoveredAssetMaxDistance;
+            float hoverPickRange = _worldScene.HoverPick.HoveredAssetMaxDistance;
             if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 100f, MaxTerrainFogDistance, "%.2f yd"))
-                _worldScene.HoveredAssetMaxDistance = hoverPickRange;
+                _worldScene.HoverPick.HoveredAssetMaxDistance = hoverPickRange;
 
-            ImGui.TextDisabled($"Effective range: {_worldScene.EffectiveHoveredAssetMaxDistance:F2} yd");
+            ImGui.TextDisabled($"Effective range: {_worldScene.HoverPick.EffectiveHoveredAssetMaxDistance:F2} yd");
         }
 
         bool showSelectedObjectBounds = _worldScene.ShowSelectedObjectBounds;

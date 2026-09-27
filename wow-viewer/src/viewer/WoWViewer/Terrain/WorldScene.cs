@@ -100,7 +100,7 @@ public readonly record struct TaxiActorPose(
     float Scale,
     string ModelPath);
 
-public class WorldScene : ISceneRenderer, IPm4OverlayHost
+public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
 {
     private const float TaxiActorHeadingSampleWindow = 18f;
     private const float TaxiActorHeadingSmoothingHz = 8f;
@@ -167,10 +167,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
     private bool _doodadsVisible = true;
     private bool _objectFogEnabled = true;
     private bool _objectPathFiltersEnabled = true;
-    private bool _limitHoveredAssetRange = true;
-    private bool _useDynamicHoveredAssetRange = false;
     private bool _showSelectedObjectBounds = true;
-    private float _hoveredAssetMaxDistance = 533.33f;
     private float _lastHoverPickFogEnd = 1500f;
     private float _objectStreamingRangeMultiplier = 0.5f;
     private float _maxVisibleMdxBoundsHeight;
@@ -193,11 +190,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
     private const float MinOffFrustumConeFactor = 0.35f;
     private const float RearConeFadeFloor = 0.25f;
     private const float RearConeLoadPenalty = 2.5f;
-    private const float HoverInfoBrushPixels = 32f;
-    private const float HoverInfoMaxScreenRadius = 96f;
-    private const float WireframeRevealBrushPixels = 96f;
-    private const float WireframeRevealMaxScreenRadius = 220f;
-    private const float MaxWorldObjectViewDistance = 20000f;
+    internal const float MaxWorldObjectViewDistance = 20000f;
     private const float MaxWorldObjectViewDistanceSq = MaxWorldObjectViewDistance * MaxWorldObjectViewDistance;
 
     private static readonly TerrainAssetLoadPolicy WmoOnlyAssetLoadPolicy = new(
@@ -221,13 +214,9 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
     private readonly SceneLightManager _sceneLightManager = new();
     private readonly List<SceneLight> _sceneLightCollectScratch = new();
     private readonly HashSet<WmoRenderer> _worldFrameWmoRenderers = new();
-    private readonly List<int> _wireframeRevealWmoIndices = new();
-    private readonly List<int> _wireframeRevealMdxIndices = new();
     private readonly MinimapRenderer? _minimapRenderer;
-    private HoveredAssetInfo? _hoveredAssetInfo;
     private TerrainAssetLoadPolicy _assetLoadPolicy = StreamingTerrainAssetLoadPolicy;
     private bool _wireframeRevealEnabled;
-    private bool _showHoveredAssetTooltips = true;
     private const int UniqueIdLayerGapThreshold = 100;
     private bool _uniqueIdFilterEnabled;
     private UniqueIdVisibilityScope _uniqueIdVisibilityScope = UniqueIdVisibilityScope.PerMap;
@@ -249,9 +238,37 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
     List<ObjectInstance> IPm4OverlayHost.WmoInstances => _wmoInstances;
     bool IPm4OverlayHost.HasLastRenderedCameraPosition => _hasLastRenderedCameraPosition;
     Vector3 IPm4OverlayHost.LastRenderedCameraPosition => _lastRenderedCameraPosition;
-    bool IPm4OverlayHost.IsHoverPickDistanceAllowed(float distance) => IsHoverPickDistanceAllowed(distance);
-    bool IPm4OverlayHost.IsHoverPickPositionAllowed(Vector3 worldPosition) => IsHoverPickPositionAllowed(worldPosition);
+    bool IPm4OverlayHost.IsHoverPickDistanceAllowed(float distance) => _hoverPick.IsHoverPickDistanceAllowed(distance);
+    bool IPm4OverlayHost.IsHoverPickPositionAllowed(Vector3 worldPosition) => _hoverPick.IsHoverPickPositionAllowed(worldPosition);
     FrustumCuller IPm4OverlayHost.FrustumCuller => _frustumCuller;
+
+    // Scene services (Spec 255): each owns one feature's state and behaviour; WorldScene keeps
+    // one field per service, built first in each constructor.
+    private readonly SceneHoverPickController _hoverPick;
+    public SceneHoverPickController HoverPick => _hoverPick;
+    // SCENE-SERVICES-END
+
+    // IWorldSceneHost (Spec 255): the scene state the services read, implemented explicitly.
+    WorldAssetManager IWorldSceneHost.Assets => _assets;
+    ref bool IWorldSceneHost.DoodadsVisible => ref _doodadsVisible;
+    GL IWorldSceneHost.Gl => _gl;
+    ref bool IWorldSceneHost.InstancesDirty => ref _instancesDirty;
+    ref float IWorldSceneHost.LastHoverPickFogEnd => ref _lastHoverPickFogEnd;
+    ref List<ObjectInstance> IWorldSceneHost.MdxInstances => ref _mdxInstances;
+    Pm4OverlayScene IWorldSceneHost.Pm4Overlay => _pm4Overlay;
+    ref bool IWorldSceneHost.ShowWlLiquids => ref _showWlLiquids;
+    TerrainManager IWorldSceneHost.TerrainManager => _terrainManager;
+    ref bool IWorldSceneHost.WireframeRevealEnabledField => ref _wireframeRevealEnabled;
+    ref WlLiquidLoader? IWorldSceneHost.WlLoader => ref _wlLoader;
+    ref List<ObjectInstance> IWorldSceneHost.WmoInstances => ref _wmoInstances;
+    ref bool IWorldSceneHost.WmosVisible => ref _wmosVisible;
+    void IWorldSceneHost.RebuildInstanceLists() => RebuildInstanceLists();
+    IModelRenderer? IWorldSceneHost.ResolveVisibleMdxRenderer(WorldRenderFrame frame, string modelKey) => ResolveVisibleMdxRenderer(frame, modelKey);
+    WmoRenderer? IWorldSceneHost.ResolveVisibleWmoRenderer(WorldRenderFrame frame, string modelKey) => ResolveVisibleWmoRenderer(frame, modelKey);
+    bool IWorldSceneHost.ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst) => ShouldHideObjectInstanceByUniqueId(in inst);
+    IModelRenderer? IWorldSceneHost.TryGetQueuedMdx(string modelKey) => TryGetQueuedMdx(modelKey);
+    WmoRenderer? IWorldSceneHost.TryGetQueuedWmo(string modelKey) => TryGetQueuedWmo(modelKey);
+    // WORLD-SCENE-HOST-IMPL-END
 
     private Vector3 _lastRenderedCameraPosition;
     private bool _hasLastRenderedCameraPosition;
@@ -432,13 +449,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
     public ObjectType SelectedObjectType => _selectedObjectType;
     public int SelectedObjectIndex => _selectedObjectIndex;
     public int SelectedWmoParentIndex => _selectedWmoParentIndex;
-    public bool WireframeRevealEnabled => _wireframeRevealEnabled;
     public bool TerrainWireframeEnabled => _terrainManager.IsWireframe;
     public bool ObjectWireframeEnabled => _assets.ObjectWireframeEnabled;
-    public HoveredAssetInfo? HoveredAssetInfo => _hoveredAssetInfo;
-    public bool ShowHoveredAssetTooltips { get => _showHoveredAssetTooltips; set => _showHoveredAssetTooltips = value; }
-    public bool LimitHoveredAssetRange { get => _limitHoveredAssetRange; set => _limitHoveredAssetRange = value; }
-    public bool UseDynamicHoveredAssetRange { get => _useDynamicHoveredAssetRange; set => _useDynamicHoveredAssetRange = value; }
     public int PendingAssetLoadCount => _assets.PendingAssetLoadCount;
     public int PendingDeferredWmoDoodadLoadCount => _assets.PendingDeferredWmoDoodadLoadCount;
     public int PendingDeferredWmoMaterialTextureLoadCount => _assets.PendingDeferredWmoMaterialTextureLoadCount;
@@ -600,12 +612,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
     public bool ObjectPathFiltersEnabled { get => _objectPathFiltersEnabled; set => _objectPathFiltersEnabled = value; }
     public IReadOnlyList<ObjectPathFilterEntry> ObjectPathFilters => _objectPathFilters;
     public bool ShowSelectedObjectBounds { get => _showSelectedObjectBounds; set => _showSelectedObjectBounds = value; }
-    public float HoveredAssetMaxDistance
-    {
-        get => _hoveredAssetMaxDistance;
-        set => _hoveredAssetMaxDistance = Math.Clamp(value, 10f, MaxWorldObjectViewDistance);
-    }
-    public float EffectiveHoveredAssetMaxDistance => ComputeEffectiveHoveredAssetMaxDistance();
     public bool UniqueIdFilterEnabled { get => _uniqueIdFilterEnabled; set => _uniqueIdFilterEnabled = value; }
     public UniqueIdVisibilityScope UniqueIdVisibilityScope { get => _uniqueIdVisibilityScope; set => _uniqueIdVisibilityScope = value; }
     public int UniqueIdFilterMin { get => _uniqueIdFilterMin; set => _uniqueIdFilterMin = value; }
@@ -1913,6 +1919,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         _dataSource = dataSource;
         _dbcBuild = buildVersion;
         _minimapRenderer = minimapRenderer;
+        _hoverPick = new SceneHoverPickController(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -1952,6 +1959,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         _dataSource = dataSource;
         _dbcBuild = buildVersion;
         _minimapRenderer = minimapRenderer;
+        _hoverPick = new SceneHoverPickController(this);
         _pm4Overlay = new Pm4OverlayScene(this, Pm4OverlayCacheService.CreateForDataSource(dataSource));
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -5503,7 +5511,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
                             objectWireframeMs = MeasureDurationMs(() =>
                             {
                                 (objectWireframePreparedCount, objectWireframeSubmittedCount) =
-                                    RenderVisibleObjectWireframeOverlay(frame, view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
+                                    _hoverPick.RenderVisibleObjectWireframeOverlay(frame, view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
                             });
                         }
                         else if (_wireframeRevealEnabled)
@@ -5511,7 +5519,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
                             objectWireframeMs = MeasureDurationMs(() =>
                             {
                                 (objectWireframePreparedCount, objectWireframeSubmittedCount) =
-                                    RenderWireframeReveal(view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
+                                    _hoverPick.RenderWireframeReveal(view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
                             });
                         }
 
@@ -6720,339 +6728,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
 
         _wireframeRevealEnabled = false;
         _assets.SetObjectWireframeEnabled(enabled);
-        ClearWireframeReveal();
+        _hoverPick.ClearWireframeReveal();
     }
 
     public bool IsWireframe => TerrainWireframeEnabled || ObjectWireframeEnabled;
-
-    public void UpdateWireframeReveal(Matrix4x4 view, Matrix4x4 proj,
-        float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight)
-    {
-        if (!_wireframeRevealEnabled)
-        {
-            ClearWireframeReveal();
-            return;
-        }
-
-        if (_instancesDirty)
-            RebuildInstanceLists();
-
-        _wireframeRevealWmoIndices.Clear();
-        _wireframeRevealMdxIndices.Clear();
-
-        if (_wmosVisible)
-            PopulateWireframeRevealHits(_wmoInstances, _wireframeRevealWmoIndices,
-                view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight);
-        if (_doodadsVisible)
-            PopulateWireframeRevealHits(_mdxInstances, _wireframeRevealMdxIndices,
-                view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight);
-    }
-
-    public void UpdateHoveredAssetInfo(Matrix4x4 view, Matrix4x4 proj,
-        float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight)
-    {
-        float safeViewportWidth = Math.Max(viewportWidth, 1f);
-        float safeViewportHeight = Math.Max(viewportHeight, 1f);
-        float ndcX = (mouseViewportX / safeViewportWidth) * 2f - 1f;
-        float ndcY = 1f - (mouseViewportY / safeViewportHeight) * 2f;
-        var (rayOrigin, rayDir) = ScreenToRay(ndcX, ndcY, view, proj);
-
-        bool hasSceneRayHit = TryBuildHoveredSceneInfoByRay(rayOrigin, rayDir, out HoveredAssetInfo sceneRayInfo, out float sceneRayDistance);
-        HoveredAssetInfo pm4RayInfo = default;
-        float pm4RayDistance = float.MaxValue;
-        bool hasPm4RayHit = _pm4Overlay._showPm4Overlay
-            && _pm4Overlay.TryBuildHoveredPm4InfoByRay(rayOrigin, rayDir, out pm4RayInfo, out pm4RayDistance);
-
-        WorldSceneHoverSource raySource = WorldSceneSelectionService.ChooseHoverRaySource(
-            hasSceneRayHit, sceneRayDistance, hasPm4RayHit, pm4RayDistance, _pm4Overlay._pm4OverlayIgnoreDepth);
-        if (raySource == WorldSceneHoverSource.Pm4)
-        {
-            _hoveredAssetInfo = pm4RayInfo.WithPreciseRayHit();
-            return;
-        }
-
-        if (raySource == WorldSceneHoverSource.Scene)
-        {
-            _hoveredAssetInfo = sceneRayInfo.WithPreciseRayHit();
-            return;
-        }
-
-        bool hasSceneBrushHit = TryBuildHoveredSceneInfo(
-            view,
-            proj,
-            mouseViewportX,
-            mouseViewportY,
-            viewportWidth,
-            viewportHeight,
-            out HoveredAssetInfo sceneBrushInfo,
-            out float sceneBrushDistanceSq,
-            out float sceneBrushDepth);
-        HoveredAssetInfo pm4BrushInfo = default;
-        int hoveredPm4Count = 0;
-        float pm4BrushDistanceSq = float.MaxValue;
-        float pm4BrushDepth = float.MaxValue;
-        bool hasPm4BrushHit = _pm4Overlay._showPm4Overlay
-            && _pm4Overlay.TryBuildHoveredPm4Info(
-                view,
-                proj,
-                mouseViewportX,
-                mouseViewportY,
-                viewportWidth,
-                viewportHeight,
-                out pm4BrushInfo,
-                out hoveredPm4Count,
-                out pm4BrushDistanceSq,
-                out pm4BrushDepth);
-
-        WorldSceneHoverSource brushSource = WorldSceneSelectionService.ChooseHoverBrushSource(
-            hasSceneBrushHit, sceneBrushDistanceSq, sceneBrushDepth,
-            hasPm4BrushHit, pm4BrushDistanceSq, pm4BrushDepth, _pm4Overlay._pm4OverlayIgnoreDepth);
-        if (brushSource == WorldSceneHoverSource.Pm4)
-        {
-            _hoveredAssetInfo = new HoveredAssetInfo(
-                pm4BrushInfo.AssetKind,
-                pm4BrushInfo.DisplayName,
-                pm4BrushInfo.SourcePath,
-                pm4BrushInfo.DetailLine,
-                pm4BrushInfo.WorldPosition,
-                Math.Max(0, hoveredPm4Count - 1),
-                pm4BrushInfo.Pm4ObjectKey,
-                pm4BrushInfo.SceneObjectType,
-                pm4BrushInfo.SceneObjectIndex,
-                pm4BrushInfo.WlBodyKey);
-            return;
-        }
-
-        if (hasSceneBrushHit)
-        {
-            _hoveredAssetInfo = sceneBrushInfo;
-            return;
-        }
-
-        _hoveredAssetInfo = null;
-    }
-
-    public void ClearWireframeReveal()
-    {
-        _wireframeRevealWmoIndices.Clear();
-        _wireframeRevealMdxIndices.Clear();
-    }
-
-    public void ClearHoveredAssetInfo()
-    {
-        _hoveredAssetInfo = null;
-    }
-
-    private bool TryBuildHoveredSceneInfo(
-        Matrix4x4 view,
-        Matrix4x4 proj,
-        float mouseViewportX,
-        float mouseViewportY,
-        float viewportWidth,
-        float viewportHeight,
-        out HoveredAssetInfo info,
-        out float bestDistanceSq,
-        out float bestDepth)
-    {
-        info = default;
-        bestDistanceSq = float.MaxValue;
-        bestDepth = float.MaxValue;
-
-        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer;
-        var candidateInfos = new List<HoveredAssetInfo>();
-        var brushCandidates = new List<WorldSceneBrushCandidate>();
-
-        void ConsiderCandidate(HoveredAssetInfo candidateInfo, float distanceSq, float depth)
-        {
-            brushCandidates.Add(new WorldSceneBrushCandidate(candidateInfos.Count, distanceSq, depth, candidateInfo.WorldPosition));
-            candidateInfos.Add(candidateInfo);
-        }
-
-        if (_wmosVisible)
-        {
-            for (int i = 0; i < _wmoInstances.Count; i++)
-            {
-                ObjectInstance inst = _wmoInstances[i];
-                if (ShouldHideObjectInstanceByUniqueId(inst))
-                    continue;
-
-                if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
-                    continue;
-
-                ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst, ObjectType.Wmo, i), distanceSq, depth);
-            }
-        }
-
-        if (_doodadsVisible)
-        {
-            for (int i = 0; i < _mdxInstances.Count; i++)
-            {
-                ObjectInstance inst = _mdxInstances[i];
-                if (ShouldHideObjectInstanceByUniqueId(inst))
-                    continue;
-
-                if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
-                    continue;
-
-                ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst, ObjectType.Mdx, i), distanceSq, depth);
-            }
-        }
-
-        if (_showWlLiquids && _wlLoader != null)
-        {
-            for (int i = 0; i < _wlLoader.Bodies.Count; i++)
-            {
-                WlLiquidBody body = _wlLoader.Bodies[i];
-                if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.BodyKey))
-                    continue;
-
-                if (!TryMeasureHoverInfoHit(body.BoundsMin, body.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
-                    continue;
-
-                ConsiderCandidate(BuildHoveredWlLiquidInfo(body), distanceSq, depth);
-            }
-        }
-
-        // Range check, cursor-distance/depth choice and the eligible count live in the Core selection
-        // service (Spec 228; Epic 251 U-01 E4). Candidates keep their WMO, MDX, liquid order.
-        WorldSceneBrushResult brush = WorldSceneSelectionService.SelectBrush(
-            new WorldSceneSelectionPolicy(
-                _limitHoveredAssetRange,
-                ComputeEffectiveHoveredAssetMaxDistance(),
-                _limitHoveredAssetRange ? _pm4Overlay.GetPm4LoadAnchorCameraPosition() : Vector3.Zero),
-            brushCandidates);
-        if (brush.Status != WorldSceneSelectionStatus.Hit)
-            return false;
-
-        HoveredAssetInfo bestCandidate = candidateInfos[brush.BestId];
-        int hitCount = brush.EligibleCount;
-        bestDistanceSq = brush.BestScreenDistanceSq;
-        bestDepth = brush.BestDepth;
-        info = new HoveredAssetInfo(
-            bestCandidate.AssetKind,
-            bestCandidate.DisplayName,
-            bestCandidate.SourcePath,
-            bestCandidate.DetailLine,
-            bestCandidate.WorldPosition,
-            Math.Max(0, hitCount - 1),
-            bestCandidate.Pm4ObjectKey,
-            bestCandidate.SceneObjectType,
-            bestCandidate.SceneObjectIndex,
-            bestCandidate.WlBodyKey);
-        return true;
-    }
-
-    private bool TryBuildHoveredSceneInfoByRay(Vector3 rayOrigin, Vector3 rayDir, out HoveredAssetInfo info, out float distance)
-    {
-        info = default;
-        distance = float.MaxValue;
-        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer;
-
-        // Hover and click must agree about scene-object identity. Reuse the proven Spec 211 click
-        // picker so WMO doodads participate in hover and an enclosing WMO AABB cannot hide them.
-        var sceneHits = new List<SceneObjectPickHit>();
-        CollectSceneObjectPickHits(rayOrigin, rayDir, sceneHits, logHits: false);
-
-        var liquidTargets = new List<WorldSceneRayTarget>();
-        if (_showWlLiquids && _wlLoader != null)
-        {
-            Vector3 padding = new(2f, 2f, 1f);
-            for (int i = 0; i < _wlLoader.Bodies.Count; i++)
-            {
-                WlLiquidBody body = _wlLoader.Bodies[i];
-                if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.BodyKey))
-                    continue;
-
-                liquidTargets.Add(new WorldSceneRayTarget(i, RayAABBIntersect(rayOrigin, rayDir, body.BoundsMin - padding, body.BoundsMax + padding)));
-            }
-        }
-
-        // Visibility, WMO container fall-through, range and nearest-first live in the Core
-        // selection service (Spec 228; Epic 251 U-01 E4).
-        WorldSceneHoverRayResult hover = WorldSceneSelectionAdapter.ResolveHoverRay(
-            sceneHits,
-            new WorldSceneSelectionPolicy(_limitHoveredAssetRange, ComputeEffectiveHoveredAssetMaxDistance(), Vector3.Zero),
-            _wmosVisible,
-            _doodadsVisible,
-            liquidTargets);
-
-        if (hover.Target == WorldSceneHoverRayTarget.SceneObject)
-        {
-            SceneObjectPickHit hit = sceneHits[hover.Id];
-            info = hit.ObjectType == ObjectType.WmoDoodad
-                ? BuildHoveredWmoDoodadInfo(hit)
-                : BuildHoveredScenePickHitInfo(hit);
-            distance = hit.Distance;
-        }
-        else if (hover.Target == WorldSceneHoverRayTarget.LiquidBody)
-        {
-            info = BuildHoveredWlLiquidInfo(_wlLoader!.Bodies[hover.Id]);
-            distance = hover.Distance;
-        }
-
-        return distance < float.MaxValue;
-    }
-
-    private static HoveredAssetInfo BuildHoveredScenePickHitInfo(in SceneObjectPickHit hit)
-    {
-        return new HoveredAssetInfo(
-            hit.KindLabel,
-            hit.ModelName,
-            hit.ModelPath,
-            $"UniqueId: {hit.UniqueId}",
-            hit.PlacementPosition,
-            0,
-            null,
-            hit.ObjectType,
-            hit.ObjectIndex,
-            null);
-    }
-
-    private HoveredAssetInfo BuildHoveredWmoDoodadInfo(in SceneObjectPickHit hit)
-    {
-        string detail = $"Active doodad index: {hit.ObjectIndex}";
-        string parentPath = string.Empty;
-        string parentName = $"WMO [{hit.ParentWmoIndex}]";
-
-        if (hit.ParentWmoIndex >= 0 && hit.ParentWmoIndex < _wmoInstances.Count)
-        {
-            ObjectInstance parent = _wmoInstances[hit.ParentWmoIndex];
-            parentPath = parent.ModelPath;
-            parentName = string.IsNullOrWhiteSpace(parent.ModelName) ? parent.ModelPath : parent.ModelName;
-
-            if (_assets.TryGetLoadedWmo(parent.ModelKey, out WmoRenderer? renderer) && renderer != null
-                && renderer.TryGetDoodadInfo(hit.ObjectIndex, out WmoDoodadInfo doodad))
-            {
-                string setName = renderer.GetDoodadSetName(renderer.ActiveDoodadSet);
-                List<int> renderGroups = renderer.GetRenderGroupsForDoodadDef(doodad.DoodadDefIndex);
-                string groupText = renderGroups.Count == 0
-                    ? "no MODR group reference"
-                    : string.Join(", ", renderGroups.Select(renderer.GetRenderGroupName));
-                detail = $"MODD definition: {doodad.DoodadDefIndex}   MODN offset: {doodad.NameIndex}\n"
-                    + $"Doodad set [{renderer.ActiveDoodadSet}]: {setName}\n"
-                    + $"WMO groups: {groupText}\n"
-                    + $"Parent WMO [{hit.ParentWmoIndex}]: {parentName}";
-            }
-            else
-            {
-                detail += $"\nParent WMO [{hit.ParentWmoIndex}]: {parentName}";
-            }
-        }
-
-        return new HoveredAssetInfo(
-            "WMO Doodad",
-            hit.ModelName,
-            hit.ModelPath,
-            detail,
-            hit.SelectionPoint,
-            0,
-            null,
-            ObjectType.WmoDoodad,
-            hit.ObjectIndex,
-            null,
-            parentWmoIndex: hit.ParentWmoIndex,
-            parentSourcePath: parentPath);
-    }
 
     public void ToggleObjects() => _objectsVisible = !_objectsVisible;
     public void ToggleWmos() => _wmosVisible = !_wmosVisible;
@@ -7096,7 +6775,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
     /// </summary>
     public void SelectObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
     {
-        if (TryPickSceneObjectByRay(rayOrigin, rayDir, out ObjectType bestType, out int bestIndex, out _))
+        if (_hoverPick.TryPickSceneObjectByRay(rayOrigin, rayDir, out ObjectType bestType, out int bestIndex, out _))
         {
             _selectedObjectType = bestType;
             _selectedObjectIndex = bestIndex;
@@ -7140,195 +6819,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         }
     }
 
-    public bool TryPickSceneObjectByRay(Vector3 rayOrigin, Vector3 rayDir, out ObjectType objectType, out int objectIndex, out float distance)
-    {
-        var hits = new List<SceneObjectPickHit>();
-        CollectSceneObjectPickHits(rayOrigin, rayDir, hits, logHits: true);
-
-        if (hits.Count == 0)
-        {
-            objectType = ObjectType.None;
-            objectIndex = -1;
-            distance = float.MaxValue;
-            return false;
-        }
-
-        SceneObjectPickHit bestHit = hits[0];
-        objectType = bestHit.ObjectType;
-        objectIndex = bestHit.ObjectIndex;
-        distance = bestHit.Distance;
-        return true;
-    }
-
-    public bool TryPickSceneObjectsByRay(Vector3 rayOrigin, Vector3 rayDir, List<SceneObjectPickHit> hits)
-    {
-        return TryPickSceneObjectsByRay(rayOrigin, rayDir, hits, null, null);
-    }
-
-    public bool TryPickSceneObjectsByRay(
-        Vector3 rayOrigin,
-        Vector3 rayDir,
-        List<SceneObjectPickHit> hits,
-        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey,
-        Vector3? clickedWorldPoint)
-    {
-        ArgumentNullException.ThrowIfNull(hits);
-        CollectSceneObjectPickHits(rayOrigin, rayDir, hits, logHits: false, clickedChunkKey, clickedWorldPoint);
-        return hits.Count > 0;
-    }
-
-    private void CollectSceneObjectPickHits(
-        Vector3 rayOrigin,
-        Vector3 rayDir,
-        List<SceneObjectPickHit> hits,
-        bool logHits,
-        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey = null,
-        Vector3? clickedWorldPoint = null)
-    {
-        hits.Clear();
-
-        if (_instancesDirty)
-            RebuildInstanceLists();
-
-        // Pick padding is applied in the model's own local space, so it already scales with the
-        // placement. It was 2 yd for WMOs and 1 yd for doodads, which inflated every click volume by
-        // that much in all six directions: a nearby object then swallowed rays aimed past it, which
-        // is what made objects close to the camera hard to inspect. Keep just enough forgiveness for
-        // thin geometry such as fences and poles.
-        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _wmoInstances, ObjectType.Wmo, new Vector3(0.25f, 0.25f, 0.25f), clickedChunkKey, clickedWorldPoint);
-        AppendWmoDoodadPickHits(rayOrigin, rayDir, hits, clickedChunkKey, clickedWorldPoint);
-        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _mdxInstances, ObjectType.Mdx, new Vector3(0.1f, 0.1f, 0.1f), clickedChunkKey, clickedWorldPoint);
-
-        // Range limit, clicked-chunk filter and click ranking live in the Core selection service
-        // (Spec 228; Epic 251 U-01 E4).
-        WorldSceneSelectionAdapter.RankClickHits(
-            hits,
-            clickedChunkKey.HasValue,
-            new WorldSceneSelectionPolicy(_limitHoveredAssetRange, ComputeEffectiveHoveredAssetMaxDistance(), Vector3.Zero));
-
-        if (!logHits || hits.Count == 0)
-            return;
-
-        ViewerLog.Debug(ViewerLog.Category.Terrain, $"[ObjectPick] Ray hit {hits.Count} objects:");
-        foreach (SceneObjectPickHit hit in hits.Take(5))
-            ViewerLog.Debug(ViewerLog.Category.Terrain, $"  {hit.KindLabel}[{hit.ObjectIndex}] {hit.ModelName} @ dist={hit.Distance:F1}");
-        if (hits.Count > 5)
-            ViewerLog.Debug(ViewerLog.Category.Terrain, $"  ... and {hits.Count - 5} more");
-    }
-
-    private void AppendSceneObjectPickHits(
-        Vector3 rayOrigin,
-        Vector3 rayDir,
-        List<SceneObjectPickHit> hits,
-        List<ObjectInstance> instances,
-        ObjectType objectType,
-        Vector3 padding,
-        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey,
-        Vector3? clickedWorldPoint)
-    {
-        for (int i = 0; i < instances.Count; i++)
-        {
-            ObjectInstance instance = instances[i];
-            if (ShouldHideObjectInstanceByUniqueId(instance))
-                continue;
-
-            if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, instance, padding, out float distance))
-                continue;
-
-            Vector3 selectionPoint = GetSceneObjectSelectionPoint(instance);
-            bool sharesClickedChunk = clickedChunkKey.HasValue
-                && TryGetSceneObjectChunkKey(instance, out var instanceChunkKey)
-                && instanceChunkKey == clickedChunkKey.Value;
-            int chunkGridDistance = clickedChunkKey.HasValue && TryGetSceneObjectChunkKey(instance, out instanceChunkKey)
-                ? Math.Abs(instanceChunkKey.tileX - clickedChunkKey.Value.tileX)
-                    + Math.Abs(instanceChunkKey.tileY - clickedChunkKey.Value.tileY)
-                    + Math.Abs(instanceChunkKey.chunkX - clickedChunkKey.Value.chunkX)
-                    + Math.Abs(instanceChunkKey.chunkY - clickedChunkKey.Value.chunkY)
-                : int.MaxValue;
-            float selectionPointDistanceSq = clickedWorldPoint.HasValue
-                ? Vector3.DistanceSquared(selectionPoint, clickedWorldPoint.Value)
-                : float.MaxValue;
-
-            hits.Add(new SceneObjectPickHit(
-                objectType,
-                i,
-                distance,
-                instance.ModelName,
-                instance.ModelPath,
-                instance.UniqueId,
-                instance.PlacementPosition,
-                instance.BoundsMin,
-                instance.BoundsMax,
-                selectionPoint,
-                selectionPointDistanceSq,
-                sharesClickedChunk,
-                chunkGridDistance));
-        }
-    }
-
-    private void AppendWmoDoodadPickHits(
-        Vector3 rayOrigin,
-        Vector3 rayDir,
-        List<SceneObjectPickHit> hits,
-        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey,
-        Vector3? clickedWorldPoint)
-    {
-        var doodadHitsScratch = new List<(int index, float distance, Vector3 hitPoint, Vector3 boundsMin, Vector3 boundsMax, WmoDoodadInfo info)>();
-        for (int wmoIndex = 0; wmoIndex < _wmoInstances.Count; wmoIndex++)
-        {
-            ObjectInstance wmo = _wmoInstances[wmoIndex];
-            if (ShouldHideObjectInstanceByUniqueId(wmo))
-                continue;
-
-            if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, wmo, new Vector3(5f, 5f, 5f), out _))
-                continue;
-
-            if (!_assets.TryGetLoadedWmo(wmo.ModelKey, out WmoRenderer? wmoRenderer) || wmoRenderer == null)
-                continue;
-
-            doodadHitsScratch.Clear();
-            if (!wmoRenderer.TryPickDoodadsByRay(rayOrigin, rayDir, wmo.Transform, doodadHitsScratch))
-                continue;
-
-            foreach (var dh in doodadHitsScratch)
-            {
-                bool sharesClickedChunk = clickedChunkKey.HasValue
-                    && TryGetTerrainChunkKey(dh.hitPoint.X, dh.hitPoint.Y, out var chunkKey)
-                    && chunkKey == clickedChunkKey.Value;
-
-                int chunkGridDistance = clickedChunkKey.HasValue && TryGetTerrainChunkKey(dh.hitPoint.X, dh.hitPoint.Y, out chunkKey)
-                    ? Math.Abs(chunkKey.tileX - clickedChunkKey.Value.tileX)
-                        + Math.Abs(chunkKey.tileY - clickedChunkKey.Value.tileY)
-                        + Math.Abs(chunkKey.chunkX - clickedChunkKey.Value.chunkX)
-                        + Math.Abs(chunkKey.chunkY - clickedChunkKey.Value.chunkY)
-                    : int.MaxValue;
-
-                float selectionPointDistanceSq = clickedWorldPoint.HasValue
-                    ? Vector3.DistanceSquared(dh.hitPoint, clickedWorldPoint.Value)
-                    : float.MaxValue;
-
-                hits.Add(new SceneObjectPickHit(
-                    ObjectType.WmoDoodad,
-                    dh.index,
-                    dh.distance,
-                    Path.GetFileName(dh.info.ModelPath),
-                    dh.info.ModelPath,
-                    // MODD has no uniqueId; the def index is not one. Putting it in this slot made
-                    // the disambiguation list report a uniqueId the record does not have.
-                    UniqueId: 0,
-                    dh.hitPoint,
-                    dh.boundsMin,
-                    dh.boundsMax,
-                    dh.hitPoint,
-                    selectionPointDistanceSq,
-                    sharesClickedChunk,
-                    chunkGridDistance,
-                    ParentWmoIndex: wmoIndex));
-            }
-        }
-    }
-
-    private static Vector3 GetSceneObjectSelectionPoint(in ObjectInstance instance)
+    internal static Vector3 GetSceneObjectSelectionPoint(in ObjectInstance instance)
     {
         if (instance.BoundsResolved)
         {
@@ -7340,13 +6831,13 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         return instance.PlacementPosition;
     }
 
-    private static bool TryGetSceneObjectChunkKey(in ObjectInstance instance, out (int tileX, int tileY, int chunkX, int chunkY) key)
+    internal static bool TryGetSceneObjectChunkKey(in ObjectInstance instance, out (int tileX, int tileY, int chunkX, int chunkY) key)
     {
         Vector3 selectionPoint = GetSceneObjectSelectionPoint(instance);
         return TryGetTerrainChunkKey(selectionPoint.X, selectionPoint.Y, out key);
     }
 
-    private static bool TryGetTerrainChunkKey(float worldX, float worldY, out (int tileX, int tileY, int chunkX, int chunkY) key)
+    internal static bool TryGetTerrainChunkKey(float worldX, float worldY, out (int tileX, int tileY, int chunkX, int chunkY) key)
     {
         key = default;
 
@@ -7377,35 +6868,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         _selectedObjectIndex = -1;
         _selectedWmoParentIndex = -1;
         _selectedSceneObjectKey = null;
-    }
-
-    private float ComputeEffectiveHoveredAssetMaxDistance()
-    {
-        if (!_limitHoveredAssetRange)
-            return float.MaxValue;
-
-        if (!_useDynamicHoveredAssetRange)
-            return _hoveredAssetMaxDistance;
-
-        float fogDrivenDistance = Math.Clamp(_lastHoverPickFogEnd * 0.4f, 533.33f, MaxWorldObjectViewDistance);
-        return Math.Min(_hoveredAssetMaxDistance, fogDrivenDistance);
-    }
-
-    private bool IsHoverPickDistanceAllowed(float distance)
-    {
-        if (!_limitHoveredAssetRange)
-            return true;
-
-        return new WorldSceneSelectionPolicy(true, ComputeEffectiveHoveredAssetMaxDistance(), Vector3.Zero).IsDistanceAllowed(distance);
-    }
-
-    private bool IsHoverPickPositionAllowed(Vector3 worldPosition)
-    {
-        if (!_limitHoveredAssetRange)
-            return true;
-
-        Vector3 cameraPosition = _pm4Overlay.GetPm4LoadAnchorCameraPosition();
-        return new WorldSceneSelectionPolicy(true, ComputeEffectiveHoveredAssetMaxDistance(), cameraPosition).IsPositionAllowed(worldPosition);
     }
 
     /// <summary>
@@ -7441,153 +6903,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         return tmin >= 0 ? tmin : tmax >= 0 ? tmax : -1;
     }
 
-    private static bool TryRayIntersectInstanceBounds(Vector3 origin, Vector3 dir, in ObjectInstance instance, Vector3 padding, out float distance)
-    {
-        if (instance.BoundsResolved
-            && Matrix4x4.Invert(instance.Transform, out Matrix4x4 inverseTransform))
-        {
-            Vector3 localOrigin = Vector3.Transform(origin, inverseTransform);
-            Vector3 localDirection = Vector3.TransformNormal(dir, inverseTransform);
-
-            // Pick against the tight geometry box where one is available. Using the culling bounds
-            // here meant an M2's declared animation extent was the click target, so a nearby object
-            // swallowed rays aimed past it — the reason objects close to the camera were hard to
-            // inspect.
-            bool useSelectionBounds = instance.SelectionBoundsResolved
-                && AreFiniteOrderedBounds(instance.SelectionLocalBoundsMin, instance.SelectionLocalBoundsMax);
-            Vector3 pickMin = useSelectionBounds ? instance.SelectionLocalBoundsMin : instance.LocalBoundsMin;
-            Vector3 pickMax = useSelectionBounds ? instance.SelectionLocalBoundsMax : instance.LocalBoundsMax;
-
-            if (localDirection.LengthSquared() > 1e-10f)
-            {
-                float localT = RayAABBIntersect(
-                    localOrigin,
-                    localDirection,
-                    pickMin - padding,
-                    pickMax + padding);
-
-                if (localT >= 0f)
-                {
-                    Vector3 localHit = localOrigin + (localDirection * localT);
-                    Vector3 worldHit = Vector3.Transform(localHit, instance.Transform);
-                    distance = Vector3.Distance(origin, worldHit);
-                    return true;
-                }
-            }
-        }
-
-        distance = RayAABBIntersect(origin, dir, instance.BoundsMin - padding, instance.BoundsMax + padding);
-        return distance >= 0f;
-    }
-
-    private void PopulateWireframeRevealHits(List<ObjectInstance> instances, List<int> hitIndices,
-        Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY,
-        float viewportWidth, float viewportHeight)
-    {
-        for (int i = 0; i < instances.Count; i++)
-        {
-            if (ShouldRevealInstance(instances[i], view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight))
-                hitIndices.Add(i);
-        }
-    }
-
-    private static bool ShouldRevealInstance(ObjectInstance inst, Matrix4x4 view, Matrix4x4 proj,
-        float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight)
-    {
-        return TryMeasureHoverBrushHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out _, out _);
-    }
-
-    internal static bool TryMeasureHoverInfoHit(Vector3 boundsMin, Vector3 boundsMax,
-        Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY,
-        float viewportWidth, float viewportHeight, out float distanceSq, out float depth)
-    {
-        return TryMeasureScreenBrushHit(
-            boundsMin,
-            boundsMax,
-            view,
-            proj,
-            mouseViewportX,
-            mouseViewportY,
-            viewportWidth,
-            viewportHeight,
-            HoverInfoBrushPixels,
-            HoverInfoMaxScreenRadius,
-            out distanceSq,
-            out depth);
-    }
-
-    private static bool TryMeasureHoverBrushHit(Vector3 boundsMin, Vector3 boundsMax,
-        Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY,
-        float viewportWidth, float viewportHeight, out float distanceSq, out float depth)
-    {
-        return TryMeasureScreenBrushHit(
-            boundsMin,
-            boundsMax,
-            view,
-            proj,
-            mouseViewportX,
-            mouseViewportY,
-            viewportWidth,
-            viewportHeight,
-            WireframeRevealBrushPixels,
-            WireframeRevealMaxScreenRadius,
-            out distanceSq,
-            out depth);
-    }
-
-    private static bool TryMeasureScreenBrushHit(Vector3 boundsMin, Vector3 boundsMax,
-        Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY,
-        float viewportWidth, float viewportHeight, float brushPixels, float maxScreenRadius,
-        out float distanceSq, out float depth)
-    {
-        Vector3 center = (boundsMin + boundsMax) * 0.5f;
-        if (!TryProjectToViewport(center, view, proj, viewportWidth, viewportHeight, out float sx, out float sy, out depth))
-        {
-            distanceSq = 0f;
-            return false;
-        }
-
-        float dx = sx - mouseViewportX;
-        float dy = sy - mouseViewportY;
-        distanceSq = dx * dx + dy * dy;
-
-        float worldRadius = MathF.Max((boundsMax - boundsMin).Length() * 0.5f, 4f);
-        float projectedRadius = EstimateProjectedRadius(worldRadius, depth, proj, viewportHeight);
-        float revealRadius = MathF.Min(brushPixels + projectedRadius, maxScreenRadius);
-        return distanceSq <= revealRadius * revealRadius;
-    }
-
-    private static HoveredAssetInfo BuildHoveredObjectInfo(string assetKind, in ObjectInstance inst, ObjectType objectType, int objectIndex)
-    {
-        return new HoveredAssetInfo(
-            assetKind,
-            inst.ModelName,
-            inst.ModelPath,
-            $"UniqueId: {inst.UniqueId}",
-            inst.PlacementPosition,
-            0,
-            null,
-            objectType,
-                objectIndex,
-                null);
-    }
-
-    private static HoveredAssetInfo BuildHoveredWlLiquidInfo(WlLiquidBody body)
-    {
-        Vector3 worldPosition = (body.BoundsMin + body.BoundsMax) * 0.5f;
-        return new HoveredAssetInfo(
-            "WL liquid",
-            body.Name,
-            body.SourcePath,
-            $"{body.FileType} • {body.GroupLabel} • {body.BlockCount} blocks • Z {body.MinHeight:F1}..{body.MaxHeight:F1}",
-            worldPosition,
-            0,
-                null,
-                ObjectType.None,
-                -1,
-                body.BodyKey);
-    }
-
     /// <summary>
     /// Resolves a PM4 object to the placed asset that produced it.
     /// </summary>
@@ -7614,134 +6929,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
         }
 
         return false;
-    }
-
-    private static bool TryProjectToViewport(Vector3 worldPos, Matrix4x4 view, Matrix4x4 proj,
-        float viewportWidth, float viewportHeight, out float sx, out float sy, out float depth)
-    {
-        var viewSpace = Vector4.Transform(new Vector4(worldPos, 1f), view);
-        depth = MathF.Abs(viewSpace.Z);
-        if (depth < 0.001f)
-        {
-            sx = sy = 0f;
-            return false;
-        }
-
-        var clip = Vector4.Transform(new Vector4(worldPos, 1f), view * proj);
-        if (clip.W <= 0f)
-        {
-            sx = sy = 0f;
-            return false;
-        }
-
-        float ndcX = clip.X / clip.W;
-        float ndcY = clip.Y / clip.W;
-        sx = (ndcX * 0.5f + 0.5f) * viewportWidth;
-        sy = (1f - (ndcY * 0.5f + 0.5f)) * viewportHeight;
-        return true;
-    }
-
-    private static float EstimateProjectedRadius(float worldRadius, float depth, Matrix4x4 proj, float viewportHeight)
-    {
-        float yScale = MathF.Abs(proj.M22);
-        if (yScale < 0.0001f)
-            return 0f;
-
-        return MathF.Min((worldRadius * yScale / depth) * (viewportHeight * 0.5f), WireframeRevealMaxScreenRadius);
-    }
-
-    private (int PreparedPrimitiveCount, int SubmittedPrimitiveCount) RenderWireframeReveal(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
-        Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
-    {
-        if (_wireframeRevealWmoIndices.Count == 0 && _wireframeRevealMdxIndices.Count == 0)
-            return (0, 0);
-
-        int preparedPrimitiveCount = _wireframeRevealWmoIndices.Count + _wireframeRevealMdxIndices.Count;
-        int submittedPrimitiveCount = 0;
-
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthFunc(DepthFunction.Lequal);
-        _gl.DepthMask(false);
-        _gl.Disable(EnableCap.Blend);
-
-        foreach (int idx in _wireframeRevealWmoIndices)
-        {
-            if ((uint)idx >= (uint)_wmoInstances.Count)
-                continue;
-
-            var inst = _wmoInstances[idx];
-            var renderer = TryGetQueuedWmo(inst.ModelKey);
-            if (renderer == null)
-                continue;
-
-            renderer.RenderWireframeOverlay(inst.Transform, view, proj,
-                fogColor, fogStart, fogEnd, cameraPos,
-                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-            submittedPrimitiveCount++;
-        }
-
-        foreach (int idx in _wireframeRevealMdxIndices)
-        {
-            if ((uint)idx >= (uint)_mdxInstances.Count)
-                continue;
-
-            var inst = _mdxInstances[idx];
-            var renderer = TryGetQueuedMdx(inst.ModelKey);
-            if (renderer == null)
-                continue;
-
-            renderer.RenderWireframeOverlay(inst.Transform, view, proj,
-                fogColor, fogStart, fogEnd, cameraPos,
-                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-            submittedPrimitiveCount++;
-        }
-
-        _gl.DepthMask(true);
-        _gl.DepthFunc(DepthFunction.Lequal);
-        return (preparedPrimitiveCount, submittedPrimitiveCount);
-    }
-
-    private (int PreparedPrimitiveCount, int SubmittedPrimitiveCount) RenderVisibleObjectWireframeOverlay(WorldRenderFrame frame, Matrix4x4 view, Matrix4x4 proj,
-        Vector3 cameraPos, Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
-    {
-        if (frame.Visibility.VisibleWmos.Count == 0 && frame.Visibility.VisibleMdx.Count == 0)
-            return (0, 0);
-
-        int preparedPrimitiveCount = frame.Visibility.VisibleWmos.Count + frame.Visibility.VisibleMdx.Count;
-        int submittedPrimitiveCount = 0;
-
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthFunc(DepthFunction.Lequal);
-        _gl.DepthMask(false);
-        _gl.Disable(EnableCap.Blend);
-
-        foreach (VisibleWmoInstance visible in frame.Visibility.VisibleWmos)
-        {
-            WmoRenderer? renderer = ResolveVisibleWmoRenderer(frame, visible.Instance.ModelKey);
-            if (renderer == null)
-                continue;
-
-            renderer.RenderWireframeOverlay(visible.Instance.Transform, view, proj,
-                fogColor, fogStart, fogEnd, cameraPos,
-                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-            submittedPrimitiveCount++;
-        }
-
-        foreach (VisibleMdxInstance visible in frame.Visibility.VisibleMdx)
-        {
-            IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
-            if (renderer == null)
-                continue;
-
-            renderer.RenderWireframeOverlay(visible.Instance.Transform, view, proj,
-                fogColor, fogStart, fogEnd, cameraPos,
-                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-            submittedPrimitiveCount++;
-        }
-
-        _gl.DepthMask(true);
-        _gl.DepthFunc(DepthFunction.Lequal);
-        return (preparedPrimitiveCount, submittedPrimitiveCount);
     }
 
     /// <summary>
@@ -7869,12 +7056,6 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost
     }
 }
 
-/// <summary>
-/// Lightweight placement instance — just a model key and world transform.
-/// The actual renderer is looked up from WorldAssetManager at render time.
-/// </summary>
-public enum ObjectType { None, Wmo, Mdx, WmoDoodad }
-
 public enum UniqueIdVisibilityScope
 {
     PerMap,
@@ -7899,80 +7080,4 @@ public readonly struct UniqueIdArchaeologyLayer
     public int PlacementCount { get; }
     public int WmoCount { get; }
     public int MdxCount { get; }
-}
-
-    public readonly struct HoveredAssetInfo
-{
-    public HoveredAssetInfo(
-        string assetKind,
-        string displayName,
-        string sourcePath,
-        string detailLine,
-        Vector3 worldPosition,
-        int additionalHitCount,
-        (int tileX, int tileY, uint ck24, int objectPart)? pm4ObjectKey,
-        ObjectType sceneObjectType = ObjectType.None,
-        int sceneObjectIndex = -1,
-        string? wlBodyKey = null,
-        bool isPreciseRayHit = false,
-        int parentWmoIndex = -1,
-        string? parentSourcePath = null)
-    {
-        AssetKind = assetKind ?? string.Empty;
-        DisplayName = displayName ?? string.Empty;
-        SourcePath = sourcePath ?? string.Empty;
-        DetailLine = detailLine ?? string.Empty;
-        WorldPosition = worldPosition;
-        AdditionalHitCount = Math.Max(0, additionalHitCount);
-        Pm4ObjectKey = pm4ObjectKey;
-        SceneObjectType = sceneObjectType;
-        SceneObjectIndex = sceneObjectIndex;
-        WlBodyKey = wlBodyKey ?? string.Empty;
-        IsPreciseRayHit = isPreciseRayHit;
-        ParentWmoIndex = parentWmoIndex;
-        ParentSourcePath = parentSourcePath ?? string.Empty;
-    }
-
-    public string AssetKind { get; }
-    public string DisplayName { get; }
-    public string SourcePath { get; }
-    public string DetailLine { get; }
-    public Vector3 WorldPosition { get; }
-    public int AdditionalHitCount { get; }
-    public (int tileX, int tileY, uint ck24, int objectPart)? Pm4ObjectKey { get; }
-    public ObjectType SceneObjectType { get; }
-    public int SceneObjectIndex { get; }
-    public string WlBodyKey { get; }
-    public bool IsPreciseRayHit { get; }
-    public int ParentWmoIndex { get; }
-    public string ParentSourcePath { get; }
-    public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo or ObjectType.WmoDoodad && SceneObjectIndex >= 0;
-
-    public HoveredAssetInfo WithPreciseRayHit() => new(
-        AssetKind, DisplayName, SourcePath, DetailLine, WorldPosition, AdditionalHitCount, Pm4ObjectKey,
-        SceneObjectType, SceneObjectIndex, WlBodyKey, isPreciseRayHit: true, ParentWmoIndex, ParentSourcePath);
-}
-
-public readonly record struct SceneObjectPickHit(
-    ObjectType ObjectType,
-    int ObjectIndex,
-    float Distance,
-    string ModelName,
-    string ModelPath,
-    int UniqueId,
-    Vector3 PlacementPosition,
-    Vector3 BoundsMin,
-    Vector3 BoundsMax,
-    Vector3 SelectionPoint,
-    float SelectionPointDistanceSq,
-    bool SharesClickedChunk,
-    int ChunkGridDistance,
-    int ParentWmoIndex = -1)
-{
-    public string KindLabel => ObjectType switch
-    {
-        ObjectType.Wmo => "WMO",
-        ObjectType.WmoDoodad => "WMO Doodad",
-        _ => "MDX"
-    };
 }

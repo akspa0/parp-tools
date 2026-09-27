@@ -16,7 +16,7 @@ internal sealed partial class SceneHoverAndPickService
 
     private bool TryDrawTerrainChunkHoverOverlay()
     {
-        if (_worldScene != null && !_worldScene.ShowHoveredAssetTooltips)
+        if (_worldScene != null && !_worldScene.HoverPick.ShowHoveredAssetTooltips)
             return false;
 
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;

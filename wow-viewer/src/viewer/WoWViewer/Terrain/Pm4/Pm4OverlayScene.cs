@@ -125,7 +125,7 @@ public sealed partial class Pm4OverlayScene
     private static void TransformBounds(Vector3 boundsMin, Vector3 boundsMax, in Matrix4x4 transform, out Vector3 transformedMin, out Vector3 transformedMax)
         => WorldScene.TransformBounds(boundsMin, boundsMax, in transform, out transformedMin, out transformedMax);
     private static bool TryMeasureHoverInfoHit(Vector3 boundsMin, Vector3 boundsMax, Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight, out float distanceSq, out float depth)
-        => WorldScene.TryMeasureHoverInfoHit(boundsMin, boundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out distanceSq, out depth);
+        => SceneHoverPickController.TryMeasureHoverInfoHit(boundsMin, boundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out distanceSq, out depth);
 
     private static float? JsonFiniteOrNull(float value) => float.IsFinite(value) ? value : null;
     private readonly Pm4OverlayCacheService? _pm4OverlayCacheService;

@@ -140,7 +140,7 @@ internal sealed partial class NavigatorPanelService
 
     internal bool TryInspectHoveredSceneAssetInSelection()
     {
-        if (_worldScene?.HoveredAssetInfo is not HoveredAssetInfo info || !info.HasSceneObject)
+        if (_worldScene?.HoverPick.HoveredAssetInfo is not HoveredAssetInfo info || !info.HasSceneObject)
             return false;
 
         if (!_worldScene.SelectSceneObject(info.SceneObjectType, info.SceneObjectIndex, info.ParentWmoIndex))

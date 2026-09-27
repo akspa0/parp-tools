@@ -255,7 +255,7 @@ internal sealed partial class ViewerChromeService
                         ImGui.SameLine();
                         _modelInspector.DrawHoveredWmoDoodadSetCombo(frozenWmo, _hoveredWmoDoodadSetComboSourcePath);
                     }
-                    else if (_worldScene.HoveredAssetInfo is { } hoveredAsset
+                    else if (_worldScene.HoverPick.HoveredAssetInfo is { } hoveredAsset
                         && hoveredAsset.SceneObjectType == Terrain.ObjectType.Wmo
                         && hoveredAsset.SceneObjectIndex >= 0)
                     {
