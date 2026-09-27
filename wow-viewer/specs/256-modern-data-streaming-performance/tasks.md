@@ -51,3 +51,8 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 - [x] T091 Operator capture: DeferredAssetLoads while streaming; doodad load phase line. Receipt: [evidence/capture-d-p3-2026-09-27.md](evidence/capture-d-p3-2026-09-27.md) (DeferredAssetLoads median 68.3 → 7.6 ms).
 - [ ] T092 Split `Rendering/WmoRenderer.cs` (3,794 lines before D; over the ~2,000 budget) — AGENTS.md §10.
 - [x] T093 Perf panel code moved out of `Pm4WorkbenchService` into `PerfPanelService` (operator 2026-09-27). Receipt: [evidence/perf-panel-move-2026-09-27.md](evidence/perf-panel-move-2026-09-27.md).
+
+## Amendment A — M2 animation cost (operator 2026-09-27: "yes, the animation is eating everything for breakfast")
+- [x] T100 Find the per-frame and first-use costs of native M2 animation (code + measurement). Receipt: [evidence/a-animation-2026-09-27.md](evidence/a-animation-2026-09-27.md) (code reading; measurement is T102).
+- [x] T101 Implement the cuts; build + tests + receipt. Receipt: [evidence/a-animation-2026-09-27.md](evidence/a-animation-2026-09-27.md).
+- [ ] T102 Operator capture: MdxAnimation stage, hitches when entering an animated area.

@@ -111,3 +111,10 @@ Capture `evidence/capture-t073-2026-09-27.md`. D brings WMO doodad M2 loads to t
 | D5 | Doodad load time in Runtime Stats (new load phase) |
 
 Standalone/screenshot WMO renderers keep their own caches. P3 (T040–T042) starts after D's build/receipt.
+
+## Amendment 2026-09-27 — A: M2 animation cost (operator: "yes, the animation is eating everything for breakfast. it's especially apparent when you move from an area with no animated doodads to an area with animated models, it causes the whole thing to hitch and stutter until the animation frames start rendering.")
+
+Capture `evidence/capture-d-p3-2026-09-27.md`: MDX animation 43.9 ms (Runtime Stats), every recent hitch attributed to
+MdxAnimation. Scope: the native `M2Renderer.UpdateAnimation` path (per-model CPU pose/skin/upload, first-use costs when
+animated models come into view). Findings and steps recorded in `evidence/` before code; each step build + tests +
+receipt; operator capture.

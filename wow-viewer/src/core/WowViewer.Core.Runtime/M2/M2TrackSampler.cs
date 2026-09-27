@@ -57,7 +57,8 @@ public static class M2TrackSampler
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(track);
 
-        if (!TryReadTrackKeyFrames(payload, track, sequenceIndex, readSample, out List<TrackKeyFrame<TValue>> keyFrames) || keyFrames.Count == 0)
+        TrackKeyFrame<TValue>[]? keyFrames = GetKeyFrames(payload, track, sequenceIndex, readSample);
+        if (keyFrames is null || keyFrames.Length == 0)
             return fallback;
 
         uint duration = 0u;
@@ -81,10 +82,10 @@ public static class M2TrackSampler
         }
 
         int sampleTime = resolvedOffset + ResolveSampleTime(timeMs, duration);
-        if (track.Interpolation == M2TrackInterpolation.None || keyFrames.Count == 1)
+        if (track.Interpolation == M2TrackInterpolation.None || keyFrames.Length == 1)
             return SampleStep(keyFrames, sampleTime);
 
-        for (int index = 0; index < keyFrames.Count - 1; index++)
+        for (int index = 0; index < keyFrames.Length - 1; index++)
         {
             TrackKeyFrame<TValue> current = keyFrames[index];
             TrackKeyFrame<TValue> next = keyFrames[index + 1];
@@ -100,6 +101,25 @@ public static class M2TrackSampler
         }
 
         return sampleTime <= keyFrames[0].Time ? keyFrames[0].Value : keyFrames[^1].Value;
+    }
+
+    // Decoded once per (track, payload, slot); see M2TrackKeyFrameCache. Each (TTrack, TValue) pair has exactly
+    // one reader in this class, so the cache key does not need the reader.
+    private static TrackKeyFrame<TValue>[]? GetKeyFrames<TTrack, TValue>(
+        byte[] payload,
+        M2TrackDefinition<TTrack> track,
+        int sequenceIndex,
+        Func<byte[], int, M2TrackInterpolation, TrackSample<TValue>> readSample)
+    {
+        int trackIndex = track.UsesGlobalSequence ? 0 : sequenceIndex;
+        if (M2TrackKeyFrameCache<TTrack, TrackKeyFrame<TValue>>.TryGet(track, payload, trackIndex, out TrackKeyFrame<TValue>[]? cached))
+            return cached;
+
+        TrackKeyFrame<TValue>[]? decoded = TryReadTrackKeyFrames(payload, track, sequenceIndex, readSample, out List<TrackKeyFrame<TValue>> keyFrames)
+            ? keyFrames.ToArray()
+            : null;
+        M2TrackKeyFrameCache<TTrack, TrackKeyFrame<TValue>>.Store(track, payload, trackIndex, decoded);
+        return decoded;
     }
 
     private static bool TryReadTrackKeyFrames<TTrack, TValue>(
@@ -188,10 +208,10 @@ public static class M2TrackSampler
         return sampleTime;
     }
 
-    private static T SampleStep<T>(IReadOnlyList<TrackKeyFrame<T>> keyFrames, int sampleTime)
+    private static T SampleStep<T>(TrackKeyFrame<T>[] keyFrames, int sampleTime)
     {
         TrackKeyFrame<T> current = keyFrames[0];
-        for (int index = 1; index < keyFrames.Count; index++)
+        for (int index = 1; index < keyFrames.Length; index++)
         {
             if (sampleTime < keyFrames[index].Time)
                 break;

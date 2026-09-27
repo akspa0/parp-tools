@@ -151,6 +151,7 @@ public sealed partial class M2Renderer
         Matrix4x4 proj = _batchProj;
         gl.UseProgram(_shaderProgram);
         gl.Uniform1(_uInstanced, 1);
+        ApplySkinningUniforms();
         gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
         gl.Uniform3(_uFogColor, _batchFogColor.X, _batchFogColor.Y, _batchFogColor.Z);

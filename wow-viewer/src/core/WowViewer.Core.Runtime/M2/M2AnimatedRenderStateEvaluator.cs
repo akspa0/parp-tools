@@ -265,7 +265,8 @@ public static class M2AnimatedRenderStateEvaluator
 
     private static T EvaluateTrack<T>(byte[] payload, M2ModelDocument model, int sequenceIndex, int timeMs, M2TrackDefinition<T> track, T fallback)
     {
-        if (!TryReadTrackKeyFrames(payload, track, sequenceIndex, out List<TrackKeyFrame<T>> keyFrames) || keyFrames.Count == 0)
+        TrackKeyFrame<T>[]? keyFrames = GetKeyFrames(payload, track, sequenceIndex);
+        if (keyFrames is null || keyFrames.Length == 0)
             return fallback;
 
         uint duration = track.UsesGlobalSequence
@@ -273,10 +274,10 @@ public static class M2AnimatedRenderStateEvaluator
             : model.Sequences[sequenceIndex].Duration;
 
         int sampleTime = ResolveSampleTime(timeMs, duration);
-        if (track.Interpolation == M2TrackInterpolation.None || keyFrames.Count == 1)
+        if (track.Interpolation == M2TrackInterpolation.None || keyFrames.Length == 1)
             return SampleStep(keyFrames, sampleTime);
 
-        for (int index = 0; index < keyFrames.Count - 1; index++)
+        for (int index = 0; index < keyFrames.Length - 1; index++)
         {
             TrackKeyFrame<T> current = keyFrames[index];
             TrackKeyFrame<T> next = keyFrames[index + 1];
@@ -312,10 +313,10 @@ public static class M2AnimatedRenderStateEvaluator
         return sampleTime;
     }
 
-    private static T SampleStep<T>(IReadOnlyList<TrackKeyFrame<T>> keyFrames, int sampleTime)
+    private static T SampleStep<T>(TrackKeyFrame<T>[] keyFrames, int sampleTime)
     {
         TrackKeyFrame<T> current = keyFrames[0];
-        for (int index = 1; index < keyFrames.Count; index++)
+        for (int index = 1; index < keyFrames.Length; index++)
         {
             if (sampleTime < keyFrames[index].Time)
                 break;
@@ -324,6 +325,20 @@ public static class M2AnimatedRenderStateEvaluator
         }
 
         return current.Value;
+    }
+
+    // Decoded once per (track, payload, slot); see M2TrackKeyFrameCache.
+    private static TrackKeyFrame<T>[]? GetKeyFrames<T>(byte[] payload, M2TrackDefinition<T> track, int sequenceIndex)
+    {
+        int trackIndex = track.UsesGlobalSequence ? 0 : sequenceIndex;
+        if (M2TrackKeyFrameCache<T, TrackKeyFrame<T>>.TryGet(track, payload, trackIndex, out TrackKeyFrame<T>[]? cached))
+            return cached;
+
+        TrackKeyFrame<T>[]? decoded = TryReadTrackKeyFrames(payload, track, sequenceIndex, out List<TrackKeyFrame<T>> keyFrames)
+            ? keyFrames.ToArray()
+            : null;
+        M2TrackKeyFrameCache<T, TrackKeyFrame<T>>.Store(track, payload, trackIndex, decoded);
+        return decoded;
     }
 
     private static bool TryReadTrackKeyFrames<T>(byte[] payload, M2TrackDefinition<T> track, int sequenceIndex, out List<TrackKeyFrame<T>> keyFrames)

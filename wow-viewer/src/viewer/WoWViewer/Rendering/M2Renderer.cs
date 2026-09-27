@@ -344,6 +344,16 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
         try
         {
             M2AnimatedRenderState animatedState = M2AnimatedRenderStateEvaluator.Evaluate(_runtimeModel.Model, _runtimeModel, sequenceIndex, timeMs, externalAnimationState);
+            if (_gpuSkinning)
+            {
+                // Spec 256 A: the vertex shader skins with these matrices; no per-frame vertex rebuild or upload.
+                M2BonePoseEvaluator.EvaluateWorldMatrices(_runtimeModel.Model, sequenceIndex, timeMs, externalAnimationState, _boneMatrices, _boneSolvedScratch);
+                _hasBonePose = true;
+                _lastAnimatedLights = animatedState.Lights;
+                ApplyAnimatedPassStates(M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState));
+                return;
+            }
+
             M2BonePoseState bonePoseState = M2BonePoseEvaluator.Evaluate(_runtimeModel.Model, sequenceIndex, timeMs, externalAnimationState);
             M2SkinnedRenderModel skinnedRenderModel = M2SkinnedRenderModelBuilder.ApplyPose(_runtimeModel, bonePoseState);
             M2RenderConsumerFrameState consumerState = M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState);
@@ -578,14 +588,17 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             return;
 
         CreateInstanceBuffer(); // Spec 256 P3
+        InitGpuSkinning(); // Spec 256 A
+        int stride = _gpuSkinning ? GpuSkinnedVertexFloats : 10;
 
         foreach (M2StaticRenderSection section in _runtimeModel.Sections)
         {
-            float[] vertexData = new float[section.Vertices.Count * 10];
+            float[] vertexData = new float[section.Vertices.Count * stride];
+            M2StructuredRenderSection? skinSource = _gpuSkinning ? FindSkinSource(section) : null;
             for (int index = 0; index < section.Vertices.Count; index++)
             {
                 M2StaticRenderVertex vertex = section.Vertices[index];
-                int offset = index * 10;
+                int offset = index * stride;
                 vertexData[offset + 0] = vertex.Position.X;
                 vertexData[offset + 1] = vertex.Position.Y;
                 vertexData[offset + 2] = vertex.Position.Z;
@@ -596,6 +609,8 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
                 vertexData[offset + 7] = vertex.TextureCoords0.Y;
                 vertexData[offset + 8] = vertex.TextureCoords1.X;
                 vertexData[offset + 9] = vertex.TextureCoords1.Y;
+                if (_gpuSkinning)
+                    WriteSkinningAttributes(vertexData, offset, skinSource, index);
             }
 
             uint[] indices = section.Indices.ToArray();
@@ -609,7 +624,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             {
                 fixed (float* vertexPtr = vertexData)
                 {
-                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), vertexPtr, _runtimeAnimator != null ? BufferUsageARB.DynamicDraw : BufferUsageARB.StaticDraw);
+                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), vertexPtr, _runtimeAnimator != null && !_gpuSkinning ? BufferUsageARB.DynamicDraw : BufferUsageARB.StaticDraw);
                 }
 
                 _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
@@ -618,14 +633,22 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
                     _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(uint)), indexPtr, BufferUsageARB.StaticDraw);
                 }
 
-                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)0);
+                uint strideBytes = (uint)stride * sizeof(float);
+                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, strideBytes, (void*)0);
                 _gl.EnableVertexAttribArray(0);
-                _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(3 * sizeof(float)));
+                _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, strideBytes, (void*)(3 * sizeof(float)));
                 _gl.EnableVertexAttribArray(1);
-                _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(6 * sizeof(float)));
+                _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, strideBytes, (void*)(6 * sizeof(float)));
                 _gl.EnableVertexAttribArray(2);
-                _gl.VertexAttribPointer(3, 2, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(8 * sizeof(float)));
+                _gl.VertexAttribPointer(3, 2, VertexAttribPointerType.Float, false, strideBytes, (void*)(8 * sizeof(float)));
                 _gl.EnableVertexAttribArray(3);
+                if (_gpuSkinning)
+                {
+                    _gl.VertexAttribPointer(SkinBoneIndexAttribute, 4, VertexAttribPointerType.Float, false, strideBytes, (void*)(10 * sizeof(float)));
+                    _gl.EnableVertexAttribArray(SkinBoneIndexAttribute);
+                    _gl.VertexAttribPointer(SkinBoneWeightAttribute, 4, VertexAttribPointerType.Float, false, strideBytes, (void*)(14 * sizeof(float)));
+                    _gl.EnableVertexAttribArray(SkinBoneWeightAttribute);
+                }
             }
 
             ConfigureInstanceAttributes(); // bound VAO; left disabled until an instanced draw
@@ -642,9 +665,21 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
     private void ApplyAnimatedFrame(M2SkinnedRenderModel skinnedRenderModel, M2RenderConsumerFrameState consumerState)
     {
-        Dictionary<int, M2RenderConsumerPassState> firstPassBySection = consumerState.Passes
-            .GroupBy(static pass => pass.AnimatedPass.SectionIndex)
-            .ToDictionary(static group => group.Key, static group => group.First());
+        ApplyAnimatedPassStates(consumerState);
+
+        foreach (M2SkinnedRenderSection section in skinnedRenderModel.Sections)
+            UploadAnimatedVertices(section);
+    }
+
+    // Reused every frame (was a LINQ GroupBy/ToDictionary per frame): the first pass of each section.
+    private readonly Dictionary<int, M2RenderConsumerPassState> _firstPassBySection = new();
+
+    private void ApplyAnimatedPassStates(M2RenderConsumerFrameState consumerState)
+    {
+        Dictionary<int, M2RenderConsumerPassState> firstPassBySection = _firstPassBySection;
+        firstPassBySection.Clear();
+        foreach (M2RenderConsumerPassState pass in consumerState.Passes)
+            firstPassBySection.TryAdd(pass.AnimatedPass.SectionIndex, pass);
 
         for (int index = 0; index < _sections.Count; index++)
         {
@@ -665,16 +700,17 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
                 ResetAnimatedTextureState(section);
             }
         }
-
-        foreach (M2SkinnedRenderSection section in skinnedRenderModel.Sections)
-            UploadAnimatedVertices(section);
     }
 
     private void ApplyAnimatedTextureState(SectionBuffers section, M2RenderConsumerPassState passState)
     {
-        M2RenderConsumerTextureState? textureState = passState.Textures
-            .OrderBy(static texture => texture.StageIndex)
-            .FirstOrDefault();
+        // First texture with the lowest stage (what the stable OrderBy(StageIndex).FirstOrDefault() picked).
+        M2RenderConsumerTextureState? textureState = null;
+        foreach (M2RenderConsumerTextureState texture in passState.Textures)
+        {
+            if (textureState == null || texture.StageIndex < textureState.StageIndex)
+                textureState = texture;
+        }
 
         if (textureState == null)
         {
@@ -760,6 +796,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
         _gl.UseProgram(_shaderProgram);
         _gl.Uniform1(_uInstanced, 0);
+        ApplySkinningUniforms();
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&modelMatrix);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
@@ -908,6 +945,11 @@ layout (location = 5) in vec4 aInstanceModel1;
 layout (location = 6) in vec4 aInstanceModel2;
 layout (location = 7) in vec4 aInstanceModel3;
 layout (location = 8) in float aInstanceFade;
+// Spec 256 A: GPU skinning (model bone indices, weights <= 0 mark unused or unresolved influences).
+layout (location = 9) in vec4 aBoneIndices;
+layout (location = 10) in vec4 aBoneWeights;
+uniform int uSkinned;
+uniform mat4 uBones[128];
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -927,9 +969,43 @@ void main()
         ? mat4(aInstanceModel0, aInstanceModel1, aInstanceModel2, aInstanceModel3)
         : uModel;
     vInstanceFade = uInstanced == 1 ? aInstanceFade : 1.0;
-    vec4 worldPos = model * vec4(aPos, 1.0);
+
+    // Same weighting as M2SkinnedRenderModelBuilder.ApplyVertex (the CPU path this replaces).
+    vec3 localPos = aPos;
+    vec3 localNormal = aNormal;
+    if (uSkinned == 1)
+    {
+        vec3 skinnedPos = vec3(0.0);
+        vec3 skinnedNormal = vec3(0.0);
+        float totalWeight = 0.0;
+        for (int influence = 0; influence < 4; influence++)
+        {
+            float weight = aBoneWeights[influence];
+            if (weight <= 0.0)
+                continue;
+
+            mat4 bone = uBones[int(aBoneIndices[influence])];
+            skinnedPos += (bone * vec4(aPos, 1.0)).xyz * weight;
+            skinnedNormal += (mat3(bone) * aNormal) * weight;
+            totalWeight += weight;
+        }
+
+        if (totalWeight > 0.0)
+        {
+            if (abs(totalWeight - 1.0) > 0.0001)
+            {
+                skinnedPos /= totalWeight;
+                skinnedNormal /= totalWeight;
+            }
+
+            localPos = skinnedPos;
+            localNormal = skinnedNormal;
+        }
+    }
+
+    vec4 worldPos = model * vec4(localPos, 1.0);
     vWorldPos = worldPos.xyz;
-    vNormal = normalize(mat3(model) * aNormal);
+    vNormal = normalize(mat3(model) * localNormal);
     vViewNormal = mat3(uView) * vNormal;
     vTexCoord0 = aTexCoord0;
     vTexCoord1 = aTexCoord1;
@@ -1051,6 +1127,8 @@ void main()
         _uUvScale = _gl.GetUniformLocation(_shaderProgram, "uUvScale");
         _uUvRotation = _gl.GetUniformLocation(_shaderProgram, "uUvRotation");
         _uInstanced = _gl.GetUniformLocation(_shaderProgram, "uInstanced");
+        _uSkinned = _gl.GetUniformLocation(_shaderProgram, "uSkinned");
+        _uBones = _gl.GetUniformLocation(_shaderProgram, "uBones");
         _shaderInitialized = true;
     }
 

@@ -84,17 +84,7 @@ public static class M2BonePoseEvaluator
         int timeMs,
         M2ExternalAnimationRuntimeState? externalAnimationState = null)
     {
-        ArgumentNullException.ThrowIfNull(model);
-
-        if (sequenceIndex < 0 || sequenceIndex >= model.Sequences.Count)
-            throw new ArgumentOutOfRangeException(nameof(sequenceIndex), $"Sequence index {sequenceIndex} is out of range for model '{model.Identity.CanonicalModelPath}'.");
-
-        if (externalAnimationState is not null && externalAnimationState.RequestedSequenceIndex != sequenceIndex)
-        {
-            throw new ArgumentException(
-                $"External animation state targets sequence {externalAnimationState.RequestedSequenceIndex} but pose evaluation requested sequence {sequenceIndex}.",
-                nameof(externalAnimationState));
-        }
+        ValidateRequest(model, sequenceIndex, externalAnimationState);
 
         int resolvedSequenceIndex = externalAnimationState?.ResolvedSequenceIndex ?? sequenceIndex;
         byte[] payload = ResolvePayload(model, externalAnimationState);
@@ -109,6 +99,46 @@ public static class M2BonePoseEvaluator
         return new M2BonePoseState(sequenceIndex, resolvedSequenceIndex, timeMs, usesExternalPayload, poses.Select(static pose => pose!).ToArray());
     }
 
+    /// <summary>
+    /// The <see cref="M2BonePoseState.Matrices"/> of <see cref="Evaluate"/>, computed identically but written
+    /// into caller-owned arrays (length at least the bone count) instead of allocating a pose object per bone.
+    /// For renderers that evaluate every frame and only need the matrices.
+    /// </summary>
+    public static void EvaluateWorldMatrices(
+        M2ModelDocument model,
+        int sequenceIndex,
+        int timeMs,
+        M2ExternalAnimationRuntimeState? externalAnimationState,
+        Matrix4x4[] worldMatrices,
+        bool[] solvedScratch)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(worldMatrices);
+        ArgumentNullException.ThrowIfNull(solvedScratch);
+        ValidateRequest(model, sequenceIndex, externalAnimationState);
+        if (worldMatrices.Length < model.Bones.Count || solvedScratch.Length < model.Bones.Count)
+            throw new ArgumentException($"Destination arrays hold fewer than {model.Bones.Count} bones.", nameof(worldMatrices));
+
+        int resolvedSequenceIndex = externalAnimationState?.ResolvedSequenceIndex ?? sequenceIndex;
+        byte[] payload = ResolvePayload(model, externalAnimationState);
+        Array.Clear(solvedScratch, 0, model.Bones.Count);
+        for (int boneIndex = 0; boneIndex < model.Bones.Count; boneIndex++)
+            SolveBone(model, payload, resolvedSequenceIndex, timeMs, boneIndex, worldMatrices, solvedScratch, poses: null);
+    }
+
+    private static void ValidateRequest(M2ModelDocument model, int sequenceIndex, M2ExternalAnimationRuntimeState? externalAnimationState)
+    {
+        if (sequenceIndex < 0 || sequenceIndex >= model.Sequences.Count)
+            throw new ArgumentOutOfRangeException(nameof(sequenceIndex), $"Sequence index {sequenceIndex} is out of range for model '{model.Identity.CanonicalModelPath}'.");
+
+        if (externalAnimationState is not null && externalAnimationState.RequestedSequenceIndex != sequenceIndex)
+        {
+            throw new ArgumentException(
+                $"External animation state targets sequence {externalAnimationState.RequestedSequenceIndex} but pose evaluation requested sequence {sequenceIndex}.",
+                nameof(externalAnimationState));
+        }
+    }
+
     private static void SolveBone(
         M2ModelDocument model,
         byte[] payload,
@@ -117,7 +147,7 @@ public static class M2BonePoseEvaluator
         int boneIndex,
         Matrix4x4[] worldMatrices,
         bool[] solved,
-        M2BonePose?[] poses)
+        M2BonePose?[]? poses)
     {
         if (solved[boneIndex])
             return;
@@ -143,7 +173,8 @@ public static class M2BonePoseEvaluator
 
         worldMatrices[boneIndex] = world;
         solved[boneIndex] = true;
-        poses[boneIndex] = new M2BonePose(bone.Index, bone.ParentBone, bone.Pivot, translation, rotation, scaling, local, world);
+        if (poses != null)
+            poses[boneIndex] = new M2BonePose(bone.Index, bone.ParentBone, bone.Pivot, translation, rotation, scaling, local, world);
     }
 
     private static Matrix4x4 FilterParentTransform(Matrix4x4 parentWorld, M2BoneDefinition bone)
