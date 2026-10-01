@@ -277,6 +277,32 @@ internal sealed partial class ViewerChromeService
                     {
                         _hoveredWmoDoodadSetComboWmo = null;
                     }
+
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                    ImGui.SameLine();
+
+                    bool wmoTex = WmoRenderer.TexturesEnabled;
+                    if (ImGui.Checkbox("WMO Tex", ref wmoTex))
+                        WmoRenderer.TexturesEnabled = wmoTex;
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Toggle textures for WMO objects. Uncheck to render untextured geometry.");
+
+                    ImGui.SameLine();
+                    float wmoOpacity = WmoRenderer.GlobalOpacity * 100f;
+                    ImGui.SetNextItemWidth(65);
+                    if (ImGui.SliderFloat("WMO %", ref wmoOpacity, 0f, 100f, "%.0f%%"))
+                        WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Global WMO Opacity (0% - 100%, e.g. 75% for see-through). Right-click to type.");
+
+                    ImGui.SameLine();
+                    float wallOpacity = WmoRenderer.CollisionWallOpacity * 100f;
+                    ImGui.SetNextItemWidth(65);
+                    if (ImGui.SliderFloat("Walls %", ref wallOpacity, 0f, 100f, "%.0f%%"))
+                        WmoRenderer.CollisionWallOpacity = Math.Clamp(wallOpacity / 100f, 0f, 1f);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Collision Wall Opacity (0% = hidden, 50% = translucent, 100% = solid). Right-click to type.");
                 }
                 else
                 {
@@ -305,6 +331,15 @@ internal sealed partial class ViewerChromeService
                 ImGui.Checkbox("WMO Group BBs", ref _standaloneWmoGroupOverlayEnabled);
                 ImGui.SameLine();
                 ImGui.Checkbox("Group Names", ref _standaloneWmoGroupLabelsAllEnabled);
+                ImGui.SameLine();
+                bool wmoTex = WmoRenderer.TexturesEnabled;
+                if (ImGui.Checkbox("Tex", ref wmoTex))
+                    WmoRenderer.TexturesEnabled = wmoTex;
+                ImGui.SameLine();
+                float wmoOpacity = WmoRenderer.GlobalOpacity * 100f;
+                ImGui.SetNextItemWidth(65);
+                if (ImGui.SliderFloat("WMO %", ref wmoOpacity, 0f, 100f, "%.0f%%"))
+                    WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
             }
 
             ImGui.SameLine();

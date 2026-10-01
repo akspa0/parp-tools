@@ -126,5 +126,60 @@ internal sealed partial class RenderQualityService
             ApplyRenderQualitySettings(refreshTextures: true);
 
         ImGui.TextDisabled("Applies live to standalone MDX, standalone WMO, terrain, and world object renderer caches.");
+
+        ImGui.Separator();
+        ImGui.Text("World Map Objects (WMO)");
+
+        bool wmoTex = WmoRenderer.TexturesEnabled;
+        if (ImGui.Checkbox("Enable WMO Textures", ref wmoTex))
+        {
+            WmoRenderer.TexturesEnabled = wmoTex;
+            _settings.SaveViewerSettings();
+        }
+
+        float wmoOpacity = WmoRenderer.GlobalOpacity * 100f;
+        if (ImGui.SliderFloat("WMO Opacity", ref wmoOpacity, 0f, 100f, "%.0f%%"))
+        {
+            WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Global WMO Opacity (0% - 100%, e.g. 75% for see-through). Right-click to type.");
+
+        bool wallTex = WmoRenderer.CollisionWallTexturesEnabled;
+        if (ImGui.Checkbox("Enable Collision Wall Textures", ref wallTex))
+        {
+            WmoRenderer.CollisionWallTexturesEnabled = wallTex;
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Toggle textures for invisible/boundary collision walls in WoW:Forever and classic clients.");
+
+        float wallOpacity = WmoRenderer.CollisionWallOpacity * 100f;
+        if (ImGui.SliderFloat("Collision Wall Opacity", ref wallOpacity, 0f, 100f, "%.0f%%"))
+        {
+            WmoRenderer.CollisionWallOpacity = Math.Clamp(wallOpacity / 100f, 0f, 1f);
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Dedicated opacity for collision wall WMOs (0% = invisible, 50% = translucent, 100% = solid).");
+
+        if (ImGui.SmallButton("Hide Collision Walls (0%)"))
+        {
+            WmoRenderer.CollisionWallOpacity = 0.0f;
+            _settings.SaveViewerSettings();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Translucent Walls (50%)"))
+        {
+            WmoRenderer.CollisionWallOpacity = 0.5f;
+            _settings.SaveViewerSettings();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Reset Walls (100%)"))
+        {
+            WmoRenderer.CollisionWallOpacity = 1.0f;
+            _settings.SaveViewerSettings();
+        }
     }
 }

@@ -193,6 +193,11 @@ internal sealed class ViewerSettingsService
                 WmoRenderer.MliqRotationQuarterTurns = savedWmoMliqRotation;
             }
 
+            WmoRenderer.GlobalOpacity = Math.Clamp(settings.WmoOpacity, 0f, 1f);
+            WmoRenderer.TexturesEnabled = settings.WmoTexturesEnabled;
+            WmoRenderer.CollisionWallOpacity = Math.Clamp(settings.CollisionWallOpacity, 0f, 1f);
+            WmoRenderer.CollisionWallTexturesEnabled = settings.CollisionWallTexturesEnabled;
+
             _lastGameFolderPath = settings.LastGameFolderPath ?? "";
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
             _datasetCatalogRoot = string.IsNullOrWhiteSpace(settings.LastDatasetCatalogRoot)
@@ -454,6 +459,10 @@ internal sealed class ViewerSettingsService
                 UiTheme = (int)_uiTheme,
                 WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
                 HasExplicitWmoMliqRotationOverride = _hasExplicitWmoMliqRotationOverride,
+                WmoOpacity = WmoRenderer.GlobalOpacity,
+                WmoTexturesEnabled = WmoRenderer.TexturesEnabled,
+                CollisionWallOpacity = WmoRenderer.CollisionWallOpacity,
+                CollisionWallTexturesEnabled = WmoRenderer.CollisionWallTexturesEnabled,
                 LastGameFolderPath = _lastGameFolderPath,
                 LastLooseOverlayPath = _lastLooseOverlayPath,
                 LastDatasetCatalogRoot = _datasetCatalogRoot,
@@ -633,6 +642,10 @@ internal sealed class ViewerSettingsService
         public float UiFontScale { get; set; } = 1.0f;
         public int WmoMliqRotationQuarterTurns { get; set; }
         public bool HasExplicitWmoMliqRotationOverride { get; set; }
+        public float WmoOpacity { get; set; } = 1.0f;
+        public bool WmoTexturesEnabled { get; set; } = true;
+        public float CollisionWallOpacity { get; set; } = 1.0f;
+        public bool CollisionWallTexturesEnabled { get; set; } = true;
         public string? LastGameFolderPath { get; set; }
         public string? LastLooseOverlayPath { get; set; }
         public string? LastDatasetCatalogRoot { get; set; }

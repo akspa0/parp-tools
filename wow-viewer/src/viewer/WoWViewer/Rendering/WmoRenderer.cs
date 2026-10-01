@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Numerics;
 using System.Text;
 using WowViewer.Core.IO.Mdx;
@@ -33,6 +33,16 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     private readonly bool _deferInitialDoodadLoads;
     private readonly bool _deferInitialMaterialTextureLoads;
     private bool _enableRuntimeGroupVisibility;
+    private readonly bool _isCollisionWall;
+
+    public static float GlobalOpacity { get; set; } = 1.0f;
+    public static bool TexturesEnabled { get; set; } = true;
+    public static float CollisionWallOpacity { get; set; } = 1.0f;
+    public static bool CollisionWallTexturesEnabled { get; set; } = true;
+
+    public bool IsCollisionWall => _isCollisionWall;
+    public float GetEffectiveOpacity() => _isCollisionWall ? Math.Clamp(GlobalOpacity * CollisionWallOpacity, 0f, 1f) : Math.Clamp(GlobalOpacity, 0f, 1f);
+    public bool AreTexturesEffective() => TexturesEnabled && (!_isCollisionWall || CollisionWallTexturesEnabled);
 
     private readonly WmoLiquidRenderer _liquidRenderer;
     private readonly WmoMaterialManager _materialManager;
@@ -41,7 +51,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     // Shared static shader program — prevents race condition when multiple WmoRenderers
     // exist and one is disposed (same fix as MdxRenderer)
     private static uint _shaderProgram;
-    private static int _uModel, _uView, _uProj, _uHasTexture, _uUnlit, _uColor, _uAlphaTest;
+    private static int _uModel, _uView, _uProj, _uHasTexture, _uUnlit, _uColor, _uAlphaTest, _uOpacity;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
     private const int MaxWmoLocalLights = SceneLightManager.MaxShaderLights;
@@ -143,6 +153,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         _gl = gl;
         _wmo = wmo;
         _modelDir = modelDir;
+        _isCollisionWall = modelDir.Contains("collisionwall", StringComparison.OrdinalIgnoreCase) || modelDir.Contains("collision_wall", StringComparison.OrdinalIgnoreCase);
         _dataSource = dataSource;
         _texResolver = texResolver;
         _buildVersion = buildVersion;
@@ -563,12 +574,17 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null,
         Vector3? wireframeColor = null)
     {
+        float effectiveOpacity = GetEffectiveOpacity();
+        if (effectiveOpacity <= 0.001f)
+            return;
+
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.DepthMask(false);
         _gl.Disable(EnableCap.Blend);
+        _gl.Uniform1(_uOpacity, effectiveOpacity);
 
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
@@ -639,6 +655,10 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null,
         SceneLightManager? sceneLights = null)
     {
+        float effectiveOpacity = GetEffectiveOpacity();
+        if (effectiveOpacity <= 0.001f)
+            return;
+
         ResetRenderStats();
         ProcessDeferredMaterialTextureLoads();
         _liquidRenderer.EnsureLiquidMeshesUpToDate();
@@ -650,6 +670,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         _gl.UseProgram(_shaderProgram);
         ApplySurfaceCulling();
         _gl.Uniform1(_uUseInstanceModel, 0);
+        _gl.Uniform1(_uOpacity, effectiveOpacity);
 
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
@@ -687,7 +708,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
                 _gl.DepthMask(true);
                 _gl.Enable(EnableCap.Blend);
                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 0.33f);
+                _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 0.33f * effectiveOpacity);
                 // Spec 232: ghost wireframe lines must not be blackened by baked MOCV vertex
                 // light (frequent on WMO interiors) — draw them unlit so they stay visible.
                 _gl.Uniform1(_uUnlit, 1);
@@ -695,7 +716,15 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
             else
             {
                 _gl.DepthMask(true);
-                _gl.Disable(EnableCap.Blend);
+                if (effectiveOpacity < 1.0f)
+                {
+                    _gl.Enable(EnableCap.Blend);
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                }
+                else
+                {
+                    _gl.Disable(EnableCap.Blend);
+                }
                 _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
                 _gl.Uniform1(_uUnlit, 0);
             }
@@ -720,13 +749,15 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
 
                         if (blendMode == EGxBlend.AlphaKey)
                         {
-                            if (!_wireframe) _gl.Disable(EnableCap.Blend);
+                            if (!_wireframe && effectiveOpacity >= 1.0f) _gl.Disable(EnableCap.Blend);
+                            else if (effectiveOpacity < 1.0f) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
                             _gl.DepthMask(true);
                             _gl.Uniform1(_uAlphaTest, WoWConstants.AlphaKeyThreshold);
                         }
                         else
                         {
-                            if (!_wireframe) _gl.Disable(EnableCap.Blend);
+                            if (!_wireframe && effectiveOpacity >= 1.0f) _gl.Disable(EnableCap.Blend);
+                            else if (effectiveOpacity < 1.0f) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
                             _gl.DepthMask(true);
                             _gl.Uniform1(_uAlphaTest, 0.0f);
                         }
@@ -852,6 +883,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
             RenderWireframeOverlay(modelMatrix, view, proj, fc, fogStart, fogEnd, cp, ld, lc, ac);
         }
 
+        _gl.Disable(EnableCap.Blend);
+        _gl.DepthMask(true);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
         LastRenderStats = new WmoRenderStats(
@@ -879,6 +912,13 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         EnsureGpuInstanceBuffer();
 
         _gpuInstanceMatrices.Clear();
+        float effectiveOpacity = GetEffectiveOpacity();
+        if (effectiveOpacity <= 0.001f)
+        {
+            _gpuInstanceBatchActive = false;
+            return;
+        }
+
         _gpuInstanceBatchActive = SupportsGpuInstancedOpaque;
         if (!_gpuInstanceBatchActive)
             return;
@@ -887,7 +927,16 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         ApplySurfaceCulling();
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
-        _gl.Disable(EnableCap.Blend);
+        if (effectiveOpacity < 1.0f)
+        {
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        }
+        else
+        {
+            _gl.Disable(EnableCap.Blend);
+        }
+        _gl.Uniform1(_uOpacity, effectiveOpacity);
         _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
         _gl.Uniform1(_uUseInstanceModel, 0);
 
@@ -993,6 +1042,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         finally
         {
             _gl.Uniform1(_uUseInstanceModel, 0);
+            _gl.Disable(EnableCap.Blend);
+            _gl.DepthMask(true);
             _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
             _gl.BindVertexArray(0);
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
@@ -1090,7 +1141,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         if (!TryBindGroupGeometry(gb, batch))
             return;
 
-        if (_materialManager.TryGetTexture(matId, out uint glTex))
+        if (AreTexturesEffective() && _materialManager.TryGetTexture(matId, out uint glTex))
         {
             _gl.ActiveTexture(TextureUnit.Texture0);
             _gl.BindTexture(TextureTarget.Texture2D, glTex);
@@ -1100,9 +1151,9 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         else
         {
             _gl.Uniform1(_uHasTexture, 0);
-            float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-            float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-            float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+            float r = _isCollisionWall ? 0.35f : ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+            float g = _isCollisionWall ? 0.65f : ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+            float b = _isCollisionWall ? 0.95f : ((gb.GroupIndex * 43 + 29) % 255) / 255f;
             _gl.Uniform4(_uColor, r, g, b, 1.0f);
         }
         _currentDrawCalls++;
@@ -1120,7 +1171,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         if (!TryBindGroupGeometry(gb, batch))
             return;
 
-        if (_materialManager.TryGetTexture(matId, out uint glTex))
+        if (AreTexturesEffective() && _materialManager.TryGetTexture(matId, out uint glTex))
         {
             _gl.ActiveTexture(TextureUnit.Texture0);
             _gl.BindTexture(TextureTarget.Texture2D, glTex);
@@ -1130,9 +1181,9 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         else
         {
             _gl.Uniform1(_uHasTexture, 0);
-            float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-            float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-            float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+            float r = _isCollisionWall ? 0.35f : ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+            float g = _isCollisionWall ? 0.65f : ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+            float b = _isCollisionWall ? 0.95f : ((gb.GroupIndex * 43 + 29) % 255) / 255f;
             _gl.Uniform4(_uColor, r, g, b, 1.0f);
         }
 
@@ -1412,6 +1463,7 @@ uniform vec3 uLocalLightColor[8];
 uniform float uLocalLightIntensity[8];
 uniform float uLocalLightStart[8];
 uniform float uLocalLightEnd[8];
+uniform float uOpacity;
 
 out vec4 FragColor;
 
@@ -1460,7 +1512,7 @@ void main() {
     // carries baked MOCV vertex light that is frequently black, which previously rendered
     // the selection outline invisible (black lines on dark terrain).
     if (uUnlit == 1) {
-        FragColor = vec4(texColor.rgb, texColor.a);
+        FragColor = vec4(texColor.rgb, texColor.a * uOpacity);
         return;
     }
 
@@ -1474,7 +1526,7 @@ void main() {
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
     vec3 foggedColor = mix(uFogColor, litColor, fogFactor);
 
-    FragColor = vec4(foggedColor, texColor.a);
+    FragColor = vec4(foggedColor, texColor.a * uOpacity);
 }
 ";
 
@@ -1499,6 +1551,7 @@ void main() {
         _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
         _uUseInstanceModel = _gl.GetUniformLocation(_shaderProgram, "uUseInstanceModel");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
+        _uOpacity = _gl.GetUniformLocation(_shaderProgram, "uOpacity");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
         _uUnlit = _gl.GetUniformLocation(_shaderProgram, "uUnlit");
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
