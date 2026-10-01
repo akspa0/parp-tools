@@ -34,7 +34,7 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 - [x] T051 Operator: minimap pending count drains quickly on the baseline map. Receipt: operator 2026-09-27 "minimaps are quick now, at least, and fully load"; [evidence/capture-p1-2026-09-27.md](evidence/capture-p1-2026-09-27.md).
 
 ## File budget
-- [ ] T060 Split `Terrain/WorldAssetManager.cs` (2,112 lines; over the ~2,000 budget before this spec, +24 timing/index lines here) — AGENTS.md §10.
+- [x] T060 Split `Terrain/WorldAssetManager.cs` (2,128 -> 1,576 lines; < 2,000 budget) — AGENTS.md §10. Receipt: [evidence/file-splits-2026-09-30.md](evidence/file-splits-2026-09-30.md).
 
 ## P2 amendment — native M2 textures (operator 2026-09-27: "Approve P2a and P2b and P2c")
 - [x] T070 P2a shared reference-counted native M2 texture cache. `c9cf7b6`; Receipt: [evidence/p2abc-2026-09-27.md](evidence/p2abc-2026-09-27.md).
@@ -49,7 +49,7 @@ Nothing is checked without a §9.2 receipt in `evidence/`. FPS, load time and vi
 ## Amendment D — WMO doodad loads (operator 2026-09-27: "Fix building doodad loads")
 - [x] T090 D1–D5 per plan amendment D; build + tests + receipt. Receipt: [evidence/d-wmo-doodads-2026-09-27.md](evidence/d-wmo-doodads-2026-09-27.md).
 - [x] T091 Operator capture: DeferredAssetLoads while streaming; doodad load phase line. Receipt: [evidence/capture-d-p3-2026-09-27.md](evidence/capture-d-p3-2026-09-27.md) (DeferredAssetLoads median 68.3 → 7.6 ms).
-- [ ] T092 Split `Rendering/WmoRenderer.cs` (3,794 lines before D; over the ~2,000 budget) — AGENTS.md §10.
+- [x] T092 Split `Rendering/WmoRenderer.cs` (3,824 -> 1,937 lines; < 2,000 budget) — AGENTS.md §10. Receipt: [evidence/file-splits-2026-09-30.md](evidence/file-splits-2026-09-30.md).
 - [x] T093 Perf panel code moved out of `Pm4WorkbenchService` into `PerfPanelService` (operator 2026-09-27). Receipt: [evidence/perf-panel-move-2026-09-27.md](evidence/perf-panel-move-2026-09-27.md).
 
 ## Amendment A — M2 animation cost (operator 2026-09-27: "yes, the animation is eating everything for breakfast")

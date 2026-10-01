@@ -16,54 +16,7 @@ using WowViewer.Core.IO.M2Era1121;
 
 namespace WoWViewer.Terrain;
 
-public readonly record struct WorldAssetReadStats(
-    long ReadRequests,
-    long FileCacheHits,
-    int FileCacheCount,
-    long FileCacheBytes,
-    long ResolvedPathCacheHits,
-    long PathProbeAttempts,
-    long PathProbeResolutions,
-    long PathProbeMisses,
-    int ResolvedPathCacheCount);
 
-public readonly record struct WmoMeshSummary(
-    int Version,
-    int GroupCount,
-    int VertexCount,
-    int IndexCount,
-    int TriangleCount,
-    int BatchCount,
-    Vector3 BoundsMin,
-    Vector3 BoundsMax,
-    Vector3[] FootprintSampleVertices,
-    WmoGroupMeshSummary[] GroupSummaries)
-{
-    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
-}
-
-public readonly record struct WmoGroupMeshSummary(
-    int GroupIndex,
-    int VertexCount,
-    int IndexCount,
-    int TriangleCount,
-    Vector3 BoundsMin,
-    Vector3 BoundsMax,
-    Vector3[] FootprintSampleVertices)
-{
-    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
-}
-
-public readonly record struct MdxCollisionMeshSummary(
-    int VertexCount,
-    int TriangleIndexCount,
-    int TriangleCount,
-    Vector3 BoundsMin,
-    Vector3 BoundsMax,
-    Vector3[] FootprintSampleVertices)
-{
-    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
-}
 
 /// <summary>
 /// Centralized asset manager for world scene rendering.
@@ -110,7 +63,7 @@ public class WorldAssetManager : IDisposable
     private readonly LinkedList<string> _fileLru = new();
     private readonly Dictionary<string, LinkedListNode<string>> _fileLruMap = new(StringComparer.OrdinalIgnoreCase);
     private long _fileDataCacheBytes;
-    private readonly Dictionary<string, string> _resolvedReadPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly WorldAssetPathResolver _pathResolver;
     private const int MaxFileCached = 1000; // Max raw file entries cached
     private const long MaxFileCacheBytes = 512L * 1024 * 1024; // Raw bytes only; parsed renderers have separate lifetimes.
 
@@ -167,10 +120,6 @@ public class WorldAssetManager : IDisposable
 
     private long _fileReadRequests;
     private long _fileReadCacheHits;
-    private long _resolvedPathCacheHits;
-    private long _pathProbeAttempts;
-    private long _pathProbeResolutions;
-    private long _pathProbeMisses;
     private long _suppressedFailedMdxRetryCount;
     private long _suppressedMissingM2SkinLogCount;
 
@@ -180,6 +129,7 @@ public class WorldAssetManager : IDisposable
         _dataSource = dataSource;
         _texResolver = texResolver;
         _buildVersion = buildVersion;
+        _pathResolver = new WorldAssetPathResolver(dataSource);
     }
 
     public void SetBuildVersion(string? buildVersion)
@@ -260,11 +210,11 @@ public class WorldAssetManager : IDisposable
             _fileReadCacheHits,
             _fileDataCache.Count,
             _fileDataCacheBytes,
-            _resolvedPathCacheHits,
-            _pathProbeAttempts,
-            _pathProbeResolutions,
-            _pathProbeMisses,
-            _resolvedReadPathCache.Count);
+            _pathResolver.ResolvedPathCacheHits,
+            _pathResolver.PathProbeAttempts,
+            _pathResolver.PathProbeResolutions,
+            _pathResolver.PathProbeMisses,
+            _pathResolver.ResolvedPathCacheCount);
 
     /// <summary>
     /// Pre-register all model names referenced by the map so we know the full asset set.
@@ -492,7 +442,7 @@ public class WorldAssetManager : IDisposable
             return false;
         }
 
-        summary = BuildWmoMeshSummary(wmo);
+        summary = WmoMeshSummaryBuilder.BuildWmoMeshSummary(wmo);
         _wmoMeshSummaries[normalizedKey] = summary;
         return true;
     }
@@ -557,7 +507,7 @@ public class WorldAssetManager : IDisposable
             Vector3 boundsMin = collisionFile.Collision.BoundsMin ?? Vector3.Zero;
             Vector3 boundsMax = collisionFile.Collision.BoundsMax ?? Vector3.Zero;
             if (collisionFile.Collision.VertexCount > 0 && collisionFile.Collision.BoundsMin is null)
-                ComputeVectorBounds(collisionFile.Collision.Vertices, out boundsMin, out boundsMax);
+                WmoMeshSummaryBuilder.ComputeVectorBounds(collisionFile.Collision.Vertices, out boundsMin, out boundsMax);
 
             summary = new MdxCollisionMeshSummary(
                 collisionFile.Collision.VertexCount,
@@ -565,7 +515,7 @@ public class WorldAssetManager : IDisposable
                 collisionFile.Collision.TriangleCount,
                 boundsMin,
                 boundsMax,
-                BuildSampleVertices(collisionFile.Collision.Vertices, 256));
+                WmoMeshSummaryBuilder.BuildSampleVertices(collisionFile.Collision.Vertices, 256));
             _mdxCollisionSummaries[normalizedKey] = summary;
             return true;
         }
@@ -836,33 +786,7 @@ public class WorldAssetManager : IDisposable
             return cached;
         }
 
-        byte[]? data = null;
-        string? resolvedPath = null;
-
-        if (_resolvedReadPathCache.TryGetValue(key, out string? cachedResolvedPath))
-        {
-            _resolvedPathCacheHits++;
-            data = TryReadCandidate(cachedResolvedPath, out resolvedPath);
-        }
-
-        if (data == null)
-        {
-            foreach (string candidate in EnumerateReadCandidates(key))
-            {
-                if (!string.IsNullOrWhiteSpace(cachedResolvedPath) && candidate.Equals(cachedResolvedPath, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                data = TryReadCandidate(candidate, out resolvedPath);
-                if (data != null)
-                    break;
-            }
-        }
-
-        if (data != null && !string.IsNullOrWhiteSpace(resolvedPath))
-            _resolvedReadPathCache[key] = NormalizeKey(resolvedPath);
-        else if (data == null)
-            _pathProbeMisses++;
-
+        byte[]? data = _pathResolver.ResolveAndReadFile(key, out _);
         CacheFileData(key, data);
         return data;
     }
@@ -878,273 +802,7 @@ public class WorldAssetManager : IDisposable
         EvictFileCacheIfNeeded();
     }
 
-    public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
-
-    private static string? SwapMdlMdxExtension(string path)
-    {
-        if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
-            return path[..^4] + ".mdx";
-        if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
-            return path[..^4] + ".mdl";
-        // 3.x+ clients may reference .m2 while some archives/listfiles still expose .mdx.
-        if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
-            return path[..^3] + ".mdx";
-        return null;
-    }
-
-    private static IEnumerable<string> GetAlternateModelPaths(string path)
-    {
-        if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return path[..^4] + ".m2";
-            yield return path[..^4] + ".mdl";
-            yield break;
-        }
-
-        if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return path[..^4] + ".mdx";
-            yield return path[..^4] + ".m2";
-            yield break;
-        }
-
-        if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return path[..^3] + ".mdx";
-            yield return path[..^3] + ".mdl";
-        }
-    }
-
-    private static bool IsClassicModelRequest(string path)
-    {
-        string extension = Path.GetExtension(path);
-        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsModelRequest(string path)
-    {
-        string extension = Path.GetExtension(path);
-        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".m2", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static IEnumerable<string> EnumeratePreferredClassicModelPaths(string normalizedPath)
-    {
-        yield return normalizedPath;
-
-        foreach (string alt in GetAlternateModelPaths(normalizedPath))
-        {
-            if (!alt.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
-                yield return alt;
-        }
-    }
-
-    private string? TryResolveFromFileSet(string normalizedPath)
-    {
-        if (_dataSource is not MpqDataSource mpqDataSource)
-            return null;
-
-        foreach (var candidate in BuildFileSetCandidates(normalizedPath))
-        {
-            var found = mpqDataSource.FindInFileSet(candidate);
-            if (!string.IsNullOrWhiteSpace(found))
-                return found;
-        }
-
-        string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
-        if (string.IsNullOrWhiteSpace(baseName) || !IsModelRequest(normalizedPath))
-            return null;
-
-        var indexedMatch = mpqDataSource.FindByBaseName(baseName, GetLikelyModelExtensions(normalizedPath));
-        if (!string.IsNullOrWhiteSpace(indexedMatch))
-            return NormalizeKey(indexedMatch);
-
-        return null;
-    }
-
-    private static IEnumerable<string> BuildFileSetCandidates(string normalizedPath)
-    {
-        yield return normalizedPath;
-
-        foreach (string alternate in GetAlternateModelPaths(normalizedPath))
-            yield return alternate;
-
-        string fileName = Path.GetFileName(normalizedPath);
-        if (!string.IsNullOrWhiteSpace(fileName) && !fileName.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
-        {
-            yield return fileName;
-
-            foreach (string alternate in GetAlternateModelPaths(fileName))
-                yield return alternate;
-        }
-
-        string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
-        if (!string.IsNullOrWhiteSpace(baseName))
-        {
-            yield return $"Creature\\{baseName}\\{baseName}.mdx";
-            yield return $"Creature\\{baseName}\\{baseName}.m2";
-            yield return $"Creature\\{baseName}\\{baseName}.mdl";
-        }
-    }
-
-    private static IEnumerable<string> GetLikelyModelExtensions(string normalizedPath)
-    {
-        string ext = Path.GetExtension(normalizedPath);
-        if (ext.Equals(".m2", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return ".m2";
-            yield return ".mdx";
-            yield return ".mdl";
-            yield break;
-        }
-
-        if (ext.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return ".mdl";
-            yield return ".mdx";
-            yield return ".m2";
-            yield break;
-        }
-
-        yield return ".mdx";
-        yield return ".mdl";
-        yield return ".m2";
-    }
-
-    private byte[]? TryReadCandidate(string candidate, out string? resolvedPath)
-    {
-        resolvedPath = candidate;
-        _pathProbeAttempts++;
-
-        byte[]? data = _dataSource?.ReadFile(candidate);
-        if (data != null)
-        {
-            _pathProbeResolutions++;
-            return data;
-        }
-
-        resolvedPath = null;
-        return null;
-    }
-
-    private byte[]? TryReadExactCandidate(string candidate, out string? resolvedPath)
-    {
-        resolvedPath = NormalizeKey(candidate);
-        _pathProbeAttempts++;
-
-        byte[]? data = _dataSource?.ReadFile(resolvedPath);
-        if (data != null)
-        {
-            _pathProbeResolutions++;
-            return data;
-        }
-
-        if (_dataSource is MpqDataSource mpqDataSource)
-        {
-            string? found = mpqDataSource.FindInFileSet(resolvedPath);
-            if (!string.IsNullOrWhiteSpace(found))
-            {
-                string normalizedFound = NormalizeKey(found);
-                if (!normalizedFound.Equals(resolvedPath, StringComparison.OrdinalIgnoreCase))
-                    data = _dataSource.ReadFile(normalizedFound);
-
-                if (data != null)
-                {
-                    resolvedPath = normalizedFound;
-                    _pathProbeResolutions++;
-                    return data;
-                }
-            }
-        }
-
-        resolvedPath = null;
-        return null;
-    }
-
-    private bool TryReadPreferredClassicModelData(string normalizedKey, out string resolvedPath, out byte[]? data)
-    {
-        resolvedPath = normalizedKey;
-        data = null;
-
-        if (!IsClassicModelRequest(normalizedKey))
-            return false;
-
-        foreach (string candidate in EnumeratePreferredClassicModelPaths(normalizedKey))
-        {
-            data = TryReadExactCandidate(candidate, out string? exactResolvedPath);
-            if (data == null || data.Length == 0 || string.IsNullOrWhiteSpace(exactResolvedPath))
-                continue;
-
-            resolvedPath = NormalizeKey(exactResolvedPath);
-            return true;
-        }
-
-        data = null;
-        resolvedPath = normalizedKey;
-        return false;
-    }
-
-    private IEnumerable<string> EnumerateReadCandidates(string normalizedPath)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        bool TryYield(string? candidate, out string yielded)
-        {
-            yielded = string.Empty;
-            if (string.IsNullOrWhiteSpace(candidate))
-                return false;
-
-            string normalizedCandidate = NormalizeKey(candidate);
-            if (!seen.Add(normalizedCandidate))
-                return false;
-
-            yielded = normalizedCandidate;
-            return true;
-        }
-
-        if (TryYield(normalizedPath, out string exactPath))
-            yield return exactPath;
-
-        string? resolvedFileSetPath = TryResolveFromFileSet(normalizedPath);
-        if (TryYield(resolvedFileSetPath, out string resolvedExactPath))
-            yield return resolvedExactPath;
-
-        foreach (string alternatePath in GetAlternateModelPaths(normalizedPath))
-        {
-            if (TryYield(alternatePath, out string yieldedAlternatePath))
-                yield return yieldedAlternatePath;
-
-            string? resolvedAlternatePath = TryResolveFromFileSet(alternatePath);
-            if (TryYield(resolvedAlternatePath, out string yieldedResolvedAlternatePath))
-                yield return yieldedResolvedAlternatePath;
-        }
-
-        string fileName = Path.GetFileName(normalizedPath);
-        if (!string.IsNullOrWhiteSpace(fileName) && !fileName.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
-        {
-            if (TryYield(fileName, out string yieldedFileName))
-                yield return yieldedFileName;
-
-            string? resolvedFileName = TryResolveFromFileSet(fileName);
-            if (TryYield(resolvedFileName, out string yieldedResolvedFileName))
-                yield return yieldedResolvedFileName;
-
-            string[] prefixes = { "Creature\\", "World\\", "Environment\\" };
-            foreach (string prefix in prefixes)
-            {
-                if (normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (TryYield(prefix + normalizedPath, out string yieldedPrefixedPath))
-                    yield return yieldedPrefixedPath;
-
-                if (TryYield(prefix + fileName, out string yieldedPrefixedFileName))
-                    yield return yieldedPrefixedFileName;
-            }
-        }
-    }
+    public static string NormalizeKey(string path) => WorldAssetPathResolver.NormalizeKey(path);
 
     private bool TryDequeuePendingLoad(out bool isMdx, out string? key)
     {
@@ -1266,11 +924,11 @@ private int _mdxLoadFailCount = 0;
         long phaseStart = Stopwatch.GetTimestamp();
         try
         {
-            string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
+            string resolvedModelPath = _pathResolver.ResolveCanonicalModelPath(normalizedKey);
             string buildProfileId = FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId ?? "unknown";
             byte[]? data;
 
-            if (!TryReadPreferredClassicModelData(normalizedKey, out string preferredClassicPath, out data))
+            if (!_pathResolver.TryReadPreferredClassicModelData(normalizedKey, out string preferredClassicPath, out data))
             {
                 data = ReadFileData(resolvedModelPath);
                 if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
@@ -1283,9 +941,9 @@ private int _mdxLoadFailCount = 0;
 
             if (data != null && data.Length > 0)
             {
-                if (_resolvedReadPathCache.TryGetValue(resolvedModelPath, out string? cachedResolved) && !string.IsNullOrWhiteSpace(cachedResolved))
+                if (_pathResolver.TryGetCachedResolvedPath(resolvedModelPath, out string? cachedResolved) && !string.IsNullOrWhiteSpace(cachedResolved))
                     resolvedModelPath = cachedResolved;
-                else if (_resolvedReadPathCache.TryGetValue(normalizedKey, out string? cachedKeyResolved) && !string.IsNullOrWhiteSpace(cachedKeyResolved))
+                else if (_pathResolver.TryGetCachedResolvedPath(normalizedKey, out string? cachedKeyResolved) && !string.IsNullOrWhiteSpace(cachedKeyResolved))
                     resolvedModelPath = cachedKeyResolved;
             }
 
@@ -1601,33 +1259,8 @@ private int _mdxLoadFailCount = 0;
         }
     }
 
-    private string ResolveCanonicalModelPath(string normalizedKey)
-    {
-        string? resolved = TryResolveFromFileSet(normalizedKey);
-        if (!string.IsNullOrWhiteSpace(resolved))
-            return NormalizeKey(resolved);
-
-        foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
-        {
-            resolved = TryResolveFromFileSet(alternatePath);
-            if (!string.IsNullOrWhiteSpace(resolved))
-                return NormalizeKey(resolved);
-        }
-
-        if (_dataSource != null)
-        {
-            if (_dataSource.FileExists(normalizedKey))
-                return normalizedKey;
-
-            foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
-            {
-                if (_dataSource.FileExists(alternatePath))
-                    return NormalizeKey(alternatePath);
-            }
-        }
-
-        return normalizedKey;
-    }
+    public string ResolveCanonicalModelPath(string normalizedKey)
+        => _pathResolver.ResolveCanonicalModelPath(normalizedKey);
 
     private readonly SkinPathIndex _skinPathIndex = new();
 
@@ -1649,14 +1282,14 @@ private int _mdxLoadFailCount = 0;
         if (_dataSource is not { } mpqDataSource)
             return;
 
-        string canonicalModelPath = ResolveCanonicalModelPath(normalizedKey);
+        string canonicalModelPath = _pathResolver.ResolveCanonicalModelPath(normalizedKey);
         mpqDataSource.PrefetchFile(canonicalModelPath);
 
         if (canonicalModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
         {
-            foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
+            foreach (string alternatePath in _pathResolver.GetAlternateModelPaths(normalizedKey))
             {
-                string resolvedAlternatePath = ResolveCanonicalModelPath(alternatePath);
+                string resolvedAlternatePath = _pathResolver.ResolveCanonicalModelPath(alternatePath);
                 if (!resolvedAlternatePath.Equals(canonicalModelPath, StringComparison.OrdinalIgnoreCase))
                     mpqDataSource.PrefetchFile(resolvedAlternatePath);
             }
@@ -1734,7 +1367,7 @@ private int _mdxLoadFailCount = 0;
         if (_wmoModels.Count < 3)
             ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data found for: \"{normalizedKey}\" ({data.Length} bytes)");
 
-        int version = DetectWmoVersion(data);
+        int version = WmoMeshSummaryBuilder.DetectWmoVersion(data);
         if (version >= 17)
         {
             var v17Parser = new WmoV17ToV14Converter();
@@ -1827,183 +1460,7 @@ private int _mdxLoadFailCount = 0;
         return groupBytesList;
     }
 
-    private static WmoMeshSummary BuildWmoMeshSummary(WmoV14ToV17Converter.WmoV14Data wmo)
-    {
-        int vertexCount = 0;
-        int indexCount = 0;
-        int batchCount = 0;
-        Vector3[] footprintSampleVertices = BuildWmoFootprintSamples(wmo.Groups);
-        WmoGroupMeshSummary[] groupSummaries = BuildWmoGroupMeshSummaries(wmo.Groups);
-        ComputeWmoGeometryBounds(wmo, out Vector3 boundsMin, out Vector3 boundsMax);
 
-        foreach (WmoV14ToV17Converter.WmoGroupData group in wmo.Groups)
-        {
-            vertexCount += group.Vertices.Count;
-            indexCount += group.Indices.Count;
-            batchCount += group.Batches.Count;
-        }
-
-        return new WmoMeshSummary(
-            Version: (int)wmo.Version,
-            GroupCount: wmo.Groups.Count,
-            VertexCount: vertexCount,
-            IndexCount: indexCount,
-            TriangleCount: indexCount / 3,
-            BatchCount: batchCount,
-            BoundsMin: boundsMin,
-            BoundsMax: boundsMax,
-            FootprintSampleVertices: footprintSampleVertices,
-            GroupSummaries: groupSummaries);
-    }
-
-    private static WmoGroupMeshSummary[] BuildWmoGroupMeshSummaries(IReadOnlyList<WmoV14ToV17Converter.WmoGroupData> groups)
-    {
-        if (groups.Count == 0)
-            return Array.Empty<WmoGroupMeshSummary>();
-
-        var summaries = new WmoGroupMeshSummary[groups.Count];
-        for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
-        {
-            WmoV14ToV17Converter.WmoGroupData group = groups[groupIndex];
-            ComputeVectorBounds(group.Vertices, out Vector3 boundsMin, out Vector3 boundsMax);
-            summaries[groupIndex] = new WmoGroupMeshSummary(
-                GroupIndex: groupIndex,
-                VertexCount: group.Vertices.Count,
-                IndexCount: group.Indices.Count,
-                TriangleCount: group.Indices.Count / 3,
-                BoundsMin: boundsMin,
-                BoundsMax: boundsMax,
-                FootprintSampleVertices: BuildSampleVertices(group.Vertices, 128));
-        }
-
-        return summaries;
-    }
-
-    private static void ComputeWmoGeometryBounds(WmoV14ToV17Converter.WmoV14Data wmo, out Vector3 boundsMin, out Vector3 boundsMax)
-    {
-        bool hasBounds = false;
-        Vector3 min = new(float.MaxValue);
-        Vector3 max = new(float.MinValue);
-
-        foreach (WmoV14ToV17Converter.WmoGroupData group in wmo.Groups)
-        {
-            List<Vector3> vertices = group.Vertices;
-            for (int vertexIndex = 0; vertexIndex < vertices.Count; vertexIndex++)
-            {
-                Vector3 vertex = vertices[vertexIndex];
-                min = Vector3.Min(min, vertex);
-                max = Vector3.Max(max, vertex);
-                hasBounds = true;
-            }
-        }
-
-        if (hasBounds)
-        {
-            boundsMin = min;
-            boundsMax = max;
-            return;
-        }
-
-        boundsMin = wmo.BoundsMin;
-        boundsMax = wmo.BoundsMax;
-    }
-
-    private static Vector3[] BuildWmoFootprintSamples(IReadOnlyList<WmoV14ToV17Converter.WmoGroupData> groups)
-    {
-        int totalVertexCount = 0;
-        for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
-            totalVertexCount += groups[groupIndex].Vertices.Count;
-
-        if (totalVertexCount <= 0)
-            return Array.Empty<Vector3>();
-
-        const int maxSamples = 256;
-        int stride = Math.Max(1, totalVertexCount / maxSamples);
-        var samples = new List<Vector3>(Math.Min(totalVertexCount, maxSamples));
-        int globalVertexIndex = 0;
-
-        for (int groupIndex = 0; groupIndex < groups.Count && samples.Count < maxSamples; groupIndex++)
-        {
-            List<Vector3> vertices = groups[groupIndex].Vertices;
-            for (int vertexIndex = 0; vertexIndex < vertices.Count && samples.Count < maxSamples; vertexIndex++, globalVertexIndex++)
-            {
-                if (globalVertexIndex % stride == 0)
-                    samples.Add(vertices[vertexIndex]);
-            }
-        }
-
-        if (samples.Count == 0)
-        {
-            for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
-            {
-                List<Vector3> vertices = groups[groupIndex].Vertices;
-                if (vertices.Count > 0)
-                {
-                    samples.Add(vertices[0]);
-                    break;
-                }
-            }
-        }
-
-        return samples.ToArray();
-    }
-
-    private static Vector3[] BuildSampleVertices(IReadOnlyList<Vector3> vertices, int maxSamples)
-    {
-        if (vertices.Count == 0 || maxSamples <= 0)
-            return Array.Empty<Vector3>();
-
-        int stride = Math.Max(1, vertices.Count / maxSamples);
-        var samples = new List<Vector3>(Math.Min(vertices.Count, maxSamples));
-        for (int index = 0; index < vertices.Count && samples.Count < maxSamples; index += stride)
-            samples.Add(vertices[index]);
-
-        return samples.ToArray();
-    }
-
-    private static void ComputeVectorBounds(IReadOnlyList<Vector3> vertices, out Vector3 boundsMin, out Vector3 boundsMax)
-    {
-        if (vertices.Count == 0)
-        {
-            boundsMin = Vector3.Zero;
-            boundsMax = Vector3.Zero;
-            return;
-        }
-
-        Vector3 min = new(float.MaxValue);
-        Vector3 max = new(float.MinValue);
-        for (int index = 0; index < vertices.Count; index++)
-        {
-            Vector3 vertex = vertices[index];
-            min = Vector3.Min(min, vertex);
-            max = Vector3.Max(max, vertex);
-        }
-
-        boundsMin = min;
-        boundsMax = max;
-    }
-
-    /// <summary>
-    /// Detect WMO version from raw bytes. Returns 14 for Alpha (MOMO container), version number for v17+, or 0.
-    /// </summary>
-    private static int DetectWmoVersion(byte[] data)
-    {
-        if (data.Length < 12) return 0;
-        string magic = System.Text.Encoding.ASCII.GetString(data, 0, 4);
-        string reversed = new string(magic.Reverse().ToArray());
-
-        // v14 Alpha: starts with MOMO container
-        if (magic == "MOMO" || reversed == "MOMO") return 14;
-
-        // v17+: starts with MVER chunk
-        if (magic == "MVER" || reversed == "MVER")
-        {
-            uint size = BitConverter.ToUInt32(data, 4);
-            if (size >= 4 && data.Length >= 12)
-                return (int)BitConverter.ToUInt32(data, 8);
-        }
-        return 0;
-    }
 
     // ── LRU helpers ─────────────────────────────────────────────────────
 
@@ -2113,15 +1570,7 @@ private int _mdxLoadFailCount = 0;
         _knownMissingM2SkinPaths.Clear();
         _loggedMissingM2SkinPaths.Clear();
         _priorityMdxLoads.Clear();
+        _pathResolver.Clear();
     }
 }
 
-/// <summary>
-/// Describes the set of unique assets referenced by a map.
-/// Built before loading so we know the full scope.
-/// </summary>
-public class AssetManifest
-{
-    public HashSet<string> ReferencedMdx { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> ReferencedWmo { get; } = new(StringComparer.OrdinalIgnoreCase);
-}

@@ -1,6 +1,13 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-27
+Last updated: 2026-09-30
+
+## 2026-09-30 — Spec 256 T060 & T092 file budget splits completed (code only)
+
+Completed governance file budget splits per AGENTS.md §10 (< 2,000 lines):
+- T060 `WorldAssetManager.cs` (2,128 → 1,576 lines): extracted `WorldAssetReadStats`, `WmoMeshSummary`, `MdxCollisionMeshSummary`, `AssetManifest`, `WmoMeshSummaryBuilder`, and `WorldAssetPathResolver`.
+- T092 `WmoRenderer.cs` (3,824 → 1,937 lines): extracted `WmoDoodadInfo`, `WmoOpaqueDoodadBatchItem`, `WmoRenderPass`, `WmoRenderStats`, `WmoGeometryHelper`, `WmoLiquidRenderer`, `WmoMaterialManager`, and `WmoDoodadController`.
+Clean solution build (0 errors); unit test suite passes with exact pre-existing baseline (10 failures). Receipt: `specs/256-modern-data-streaming-performance/evidence/file-splits-2026-09-30.md`.
 
 ## 2026-09-27 — Spec 256 P2b regression fixed (code only)
 
