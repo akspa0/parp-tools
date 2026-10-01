@@ -3,6 +3,29 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.6.0-alpha4 — 2026-10-01
+
+Release (not a pre-release): **modern ADT 64-bit high-resolution terrain holes, major performance gains, M2 opacity, wireframe styling, and 3D cursor picking**.
+This build performs significantly better than the last released build across modern CASC clients. Caves, basements, and dungeon entrances
+now carve proper openings in modern ADT terrain meshes and raycasts/clicks pass cleanly through cave thresholds to select interior WMOs.
+Special thanks to **Kruithne** for `wow.export`.
+
+Full notes: [`docs/releases/v0.6.0-alpha4.md`](docs/releases/v0.6.0-alpha4.md)
+
+### Added
+- **Modern ADT 64-bit high-res holes**: full parsing and rendering of 64-bit `high_res_holes` (flag `0x10000`, 8-byte mask at offset `0x14`).
+- **Hole-aware raycasting and picking**: height sampling and raycasting allow rays and clicks to pass through cave thresholds into interior WMOs and doodads.
+- **M2 opacity slider**: interactive opacity control for M2 models.
+- **Synchronized wireframe overlay**: wireframe overlay for WMO/M2/MDX follows the opacity slider; customizable wireframe colors and styling in settings.
+- **Scene cursor picking**: 3D cursor rendering in scene for accurate object identification and selection.
+- **Community acknowledgment**: special thanks to Kruithne for `wow.export` added to viewer About box, README, and release documentation.
+
+### Changed & Fixed
+- **Toolbar & Sidebar cleanup**: Removed redundant and fragile WMO doodad-set combo from the bottom toolbar in favor of the Inspector panel; eliminated duplicate and nested "MCNK Flag Overlay" menus in the right sidebar.
+
+### Performance
+- Further optimized modern CASC data streaming, texture pre-filtering, and frame submission for higher framerates and lower stutter.
+
 ## v0.6.0-alpha3 — 2026-09-27
 
 Release (not a pre-release): **rendering performance for modern CASC clients (WoW: Forever)**. On the

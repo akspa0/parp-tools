@@ -281,8 +281,15 @@ internal sealed partial class TerrainQueryService
 
         float localX = chunk.WorldPosition.Y - worldY;
         float localY = chunk.WorldPosition.X - worldX;
-        localX = Math.Clamp(localX, 0f, WoWConstants.ChunkSize);
-        localY = Math.Clamp(localY, 0f, WoWConstants.ChunkSize);
+        float chunkSpan = WoWConstants.ChunkSize / 16f;
+        float subCellSize = chunkSpan / 8f;
+        int cellX = Math.Clamp((int)MathF.Floor(localX / subCellSize), 0, 7);
+        int cellY = Math.Clamp((int)MathF.Floor(localY / subCellSize), 0, 7);
+        if (chunk.IsCellHoled(cellX, cellY))
+            return false;
+
+        localX = Math.Clamp(localX, 0f, chunkSpan);
+        localY = Math.Clamp(localY, 0f, chunkSpan);
 
         height = TerrainChunkMath.SampleHeightOuterGrid(chunk, localX, localY);
         return true;

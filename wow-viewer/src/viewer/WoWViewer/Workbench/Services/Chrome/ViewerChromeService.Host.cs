@@ -64,6 +64,7 @@ internal sealed partial class ViewerChromeService
     private ref ISceneRenderer? _renderer => ref _host.Renderer;
     private ref float _rightSidebarWidth => ref _host.RightSidebarWidth;
     private ViewerSettingsService _settings => _host.Settings;
+    private ref SceneCursorRenderer? _sceneCursorRenderer => ref _host.SceneCursorRenderer;
     private ShellLayoutService _shellLayout => _host.ShellLayout;
     private ref bool _showFolderInput => ref _host.ShowFolderInput;
     private ref bool _showSettingsWindow => ref _host.ShowSettingsWindow;

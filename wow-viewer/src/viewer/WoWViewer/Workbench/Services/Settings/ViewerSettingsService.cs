@@ -99,6 +99,7 @@ internal sealed class ViewerSettingsService
     private ref Vector3 _pm4SavedOverlayTranslation => ref _host.Pm4SavedOverlayTranslation;
     private ref Dictionary<string, Pm4WmoMatchEntry> _pm4WmoMatchEntries => ref _host.Pm4WmoMatchEntries;
     private ref Pm4WmoMatchStore? _pm4WmoMatchStore => ref _host.Pm4WmoMatchStore;
+    private ref SceneCursorRenderer? _sceneCursorRenderer => ref _host.SceneCursorRenderer;
     private ref float _rightSidebarWidth => ref _host.RightSidebarWidth;
     private ref int _savedDetailedAdtTileCountOverride => ref _host.SavedDetailedAdtTileCountOverride;
     private Dictionary<string, SavedObjectPathFilterMap> _savedObjectPathFiltersByMap => _host.SavedObjectPathFiltersByMap;
@@ -197,6 +198,22 @@ internal sealed class ViewerSettingsService
             WmoRenderer.TexturesEnabled = settings.WmoTexturesEnabled;
             WmoRenderer.CollisionWallOpacity = Math.Clamp(settings.CollisionWallOpacity, 0f, 1f);
             WmoRenderer.CollisionWallTexturesEnabled = settings.CollisionWallTexturesEnabled;
+            M2Renderer.GlobalOpacity = Math.Clamp(settings.M2Opacity, 0f, 1f);
+            MdxRenderer.GlobalOpacity = Math.Clamp(settings.M2Opacity, 0f, 1f);
+            WireframeOverlaySettings.DefaultColor = new Vector3(
+                Math.Clamp(settings.WireframeColorR, 0f, 1f),
+                Math.Clamp(settings.WireframeColorG, 0f, 1f),
+                Math.Clamp(settings.WireframeColorB, 0f, 1f));
+            WireframeOverlaySettings.LineWidth = Math.Clamp(settings.WireframeLineWidth, 0.5f, 5.0f);
+            WireframeOverlaySettings.BaseIntensity = Math.Clamp(settings.WireframeBaseIntensity, 0.05f, 1.0f);
+            WireframeOverlaySettings.FollowModelOpacity = settings.WireframeFollowModelOpacity;
+            if (_sceneCursorRenderer != null)
+            {
+                if (Enum.IsDefined(typeof(CursorStyle), settings.CursorStyle))
+                    _sceneCursorRenderer.Style = (CursorStyle)settings.CursorStyle;
+                if (settings.CursorScale > 0.1f)
+                    _sceneCursorRenderer.UserScale = Math.Clamp(settings.CursorScale, 0.2f, 5.0f);
+            }
 
             _lastGameFolderPath = settings.LastGameFolderPath ?? "";
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
@@ -463,6 +480,15 @@ internal sealed class ViewerSettingsService
                 WmoTexturesEnabled = WmoRenderer.TexturesEnabled,
                 CollisionWallOpacity = WmoRenderer.CollisionWallOpacity,
                 CollisionWallTexturesEnabled = WmoRenderer.CollisionWallTexturesEnabled,
+                M2Opacity = M2Renderer.GlobalOpacity,
+                WireframeColorR = WireframeOverlaySettings.DefaultColor.X,
+                WireframeColorG = WireframeOverlaySettings.DefaultColor.Y,
+                WireframeColorB = WireframeOverlaySettings.DefaultColor.Z,
+                WireframeLineWidth = WireframeOverlaySettings.LineWidth,
+                WireframeBaseIntensity = WireframeOverlaySettings.BaseIntensity,
+                WireframeFollowModelOpacity = WireframeOverlaySettings.FollowModelOpacity,
+                CursorStyle = (int)(_sceneCursorRenderer?.Style ?? CursorStyle.ClassicOSArrow),
+                CursorScale = _sceneCursorRenderer?.UserScale ?? 1.0f,
                 LastGameFolderPath = _lastGameFolderPath,
                 LastLooseOverlayPath = _lastLooseOverlayPath,
                 LastDatasetCatalogRoot = _datasetCatalogRoot,
@@ -646,6 +672,15 @@ internal sealed class ViewerSettingsService
         public bool WmoTexturesEnabled { get; set; } = true;
         public float CollisionWallOpacity { get; set; } = 1.0f;
         public bool CollisionWallTexturesEnabled { get; set; } = true;
+        public float M2Opacity { get; set; } = 1.0f;
+        public float WireframeColorR { get; set; } = 1.0f;
+        public float WireframeColorG { get; set; } = 0.85f;
+        public float WireframeColorB { get; set; } = 0.3f;
+        public float WireframeLineWidth { get; set; } = 1.0f;
+        public float WireframeBaseIntensity { get; set; } = 0.75f;
+        public bool WireframeFollowModelOpacity { get; set; } = true;
+        public int CursorStyle { get; set; } = (int)Rendering.CursorStyle.ClassicOSArrow;
+        public float CursorScale { get; set; } = 1.0f;
         public string? LastGameFolderPath { get; set; }
         public string? LastLooseOverlayPath { get; set; }
         public string? LastDatasetCatalogRoot { get; set; }

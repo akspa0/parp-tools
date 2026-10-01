@@ -302,7 +302,7 @@ internal sealed partial class SceneHoverAndPickService
                 && TryRaycastTerrain(occlusionRenderer, rayOrigin, rayDir, GetSceneFarPlane(), out _, out Vector3 terrainHit))
             {
                 float terrainDistance = Vector3.Distance(rayOrigin, terrainHit);
-                float objectDistance = Vector3.Distance(rayOrigin, hovered.WorldPosition);
+                float objectDistance = hovered.RayDistance > 0f ? hovered.RayDistance : Vector3.Distance(rayOrigin, hovered.WorldPosition);
                 if (objectDistance > terrainDistance + 1f)
                     _worldScene.HoverPick.ClearHoveredAssetInfo();
             }
@@ -359,7 +359,7 @@ internal sealed partial class SceneHoverAndPickService
         float? hitDistance = null;
         if (_worldScene?.HoverPick.HoveredAssetInfo is HoveredAssetInfo hoverInfo && hoverInfo.IsPreciseRayHit)
         {
-            hitDistance = (hoverInfo.WorldPosition - rayOrigin).Length();
+            hitDistance = hoverInfo.RayDistance > 0f ? hoverInfo.RayDistance : (hoverInfo.WorldPosition - rayOrigin).Length();
             _sceneCursorRenderer.State = (hoverInfo.AssetKind.Contains("NPC", StringComparison.OrdinalIgnoreCase)
                 || hoverInfo.DisplayName.Contains("Creature", StringComparison.OrdinalIgnoreCase))
                 ? SceneCursorState.Speak
@@ -415,9 +415,6 @@ internal sealed partial class SceneHoverAndPickService
             TryDrawTerrainChunkHoverOverlay();
             return;
         }
-
-        if (_sceneCursorRenderer != null && _sceneCursorRenderer.Style != CursorStyle.ClassicOSArrow)
-            return;
 
         if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
             return;

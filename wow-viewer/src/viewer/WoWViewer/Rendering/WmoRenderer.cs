@@ -583,8 +583,9 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.DepthMask(false);
-        _gl.Disable(EnableCap.Blend);
-        _gl.Uniform1(_uOpacity, effectiveOpacity);
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.Uniform1(_uOpacity, 1.0f);
 
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
@@ -608,10 +609,11 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         _gl.Uniform1(_uHasTexture, 0);
         _gl.Uniform1(_uUnlit, 1);
         _gl.Uniform1(_uAlphaTest, 0.0f);
-        Vector3 lineColor = wireframeColor ?? new Vector3(0.95f, 1.0f, 0.65f);
-        _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, 1.0f);
+        Vector3 lineColor = wireframeColor ?? WireframeOverlaySettings.DefaultColor;
+        float wireframeAlpha = (WireframeOverlaySettings.FollowModelOpacity ? effectiveOpacity : 1.0f) * WireframeOverlaySettings.BaseIntensity;
+        _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, wireframeAlpha);
 
-        _gl.LineWidth(1.5f);
+        _gl.LineWidth(WireframeOverlaySettings.LineWidth);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
 
         foreach (var gb in _groups)
@@ -626,6 +628,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         _gl.LineWidth(1.0f);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
         _gl.Enable(EnableCap.CullFace);
     }
 
@@ -633,7 +636,6 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     {
         RenderWithTransform(Matrix4x4.Identity, view, proj, WmoRenderPass.Both);
     }
-
 
     /// <summary>
     /// Render this WMO with a custom world transform (for placed WMO instances in WorldScene).

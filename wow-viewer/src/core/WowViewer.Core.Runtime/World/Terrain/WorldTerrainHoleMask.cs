@@ -8,16 +8,27 @@ public readonly struct WorldTerrainHoleMask
     public WorldTerrainHoleMask(ushort rawValue)
     {
         RawValue = rawValue;
+        RawValue64 = Maps.TerrainHoleMath.UpsampleLowResToHighRes(rawValue);
+    }
+
+    public WorldTerrainHoleMask(ulong rawValue64, ushort rawValue = 0)
+    {
+        RawValue64 = rawValue64;
+        RawValue = rawValue != 0 ? rawValue : Maps.TerrainHoleMath.DownsampleHighResToLowRes(rawValue64);
     }
 
     public ushort RawValue { get; }
+    public ulong RawValue64 { get; }
 
-    public bool HasHoles => RawValue != 0;
+    public bool HasHoles => RawValue64 != 0UL || RawValue != 0;
 
     public bool IsCellHoled(int cellX, int cellY)
     {
         ValidateCellCoordinate(cellX, nameof(cellX));
         ValidateCellCoordinate(cellY, nameof(cellY));
+
+        if (RawValue64 != 0UL)
+            return Maps.TerrainHoleMath.IsCellHoled64(RawValue64, cellX, cellY);
 
         return IsHoleGroupSet(cellX / 2, cellY / 2);
     }

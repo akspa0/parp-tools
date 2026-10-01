@@ -153,7 +153,12 @@ void main()
             string[] candidates = {
                 @"Interface\Cursor\Cursor.mdx",
                 @"interface\cursor\cursor.mdx",
-                @"Interface\Cursor\Point.mdx"
+                @"Interface\Cursor\Point.mdx",
+                @"interface\cursor\point.mdx",
+                @"Interface\Cursor\Cursor.m2",
+                @"interface\cursor\cursor.m2",
+                @"Interface\Cursor\Point.m2",
+                @"interface\cursor\point.m2",
             };
 
             foreach (string candidate in candidates)

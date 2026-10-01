@@ -1,6 +1,15 @@
 # Progress — wow-viewer
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
+
+## 2026-10-01 — v0.6.0-alpha4: modern ADT 64-bit holes, M2 opacity, wireframe styling & release prep
+
+- **Modern ADT 64-bit high_res_holes**: Implemented full support for modern 64-bit hole masks (flag 0x10000, 8-byte bitmask at offset 0x14) across `TerrainHoleMath`, `Mcnk`, `TerrainChunkData`, `StandardTerrainAdapter`, `PhaseChunkMerger`, `WorldTerrainHoleMask`, `WorldTerrainCellGrid`, and mesh builders (`TerrainTileMeshBuilder`, `TerrainMeshBuilder`, `MapGlbExporter`, `TerrainHeightmapIo`, `TerrainChunkMath`). Preserved complete backward-compatibility with 16-bit legacy masks for Alpha 0.5.3, Classic, TBC, and LK.
+- **Hole-aware raycasting and picking**: `TerrainQueryService` and `SceneTerrainQueries` check `chunk.IsCellHoled(cellX, cellY)`, returning false on holed cells so rays and clicks pass directly into cave/dungeon openings to hit interior WMOs.
+- **Rendering controls & interactions**: Added M2 opacity slider, tied WMO/M2/MDX wireframes to opacity, added customizable wireframe styling in settings, fixed particle light effects opacity calculation, enabled 3D cursor picking.
+- **Community acknowledgment**: Added special thanks to Kruithne for `wow.export` across About dialog (`MainMenuBarService`), `README.md`, `CHANGELOG.md`, and release notes.
+- **Release prep**: Bumped version to `0.6.0-alpha4` in `eng/Version.props`, created `docs/releases/v0.6.0-alpha4.md` with `<!-- release: full -->`.
+- **Validation**: 20/20 hole & cell-grid tests pass; full solution builds with 0 errors.
 
 ## 2026-09-30 — Spec 256 T060 & T092 file budget splits completed (code only)
 

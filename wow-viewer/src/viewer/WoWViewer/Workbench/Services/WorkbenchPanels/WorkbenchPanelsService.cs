@@ -701,11 +701,15 @@ internal sealed partial class WorkbenchPanelsService
     {
         DrawUnifiedInspectorContent();
 
+        bool isMcnkRequested = _pendingInspectorContextSection == InspectorContextSection.Mcnk;
+        if (isMcnkRequested)
+            _pendingInspectorContextSection = InspectorContextSection.None;
+
         if ((_terrainManager != null || _vlmTerrainManager != null)
             && SharedUiWidgets.SectionHeader(
                 "MCNK Flag Overlay",
                 "Filter and highlight raw MCNK flags in the loaded terrain. Diagonal weak-corner markers share this control.",
-                defaultOpen: false,
+                defaultOpen: isMcnkRequested,
                 id: "InspectorMcnkFlags"))
         {
             _investigation.DrawMcnkFlagOverlayControls();
@@ -723,9 +727,7 @@ internal sealed partial class WorkbenchPanelsService
                     _investigation.DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null);
                 break;
             case InspectorContextSection.Mcnk:
-                if ((_terrainManager != null || _vlmTerrainManager != null)
-                    && SharedUiWidgets.SectionHeader("MCNK Flag Overlay", defaultOpen: true, id: "InspectorMcnkFlagsLegacy"))
-                    _investigation.DrawMcnkFlagOverlayControls();
+                // Already rendered above in the canonical MCNK Flag Overlay section.
                 break;
             case InspectorContextSection.WorldContext:
                 if (SharedUiWidgets.SectionHeader("World Context", defaultOpen: true, id: "InspectorWorldContext"))

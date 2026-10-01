@@ -531,6 +531,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 Heights = chunk.Heights,
                 Normals = chunk.Normals,
                 HoleMask = chunk.HoleMask,
+                HoleMask64 = chunk.HoleMask64,
                 Layers = chunk.Layers,
                 AlphaMaps = chunk.AlphaMaps,
                 ShadowMap = chunk.ShadowMap,
@@ -1514,6 +1515,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 // Hole mask
                 int holeMask = (int)mcnk.Header.Holes;
+                ulong holeMask64 = mcnk.Header.HolesHighRes;
 
                 // Cataclysm+/MoP object companions carry per-slot reference
                 // streams in headerless MCNK wrappers. Preserve those streams
@@ -1568,6 +1570,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Heights = heights,
                     Normals = normals,
                     HoleMask = holeMask,
+                    HoleMask64 = holeMask64,
                     Layers = layers,
                     AlphaMaps = alphaMaps,
                     ShadowMap = shadowMap,

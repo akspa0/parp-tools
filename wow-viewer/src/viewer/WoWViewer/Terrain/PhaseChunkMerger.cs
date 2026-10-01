@@ -64,6 +64,7 @@ internal static class PhaseChunkMerger
             Heights = TakeChannel(PhaseDataChannel.Heightmap) ? phaseChunk.Heights : baseChunk.Heights,
             Normals = TakeChannel(PhaseDataChannel.Normals) ? phaseChunk.Normals : baseChunk.Normals,
             HoleMask = TakeChannel(PhaseDataChannel.Holes) ? phaseChunk.HoleMask : baseChunk.HoleMask,
+            HoleMask64 = TakeChannel(PhaseDataChannel.Holes) ? phaseChunk.HoleMask64 : baseChunk.HoleMask64,
 
             Layers = takeTexturing ? phaseChunk.Layers : baseChunk.Layers,
             AlphaMaps = takeTexturing ? phaseChunk.AlphaMaps : baseChunk.AlphaMaps,

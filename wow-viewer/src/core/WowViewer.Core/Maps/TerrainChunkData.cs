@@ -12,6 +12,17 @@ public sealed class TerrainChunkData
     public float[] Heights { get; init; } = [];
     public Vector3[] Normals { get; init; } = [];
     public int HoleMask { get; init; }
+    public ulong HoleMask64 { get; init; }
+
+    public bool IsCellHoled(int cellX, int cellY)
+    {
+        if (HoleMask64 != 0UL)
+            return TerrainHoleMath.IsCellHoled64(HoleMask64, cellX, cellY);
+        if (HoleMask != 0)
+            return TerrainHoleMath.IsCellHoled16((ushort)HoleMask, cellX, cellY);
+        return false;
+    }
+
     public TerrainLayer[] Layers { get; init; } = [];
     public Dictionary<int, byte[]> AlphaMaps { get; init; } = new();
     public byte[]? ShadowMap { get; init; }

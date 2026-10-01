@@ -249,6 +249,7 @@ public static class TerrainHeightmapIo
                 Heights = newHeights,
                 Normals = newNormals,
                 HoleMask = chunk.HoleMask,
+                HoleMask64 = chunk.HoleMask64,
                 Layers = chunk.Layers,
                 AlphaMaps = chunk.AlphaMaps,
                 ShadowMap = chunk.ShadowMap,
@@ -305,7 +306,7 @@ public static class TerrainHeightmapIo
         for (int i = 0; i < 145; i++)
             positions[i] = GetVertexWorldPosition(chunk, heights, i);
 
-        var indices = BuildIndices(chunk.HoleMask);
+        var indices = BuildIndices(chunk.HoleMask64, chunk.HoleMask);
         var accum = new Vector3[145];
 
         for (int t = 0; t + 2 < indices.Length; t += 3)
@@ -393,7 +394,9 @@ public static class TerrainHeightmapIo
     private static int OuterIndex(int outerRow, int outerCol) => outerRow * 17 + outerCol;
     private static int InnerIndex(int innerRow, int innerCol) => innerRow * 17 + 9 + innerCol;
 
-    private static int[] BuildIndices(int holeMask)
+    private static int[] BuildIndices(int holeMask) => BuildIndices(0UL, holeMask);
+
+    private static int[] BuildIndices(ulong holeMask64, int holeMask)
     {
         var indices = new List<int>(256 * 3);
 
@@ -401,12 +404,14 @@ public static class TerrainHeightmapIo
         {
             for (int cellX = 0; cellX < 8; cellX++)
             {
-                if (holeMask != 0)
+                if (holeMask64 != 0UL)
                 {
-                    int holeX = cellX / 2;
-                    int holeY = cellY / 2;
-                    int holeBit = 1 << (holeY * 4 + holeX);
-                    if ((holeMask & holeBit) != 0)
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled64(holeMask64, cellX, cellY))
+                        continue;
+                }
+                else if (holeMask != 0)
+                {
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled16((ushort)holeMask, cellX, cellY))
                         continue;
                 }
 

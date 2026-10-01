@@ -31,6 +31,19 @@ public class TerrainChunkData
     /// <summary>Hole mask from MCNK header (16-bit, one bit per 2×2 cell group).</summary>
     public int HoleMask { get; init; }
 
+    /// <summary>Full 64-bit hole mask (1 bit per 1x1 cell, row-major cellY * 8 + cellX). Supports modern high_res_holes.</summary>
+    public ulong HoleMask64 { get; init; }
+
+    /// <summary>Returns true if the 1x1 cell (0..7, 0..7) is marked as a hole.</summary>
+    public bool IsCellHoled(int cellX, int cellY)
+    {
+        if (HoleMask64 != 0UL)
+            return WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled64(HoleMask64, cellX, cellY);
+        if (HoleMask != 0)
+            return WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled16((ushort)HoleMask, cellX, cellY);
+        return false;
+    }
+
     /// <summary>Texture layers for this chunk (all MCLY entries; the tile renderer draws up to 8).</summary>
     public TerrainLayer[] Layers { get; init; } = Array.Empty<TerrainLayer>();
 

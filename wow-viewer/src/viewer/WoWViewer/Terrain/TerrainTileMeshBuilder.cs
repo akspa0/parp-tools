@@ -148,7 +148,7 @@ public sealed class TerrainTileMeshBuilder
             tileMax = Vector3.Max(tileMax, boundsMax);
             chunkInfos.Add(new TerrainChunkInfo(chunk.TileX, chunk.TileY, chunk.ChunkX, chunk.ChunkY, boundsMin, boundsMax, chunk.AreaId));
 
-            var chunkIndices = BuildIndices(chunk.HoleMask);
+            var chunkIndices = BuildIndices(chunk.HoleMask64, chunk.HoleMask);
             int baseVertex = chunkIndex * vertsPerChunk;
             for (int i = 0; i < chunkIndices.Length; i++)
                 indices.Add((ushort)(chunkIndices[i] + baseVertex));
@@ -341,7 +341,9 @@ public sealed class TerrainTileMeshBuilder
 
     private static int InnerIndex(int innerRow, int innerCol) => innerRow * 17 + 9 + innerCol;
 
-    private static ushort[] BuildIndices(int holeMask)
+    private static ushort[] BuildIndices(int holeMask) => BuildIndices(0UL, holeMask);
+
+    private static ushort[] BuildIndices(ulong holeMask64, int holeMask)
     {
         var indices = new List<ushort>(256 * 3);
 
@@ -349,12 +351,14 @@ public sealed class TerrainTileMeshBuilder
         {
             for (int cellX = 0; cellX < 8; cellX++)
             {
-                if (holeMask != 0)
+                if (holeMask64 != 0UL)
                 {
-                    int holeX = cellX / 2;
-                    int holeY = cellY / 2;
-                    int holeBit = 1 << (holeY * 4 + holeX);
-                    if ((holeMask & holeBit) != 0)
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled64(holeMask64, cellX, cellY))
+                        continue;
+                }
+                else if (holeMask != 0)
+                {
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled16((ushort)holeMask, cellX, cellY))
                         continue;
                 }
 

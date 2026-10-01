@@ -621,6 +621,7 @@ internal sealed partial class MainMenuBarService
             ImGui.Separator();
             ImGui.TextWrapped("Thanks to...");
             ImGui.TextWrapped("Marlamin, schlumpf, Dovah, Pirate the Explorer, fean, implave, IS4, Mjollna, Adspartan (Noggit), and Skarn (Noggit-Red).");
+            ImGui.TextWrapped("Special thanks to Kruithne for wow.export, whose tools and format research have been invaluable to the community.");
             ImGui.TextWrapped("Without the WoW Exploration community, this project would not exist. Everyone named here contributed inspiration to this project in some way.");
             ImGui.TextDisabled("This tooling is about restoration, not touching up or polishing what we recover - it is the instrument for restoring what already exists. Noggit and Noggit-Red remain the preferred editors for fine-tuning the results this library and tooling produce.");
             ImGui.Spacing();

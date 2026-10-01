@@ -254,6 +254,7 @@ internal sealed partial class SettingsWindowService
         {
             if (_sceneCursorRenderer != null)
                 _sceneCursorRenderer.UserScale = cursorScale;
+            _settings.SaveViewerSettings();
         }
 
         ImGui.Spacing();

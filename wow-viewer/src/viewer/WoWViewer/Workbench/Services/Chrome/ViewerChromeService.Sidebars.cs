@@ -243,41 +243,6 @@ internal sealed partial class ViewerChromeService
                         _worldScene.WorldDoodadAnimationEnabled = worldAnimations;
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("Advance animations on world doodad MDX/M2 models.");
-
-                    // Fast doodad-set switching for the WMO under the cursor, always visible
-                    // in the editor toolbar (the Inspector's live-switch section is buried).
-                    // While the combo popup is open, the hovered WMO is frozen: moving the
-                    // mouse off the model to reach the dropdown would otherwise retarget or
-                    // collapse the combo mid-interaction (operator report 2026-09-07).
-                    bool doodadSetComboOpen = ImGui.IsPopupOpen("##HoveredWmoDoodadSet");
-                    if (doodadSetComboOpen && _hoveredWmoDoodadSetComboWmo is { DoodadSetCount: > 0 } frozenWmo)
-                    {
-                        ImGui.SameLine();
-                        _modelInspector.DrawHoveredWmoDoodadSetCombo(frozenWmo, _hoveredWmoDoodadSetComboSourcePath);
-                    }
-                    else if (_worldScene.HoverPick.HoveredAssetInfo is { } hoveredAsset
-                        && hoveredAsset.SceneObjectType == Terrain.ObjectType.Wmo
-                        && hoveredAsset.SceneObjectIndex >= 0)
-                    {
-                        WmoRenderer? hoveredWmo = _worldScene.Assets.GetWmo(
-                            WorldAssetManager.NormalizeKey(hoveredAsset.SourcePath));
-                        if (hoveredWmo is { DoodadSetCount: > 0 })
-                        {
-                            _hoveredWmoDoodadSetComboWmo = hoveredWmo;
-                            _hoveredWmoDoodadSetComboSourcePath = hoveredAsset.SourcePath;
-                            ImGui.SameLine();
-                            _modelInspector.DrawHoveredWmoDoodadSetCombo(hoveredWmo, hoveredAsset.SourcePath);
-                        }
-                        else
-                        {
-                            _hoveredWmoDoodadSetComboWmo = null;
-                        }
-                    }
-                    else
-                    {
-                        _hoveredWmoDoodadSetComboWmo = null;
-                    }
-
                     ImGui.SameLine();
                     ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
                     ImGui.SameLine();
@@ -295,6 +260,17 @@ internal sealed partial class ViewerChromeService
                         WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("Global WMO Opacity (0% - 100%, e.g. 75% for see-through). Right-click to type.");
+
+                    ImGui.SameLine();
+                    float m2Opacity = M2Renderer.GlobalOpacity * 100f;
+                    ImGui.SetNextItemWidth(65);
+                    if (ImGui.SliderFloat("M2 %", ref m2Opacity, 0f, 100f, "%.0f%%"))
+                    {
+                        M2Renderer.GlobalOpacity = Math.Clamp(m2Opacity / 100f, 0f, 1f);
+                        MdxRenderer.GlobalOpacity = M2Renderer.GlobalOpacity;
+                    }
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Global M2/MDX and particle opacity (0% - 100%). Right-click to type.");
 
                     ImGui.SameLine();
                     float wallOpacity = WmoRenderer.CollisionWallOpacity * 100f;
@@ -317,6 +293,20 @@ internal sealed partial class ViewerChromeService
                 bool wireframe = _renderer.IsWireframe;
                 if (ImGui.Checkbox(_renderer is WmoRenderer ? "WMO WF" : "Model WF", ref wireframe))
                     _renderer.ToggleWireframe();
+
+                if (_renderer is not WmoRenderer)
+                {
+                    ImGui.SameLine();
+                    float modelOpacity = MdxRenderer.GlobalOpacity * 100f;
+                    ImGui.SetNextItemWidth(65);
+                    if (ImGui.SliderFloat("Model %", ref modelOpacity, 0f, 100f, "%.0f%%"))
+                    {
+                        MdxRenderer.GlobalOpacity = Math.Clamp(modelOpacity / 100f, 0f, 1f);
+                        M2Renderer.GlobalOpacity = MdxRenderer.GlobalOpacity;
+                    }
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Model and particle opacity (0% - 100%). Right-click to type.");
+                }
             }
 
             if (_renderer is WmoRenderer)
@@ -340,6 +330,21 @@ internal sealed partial class ViewerChromeService
                 ImGui.SetNextItemWidth(65);
                 if (ImGui.SliderFloat("WMO %", ref wmoOpacity, 0f, 100f, "%.0f%%"))
                     WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
+            }
+
+            if (_sceneCursorRenderer != null)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                ImGui.SameLine();
+                bool is3dCursor = _sceneCursorRenderer.Style != CursorStyle.ClassicOSArrow;
+                if (ImGui.Checkbox("3D Cursor", ref is3dCursor))
+                {
+                    _sceneCursorRenderer.Style = is3dCursor ? CursorStyle.AuthenticWoWGauntlet : CursorStyle.ClassicOSArrow;
+                    _settings.SaveViewerSettings();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle 3D in-scene cursor (WoW Gauntlet / 3D pointer). Configure style and scale in Settings.");
             }
 
             ImGui.SameLine();
@@ -843,10 +848,4 @@ internal sealed partial class ViewerChromeService
             ? "Live Alpha 0.5.3 clock: one game day per 24 real minutes."
             : "Time frozen at the selected value; enable the cycle to resume.");
     }
-
-    // Frozen hovered-WMO source for the toolbar doodad-set quick combo: while the
-    // combo popup is open the reference must not follow the mouse (operator bug
-    // report 2026-09-07 — the dropdown collapsed as soon as the cursor left the WMO).
-    private WmoRenderer? _hoveredWmoDoodadSetComboWmo;
-    private string _hoveredWmoDoodadSetComboSourcePath = string.Empty;
 }

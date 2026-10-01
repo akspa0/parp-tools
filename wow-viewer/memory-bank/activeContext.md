@@ -47,8 +47,8 @@ revert it before staging.
 
 ## Release state
 
-`eng/Version.props` = `0.6.0` / `InformationalVersion 0.6.0-alpha2`, released 2026-09-21 (tag
-`v0.6.0-alpha2`, all four self-contained binaries). Notes: `docs/releases/v0.6.0-alpha2.md`.
+`eng/Version.props` = `0.6.0` / `InformationalVersion 0.6.0-alpha4`, release 2026-10-01 (tag
+`v0.6.0-alpha4`, all four self-contained binaries). Notes: `docs/releases/v0.6.0-alpha4.md`.
 
 **Shipped unverified in alpha2** (operator verification, tracked as V-tasks in the epics): the M2
 texture-wrap fix (every M2 era); `LkAdtWriter` chunk-completeness fixes (17 call sites); no exported

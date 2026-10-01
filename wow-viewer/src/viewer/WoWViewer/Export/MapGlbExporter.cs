@@ -229,7 +229,7 @@ public static class MapGlbExporter
         for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
         {
             var chunk = chunks[chunkIndex];
-            var indices = BuildChunkIndices(chunk.HoleMask);
+            var indices = BuildChunkIndices(chunk.HoleMask64, chunk.HoleMask);
             var verts = chunkVertices[chunkIndex];
 
             for (int t = 0; t + 2 < indices.Length; t += 3)
@@ -703,7 +703,9 @@ public static class MapGlbExporter
     private static int OuterIndex(int outerRow, int outerCol) => outerRow * 17 + outerCol;
     private static int InnerIndex(int innerRow, int innerCol) => innerRow * 17 + 9 + innerCol;
 
-    private static ushort[] BuildChunkIndices(int holeMask)
+    private static ushort[] BuildChunkIndices(int holeMask) => BuildChunkIndices(0UL, holeMask);
+
+    private static ushort[] BuildChunkIndices(ulong holeMask64, int holeMask)
     {
         // Matches TerrainTileMeshBuilder.BuildIndices.
         var indices = new List<ushort>(256 * 3);
@@ -712,12 +714,14 @@ public static class MapGlbExporter
         {
             for (int cellX = 0; cellX < 8; cellX++)
             {
-                if (holeMask != 0)
+                if (holeMask64 != 0UL)
                 {
-                    int holeX = cellX / 2;
-                    int holeY = cellY / 2;
-                    int holeBit = 1 << (holeY * 4 + holeX);
-                    if ((holeMask & holeBit) != 0)
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled64(holeMask64, cellX, cellY))
+                        continue;
+                }
+                else if (holeMask != 0)
+                {
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled16((ushort)holeMask, cellX, cellY))
                         continue;
                 }
 

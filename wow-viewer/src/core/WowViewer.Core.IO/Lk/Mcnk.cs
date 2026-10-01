@@ -566,7 +566,9 @@ namespace WowViewer.Core.IO.Lk
             h.DoodadRefs = BitConverter.ToUInt32(data, 0x10);
             h.AreaId = BitConverter.ToUInt32(data, 0x34);
             h.MapObjRefs = BitConverter.ToUInt32(data, 0x38);
-            h.Holes = BitConverter.ToUInt16(data, 0x3C);
+            var (holes64, holes16) = WowViewer.Core.Maps.TerrainHoleMath.ReadHoleMasks(data, (uint)h.Flags);
+            h.Holes = holes16;
+            h.HolesHighRes = holes64;
 
             // Sub-chunk offset table (0.6.0 Ghidra-verified)
             if (data.Length >= 0x68)
@@ -640,6 +642,7 @@ namespace WowViewer.Core.IO.Lk
         public uint AreaId;
         public uint MapObjRefs;
         public ushort Holes;
+        public ulong HolesHighRes;
         public float[] Position; // [0]=Z(height), [1]=X, [2]=Y at data offset 0x70
 
         // 0.6.0 sub-chunk offset table (offsets relative to MCNK chunk start, i.e. where token lives)
@@ -668,6 +671,7 @@ namespace WowViewer.Core.IO.Lk
         HasMagma = 0x10,
         HasSlime = 0x20,
         HasMccv = 0x40,
+        HighResHoles = 0x10000,
         HasBakedShadows = 0x20000
     }
 }

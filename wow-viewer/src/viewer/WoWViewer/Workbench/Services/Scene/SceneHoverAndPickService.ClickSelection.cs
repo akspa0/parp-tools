@@ -4,6 +4,7 @@ using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Terrain;
 using WoWViewer.Rendering;
+using WowViewer.Core.Runtime.World;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
@@ -124,6 +125,9 @@ internal sealed partial class SceneHoverAndPickService
                 // If an interior object is hit along the ray inside a WMO's bounding box,
                 // the enclosing WMO must not occlude or capture the click.
                 var containerWmoIndices = new HashSet<int>();
+                bool isCameraInsideWmo(in SceneObjectPickHit hit) =>
+                    WmoContainerFallThroughFilter.IsPointInsideAabb(rayOrigin, hit.BoundsMin, hit.BoundsMax);
+
                 foreach (var hit in validHits)
                 {
                     if (hit.ObjectType != ObjectType.Wmo)
@@ -144,12 +148,17 @@ internal sealed partial class SceneHoverAndPickService
                         continue;
                     }
 
+                    bool cameraInside = isCameraInsideWmo(hit);
                     bool hasInteriorHit = validHits.Any(other =>
                     {
                         if (other.ObjectType == ObjectType.Wmo && other.ObjectIndex == hit.ObjectIndex)
                             return false;
 
-                        // Test if other object's selection point is within this WMO's bounding box (with slight margin)
+                        // When camera is outside the WMO and the ray hits the WMO before the interior object,
+                        // the WMO is the front-facing exterior surface and must NOT be dropped.
+                        if (!cameraInside && other.Distance >= hit.Distance)
+                            return false;
+
                         return other.SelectionPoint.X >= hit.BoundsMin.X - 0.5f && other.SelectionPoint.X <= hit.BoundsMax.X + 0.5f
                             && other.SelectionPoint.Y >= hit.BoundsMin.Y - 0.5f && other.SelectionPoint.Y <= hit.BoundsMax.Y + 0.5f
                             && other.SelectionPoint.Z >= hit.BoundsMin.Z - 0.5f && other.SelectionPoint.Z <= hit.BoundsMax.Z + 0.5f;

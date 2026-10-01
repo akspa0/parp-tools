@@ -1,4 +1,5 @@
 using System;
+using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
@@ -181,5 +182,110 @@ internal sealed partial class RenderQualityService
             WmoRenderer.CollisionWallOpacity = 1.0f;
             _settings.SaveViewerSettings();
         }
+
+        ImGui.Separator();
+        ImGui.Text("M2 & MDX Models");
+
+        float m2Opacity = M2Renderer.GlobalOpacity * 100f;
+        if (ImGui.SliderFloat("Model Opacity", ref m2Opacity, 0f, 100f, "%.0f%%"))
+        {
+            M2Renderer.GlobalOpacity = Math.Clamp(m2Opacity / 100f, 0f, 1f);
+            MdxRenderer.GlobalOpacity = M2Renderer.GlobalOpacity;
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Global opacity for M2 and MDX models and particle effects (0% - 100%). Right-click to type.");
+
+        if (ImGui.SmallButton("Invisible (0%)##m2"))
+        {
+            M2Renderer.GlobalOpacity = 0.0f;
+            MdxRenderer.GlobalOpacity = 0.0f;
+            _settings.SaveViewerSettings();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Translucent (50%)##m2"))
+        {
+            M2Renderer.GlobalOpacity = 0.5f;
+            MdxRenderer.GlobalOpacity = 0.5f;
+            _settings.SaveViewerSettings();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("See-Through (75%)##m2"))
+        {
+            M2Renderer.GlobalOpacity = 0.75f;
+            MdxRenderer.GlobalOpacity = 0.75f;
+            _settings.SaveViewerSettings();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Solid (100%)##m2"))
+        {
+            M2Renderer.GlobalOpacity = 1.0f;
+            MdxRenderer.GlobalOpacity = 1.0f;
+            _settings.SaveViewerSettings();
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Wireframe Overlay Styling");
+
+        var wireColor = WireframeOverlaySettings.DefaultColor;
+        if (ImGui.ColorEdit3("Wireframe Color", ref wireColor, ImGuiColorEditFlags.NoInputs))
+        {
+            WireframeOverlaySettings.DefaultColor = wireColor;
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Color used for wireframe overlays across WMO, M2, and MDX geometry.");
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Gold##wf"))
+        {
+            WireframeOverlaySettings.DefaultColor = new Vector3(1.0f, 0.85f, 0.3f);
+            _settings.SaveViewerSettings();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Cyan##wf"))
+        {
+            WireframeOverlaySettings.DefaultColor = new Vector3(0.2f, 0.8f, 1.0f);
+            _settings.SaveViewerSettings();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Green##wf"))
+        {
+            WireframeOverlaySettings.DefaultColor = new Vector3(0.2f, 1.0f, 0.4f);
+            _settings.SaveViewerSettings();
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("White##wf"))
+        {
+            WireframeOverlaySettings.DefaultColor = new Vector3(1.0f, 1.0f, 1.0f);
+            _settings.SaveViewerSettings();
+        }
+
+        float lineWidth = WireframeOverlaySettings.LineWidth;
+        if (ImGui.SliderFloat("Wireframe Width", ref lineWidth, 0.5f, 4.0f, "%.1f px"))
+        {
+            WireframeOverlaySettings.LineWidth = Math.Clamp(lineWidth, 0.5f, 4.0f);
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Rasterized line thickness in pixels for wireframe meshes.");
+
+        float baseIntensity = WireframeOverlaySettings.BaseIntensity * 100f;
+        if (ImGui.SliderFloat("Wireframe Intensity", ref baseIntensity, 10f, 100f, "%.0f%%"))
+        {
+            WireframeOverlaySettings.BaseIntensity = Math.Clamp(baseIntensity / 100f, 0.1f, 1.0f);
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Base opacity of the wireframe lines so they do not overpower the underlying textures.");
+
+        bool followOpacity = WireframeOverlaySettings.FollowModelOpacity;
+        if (ImGui.Checkbox("Tie Wireframe to Model/WMO Opacity", ref followOpacity))
+        {
+            WireframeOverlaySettings.FollowModelOpacity = followOpacity;
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("When checked, wireframe line alpha automatically fades down when the model or WMO opacity is reduced.");
     }
 }

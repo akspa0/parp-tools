@@ -15,8 +15,10 @@ public sealed class WorldTerrainCellGrid
     public IReadOnlyList<WorldTerrainCell> Cells => _cells;
 
     public static WorldTerrainCellGrid CreateDefault(ushort holeMask)
+        => CreateDefault(new WorldTerrainHoleMask(holeMask));
+
+    public static WorldTerrainCellGrid CreateDefault(WorldTerrainHoleMask holeMaskState)
     {
-        WorldTerrainHoleMask holeMaskState = new(holeMask);
         WorldTerrainCell[] cells = new WorldTerrainCell[CellCount];
 
         for (int cellY = 0; cellY < CellsPerAxis; cellY++)

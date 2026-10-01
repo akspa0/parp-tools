@@ -158,12 +158,15 @@ internal static class TerrainChunkMath
     }
 
     internal static Vector3[] GenerateNormalsForChunk(Terrain.TerrainChunkData chunk, float[] heights, int holeMask)
+        => GenerateNormalsForChunk(chunk, heights, chunk.HoleMask64, holeMask);
+
+    internal static Vector3[] GenerateNormalsForChunk(Terrain.TerrainChunkData chunk, float[] heights, ulong holeMask64, int holeMask)
     {
         var positions = new Vector3[145];
         for (int i = 0; i < 145; i++)
             positions[i] = GetChunkVertexWorldPosition(chunk, heights, i);
 
-        var indices = BuildChunkIndices(holeMask);
+        var indices = BuildChunkIndices(holeMask64, holeMask);
         var accum = new Vector3[145];
 
         for (int t = 0; t + 2 < indices.Length; t += 3)
@@ -231,7 +234,9 @@ internal static class TerrainChunkMath
     internal static int OuterIndex(int outerRow, int outerCol) => outerRow * 17 + outerCol;
     private static int InnerIndex(int innerRow, int innerCol) => innerRow * 17 + 9 + innerCol;
 
-    internal static int[] BuildChunkIndices(int holeMask)
+    internal static int[] BuildChunkIndices(int holeMask) => BuildChunkIndices(0UL, holeMask);
+
+    internal static int[] BuildChunkIndices(ulong holeMask64, int holeMask)
     {
         var indices = new List<int>(256 * 3);
 
@@ -239,12 +244,14 @@ internal static class TerrainChunkMath
         {
             for (int cellX = 0; cellX < 8; cellX++)
             {
-                if (holeMask != 0)
+                if (holeMask64 != 0UL)
                 {
-                    int holeX = cellX / 2;
-                    int holeY = cellY / 2;
-                    int holeBit = 1 << (holeY * 4 + holeX);
-                    if ((holeMask & holeBit) != 0)
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled64(holeMask64, cellX, cellY))
+                        continue;
+                }
+                else if (holeMask != 0)
+                {
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled16((ushort)holeMask, cellX, cellY))
                         continue;
                 }
 
@@ -280,6 +287,7 @@ internal static class TerrainChunkMath
         float[]? heights = null,
         Vector3[]? normals = null,
         int? holeMask = null,
+        ulong? holeMask64 = null,
         WoWViewer.Terrain.TerrainLayer[]? layers = null,
         Dictionary<int, byte[]>? alphaMaps = null,
         byte[]? shadowMap = null,
@@ -294,6 +302,7 @@ internal static class TerrainChunkMath
             Heights = heights ?? source.Heights,
             Normals = normals ?? source.Normals,
             HoleMask = holeMask ?? source.HoleMask,
+            HoleMask64 = holeMask64 ?? source.HoleMask64,
             Layers = layers ?? source.Layers,
             AlphaMaps = alphaMaps ?? source.AlphaMaps,
             ShadowMap = shadowMap ?? source.ShadowMap,

@@ -2,7 +2,7 @@
 
 Preservation, conversion, reverse engineering, analysis, and 3D visualization tooling for World of Warcraft client data.
 
-**Current Release Line**: `v0.6.0-alpha` (v0.6 line)
+**Current Release Line**: `v0.6.0-alpha4` (v0.6 line)
 **Primary Project Directory**: `wow-viewer/`  
 **Target Runtime**: .NET 10 (`net10.0`) & Python 3.12+ (`uv`)
 
@@ -153,6 +153,13 @@ Later client terrain formats are outside the current project scope unless a futu
 - **[Expanded CLI Reference](wow-viewer/docs/CLI-TOOLS.md)**: Longer historical command reference for `wowviewer-inspect`, `wowviewer-converter`, `wowviewer-harvest`, and dataset workflows.
 - **[Feature Specifications & Status](wow-viewer/specs/STATUS.md)**: Specification kit tracking active architecture specs, plans, and task lists.
 - **[Memory Bank Dashboard](wow-viewer/memory-bank/activeContext.md)**: Current workstream focus, execution lanes, and progress ledger.
+
+---
+
+## Community & Acknowledgments
+
+Special thanks to **Kruithne** for [wow.export](https://github.com/Kruithne/wow.export), whose tooling, format research, and community contributions have been a tremendous reference and inspiration for modern World of Warcraft asset extraction and analysis.
+We also gratefully acknowledge Marlamin, schlumpf, Dovah, Pirate the Explorer, fean, implave, IS4, Mjollna, Adspartan (Noggit), Skarn (Noggit-Red), and the entire WoW Exploration & Pre-Alpha Restoration communities.
 
 ---
 

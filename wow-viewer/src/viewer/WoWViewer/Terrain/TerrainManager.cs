@@ -275,7 +275,7 @@ public class TerrainManager : ISceneRenderer
             var adjustedChunks = new List<TerrainChunkData>(chunks.Count);
             foreach (var chunk in chunks)
             {
-                adjustedChunks.Add(chunk.HoleMask == 0 ? chunk : CloneChunkWithHoleMask(chunk, 0));
+                adjustedChunks.Add(chunk.HoleMask == 0 && chunk.HoleMask64 == 0UL ? chunk : CloneChunkWithHoleMask(chunk, 0, 0UL));
             }
 
             chunksToBuild = adjustedChunks;
@@ -284,7 +284,7 @@ public class TerrainManager : ISceneRenderer
         return _tileMeshBuilder.BuildTileMesh(tileX, tileY, chunksToBuild);
     }
 
-    private static TerrainChunkData CloneChunkWithHoleMask(TerrainChunkData chunk, int holeMask)
+    private static TerrainChunkData CloneChunkWithHoleMask(TerrainChunkData chunk, int holeMask, ulong holeMask64 = 0UL)
         => new()
         {
             McinIndex = chunk.McinIndex,
@@ -295,6 +295,7 @@ public class TerrainManager : ISceneRenderer
             Heights = chunk.Heights,
             Normals = chunk.Normals,
             HoleMask = holeMask,
+            HoleMask64 = holeMask64,
             Layers = chunk.Layers,
             AlphaMaps = chunk.AlphaMaps,
             ShadowMap = chunk.ShadowMap,

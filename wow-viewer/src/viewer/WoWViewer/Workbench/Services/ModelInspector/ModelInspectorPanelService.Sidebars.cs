@@ -613,26 +613,6 @@ internal sealed partial class ModelInspectorPanelService
         ImGui.TextDisabled("Adds on top of the version-aware WMO MLIQ baseline. Changes are live.");
     }
 
-    internal void DrawHoveredWmoDoodadSetCombo(WmoRenderer hoveredWmo, string sourcePath)
-    {
-        ImGui.SetNextItemWidth(150f);
-        int activeDoodadSet = hoveredWmo.ActiveDoodadSet;
-        if (ImGui.BeginCombo("##HoveredWmoDoodadSet", hoveredWmo.GetDoodadSetName(activeDoodadSet)))
-        {
-            for (int setIndex = 0; setIndex < hoveredWmo.DoodadSetCount; setIndex++)
-            {
-                bool isSetSelected = setIndex == activeDoodadSet;
-                if (ImGui.Selectable(hoveredWmo.GetDoodadSetName(setIndex), isSetSelected))
-                    hoveredWmo.SetActiveDoodadSet(setIndex);
-                if (isSetSelected)
-                    ImGui.SetItemDefaultFocus();
-            }
-            ImGui.EndCombo();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip($"Doodad set for hovered WMO '{Path.GetFileName(sourcePath)}'.");
-    }
-
 
 
     internal void DrawModelAnimationsSubTab()

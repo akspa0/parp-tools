@@ -18,7 +18,8 @@ public sealed class WorldTerrainChunkData
         float[]? heights,
         IReadOnlyList<AdtTextureChunkLayer>? textureLayers = null,
         Vector3[]? normals = null,
-        byte[]? shadowMap = null)
+        byte[]? shadowMap = null,
+        ulong holeMask64 = 0)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(chunkIndex);
         ArgumentOutOfRangeException.ThrowIfNegative(indexX);
@@ -38,14 +39,15 @@ public sealed class WorldTerrainChunkData
         Flags = flags;
         DeclaredLayerCount = layerCount;
         HoleMask = holeMask;
-        HoleMaskState = new WorldTerrainHoleMask(holeMask);
+        HoleMask64 = holeMask64 != 0UL ? holeMask64 : Maps.TerrainHoleMath.UpsampleLowResToHighRes(holeMask);
+        HoleMaskState = holeMask64 != 0UL ? new WorldTerrainHoleMask(holeMask64, holeMask) : new WorldTerrainHoleMask(holeMask);
         HasLiquidFlags = hasLiquidFlags;
         HasVertexColors = hasVertexColors;
         Heights = heights;
         TextureLayers = textureLayers ?? [];
         Normals = normals;
         ShadowMap = shadowMap;
-        CellGrid = WorldTerrainCellGrid.CreateDefault(holeMask);
+        CellGrid = WorldTerrainCellGrid.CreateDefault(HoleMaskState);
     }
 
     public int ChunkIndex { get; }
@@ -64,7 +66,9 @@ public sealed class WorldTerrainChunkData
 
     public ushort HoleMask { get; }
 
-    public bool HasHoles => HoleMask != 0;
+    public ulong HoleMask64 { get; }
+
+    public bool HasHoles => HoleMask64 != 0UL || HoleMask != 0;
 
     public WorldTerrainHoleMask HoleMaskState { get; }
 

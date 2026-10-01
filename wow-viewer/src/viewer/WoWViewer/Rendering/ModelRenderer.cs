@@ -498,6 +498,8 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         return true;
     }
 
+    public static float GlobalOpacity { get; set; } = 1.0f;
+
     public bool IsWireframe => _wireframe;
 
     public void ToggleWireframe()
@@ -1559,7 +1561,9 @@ if (isAlphaCutout)
     {
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
-        _gl.Disable(EnableCap.Blend);
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.LineWidth(WireframeOverlaySettings.LineWidth);
         _gl.Uniform1(_uHasTexture, 0);
         _gl.Uniform1(_uAlphaTest, 0);
         _gl.Uniform1(_uUseTextureAlpha, 0);
@@ -1569,8 +1573,9 @@ if (isAlphaCutout)
         _gl.Uniform1(_uSphereEnvMap, 0);
         _gl.Uniform1(_uUvSet, 0);
         ResetLayerUvTransform();
-        Vector3 lineColor = _wireframeLineColorOverride ?? new Vector3(1.0f, 0.85f, 0.3f);
-        _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, 1.0f);
+        Vector3 lineColor = _wireframeLineColorOverride ?? WireframeOverlaySettings.DefaultColor;
+        float wireframeAlpha = (WireframeOverlaySettings.FollowModelOpacity ? GlobalOpacity : 1.0f) * WireframeOverlaySettings.BaseIntensity;
+        _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, wireframeAlpha);
 
         _gl.BindVertexArray(gb.Vao);
         if (_gpuInstanceDrawActive)
@@ -1579,6 +1584,8 @@ if (isAlphaCutout)
             _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
         ModelDrawCallCounter.Record();
         _gl.BindVertexArray(0);
+        _gl.LineWidth(1.0f);
+        _gl.Disable(EnableCap.Blend);
     }
 
     private unsafe void DrawForcedM2SolidGeoset(GeosetBuffers gb, bool forceBackdropState)

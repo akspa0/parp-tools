@@ -647,10 +647,6 @@ internal sealed partial class InvestigationService
 
     internal void DrawMcnkFlagOverlayControls()
     {
-        if (!WoWViewer.UI.SharedUiWidgets.DrawSectionHeader("MCNK Flag Overlay",
-            "Highlight resident terrain chunks by raw MCNK header flags. Diagonal weak corners require the overlay and Impassable flag."))
-            return;
-
         bool showOverlay = _showMcnkFlagOverlay;
         if (ImGui.Checkbox("Show MCNK Flag Overlay", ref showOverlay))
             _showMcnkFlagOverlay = showOverlay;

@@ -77,7 +77,9 @@ internal sealed partial class TerrainInspectionPanelService
         meta.Row("Area Name", ResolveTerrainAreaName(chunkData.AreaId), isImportant: true);
         meta.Row("MCNK Flags", $"0x{unchecked((uint)chunkData.McnkFlags):X8} ({DescribeMcnkFlags(chunkData.McnkFlags)})");
         meta.Row("Alpha Source Flags", $"0x{unchecked((uint)chunkData.AlphaSourceFlags):X8}");
-        meta.Row("Holes Mask", $"0x{chunkData.HoleMask:X4} ({CountTerrainHoleCells(chunkData.HoleMask)}/16 2x2 groups)");
+        meta.Row("Holes Mask", chunkData.HoleMask64 != 0UL
+            ? $"0x{chunkData.HoleMask64:X16} (high-res {System.Numerics.BitOperations.PopCount(chunkData.HoleMask64)}/64 cells)"
+            : $"0x{chunkData.HoleMask:X4} ({CountTerrainHoleCells(chunkData.HoleMask)}/16 2x2 groups)");
         meta.Row("World Position", FormatVector(chunkData.WorldPosition));
         meta.Row("Elevation", DescribeTerrainElevation(chunkData));
         meta.Row("Terrain Bounds", $"Min {FormatVector(chunkInfo.BoundsMin)}  Max {FormatVector(chunkInfo.BoundsMax)}");

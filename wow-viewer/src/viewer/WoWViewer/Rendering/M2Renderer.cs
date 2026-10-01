@@ -26,6 +26,7 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
     private readonly List<bool> _sectionVisibility = new();
     private readonly Dictionary<string, uint> _loadedTextureCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> _ownedTextureIds = new();
+    private readonly M2ParticleController? _particleController;
 
     // Spec 256 P2b: world-streamed models read/decode textures off the render thread (M2TextureStreamer).
     private readonly bool _deferTextureLoads;
@@ -72,6 +73,7 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
     private static int _uUvTranslation;
     private static int _uUvScale;
     private static int _uUvRotation;
+    private static int _uAdditive;
     private static bool _shaderInitialized;
     private static int _shaderRefCount;
 
@@ -130,6 +132,11 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
         BlpCompressedTexture.DetectSupport(gl); // Spec 256 P2c, render thread
         LoadSectionTextures();
 
+        if (_runtimeModel?.Model.Particles.Count > 0)
+        {
+            _particleController = new M2ParticleController(_gl, _runtimeModel, ResolveParticleTexture);
+        }
+
         if (_texResolver != null)
         {
             IReadOnlyCollection<uint>? defaultGroups = _texResolver.GetDefaultCharacterSelectionGroups(SourceModelPath);
@@ -157,6 +164,8 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
 
     public Vector3 BoundsMax => _runtimeModel?.BoundsMax ?? _legacyRenderer?.BoundsMax ?? Vector3.Zero;
 
+    public static float GlobalOpacity { get; set; } = 1.0f;
+
     public bool HasTransparentWorldPass
     {
         get
@@ -164,10 +173,16 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
             if (_legacyRenderer != null)
                 return _legacyRenderer.HasTransparentWorldPass;
 
+            if (GlobalOpacity < 0.999f)
+                return true;
+
+            if (_particleController?.HasActiveParticles == true)
+                return true;
+
             for (int index = 0; index < _sections.Count; index++)
             {
                 SectionBuffers section = _sections[index];
-                if (section.Visible && section.Material.IsTransparent)
+                if (section.Visible && (section.Material.IsTransparent || section.AnimatedAlpha < 0.999f || section.Material.BlendMode is WowViewer.Core.M2.M2BlendMode.Add or WowViewer.Core.M2.M2BlendMode.NoAlphaAdd or WowViewer.Core.M2.M2BlendMode.BlendAdd))
                     return true;
             }
 
@@ -330,16 +345,24 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
             return;
         }
 
-        if (_runtimeAnimator == null || _runtimeModel == null || _gl == null)
-            return;
-
         DateTime now = DateTime.UtcNow;
         float deltaMs = (float)(now - _lastAnimationUpdateTime).TotalMilliseconds;
         _lastAnimationUpdateTime = now;
-        _runtimeAnimator.Update(Math.Clamp(deltaMs, 0.0f, 100.0f));
+        float clampedDeltaMs = Math.Clamp(deltaMs, 0.0f, 100.0f);
+
+        if (_runtimeAnimator == null || _runtimeModel == null || _gl == null)
+        {
+            _particleController?.Update(clampedDeltaMs / 1000f, null, -1, 0);
+            return;
+        }
+
+        _runtimeAnimator.Update(clampedDeltaMs);
 
         if (!_runtimeAnimator.TryPrepareCurrentSequence(out int sequenceIndex, out int timeMs, out M2ExternalAnimationRuntimeState? externalAnimationState))
+        {
+            _particleController?.Update(clampedDeltaMs / 1000f, null, -1, 0);
             return;
+        }
 
         try
         {
@@ -351,6 +374,7 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
                 _hasBonePose = true;
                 _lastAnimatedLights = animatedState.Lights;
                 ApplyAnimatedPassStates(M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState));
+                _particleController?.Update(clampedDeltaMs / 1000f, _boneMatrices, sequenceIndex, timeMs);
                 return;
             }
 
@@ -359,6 +383,7 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
             M2RenderConsumerFrameState consumerState = M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState);
             _lastAnimatedLights = animatedState.Lights;
             ApplyAnimatedFrame(skinnedRenderModel, consumerState);
+            _particleController?.Update(clampedDeltaMs / 1000f, _boneMatrices, sequenceIndex, timeMs);
         }
         catch (Exception ex)
         {
@@ -530,9 +555,12 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
     {
         if (_legacyRenderer != null)
         {
-            _legacyRenderer.RenderWireframeOverlay(modelMatrix, view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+            _legacyRenderer.RenderWireframeOverlay(modelMatrix, view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor, wireframeColor);
             return;
         }
+
+        if (GlobalOpacity <= 0.001f)
+            return;
 
         bool previousWireframe = _wireframe;
         _wireframe = true;
@@ -569,6 +597,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         _disposed = true;
         _sections.Clear();
         DeleteInstanceBuffer();
+        _particleController?.Dispose();
 
         ReleaseOwnedTextures();
 
@@ -819,14 +848,33 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             _gl.DepthFunc(DepthFunction.Lequal);
         }
 
-        _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
+        if (_wireframe)
+        {
+            _gl.LineWidth(WireframeOverlaySettings.LineWidth);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _gl.DepthMask(false);
+        }
+        else
+        {
+            _gl.LineWidth(1.0f);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        }
 
         foreach (SectionBuffers section in _sections)
         {
             if (!section.Visible || section.TexturePending)
                 continue;
 
-            bool transparent = section.Material.IsTransparent;
+            float effectiveAlpha = Math.Clamp(fadeAlpha * section.AnimatedAlpha * GlobalOpacity, 0.0f, 1.0f);
+            bool isEffectLayer = section.Material.BlendMode is WowViewer.Core.M2.M2BlendMode.Add
+                or WowViewer.Core.M2.M2BlendMode.NoAlphaAdd
+                or WowViewer.Core.M2.M2BlendMode.BlendAdd
+                or WowViewer.Core.M2.M2BlendMode.Mod
+                or WowViewer.Core.M2.M2BlendMode.Mod2X;
+
+            bool transparent = section.Material.IsTransparent || effectiveAlpha < 0.999f || isEffectLayer;
             if (pass == RenderPass.Opaque && transparent)
                 continue;
             if (pass == RenderPass.Transparent && !transparent)
@@ -836,31 +884,46 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             // pure runtime renderer has proven stable winding or projected-pass rules.
             _gl.Disable(EnableCap.CullFace);
 
-            if (transparent)
+            if (_wireframe)
             {
-                _gl.Enable(EnableCap.Blend);
-                ConfigureBlendMode(section.Material.BlendMode);
-                _gl.DepthMask(false);
+                // Wireframe passes draw flat-colored untextured lines with configured color & alpha
+                Vector3 lineColor = _wireframeColorOverride ?? WireframeOverlaySettings.DefaultColor;
+                float wireframeAlpha = (WireframeOverlaySettings.FollowModelOpacity ? GlobalOpacity : 1.0f) * WireframeOverlaySettings.BaseIntensity;
+                ApplySectionUniforms(section, lineColor, wireframeAlpha, isEffectLayer: false);
             }
             else
             {
-                _gl.Disable(EnableCap.Blend);
-                _gl.DepthMask(!backdrop);
-            }
+                if (transparent)
+                {
+                    _gl.Enable(EnableCap.Blend);
+                    if (isEffectLayer || section.Material.IsTransparent)
+                        ConfigureBlendMode(section.Material.BlendMode);
+                    else
+                        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    _gl.DepthMask(false);
+                }
+                else
+                {
+                    _gl.Disable(EnableCap.Blend);
+                    _gl.Uniform1(_uAdditive, 0);
+                    _gl.DepthMask(!backdrop);
+                }
 
-            // Wireframe passes draw flat-colored untextured lines: with the textured fill
-            // shader the lines landed on identically-colored surfaces (invisible) and
-            // alpha-cutout foliage degraded into scattered orange fragments.
-            Vector3 baseColor = _wireframe
-                ? (_wireframeColorOverride ?? WireframeLineColor)
-                : ComputeSectionColor(section, fadeAlpha);
-            ApplySectionUniforms(section, baseColor, Math.Clamp(fadeAlpha * section.AnimatedAlpha, 0.0f, 1.0f));
+                Vector3 baseColor = ComputeSectionColor(section, fadeAlpha);
+                ApplySectionUniforms(section, baseColor, effectiveAlpha, isEffectLayer);
+            }
 
             _gl.BindVertexArray(section.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, section.IndexCount, DrawElementsType.UnsignedInt, null);
             ModelDrawCallCounter.Record();
         }
 
+        if (!_wireframe && (pass == RenderPass.Transparent || pass == RenderPass.Both))
+        {
+            _particleController?.Render(modelMatrix, view, proj, cameraPos, fogColor, fogStart, fogEnd);
+        }
+
+        _gl.LineWidth(1.0f);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.BindVertexArray(0);
         _gl.Disable(EnableCap.Blend);
@@ -871,10 +934,10 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
     }
 
     // Per-section material uniforms and texture, shared by RenderCore and the instanced draw.
-    private void ApplySectionUniforms(SectionBuffers section, Vector3 baseColor, float alpha)
+    private void ApplySectionUniforms(SectionBuffers section, Vector3 baseColor, float alpha, bool isEffectLayer = false)
     {
         _gl!.Uniform3(_uBaseColor, baseColor.X, baseColor.Y, baseColor.Z);
-        _gl.Uniform1(_uUnshaded, section.Material.IsUnshaded ? 1 : 0);
+        _gl.Uniform1(_uUnshaded, (_wireframe || section.Material.IsUnshaded || isEffectLayer) ? 1 : 0);
         _gl.Uniform1(_uHasTexture, (!_wireframe && section.HasTexture) ? 1 : 0);
         _gl.Uniform1(_uUvSet, section.UvSet);
         _gl.Uniform1(_uGeneratedTexCoord, section.GeneratedTexCoord ? 1 : 0);
@@ -895,23 +958,38 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         if (_gl == null)
             return;
 
+        bool isAdditive = false;
         switch (blendMode)
         {
             case WowViewer.Core.M2.M2BlendMode.Add:
-            case WowViewer.Core.M2.M2BlendMode.NoAlphaAdd:
-            case WowViewer.Core.M2.M2BlendMode.BlendAdd:
                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+                isAdditive = true;
+                break;
+
+            case WowViewer.Core.M2.M2BlendMode.NoAlphaAdd:
+                _gl.BlendFunc(BlendingFactor.One, BlendingFactor.One);
+                isAdditive = true;
+                break;
+
+            case WowViewer.Core.M2.M2BlendMode.BlendAdd:
+                _gl.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
+                isAdditive = true;
                 break;
 
             case WowViewer.Core.M2.M2BlendMode.Mod:
-            case WowViewer.Core.M2.M2BlendMode.Mod2X:
                 _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.Zero);
+                break;
+
+            case WowViewer.Core.M2.M2BlendMode.Mod2X:
+                _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.SrcColor);
                 break;
 
             default:
                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 break;
         }
+
+        _gl.Uniform1(_uAdditive, isAdditive ? 1 : 0);
     }
 
     private static Vector3 ComputeSectionColor(SectionBuffers section, float fadeAlpha)
@@ -1028,6 +1106,7 @@ uniform vec3 uLightColor;
 uniform vec3 uAmbientColor;
 uniform vec3 uBaseColor;
 uniform int uUnshaded;
+uniform int uAdditive;
 uniform int uHasTexture;
 uniform int uUvSet;
 uniform int uGeneratedTexCoord;
@@ -1079,13 +1158,16 @@ void main()
         float diff = nDotL * 0.5 + 0.5;
         diffuseStrength = diff * diff;
     }
-    // vInstanceFade is 1.0 outside instanced draws, so both factors below are then exact no-ops; in an
-    // instanced draw they apply the fade exactly as ComputeSectionColor / RenderCore do per instance.
-    vec3 litColor = (uBaseColor * clamp(vInstanceFade, 0.1, 1.0) * textureSample.rgb) * (uAmbientColor + (uLightColor * diffuseStrength));
+    vec3 lightMultiplier = uUnshaded == 1
+        ? vec3(1.0)
+        : (uAmbientColor + (uLightColor * diffuseStrength));
+    vec3 litColor = (uBaseColor * clamp(vInstanceFade, 0.1, 1.0) * textureSample.rgb) * lightMultiplier;
     float distanceToCamera = distance(vWorldPos, uCameraPos);
     float fogRange = max(uFogEnd - uFogStart, 0.001);
     float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
-    vec3 finalColor = mix(uFogColor, litColor, fogFactor);
+    vec3 finalColor = uAdditive == 1
+        ? (litColor * fogFactor)
+        : mix(uFogColor, litColor, fogFactor);
     FragColor = vec4(finalColor, textureSample.a * clamp(uAlpha * vInstanceFade, 0.0, 1.0));
 }
 """;
@@ -1116,6 +1198,7 @@ void main()
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
         _uBaseColor = _gl.GetUniformLocation(_shaderProgram, "uBaseColor");
         _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
+        _uAdditive = _gl.GetUniformLocation(_shaderProgram, "uAdditive");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uUvSet = _gl.GetUniformLocation(_shaderProgram, "uUvSet");
         _uGeneratedTexCoord = _gl.GetUniformLocation(_shaderProgram, "uGeneratedTexCoord");
@@ -1342,6 +1425,54 @@ void main()
 
         ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} has no database texture for {Path.GetFileName(SourceModelPath)}");
         return null;
+    }
+
+    private uint ResolveParticleTexture(ushort textureIndex)
+    {
+        if (_gl == null || _disposed)
+            return 0u;
+
+        string? path = null;
+        uint replaceableId = 0;
+        uint flags = 0;
+
+        int actualIndex = textureIndex;
+        if (_runtimeModel?.TextureLookup != null && textureIndex < _runtimeModel.TextureLookup.Count)
+            actualIndex = _runtimeModel.TextureLookup[textureIndex];
+
+        if (_runtimeModel?.Textures != null && actualIndex >= 0 && actualIndex < _runtimeModel.Textures.Count)
+        {
+            M2GeometryTexture geomTex = _runtimeModel.Textures[actualIndex];
+            path = geomTex.Filename;
+            replaceableId = geomTex.ReplaceableId;
+            flags = geomTex.Flags;
+        }
+
+        if (replaceableId != 0)
+        {
+            string? resolved = ResolveReplaceableTexture(replaceableId);
+            if (!string.IsNullOrWhiteSpace(resolved))
+                path = resolved;
+        }
+
+        if (string.IsNullOrWhiteSpace(path) && _sections.Count > 0)
+        {
+            foreach (SectionBuffers sec in _sections)
+            {
+                if (sec.HasTexture && sec.TextureId != 0)
+                    return sec.TextureId;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            bool clampS = (flags & 0x1u) == 0;
+            bool clampT = (flags & 0x2u) == 0;
+            if (TryGetOrLoadTexture(path, clampS, clampT, out uint texId))
+                return texId;
+        }
+
+        return 0u;
     }
 
     private bool TryGetOrLoadTexture(string texturePath, bool clampS, bool clampT, out uint textureId)
