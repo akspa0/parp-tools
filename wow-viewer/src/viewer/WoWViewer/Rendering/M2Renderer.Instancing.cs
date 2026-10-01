@@ -29,7 +29,7 @@ public sealed partial class M2Renderer
     /// so one switch compares both backends' instanced and per-instance paths.
     /// </summary>
     private bool NativeSupportsGpuInstancedOpaque
-        => _gl != null && !_disposed && _instanceVbo != 0 && !_wireframe && MdxRenderer.GpuInstancingEnabled;
+        => _gl != null && !_disposed && _instanceVbo != 0 && !_wireframe && MdxRenderer.GpuInstancingEnabled && GlobalOpacity >= 0.999f;
 
     private void CreateInstanceBuffer()
     {
@@ -84,6 +84,12 @@ public sealed partial class M2Renderer
         Vector3 lightColor,
         Vector3 ambientColor)
     {
+        if (GlobalOpacity <= 0.001f)
+        {
+            _gpuInstanceBatchActive = false;
+            return;
+        }
+
         BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
         _instanceCount = 0;
         _gpuInstanceBatchActive = true;
@@ -91,7 +97,7 @@ public sealed partial class M2Renderer
 
     private void QueueNativeGpuInstance(Matrix4x4 modelMatrix, float fadeAlpha)
     {
-        if (!_gpuInstanceBatchActive)
+        if (!_gpuInstanceBatchActive || GlobalOpacity <= 0.001f)
             return;
 
         // Not instanceable right now (wireframe toggled mid-frame, instancing switched off): draw this one
@@ -135,7 +141,7 @@ public sealed partial class M2Renderer
         _gpuInstanceBatchActive = false;
         int count = _instanceCount;
         _instanceCount = 0;
-        if (count == 0 || _gl == null || _disposed || !_batchStateValid)
+        if (count == 0 || _gl == null || _disposed || !_batchStateValid || GlobalOpacity <= 0.001f)
             return;
 
         GL gl = _gl;

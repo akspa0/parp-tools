@@ -131,7 +131,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         => !_wireframe
             && _groups.Count > 0
             && _wmo.Portals.Count == 0
-            && _groups.All(static group => group.ManualVisible);
+            && _groups.All(static group => group.ManualVisible)
+            && GetEffectiveOpacity() >= 0.999f;
 
     public M2RouteDecision? GetDoodadRouteDecision(string normalizedPath)
         => _doodadController.GetDoodadRouteDecision(normalizedPath);
@@ -144,16 +145,80 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
 
     public int LiquidMeshCount => _liquidRenderer.LiquidMeshCount;
 
+    public static bool DetermineIsCollisionWall(string? modelDir, string? modelPath = null, WmoV14ToV17Converter.WmoV14Data? wmo = null)
+    {
+        string text = $"{modelDir ?? ""} {modelPath ?? ""}".Replace('/', '\\');
+        string fileName = !string.IsNullOrEmpty(modelPath) ? Path.GetFileNameWithoutExtension(modelPath) : "";
+
+        if (text.Contains("collisionwall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("collision_wall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("invisible_wall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("invisiblewall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("invis_wall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("inviswall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("boundary_wall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("boundarywall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("camera_collision", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("cameracollision", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("cam_collision", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("camcollision", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("collwall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("coll_wall", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrEmpty(fileName))
+        {
+            if (fileName.EndsWith("_collision", StringComparison.OrdinalIgnoreCase) ||
+                fileName.EndsWith("collision", StringComparison.OrdinalIgnoreCase) ||
+                fileName.EndsWith("_coll", StringComparison.OrdinalIgnoreCase) ||
+                fileName.EndsWith("_invis", StringComparison.OrdinalIgnoreCase) ||
+                fileName.StartsWith("invis_", StringComparison.OrdinalIgnoreCase) ||
+                fileName.StartsWith("invisible_", StringComparison.OrdinalIgnoreCase) ||
+                fileName.StartsWith("collision_", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        if (wmo != null && wmo.Groups != null && wmo.Groups.Count > 0)
+        {
+            bool anyCollision = false;
+            bool allCollision = true;
+            foreach (var group in wmo.Groups)
+            {
+                if (!string.IsNullOrWhiteSpace(group.Name) &&
+                    (group.Name.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
+                     group.Name.Contains("invisible", StringComparison.OrdinalIgnoreCase) ||
+                     group.Name.Contains("invis_wall", StringComparison.OrdinalIgnoreCase) ||
+                     group.Name.Contains("inviswall", StringComparison.OrdinalIgnoreCase)))
+                {
+                    anyCollision = true;
+                }
+                else
+                {
+                    allCollision = false;
+                }
+            }
+
+            if (anyCollision && (allCollision || wmo.Groups.Count <= 2))
+                return true;
+        }
+
+        return false;
+    }
+
     public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
         IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null,
         bool deferInitialDoodadLoads = false, bool deferInitialMaterialTextureLoads = false,
-        bool enableRuntimeGroupVisibility = true)
+        bool enableRuntimeGroupVisibility = true, string? modelPath = null)
     {
         var initStopwatch = Stopwatch.StartNew();
         _gl = gl;
         _wmo = wmo;
         _modelDir = modelDir;
-        _isCollisionWall = modelDir.Contains("collisionwall", StringComparison.OrdinalIgnoreCase) || modelDir.Contains("collision_wall", StringComparison.OrdinalIgnoreCase);
+        _isCollisionWall = DetermineIsCollisionWall(modelDir, modelPath, wmo);
         _dataSource = dataSource;
         _texResolver = texResolver;
         _buildVersion = buildVersion;
@@ -717,7 +782,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
             }
             else
             {
-                _gl.DepthMask(true);
+                _gl.DepthMask(effectiveOpacity >= 0.999f);
                 if (effectiveOpacity < 1.0f)
                 {
                     _gl.Enable(EnableCap.Blend);
@@ -753,14 +818,14 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
                         {
                             if (!_wireframe && effectiveOpacity >= 1.0f) _gl.Disable(EnableCap.Blend);
                             else if (effectiveOpacity < 1.0f) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
-                            _gl.DepthMask(true);
+                            _gl.DepthMask(effectiveOpacity >= 0.999f);
                             _gl.Uniform1(_uAlphaTest, WoWConstants.AlphaKeyThreshold);
                         }
                         else
                         {
                             if (!_wireframe && effectiveOpacity >= 1.0f) _gl.Disable(EnableCap.Blend);
                             else if (effectiveOpacity < 1.0f) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
-                            _gl.DepthMask(true);
+                            _gl.DepthMask(effectiveOpacity >= 0.999f);
                             _gl.Uniform1(_uAlphaTest, 0.0f);
                         }
 
@@ -1291,9 +1356,9 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     private unsafe void DrawGroupFallback(GroupBuffers gb)
     {
         _gl.Uniform1(_uHasTexture, 0);
-        float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-        float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-        float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+        float r = _isCollisionWall ? 0.35f : ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+        float g = _isCollisionWall ? 0.65f : ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+        float b = _isCollisionWall ? 0.95f : ((gb.GroupIndex * 43 + 29) % 255) / 255f;
         _gl.Uniform4(_uColor, r, g, b, 1.0f);
         _currentDrawCalls++;
         _currentGroupFallbackDrawCalls++;
@@ -1304,9 +1369,9 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     private unsafe void DrawInstancedGroupFallback(GroupBuffers gb, uint instanceCount)
     {
         _gl.Uniform1(_uHasTexture, 0);
-        float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-        float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-        float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+        float r = _isCollisionWall ? 0.35f : ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+        float g = _isCollisionWall ? 0.65f : ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+        float b = _isCollisionWall ? 0.95f : ((gb.GroupIndex * 43 + 29) % 255) / 255f;
         _gl.Uniform4(_uColor, r, g, b, 1.0f);
         _currentDrawCalls++;
         _currentGroupFallbackDrawCalls++;

@@ -170,11 +170,11 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
     {
         get
         {
-            if (_legacyRenderer != null)
-                return _legacyRenderer.HasTransparentWorldPass;
-
             if (GlobalOpacity < 0.999f)
                 return true;
+
+            if (_legacyRenderer != null)
+                return _legacyRenderer.HasTransparentWorldPass;
 
             if (_particleController?.HasActiveParticles == true)
                 return true;
@@ -470,6 +470,9 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
 
 public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         if (_legacyRenderer != null)
         {
             _legacyRenderer.RenderInstance(modelMatrix, pass, fadeAlpha);
@@ -497,6 +500,9 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         Vector3? ambientColor = null,
         SceneLightManager? sceneLights = null)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         if (_legacyRenderer != null)
         {
             _legacyRenderer.RenderWithTransform(modelMatrix, view, proj, pass, fadeAlpha, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor, sceneLights);
@@ -531,6 +537,9 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         Vector3 lightColor,
         Vector3 ambientColor)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         if (_legacyRenderer != null)
         {
             _legacyRenderer.RenderBackdrop(modelMatrix, view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
@@ -820,7 +829,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         Vector3 ambientColor,
         bool backdrop)
     {
-        if (_gl == null)
+        if (_gl == null || GlobalOpacity <= 0.001f)
             return;
 
         _gl.UseProgram(_shaderProgram);

@@ -598,7 +598,7 @@ internal sealed partial class StandaloneModelLoaderService
             var v17Parser = new WmoV17ToV14Converter();
             var wmo = v17Parser.ParseV17ToModel(v17RootBytes, groupBytesList);
             ViewerLog.Trace($"[WMO] Parsed v{version} direct ({wmo.Groups.Count} groups)");
-            LoadWmoModel(wmo, dir);
+            LoadWmoModel(wmo, dir, filePath);
             _statusMessage = $"Loaded WMO v{version}: {Path.GetFileName(filePath)}";
         }
         else
@@ -606,7 +606,7 @@ internal sealed partial class StandaloneModelLoaderService
             // v14 (Alpha): use existing pipeline directly
             var converter = new WmoV14ToV17Converter();
             var wmo = converter.ParseWmoV14(filePath);
-            LoadWmoModel(wmo, dir);
+            LoadWmoModel(wmo, dir, filePath);
         }
     }
 
@@ -643,7 +643,7 @@ internal sealed partial class StandaloneModelLoaderService
             var v17Parser = new WmoV17ToV14Converter();
             var wmo = v17Parser.ParseV17ToModel(rootBytes, groupBytesList);
             ViewerLog.Trace($"[WMO] Parsed v{version} direct ({wmo.Groups.Count} groups)");
-            LoadWmoModel(wmo, CacheDir);
+            LoadWmoModel(wmo, CacheDir, virtualPath);
             _statusMessage = $"Loaded WMO v{version}: {Path.GetFileName(virtualPath)}";
         }
         else
@@ -699,7 +699,7 @@ internal sealed partial class StandaloneModelLoaderService
                 }
             }
 
-            LoadWmoModel(wmo, CacheDir);
+            LoadWmoModel(wmo, CacheDir, virtualPath);
         }
     }
 
@@ -1492,7 +1492,7 @@ internal sealed partial class StandaloneModelLoaderService
         _sqlSpawnStreaming.ResetSqlSpawnStreamingState(clearSceneSpawns: false);
     }
 
-    private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
+    private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir, string? modelPath = null)
     {
         // Loading a standalone WMO fully switches the viewer to object-view mode — the render
         // path draws this WMO and no longer draws the world scene. Tear down any lingering
@@ -1511,7 +1511,8 @@ internal sealed partial class StandaloneModelLoaderService
         int totalTris = wmo.Groups.Sum(g => g.Indices.Count / 3);
 
         _renderer = new WmoRenderer(_gl, wmo, dir, _dataSource, _texResolver, _dbcBuild,
-            enableRuntimeGroupVisibility: false);
+            enableRuntimeGroupVisibility: false,
+            modelPath: modelPath);
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();

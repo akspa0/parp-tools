@@ -1327,7 +1327,8 @@ private int _mdxLoadFailCount = 0;
             WmoRenderer renderer = new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion,
                 deferInitialDoodadLoads: true,
                 deferInitialMaterialTextureLoads: true,
-                enableRuntimeGroupVisibility: _enableRuntimeWmoGroupVisibility)
+                enableRuntimeGroupVisibility: _enableRuntimeWmoGroupVisibility,
+                modelPath: normalizedKey)
             {
                 DoodadModelShare = _wmoDoodadModels,
             };

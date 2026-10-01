@@ -241,7 +241,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
     /// <summary>Tight geometry-derived max corner, for selection highlighting and picking.</summary>
     public Vector3 SelectionBoundsMax => _renderableBoundsMax;
     public bool IsM2AdapterModel => _isM2AdapterModel;
-    public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
+    public bool HasTransparentWorldPass => !_forceM2SolidDebug && (GlobalOpacity < 0.999f || ComputeHasTransparentWorldPass());
     // Only state that changes how the OPAQUE geosets are drawn belongs here — this property is
     // consulted by the opaque batch planner and by WMO opaque doodad collection, and by nothing
     // else.
@@ -303,6 +303,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         => _gpuInstancingShaderAvailable
            && GpuInstancingEnabled
            && !RequiresUnbatchedWorldRender
+           && GlobalOpacity >= 0.999f
            && _mdx.Lights.Count == 0;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
@@ -884,6 +885,12 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
         Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
     {
+        if (GlobalOpacity <= 0.001f)
+        {
+            _gpuInstanceBatchActive = false;
+            return;
+        }
+
         BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
         _gpuInstanceData.Clear();
         _gpuInstanceFadedData.Clear();
@@ -901,7 +908,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
     /// </remarks>
     public void QueueGpuInstance(Matrix4x4 modelMatrix, float fadeAlpha = 1.0f)
     {
-        if (!_gpuInstanceBatchActive || !SupportsGpuInstancedOpaque)
+        if (!_gpuInstanceBatchActive || !SupportsGpuInstancedOpaque || GlobalOpacity <= 0.001f)
             return;
 
         if (fadeAlpha >= GpuInstanceOpaqueFadeThreshold)
@@ -962,6 +969,9 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
     /// </summary>
     public unsafe void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         _currentModelMatrix = modelMatrix;
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
@@ -1003,6 +1013,9 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null,
         SceneLightManager? sceneLights = null)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
@@ -1334,6 +1347,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
                     // A faded instance batch carries per-instance alpha below 1, so it must blend
                     // even where the material alone would have been opaque.
                     bool needsBlend = _gpuInstanceFadedPass
+                        || GlobalOpacity < 0.999f
                         || (!isAlphaCutout && (l > 0 || effectiveBlendMode != MdlTexOp.Load));
 
                     // Filter by render pass — alpha cutout renders in opaque pass
@@ -1497,7 +1511,7 @@ if (isAlphaCutout)
 
                     ApplyLayerUvTransform(layer);
 
-                    float alpha = EvaluateLayerAlpha(layer) * fadeAlpha;
+                    float alpha = Math.Clamp(EvaluateLayerAlpha(layer) * fadeAlpha * GlobalOpacity, 0.0f, 1.0f);
                     // Apply geoset animation alpha override if present
                     if (_geosetAlphaOverrides.TryGetValue(gb.GeosetIndex, out float geoAlpha))
                         alpha *= geoAlpha;
