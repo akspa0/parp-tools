@@ -192,13 +192,13 @@ public sealed class SceneHoverPickController
             hasSceneRayHit, sceneRayDistance, hasPm4RayHit, pm4RayDistance, _pm4Overlay._pm4OverlayIgnoreDepth);
         if (raySource == WorldSceneHoverSource.Pm4)
         {
-            _hoveredAssetInfo = pm4RayInfo.WithPreciseRayHit();
+            _hoveredAssetInfo = pm4RayInfo.WithPreciseRayHit(pm4RayDistance);
             return;
         }
 
         if (raySource == WorldSceneHoverSource.Scene)
         {
-            _hoveredAssetInfo = sceneRayInfo.WithPreciseRayHit();
+            _hoveredAssetInfo = sceneRayInfo.WithPreciseRayHit(sceneRayDistance);
             return;
         }
 
@@ -430,7 +430,9 @@ public sealed class SceneHoverPickController
             null,
             hit.ObjectType,
             hit.ObjectIndex,
-            null);
+            null,
+            isPreciseRayHit: true,
+            rayDistance: hit.Distance);
     }
 
     private HoveredAssetInfo BuildHoveredWmoDoodadInfo(in SceneObjectPickHit hit)
@@ -475,8 +477,10 @@ public sealed class SceneHoverPickController
             ObjectType.WmoDoodad,
             hit.ObjectIndex,
             null,
+            isPreciseRayHit: true,
             parentWmoIndex: hit.ParentWmoIndex,
-            parentSourcePath: parentPath);
+            parentSourcePath: parentPath,
+            rayDistance: hit.Distance);
     }
 
     public bool TryPickSceneObjectByRay(Vector3 rayOrigin, Vector3 rayDir, out ObjectType objectType, out int objectIndex, out float distance)
@@ -575,14 +579,18 @@ public sealed class SceneHoverPickController
                 continue;
 
             Vector3 selectionPoint = GetSceneObjectSelectionPoint(instance);
+            bool hasChunkKey = TryGetSceneObjectChunkKey(instance, out var instanceChunkKey);
             bool sharesClickedChunk = clickedChunkKey.HasValue
-                && TryGetSceneObjectChunkKey(instance, out var instanceChunkKey)
-                && instanceChunkKey == clickedChunkKey.Value;
-            int chunkGridDistance = clickedChunkKey.HasValue && TryGetSceneObjectChunkKey(instance, out instanceChunkKey)
-                ? Math.Abs(instanceChunkKey.tileX - clickedChunkKey.Value.tileX)
-                    + Math.Abs(instanceChunkKey.tileY - clickedChunkKey.Value.tileY)
-                    + Math.Abs(instanceChunkKey.chunkX - clickedChunkKey.Value.chunkX)
-                    + Math.Abs(instanceChunkKey.chunkY - clickedChunkKey.Value.chunkY)
+                && (objectType == ObjectType.Wmo || (hasChunkKey && instanceChunkKey == clickedChunkKey.Value));
+            int chunkGridDistance = clickedChunkKey.HasValue
+                ? (objectType == ObjectType.Wmo
+                    ? 0
+                    : (hasChunkKey
+                        ? Math.Abs(instanceChunkKey.tileX - clickedChunkKey.Value.tileX)
+                            + Math.Abs(instanceChunkKey.tileY - clickedChunkKey.Value.tileY)
+                            + Math.Abs(instanceChunkKey.chunkX - clickedChunkKey.Value.chunkX)
+                            + Math.Abs(instanceChunkKey.chunkY - clickedChunkKey.Value.chunkY)
+                        : int.MaxValue))
                 : int.MaxValue;
             float selectionPointDistanceSq = clickedWorldPoint.HasValue
                 ? Vector3.DistanceSquared(selectionPoint, clickedWorldPoint.Value)

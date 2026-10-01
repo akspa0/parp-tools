@@ -98,6 +98,9 @@ internal sealed partial class SceneHoverAndPickService
         if (pm4Hit)
             AddPm4ClickSelectionCandidate(addedKeys, pm4HitKey.Value, pm4HitDistance, "Ray hit");
 
+        if (hoveredInfo is { HasSceneObject: true } hoveredSceneObj)
+            AddHoveredSceneObjectClickSelectionCandidate(addedKeys, hoveredSceneObj);
+
         // If PM4 overlay is on and we hit a PM4 object, skip scene object picking
         // (PM4 objects are behind scene WMO/M2 visually, so the ray hits both)
         if (!pm4Hit || !_worldScene.Pm4Overlay.ShowPm4Overlay)
@@ -125,6 +128,21 @@ internal sealed partial class SceneHoverAndPickService
                 {
                     if (hit.ObjectType != ObjectType.Wmo)
                         continue;
+
+                    // Do not treat collision walls or invisible boundary WMOs as room containers
+                    if (hit.ModelName.Contains("collision", StringComparison.OrdinalIgnoreCase)
+                        || hit.ModelPath.Contains("collision", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    // If the user explicitly hovered over this WMO, do not treat it as an occluding container to drop
+                    if (hoveredInfo is { HasSceneObject: true } h
+                        && h.SceneObjectType == ObjectType.Wmo
+                        && h.SceneObjectIndex == hit.ObjectIndex)
+                    {
+                        continue;
+                    }
 
                     bool hasInteriorHit = validHits.Any(other =>
                     {
@@ -186,7 +204,16 @@ internal sealed partial class SceneHoverAndPickService
             if (minDistance < float.MaxValue)
             {
                 const float globalClusterThreshold = 2.0f;
-                _clickSelectionCandidates.RemoveAll(c => c.Distance.HasValue && c.Distance.Value > minDistance + globalClusterThreshold);
+                string? hoveredDedupKey = hoveredInfo is { HasSceneObject: true } hObj
+                    ? (hObj.SceneObjectType == ObjectType.WmoDoodad
+                        ? $"scene:{hObj.SceneObjectType}:{hObj.ParentWmoIndex}:{hObj.SceneObjectIndex}"
+                        : $"scene:{hObj.SceneObjectType}:{hObj.SceneObjectIndex}")
+                    : null;
+
+                _clickSelectionCandidates.RemoveAll(c =>
+                    c.DedupKey != hoveredDedupKey
+                    && c.Distance.HasValue
+                    && c.Distance.Value > minDistance + globalClusterThreshold);
             }
         }
 
@@ -436,6 +463,50 @@ internal sealed partial class SceneHoverAndPickService
                     }
 
                     if (!_worldScene.Selection.SelectSceneObject(hit.ObjectType, hit.ObjectIndex, hit.ParentWmoIndex))
+                        return;
+
+                    ClearSelectedWlLiquidBody(clearListIsolation: true);
+                    _worldScene.TaxiActors.ClearTaxiSelection();
+                    _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
+                    _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
+                    RefreshSelectedWorldObjectInfo();
+                }));
+    }
+
+    private void AddHoveredSceneObjectClickSelectionCandidate(HashSet<string> addedKeys, HoveredAssetInfo hovered)
+    {
+        string dedupKey = hovered.SceneObjectType == ObjectType.WmoDoodad
+            ? $"scene:{hovered.SceneObjectType}:{hovered.ParentWmoIndex}:{hovered.SceneObjectIndex}"
+            : $"scene:{hovered.SceneObjectType}:{hovered.SceneObjectIndex}";
+
+        string detail = hovered.DetailLine;
+        if (string.IsNullOrWhiteSpace(detail))
+            detail = $"Pos: ({hovered.WorldPosition.X:F1}, {hovered.WorldPosition.Y:F1}, {hovered.WorldPosition.Z:F1})";
+
+        TryAddClickSelectionCandidate(
+            addedKeys,
+            new ClickSelectionCandidate(
+                dedupKey,
+                $"{hovered.AssetKind} {hovered.DisplayName}".Trim(),
+                detail,
+                hovered.SourcePath,
+                hovered.RayDistance > 0 ? hovered.RayDistance : null,
+                () =>
+                {
+                    if (_worldScene == null)
+                        return;
+
+                    // Toggle off / deselect if already selected
+                    if (_worldScene.Selection.SelectedObjectType == hovered.SceneObjectType && _worldScene.Selection.SelectedObjectIndex == hovered.SceneObjectIndex)
+                    {
+                        _worldScene.Selection.ClearSelection();
+                        _selectedObjectIndex = -1;
+                        _selectedObjectType = "";
+                        _selectedObjectInfo = "";
+                        return;
+                    }
+
+                    if (!_worldScene.Selection.SelectSceneObject(hovered.SceneObjectType, hovered.SceneObjectIndex, hovered.ParentWmoIndex))
                         return;
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);

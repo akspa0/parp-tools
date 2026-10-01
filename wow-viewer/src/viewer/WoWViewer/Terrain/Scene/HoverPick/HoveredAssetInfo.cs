@@ -17,7 +17,8 @@ namespace WoWViewer.Terrain;
         string? wlBodyKey = null,
         bool isPreciseRayHit = false,
         int parentWmoIndex = -1,
-        string? parentSourcePath = null)
+        string? parentSourcePath = null,
+        float rayDistance = 0f)
     {
         AssetKind = assetKind ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
@@ -32,6 +33,7 @@ namespace WoWViewer.Terrain;
         IsPreciseRayHit = isPreciseRayHit;
         ParentWmoIndex = parentWmoIndex;
         ParentSourcePath = parentSourcePath ?? string.Empty;
+        RayDistance = rayDistance;
     }
 
     public string AssetKind { get; }
@@ -47,9 +49,11 @@ namespace WoWViewer.Terrain;
     public bool IsPreciseRayHit { get; }
     public int ParentWmoIndex { get; }
     public string ParentSourcePath { get; }
+    public float RayDistance { get; }
     public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo or ObjectType.WmoDoodad && SceneObjectIndex >= 0;
 
-    public HoveredAssetInfo WithPreciseRayHit() => new(
+    public HoveredAssetInfo WithPreciseRayHit(float? rayDistance = null) => new(
         AssetKind, DisplayName, SourcePath, DetailLine, WorldPosition, AdditionalHitCount, Pm4ObjectKey,
-        SceneObjectType, SceneObjectIndex, WlBodyKey, isPreciseRayHit: true, ParentWmoIndex, ParentSourcePath);
+        SceneObjectType, SceneObjectIndex, WlBodyKey, isPreciseRayHit: true, ParentWmoIndex, ParentSourcePath,
+        rayDistance ?? RayDistance);
 }
