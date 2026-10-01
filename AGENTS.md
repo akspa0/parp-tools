@@ -1,4 +1,4 @@
-# Workspace Instructions & Multi-LLM Routing Guide
+# Workspace Instructions & Agent Guidelines
 
 These instructions apply to `I:/parp/parp-tools` and its active projects. Keep this file
 operational, clear, and actionable across all LLM models and agent harnesses (Codex, Claude,
@@ -19,48 +19,16 @@ Use **Spec Kit / Specify** for all design and implementation planning: **specify
 
 ---
 
-## 2. Multi-LLM Model & Agent Routing Matrix
+## 2. Sub-Agent Strategy & General Rules
 
-### General Rule: NEVER USE TERRA
-Never route implementation, planning, exploration, or review to Terra.
-
-### Model-Specific Routing Profiles
-
-| LLM Family / Ecosystem | Planning & Review Role | Implementation & Sub-Agent Role | Recommended Effort / Parameters |
-|---|---|---|---|
-| **Codex / OpenAI** | **Sol** (Planning / Review) | **Luna** (Implementation) | Sol at **High / Extra-High**; Luna at **Extra-High / Max**. Sol returns review findings only; Luna remediates. |
-| **Anthropic Claude** | **Claude Opus** (Master Architecture & Guidance) | **Claude Sonnet** (Sub-agents & Implementation) | Opus provides global plan/review; Sonnet sub-agents run focused slices. |
-| **Google Gemini** | **Gemini 3.7 Flash** | **Gemini 3.7 Flash** | Use **High Effort / Thinking High** across all Gemini primary tasks and subagents. |
-| **DeepSeek** | **DeepSeek Pro / Reasoner (v4 via OpenRouter)** | **DeepSeek Flash (v4 via OpenRouter)** | DeepSeek Pro v4 owns architectural planning & review; DeepSeek Flash v4 executes implementation & sub-agents. |
-
-### Hybrid / Cross-Model Workflow
-When operating across multiple tools or models:
-1. **Plan & Specify**: Plan with **DeepSeek Pro (v4)**, **Claude Opus**, or **Sol High**.
-2. **Execute & Remediate**: Implement separately with **DeepSeek Flash (v4)**, **Luna (Max)**, **Claude Sonnet**, **Gemini 3.7 Flash (High)**, or **ChatGPT/Codex**.
-3. **Review & Gate**: Review against the plan before closing the phase or passing to the operator.
-
-### Codex / Standard Review Loop
-```text
-[Planning] Sol (High/Extra-High) -> plan.md / tasks.md
-    ↓
-[Implementation] Luna (Max) implements phase
-    ↓
-[Focused Verification] Run unit/integration tests for changed owner
-    ↓
-[Scope Gate] Run affected project test suites
-    ↓
-[Review] Sol reviews diff + done-when criteria
-    ↓
-CHANGES REQUIRED → Luna remediates → focused verification → re-review (max 6 cycles)
-BLOCKED          → Stop and report to operator
-PASS             → Report completion / await operator approval (Do not self-merge)
-```
+- **Sub-Agent Strategy**: Use sub-agents at low effort thinking when possible to accomplish complex tasks.
+- **General Rule: NEVER USE TERRA**: Never route implementation, planning, exploration, or review to Terra.
 
 ---
 
 ## 3. Sub-Agent Execution Guidelines
 
-- Use sub-agents by default for independent, safely parallelizable discovery, analysis, focused
+- Use sub-agents by default at low effort thinking for independent, safely parallelizable discovery, analysis, focused
   verification, or bounded implementation slices. Look for these opportunities before starting
   the main work, and run independent slices in parallel when that improves throughput.
 - **Disjoint Scopes**: Give each sub-agent an explicit question or deliverable and a strictly bounded
