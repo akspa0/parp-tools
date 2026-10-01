@@ -256,13 +256,6 @@ public sealed class TerrainTileMeshBuilder
         const int size = 64;
         int sliceBase = slice * size * size * 4;
 
-        static int EdgeFixedIndex(int x, int y)
-        {
-            if (x >= 63) x = 62;
-            if (y >= 63) y = 62;
-            return y * size + x;
-        }
-
         for (int layer = 1; layer < MaxLayers; layer++)
         {
             // Layers 1..3 share the shadow array (RGB); layers 4..7 use the extension array (RGBA).
@@ -271,31 +264,16 @@ public sealed class TerrainTileMeshBuilder
                 break;
 
             int channel = layer <= 3 ? layer - 1 : layer - 4;
-            bool hasLayer = layer < chunk.Layers.Length;
-            bool usesAlphaMap = hasLayer && (chunk.Layers[layer].Flags & 0x100u) != 0;
 
             if (chunk.AlphaMaps.TryGetValue(layer, out var alpha) && alpha != null && alpha.Length >= size * size)
             {
                 for (int y = 0; y < size; y++)
                 {
+                    int rowOffset = y * size;
                     for (int x = 0; x < size; x++)
                     {
-                        int dst = y * size + x;
-                        int src = EdgeFixedIndex(x, y);
-                        target[sliceBase + dst * 4 + channel] = alpha[src];
-                    }
-                }
-                continue;
-            }
-
-            if (hasLayer && !usesAlphaMap)
-            {
-                for (int y = 0; y < size; y++)
-                {
-                    for (int x = 0; x < size; x++)
-                    {
-                        int dst = y * size + x;
-                        target[sliceBase + dst * 4 + channel] = 255;
+                        int dst = rowOffset + x;
+                        target[sliceBase + dst * 4 + channel] = alpha[dst];
                     }
                 }
             }
@@ -305,10 +283,10 @@ public sealed class TerrainTileMeshBuilder
         {
             for (int y = 0; y < size; y++)
             {
+                int rowOffset = y * size;
                 for (int x = 0; x < size; x++)
                 {
-                    int dst = y * size + x;
-                    // MCSH is a native 64x64 mask. The MCAL edge-fix does not apply to it.
+                    int dst = rowOffset + x;
                     alphaShadow[sliceBase + dst * 4 + 3] = chunk.ShadowMap[dst];
                 }
             }

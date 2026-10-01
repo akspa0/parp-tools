@@ -2060,49 +2060,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
             chunkLookup[(chunk.ChunkX, chunk.ChunkY)] = chunk;
 
         foreach (var chunk in chunks)
-            SynthesizeCataclysm400ResidualAlpha(chunk, useBigAlpha);
-
-        foreach (var chunk in chunks)
         {
             bool doNotFixAlphaMap = (((uint)chunk.AlphaSourceFlags) & 0x8000u) != 0;
             if (!doNotFixAlphaMap)
                 StitchCataclysm400ChunkEdges(chunk, chunkLookup);
-        }
-    }
-
-    private static void SynthesizeCataclysm400ResidualAlpha(TerrainChunkData chunk, bool useBigAlpha)
-    {
-        if (!useBigAlpha || chunk.Layers.Length <= 1)
-            return;
-
-        int layerCount = Math.Min(TerrainTileMeshBuilder.MaxLayers, chunk.Layers.Length);
-        for (int targetLayerIndex = 1; targetLayerIndex < layerCount; targetLayerIndex++)
-        {
-            if (chunk.AlphaMaps.ContainsKey(targetLayerIndex))
-                continue;
-
-            if ((chunk.Layers[targetLayerIndex].Flags & 0x100u) != 0)
-                continue;
-
-            var residualAlpha = new byte[64 * 64];
-            for (int pixelIndex = 0; pixelIndex < residualAlpha.Length; pixelIndex++)
-            {
-                int residual = 255;
-                for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
-                {
-                    if (layerIndex == targetLayerIndex)
-                        continue;
-
-                    if (!chunk.AlphaMaps.TryGetValue(layerIndex, out var otherAlpha) || otherAlpha.Length <= pixelIndex)
-                        continue;
-
-                    residual -= otherAlpha[pixelIndex];
-                }
-
-                residualAlpha[pixelIndex] = (byte)Math.Clamp(residual, 0, 255);
-            }
-
-            chunk.AlphaMaps[targetLayerIndex] = residualAlpha;
         }
     }
 
@@ -2118,13 +2079,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             int textureIndex = chunk.Layers[layerIndex].TextureIndex;
 
-            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX, chunk.ChunkY + 1, textureIndex, out var eastAlpha))
+            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX + 1, chunk.ChunkY, textureIndex, out var eastAlpha))
             {
                 for (int row = 0; row < 64; row++)
                     alpha[row * 64 + 63] = eastAlpha[row * 64];
             }
 
-            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX + 1, chunk.ChunkY, textureIndex, out var southAlpha))
+            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX, chunk.ChunkY + 1, textureIndex, out var southAlpha))
                 Buffer.BlockCopy(southAlpha, 0, alpha, 63 * 64, 64);
 
             if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX + 1, chunk.ChunkY + 1, textureIndex, out var diagonalAlpha))

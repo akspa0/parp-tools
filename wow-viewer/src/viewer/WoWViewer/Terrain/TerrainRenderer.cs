@@ -1237,16 +1237,12 @@ public class TerrainRenderer : IDisposable
 
         for (int layer = 1; layer < 4; layer++)
         {
-            bool hasLayer = layer < chunk.Layers.Length;
-            bool usesAlphaMap = hasLayer && (chunk.Layers[layer].Flags & 0x100u) != 0;
-            bool implicitFullAlpha = hasLayer && !usesAlphaMap;
-
             bool hasAlpha = chunk.AlphaTextures.TryGetValue(layer, out uint alphaTexture) && alphaTexture != 0;
             if (hasAlpha)
                 BindTexture2D(3 + layer, alphaTexture);
 
             Uniform1Counted(_uHasAlphaLoc[layer], hasAlpha ? 1 : 0);
-            Uniform1Counted(_uImplicitAlphaLoc[layer], implicitFullAlpha ? 1 : 0);
+            Uniform1Counted(_uImplicitAlphaLoc[layer], 0);
         }
 
         bool hasShadow = chunk.ShadowTexture != 0;
@@ -1654,9 +1650,9 @@ void main() {
     float texScale = 8.0 / 33.333;
     vec2 diffuseUV = (uUseWorldUV == 1) ? (vec2(-vWorldPos.y, -vWorldPos.x) * texScale) : (vTexCoord * 8.0);
 
-    float a1Raw = (uHasAlpha1 == 1) ? texture(uAlpha1, vTexCoord).r : ((uImplicitAlpha1 == 1) ? 1.0 : 0.0);
-    float a2Raw = (uHasAlpha2 == 1) ? texture(uAlpha2, vTexCoord).r : ((uImplicitAlpha2 == 1) ? 1.0 : 0.0);
-    float a3Raw = (uHasAlpha3 == 1) ? texture(uAlpha3, vTexCoord).r : ((uImplicitAlpha3 == 1) ? 1.0 : 0.0);
+    float a1Raw = (uHasAlpha1 == 1) ? texture(uAlpha1, vTexCoord).r : 0.0;
+    float a2Raw = (uHasAlpha2 == 1) ? texture(uAlpha2, vTexCoord).r : 0.0;
+    float a3Raw = (uHasAlpha3 == 1) ? texture(uAlpha3, vTexCoord).r : 0.0;
 
     float a1 = (uShowLayer1 == 1) ? a1Raw : 0.0;
     float a2 = (uShowLayer2 == 1) ? a2Raw : 0.0;
@@ -1699,23 +1695,32 @@ void main() {
             * localDiffuse;
     }
     vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility + localLight;
-    vec3 result = vec3(1.0);
+    float w1 = (uShowLayer1 == 1 && uHasTex1 == 1) ? a1 : 0.0;
+    float w2 = (uShowLayer2 == 1 && uHasTex2 == 1) ? a2 : 0.0;
+    float w3 = (uShowLayer3 == 1 && uHasTex3 == 1) ? a3 : 0.0;
+    float overlaySum = w1 + w2 + w3;
+    float w0 = (uShowLayer0 == 1 && uHasTex0 == 1) ? clamp(1.0 - overlaySum, 0.0, 1.0) : 0.0;
+    float totalWeight = w0 + overlaySum;
 
-    if (uShowLayer0 == 1) {
-        vec4 c0 = SampleDiffuse(uHasTex0, uDiffuse0, diffuseUV);
-        result = c0.rgb * lighting;
-    }
-    if (uShowLayer1 == 1 && uHasTex1 == 1) {
-        vec4 c1 = texture(uDiffuse1, diffuseUV);
-        result = mix(result, c1.rgb * lighting, a1);
-    }
-    if (uShowLayer2 == 1 && uHasTex2 == 1) {
-        vec4 c2 = texture(uDiffuse2, diffuseUV);
-        result = mix(result, c2.rgb * lighting, a2);
-    }
-    if (uShowLayer3 == 1 && uHasTex3 == 1) {
-        vec4 c3 = texture(uDiffuse3, diffuseUV);
-        result = mix(result, c3.rgb * lighting, a3);
+    vec3 result = vec3(0.0);
+    if (totalWeight > 0.0001) {
+        if (w0 > 0.0) {
+            vec4 c0 = SampleDiffuse(uHasTex0, uDiffuse0, diffuseUV);
+            result += c0.rgb * w0;
+        }
+        if (w1 > 0.0) {
+            vec4 c1 = texture(uDiffuse1, diffuseUV);
+            result += c1.rgb * w1;
+        }
+        if (w2 > 0.0) {
+            vec4 c2 = texture(uDiffuse2, diffuseUV);
+            result += c2.rgb * w2;
+        }
+        if (w3 > 0.0) {
+            vec4 c3 = texture(uDiffuse3, diffuseUV);
+            result += c3.rgb * w3;
+        }
+        result = (result / totalWeight) * lighting;
     }
 
     // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.
@@ -1811,11 +1816,7 @@ void main() {
 
     float outAlpha = 1.0;
     if (uShowLayer0 == 0) {
-        float inv = 1.0;
-        if (uShowLayer1 == 1) inv *= (1.0 - a1);
-        if (uShowLayer2 == 1) inv *= (1.0 - a2);
-        if (uShowLayer3 == 1) inv *= (1.0 - a3);
-        outAlpha = 1.0 - inv;
+        outAlpha = clamp(overlaySum, 0.0, 1.0);
     }
 
     FragColor = vec4(finalColor, outAlpha * uOpacity);
@@ -1981,16 +1982,28 @@ void main() {
             * localDiffuse;
     }
     vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility + localLight;
-    vec3 result = vec3(1.0);
-
-    if (visible[0]) {
-        result = texture(uDiffuseArray, vec3(diffuseUV, float(texIdx[0]))).rgb * lighting;
-    }
+    float weights[8];
+    float overlaySum = 0.0;
     for (int i = 1; i < 8; i++) {
-        if (!visible[i])
-            continue;
-        vec4 layerColor = texture(uDiffuseArray, vec3(diffuseUV, float(texIdx[i])));
-        result = mix(result, layerColor.rgb * lighting, alphaRaw[i]);
+        if (visible[i]) {
+            weights[i] = alphaRaw[i];
+            overlaySum += weights[i];
+        } else {
+            weights[i] = 0.0;
+        }
+    }
+    weights[0] = visible[0] ? clamp(1.0 - overlaySum, 0.0, 1.0) : 0.0;
+    float totalWeight = weights[0] + overlaySum;
+
+    vec3 result = vec3(0.0);
+    if (totalWeight > 0.0001) {
+        for (int i = 0; i < 8; i++) {
+            if (weights[i] > 0.0) {
+                vec4 layerColor = texture(uDiffuseArray, vec3(diffuseUV, float(texIdx[i])));
+                result += layerColor.rgb * weights[i];
+            }
+        }
+        result = (result / totalWeight) * lighting;
     }
 
     // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.
@@ -2087,11 +2100,7 @@ void main() {
 
     float outAlpha = 1.0;
     if (!baseLayerShown) {
-        float inv = 1.0;
-        for (int i = 1; i < 8; i++) {
-            if (visible[i]) inv *= (1.0 - alphaRaw[i]);
-        }
-        outAlpha = 1.0 - inv;
+        outAlpha = clamp(overlaySum, 0.0, 1.0);
     }
 
     FragColor = vec4(finalColor, outAlpha);
