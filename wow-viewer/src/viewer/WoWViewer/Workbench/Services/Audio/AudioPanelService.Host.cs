@@ -31,7 +31,7 @@ using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;

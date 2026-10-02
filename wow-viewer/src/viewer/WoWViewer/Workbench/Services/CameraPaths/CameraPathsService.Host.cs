@@ -7,7 +7,7 @@ using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.Runtime.M2;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using Silk.NET.Input;
@@ -58,6 +58,7 @@ internal sealed partial class CameraPathsService
     private ref PendingCaptureRequest? _activeCaptureRequest => ref _host.ActiveCaptureRequest;
     private ref int _activeUtilitiesTabIndex => ref _host.ActiveUtilitiesTabIndex;
     private ref ActiveVideoRecording? _activeVideoRecording => ref _host.ActiveVideoRecording;
+    private RecordingCoordinatorService _recordingCoordinator => _host.RecordingCoordinator;
     private ref Camera _camera => ref _host.Camera;
     private Queue<PendingCaptureRequest> _captureQueue => _host.CaptureQueue;
     private ref string? _dbcBuild => ref _host.DbcBuild;

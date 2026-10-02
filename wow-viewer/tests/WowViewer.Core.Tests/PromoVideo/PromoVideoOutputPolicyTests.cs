@@ -1,13 +1,13 @@
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 
-namespace WowViewer.Core.Tests.MarketingCapture;
+namespace WowViewer.Core.Tests.PromoVideo;
 
-public sealed class MarketingCaptureOutputPolicyTests
+public sealed class PromoVideoOutputPolicyTests
 {
     [Fact]
     public void TryCreateAuthoringHandoff_ConvertsManagedAbsolutePathsToRelativeReferences()
     {
-        string root = Path.Combine(Path.GetTempPath(), "wow-viewer-marketing", Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "wow-viewer-promo", Guid.NewGuid().ToString("N"));
         string capture = Path.Combine(root, "Elwynn", "1.12", "flyby.mp4");
         string receipt = capture + ".tour-receipt.json";
         string still = Path.Combine(root, "Elwynn", "1.12", "flyby_001.png");
@@ -17,7 +17,7 @@ public sealed class MarketingCaptureOutputPolicyTests
             capture,
             receipt,
             [still],
-            new AuthoringHandoffProvenance("camera-path-overview", "1", "Elwynn", "1.12", MarketingCaptureTerminalOutcome.Completed));
+            new AuthoringHandoffProvenance("camera-path-overview", "1", "Elwynn", "1.12", PromoCaptureTerminalOutcome.Completed));
 
         AuthoringHandoffValidationResult result = AuthoringHandoffFactory.TryCreate(root, request);
 
@@ -32,14 +32,14 @@ public sealed class MarketingCaptureOutputPolicyTests
     [Fact]
     public void TryCreateAuthoringHandoff_RejectsTraversalOutsideManagedOutputRoot()
     {
-        string root = Path.Combine(Path.GetTempPath(), "wow-viewer-marketing", Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "wow-viewer-promo", Guid.NewGuid().ToString("N"));
         string outside = Path.Combine(root, "..", "outside.mp4");
         AuthoringHandoffRequest request = new(
             "attempt-001",
             outside,
             Path.Combine(root, "receipt.json"),
             [],
-            new AuthoringHandoffProvenance("camera-path-overview", "1", "Elwynn", "1.12", MarketingCaptureTerminalOutcome.Completed));
+            new AuthoringHandoffProvenance("camera-path-overview", "1", "Elwynn", "1.12", PromoCaptureTerminalOutcome.Completed));
 
         AuthoringHandoffValidationResult result = AuthoringHandoffFactory.TryCreate(root, request);
 
@@ -51,10 +51,10 @@ public sealed class MarketingCaptureOutputPolicyTests
     [Fact]
     public void TryResolveManagedArtifact_RejectsRelativeTraversalAndAcceptsContainedPath()
     {
-        string root = Path.Combine(Path.GetTempPath(), "wow-viewer-marketing", Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "wow-viewer-promo", Guid.NewGuid().ToString("N"));
 
-        bool traversalAccepted = MarketingCaptureOutputPolicy.TryResolveManagedArtifact(root, "..\\outside.mp4", out _, out string traversalError);
-        bool containedAccepted = MarketingCaptureOutputPolicy.TryResolveManagedArtifact(root, "Azeroth\\1.12\\tour.mp4", out ManagedMarketingArtifact artifact, out string containedError);
+        bool traversalAccepted = PromoVideoOutputPolicy.TryResolveManagedArtifact(root, "..\\outside.mp4", out _, out string traversalError);
+        bool containedAccepted = PromoVideoOutputPolicy.TryResolveManagedArtifact(root, "Azeroth\\1.12\\tour.mp4", out ManagedPromoArtifact artifact, out string containedError);
 
         Assert.False(traversalAccepted);
         Assert.Equal("artifact-outside-managed-root", traversalError);

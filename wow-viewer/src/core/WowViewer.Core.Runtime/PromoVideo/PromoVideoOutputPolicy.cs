@@ -1,18 +1,18 @@
-namespace WowViewer.Core.Runtime.Marketing;
+namespace WowViewer.Core.Runtime.PromoVideo;
 
 /// <summary>A contained artifact expressed as both a managed-root-relative and resolved path.</summary>
-public sealed record ManagedMarketingArtifact(string RelativePath, string FullPath);
+public sealed record ManagedPromoArtifact(string RelativePath, string FullPath);
 
 /// <summary>
-/// Enforces the marketing-capture boundary: evidence and handoff artifact locations remain under
+/// Enforces the promo-capture boundary: evidence and handoff artifact locations remain under
 /// the viewer-managed output root, and external descriptors never carry machine-local paths.
 /// </summary>
-public static class MarketingCaptureOutputPolicy
+public static class PromoVideoOutputPolicy
 {
     public static bool TryResolveManagedArtifact(
         string? managedOutputRoot,
         string? artifactPath,
-        out ManagedMarketingArtifact artifact,
+        out ManagedPromoArtifact artifact,
         out string errorCode)
     {
         artifact = default!;
@@ -49,7 +49,7 @@ public static class MarketingCaptureOutputPolicy
                 return false;
             }
 
-            artifact = new ManagedMarketingArtifact(relativePath, fullArtifact);
+            artifact = new ManagedPromoArtifact(relativePath, fullArtifact);
             return true;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)

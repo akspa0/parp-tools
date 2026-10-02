@@ -1,6 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 
 namespace WoWViewer.Capture;
 
@@ -8,7 +8,7 @@ namespace WoWViewer.Capture;
 /// Viewer-only presentation adapter for the active feature-tour beat. It draws one intentionally
 /// small callout on top of a clean scene; it does not open, move, or depend on normal UI chrome.
 /// </summary>
-public static class MarketingTourOverlayRenderer
+public static class PromoTourOverlayRenderer
 {
     public static void Draw(in FeatureTourPresentation presentation)
     {

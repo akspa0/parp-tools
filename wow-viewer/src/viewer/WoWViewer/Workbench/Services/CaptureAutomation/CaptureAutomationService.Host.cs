@@ -15,7 +15,7 @@ using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WoWViewer.Capture;
 using WowViewer.Core.IO.Maps;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WoWViewer.Terrain.Vlm;
 using System.Reflection;
 using System.Security.Cryptography;

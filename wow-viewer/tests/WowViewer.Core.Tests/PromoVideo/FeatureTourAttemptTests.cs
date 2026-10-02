@@ -1,6 +1,6 @@
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 
-namespace WowViewer.Core.Tests.MarketingCapture;
+namespace WowViewer.Core.Tests.PromoVideo;
 
 public sealed class FeatureTourAttemptTests
 {
@@ -19,9 +19,9 @@ public sealed class FeatureTourAttemptTests
                 new FeatureTourBeat(2, FeatureTourPresentationKind.Callout, "renderer", "Renderer", null, 1),
             ]);
 
-        MarketingTourAttemptStartResult start = MarketingTourAttempt.TryStart(recipe, cameraPathDurationSeconds: 4);
+        PromoTourAttemptStartResult start = PromoTourAttempt.TryStart(recipe, cameraPathDurationSeconds: 4);
         Assert.True(start.IsStarted, start.Error);
-        MarketingTourAttempt attempt = Assert.IsType<MarketingTourAttempt>(start.Attempt);
+        PromoTourAttempt attempt = Assert.IsType<PromoTourAttempt>(start.Attempt);
 
         attempt.Advance(0.5);
         Assert.Equal("camera-path", attempt.ActivePresentation?.FeatureId);
@@ -45,10 +45,10 @@ public sealed class FeatureTourAttemptTests
     [Fact]
     public void Cancel_PreservesTerminalReasonAndSuppressesPresentation()
     {
-        MarketingTourAttemptStartResult start = MarketingTourAttempt.TryStart(
+        PromoTourAttemptStartResult start = PromoTourAttempt.TryStart(
             BuiltinFeatureTourRecipes.CreateCameraPathOverview("FlybyUndead.mdx", fps: 30),
             cameraPathDurationSeconds: 30);
-        MarketingTourAttempt attempt = Assert.IsType<MarketingTourAttempt>(start.Attempt);
+        PromoTourAttempt attempt = Assert.IsType<PromoTourAttempt>(start.Attempt);
 
         attempt.Advance(0.25);
         attempt.Cancel("active-map-changed");
@@ -71,7 +71,7 @@ public sealed class FeatureTourAttemptTests
             new FeatureTourCaptureSettings(1, FullFrameWithTourOverlay: true),
             []);
 
-        MarketingTourAttemptStartResult start = MarketingTourAttempt.TryStart(invalid, cameraPathDurationSeconds: 5);
+        PromoTourAttemptStartResult start = PromoTourAttempt.TryStart(invalid, cameraPathDurationSeconds: 5);
 
         Assert.False(start.IsStarted);
         Assert.Null(start.Attempt);

@@ -1,6 +1,6 @@
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 
-namespace WowViewer.Core.Tests.MarketingCapture;
+namespace WowViewer.Core.Tests.PromoVideo;
 
 public sealed class FeatureTourRecipeTests
 {
@@ -76,6 +76,27 @@ public sealed class FeatureTourRecipeTests
         Assert.DoesNotContain("private-client", recipe.DisplayName, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("FlybyUndead", recipe.DisplayName, StringComparison.Ordinal);
         Assert.True(FeatureTourRecipeValidator.Validate(recipe, cameraPathDurationSeconds: 30).IsValid);
+    }
+
+    [Fact]
+    public void BuiltinTaxiRouteOverview_CreatesValidRecipeWithStationCallouts()
+    {
+        FeatureTourRecipe recipe = BuiltinFeatureTourRecipes.CreateTaxiRouteOverview(
+            routeId: 42,
+            routeLabel: "[42] Stormwind -> Ironforge",
+            fromStation: "Stormwind",
+            toStation: "Ironforge",
+            fps: 30);
+
+        Assert.Equal("taxi-route-overview", recipe.Id);
+        Assert.Contains("Stormwind -> Ironforge", recipe.DisplayName, StringComparison.Ordinal);
+        Assert.False(recipe.RequiresWarmPath);
+        Assert.Equal(3, recipe.Beats.Count);
+        Assert.Contains("Departing: Stormwind", recipe.Beats[0].Title);
+        Assert.Contains("Approaching: Ironforge", recipe.Beats[2].Title);
+
+        FeatureTourValidationResult result = FeatureTourRecipeValidator.Validate(recipe, cameraPathDurationSeconds: 15);
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
 
     private static FeatureTourRecipe CreateRecipe(IReadOnlyList<FeatureTourBeat> beats, int fps = 30)

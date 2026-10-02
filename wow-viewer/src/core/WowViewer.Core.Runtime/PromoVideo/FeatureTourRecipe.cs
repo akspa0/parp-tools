@@ -1,4 +1,4 @@
-namespace WowViewer.Core.Runtime.Marketing;
+namespace WowViewer.Core.Runtime.PromoVideo;
 
 /// <summary>
 /// The visual form a feature-tour beat may request. The first production tour uses a callout;

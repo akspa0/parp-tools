@@ -1,6 +1,26 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
+
+## 2026-10-02 — Spec 258: Taxi Route Playlists & Dynamic Marketing Showreel Tour (code & spec complete)
+
+- **Taxi Flight Playlists & Multi-Route Chaining**: Implemented `TaxiPlaylistService` allowing users and automation harnesses to assemble playlists of multiple taxi routes, reorder them, auto-chain connected flights across the continent, loop playlists, and execute seamless multi-segment flight playback.
+- **Continuous Multi-Route Video Recording**: Starting a recording on a playlist records continuously across all route segments into a single high-definition video file without interruption, cleanly finalizing when the final destination is reached.
+- **Dynamic Showreel HUD & Broadcast Overlays**: Implemented `ShowreelOverlayService` rendering directly on top of the clean 3D scene (into video recordings without workbench chrome). Features include:
+  - **Cinematic Zone Banners**: Dynamic title cards displaying primary zone names (e.g. `ELWYNN FOREST`, `WESTFALL`), subzones (`Goldshire`, `Sentinel Hill`), and Area IDs with smooth fade transitions.
+  - **Live World Telemetry HUD**: Real-time camera position $(X, Y, Z)$, compass heading ($0^\circ - 360^\circ$ and 8-cardinal direction), ADT tile indices $[X, Y]$, MCNK chunk coordinates $[0..15, 0..15]$, and taxi flight progress percentage.
+  - **Landmark Proximity Callouts**: Scans approaching `TaxiNode` flight masters within 350 yards and displays distance and station names.
+  - **Engine Feature Badges**: Rotating technical showcases highlighting the viewer's engine accomplishments for Patreon supporters (64-bit hole punching, native M2 GPU skinning & instancing, authentic DBC flight mechanics).
+- **Startup Automation (CLI)**: Added CLI flags `--record-taxi-playlist`, `--record-taxi-chain`, `--showreel-hud`, `--showreel-zone-banners`, `--showreel-telemetry`, `--showreel-landmarks`, and `--showreel-engine-badges`.
+- **Validation**: Full solution builds with 0 errors; +19 new unit tests in `ShowreelModelTests` and `TaxiPlaylistModelTests` pass with zero regressions. Spec 258 closed with complete receipt in `specs/258-taxi-playlist-showreel-tour/evidence/receipt-spec258.md`.
+
+## 2026-10-02 — Spec 257: Unified Video Recording & Automation System (code & spec complete)
+
+- **Crash Defect Fix**: Fixed the `NullReferenceException` in `TaxiPanelService.Sidebars.cs` that crashed the viewer when stopping a taxi route video recording (attempting to dereference `_activeVideoRecording.OutputPath` immediately after clearing the active session).
+- **Unified Recording Coordinator**: Created `RecordingCoordinatorService` and `RecordingModels` in `Workbench/Services/Recording/`, centralizing FFmpeg process lifecycle management, raw RGBA video piping, framerate pacing, UI chrome state restoration, archaeology playback synchronization, and clean teardown.
+- **Subsystem Integrations**: Unified video capture across Taxi Routes (`TaxiPanelService`), Camera Paths (`CameraPathsService`), Feature Tours (`FeatureTourPresentation`), and generic Video capture (`CaptureAutomationService.Video.cs`). Added taxi route arrival auto-stop and taxi route feature tour recipe generation.
+- **Startup Automation (CLI)**: Added command-line flags `--record-taxi-route`, `--record-camera-path`, `--record-duration`, `--record-output`, `--record-fps`, `--record-with-ui`, `--record-no-ui`, `--record-feature-tour`, and `--exit-after-record` to `StartupAutomationService`.
+- **Validation**: Full solution builds with 0 errors; all new unit tests pass; 0 test regressions. Spec 257 closed with complete receipt in `specs/257-unified-recording-system/evidence/receipt-spec257.md`.
 
 ## 2026-10-01 — v0.6.0-alpha4: modern ADT 64-bit holes, M2 opacity, wireframe styling & release prep
 

@@ -1,4 +1,4 @@
-namespace WowViewer.Core.Runtime.Marketing;
+namespace WowViewer.Core.Runtime.PromoVideo;
 
 /// <summary>Immutable render-facing state for one currently visible feature-tour beat.</summary>
 public readonly record struct FeatureTourPresentation(
@@ -10,13 +10,13 @@ public readonly record struct FeatureTourPresentation(
     double EndsAtSeconds);
 
 /// <summary>Typed launch result; invalid recipes cannot touch playback or capture state.</summary>
-public sealed record MarketingTourAttemptStartResult(
+public sealed record PromoTourAttemptStartResult(
     bool IsStarted,
-    MarketingTourAttempt? Attempt,
+    PromoTourAttempt? Attempt,
     string? ErrorCode,
     string? Error)
 {
-    public static MarketingTourAttemptStartResult Rejected(FeatureTourValidationResult validation)
+    public static PromoTourAttemptStartResult Rejected(FeatureTourValidationResult validation)
         => new(
             false,
             null,
@@ -27,10 +27,10 @@ public sealed record MarketingTourAttemptStartResult(
 }
 
 /// <summary>
-/// Allocation-free-on-steady-frame lifecycle state for an active marketing tour. This class owns
+/// Allocation-free-on-steady-frame lifecycle state for an active promo tour. This class owns
 /// recipe timing only; viewer composition supplies path playback, capture, and UI rendering.
 /// </summary>
-public sealed class MarketingTourAttempt
+public sealed class PromoTourAttempt
 {
     private readonly FeatureTourRecipe _recipe;
     private readonly double _cameraPathDurationSeconds;
@@ -39,7 +39,7 @@ public sealed class MarketingTourAttempt
     private bool _isCancelled;
     private string? _terminalReason;
 
-    private MarketingTourAttempt(FeatureTourRecipe recipe, double cameraPathDurationSeconds)
+    private PromoTourAttempt(FeatureTourRecipe recipe, double cameraPathDurationSeconds)
     {
         _recipe = recipe;
         _cameraPathDurationSeconds = cameraPathDurationSeconds;
@@ -53,15 +53,15 @@ public sealed class MarketingTourAttempt
 
     public FeatureTourPresentation? ActivePresentation => _activePresentation;
 
-    public static MarketingTourAttemptStartResult TryStart(FeatureTourRecipe? recipe, double cameraPathDurationSeconds)
+    public static PromoTourAttemptStartResult TryStart(FeatureTourRecipe? recipe, double cameraPathDurationSeconds)
     {
         FeatureTourValidationResult validation = FeatureTourRecipeValidator.Validate(recipe, cameraPathDurationSeconds);
         if (!validation.IsValid)
-            return MarketingTourAttemptStartResult.Rejected(validation);
+            return PromoTourAttemptStartResult.Rejected(validation);
 
-        return new MarketingTourAttemptStartResult(
+        return new PromoTourAttemptStartResult(
             true,
-            new MarketingTourAttempt(recipe!, cameraPathDurationSeconds),
+            new PromoTourAttempt(recipe!, cameraPathDurationSeconds),
             null,
             null);
     }

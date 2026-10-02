@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Globalization;
+using WowViewer.Core.Runtime.PromoVideo;
 using static WoWViewer.ViewerApp;
 using static WoWViewer.CaptureAutomationService;
 
@@ -47,6 +49,21 @@ internal sealed partial class StartupAutomationService
         public string? RoofCaptureAssetListPath { get; init; }
         public int RoofCaptureResolution { get; init; }
         public bool RoofCaptureAllAngles { get; init; }
+        public int? RecordTaxiRouteId { get; init; }
+        public string? RecordCameraPathName { get; init; }
+        public double? RecordDurationSeconds { get; init; }
+        public string? RecordOutputPath { get; init; }
+        public int? RecordFps { get; init; }
+        public bool? RecordIncludeUi { get; init; }
+        public bool RecordFeatureTour { get; init; }
+        public bool ExitAfterRecord { get; init; }
+        public string? RecordTaxiPlaylist { get; init; }
+        public string? RecordTaxiChain { get; init; }
+        public bool ShowreelHud { get; init; }
+        public bool? ShowreelZoneBanners { get; init; }
+        public bool? ShowreelTelemetry { get; init; }
+        public bool? ShowreelLandmarks { get; init; }
+        public bool? ShowreelEngineBadges { get; init; }
     }
 
     internal sealed class PendingRoofCaptureBatch
@@ -110,6 +127,25 @@ internal sealed partial class StartupAutomationService
 
         if (!string.IsNullOrWhiteSpace(request.RoofCaptureOutputDir))
             QueueStartupRoofCapture(request);
+
+        if (request.ShowreelHud)
+        {
+            _host.ShowreelOverlay.Config.EnableOverlay = true;
+            if (request.ShowreelZoneBanners.HasValue)
+                _host.ShowreelOverlay.Config.ShowZoneBanners = request.ShowreelZoneBanners.Value;
+            if (request.ShowreelTelemetry.HasValue)
+                _host.ShowreelOverlay.Config.ShowLiveTelemetry = request.ShowreelTelemetry.Value;
+            if (request.ShowreelLandmarks.HasValue)
+                _host.ShowreelOverlay.Config.ShowLandmarkCallouts = request.ShowreelLandmarks.Value;
+            if (request.ShowreelEngineBadges.HasValue)
+                _host.ShowreelOverlay.Config.ShowEngineBadges = request.ShowreelEngineBadges.Value;
+        }
+
+        if (request.RecordTaxiRouteId.HasValue ||
+            !string.IsNullOrWhiteSpace(request.RecordCameraPathName) ||
+            !string.IsNullOrWhiteSpace(request.RecordTaxiPlaylist) ||
+            !string.IsNullOrWhiteSpace(request.RecordTaxiChain))
+            QueueStartupVideoRecording(request);
     }
 
     private StartupAutomationRequest ParseStartupAutomationRequest(string[]? initialArgs, out string? legacyPath)
@@ -142,6 +178,21 @@ internal sealed partial class StartupAutomationService
         string? roofCaptureAssetListPath = null;
         string? roofCaptureResolution = null;
         bool roofCaptureAllAngles = false;
+        string? recordTaxiRoute = null;
+        string? recordCameraPath = null;
+        string? recordDuration = null;
+        string? recordOutput = null;
+        string? recordFps = null;
+        bool? recordIncludeUi = null;
+        bool recordFeatureTour = false;
+        bool exitAfterRecord = false;
+        string? recordTaxiPlaylist = null;
+        string? recordTaxiChain = null;
+        bool showreelHud = false;
+        bool? showreelZoneBanners = null;
+        bool? showreelTelemetry = null;
+        bool? showreelLandmarks = null;
+        bool? showreelEngineBadges = null;
 
         for (int index = 0; index < initialArgs.Length; index++)
         {
@@ -267,6 +318,89 @@ internal sealed partial class StartupAutomationService
                     roofCaptureAllAngles = true;
                     break;
 
+                case "--record-taxi-route":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out recordTaxiRoute))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--record-camera-path":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out recordCameraPath))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--record-duration":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out recordDuration))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--record-output":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out recordOutput))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--record-fps":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out recordFps))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--record-with-ui":
+                    recordIncludeUi = true;
+                    break;
+
+                case "--record-no-ui":
+                    recordIncludeUi = false;
+                    break;
+
+                case "--record-feature-tour":
+                    recordFeatureTour = true;
+                    break;
+
+                case "--exit-after-record":
+                    exitAfterRecord = true;
+                    break;
+
+                case "--record-taxi-playlist":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out recordTaxiPlaylist))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--record-taxi-chain":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out recordTaxiChain))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--showreel-hud":
+                    showreelHud = true;
+                    break;
+
+                case "--showreel-zone-banners":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valBanners) && bool.TryParse(valBanners, out bool bBanners))
+                        showreelZoneBanners = bBanners;
+                    else
+                        showreelZoneBanners = true;
+                    break;
+
+                case "--showreel-telemetry":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valTelem) && bool.TryParse(valTelem, out bool bTelem))
+                        showreelTelemetry = bTelem;
+                    else
+                        showreelTelemetry = true;
+                    break;
+
+                case "--showreel-landmarks":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valLand) && bool.TryParse(valLand, out bool bLand))
+                        showreelLandmarks = bLand;
+                    else
+                        showreelLandmarks = true;
+                    break;
+
+                case "--showreel-engine-badges":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valBadges) && bool.TryParse(valBadges, out bool bBadges))
+                        showreelEngineBadges = bBadges;
+                    else
+                        showreelEngineBadges = true;
+                    break;
+
                 default:
                     if (arg.StartsWith("--", StringComparison.Ordinal))
                     {
@@ -306,6 +440,18 @@ internal sealed partial class StartupAutomationService
         if (validationBatchSettledFrames == null)
             resolvedValidationBatchSettledFrames = DefaultBatchSettledFrames;
 
+        int? resolvedRecordTaxiRouteId = null;
+        if (!string.IsNullOrWhiteSpace(recordTaxiRoute) && int.TryParse(recordTaxiRoute, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedRouteId))
+            resolvedRecordTaxiRouteId = parsedRouteId;
+
+        double? resolvedRecordDuration = null;
+        if (!string.IsNullOrWhiteSpace(recordDuration) && double.TryParse(recordDuration, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedDuration) && parsedDuration > 0)
+            resolvedRecordDuration = parsedDuration;
+
+        int? resolvedRecordFps = null;
+        if (!string.IsNullOrWhiteSpace(recordFps) && int.TryParse(recordFps, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedFps) && parsedFps >= 12 && parsedFps <= 60)
+            resolvedRecordFps = parsedFps;
+
         return new StartupAutomationRequest
         {
             GamePath = NormalizeOptionalPath(gamePath),
@@ -332,6 +478,21 @@ internal sealed partial class StartupAutomationService
             RoofCaptureAssetListPath = NormalizeOptionalValue(roofCaptureAssetListPath),
             RoofCaptureResolution = TryParseOptionalPositiveInt(roofCaptureResolution, "--capture-roof-resolution", out int resolvedRoofRes) ? resolvedRoofRes : 512,
             RoofCaptureAllAngles = roofCaptureAllAngles,
+            RecordTaxiRouteId = resolvedRecordTaxiRouteId,
+            RecordCameraPathName = NormalizeOptionalValue(recordCameraPath),
+            RecordDurationSeconds = resolvedRecordDuration,
+            RecordOutputPath = NormalizeOptionalPath(recordOutput),
+            RecordFps = resolvedRecordFps,
+            RecordIncludeUi = recordIncludeUi,
+            RecordFeatureTour = recordFeatureTour,
+            ExitAfterRecord = exitAfterRecord,
+            RecordTaxiPlaylist = NormalizeOptionalValue(recordTaxiPlaylist),
+            RecordTaxiChain = NormalizeOptionalValue(recordTaxiChain),
+            ShowreelHud = showreelHud,
+            ShowreelZoneBanners = showreelZoneBanners,
+            ShowreelTelemetry = showreelTelemetry,
+            ShowreelLandmarks = showreelLandmarks,
+            ShowreelEngineBadges = showreelEngineBadges,
         };
     }
 
@@ -530,5 +691,133 @@ private void QueueStartupRoofCapture(StartupAutomationRequest request)
 
         _statusMessage = $"Invalid variation id for {optionName}: {rawValue}";
         return false;
+    }
+
+    private void QueueStartupVideoRecording(StartupAutomationRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.RecordTaxiPlaylist))
+        {
+            string[] parts = request.RecordTaxiPlaylist.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            foreach (string part in parts)
+            {
+                if (int.TryParse(part, out int rid))
+                    _host.TaxiPlaylist.AddRoute(rid);
+            }
+
+            if (_host.TaxiPlaylist.Items.Count > 0)
+            {
+                _host.TaxiPlaylist.StartPlaylist(
+                    recordVideo: true,
+                    videoFps: request.RecordFps ?? 30,
+                    includeUi: request.RecordIncludeUi ?? true, // Default to true so showreel HUD captures
+                    customOutput: request.RecordOutputPath,
+                    exitAfterRecord: request.ExitAfterRecord);
+            }
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.RecordTaxiChain))
+        {
+            string[] parts = request.RecordTaxiChain.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length > 0 && int.TryParse(parts[0], out int startNode))
+            {
+                int hops = parts.Length > 1 && int.TryParse(parts[1], out int h) ? h : 4;
+                _host.TaxiPlaylist.BuildAutoChain(startNode, hops);
+
+                if (_host.TaxiPlaylist.Items.Count > 0)
+                {
+                    _host.TaxiPlaylist.StartPlaylist(
+                        recordVideo: true,
+                        videoFps: request.RecordFps ?? 30,
+                        includeUi: request.RecordIncludeUi ?? true,
+                        customOutput: request.RecordOutputPath,
+                        exitAfterRecord: request.ExitAfterRecord);
+                }
+            }
+            return;
+        }
+
+        if (request.RecordTaxiRouteId is int routeId)
+        {
+            if (_worldScene == null)
+            {
+                _statusMessage = "Cannot record taxi route: no world scene is loaded.";
+                return;
+            }
+
+            _worldScene.TaxiActors.ShowTaxi = true;
+            _worldScene.TaxiActors.ShowTaxiActors = true;
+            _worldScene.TaxiActors.SelectedTaxiRouteId = routeId;
+            _worldScene.TaxiActors.ActiveTaxiRideRouteId = routeId;
+            _host.TaxiRideCameraRouteId = routeId;
+            _host.TaxiRideCameraScene = _worldScene;
+            _host.TaxiRideCameraEnabled = true;
+            _host.TaxiRideCameraPoseInitialized = false;
+            _host.LastTaxiRideCameraTick = Stopwatch.GetTimestamp();
+
+            _worldScene.TaxiActors.ResetTaxiRouteTravel(routeId);
+
+            FeatureTourRecipe? tourRecipe = null;
+            string routeLabel = _taxiAndAreaPoi.GetTaxiRouteDisplayLabel(routeId);
+            if (request.RecordFeatureTour)
+            {
+                var route = _worldScene.TaxiActors.GetTaxiRoute(routeId);
+                string? fromStation = route != null ? _worldScene.TaxiActors.GetTaxiNode(route.FromNodeId)?.Name : null;
+                string? toStation = route != null ? _worldScene.TaxiActors.GetTaxiNode(route.ToNodeId)?.Name : null;
+                tourRecipe = BuiltinFeatureTourRecipes.CreateTaxiRouteOverview(routeId, routeLabel, fromStation, toStation, request.RecordFps ?? 30);
+            }
+
+            var recRequest = new RecordingRequest
+            {
+                SourceKind = RecordingSourceKind.TaxiRoute,
+                TaxiRouteId = routeId,
+                Label = routeLabel,
+                OutputPathOverride = request.RecordOutputPath,
+                IncludeUi = request.RecordIncludeUi ?? false,
+                Fps = request.RecordFps ?? 30,
+                MaxDurationSeconds = request.RecordDurationSeconds,
+                AutoStopOnRouteArrival = !request.RecordDurationSeconds.HasValue,
+                ExitAfterRecording = request.ExitAfterRecord,
+                TourRecipe = tourRecipe,
+                IncludeShowreelOverlay = request.RecordFeatureTour || request.ShowreelHud || _host.ShowreelOverlay.Config.EnableOverlay,
+            };
+
+            _recordingCoordinator.TryStartRecording(recRequest, out string? error);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                _statusMessage = $"Failed to start automated taxi recording: {error}";
+            }
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.RecordCameraPathName))
+        {
+            string pathName = request.RecordCameraPathName;
+            FeatureTourRecipe? tourRecipe = null;
+            if (request.RecordFeatureTour)
+            {
+                tourRecipe = BuiltinFeatureTourRecipes.CreateCameraPathOverview(pathName, request.RecordFps ?? 30);
+            }
+
+            var recRequest = new RecordingRequest
+            {
+                SourceKind = RecordingSourceKind.CameraPath,
+                CameraPathName = pathName,
+                Label = pathName,
+                OutputPathOverride = request.RecordOutputPath,
+                IncludeUi = request.RecordIncludeUi ?? false,
+                Fps = request.RecordFps ?? 30,
+                MaxDurationSeconds = request.RecordDurationSeconds,
+                ExitAfterRecording = request.ExitAfterRecord,
+                TourRecipe = tourRecipe,
+                IncludeShowreelOverlay = request.RecordFeatureTour || request.ShowreelHud || _host.ShowreelOverlay.Config.EnableOverlay,
+            };
+
+            _recordingCoordinator.TryStartRecording(recRequest, out string? error);
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                _statusMessage = $"Failed to start automated camera path recording: {error}";
+            }
+        }
     }
 }

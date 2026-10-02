@@ -7,7 +7,7 @@ using WowViewer.Core.M2;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.Runtime.M2;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using Silk.NET.Input;

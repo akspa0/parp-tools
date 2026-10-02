@@ -283,6 +283,26 @@ public sealed class TaxiActorScene
         return TryGetTaxiRouteSelectionPoint(route, out point);
     }
 
+    public bool TryGetTaxiRouteProgress(int pathId, out float travelDistance, out float totalLength)
+    {
+        travelDistance = 0f;
+        totalLength = 0f;
+        TaxiPathLoader.TaxiRoute? route = GetTaxiRoute(pathId);
+        if (route == null || route.Waypoints.Count < 2)
+            return false;
+
+        totalLength = GetRouteLength(route.Waypoints);
+        _taxiActorTravelByPath.TryGetValue(pathId, out travelDistance);
+        return totalLength > 1f;
+    }
+
+    public void ResetTaxiRouteTravel(int pathId)
+    {
+        _taxiActorTravelByPath[pathId] = 0f;
+        _taxiActorPoseByPath.Remove(pathId);
+        _taxiActorSmoothedForwardByPath.Remove(pathId);
+    }
+
     private void LazyLoadTaxi()
     {
         _taxiLoadAttempted = true;

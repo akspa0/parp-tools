@@ -15,7 +15,7 @@ using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WoWViewer.Capture;
 using WowViewer.Core.IO.Maps;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WoWViewer.Terrain.Vlm;
 using static WoWViewer.ViewerApp;
 
@@ -29,265 +29,28 @@ internal sealed partial class CaptureAutomationService
 
     internal bool TryStartCurrentViewVideoRecording(bool includeUi, string? label = null)
     {
-        if (_activeVideoRecording != null)
+        var request = new RecordingRequest
         {
-            _statusMessage = "A video recording is already in progress.";
-            return false;
-        }
+            SourceKind = RecordingSourceKind.Manual,
+            Label = label,
+            IncludeUi = includeUi,
+            Fps = _videoCaptureFps,
+            ContainerIndex = _videoCaptureContainerIndex,
+        };
 
-        if (!TryGetCaptureRegion(includeUi, out _, out _, out int width, out int height))
-        {
-            _statusMessage = includeUi
-                ? "Unable to resolve the current framebuffer size for video capture."
-                : "Unable to resolve the scene viewport for no-UI video capture.";
-            return false;
-        }
-
-        if (width <= 0 || height <= 0)
-        {
-            _statusMessage = "Video capture dimensions were invalid.";
-            return false;
-        }
-
-        // 069 Phase 7: if archeology playback to video is enabled, start playback.
-        // Track ownership so a failed recording start never stops a playback
-        // session the operator started independently.
-        bool startedArcheologyPlayback = false;
-        if (_archeologyApplyToVideoRecording && !_archeologyPlaybackActive)
-        {
-            _archaeologyPanel.StartArcheologyPlayback();
-            startedArcheologyPlayback = _archeologyPlaybackActive;
-        }
-
-        VideoEncoderResolution encoderResolution = VideoEncoderExecutableResolver.Resolve(_videoEncoderExecutable, AppContext.BaseDirectory);
-
-        string extension = VideoContainerExtensions[Math.Clamp(_videoCaptureContainerIndex, 0, VideoContainerExtensions.Length - 1)];
-        string safeMap = MakeSafePathSegment(GetCurrentCaptureMapName());
-        string safeBuild = MakeSafePathSegment(GetCurrentCaptureBuildVersion());
-        string safeLabel = MakeSafePathSegment(string.IsNullOrWhiteSpace(label) ? "current_view" : label);
-        string captureMode = includeUi ? "with_ui" : "no_ui";
-        string outputPath = Path.Combine(
-            string.IsNullOrWhiteSpace(_captureOutputDir) ? Path.Combine(OutputDir, "captures") : _captureOutputDir,
-            safeMap,
-            safeBuild,
-            $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{safeLabel}_{captureMode}{extension}");
-
-        try
-        {
-            string? outputDirectory = Path.GetDirectoryName(outputPath);
-            if (!string.IsNullOrWhiteSpace(outputDirectory))
-                Directory.CreateDirectory(outputDirectory);
-
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = encoderResolution.Executable,
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                WorkingDirectory = Environment.CurrentDirectory,
-            };
-
-            StringBuilder encoderErrorOutput = new();
-
-            startInfo.ArgumentList.Add("-y");
-            startInfo.ArgumentList.Add("-f");
-            startInfo.ArgumentList.Add("rawvideo");
-            startInfo.ArgumentList.Add("-pixel_format");
-            startInfo.ArgumentList.Add("rgba");
-            startInfo.ArgumentList.Add("-video_size");
-            startInfo.ArgumentList.Add($"{width}x{height}");
-            startInfo.ArgumentList.Add("-framerate");
-            startInfo.ArgumentList.Add(_videoCaptureFps.ToString());
-            startInfo.ArgumentList.Add("-i");
-            startInfo.ArgumentList.Add("-");
-            startInfo.ArgumentList.Add("-vf");
-            startInfo.ArgumentList.Add(BuildVideoCaptureFilter(width, height));
-            startInfo.ArgumentList.Add("-an");
-            startInfo.ArgumentList.Add("-c:v");
-            startInfo.ArgumentList.Add("libx264");
-            startInfo.ArgumentList.Add("-preset");
-            startInfo.ArgumentList.Add("veryfast");
-            startInfo.ArgumentList.Add("-pix_fmt");
-            startInfo.ArgumentList.Add("yuv420p");
-            startInfo.ArgumentList.Add(outputPath);
-
-            Process process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("ffmpeg did not start.");
-            process.ErrorDataReceived += (_, args) => AppendVideoEncoderError(encoderErrorOutput, args.Data);
-            process.BeginErrorReadLine();
-
-            _activeVideoRecording = new ActiveVideoRecording
-            {
-                EncoderProcess = process,
-                EncoderInput = process.StandardInput.BaseStream,
-                EncoderErrorOutput = encoderErrorOutput,
-                OutputPath = outputPath,
-                IncludeUi = includeUi,
-                Width = width,
-                Height = height,
-                FrameIntervalSeconds = 1.0 / Math.Max(1, _videoCaptureFps),
-                FrameAccumulatorSeconds = 0.0,
-                FrameBuffer = new byte[width * height * 4],
-                ApplyArcheologyPlayback = _archeologyApplyToVideoRecording,
-                StartedArcheologyPlayback = startedArcheologyPlayback,
-            };
-
-            _statusMessage = $"Started video recording with {encoderResolution.DisplayName}: {outputPath}";
-            return true;
-        }
-        catch (Win32Exception ex)
-        {
-            if (startedArcheologyPlayback && _archeologyPlaybackActive)
-                _archaeologyPanel.StopArcheologyPlayback(restoreRange: true);
-            _statusMessage = VideoEncoderExecutableResolver.BuildUnavailableMessage(encoderResolution, ex.Message);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            if (startedArcheologyPlayback && _archeologyPlaybackActive)
-                _archaeologyPanel.StopArcheologyPlayback(restoreRange: true);
-            _statusMessage = $"Failed to start video recording: {ex.Message}";
-            return false;
-        }
+        return _host.RecordingCoordinator.TryStartRecording(request, out _);
     }
 
     internal void StopVideoRecording(string? statusOverride = null)
     {
-        if (_activeVideoRecording == null)
-            return;
-
-        ActiveVideoRecording recording = _activeVideoRecording;
-        _activeVideoRecording = null;
-
-        // 069 Phase 7: stop archeology playback if it was started for video.
-        if (recording.StartedArcheologyPlayback && _archeologyPlaybackActive)
-            _archaeologyPanel.StopArcheologyPlayback(restoreRange: true);
-
-        bool success = false;
-        string statusMessage = statusOverride ?? $"Saved video: {recording.OutputPath}";
-
-        try
-        {
-            recording.EncoderInput.Flush();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            recording.EncoderInput.Dispose();
-        }
-        catch
-        {
-        }
-
-        try
-        {
-            if (!recording.EncoderProcess.WaitForExit(10000))
-                recording.EncoderProcess.Kill(entireProcessTree: true);
-
-            success = recording.EncoderProcess.ExitCode == 0;
-            if (!success && statusOverride == null)
-                statusMessage = $"Video encode failed for {recording.OutputPath} (exit {recording.EncoderProcess.ExitCode}).";
-
-            string encoderError = GetVideoEncoderErrorSummary(recording);
-            if (!string.IsNullOrWhiteSpace(encoderError) && (!success || statusOverride != null))
-                statusMessage = $"{statusMessage} ffmpeg: {encoderError}";
-        }
-        catch (Exception ex)
-        {
-            statusMessage = statusOverride ?? $"Failed to finish video recording: {ex.Message}";
-        }
-        finally
-        {
-            try
-            {
-                recording.EncoderProcess.CancelErrorRead();
-            }
-            catch
-            {
-            }
-
-            recording.EncoderProcess.Dispose();
-        }
-
-        if (recording.RestoreUiChromeAfterMarketingTour)
-            _hideUiChrome = recording.PreviousHideUiChrome;
-
-        if (!success && statusOverride == null && File.Exists(recording.OutputPath))
-        {
-            try
-            {
-                File.Delete(recording.OutputPath);
-            }
-            catch
-            {
-            }
-        }
-
-        _statusMessage = statusMessage;
+        _host.RecordingCoordinator.StopRecording(statusOverride);
     }
 
     internal void CaptureVideoFrameIfNeeded(bool includeUi, double dt)
     {
-        if (_activeVideoRecording == null || _activeVideoRecording.IncludeUi != includeUi)
-            return;
-
-        ActiveVideoRecording recording = _activeVideoRecording;
-        recording.FrameAccumulatorSeconds += Math.Max(0.0, dt);
-        if (recording.FrameAccumulatorSeconds + 1e-6 < recording.FrameIntervalSeconds)
-        {
-            _activeVideoRecording = recording;
-            return;
-        }
-
-        if (!TryGetCaptureRegion(includeUi, out int readX, out int readY, out int width, out int height))
-        {
-            StopVideoRecording(includeUi
-                ? "Video recording stopped because the framebuffer was unavailable."
-                : "Video recording stopped because the scene viewport was unavailable.");
-            return;
-        }
-
-        if (width != recording.Width || height != recording.Height)
-        {
-            StopVideoRecording("Video recording stopped because the capture size changed during recording.");
-            return;
-        }
-
-        if (recording.EncoderProcess.HasExited)
-        {
-            StopVideoRecording("Video recording stopped because ffmpeg exited before the first frame was accepted.");
-            return;
-        }
-
-        int framesToWrite = Math.Max(1, (int)(recording.FrameAccumulatorSeconds / recording.FrameIntervalSeconds));
-        recording.FrameAccumulatorSeconds -= framesToWrite * recording.FrameIntervalSeconds;
-
-        byte[] pixels = recording.FrameBuffer.Length == recording.Width * recording.Height * 4
-            ? recording.FrameBuffer
-            : new byte[recording.Width * recording.Height * 4];
-        recording.FrameBuffer = pixels;
-
-        if (!TryReadFramebufferRgba(readX, readY, recording.Width, recording.Height, pixels))
-        {
-            StopVideoRecording("Video recording stopped because framebuffer capture failed.");
-            return;
-        }
-
-        try
-        {
-            for (int frameIndex = 0; frameIndex < framesToWrite; frameIndex++)
-                recording.EncoderInput.Write(pixels, 0, pixels.Length);
-            _activeVideoRecording = recording;
-        }
-        catch (Exception ex)
-        {
-            StopVideoRecording($"Video recording stopped because ffmpeg write failed: {ex.Message}");
-        }
+        _host.RecordingCoordinator.CaptureVideoFrameIfNeeded(includeUi, dt);
     }
+
 
     internal void StopTaxiRideCamera(string? statusMessage = null)
     {

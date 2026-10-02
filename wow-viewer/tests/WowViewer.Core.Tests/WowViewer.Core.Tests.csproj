@@ -21,6 +21,8 @@
   <ItemGroup>
     <Compile Include="..\..\src\viewer\WoWViewer\Capture\VideoEncoderExecutableResolver.cs"
              Link="Capture\VideoEncoderExecutableResolver.cs" />
+    <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\Recording\RecordingModels.cs"
+             Link="Recording\RecordingModels.cs" />
   </ItemGroup>
 
   <ItemGroup>

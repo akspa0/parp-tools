@@ -131,7 +131,13 @@ internal sealed partial class TaxiPanelService
         if (ImGui.Checkbox("Ride Video Includes UI", ref videoIncludeUi))
             _videoCaptureIncludeUi = videoIncludeUi;
 
-        if (_activeVideoRecording == null)
+        ImGui.Checkbox("Auto-stop at destination", ref _taxiAutoStopOnRouteArrival);
+        ImGui.SameLine();
+        ImGui.Checkbox("Route Tour Callouts", ref _taxiRecordWithFeatureTour);
+
+        bool isAnyRecordingActive = _recordingCoordinator.IsRecording;
+
+        if (!isAnyRecordingActive)
         {
             if (!hasSelectedTaxiRoute)
                 ImGui.BeginDisabled();
@@ -143,10 +149,134 @@ internal sealed partial class TaxiPanelService
         else
         {
             if (ImGui.Button("Stop Route Video"))
-                StopVideoRecording();
+            {
+                _recordingCoordinator.StopRecording("Taxi route video recording stopped by user.");
+            }
+
+            if (_recordingCoordinator.ActiveSession is { } active)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled($"{Path.GetFileName(active.OutputPath)} ({active.ElapsedSeconds:F1}s)");
+            }
+        }
+
+        if (!isAnyRecordingActive && _recordingCoordinator.LastCompletedSession is { } lastCompleted
+            && lastCompleted.SourceKind == RecordingSourceKind.TaxiRoute)
+        {
+            ImGui.TextDisabled($"Saved: {Path.GetFileName(lastCompleted.OutputPath)} ({lastCompleted.DurationSeconds:F1}s)");
+        }
+
+        if (ImGui.CollapsingHeader("Flight Playlist & Promo Video Showreel", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            TaxiPlaylistService playlist = _host.TaxiPlaylist;
+            ShowreelOverlayService showreel = _host.ShowreelOverlay;
+
+            bool showreelOn = showreel.Config.EnableOverlay;
+            if (ImGui.Checkbox("Tour HUD Overlay in Video", ref showreelOn))
+                showreel.Config.EnableOverlay = showreelOn;
 
             ImGui.SameLine();
-            ImGui.TextDisabled(Path.GetFileName(_activeVideoRecording.OutputPath));
+            bool previewOn = showreel.Config.PreviewInViewport;
+            if (ImGui.Checkbox("Preview in Viewport", ref previewOn))
+                showreel.Config.PreviewInViewport = previewOn;
+
+            if (showreel.Config.EnableOverlay || showreel.Config.PreviewInViewport)
+            {
+                bool showTele = showreel.Config.ShowLiveTelemetry;
+                if (ImGui.Checkbox("Live Telemetry & Coordinates", ref showTele))
+                    showreel.Config.ShowLiveTelemetry = showTele;
+                ImGui.SameLine();
+                bool showZone = showreel.Config.ShowZoneBanners;
+                if (ImGui.Checkbox("Zone Banners", ref showZone))
+                    showreel.Config.ShowZoneBanners = showZone;
+
+                bool showLand = showreel.Config.ShowLandmarkCallouts;
+                if (ImGui.Checkbox("Landmark Proximity Callouts", ref showLand))
+                    showreel.Config.ShowLandmarkCallouts = showLand;
+                ImGui.SameLine();
+                bool showBadges = showreel.Config.ShowEngineBadges;
+                if (ImGui.Checkbox("Engine Feature Badges", ref showBadges))
+                    showreel.Config.ShowEngineBadges = showBadges;
+            }
+
+            ImGui.Separator();
+
+            ImGui.Text($"Playlist Segments ({playlist.Items.Count}):");
+            if (playlist.Items.Count == 0)
+            {
+                ImGui.TextDisabled("Playlist is empty. Select a route and click 'Add Selected Route' or 'Auto-Chain'.");
+            }
+            else
+            {
+                for (int i = 0; i < playlist.Items.Count; i++)
+                {
+                    var item = playlist.Items[i];
+                    bool isCurrent = playlist.IsPlaying && playlist.CurrentIndex == i;
+                    string prefix = isCurrent ? ">> " : $"{i + 1}. ";
+                    ImGui.TextUnformatted($"{prefix}{item.DisplayLabel} ({item.RouteLength:F0} yd)");
+
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"^##up_{i}") && i > 0)
+                        playlist.MoveUp(i);
+
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"v##dn_{i}") && i < playlist.Items.Count - 1)
+                        playlist.MoveDown(i);
+
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"X##del_{i}"))
+                        playlist.RemoveAt(i);
+                }
+            }
+
+            if (hasSelectedTaxiRoute)
+            {
+                if (ImGui.Button("Add Selected Route"))
+                    playlist.AddRoute(_worldScene.TaxiActors.SelectedTaxiRouteId);
+
+                ImGui.SameLine();
+                if (ImGui.Button("Auto-Chain 4 Hops"))
+                {
+                    var r = _worldScene.TaxiActors.GetTaxiRoute(_worldScene.TaxiActors.SelectedTaxiRouteId);
+                    if (r != null)
+                        playlist.BuildAutoChain(r.FromNodeId, 4);
+                }
+            }
+
+            if (playlist.Items.Count > 0)
+            {
+                ImGui.SameLine();
+                if (ImGui.Button("Clear"))
+                    playlist.Clear();
+
+                bool loop = playlist.Loop;
+                if (ImGui.Checkbox("Loop Playlist", ref loop))
+                    playlist.Loop = loop;
+
+                if (!playlist.IsPlaying)
+                {
+                    if (ImGui.Button("Play Playlist"))
+                        playlist.StartPlaylist(recordVideo: false);
+
+                    ImGui.SameLine();
+                    if (ImGui.Button("Record Playlist Video"))
+                    {
+                        playlist.StartPlaylist(
+                            recordVideo: true,
+                            videoFps: _videoCaptureFps,
+                            includeUi: _videoCaptureIncludeUi,
+                            includeShowreelOverlay: showreel.Config.EnableOverlay);
+                    }
+                }
+                else
+                {
+                    if (ImGui.Button("Stop Playlist"))
+                        playlist.StopPlaylist("Stopped by user.");
+
+                    ImGui.SameLine();
+                    ImGui.TextDisabled(playlist.StatusText);
+                }
+            }
         }
 
         bool showTaxiActors = _worldScene.TaxiActors.ShowTaxiActors;

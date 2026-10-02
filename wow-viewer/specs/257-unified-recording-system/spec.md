@@ -1,6 +1,6 @@
 # Spec 257 — Unified Video Recording & Automation System
 
-**Created**: 2026-10-02 · **Branch**: `v0.6.0-dev` · **Status**: Specified & In Progress
+**Created**: 2026-10-02 · **Branch**: `v0.6.0-dev` · **Status**: Implemented (Awaiting Operator Smoke Test)
 **Parent**: Epic 251 (Viewer UX, Shell & Code Health) / Epic 252 (World Simulation, Audio & Interaction). Governance: AGENTS.md §4, §9, §10, §11.
 
 ---

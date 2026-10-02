@@ -15,7 +15,7 @@ using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WoWViewer.Capture;
 using WowViewer.Core.IO.Maps;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WoWViewer.Terrain.Vlm;
 using static WoWViewer.ViewerApp;
 
@@ -26,6 +26,9 @@ namespace WoWViewer;
 internal sealed partial class TaxiPanelService
 {
     private float _taxiRideLookAhead = 28f;
+    private bool _taxiAutoStopOnRouteArrival = true;
+    private bool _taxiRecordWithFeatureTour = false;
+    private bool _taxiResetTravelOnRecordStart = true;
 
     private bool TryStartTaxiRideVideoCapture()
     {
@@ -38,7 +41,38 @@ internal sealed partial class TaxiPanelService
         if (!TryAttachTaxiRideCameraToSelectedRoute())
             return false;
 
-        return TryStartCurrentViewVideoRecording(_videoCaptureIncludeUi, _taxiAndAreaPoi.GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId));
+        int routeId = _taxiRideCameraRouteId;
+        string routeLabel = _taxiAndAreaPoi.GetTaxiRouteDisplayLabel(routeId);
+
+        if (_taxiResetTravelOnRecordStart)
+        {
+            _worldScene.TaxiActors.ResetTaxiRouteTravel(routeId);
+        }
+
+        FeatureTourRecipe? recipe = null;
+        if (_taxiRecordWithFeatureTour)
+        {
+            var route = _worldScene.TaxiActors.GetTaxiRoute(routeId);
+            string? fromStation = route != null ? _worldScene.TaxiActors.GetTaxiNode(route.FromNodeId)?.Name : null;
+            string? toStation = route != null ? _worldScene.TaxiActors.GetTaxiNode(route.ToNodeId)?.Name : null;
+            recipe = BuiltinFeatureTourRecipes.CreateTaxiRouteOverview(routeId, routeLabel, fromStation, toStation, _videoCaptureFps);
+        }
+
+        var request = new RecordingRequest
+        {
+            SourceKind = RecordingSourceKind.TaxiRoute,
+            TaxiRouteId = routeId,
+            Label = routeLabel,
+            IncludeUi = _videoCaptureIncludeUi,
+            Fps = _videoCaptureFps,
+            ContainerIndex = _host.VideoCaptureContainerIndex,
+            AutoStopOnRouteArrival = _taxiAutoStopOnRouteArrival,
+            DetachCameraOnStop = false,
+            TourRecipe = recipe,
+            IncludeShowreelOverlay = _taxiRecordWithFeatureTour || _host.ShowreelOverlay.Config.EnableOverlay,
+        };
+
+        return _recordingCoordinator.TryStartRecording(request, out _);
     }
 
     private bool TryAttachTaxiRideCameraToSelectedRoute()
@@ -64,5 +98,20 @@ internal sealed partial class TaxiPanelService
         _lastTaxiRideCameraTick = Stopwatch.GetTimestamp();
         _statusMessage = $"Ride camera attached to {_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}.";
         return true;
+    }
+
+    internal bool AttachTaxiRideCamera(int routeId)
+    {
+        if (_worldScene == null)
+            return false;
+
+        _worldScene.TaxiActors.SelectedTaxiRouteId = routeId;
+        _worldScene.TaxiActors.SelectedTaxiNodeId = -1;
+        return TryAttachTaxiRideCameraToSelectedRoute();
+    }
+
+    internal void StopTaxiRideCameraPublic(string? statusMessage = null)
+    {
+        StopTaxiRideCamera(statusMessage);
     }
 }

@@ -35,6 +35,8 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 |---|---|---|
 | [255 WorldScene Decomposition](255-worldscene-decomposition/spec.md) | Split `WorldScene.cs` (8,275 lines at start) into owned scene services, continuing Epic 251 U-01 | Plan approved 2026-09-27; **W0–W7 landed 2026-09-27** (8,275 → 4,922 lines; smoke T018 owed); W8/W9/E2 gated on R-10 |
 | [256 Modern-Data Streaming & M2 Submission](256-modern-data-streaming-performance/spec.md) | Name the hidden frame time; off-thread model loading; native M2 instancing (measured baseline: 4 FPS, 98 ms/frame loading, 0 of 5,169 M2s instanced) | Approved 2026-09-27; **P0, P1, minimap budget, P2a/b/c, D, P3, A, and file splits (T060/T092) landed**; operator captures owed (T015, T022, T042, T073, T081, T102) |
+| [257 Unified Video Recording & Automation](257-unified-recording-system/spec.md) | Centralized recording coordinator, taxi node stop-crash fix, automated CLI video recording, camera path and feature tour integration | Implemented (2026-10-02); receipt in `evidence/receipt-spec257.md`; operator smoke owed |
+| [258 Taxi Route Playlists & Dynamic Marketing Showreel Tour](258-taxi-playlist-showreel-tour/spec.md) | Multi-route taxi flight chaining/playlists, continuous multi-segment recording, dynamic showreel telemetry HUD, zone banners, and landmark discovery callouts | Implemented (2026-10-02); receipt in `evidence/receipt-spec258.md`; operator smoke owed |
 
 ## Operator verification owed on shipped code
 

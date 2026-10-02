@@ -35,7 +35,7 @@ using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WowViewer.Core.IO.Converters;
 using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
 using CoreMdxGeometryFile = WowViewer.Core.Mdx.MdxGeometryFile;

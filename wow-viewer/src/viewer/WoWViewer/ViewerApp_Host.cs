@@ -29,7 +29,7 @@ using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;
@@ -405,6 +405,8 @@ public partial class ViewerApp
     LightingPanelService IViewerAppHost.LightingPanel => _lightingPanel;
     MainMenuBarService IViewerAppHost.MainMenuBar => _mainMenuBar;
     TaxiPanelService IViewerAppHost.TaxiPanel => _taxiPanel;
+    TaxiPlaylistService IViewerAppHost.TaxiPlaylist => _taxiPlaylist;
+    ShowreelOverlayService IViewerAppHost.ShowreelOverlay => _showreelOverlay;
     ThemesService IViewerAppHost.Themes => _themes;
     ViewerChromeService IViewerAppHost.ViewerChrome => _viewerChrome;
     WorldObjectsPanelService IViewerAppHost.WorldObjectsPanel => _worldObjectsPanel;
@@ -422,6 +424,7 @@ public partial class ViewerApp
     CameraPathsService IViewerAppHost.CameraPaths => _cameraPaths;
     StartupAutomationService IViewerAppHost.StartupAutomation => _startupAutomation;
     CaptureAutomationService IViewerAppHost.CaptureAutomation => _captureAutomation;
+    RecordingCoordinatorService IViewerAppHost.RecordingCoordinator => _recordingCoordinator;
     SettingsWindowService IViewerAppHost.SettingsWindow => _settingsWindow;
     SynthesizedMinimapExportService IViewerAppHost.SynthesizedMinimapExport => _synthesizedMinimapExport;
     WorkspacesService IViewerAppHost.Workspaces => _workspaces;

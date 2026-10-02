@@ -31,7 +31,7 @@ using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.M2;
 using WoWViewer.Terrain.Vlm;
 using WowViewer.Core.Runtime.M2;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;
@@ -615,6 +615,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly Pm4WorkbenchService _pm4Workbench;
     private readonly PerfPanelService _perfPanel;
     private readonly TaxiPanelService _taxiPanel;
+    private readonly TaxiPlaylistService _taxiPlaylist;
+    private readonly ShowreelOverlayService _showreelOverlay;
     private readonly ArchaeologyPanelService _archaeologyPanel;
     private readonly ModelInspectorPanelService _modelInspector;
     private readonly TerrainControlsPanelService _terrainControlsPanel;
@@ -639,6 +641,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly StartupAutomationService _startupAutomation;
     private readonly CameraPathsService _cameraPaths;
     private readonly CaptureAutomationService _captureAutomation;
+    private readonly RecordingCoordinatorService _recordingCoordinator;
     private readonly WorkspacesService _workspaces;
     private readonly EditorPanelsService _editorPanels;
 
@@ -670,6 +673,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _pm4Workbench = new Pm4WorkbenchService(this);
         _perfPanel = new PerfPanelService(this);
         _taxiPanel = new TaxiPanelService(this);
+        _taxiPlaylist = new TaxiPlaylistService(this);
+        _showreelOverlay = new ShowreelOverlayService(this);
         _archaeologyPanel = new ArchaeologyPanelService(this);
         _modelInspector = new ModelInspectorPanelService(this);
         _terrainControlsPanel = new TerrainControlsPanelService(this);
@@ -694,6 +699,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _startupAutomation = new StartupAutomationService(this);
         _cameraPaths = new CameraPathsService(this);
         _captureAutomation = new CaptureAutomationService(this);
+        _recordingCoordinator = new RecordingCoordinatorService(this);
         _workspaces = new WorkspacesService(this);
         _editorPanels = new EditorPanelsService(this);
     }
@@ -823,6 +829,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _cameraPaths.UpdateCameraPathPlayback(dt);
         _cameraPaths.UpdateCameraPathPreload();
         _captureAutomation.UpdateTaxiRideCamera();
+        _recordingCoordinator.Update(dt);
+        _taxiPlaylist.Update(dt);
+        _showreelOverlay.Update(dt);
         _archaeologyPanel.UpdateArcheologyPlayback(dt);
         // Spec 256 amendment: ready tiles upload by time budget, not one per frame — at 4 FPS one per
         // frame left thousands of decoded tiles waiting. A tile upload is well under 1 ms.
@@ -1192,7 +1201,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         if (hasSceneViewport)
             _gl.Viewport(_window.FramebufferSize);
 
-        _captureAutomation.CaptureVideoFrameIfNeeded(includeUi: false, dt);
+        _recordingCoordinator.CaptureVideoFrameIfNeeded(includeUi: false, dt);
         _captureAutomation.CompleteCaptureIfReady(includeUi: false);
 
         // Render ImGui overlay when the native ImGui context is live. Startup capture and
@@ -1228,7 +1237,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             _imGui.Render();
         }
 
-        _captureAutomation.CaptureVideoFrameIfNeeded(includeUi: true, dt);
+        _recordingCoordinator.CaptureVideoFrameIfNeeded(includeUi: true, dt);
         _captureAutomation.CompleteCaptureIfReady(includeUi: true);
 
         // The scene cursor is drawn LAST, after ImGui and after both capture taps.
@@ -1440,8 +1449,10 @@ void main() {
 
         }
 
-        if (_captureAutomation._activeVideoRecording?.MarketingTourAttempt?.ActivePresentation is FeatureTourPresentation presentation)
-            MarketingTourOverlayRenderer.Draw(presentation);
+        if (_recordingCoordinator.ActiveTourPresentation is FeatureTourPresentation presentation)
+            PromoTourOverlayRenderer.Draw(presentation);
+
+        _showreelOverlay.Draw();
 
         _forceApplyShellPanelLayout = false;
 
@@ -1638,6 +1649,7 @@ void main() {
         if (_disposed) return;
         _disposed = true;
 
+        _recordingCoordinator.StopRecording("Stopped video recording during shutdown.");
         _captureAutomation.StopVideoRecording("Stopped video recording during shutdown.");
         _captureAutomation.StopTaxiRideCamera();
         _mlTraining.ShutdownMlTrainingMonitor();

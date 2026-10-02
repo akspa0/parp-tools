@@ -29,7 +29,7 @@ using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;
@@ -56,6 +56,7 @@ internal sealed partial class TaxiPanelService
 {
     // Host bridge (same names as the former ViewerApp members).
     private ref ActiveVideoRecording? _activeVideoRecording => ref _host.ActiveVideoRecording;
+    private RecordingCoordinatorService _recordingCoordinator => _host.RecordingCoordinator;
     private DataSourceSessionService _dataSourceSession => _host.DataSourceSession;
     private ref long _lastTaxiRideCameraTick => ref _host.LastTaxiRideCameraTick;
     private StandaloneModelLoaderService _modelLoader => _host.ModelLoader;

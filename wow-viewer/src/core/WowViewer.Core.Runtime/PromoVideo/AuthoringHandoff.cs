@@ -1,7 +1,7 @@
-namespace WowViewer.Core.Runtime.Marketing;
+namespace WowViewer.Core.Runtime.PromoVideo;
 
 /// <summary>Terminal state carried through receipts and external authoring descriptors.</summary>
-public enum MarketingCaptureTerminalOutcome
+public enum PromoCaptureTerminalOutcome
 {
     Completed = 0,
     Degraded = 1,
@@ -16,7 +16,7 @@ public sealed record AuthoringHandoffProvenance(
     string RecipeVersion,
     string MapName,
     string BuildVersion,
-    MarketingCaptureTerminalOutcome TerminalOutcome);
+    PromoCaptureTerminalOutcome TerminalOutcome);
 
 /// <summary>Untrusted absolute/relative artifact inputs supplied by the viewer's receipt layer.</summary>
 public sealed record AuthoringHandoffRequest(
@@ -60,22 +60,22 @@ public static class AuthoringHandoffFactory
             return AuthoringHandoffValidationResult.Failure("attempt-id-missing", "A handoff requires an attempt id.");
         if (request.Provenance is null)
             return AuthoringHandoffValidationResult.Failure("handoff-provenance-missing", "A handoff requires capture provenance.");
-        if (request.Provenance.TerminalOutcome is not (MarketingCaptureTerminalOutcome.Completed or MarketingCaptureTerminalOutcome.Degraded))
+        if (request.Provenance.TerminalOutcome is not (PromoCaptureTerminalOutcome.Completed or PromoCaptureTerminalOutcome.Degraded))
         {
             return AuthoringHandoffValidationResult.Failure(
                 "terminal-outcome-not-handoff-eligible",
                 "Only completed or degraded captures may be handed to external authoring.");
         }
 
-        if (!MarketingCaptureOutputPolicy.TryResolveManagedArtifact(managedOutputRoot, request.CapturePath, out ManagedMarketingArtifact capture, out string captureError))
+        if (!PromoVideoOutputPolicy.TryResolveManagedArtifact(managedOutputRoot, request.CapturePath, out ManagedPromoArtifact capture, out string captureError))
             return AuthoringHandoffValidationResult.Failure(MapArtifactError("capture", captureError), "Capture artifact is not inside the managed output root.");
-        if (!MarketingCaptureOutputPolicy.TryResolveManagedArtifact(managedOutputRoot, request.ReceiptPath, out ManagedMarketingArtifact receipt, out string receiptError))
+        if (!PromoVideoOutputPolicy.TryResolveManagedArtifact(managedOutputRoot, request.ReceiptPath, out ManagedPromoArtifact receipt, out string receiptError))
             return AuthoringHandoffValidationResult.Failure(MapArtifactError("receipt", receiptError), "Receipt artifact is not inside the managed output root.");
 
         var stillRelativePaths = new List<string>(request.StillPaths?.Count ?? 0);
         foreach (string? stillPath in request.StillPaths ?? Array.Empty<string>())
         {
-            if (!MarketingCaptureOutputPolicy.TryResolveManagedArtifact(managedOutputRoot, stillPath, out ManagedMarketingArtifact still, out string stillError))
+            if (!PromoVideoOutputPolicy.TryResolveManagedArtifact(managedOutputRoot, stillPath, out ManagedPromoArtifact still, out string stillError))
                 return AuthoringHandoffValidationResult.Failure(MapArtifactError("still", stillError), "Still artifact is not inside the managed output root.");
             stillRelativePaths.Add(still.RelativePath);
         }

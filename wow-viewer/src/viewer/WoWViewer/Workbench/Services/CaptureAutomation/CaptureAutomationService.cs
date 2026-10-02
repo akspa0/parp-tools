@@ -15,7 +15,7 @@ using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WoWViewer.Capture;
 using WowViewer.Core.IO.Maps;
-using WowViewer.Core.Runtime.Marketing;
+using WowViewer.Core.Runtime.PromoVideo;
 using WoWViewer.Terrain.Vlm;
 using static WoWViewer.ViewerApp;
 
@@ -246,8 +246,8 @@ internal sealed partial class CaptureAutomationService
         // 069 Phase 7: archeology playback
         public bool ApplyArcheologyPlayback { get; set; }
         public bool StartedArcheologyPlayback { get; init; }
-        public MarketingTourAttempt? MarketingTourAttempt { get; set; }
-        public bool RestoreUiChromeAfterMarketingTour { get; set; }
+        public PromoTourAttempt? PromoTourAttempt { get; set; }
+        public bool RestoreUiChromeAfterPromoTour { get; set; }
         public bool PreviousHideUiChrome { get; set; }
     }
 
@@ -313,7 +313,8 @@ internal sealed partial class CaptureAutomationService
         if (!_videoCaptureIncludeUi)
             ImGui.TextDisabled("Scene-only recording captures the viewport before ImGui. Use Tab before starting only when a full-window scene is desired.");
 
-        if (_activeVideoRecording == null)
+        bool isRecording = _host.RecordingCoordinator.IsRecording;
+        if (!isRecording)
         {
             if (ImGui.Button("Start Video Recording"))
                 TryStartCurrentViewVideoRecording(_videoCaptureIncludeUi);
@@ -324,8 +325,10 @@ internal sealed partial class CaptureAutomationService
                 StopVideoRecording();
         }
 
-        if (_activeVideoRecording != null)
-            ImGui.TextDisabled($"Recording: {Path.GetFileName(_activeVideoRecording.OutputPath)}");
+        if (_host.RecordingCoordinator.ActiveSession is { } activeRec)
+            ImGui.TextDisabled($"Recording: {Path.GetFileName(activeRec.OutputPath)} ({activeRec.ElapsedSeconds:F1}s)");
+        else if (_host.RecordingCoordinator.LastCompletedSession is { } lastRec)
+            ImGui.TextDisabled($"Saved: {Path.GetFileName(lastRec.OutputPath)} ({lastRec.DurationSeconds:F1}s)");
         else
             ImGui.TextDisabled("Direct video capture uses ffmpeg to write mp4/mov from the current framebuffer.");
 
