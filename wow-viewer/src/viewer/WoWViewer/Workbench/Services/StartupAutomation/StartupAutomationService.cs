@@ -64,6 +64,11 @@ internal sealed partial class StartupAutomationService
         public bool? ShowreelTelemetry { get; init; }
         public bool? ShowreelLandmarks { get; init; }
         public bool? ShowreelEngineBadges { get; init; }
+        public bool? ShowreelPerf { get; init; }
+        public bool? ShowreelPipeline { get; init; }
+        public bool? ShowreelHitches { get; init; }
+        public bool? ShowreelExpanded { get; init; }
+        public float? ShowreelHitchThreshold { get; init; }
     }
 
     internal sealed class PendingRoofCaptureBatch
@@ -139,6 +144,16 @@ internal sealed partial class StartupAutomationService
                 _host.ShowreelOverlay.Config.ShowLandmarkCallouts = request.ShowreelLandmarks.Value;
             if (request.ShowreelEngineBadges.HasValue)
                 _host.ShowreelOverlay.Config.ShowEngineBadges = request.ShowreelEngineBadges.Value;
+            if (request.ShowreelPerf.HasValue)
+                _host.ShowreelOverlay.Config.ShowPerformanceTelemetry = request.ShowreelPerf.Value;
+            if (request.ShowreelPipeline.HasValue)
+                _host.ShowreelOverlay.Config.ShowPipelineTelemetry = request.ShowreelPipeline.Value;
+            if (request.ShowreelHitches.HasValue)
+                _host.ShowreelOverlay.Config.ShowHitchAlerts = request.ShowreelHitches.Value;
+            if (request.ShowreelExpanded.HasValue)
+                _host.ShowreelOverlay.Config.ExpandedDiagnostics = request.ShowreelExpanded.Value;
+            if (request.ShowreelHitchThreshold.HasValue)
+                _host.ShowreelOverlay.Config.HitchThresholdMs = request.ShowreelHitchThreshold.Value;
         }
 
         if (request.RecordTaxiRouteId.HasValue ||
@@ -193,6 +208,11 @@ internal sealed partial class StartupAutomationService
         bool? showreelTelemetry = null;
         bool? showreelLandmarks = null;
         bool? showreelEngineBadges = null;
+        bool? showreelPerf = null;
+        bool? showreelPipeline = null;
+        bool? showreelHitches = null;
+        bool? showreelExpanded = null;
+        float? showreelHitchThreshold = null;
 
         for (int index = 0; index < initialArgs.Length; index++)
         {
@@ -401,6 +421,39 @@ internal sealed partial class StartupAutomationService
                         showreelEngineBadges = true;
                     break;
 
+                case "--showreel-perf":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valPerf) && bool.TryParse(valPerf, out bool bPerf))
+                        showreelPerf = bPerf;
+                    else
+                        showreelPerf = true;
+                    break;
+
+                case "--showreel-pipeline":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valPipe) && bool.TryParse(valPipe, out bool bPipe))
+                        showreelPipeline = bPipe;
+                    else
+                        showreelPipeline = true;
+                    break;
+
+                case "--showreel-hitches":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valHitch) && bool.TryParse(valHitch, out bool bHitch))
+                        showreelHitches = bHitch;
+                    else
+                        showreelHitches = true;
+                    break;
+
+                case "--showreel-expanded":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valExp) && bool.TryParse(valExp, out bool bExp))
+                        showreelExpanded = bExp;
+                    else
+                        showreelExpanded = true;
+                    break;
+
+                case "--showreel-hitch-threshold":
+                    if (TryReadStartupOptionValue(initialArgs, ref index, arg, out string? valThresh) && float.TryParse(valThresh, NumberStyles.Float, CultureInfo.InvariantCulture, out float fThresh))
+                        showreelHitchThreshold = fThresh;
+                    break;
+
                 default:
                     if (arg.StartsWith("--", StringComparison.Ordinal))
                     {
@@ -493,6 +546,11 @@ internal sealed partial class StartupAutomationService
             ShowreelTelemetry = showreelTelemetry,
             ShowreelLandmarks = showreelLandmarks,
             ShowreelEngineBadges = showreelEngineBadges,
+            ShowreelPerf = showreelPerf,
+            ShowreelPipeline = showreelPipeline,
+            ShowreelHitches = showreelHitches,
+            ShowreelExpanded = showreelExpanded,
+            ShowreelHitchThreshold = showreelHitchThreshold,
         };
     }
 

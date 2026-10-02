@@ -2,6 +2,27 @@
 
 Last updated: 2026-10-02
 
+## 2026-10-02 — Spec 260: Live Engine Diagnostics, Pipeline Telemetry & Hitch Overlay (code & spec complete)
+
+- **Engine Pipeline & Raw Data Metrics**: Enhanced `ShowreelTelemetrySnapshot` and `ShowreelOverlayService` to capture live geometry and format metrics:
+  - M2 instancing ratio (e.g. `14.2K (92% inst)`), unbatched doodad count, and M2 draw calls.
+  - Detail Doodad count (active flora, grass, flowers, shrubs, and WMO clutter from Spec 259).
+  - WMO batch draw calls and visible group instances.
+  - Rendered MCNK terrain chunks, culled chunks, and terrain draw calls.
+  - Active water/liquid meshes.
+  - ADT loaded tiles, file cache hits, file cache memory count, and deferred load admissions.
+- **Performance & Hitch Diagnostics**:
+  - Live FPS and Frame Time (ms) with color-coded status (green $\ge 55$, amber $\ge 30$, red $< 30$).
+  - Physical Working Set (MB/GB) and Managed GC Heap tracking.
+  - Real-time frame pacing / hitch spike detector ($dt \ge \text{HitchThresholdMs}$).
+  - Dominant render stage bottleneck attribution (`DeferredLoads`, `Terrain`, `WmoSubmission`, `M2Submission`, `M2Visibility`, `Liquid`, `Lighting`, `GC Pause`, etc.).
+  - Flashing glowing crimson/amber diagnostic alert badge: `[!] HITCH SPIKE: +XX.X ms (STAGE: <Stage>)` with on-screen hold countdown for unambiguous video capture troubleshooting.
+  - Optional expanded multi-column stage breakdown panel for deep-dive technical captures.
+- **UI & Automation**:
+  - Added checkboxes for Performance & Hitch Diagnostics, Pipeline & Raw Data Metrics, Visual Hitch Alert Badges, Expanded Stage Breakdown, and Hitch Spike Threshold slider in `TaxiPanelService.Sidebars.cs`.
+  - Added CLI startup automation flags (`--showreel-perf`, `--showreel-pipeline`, `--showreel-hitches`, `--showreel-expanded`, `--showreel-hitch-threshold`) in `StartupAutomationService.cs`.
+- **Validation**: Full solution builds with 0 errors; all unit tests in `ShowreelModelTests` (49/49) and `GroundEffectTests` (7/7) pass. Receipt authored in `specs/260-engine-diagnostics-telemetry-overlay/evidence/receipt-spec260.md`.
+
 ## 2026-10-02 — Spec 259: Ground Effects & WMO Detail Doodad Engine (code & spec complete)
 
 - **Research & Disassembly Conformance**: Analyzed recent wowdev.wiki disclosures (Sept 28–30, 2026) regarding WMO `MDDL` and `GroundEffectDoodad` format specifics, cross-referencing against 3.3.5 / 1.60.1 client binary disassembly.

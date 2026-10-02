@@ -197,6 +197,29 @@ internal sealed partial class TaxiPanelService
                 bool showBadges = showreel.Config.ShowEngineBadges;
                 if (ImGui.Checkbox("Engine Feature Badges", ref showBadges))
                     showreel.Config.ShowEngineBadges = showBadges;
+
+                bool showPerf = showreel.Config.ShowPerformanceTelemetry;
+                if (ImGui.Checkbox("Performance & Hitch Diagnostics", ref showPerf))
+                    showreel.Config.ShowPerformanceTelemetry = showPerf;
+                ImGui.SameLine();
+                bool showPipe = showreel.Config.ShowPipelineTelemetry;
+                if (ImGui.Checkbox("Pipeline & Raw Data Metrics", ref showPipe))
+                    showreel.Config.ShowPipelineTelemetry = showPipe;
+
+                bool showHitch = showreel.Config.ShowHitchAlerts;
+                if (ImGui.Checkbox("Visual Hitch Alert Badges", ref showHitch))
+                    showreel.Config.ShowHitchAlerts = showHitch;
+                ImGui.SameLine();
+                bool expDiag = showreel.Config.ExpandedDiagnostics;
+                if (ImGui.Checkbox("Expanded Stage Breakdown", ref expDiag))
+                    showreel.Config.ExpandedDiagnostics = expDiag;
+
+                if (showreel.Config.ShowHitchAlerts)
+                {
+                    float threshold = showreel.Config.HitchThresholdMs;
+                    if (ImGui.SliderFloat("Hitch Spike Threshold", ref threshold, 16.6f, 100.0f, "%.1f ms"))
+                        showreel.Config.HitchThresholdMs = threshold;
+                }
             }
 
             ImGui.Separator();
