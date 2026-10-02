@@ -229,6 +229,7 @@ public static class M2SoftwareVisualSnapshotBuilder
             M2RenderEntryFamily.Ribbon => ((byte)104, (byte)226, (byte)151),
             M2RenderEntryFamily.Particle => ((byte)255, (byte)116, (byte)72),
             M2RenderEntryFamily.Doodad => ((byte)158, (byte)128, (byte)240),
+            M2RenderEntryFamily.DetailDoodad => ((byte)100, (byte)215, (byte)120),
             _ => ((byte)88, (byte)183, (byte)255),
         };
 

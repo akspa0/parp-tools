@@ -644,6 +644,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly RecordingCoordinatorService _recordingCoordinator;
     private readonly WorkspacesService _workspaces;
     private readonly EditorPanelsService _editorPanels;
+    private readonly GroundEffectSceneService _groundEffects;
 
     public ViewerApp()
     {
@@ -666,6 +667,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _stratigraphy = new StratigraphyService(this);
         _projectOutput = new ProjectOutputService(this);
         _worldObjectsPanel = new WorldObjectsPanelService(this);
+        _groundEffects = new GroundEffectSceneService(this);
         _settings = new ViewerSettingsService(this);
         _cascAhdrSource = new CascAhdrSourceService(this);
         _clientDialogs = new ClientDialogsService(this);
@@ -1165,6 +1167,16 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             {
                 // WorldScene / VLM terrain — handles its own lighting
                 _renderer.Render(view, proj);
+                if (_worldScene != null && _groundEffects.EnableGroundEffects)
+                {
+                    var lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f));
+                    var lightColor = new Vector3(1.0f, 0.95f, 0.9f);
+                    var ambientColor = new Vector3(0.35f, 0.35f, 0.4f);
+                    var fogColor = new Vector3(0.5f, 0.6f, 0.7f);
+                    float fogStart = _renderQuality._defaultFogStart;
+                    float fogEnd = _renderQuality._defaultFogEnd;
+                    _groundEffects.Render(view, proj, _camera.Position, lightDir, lightColor, ambientColor, fogColor, fogStart, fogEnd);
+                }
                 _terrainQuery.DrawEditorOverlays(view, proj);
                 if (hasSceneViewportRect)
                 {

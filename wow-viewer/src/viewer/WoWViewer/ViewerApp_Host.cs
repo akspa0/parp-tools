@@ -428,6 +428,7 @@ public partial class ViewerApp
     SettingsWindowService IViewerAppHost.SettingsWindow => _settingsWindow;
     SynthesizedMinimapExportService IViewerAppHost.SynthesizedMinimapExport => _synthesizedMinimapExport;
     WorkspacesService IViewerAppHost.Workspaces => _workspaces;
+    GroundEffectSceneService IViewerAppHost.GroundEffects => _groundEffects;
     void IViewerAppHost.OpenCapturePanelTab(CameraPathsService.CapturePanelTab tab) => _cameraPaths.OpenCapturePanelTab(tab);
     void IViewerAppHost.DrawCapturePanelContent() => _cameraPaths.DrawCapturePanelContent();
     void IViewerAppHost.StopCameraPathPlayback() => _cameraPaths.StopCameraPathPlayback();

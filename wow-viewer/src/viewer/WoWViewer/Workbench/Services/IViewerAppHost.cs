@@ -500,4 +500,5 @@ internal interface IViewerAppHost
     ref EditorHost? EditorHost { get; }
     SynthesizedMinimapExportService SynthesizedMinimapExport { get; }
     WorkspacesService Workspaces { get; }
+    GroundEffectSceneService GroundEffects { get; }
 }

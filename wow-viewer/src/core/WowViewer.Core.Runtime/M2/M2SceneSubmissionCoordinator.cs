@@ -22,6 +22,7 @@ public enum M2RenderEntryFamily
     Particle = 4,
     Callback = 5,
     HitTest = 6,
+    DetailDoodad = 7,
 }
 
 public sealed class M2SceneFamilyPolicy
@@ -334,6 +335,7 @@ public static class M2SceneSubmissionCoordinator
             M2RenderEntryFamily.Particle => new M2SceneFamilyPolicy(family, "particle-dispatch", M2RuntimeOptions.BatchParticles, alwaysDirect: false, usesDedicatedStateScope: true),
             M2RenderEntryFamily.Callback => new M2SceneFamilyPolicy(family, "callback-direct", M2RuntimeOptions.None, alwaysDirect: true, usesDedicatedStateScope: true),
             M2RenderEntryFamily.HitTest => new M2SceneFamilyPolicy(family, "hit-test-direct", M2RuntimeOptions.None, alwaysDirect: true, usesDedicatedStateScope: true),
+            M2RenderEntryFamily.DetailDoodad => new M2SceneFamilyPolicy(family, "detail-doodad-batch", M2RuntimeOptions.BatchDoodads, alwaysDirect: false, usesDedicatedStateScope: false),
             _ => new M2SceneFamilyPolicy(family, "unknown-direct", M2RuntimeOptions.None, alwaysDirect: true, usesDedicatedStateScope: true),
         };
     }

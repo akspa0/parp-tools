@@ -35,7 +35,8 @@ public static class WmoRenderDocumentReader
         IReadOnlyList<WmoDoodadPlacementDetail> doodadPlacements = summary.ReportedDoodadPlacementCount > 0
             ? WmoDoodadDetailReader.ReadPlacements(stream, sourcePath)
             : [];
-        return new WmoRenderDocument(sourcePath, summary.Version, summary, materials, groups, portalVertices, portals, portalReferences, doodadSets, doodadPlacements);
+        WmoDetailDoodadDocument? detailDoodads = WmoMddlReader.ReadDetailDoodads(stream, sourcePath);
+        return new WmoRenderDocument(sourcePath, summary.Version, summary, materials, groups, portalVertices, portals, portalReferences, doodadSets, doodadPlacements, detailDoodads);
     }
 
     private static IReadOnlyList<WmoEmbeddedGroupMeshDetail> LoadGroups(

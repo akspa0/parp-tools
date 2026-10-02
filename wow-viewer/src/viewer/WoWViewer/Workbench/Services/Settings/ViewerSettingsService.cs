@@ -231,6 +231,13 @@ internal sealed class ViewerSettingsService
             _enableMultisample = settings.EnableMultisample;
             _enableTerrainBackfaceCulling = settings.EnableTerrainBackfaceCulling;
             RenderQualitySettings.EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling;
+            _host.GroundEffects.EnableGroundEffects = settings.EnableGroundEffects;
+            _host.GroundEffects.GroundEffectDensity = float.IsFinite(settings.GroundEffectDensity)
+                ? Math.Clamp(settings.GroundEffectDensity, 0.1f, 3.0f)
+                : 1.0f;
+            _host.GroundEffects.GroundEffectDistance = float.IsFinite(settings.GroundEffectDistance)
+                ? Math.Clamp(settings.GroundEffectDistance, 30.0f, 300.0f)
+                : 120.0f;
             _defaultFogStart = float.IsFinite(settings.DefaultFogStart)
                 ? Math.Clamp(settings.DefaultFogStart, 0f, 5000f)
                 : 200f;
@@ -504,6 +511,9 @@ internal sealed class ViewerSettingsService
                 TextureFilteringMode = (int)_textureFilteringMode,
                 EnableMultisample = _enableMultisample,
                 EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling,
+                EnableGroundEffects = _host.GroundEffects.EnableGroundEffects,
+                GroundEffectDensity = _host.GroundEffects.GroundEffectDensity,
+                GroundEffectDistance = _host.GroundEffects.GroundEffectDistance,
                 DefaultFogStart = _defaultFogStart,
                 DefaultFogEnd = _defaultFogEnd,
                 CameraSpeed = _cameraSpeed,
@@ -758,6 +768,11 @@ internal sealed class ViewerSettingsService
         // Camera defaults
         public float CameraSpeed { get; set; } = 50f;
         public float FovDegrees { get; set; } = 45f;
+
+        // Ground effects & detail doodads
+        public bool EnableGroundEffects { get; set; } = true;
+        public float GroundEffectDensity { get; set; } = 1.0f;
+        public float GroundEffectDistance { get; set; } = 120.0f;
     }
 
     private sealed class SavedTaxiActorOverride

@@ -2,6 +2,19 @@
 
 Last updated: 2026-10-02
 
+## 2026-10-02 — Spec 259: Ground Effects & WMO Detail Doodad Engine (code & spec complete)
+
+- **Research & Disassembly Conformance**: Analyzed recent wowdev.wiki disclosures (Sept 28–30, 2026) regarding WMO `MDDL` and `GroundEffectDoodad` format specifics, cross-referencing against 3.3.5 / 1.60.1 client binary disassembly.
+- **DBC & DB2 Support**: Extended `GroundEffectLookup` to support `GroundEffectDoodadRecord` (flags `0x1` AlignToNormal, `0x2` IgnoreMCCV, animScale, pushScale, FileDataId) and `GroundEffectTextureRecord`. Supports both legacy 0.5.3–1.12 DBC formats and modern 3.x/1.60+ FileDataID datasets. Added `Load(Func<string, byte[]?> fileReader)` for cross-source reading.
+- **WMO Root MDDL Chunk & Group Decoder**: Added FourCCs `Mddl`, `Moc2`, `Mgi2`. Implemented `WmoMddlReader` to decode root layer definitions and per-group RLE placement streams. Implemented `WmoDetailDoodadDecoder` to project detail doodads onto WMO group meshes.
+- **Runtime Placement Rules**:
+  - Enforced client slope limit: terrain normal $Z \ge 0.4$ ($\approx 66.42^\circ$); slopes steeper than $66^\circ$ cull ground effects.
+  - Normal alignment math: Flag `0x1` calculates quaternion tilting $(0, 0, 1)$ onto terrain normal while preserving random yaw.
+  - MCCV interpolation & shadow: Flag `0x2` generates white (`0xFFFFFFFF`) when set; interpolates MCCV vertex colors when unset; scales RGB by $70\%$ when covered by chunk shadow maps (`MCSH`).
+- **Engine & M2 Instancing Integration**: Registered `M2RenderEntryFamily.DetailDoodad` with dedicated fast-path instancing. Created `GroundEffectSceneService` managing dynamic instance generation, tile residency leasing, distance culling, and distance fade rendering.
+- **UI & Settings**: Added Ground Effects toggle, density multiplier slider ($0.1\times - 3.0\times$), and distance slider ($30 - 300$ yd) in `RenderQualityService` with live telemetry. Persisted in `viewer_settings.json`.
+- **Validation**: Full solution builds with 0 errors; +6 new targeted unit tests in `GroundEffectDetailDoodadTests` and `GroundEffectPlacementTests` pass (6/6). Complete receipt authored in `specs/259-ground-effects-and-wmo-detail-doodads/evidence/receipt-spec259.md`.
+
 ## 2026-10-02 — Spec 258: Taxi Route Playlists & Dynamic Marketing Showreel Tour (code & spec complete)
 
 - **Taxi Flight Playlists & Multi-Route Chaining**: Implemented `TaxiPlaylistService` allowing users and automation harnesses to assemble playlists of multiple taxi routes, reorder them, auto-chain connected flights across the continent, loop playlists, and execute seamless multi-segment flight playback.

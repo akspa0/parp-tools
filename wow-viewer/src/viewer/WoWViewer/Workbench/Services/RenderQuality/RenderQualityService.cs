@@ -225,6 +225,43 @@ internal sealed partial class RenderQualityService
         }
 
         ImGui.Separator();
+        ImGui.Text("Ground Effects & Detail Doodads");
+
+        var groundEffects = _host.GroundEffects;
+        bool enableGe = groundEffects.EnableGroundEffects;
+        if (ImGui.Checkbox("Enable Ground Effects (Flora & Clutter)", ref enableGe))
+        {
+            groundEffects.EnableGroundEffects = enableGe;
+            _settings.SaveViewerSettings();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Renders ground flora, shrubs, and detail doodads generated from ADT layer texture effects and WMO MDDL streams.");
+
+        if (groundEffects.EnableGroundEffects)
+        {
+            float density = groundEffects.GroundEffectDensity;
+            if (ImGui.SliderFloat("Effect Density", ref density, 0.1f, 3.0f, "%.2fx"))
+            {
+                groundEffects.GroundEffectDensity = Math.Clamp(density, 0.1f, 3.0f);
+                groundEffects.InvalidateDoodads();
+                _settings.SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Multiplier for ground effect doodad placement density (0.1x to 3.0x). Right-click to type.");
+
+            float dist = groundEffects.GroundEffectDistance;
+            if (ImGui.SliderFloat("Effect Distance", ref dist, 30.0f, 300.0f, "%.0f yd"))
+            {
+                groundEffects.GroundEffectDistance = Math.Clamp(dist, 30.0f, 300.0f);
+                _settings.SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Maximum camera distance for rendering detail doodads (30 to 300 yards).");
+
+            ImGui.TextDisabled($"Active detail doodads: {groundEffects.ActiveDetailDoodadCount:N0} across {groundEffects.LoadedTileDoodadCount} tiles");
+        }
+
+        ImGui.Separator();
         ImGui.Text("Wireframe Overlay Styling");
 
         var wireColor = WireframeOverlaySettings.DefaultColor;
