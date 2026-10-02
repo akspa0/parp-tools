@@ -125,6 +125,7 @@ public class WmoV17ToV14Converter
             Flags = v17.Flags,
             BoundsMin = v17.BoundingBox1,
             BoundsMax = v17.BoundingBox2,
+            DetailDoodads = v17.DetailDoodads,
         };
 
         // Textures
@@ -457,6 +458,9 @@ public class WmoV17ToV14Converter
                     break;
                 case "MODI":
                     data.DoodadFileDataIds = ReadUInt32Array(reader, effectiveSize);
+                    break;
+                case "MDDL":
+                    data.DetailDoodads = WowViewer.Core.IO.Wmo.WmoMddlReader.Read(reader.ReadBytes((int)effectiveSize));
                     break;
             }
 
@@ -1662,6 +1666,7 @@ public class WmoV17ToV14Converter
         public List<WmoFog> Fogs = new();
         public byte[] McvpRaw = Array.Empty<byte>();
         public List<WmoV17GroupData> Groups = new();
+        public WowViewer.Core.Wmo.WmoDetailDoodadDocument? DetailDoodads;
     }
 
     private class WmoV17GroupData

@@ -144,6 +144,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     }
 
     public int LiquidMeshCount => _liquidRenderer.LiquidMeshCount;
+    public WmoV14ToV17Converter.WmoV14Data WmoData => _wmo;
+    public WowViewer.Core.Wmo.WmoDetailDoodadDocument? DetailDoodads => _wmo.DetailDoodads;
 
     public static bool DetermineIsCollisionWall(string? modelDir, string? modelPath = null, WmoV14ToV17Converter.WmoV14Data? wmo = null)
     {

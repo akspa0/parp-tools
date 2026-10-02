@@ -337,6 +337,9 @@ public class WmoV14ToV17Converter
             case "MOLT":
                 ParseMolt(reader, chunkSize, data);
                 break;
+            case "MDDL":
+                data.DetailDoodads = WowViewer.Core.IO.Wmo.WmoMddlReader.Read(reader.ReadBytes((int)chunkSize));
+                break;
             default:
                 // Skip unknown chunks
                 break;
@@ -2464,6 +2467,9 @@ public class WmoV14ToV17Converter
         
         // Light data
         public List<WmoLight> Lights = new();
+
+        // Detail doodad data (MDDL)
+        public WowViewer.Core.Wmo.WmoDetailDoodadDocument? DetailDoodads;
     }
 
     public struct WmoMaterial

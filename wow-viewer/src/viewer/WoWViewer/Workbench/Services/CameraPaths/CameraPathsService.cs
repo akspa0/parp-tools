@@ -49,6 +49,7 @@ internal sealed partial class CameraPathsService
     internal bool _cameraPathVideoCaptureActive;
     internal bool _showCameraPathOverlay = true;
     private bool _cameraPathLoop;
+    private bool _cameraPathPlayNarrationAudio = true;
     private double _cameraPathTimeSeconds;
     private int _cameraPathDefaultKeySpacingMs = 1000;
     private string _cameraPathImportPath = string.Empty;
@@ -152,9 +153,16 @@ internal sealed partial class CameraPathsService
         ImGui.TextDisabled($"Map: {currentMap}  Build: {currentBuild}");
         if (_cameraPath.HasCinematicCameraOrigin)
         {
+            string soundSuffix = _cameraPath.CinematicCameraSoundId > 0
+                ? $"  SoundID: {_cameraPath.CinematicCameraSoundId}"
+                : "";
             ImGui.TextDisabled(
                 $"DBC origin: {_cameraPath.CinematicCameraModel}  tile " +
-                $"({_cameraPath.CinematicCameraOriginTileX}, {_cameraPath.CinematicCameraOriginTileY})");
+                $"({_cameraPath.CinematicCameraOriginTileX}, {_cameraPath.CinematicCameraOriginTileY}){soundSuffix}");
+            if (_cameraPath.CinematicCameraSoundId > 0)
+            {
+                ImGui.Checkbox("Play narration audio (Cinematic SoundID)", ref _cameraPathPlayNarrationAudio);
+            }
         }
 
         string name = _cameraPathName;
@@ -604,6 +612,10 @@ internal sealed partial class CameraPathsService
         _cameraPathPlaying = true;
         if (_taxiRideCameraEnabled)
             StopTaxiRideCamera();
+        if (_cameraPathPlayNarrationAudio && _cameraPath.CinematicCameraSoundId > 0 && _host.WorldScene != null)
+        {
+            _host.WorldScene.TryPreviewAudioSoundEntry((uint)_cameraPath.CinematicCameraSoundId, loop: false, out _);
+        }
         _statusMessage = $"Playing camera path '{_cameraPath.Name}'.";
         return true;
     }
@@ -685,6 +697,7 @@ internal sealed partial class CameraPathsService
         _cameraPathTimeSeconds = 0;
         _cameraPathVideoCapturePending = false;
         _cameraPathPreload?.PromoTourAttempt?.Cancel("camera-path-stopped");
+        _host.WorldScene?.StopAudioPreview();
         if (_cameraPathVideoCaptureActive)
         {
             _recordingCoordinator.StopRecording("Camera path video capture stopped.");
@@ -714,6 +727,7 @@ internal sealed partial class CameraPathsService
         {
             _cameraPathTimeSeconds = durationSeconds;
             _cameraPathPlaying = false;
+            _host.WorldScene?.StopAudioPreview();
             if (_cameraPathVideoCaptureActive)
             {
                 _recordingCoordinator.StopRecording("Camera path video capture completed.");
@@ -723,6 +737,14 @@ internal sealed partial class CameraPathsService
             else if (_captureQueue.Count == 0 && _activeCaptureRequest == null)
             {
                 EndCameraPathPreload();
+            }
+        }
+        else if (_cameraPathTimeSeconds >= durationSeconds && _cameraPathLoop)
+        {
+            _cameraPathTimeSeconds %= durationSeconds;
+            if (_cameraPathPlayNarrationAudio && _cameraPath.CinematicCameraSoundId > 0 && _host.WorldScene != null)
+            {
+                _host.WorldScene.TryPreviewAudioSoundEntry((uint)_cameraPath.CinematicCameraSoundId, loop: false, out _);
             }
         }
 
@@ -1029,6 +1051,7 @@ internal sealed partial class CameraPathsService
                     _cameraPath.CinematicCameraOriginTileX = loaded.CinematicCameraOriginTileX;
                     _cameraPath.CinematicCameraOriginTileY = loaded.CinematicCameraOriginTileY;
                     _cameraPath.CinematicCameraOriginSource = loaded.CinematicCameraOriginSource;
+                    _cameraPath.CinematicCameraSoundId = loaded.CinematicCameraSoundId;
                     _cameraPath.Keyframes = loaded.Keyframes;
                     _cameraPathName = loaded.Name;
                     _cameraPathFilePath = path;
@@ -1154,8 +1177,10 @@ internal sealed partial class CameraPathsService
                     origin.Origin,
                     origin.OriginFacingRadians,
                     origin.TileX,
-                    origin.TileY);
-                _statusMessage = $"Resolved {Path.GetFileName(assetPath)} to CinematicCamera.dbc origin tile ({origin.TileX}, {origin.TileY}).";
+                    origin.TileY,
+                    origin.SoundId);
+                string soundDesc = origin.SoundId > 0 ? $" with narration SoundID {origin.SoundId}" : "";
+                _statusMessage = $"Resolved {Path.GetFileName(assetPath)} to CinematicCamera.dbc origin tile ({origin.TileX}, {origin.TileY}){soundDesc}.";
             }
             else
             {
@@ -1190,6 +1215,7 @@ internal sealed partial class CameraPathsService
         _cameraPath.CinematicCameraOriginTileX = imported.CinematicCameraOriginTileX;
         _cameraPath.CinematicCameraOriginTileY = imported.CinematicCameraOriginTileY;
         _cameraPath.CinematicCameraOriginSource = imported.CinematicCameraOriginSource;
+        _cameraPath.CinematicCameraSoundId = imported.CinematicCameraSoundId;
         _cameraPath.Keyframes = imported.Keyframes;
         _cameraPathName = imported.Name;
         _cameraPathImportPath = sourcePath;

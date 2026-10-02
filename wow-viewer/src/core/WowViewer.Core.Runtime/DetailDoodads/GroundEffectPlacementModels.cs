@@ -68,6 +68,7 @@ public sealed class WmoGroupPlacementInput
     public Vector3[] Vertices { get; init; } = Array.Empty<Vector3>();
     public Vector3[] Normals { get; init; } = Array.Empty<Vector3>();
     public ushort[] Indices { get; init; } = Array.Empty<ushort>();
+    public (uint FirstIndex, ushort IndexCount, ushort FirstVertex, ushort LastVertex)[] Batches { get; init; } = Array.Empty<(uint, ushort, ushort, ushort)>();
     public Matrix4x4 WorldTransform { get; init; } = Matrix4x4.Identity;
     public IReadOnlyList<WmoDetailDoodadLayer> Layers { get; init; } = Array.Empty<WmoDetailDoodadLayer>();
     public IReadOnlyList<WmoDetailDoodadDecodedCommand> Commands { get; init; } = Array.Empty<WmoDetailDoodadDecodedCommand>();

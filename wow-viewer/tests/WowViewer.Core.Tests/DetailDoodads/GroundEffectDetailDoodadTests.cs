@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
@@ -164,6 +165,97 @@ public sealed class GroundEffectDetailDoodadTests
         Assert.Equal(1, doc.Groups[0].Commands[1].LocRangeIndex);
         Assert.True(doc.Groups[0].Commands[1].SingleLocation);
         Assert.Equal([4], doc.Groups[0].Commands[1].Locations);
+    }
+
+    [Fact]
+    public void GroundEffectLookup_LoadsViaDbcdStorage()
+    {
+        string definitionsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "definitions");
+        if (!Directory.Exists(definitionsDir))
+            return; // Skip if definitions not deployed
+
+        byte[] doodadDbc = BuildDbcWithStrings(
+            fieldCount: 3,
+            rows:
+            [
+                (stringOffsets) => [301u, 1u, stringOffsets["World\\Plants\\Bush02.m2"]],
+            ],
+            stringBlockEntries: ["World\\Plants\\Bush02.m2"]);
+
+        byte[] textureDbc = BuildDbcWithStrings(
+            fieldCount: 7,
+            rows:
+            [
+                (_) => [401u, 301u, 0u, 0u, 0u, 16u, 0u],
+            ],
+            stringBlockEntries: []);
+
+        FakeArchiveReader archiveReader = new(
+            new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["DBFilesClient\\GroundEffectDoodad.dbc"] = doodadDbc,
+                ["DBFilesClient\\GroundEffectTexture.dbc"] = textureDbc,
+            });
+
+        var provider = new ArchiveReaderDbcProvider(archiveReader);
+        GroundEffectLookup lookup = new();
+        lookup.Load(provider, definitionsDir, "1.12.1.5875");
+
+        Assert.True(lookup.IsLoaded);
+        var doodad = lookup.GetDoodadRecord(301);
+        Assert.NotNull(doodad);
+        Assert.Equal("World\\Plants\\Bush02.m2", doodad.ModelPath);
+
+        var tex = lookup.GetTextureRecord(401);
+        Assert.NotNull(tex);
+        Assert.Contains(301u, tex.DoodadIds);
+    }
+
+    [Fact]
+    public void WmoDetailDoodadDecoder_RollAllLocations_ExpandsAcrossBatch()
+    {
+        var vertices = new Vector3[10];
+        var normals = new Vector3[10];
+        for (int i = 0; i < 10; i++)
+        {
+            vertices[i] = new Vector3(i * 2.0f, 0f, 10f);
+            normals[i] = Vector3.UnitZ;
+        }
+        var indices = new ushort[] { 0, 1, 2, 2, 3, 4 };
+        var batches = new (uint FirstIndex, ushort IndexCount, ushort FirstVertex, ushort LastVertex)[]
+        {
+            (0, 3, 0, 2),
+            (3, 3, 2, 4),
+        };
+
+        var layers = new List<WmoDetailDoodadLayer>
+        {
+            new(Density: 24, Doodads: new List<WmoDetailDoodadEntry> { new(DoodadId: 88, Weight: 100) })
+        };
+        var commands = new List<WmoDetailDoodadDecodedCommand>
+        {
+            new(LayerIndex: 0, BatchIndex: 1, RollAllLocations: true, LocRangeIndex: 0, SingleLocation: false, Locations: new List<int>())
+        };
+
+        var input = new WowViewer.Core.Runtime.DetailDoodads.WmoGroupPlacementInput
+        {
+            GroupIndex = 0,
+            Vertices = vertices,
+            Normals = normals,
+            Indices = indices,
+            Batches = batches,
+            WorldTransform = System.Numerics.Matrix4x4.Identity,
+            Layers = layers,
+            Commands = commands,
+        };
+
+        var doodad = new GroundEffectDoodadRecord(88, "flora.m2", 0, GroundEffectDoodadFlags.AlignToNormal, 1.0f, 1.0f);
+        var instances = WowViewer.Core.Runtime.DetailDoodads.WmoDetailDoodadDecoder.DecodeGroupDoodads(input, _ => doodad);
+
+        // Should expand across batch 1 (vertices 2 to 4)
+        Assert.NotEmpty(instances);
+        Assert.All(instances, inst => Assert.Equal(88u, inst.DoodadId));
+        Assert.All(instances, inst => Assert.True(inst.Position.X >= 4.0f && inst.Position.X <= 8.0f));
     }
 
     private static byte[] BuildDbc(uint fieldCount, IReadOnlyList<uint[]> rows, IReadOnlyList<string> stringBlockEntries)

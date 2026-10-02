@@ -35,10 +35,23 @@ public static class WmoDetailDoodadDecoder
 
             // Pick doodad from layer.Doodads using weight
             int totalWeight = 0;
-            for (int i = 0; i < layer.Doodads.Count; i++)
-                totalWeight += layer.Doodads[i].Weight > 0 ? layer.Doodads[i].Weight : 1;
+            IEnumerable<int> locations = cmd.Locations;
+            if (cmd.RollAllLocations && (cmd.Locations == null || cmd.Locations.Count == 0))
+            {
+                if (input.Batches != null && cmd.BatchIndex < input.Batches.Length)
+                {
+                    var b = input.Batches[cmd.BatchIndex];
+                    int start = b.FirstVertex;
+                    int count = Math.Max(0, b.LastVertex - b.FirstVertex + 1);
+                    locations = Enumerable.Range(start, count);
+                }
+                else
+                {
+                    locations = Enumerable.Range(0, input.Vertices.Length);
+                }
+            }
 
-            foreach (int loc in cmd.Locations)
+            foreach (int loc in locations)
             {
                 Vector3 localPos;
                 Vector3 localNorm;

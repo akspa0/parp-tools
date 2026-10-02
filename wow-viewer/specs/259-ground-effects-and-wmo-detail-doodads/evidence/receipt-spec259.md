@@ -47,15 +47,20 @@ Spec 259 implements the complete Ground Effects and WMO Detail Doodad engine acr
 | Step | Command | Exit Code | Result |
 |:---|:---|:---:|:---|
 | Build | `dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` | 0 | PASS (0 errors across all projects) |
-| Targeted Tests | `dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~DetailDoodad"` | 0 | PASS (6/6 tests passed) |
+| Detail Doodad Tests | `dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~DetailDoodad"` | 0 | PASS (8/8 tests passed) |
+| Ground Effect Tests | `dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~GroundEffect"` | 0 | PASS (9/9 tests passed) |
+| Camera Path Tests | `dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~CameraPath"` | 0 | PASS (15/15 tests passed) |
 
 ### Test Matrix
 1. `GroundEffectLookup_ParsesFlagsDensityAndModelsCorrectly`: PASS
-2. `WmoMddlReader_ParsesSyntheticChunkAndDecodesGroupsCorrectly`: PASS
-3. `ComputeNormalAlignment_AlignsUnitZToTargetNormal`: PASS
-4. `GenerateChunkDoodads_EnforcesSlopeCulling`: PASS
-5. `GenerateChunkDoodads_RespectsFlagsAndMccvAndShadow`: PASS
-6. `WmoDetailDoodadDecoder_DecodesGroupPlacementsCorrectly`: PASS
+2. `GroundEffectLookup_LoadsViaDbcdStorage`: PASS
+3. `WmoMddlReader_ParsesSyntheticChunkAndDecodesGroupsCorrectly`: PASS
+4. `WmoDetailDoodadDecoder_RollAllLocations_ExpandsAcrossBatch`: PASS
+5. `WmoDetailDoodadDecoder_DecodesGroupPlacementsCorrectly`: PASS
+6. `ComputeNormalAlignment_AlignsUnitZToTargetNormal`: PASS
+7. `GenerateChunkDoodads_EnforcesSlopeCulling`: PASS
+8. `GenerateChunkDoodads_RespectsFlagsAndMccvAndShadow`: PASS
+9. `M2CameraPathPlacement_AppliesCinematicCameraOrigin_WithSoundId`: PASS
 
 ---
 

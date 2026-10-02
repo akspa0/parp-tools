@@ -34,6 +34,7 @@ public sealed class M2CameraPathDocument
     public int CinematicCameraOriginTileX { get; set; } = -1;
     public int CinematicCameraOriginTileY { get; set; } = -1;
     public string CinematicCameraOriginSource { get; set; } = string.Empty;
+    public int CinematicCameraSoundId { get; set; } = 0;
     public List<M2CameraPathKeyframe> Keyframes { get; set; } = new();
 
     public int DurationMs => Keyframes.Count == 0 ? 0 : Math.Max(0, Keyframes[^1].TimeMs);
@@ -54,6 +55,7 @@ public static class M2CameraPathPlacement
         float facingRadians,
         int tileX,
         int tileY,
+        int soundId = 0,
         string source = "CinematicCamera.dbc")
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -78,6 +80,7 @@ public static class M2CameraPathPlacement
         path.CinematicCameraOriginTileX = tileX;
         path.CinematicCameraOriginTileY = tileY;
         path.CinematicCameraOriginSource = source ?? string.Empty;
+        path.CinematicCameraSoundId = soundId;
         M2CameraPathEvaluator.NormalizeAndValidate(path);
     }
 

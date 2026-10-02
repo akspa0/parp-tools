@@ -17,7 +17,8 @@ public sealed record CinematicCameraOrigin(
     Vector3 Origin,
     float OriginFacingRadians,
     int TileX,
-    int TileY);
+    int TileY,
+    int SoundId = 0);
 
 public sealed class CinematicCameraOriginResolver
 {
@@ -48,7 +49,7 @@ public sealed class CinematicCameraOriginResolver
                 storage = dbcd.Load("CinematicCamera", build, Locale.None);
             }
 
-            List<(int Id, string Model, Vector3 Origin, float Facing)> matches = new();
+            List<(int Id, string Model, Vector3 Origin, float Facing, int SoundId)> matches = new();
             foreach (var key in storage.Keys)
             {
                 dynamic row = storage[key];
@@ -62,7 +63,8 @@ public sealed class CinematicCameraOriginResolver
                     continue;
 
                 int rowId = TryGetInt(row, "ID") ?? key;
-                matches.Add((rowId, model, origin, facing));
+                int soundId = TryGetInt(row, "SoundID") ?? TryGetInt(row, "SoundId") ?? 0;
+                matches.Add((rowId, model, origin, facing, soundId));
             }
 
             if (matches.Count != 1)
@@ -73,13 +75,13 @@ public sealed class CinematicCameraOriginResolver
                 return false;
             }
 
-            (int id, string modelPath, Vector3 originPosition, float originFacing) = matches[0];
+            (int id, string modelPath, Vector3 originPosition, float originFacing, int soundIdVal) = matches[0];
             int tileX = Math.Clamp((int)MathF.Floor((WoWConstants.MapOrigin - originPosition.X) / WoWConstants.ChunkSize), 0, 63);
             int tileY = Math.Clamp((int)MathF.Floor((WoWConstants.MapOrigin - originPosition.Y) / WoWConstants.ChunkSize), 0, 63);
-            result = new CinematicCameraOrigin(id, modelPath, originPosition, originFacing, tileX, tileY);
+            result = new CinematicCameraOrigin(id, modelPath, originPosition, originFacing, tileX, tileY, soundIdVal);
             ViewerLog.Trace(
                 $"[CinematicCamera] {modelPath} id={id} origin=({originPosition.X:F3},{originPosition.Y:F3},{originPosition.Z:F3}) " +
-                $"facing={originFacing:F4} tile=({tileX},{tileY}) build={build}");
+                $"facing={originFacing:F4} tile=({tileX},{tileY}) soundId={soundIdVal} build={build}");
             return true;
         }
         catch (Exception ex)
