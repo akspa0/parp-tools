@@ -39,6 +39,7 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 | [258 Taxi Route Playlists & Dynamic Marketing Showreel Tour](258-taxi-playlist-showreel-tour/spec.md) | Multi-route taxi flight chaining/playlists, continuous multi-segment recording, dynamic showreel telemetry HUD, zone banners, and landmark discovery callouts | Implemented (2026-10-02); receipt in `evidence/receipt-spec258.md`; operator smoke owed |
 | [259 Ground Effects & WMO Detail Doodad Engine](259-ground-effects-and-wmo-detail-doodads/spec.md) | Dynamic grass/foliage on terrain and WMO surfaces (`MDDL`), client slope ($Z \ge 0.4$) & MCCV rules, 1.60 CASC support, and instanced GPU rendering | Implemented (2026-10-02); receipt in `evidence/receipt-spec259.md`; operator smoke owed |
 | [260 Live Engine Diagnostics, Pipeline Telemetry & Hitch Overlay](260-engine-diagnostics-telemetry-overlay/spec.md) | Real-time pipeline counters (M2 instancing, flora, WMO, ADT), memory & draw calls, rolling hitch detection, bottleneck stage attribution, and diagnostic HUD | Implemented (2026-10-02); receipt in `evidence/receipt-spec260.md`; operator smoke owed |
+| [261 WoW Forever Terrain Hole Fidelity](261-wow-forever-terrain-hole-fidelity/spec.md) | WoW Forever (11.2.7 / 1.60.1) 64-bit high-res hole decoding, ADT v18 format conformance, Little-Endian bit-mapping, and cross-subsystem hole consistency | Implemented (2026-10-04); receipt in `evidence/receipt-spec261.md`; operator smoke owed |
 
 
 ## Operator verification owed on shipped code

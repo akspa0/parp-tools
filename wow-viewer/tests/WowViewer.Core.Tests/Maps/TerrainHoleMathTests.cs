@@ -116,4 +116,77 @@ public sealed class TerrainHoleMathTests
         Assert.False(mask.IsCellHoled(2, 4));
         Assert.False(mask.IsCellHoled(3, 3));
     }
+
+    [Fact]
+    public void ReadHoleMasks_ModernDeathknellChurchCrypt_AlignsAndMatchesSeam()
+    {
+        // Real CASC MCNK headers from WoW Forever 1.60.1 / 11.2.7 client: Tile [29, 28] (Deathknell)
+        // Church crypt entrance spans Chunk [5, 8] and Chunk [5, 9]
+        const uint highResFlag = 0x10000u;
+
+        // Chunk [5, 8] raw bytes: 00 00 00 00 00 00 0F 0F
+        byte[] payload8 = new byte[128];
+        byte[] rawHoles8 = new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x0F };
+        Buffer.BlockCopy(rawHoles8, 0, payload8, 0x14, 8);
+
+        // Chunk [5, 9] raw bytes: 3F 3F 00 00 00 00 00 00
+        byte[] payload9 = new byte[128];
+        byte[] rawHoles9 = new byte[] { 0x3F, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+        Buffer.BlockCopy(rawHoles9, 0, payload9, 0x14, 8);
+
+        var (mask64_8, _) = TerrainHoleMath.ReadHoleMasks(payload8, highResFlag);
+        var (mask64_9, _) = TerrainHoleMath.ReadHoleMasks(payload9, highResFlag);
+
+        // Verify Chunk [5, 8] holed cells (rows 6 and 7, cols 0..3)
+        for (int r = 0; r < 6; r++)
+            for (int c = 0; c < 8; c++)
+                Assert.False(TerrainHoleMath.IsCellHoled64(mask64_8, c, r));
+
+        for (int r = 6; r <= 7; r++)
+        {
+            for (int c = 0; c < 4; c++)
+                Assert.True(TerrainHoleMath.IsCellHoled64(mask64_8, c, r));
+            for (int c = 4; c < 8; c++)
+                Assert.False(TerrainHoleMath.IsCellHoled64(mask64_8, c, r));
+        }
+
+        // Verify Chunk [5, 9] holed cells (rows 0 and 1, cols 0..5)
+        for (int r = 0; r <= 1; r++)
+        {
+            for (int c = 0; c < 6; c++)
+                Assert.True(TerrainHoleMath.IsCellHoled64(mask64_9, c, r));
+            for (int c = 6; c < 8; c++)
+                Assert.False(TerrainHoleMath.IsCellHoled64(mask64_9, c, r));
+        }
+
+        for (int r = 2; r < 8; r++)
+            for (int c = 0; c < 8; c++)
+                Assert.False(TerrainHoleMath.IsCellHoled64(mask64_9, c, r));
+
+        // Verify seam continuity across chunk border:
+        // Row 7 of Chunk [5, 8] touches Row 0 of Chunk [5, 9].
+        // Crypt corridor in cols 0..3 connects seamlessly:
+        for (int c = 0; c < 4; c++)
+        {
+            Assert.True(TerrainHoleMath.IsCellHoled64(mask64_8, c, 7), $"Chunk [5,8] border col {c} must be holed");
+            Assert.True(TerrainHoleMath.IsCellHoled64(mask64_9, c, 0), $"Chunk [5,9] border col {c} must be holed");
+        }
+    }
+
+    [Fact]
+    public void UpsampleDownsample_RoundTrip_PreservesAll16BitGroups()
+    {
+        for (int bit = 0; bit < 16; bit++)
+        {
+            ushort original = (ushort)(1 << bit);
+            ulong highRes = TerrainHoleMath.UpsampleLowResToHighRes(original);
+            ushort roundTrip = TerrainHoleMath.DownsampleHighResToLowRes(highRes);
+            Assert.Equal(original, roundTrip);
+        }
+
+        ushort complexMask = 0xAA55;
+        ulong complexHighRes = TerrainHoleMath.UpsampleLowResToHighRes(complexMask);
+        ushort complexRoundTrip = TerrainHoleMath.DownsampleHighResToLowRes(complexHighRes);
+        Assert.Equal(complexMask, complexRoundTrip);
+    }
 }

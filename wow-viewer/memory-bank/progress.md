@@ -1,6 +1,15 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-02
+Last updated: 2026-10-04
+
+## 2026-10-04 — Spec 261: WoW Forever (11.2.7 / 1.60.1) Terrain Hole Fidelity (code & spec complete)
+
+- **Wiki Audit & Format Conformance**: Audited `wowdev.wiki/ADT/v18` in its entirety (sections 1..50). Validated split ADT companion chunks (root, obj0, obj1, tex0, lod) via CASC storage FileDataIDs. Confirmed no auxiliary or alternate hole chunks exist (sections 49 `MASD` and 50 `MALP` are dedicated solely to shoreline distance fields and LOD liquid quadtrees).
+- **Modern High-Res Holes Parsing**: Confirmed modern 11.2.7 / 1.60.1 MCNKs set flag `0x10000` (`high_res_holes`) with 8-byte 64-bit masks at offset `0x14` and set legacy offset `0x3C` to `0x0000`. Identified that earlier viewer builds (`v0.6.0-alpha1`) read only offset `0x3C`, explaining why modern holes were missed.
+- **Coordinate Translation & Seam Continuity**: Proven via adjacent chunk seam continuity tests across multiple tiles (Deathknell, Raven Hill, Elwynn) that Little-Endian row/column bit indexing (`cellY * 8 + cellX`) achieves 100% seam continuity across boundaries with zero gap.
+- **Real World Placement Alignment**: Verified holed region against Deathknell WMO 111538 Church crypt stairs and open graves M2s with sub-yard precision.
+- **Subsystem & Backward Compatibility**: Verified consistent hole handling across `TerrainTileMeshBuilder`, `TerrainMeshBuilder`, `MapGlbExporter`, `TerrainChunkMath`, `TerrainHeightmapIo`, `GroundEffectPlacementModels`, and `WorldTerrainHoleMask`. Tested roundtrip upsampling and downsampling preserving 16-bit legacy groups.
+- **Validation**: All 9 unit tests in `TerrainHoleMathTests` pass. Authored Spec 261 (`spec.md`, `plan.md`, `tasks.md`), registered in `STATUS.md`, and recorded receipt in `specs/261-wow-forever-terrain-hole-fidelity/evidence/receipt-spec261.md`.
 
 ## 2026-10-02 — Spec 260: Live Engine Diagnostics, Pipeline Telemetry & Hitch Overlay (code & spec complete)
 
