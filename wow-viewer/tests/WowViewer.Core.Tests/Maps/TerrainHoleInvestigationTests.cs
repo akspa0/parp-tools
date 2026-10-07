@@ -833,4 +833,132 @@ public sealed class TerrainHoleInvestigationTests
             offset = dataStart + (int)size;
         }
     }
+
+    [Fact]
+    public void FindAndInspectModernM2Cameras()
+    {
+        const string installDir = @"I:\wow12\World of Warcraft";
+        if (!Directory.Exists(installDir)) return;
+
+        var storage = CascStorage.OpenLocal(installDir, "wow_classic_beta", @"output\cache\casc", allowCdnFill: false);
+        var fdids = storage.GetAvailableFileDataIds();
+        _output.WriteLine($"Total available FileDataIDs: {fdids.Count}");
+
+        int m2Count = 0;
+        int m2WithCameras = 0;
+
+        foreach (uint id in fdids)
+        {
+            if (storage.TryReadFile(id, out byte[]? data) != CascReadStatus.Ok || data == null || data.Length < 0x120)
+                continue;
+
+            uint magic = BitConverter.ToUInt32(data, 0);
+            byte[]? md20 = null;
+            if (magic == 0x3032444D) // MD20
+            {
+                md20 = data;
+            }
+            else if (magic == 0x3132444D && data.Length >= 16) // MD21
+            {
+                uint chunkSize = BitConverter.ToUInt32(data, 4);
+                uint innerMagic = BitConverter.ToUInt32(data, 8);
+                if (innerMagic == 0x3032444D)
+                {
+                    md20 = new byte[Math.Min(chunkSize, (uint)(data.Length - 8))];
+                    Array.Copy(data, 8, md20, 0, md20.Length);
+                }
+            }
+
+            if (md20 == null || md20.Length < 0x120)
+                continue;
+
+            m2Count++;
+            uint version = BitConverter.ToUInt32(md20, 4);
+            uint nCameras = BitConverter.ToUInt32(md20, 0x110);
+            uint ofsCameras = BitConverter.ToUInt32(md20, 0x114);
+
+            if (nCameras > 0 && nCameras < 100 && ofsCameras < md20.Length)
+            {
+                m2WithCameras++;
+                _output.WriteLine($"Found M2 with cameras! FDID={id}, isChunked={magic == 0x3132444D}, version={version}, nCameras={nCameras}, ofsCameras=0x{ofsCameras:X}");
+
+                // Try reading with M2ModelReader
+                try
+                {
+                    using MemoryStream ms = new(md20);
+                    var doc = WowViewer.Core.IO.M2.M2ModelReader.Read(ms, $"fdid_{id}.m2");
+                    _output.WriteLine($"  M2ModelReader success! Doc cameras: {doc.Cameras.Count}");
+                    foreach (var cam in doc.Cameras)
+                    {
+                        _output.WriteLine($"    Cam[{cam.Index}]: type={cam.Type}, near={cam.NearClip}, far={cam.FarClip}, hasAnimFov={cam.HasAnimatedFieldOfView}, posTimestamps={cam.PositionTrack.TimestampArray.Count}, targetTimestamps={cam.TargetPositionTrack.TimestampArray.Count}");
+                    }
+
+                    // Test M2CameraPathImporter
+                    var path = WowViewer.Core.Runtime.M2.M2CameraPathImporter.Import(doc);
+                    _output.WriteLine($"  M2CameraPathImporter success! Keyframes={path.Keyframes.Count}, duration={path.DurationMs}ms");
+                }
+                catch (Exception ex)
+                {
+                    _output.WriteLine($"  M2ModelReader failed: {ex.Message}");
+                }
+
+                if (m2WithCameras >= 10) break;
+            }
+        }
+
+        _output.WriteLine($"Scanned {m2Count} M2s, found {m2WithCameras} with cameras.");
+    }
+
+    [Fact]
+    public void InspectCinematicCameraDb2()
+    {
+        const string installDir = @"I:\wow12\World of Warcraft";
+        if (!Directory.Exists(installDir)) return;
+
+        var storage = CascStorage.OpenLocal(installDir, "wow_classic_beta", @"output\cache\casc", allowCdnFill: false);
+        
+        // Find DB2 for CinematicCamera
+        // Let's test reading DBC/DB2 files from CASC
+        var fdids = storage.GetAvailableFileDataIds();
+        _output.WriteLine($"Checking for DBC/DB2 or specific camera FDIDs in {fdids.Count} files...");
+
+        // Known FDID 116902: What is it?
+        // Let's check FDID 116902 to 116915 (which we found earlier to be cameras!)
+        for (uint id = 116902; id <= 116912; id++)
+        {
+            if (storage.TryReadFile(id, out byte[]? data) == CascReadStatus.Ok && data != null)
+            {
+                byte[] md20 = WowViewer.Core.IO.M2.M2ChunkedFileIds.GetMd20Payload(data);
+                using MemoryStream ms = new(md20);
+                var doc = WowViewer.Core.IO.M2.M2ModelReader.Read(ms, $"fdid_{id}.m2");
+                _output.WriteLine($"Camera FDID {id}: Name='{doc.ModelName}', Cameras={doc.Cameras.Count}, Seq={doc.Sequences.Count}");
+                if (doc.Sequences.Count > 0)
+                {
+                    _output.WriteLine($"  Seq[0]: id={doc.Sequences[0].AnimationId}, duration={doc.Sequences[0].Duration}ms");
+                }
+            }
+        }
+
+        // Now test DBCD loading of CinematicCamera on wow_classic_beta
+        try
+        {
+            var dbcd = new DBCD.DBCD(new CascDbcProvider(storage), new FilesystemDBDProvider(@"output\dbd"));
+            var db = dbcd.Load("CinematicCamera", "1.60.1.70205");
+            _output.WriteLine($"Loaded CinematicCamera.db2! Rows: {db.Values.Count}");
+            foreach (var row in db.Values)
+            {
+                dynamic r = row;
+                _output.WriteLine($"  Row ID={r.ID}: FileDataID={TryGet(r, "FileDataID")}, Model={TryGet(r, "Model")}, SoundID={TryGet(r, "SoundID")}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _output.WriteLine($"Failed to load CinematicCamera with DBCD: {ex.Message}");
+        }
+
+        static object? TryGet(dynamic r, string col)
+        {
+            try { return r[col]; } catch { return null; }
+        }
+    }
 }
