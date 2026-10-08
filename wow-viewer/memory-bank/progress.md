@@ -1,8 +1,29 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-07
+Last updated: 2026-10-08
 
-## 2026-10-07 — Spec 263: 1.60 MCCV Terrain Shadow Ground-Truth Validation & Bidirectional Renderer Synthesis (code & spec complete)
+## 2026-10-08 — Spec 266: WDL Trestle Elevation Reconstruction & Lineage Synthesis (code & spec complete)
+
+- **Lineage WDL Synthesis**: Discovered that development map minimap tiles are authentic prototype Northrend tiles from Wrath 3.0.1.8303 (`H:\CLIENTS\Wrath\3.X_Pre-Release_Windows_enUS_3.0.1.8303\World of Warcraft`). Transferred authentic Northrend 17x17 WDL lattices for 2,035 development tiles into `output/development_synthesized_wdl.npz` using the perceptual match ledger (`similarity >= 0.85`), providing complete macro-elevation priors across previously un-sculpted regions.
+- **Modern Lean Trestle Architecture (`TrestleElevationUNet`)**: Designed and trained a lightweight successor to the February 2026 v7 WDL trestle model:
+  - 4,698,387 parameters (< 10M parameter budget, vs >100M in historical v7).
+  - 6 input channels: Minimap RGB (3), Normalized WDL Trestle (1), Photometric Surface Normals (2).
+  - Dual heads: Dense residual carving $\Delta Z$ in physical world yards + Auxiliary global height bounds $[Z_{\min}, Z_{\max}]$.
+- **Mesh Face Normal Fix**: Fixed face winding in `mesh_exporter.py` so exported Wavefront OBJ and binary glTF GLB meshes have counter-clockwise vertex winding with 100% upward-pointing surface normals (+Z for OBJ, +Y for GLB), resolving backface camera flips.
+- **Empirical Validation**:
+  - Validation MAE: **5.20 yards** (target $\le 25.0$ yards; down from 81.07 yards in Spec 264).
+  - Validation Pearson $r$: **0.8754** (target $\ge 0.75$).
+  - Span ratio: **1.05** (perfect scale preservation without regression-to-the-mean).
+  - High-relief mountain restoration on `development_16_33`: Reconstructed vertical relief span of **424.75 yards** (was squashed to 39 yards in single-stage models).
+  - Upward normal verification: 131,072 / 131,072 faces (**100.0%**) have positive upward (+Z) normal vectors.
+  - All 6 unit tests green in `test_trestle_elevation.py`.
+- **Shipped Artifacts**:
+  - `specs/266-wdl-trestle-elevation-reconstruction/` (`spec.md`, `plan.md`, `tasks.md`).
+  - `harvester/v60/trestle_wdl_synthesizer.py`, `harvester/v60/trestle_elevation_model.py`, `harvester/v60/trestle_dataset.py`.
+  - `scripts/v60_train_trestle_model.py`, `scripts/v60_reconstruct_minimap.py`.
+  - Checkpoint: `output/models/trestle_elevation_v1.pt`.
+  - Reconstructed 3D meshes & quilts: `output/reconstructions_trestle/`.
+
 
 - **1.60 MCCV Terrain Shadow Revelation & Architecture**: Investigated modern client engine terrain self-shadow and ambient occlusion baking. In WoW: Forever (1.60.1 / 11.2.7 engine), Blizzard relocated the continuous terrain shadow field into `MCCV` (145 vertices BGRA: 580 bytes per MCNK chunk) to drive modern deferred/PBR shading with neutral baseline $127 \approx 0.5$ ($1.0\times$ lighting multiplier).
 - **Geographic Sampling Stratification**: Integrated domain rules recognizing 1.60 maps as an unholy composite of legacy, Cataclysm, and modern tooling edits:

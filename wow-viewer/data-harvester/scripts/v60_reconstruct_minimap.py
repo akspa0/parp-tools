@@ -46,6 +46,10 @@ from harvester.v60.minimap_shadow_stripper import MinimapShadowStripper
 from harvester.v60.sam_minimap_sieve import SamMinimapSieve
 from harvester.v60.shadow_difference_refiner import extract_ridge_contours
 from harvester.v60.shadow_height_calibrator import ShadowHeightCalibrator
+from harvester.v60.wdl_elevation_calibrator import (
+    WdlElevationCalibrator,
+    WdlElevationParser,
+)
 
 
 def colorize_elevation(h_arr: np.ndarray, v_min: Optional[float] = None, v_max: Optional[float] = None) -> np.ndarray:
@@ -163,6 +167,10 @@ def main() -> int:
     parser.add_argument("--export-building-boxes", action="store_true", default=False, help="Export 3D building collision boxes into OBJ")
     parser.add_argument("--elevation-model", default=None, help="Path to trained SupervisedElevationUNet checkpoint")
     parser.add_argument("--refiner-model", default=None, help="Path to trained ResidualElevationRefiner checkpoint")
+    parser.add_argument("--trestle-model", default=None, help="Path to trained TrestleElevationUNet checkpoint (Spec 266)")
+    parser.add_argument("--synthesized-wdl", default="../output/development_synthesized_wdl.npz", help="Path to synthesized development WDL NPZ (Spec 266)")
+    parser.add_argument("--wdl", default=None, help="Optional path to matching .wdl file with coarse terrain lattices")
+    parser.add_argument("--no-wdl-calibration", dest="calibrate_wdl", action="store_false", default=True, help="Disable WDL scale calibration")
     args = parser.parse_args()
 
     img_path = Path(args.image)
@@ -215,20 +223,38 @@ def main() -> int:
         if cand_pm4.is_file():
             pm4_path_candidate = cand_pm4
 
+    obj_path_candidate = None
     if args.obj_adt:
-        obj_path = Path(args.obj_adt)
-        if obj_path.is_file():
-            extractor = DevelopmentGroundTruthExtractor(obj_path.parent)
-            m2_placements, wmo_placements, building_mask = extractor.extract_objects(obj_path, tile_x, tile_y)
-            print(f"  Loaded Object Placements: {len(wmo_placements)} WMO buildings, {len(m2_placements)} M2 doodads.")
-            for w in wmo_placements:
-                print(f"    Building: {w.name} at {w.pos}")
-    elif pm4_path_candidate and pm4_path_candidate.is_file():
-        extractor = DevelopmentGroundTruthExtractor(pm4_path_candidate.parent)
-        wmo_placements, building_mask = extractor.extract_pm4_objects(pm4_path_candidate, tile_x, tile_y)
-        print(f"  Loaded PM4 Collision Geometry: {len(wmo_placements)} structures discovered from {pm4_path_candidate.name}.")
+        cand = Path(args.obj_adt)
+        if cand.is_file():
+            obj_path_candidate = cand
+    else:
+        cand_dirs = [
+            Path("../test_data/original_development/World/Maps/development"),
+            Path("../test_data/original_development/WDT-ADT"),
+            Path("../test_data/original_development/painted"),
+        ]
+        if args.ground_truth_adt:
+            cand_dirs.insert(0, Path(args.ground_truth_adt).parent)
+        for cd in cand_dirs:
+            c = cd / f"development_{tile_x}_{tile_y}_obj0.adt"
+            if c.is_file():
+                obj_path_candidate = c
+                break
+
+    # Load and normalize minimap image first for terrain background estimation
+    raw_img = Image.open(img_path).convert("RGB")
+    raw_img = raw_img.resize((256, 256), Image.Resampling.LANCZOS)
+    raw_np = np.array(raw_img, dtype=np.float32) / 255.0
+
+    if obj_path_candidate and obj_path_candidate.is_file():
+        extractor = DevelopmentGroundTruthExtractor(obj_path_candidate.parent)
+        m2_placements, wmo_placements, building_mask = extractor.extract_objects(
+            obj_path_candidate, tile_x, tile_y, minimap_rgb=raw_np * 255.0
+        )
+        print(f"  Loaded Authentic Object Placements from {obj_path_candidate.name}: {len(wmo_placements)} WMO buildings, {len(m2_placements)} M2 doodads.")
         for w in wmo_placements[:5]:
-            print(f"    PM4 Structure: {w.name} at {w.pos}")
+            print(f"    Building: {w.name} at {w.pos}")
 
     # Load texture alpha splats from _tex0.adt if available
     tex_path_candidate = None
@@ -245,37 +271,59 @@ def main() -> int:
         if alpha_mask is not None:
             print(f"  Loaded Texture Splat Alpha Masks from: {tex_path_candidate.name} (decoupling texture albedo)")
 
-    # 2. Load and normalize minimap image
-    raw_img = Image.open(img_path).convert("RGB")
-    raw_img = raw_img.resize((256, 256), Image.Resampling.LANCZOS)
-    raw_np = np.array(raw_img, dtype=np.float32) / 255.0
+    # Load coarse WDL terrain lattice if available
+    wdl_h_257: Optional[np.ndarray] = None
+    wdl_path_candidate = None
+    if args.wdl:
+        wdl_path_candidate = Path(args.wdl)
+    elif args.ground_truth_adt:
+        wdl_path_candidate = WdlElevationCalibrator.find_wdl_for_tile(
+            Path(args.ground_truth_adt).parent, map_name=Path(args.ground_truth_adt).parent.name
+        )
+    else:
+        wdl_path_candidate = WdlElevationCalibrator.find_wdl_for_tile(img_path.parent)
 
-    # 3. Object Sieving (combine building mask with ComfyUI SAM or chroma anomaly)
+    if wdl_path_candidate and wdl_path_candidate.is_file():
+        try:
+            parser_wdl = WdlElevationParser(wdl_path_candidate)
+            if parser_wdl.has_tile_data(tile_x, tile_y):
+                wdl_h_257 = parser_wdl.extract_tile_257(tile_x, tile_y)
+                print(f"  Loaded Coarse WDL Lattice: {wdl_path_candidate.name} (Z range: {np.min(wdl_h_257):.1f} .. {np.max(wdl_h_257):.1f} yds)")
+        except Exception as e:
+            print(f"  [WARN] Failed to load WDL lattice: {e}")
+
+
+    # 3. Object Sieving (use authentic object placements if available, preserving painted textures)
     print("\n[Stage 1/6] Object Sieving (Roofs, Doodads, Structures)...")
     mask = building_mask.copy()
-    mask_cached = out_dir / f"test_mask_{img_path.stem}.png"
+    has_authentic_objects = (len(wmo_placements) > 0 or len(m2_placements) > 0)
 
-    try:
-        orchestrator = ComfyUIOrchestrator(base_url=args.comfyui_url)
-        print(f"  Querying live ComfyUI instance at {args.comfyui_url}...")
-        sam_mask = orchestrator.segment_objects(
-            image_data=img_path,
-            threshold=0.5,
-            refine_iterations=2,
-            timeout_seconds=45.0,
-        )
-        mask = mask | (sam_mask > 0)
-        print(f"  Live SAM 3.1 Sieve Success: {int(mask.sum())} non-terrain pixels masked.")
-    except Exception as ex:
-        print(f"  ComfyUI query fallback ({ex}).")
-        if mask_cached.is_file():
-            print(f"  Loading cached SAM mask from {mask_cached}...")
-            cached = np.array(Image.open(mask_cached).convert("L")) > 0
-            mask = mask | cached
-        else:
-            print("  Applying heuristic rooftop chroma sieve (roads strictly preserved)...")
-            heuristic = SamMinimapSieve.heuristic_color_sieve(raw_np)
-            mask = mask | heuristic
+    if has_authentic_objects:
+        print(f"  Using Authentic Object Placements Sieve: {len(wmo_placements)} WMOs, {len(m2_placements)} M2s ({int(mask.sum())} pixels masked).")
+        print("  Bypassing vision model SAM & heuristic color filters to preserve painted terrain & text.")
+    else:
+        mask_cached = out_dir / f"test_mask_{img_path.stem}.png"
+        try:
+            orchestrator = ComfyUIOrchestrator(base_url=args.comfyui_url)
+            print(f"  Querying live ComfyUI instance at {args.comfyui_url}...")
+            sam_mask = orchestrator.segment_objects(
+                image_data=img_path,
+                threshold=0.5,
+                refine_iterations=2,
+                timeout_seconds=45.0,
+            )
+            mask = mask | (sam_mask > 0)
+            print(f"  Live SAM 3.1 Sieve Success: {int(mask.sum())} non-terrain pixels masked.")
+        except Exception as ex:
+            print(f"  ComfyUI query fallback ({ex}).")
+            if mask_cached.is_file():
+                print(f"  Loading cached SAM mask from {mask_cached}...")
+                cached = np.array(Image.open(mask_cached).convert("L")) > 0
+                mask = mask | cached
+            else:
+                print("  Applying heuristic rooftop chroma sieve (roads strictly preserved)...")
+                heuristic = SamMinimapSieve.heuristic_color_sieve(raw_np)
+                mask = mask | heuristic
 
     # 4. Multi-Scale Laplacian Inpainting & Albedo Stripping
     print("\n[Stage 2/6] Stripping Albedo & Laplacian Inpainting...")
@@ -366,10 +414,75 @@ def main() -> int:
     if water_mask_257 is not None:
         h_257_raw[water_mask_257] = 0.0
 
-    # 7. Elevation Estimation: Supervised Neural UNet or Shadow-to-Height Calibrator
+    # 7. Elevation Estimation: Trestle UNet (Spec 266), Cascaded UNet (Spec 265), or SFS
     calibrated_h = None
+    trestle_model_path = Path(args.trestle_model) if args.trestle_model else None
     elev_model_path = Path(args.elevation_model) if args.elevation_model else None
-    if elev_model_path and elev_model_path.is_file():
+
+    if trestle_model_path and trestle_model_path.is_file():
+        print(f"\n[Stage 5/6] Modern Trestle Elevation UNet ({trestle_model_path.name}) [Spec 266]...")
+        import torch
+        from harvester.v60.trestle_elevation_model import TrestleElevationUNet
+        from harvester.v60.trestle_dataset import compute_photometric_normals
+        from harvester.v60.trestle_wdl_synthesizer import TrestleWdlSynthesizer
+
+        # Determine WDL trestle
+        cur_wdl_257 = wdl_h_257
+        if cur_wdl_257 is None and args.synthesized_wdl:
+            synth_p = Path(args.synthesized_wdl)
+            if synth_p.is_file():
+                synth = TrestleWdlSynthesizer.load_npz(synth_p)
+                if synth.has_tile(tile_x, tile_y):
+                    cur_wdl_257 = synth.get_trestle_257(tile_x, tile_y)
+                    meta = synth.get_metadata(tile_x, tile_y)
+                    print(f"  Loaded Synthesized WDL Lattice: {meta.get('origin_tile', 'Transferred')} (sim={meta.get('similarity', 1.0):.3f}, span={meta.get('vertical_span', 0.0):.1f} yds)")
+
+        if cur_wdl_257 is None and gt_height_257 is not None:
+            h17 = gt_height_257[0::16, 0::16]
+            cur_wdl_257 = ndimage.zoom(h17, (257.0 / 17.0, 257.0 / 17.0), order=3)[:257, :257].astype(np.float32)
+            print("  Derived Coarse WDL Lattice from Ground Truth ADT.")
+
+        if cur_wdl_257 is None:
+            # Fallback to Poisson estimate downsampled
+            h17 = h_257_raw[0::16, 0::16]
+            cur_wdl_257 = ndimage.zoom(h17, (257.0 / 17.0, 257.0 / 17.0), order=3)[:257, :257].astype(np.float32)
+            print("  Fallback: Derived Coarse WDL Lattice from Poisson estimate.")
+
+        ckpt = torch.load(trestle_model_path, map_location="cpu", weights_only=False)
+        unet = TrestleElevationUNet(
+            in_channels=6,
+            base_channels=ckpt.get("base_channels", 32),
+        )
+        unet.load_state_dict(ckpt["model_state_dict"])
+        unet.eval()
+
+        # Build 6-channel input
+        normals = compute_photometric_normals(raw_np)
+        cur_wdl_256 = ndimage.zoom(cur_wdl_257, (256.0 / 257.0, 256.0 / 257.0), order=1)[:256, :256]
+        norm_trestle = ((cur_wdl_256 - 150.0) / 350.0).astype(np.float32)
+        features_np = np.concatenate([raw_np, norm_trestle[..., None], normals], axis=-1)
+        feat_t = torch.from_numpy(features_np).permute(2, 0, 1).unsqueeze(0).float()
+
+        with torch.no_grad():
+            pred_delta_z, pred_bounds = unet(feat_t)
+            delta_z_np = pred_delta_z.numpy()[0]
+
+        calibrated_h = (cur_wdl_257 + delta_z_np).astype(np.float32)
+        if water_mask_257 is not None:
+            calibrated_h[water_mask_257] = 0.0
+        print(f"  Trestle Macro Anchor: span={np.ptp(cur_wdl_257):.2f} yds [{np.min(cur_wdl_257):.1f} .. {np.max(cur_wdl_257):.1f}]")
+        print(f"  Neural Residual dZ:   span={np.ptp(delta_z_np):.2f} yds (mean={np.mean(delta_z_np):.2f} yds)")
+        print(f"  Final Reconstructed:  span={np.ptp(calibrated_h):.2f} yds [{np.min(calibrated_h):.1f} .. {np.max(calibrated_h):.1f}]")
+
+        if gt_height_257 is not None:
+            diff = np.abs(calibrated_h - gt_height_257)
+            mae = float(np.mean(diff))
+            rmse = float(np.sqrt(np.mean(diff**2)))
+            c_matrix = np.corrcoef(calibrated_h.flatten(), gt_height_257.flatten())
+            pearson_r = float(c_matrix[0, 1]) if not np.isnan(c_matrix[0, 1]) else 0.0
+            print(f"  [Neural Verification vs GT] MAE: {mae:.2f} yds | RMSE: {rmse:.2f} yds | Pearson r: {pearson_r:.4f}")
+
+    elif elev_model_path and elev_model_path.is_file():
         print(f"\n[Stage 5/6] Supervised Neural Elevation Model ({elev_model_path.name})...")
         import torch
         from harvester.v60.supervised_elevation_model import SupervisedElevationUNet
@@ -419,6 +532,17 @@ def main() -> int:
 
             calibrated_h = calibrated_h + pred_delta
             print(f"  Restored vertical relief span: {np.ptp(calibrated_h):.2f} yards (was {np.ptp(pred_elev):.2f} yds)")
+
+        if wdl_h_257 is not None and getattr(args, "calibrate_wdl", True):
+            print(f"\n[Stage 5c/6] WDL Scale & Base Elevation Calibration ({wdl_path_candidate.name if wdl_path_candidate else 'WDL'})...")
+            calibrator_wdl = WdlElevationCalibrator()
+            calibrated_h, cal_metrics = calibrator_wdl.calibrate(
+                pred_h=calibrated_h,
+                wdl_h=wdl_h_257,
+                water_mask=water_mask_257,
+            )
+            print(f"  Calibrated Method: {cal_metrics['method']} | Scale: {cal_metrics['slope']:.2f} | Offset: {cal_metrics['offset']:.2f} yds")
+            print(f"  Restored Vertical Relief Span: {cal_metrics['calibrated_span_yards']:.2f} yards (was {cal_metrics['raw_span_yards']:.2f} yds, WDL span {cal_metrics['wdl_span_yards']:.2f} yds)")
 
         if water_mask_257 is not None:
             calibrated_h[water_mask_257] = 0.0

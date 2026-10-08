@@ -159,9 +159,13 @@ class DevelopmentGroundTruthExtractor:
         return h257, has_non_zero
 
     def extract_objects(
-        self, obj_path: Path | str, tile_x: int, tile_y: int
+        self,
+        obj_path: Path | str,
+        tile_x: int,
+        tile_y: int,
+        minimap_rgb: Optional[np.ndarray] = None,
     ) -> Tuple[List[M2Placement], List[WmoPlacement], np.ndarray]:
-        """Extract M2 doodads and WMO buildings from _obj0.adt."""
+        """Extract M2 doodads and WMO buildings from _obj0.adt with tight shape segmentation."""
         p = Path(obj_path)
         if not p.is_file():
             return [], [], np.zeros((256, 256), dtype=bool)
@@ -175,6 +179,16 @@ class DevelopmentGroundTruthExtractor:
         m2_placements: List[M2Placement] = []
         wmo_placements: List[WmoPlacement] = []
         building_mask = np.zeros((256, 256), dtype=bool)
+
+        # Attempt to load minimap for local terrain background estimation if not provided
+        if minimap_rgb is None:
+            cand_img = self.textures_dir / f"development_{tile_x}_{tile_y}.png"
+            if cand_img.is_file():
+                try:
+                    loaded = Image.open(cand_img).convert("RGB").resize((256, 256))
+                    minimap_rgb = np.array(loaded, dtype=np.float32)
+                except Exception:
+                    minimap_rgb = None
 
         tile_origin_x = MAP_ORIGIN - tile_x * TILE_WORLD_SIZE
         tile_origin_y = MAP_ORIGIN - tile_y * TILE_WORLD_SIZE
@@ -202,7 +216,6 @@ class DevelopmentGroundTruthExtractor:
                     scale = struct.unpack_from("<H", data, e_off + 32)[0] / 1024.0
 
                     asset_name = m2_names[name_id] if 0 <= name_id < len(m2_names) else f"M2_{name_id}"
-                    # World coords in WoW: Y=North/South, X=East/West
                     world_x = MAP_ORIGIN - ry
                     world_y = MAP_ORIGIN - rx
                     m2_placements.append(
@@ -214,6 +227,15 @@ class DevelopmentGroundTruthExtractor:
                             scale=scale,
                         )
                     )
+                    # Tight realistic footprint for M2 doodads (1px for small, 3x3 for large props)
+                    px = int(round(((rx - tile_x * TILE_WORLD_SIZE) / TILE_WORLD_SIZE) * 256.0))
+                    py = int(round(((ry - tile_y * TILE_WORLD_SIZE) / TILE_WORLD_SIZE) * 256.0))
+                    if 0 <= px < 256 and 0 <= py < 256:
+                        if scale > 1.2:
+                            r_px = 1
+                            building_mask[max(0, py - r_px) : min(256, py + r_px + 1), max(0, px - r_px) : min(256, px + r_px + 1)] = True
+                        else:
+                            building_mask[py, px] = True
 
             elif name == "MODF" and size >= 64:
                 count = size // 64
@@ -229,24 +251,54 @@ class DevelopmentGroundTruthExtractor:
                     world_x = MAP_ORIGIN - ry
                     world_y = MAP_ORIGIN - rx
 
-                    # Project 3D bounding box to 256x256 minimap pixel box
-                    # Local tile position: (0, 0) top-left to (TILE_WORLD_SIZE, TILE_WORLD_SIZE) bottom-right
-                    # MODF bounding box coordinates are raw tile-space coordinates
-                    tile_raw_x_min = tile_x * TILE_WORLD_SIZE
-                    tile_raw_y_min = tile_y * TILE_WORLD_SIZE
+                    # Project placement center to 256x256 minimap pixel space
+                    px = int(round(((rx - tile_x * TILE_WORLD_SIZE) / TILE_WORLD_SIZE) * 256.0))
+                    py = int(round(((ry - tile_y * TILE_WORLD_SIZE) / TILE_WORLD_SIZE) * 256.0))
 
-                    u_min = (bmin_x - tile_raw_x_min) / TILE_WORLD_SIZE
-                    u_max = (bmax_x - tile_raw_x_min) / TILE_WORLD_SIZE
-                    v_min = (bmin_y - tile_raw_y_min) / TILE_WORLD_SIZE
-                    v_max = (bmax_y - tile_raw_y_min) / TILE_WORLD_SIZE
+                    name_lower = asset_name.lower()
 
-                    px_min = int(np.clip(min(u_min, u_max) * 256.0, 0, 255))
-                    px_max = int(np.clip(max(u_min, u_max) * 256.0, 0, 255))
-                    py_min = int(np.clip(min(v_min, v_max) * 256.0, 0, 255))
-                    py_max = int(np.clip(max(v_min, v_max) * 256.0, 0, 255))
+                    # Vegetation / terrain grass discriminator (minimap albedo)
+                    if minimap_rgb is not None:
+                        is_grass = (minimap_rgb[..., 1] > minimap_rgb[..., 0] + 10.0) & (
+                            minimap_rgb[..., 1] > minimap_rgb[..., 2] + 12.0
+                        )
+                    else:
+                        is_grass = np.zeros((256, 256), dtype=bool)
 
-                    if px_max > px_min and py_max > py_min:
-                        building_mask[py_min : py_max + 1, px_min : px_max + 1] = True
+                    if 0 <= px < 256 and 0 <= py < 256:
+                        if "wall" in name_lower:
+                            # Wall segment: narrow corridor (~2 px wide, ~12 px long along rot_z)
+                            angle = np.radians(rot_z)
+                            for t in np.linspace(-6, 6, 13):
+                                wx = int(round(px + t * np.cos(angle)))
+                                wy = int(round(py + t * np.sin(angle)))
+                                if 0 <= wx < 256 and 0 <= wy < 256:
+                                    building_mask[max(0, wy - 1) : min(256, wy + 2), max(0, wx - 1) : min(256, wx + 2)] = True
+                        elif "tower" in name_lower:
+                            # Guard tower: circular footprint radius ~6-7 pixels, non-grass
+                            Y, X = np.ogrid[:256, :256]
+                            d = np.sqrt((X - px) ** 2 + (Y - py) ** 2)
+                            building_mask |= (d <= 7.0) & (~is_grass)
+                        elif any(tok in name_lower for tok in ("building", "largebuilding", "inn", "barracks", "house", "keep", "barn")):
+                            # Large building: oriented bounding box (~22x32 pixels rotated along rot_z)
+                            angle = np.radians(rot_z)
+                            cos_a, sin_a = np.cos(angle), np.sin(angle)
+                            Y, X = np.ogrid[:256, :256]
+                            dx = X - px
+                            dy = Y - py
+                            lx = dx * cos_a + dy * sin_a
+                            ly = -dx * sin_a + dy * cos_a
+                            in_obb = (np.abs(lx) <= 22.0) & (np.abs(ly) <= 32.0)
+                            building_mask |= in_obb & (~is_grass)
+                        elif "gate" in name_lower:
+                            Y, X = np.ogrid[:256, :256]
+                            d = np.sqrt((X - px) ** 2 + (Y - py) ** 2)
+                            building_mask |= (d <= 4.0) & (~is_grass)
+                        else:
+                            # Generic structure: tight 5px radius, non-grass
+                            Y, X = np.ogrid[:256, :256]
+                            d = np.sqrt((X - px) ** 2 + (Y - py) ** 2)
+                            building_mask |= (d <= 5.0) & (~is_grass)
 
                     wmo_placements.append(
                         WmoPlacement(
@@ -256,7 +308,7 @@ class DevelopmentGroundTruthExtractor:
                             rot=(rot_x, rot_y, rot_z),
                             bounds_min=(bmin_x, bmin_y, bmin_z),
                             bounds_max=(bmax_x, bmax_y, bmax_z),
-                            pixel_box=(px_min, py_min, px_max, py_max),
+                            pixel_box=(max(0, px - 22), max(0, py - 22), min(255, px + 22), min(255, py + 22)),
                         )
                     )
 
@@ -270,85 +322,8 @@ class DevelopmentGroundTruthExtractor:
         tile_x: int,
         tile_y: int,
     ) -> Tuple[List[WmoPlacement], np.ndarray]:
-        """Extract object placements and footprints from authentic PM4 collision geometry (MSVT/MSUR)."""
-        pm4_file = Path(pm4_path)
-        if not pm4_file.is_file():
-            return [], np.zeros((256, 256), dtype=bool)
-
-        data = pm4_file.read_bytes()
-        pos = 0
-        chunks = {}
-        total_len = len(data)
-        while pos + 8 <= total_len:
-            magic = data[pos : pos + 4][::-1].decode("latin1", errors="ignore")
-            sz = struct.unpack_from("<I", data, pos + 4)[0]
-            chunks[magic] = (pos + 8, sz)
-            pos += 8 + sz
-
-        if "MSVT" not in chunks:
-            return [], np.zeros((256, 256), dtype=bool)
-
-        msvt_off, msvt_sz = chunks["MSVT"]
-        num_verts = msvt_sz // 12
-        if num_verts == 0:
-            return [], np.zeros((256, 256), dtype=bool)
-
-        verts = np.frombuffer(data[msvt_off : msvt_off + msvt_sz], dtype=np.float32).reshape(-1, 3)
-
-        # Tile coordinate origin in WoW world space
-        # Tile Y maps to X in world coordinates (East-West), Tile X maps to Y (North-South)
-        x_origin = tile_y * TILE_WORLD_SIZE
-        y_origin = tile_x * TILE_WORLD_SIZE
-
-        # Cluster vertices into discrete structures using 3D spatial adjacency (r = 15 yards)
-        tree = cKDTree(verts)
-        pairs = tree.query_pairs(r=15.0)
-
-        building_mask = np.zeros((256, 256), dtype=bool)
-        placements: List[WmoPlacement] = []
-
-        if pairs:
-            rows = [p[0] for p in pairs]
-            cols = [p[1] for p in pairs]
-            adj = sparse.coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(verts), len(verts)))
-            n_comp, labels = connected_components(adj, directed=False)
-        else:
-            n_comp = 1
-            labels = np.zeros(len(verts), dtype=int)
-
-        for comp_id in range(n_comp):
-            c_verts = verts[labels == comp_id]
-            if len(c_verts) < 6:
-                continue
-
-            min_x, max_x = float(np.min(c_verts[:, 0])), float(np.max(c_verts[:, 0]))
-            min_y, max_y = float(np.min(c_verts[:, 1])), float(np.max(c_verts[:, 1]))
-            min_z, max_z = float(np.min(c_verts[:, 2])), float(np.max(c_verts[:, 2]))
-
-            px0 = int(np.clip((min_x - x_origin) / TILE_WORLD_SIZE * 256.0, 0, 255))
-            px1 = int(np.clip((max_x - x_origin) / TILE_WORLD_SIZE * 256.0, 0, 255))
-            py0 = int(np.clip((min_y - y_origin) / TILE_WORLD_SIZE * 256.0, 0, 255))
-            py1 = int(np.clip((max_y - y_origin) / TILE_WORLD_SIZE * 256.0, 0, 255))
-
-            if px1 > px0 and py1 > py0:
-                building_mask[py0 : py1 + 1, px0 : px1 + 1] = True
-
-            center_x = (min_x + max_x) * 0.5
-            center_y = (min_y + max_y) * 0.5
-
-            placements.append(
-                WmoPlacement(
-                    name=f"PM4_Structure_{comp_id}",
-                    unique_id=comp_id,
-                    pos=(center_x, center_y, min_z),
-                    rot=(0.0, 0.0, 0.0),
-                    bounds_min=(min_x, min_y, min_z),
-                    bounds_max=(max_x, max_y, max_z),
-                    pixel_box=(px0, py0, px1, py1),
-                )
-            )
-
-        return placements, building_mask
+        """PM4 collision extraction disabled: PM4 collision data is not used for minimap object masking."""
+        return [], np.zeros((256, 256), dtype=bool)
 
     def load_tile(self, tile_x: int, tile_y: int) -> Optional[DevelopmentTileData]:
         """Load paired ground truth and minimap for a development tile."""
@@ -367,14 +342,10 @@ class DevelopmentGroundTruthExtractor:
         else:
             minimap_rgb = np.zeros((256, 256, 3), dtype=np.float32)
 
-        # Load object placements from _obj0.adt or fallback to PM4 collision geometry
+        # Load object placements from _obj0.adt
         obj_path = self.maps_dir / f"development_{tile_x}_{tile_y}_obj0.adt"
-        pm4_path = self.maps_dir / f"development_{tile_x}_{tile_y}.pm4"
         if obj_path.is_file():
-            m2s, wmos, bmask = self.extract_objects(obj_path, tile_x, tile_y)
-        elif pm4_path.is_file():
-            wmos, bmask = self.extract_pm4_objects(pm4_path, tile_x, tile_y)
-            m2s = []
+            m2s, wmos, bmask = self.extract_objects(obj_path, tile_x, tile_y, minimap_rgb=minimap_rgb * 255.0)
         else:
             m2s, wmos, bmask = [], [], np.zeros((256, 256), dtype=bool)
 

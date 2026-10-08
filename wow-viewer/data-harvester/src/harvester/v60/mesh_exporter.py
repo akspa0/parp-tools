@@ -74,11 +74,11 @@ def export_obj_mesh(
         f.write("o Terrain\n")
         f.write("usemtl terrain\n")
 
-        # Vertices (WoW coordinates: X East, Y North, Z Up)
+        # Vertices (Cartesian: X East, Y North, Z Up)
         for y in range(h):
             for x in range(w):
                 wx = (x / cols) * tile_size_yards
-                wy = (y / rows) * tile_size_yards
+                wy = ((rows - y) / rows) * tile_size_yards
                 wz = float(h_world[y, x])
                 f.write(f"v {wx:.3f} {wy:.3f} {wz:.3f}\n")
 
@@ -94,15 +94,15 @@ def export_obj_mesh(
             for x in range(w):
                 f.write("vn 0.000 0.000 1.000\n")
 
-        # Faces (quads divided into two triangles)
+        # Faces (quads divided into two triangles, upward +Z normals)
         for y in range(rows):
             for x in range(cols):
                 v1 = y * w + x + 1
                 v2 = y * w + (x + 1) + 1
                 v3 = (y + 1) * w + (x + 1) + 1
                 v4 = (y + 1) * w + x + 1
-                f.write(f"f {v1}/{v1}/{v1} {v2}/{v2}/{v2} {v3}/{v3}/{v3}\n")
-                f.write(f"f {v1}/{v1}/{v1} {v3}/{v3}/{v3} {v4}/{v4}/{v4}\n")
+                f.write(f"f {v1}/{v1}/{v1} {v4}/{v4}/{v4} {v3}/{v3}/{v3}\n")
+                f.write(f"f {v1}/{v1}/{v1} {v3}/{v3}/{v3} {v2}/{v2}/{v2}\n")
 
         # Placed building 3D bounding boxes (opt-in only)
         if export_building_boxes and placements:
@@ -211,8 +211,9 @@ def export_glb_mesh(
     v2 = ((r_idx + 1) * w + (c_idx + 1)).ravel()
     v3 = ((r_idx + 1) * w + c_idx).ravel()
 
-    t1 = np.stack([v0, v1, v2], axis=-1).ravel()
-    t2 = np.stack([v0, v2, v3], axis=-1).ravel()
+    # Counter-clockwise winding looking from +Y down: (v0, v2, v1) and (v0, v3, v2)
+    t1 = np.stack([v0, v2, v1], axis=-1).ravel()
+    t2 = np.stack([v0, v3, v2], axis=-1).ravel()
     indices = np.concatenate([t1, t2]).astype(np.uint32)
 
     # Convert texture to PNG bytes
