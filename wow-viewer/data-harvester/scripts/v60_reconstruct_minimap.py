@@ -162,6 +162,7 @@ def main() -> int:
     parser.add_argument("--carve-foundations", action="store_true", default=False, help="Carve flat plateaus under building footprints")
     parser.add_argument("--export-building-boxes", action="store_true", default=False, help="Export 3D building collision boxes into OBJ")
     parser.add_argument("--elevation-model", default=None, help="Path to trained SupervisedElevationUNet checkpoint")
+    parser.add_argument("--refiner-model", default=None, help="Path to trained ResidualElevationRefiner checkpoint")
     args = parser.parse_args()
 
     img_path = Path(args.image)
@@ -387,6 +388,37 @@ def main() -> int:
         with torch.no_grad():
             pred_elev = unet(x_t).numpy()[0]
         calibrated_h = pred_elev.astype(np.float32)
+
+        refiner_path = Path(args.refiner_model) if args.refiner_model else None
+        if refiner_path and refiner_path.is_file():
+            print(f"\n[Stage 5b/6] Stage 2 Cascaded Residual Refiner ({refiner_path.name})...")
+            from harvester.v60.residual_elevation_model import ResidualElevationRefiner
+            from harvester.v60.supervised_elevation_model import compute_elevation_normals
+
+            ref_ckpt = torch.load(refiner_path, map_location="cpu", weights_only=False)
+            refiner = ResidualElevationRefiner(
+                in_channels=6,
+                base_channels=ref_ckpt.get("base_channels", 40),
+                delta_std=ref_ckpt.get("delta_std", 80.0),
+                delta_mean=ref_ckpt.get("delta_mean", 0.0),
+            )
+            refiner.load_state_dict(ref_ckpt["model_state"])
+            refiner.eval()
+
+            z_init_t = torch.from_numpy(calibrated_h).unsqueeze(0).float()
+            normals = compute_elevation_normals(z_init_t)[0]
+            pad_normals = torch.nn.functional.pad(normals[:2], (0, 1, 0, 1), mode="replicate")
+            z_init_norm = (torch.nn.functional.interpolate(
+                z_init_t.unsqueeze(0), size=(256, 256), mode="bilinear", align_corners=True
+            )[0] / 100.0).float()
+            rgb_t = torch.from_numpy(raw_np).permute(2, 0, 1).float()
+            feats = torch.cat([rgb_t, z_init_norm, pad_normals], dim=0).unsqueeze(0)
+
+            with torch.no_grad():
+                pred_delta = refiner(feats).numpy()[0]
+
+            calibrated_h = calibrated_h + pred_delta
+            print(f"  Restored vertical relief span: {np.ptp(calibrated_h):.2f} yards (was {np.ptp(pred_elev):.2f} yds)")
 
         if water_mask_257 is not None:
             calibrated_h[water_mask_257] = 0.0
