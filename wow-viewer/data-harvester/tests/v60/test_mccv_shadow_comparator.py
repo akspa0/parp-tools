@@ -10,6 +10,7 @@ from harvester.v60.mccv_shadow_comparator import (
     compare_residual_to_mccv,
     get_chunk_vertex_uvs,
     rasterize_mccv_tile_to_grid,
+    read_mccv_from_adt,
     synthesize_mccv_from_residual,
 )
 
@@ -59,3 +60,32 @@ def test_compare_residual_to_mccv_divergent():
 
     metrics = compare_residual_to_mccv(s1, s2)
     assert metrics.correlation_passed is False
+
+
+def test_read_mccv_from_adt_synthetic():
+    import struct
+
+    # Build synthetic MCNK with MCCV
+    mccv_payload = np.full((145, 4), 127, dtype=np.uint8).tobytes()
+    mccv_chunk = b"MCCV" + struct.pack("<I", len(mccv_payload)) + mccv_payload
+
+    mcnk_header = bytearray(128)
+    struct.pack_into("<I", mcnk_header, 4, 3)  # IndexX = 3
+    struct.pack_into("<I", mcnk_header, 8, 5)  # IndexY = 5
+    struct.pack_into("<I", mcnk_header, 0x74, 128)  # ofsMccv = 128
+
+    mcnk_payload = bytes(mcnk_header) + mccv_chunk
+    mcnk_chunk = b"MCNK" + struct.pack("<I", len(mcnk_payload)) + mcnk_payload
+
+    # Build MCIN
+    mcin_entries = bytearray(256 * 16)
+    mcin_chunk_len = 8 + (256 * 16)
+    struct.pack_into("<I", mcin_entries, 0, mcin_chunk_len)  # Entry 0 points right after MCIN
+    mcin_chunk = b"MCIN" + struct.pack("<I", len(mcin_entries)) + bytes(mcin_entries)
+
+    adt_data = mcin_chunk + mcnk_chunk
+
+    chunks = read_mccv_from_adt(adt_data)
+    assert (3, 5) in chunks
+    assert chunks[(3, 5)].shape == (145, 4)
+    assert np.all(chunks[(3, 5)] == 127)

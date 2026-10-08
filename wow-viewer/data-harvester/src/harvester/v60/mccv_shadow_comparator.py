@@ -8,7 +8,9 @@ terrain vertex shadow data, and provides bidirectional conversion to synthesize
 from __future__ import annotations
 
 import logging
+import struct
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -206,3 +208,85 @@ def compare_residual_to_mccv(
         dynamic_range_ratio=dr_ratio,
         correlation_passed=bool(ncc >= 0.70 or ssim >= 0.75),
     )
+
+
+def read_mccv_from_adt(adt_source: bytes | str | Path) -> Dict[Tuple[int, int], np.ndarray]:
+    """Extract 16x16 chunk MCCV vertex colors (145 vertices BGRA) from a root ADT file.
+
+    Walks MCIN / MCNK chunks and parses MCCV subchunks.
+    Returns dict mapping (cx, cy) -> np.ndarray of shape (145, 4) uint8.
+    """
+    if isinstance(adt_source, (str, Path)):
+        data = Path(adt_source).read_bytes()
+    else:
+        data = bytes(adt_source)
+
+    chunks: Dict[Tuple[int, int], np.ndarray] = {}
+    total_len = len(data)
+
+    # First search for MCIN chunk to locate MCNK chunks
+    mcin_offset = -1
+    pos = 0
+    while pos + 8 <= total_len:
+        magic = data[pos : pos + 4]
+        size = struct.unpack_from("<I", data, pos + 4)[0]
+        if magic in (b"MCIN", b"NICM"):
+            mcin_offset = pos + 8
+            break
+        pos += 8 + size
+        if size % 2 != 0:
+            pos += 1
+
+    mcnk_offsets: List[int] = []
+    if mcin_offset >= 0 and mcin_offset + (256 * 16) <= total_len:
+        for i in range(256):
+            off = struct.unpack_from("<I", data, mcin_offset + (i * 16))[0]
+            if off > 0 and off + 8 <= total_len:
+                mcnk_offsets.append(off)
+
+    if not mcnk_offsets:
+        # Fallback: scan for MCNK chunks sequentially
+        pos = 0
+        while pos + 8 <= total_len:
+            magic = data[pos : pos + 4]
+            size = struct.unpack_from("<I", data, pos + 4)[0]
+            if magic in (b"MCNK", b"KNCM"):
+                mcnk_offsets.append(pos)
+            pos += 8 + size
+            if size % 2 != 0:
+                pos += 1
+
+    for mcnk_off in mcnk_offsets:
+        if mcnk_off + 8 + 128 > total_len:
+            continue
+        mcnk_size = struct.unpack_from("<I", data, mcnk_off + 4)[0]
+        mcnk_payload = mcnk_off + 8
+
+        # MCNK header: IndexX at +0x04, IndexY at +0x08, ofsMccv at +0x74
+        cx = struct.unpack_from("<I", data, mcnk_payload + 4)[0]
+        cy = struct.unpack_from("<I", data, mcnk_payload + 8)[0]
+        ofs_mccv = struct.unpack_from("<I", data, mcnk_payload + 0x74)[0]
+
+        mccv_data: Optional[bytes] = None
+
+        if ofs_mccv > 0 and mcnk_payload + ofs_mccv + 8 + 580 <= total_len:
+            sub_magic = data[mcnk_payload + ofs_mccv : mcnk_payload + ofs_mccv + 4]
+            if sub_magic in (b"MCCV", b"VCCM"):
+                mccv_data = data[mcnk_payload + ofs_mccv + 8 : mcnk_payload + ofs_mccv + 8 + 580]
+
+        if mccv_data is None:
+            # Subchunk scan inside MCNK
+            sub_pos = mcnk_payload + 128
+            mcnk_end = min(total_len, mcnk_payload + mcnk_size)
+            while sub_pos + 8 <= mcnk_end:
+                sub_magic = data[sub_pos : sub_pos + 4]
+                sub_size = struct.unpack_from("<I", data, sub_pos + 4)[0]
+                if sub_magic in (b"MCCV", b"VCCM") and sub_size >= 580:
+                    mccv_data = data[sub_pos + 8 : sub_pos + 8 + 580]
+                    break
+                sub_pos += 8 + sub_size
+
+        if mccv_data is not None and len(mccv_data) == 580:
+            chunks[(cx, cy)] = np.frombuffer(mccv_data, dtype=np.uint8).reshape((145, 4))
+
+    return chunks

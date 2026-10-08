@@ -1,0 +1,15 @@
+{
+  "tile": "31_48",
+  "zone": "Stormwind City",
+  "tier": "Tier 2: Excluded (Modern City Mesh Re-sculpt)",
+  "is_trusted_baseline": false,
+  "minimap_source": "I:\\parp\\parp-tools\\output\\synthetic_minimaps\\azeroth\\tiles\\azeroth_31_48_authored.png",
+  "normalized_cross_correlation": 0.9354658722877502,
+  "mean_absolute_error": 0.030160052701830864,
+  "structural_similarity": 0.9260039925575256,
+  "dynamic_range_ratio": 1.1679936647415161,
+  "ridge_coincidence_pct": 92.18122211540832,
+  "ncc_gate_passed": true,
+  "ridge_gate_passed": true,
+  "all_gates_passed": true
+}

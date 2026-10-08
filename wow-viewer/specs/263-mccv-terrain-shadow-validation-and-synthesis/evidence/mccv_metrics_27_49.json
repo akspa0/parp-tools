@@ -1,0 +1,15 @@
+{
+  "tile": "27_49",
+  "zone": "Westfall",
+  "tier": "Tier 1: Trusted Baseline (Pristine 1.12 Lineage)",
+  "is_trusted_baseline": true,
+  "minimap_source": "I:\\parp\\parp-tools\\output\\synthetic_minimaps\\azeroth\\tiles\\azeroth_27_49_authored.png",
+  "normalized_cross_correlation": 0.924186646938324,
+  "mean_absolute_error": 0.001181851839646697,
+  "structural_similarity": 0.9949144721031189,
+  "dynamic_range_ratio": 1.0479137897491455,
+  "ridge_coincidence_pct": 100.0,
+  "ncc_gate_passed": true,
+  "ridge_gate_passed": true,
+  "all_gates_passed": true
+}

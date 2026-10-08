@@ -1,0 +1,15 @@
+{
+  "tile": "32_55",
+  "zone": "Stranglethorn Vale",
+  "tier": "Tier 1: Trusted Baseline (Pristine 1.12 Lineage)",
+  "is_trusted_baseline": true,
+  "minimap_source": "I:\\parp\\parp-tools\\output\\synthetic_minimaps\\azeroth\\tiles\\azeroth_32_55_authored.png",
+  "normalized_cross_correlation": 0.8787708282470703,
+  "mean_absolute_error": 0.025067774578928947,
+  "structural_similarity": 0.8652574419975281,
+  "dynamic_range_ratio": 1.2597330808639526,
+  "ridge_coincidence_pct": 87.88277118871926,
+  "ncc_gate_passed": true,
+  "ridge_gate_passed": true,
+  "all_gates_passed": true
+}

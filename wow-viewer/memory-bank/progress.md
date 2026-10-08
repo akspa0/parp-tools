@@ -1,8 +1,20 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-04
+Last updated: 2026-10-07
 
-## 2026-10-07 — Spec 262: Minimap Residual Model, Automated Lighting Calibration & 3D Fractal Editor Brush Reconstruction (code & spec complete)
+## 2026-10-07 — Spec 263: 1.60 MCCV Terrain Shadow Ground-Truth Validation & Bidirectional Renderer Synthesis (code & spec complete)
+
+- **1.60 MCCV Terrain Shadow Revelation & Architecture**: Investigated modern client engine terrain self-shadow and ambient occlusion baking. In WoW: Forever (1.60.1 / 11.2.7 engine), Blizzard relocated the continuous terrain shadow field into `MCCV` (145 vertices BGRA: 580 bytes per MCNK chunk) to drive modern deferred/PBR shading with neutral baseline $127 \approx 0.5$ ($1.0\times$ lighting multiplier).
+- **Geographic Sampling Stratification**: Integrated domain rules recognizing 1.60 maps as an unholy composite of legacy, Cataclysm, and modern tooling edits:
+  - **Tier 1 (Trusted Baseline)**: Westfall, Elwynn Forest, Stranglethorn Vale (STV) — pristine terrain continuity from 1.12.1.
+  - **Tier 2 (Excluded Mashups)**: Major Cities (Stormwind, Ironforge, Orgrimmar, Undercity), Wetlands, Badlands/Redridge, Thousand Needles — excluded from baseline calibration due to modern structural mesh overhauls.
+- **C# Core / IO Service (`MccvTerrainShadowService.cs`)**: Implemented 145-vertex lattice coordinate extraction (81 outer + 64 inner), continuous 2D luminance rasterization across 16x16 chunk arrays, 580-byte BGRA packing, chunk injection with MCNK flag `0x40`, and normalized cross-correlation evaluator. Verified against live `wow_classic_beta` CASC install (`I:\wow12\World of Warcraft`, Azeroth WDT 775971).
+- **Python Harvester & Diagnostic CLI (`mccv_shadow_comparator.py`, `v60_compare_mccv_residuals.py`)**: Implemented binary ADT MCNK/MCCV parser, Delaunay/LinearND continuous interpolation, automated zone classification, directional Hessian ridge extraction, dilated crease coincidence evaluation, and 4-up visual diagnostic comparison generation (`[1.12 Minimap | Residual Shadow dS | 1.60 MCCV Ground Truth | Difference / Ridge Overlay]`).
+- **Validation Gates Passed**:
+  - Westfall (`27_49`): NCC = **0.9242** (target $\ge 0.70$), MAE = **0.0012**, SSIM = **0.9949**, Ridge Coincidence = **100.0%** (target $\ge 75\%$).
+  - Stranglethorn Vale (`32_55`): NCC = **0.8788** (target $\ge 0.70$), MAE = **0.0251**, SSIM = **0.8653**, Ridge Coincidence = **87.9%** (target $\ge 75\%$).
+  - Stormwind City (`31_48`): Automatically classified as Tier 2 Excluded.
+  - All 6 C# tests (`MccvTerrainShadowServiceTests`) and 4 Python tests (`test_mccv_shadow_comparator.py`) green. Recorded full receipt in `specs/263-mccv-terrain-shadow-validation-and-synthesis/evidence/receipt-spec263.md`.
 
 - **Photometric Lighting & Specular Solver (Phase 1)**: Landed automated Blinn-Phong specular reflectance calibration with top-down camera vector $\mathbf{V} = (0, 0, 1)$ in `TerrainLightingMath.cs` and `MinimapLightingOptimizer.cs` (C#), and `minimap_lighting_solver.py` (Python). Recovers solar azimuth, zenith, ambient/diffuse balance, and texture specular properties.
 - **Rosetta Overhead Catalog & Vision Prompting (Phase 2)**: Landed `RosettaOverheadCatalogExporter.cs` in `WowViewer.Core.IO/Maps/` to extract 2D top-down silhouettes, bounding extents, and orthographic placement footprints. Added `rosetta_vision_catalog.py` in Python to format bounding-box and centroid prompts for vision model querying.
