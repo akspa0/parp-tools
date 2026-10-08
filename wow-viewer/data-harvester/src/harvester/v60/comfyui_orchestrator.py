@@ -208,7 +208,7 @@ class ComfyUIOrchestrator:
         image_name: str,
         threshold: float = 0.35,
         refine_iterations: int = 2,
-        prompt_text: str = "building, house, roof, tree, structure, road, doodad",
+        prompt_text: str = "building, house, roof, tower, castle, tent, elevated 3d doodad",
         prefix: str = "sam_mask",
     ) -> Dict[str, Any]:
         """Build workflow graph for SAM 3.1 segmentation with optional text conditioning.
@@ -320,7 +320,7 @@ class ComfyUIOrchestrator:
         image_data: Union[bytes, np.ndarray, Image.Image, Path, str],
         threshold: float = 0.35,
         refine_iterations: int = 2,
-        prompt_text: str = "building, house, roof, tree, structure, road, doodad",
+        prompt_text: str = "building, house, roof, tower, castle, tent, elevated 3d doodad",
         timeout_seconds: float = 60.0,
     ) -> np.ndarray:
         """Run SAM 3.1 object segmentation on an image. Returns binary mask (H, W) uint8 (0 or 255)."""

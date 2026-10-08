@@ -1,7 +1,11 @@
 """SAM 3.1 Minimap Sieve for Object & Contamination Masking.
 
-Leverages the ComfyUI orchestration layer to segment structures, buildings,
-doodads, trees, and roads from top-down minimap tiles.
+Leverages the ComfyUI orchestration layer to segment elevated structures, buildings,
+and placed 3D doodads from top-down minimap tiles.
+
+NOTE: Roads, trails, cobblestone, and paths are 2D alpha texture splats (MCLY/MCAL)
+painted directly on the terrain heightmap. They are NOT placed 3D objects or Rosetta
+assets, and must NEVER be masked out as objects.
 """
 
 from __future__ import annotations
@@ -77,7 +81,7 @@ class SamMinimapSieve:
         image_data: Union[bytes, np.ndarray, Image.Image, Path, str],
         threshold: float = 0.35,
         refine_iterations: int = 2,
-        prompt_text: str = "building, house, roof, tree, structure, road, doodad",
+        prompt_text: str = "building, house, roof, tower, castle, tent, elevated 3d doodad",
         dilate_radius: int = 2,
         timeout_seconds: float = 60.0,
     ) -> np.ndarray:

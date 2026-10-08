@@ -40,63 +40,8 @@ from harvester.v60.shadow_difference_refiner import (
 )
 
 
-def export_obj_mesh(
-    height: np.ndarray,
-    texture_path: Path,
-    obj_path: Path,
-    tile_size_yards: float = 533.333,
-    height_scale: float = 40.0,
-) -> None:
-    """Export 257x257 (or HxW) heightmap to textured Wavefront OBJ."""
-    h, w = height.shape
-    rows = h - 1
-    cols = w - 1
-    mtl_name = obj_path.stem + ".mtl"
-    mtl_path = obj_path.with_suffix(".mtl")
-
-    # Normalize height relative to minimum
-    h_norm = (height - np.min(height)) * height_scale
-
-    with mtl_path.open("w", encoding="utf-8") as f:
-        f.write(f"newmtl terrain\n")
-        f.write("Ka 1.0 1.0 1.0\n")
-        f.write("Kd 1.0 1.0 1.0\n")
-        f.write("Ks 0.05 0.05 0.05\n")
-        f.write(f"map_Kd {texture_path.name}\n")
-
-    with obj_path.open("w", encoding="utf-8") as f:
-        f.write(f"mtllib {mtl_name}\n")
-        f.write("usemtl terrain\n")
-
-        # Vertices (WoW coordinates: X East, Y North, Z Up)
-        for y in range(h):
-            for x in range(w):
-                wx = (x / cols) * tile_size_yards
-                wy = (y / rows) * tile_size_yards
-                wz = float(h_norm[y, x])
-                f.write(f"v {wx:.3f} {wy:.3f} {wz:.3f}\n")
-
-        # Texture coordinates
-        for y in range(h):
-            for x in range(w):
-                u = x / cols
-                v = 1.0 - (y / rows)
-                f.write(f"vt {u:.4f} {v:.4f}\n")
-
-        # Vertex normals
-        for y in range(h):
-            for x in range(w):
-                f.write("vn 0.000 0.000 1.000\n")
-
-        # Faces (quads split into two triangles)
-        for y in range(rows):
-            for x in range(cols):
-                v1 = y * w + x + 1
-                v2 = y * w + (x + 1) + 1
-                v3 = (y + 1) * w + (x + 1) + 1
-                v4 = (y + 1) * w + x + 1
-                f.write(f"f {v1}/{v1}/{v1} {v2}/{v2}/{v2} {v3}/{v3}/{v3}\n")
-                f.write(f"f {v1}/{v1}/{v1} {v3}/{v3}/{v3} {v4}/{v4}/{v4}\n")
+from harvester.v60.mesh_exporter import export_glb_mesh, export_obj_mesh
+from harvester.v60.sam_minimap_sieve import SamMinimapSieve
 
 
 def build_diagnostic_quilt(
@@ -186,10 +131,8 @@ def main() -> int:
             print(f"  Loading cached SAM mask from {mask_cached}...")
             mask = np.array(Image.open(mask_cached).convert("L")) > 0
         else:
-            print("  Using high-frequency edge & color prior fallback...")
-            gray = 0.299 * raw_np[..., 0] + 0.587 * raw_np[..., 1] + 0.114 * raw_np[..., 2]
-            grad = ndimage.generic_gradient_magnitude(gray, ndimage.sobel)
-            mask = (grad > np.percentile(grad, 92)).astype(np.uint8) * 255
+            print("  Using heuristic rooftop chroma anomaly fallback (roads strictly preserved)...")
+            mask = SamMinimapSieve.heuristic_color_sieve(raw_np)
 
     # 3. Multi-Scale Laplacian Inpainting & Albedo Stripping
     print("\n[Stage 2/5] Stripping Albedo & Laplacian Inpainting...")
@@ -256,10 +199,13 @@ def main() -> int:
     ).astype(np.uint16)
     Image.fromarray(h_norm_uint16).save(hmap_out)
 
-    # Export 3D OBJ Mesh
+    # Export 3D OBJ & GLB Meshes
     export_obj_mesh(h_257, tex_out, obj_out, height_scale=args.height_scale)
+    glb_out = out_dir / f"{stem}_reconstructed.glb"
+    export_glb_mesh(h_257, raw_img, glb_out, height_scale=args.height_scale)
     print(f"  [OK] Exported 3D Wavefront OBJ:  {obj_out}")
-    print(f"  [OK] Exported 16-bit Heightmap: {hmap_out}")
+    print(f"  [OK] Exported 3D glTF GLB:        {glb_out}")
+    print(f"  [OK] Exported 16-bit Heightmap:  {hmap_out}")
 
     # Build and save 4-panel diagnostic quilt
     quilt_img = build_diagnostic_quilt(

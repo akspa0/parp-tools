@@ -109,9 +109,23 @@ uv run python scripts/v60_compare_mccv_residuals.py --tile 31_48
 
 ---
 
-## 4. Visual Evidence Artifacts
-- Westfall 4-up diagnostic comparison: [mccv_comparison_27_49.png](mccv_comparison_27_49.png)
-- Stranglethorn Vale 4-up diagnostic comparison: [mccv_comparison_32_55.png](mccv_comparison_32_55.png)
-- Stormwind City 4-up diagnostic comparison: [mccv_comparison_31_48.png](mccv_comparison_31_48.png)
+## 4. Visual & 3D Evidence Artifacts
+
+### 2D Labeled Diagnostic Comparison Sheets (with Typography & Legends)
+- Westfall 4-up diagnostic comparison sheet: [mccv_comparison_27_49.png](mccv_comparison_27_49.png)
+- Stranglethorn Vale 4-up diagnostic comparison sheet: [mccv_comparison_32_55.png](mccv_comparison_32_55.png)
+- Stormwind City 4-up diagnostic comparison sheet: [mccv_comparison_31_48.png](mccv_comparison_31_48.png)
 - Westfall metrics JSON: [mccv_metrics_27_49.json](mccv_metrics_27_49.json)
 - Stranglethorn Vale metrics JSON: [mccv_metrics_32_55.json](mccv_metrics_32_55.json)
+
+### 3D Reconstructed Surface Meshes (Binary glTF 2.0 .glb & Wavefront .obj)
+- **Westfall (`27_49`)**:
+  - Minimap Reconstructed 3D Mesh: [27_49_minimap_reconstructed.glb](27_49_minimap_reconstructed.glb)
+  - 1.60 MCCV Ground Truth 3D Mesh: [27_49_mccv_groundtruth.glb](27_49_mccv_groundtruth.glb)
+  - 3D Difference & Ridge Overlay Mesh: [27_49_comparison_overlay.glb](27_49_comparison_overlay.glb)
+- **Stranglethorn Vale (`32_55`)**:
+  - Minimap Reconstructed 3D Mesh: [32_55_minimap_reconstructed.glb](32_55_minimap_reconstructed.glb)
+  - 1.60 MCCV Ground Truth 3D Mesh: [32_55_mccv_groundtruth.glb](32_55_mccv_groundtruth.glb)
+  - 3D Difference & Ridge Overlay Mesh: [32_55_comparison_overlay.glb](32_55_comparison_overlay.glb)
+
+*(All `.glb` meshes are standalone single-file containers with embedded textures that open natively in Windows 3D Viewer, Paint 3D, Blender, or web viewers).*
