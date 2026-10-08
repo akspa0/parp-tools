@@ -257,6 +257,48 @@ public static class TerrainLightingMath
     }
 
     /// <summary>
+    /// Evaluates lighting with both Lambertian diffuse and Blinn-Phong specular reflectance for orthographic top-down minimap cameras.
+    /// In orthographic top-down, the view direction is V = (0, 0, -1).
+    /// </summary>
+    public static Vector3 EvaluateWithSpecular(
+        float interpolatedLambert,
+        Vector3 normal,
+        Vector3 lightDirection,
+        float specularIntensity,
+        float specularPower,
+        Vector3 directionalColor,
+        Vector3 ambientColor,
+        float shadowMask,
+        float shadowStrength = DefaultAuthoredMcshShadowStrength,
+        bool toneMapped = false,
+        float toneMapExposure = ToneMapExposure)
+    {
+        float lambert = Math.Clamp(float.IsFinite(interpolatedLambert) ? interpolatedLambert : 0f, 0f, 1f);
+        float visibility = 1f - (Math.Clamp(shadowMask, 0f, 1f) * Math.Clamp(shadowStrength, 0f, 1f));
+
+        float specTerm = 0f;
+        if (specularIntensity > 0f && specularPower > 0f && normal != Vector3.Zero && lightDirection != Vector3.Zero)
+        {
+            Vector3 viewDir = Vector3.UnitZ; // Towards top-down camera
+            Vector3 sum = lightDirection + viewDir;
+            if (sum != Vector3.Zero)
+            {
+                Vector3 halfVector = Vector3.Normalize(sum);
+                float nDotH = Math.Clamp(Vector3.Dot(normal, halfVector), 0f, 1f);
+                specTerm = MathF.Pow(nDotH, specularPower) * specularIntensity * visibility;
+            }
+        }
+
+        Vector3 raw = ambientColor + (directionalColor * lambert * visibility) + (directionalColor * specTerm);
+        if (!toneMapped)
+            return raw;
+
+        float exposure = float.IsFinite(toneMapExposure) && toneMapExposure > 0f ? toneMapExposure : ToneMapExposure;
+        Vector3 exposed = raw * exposure;
+        return exposed / (Vector3.One + exposed);
+    }
+
+    /// <summary>
     /// Convert a renderer-unit FogEnd/FogStartScalar pair to renderer distances.
     /// The scalar describes how much of the range is fogged, so 0.25 starts
     /// fog at 75 percent of FogEnd rather than at 25 percent.

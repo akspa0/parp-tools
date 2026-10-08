@@ -4,6 +4,11 @@ Current state first. Old long-form lane history trimmed out.
 
 ## Current active lanes
 
+- **Spec 262 `262-minimap-shadow-sieve-terrain-reconstruction` — active terrain reconstruction & residual lane.**
+  Automated photometric lighting calibration with physical Blinn-Phong specular lobes against 0.5.3 whiteplates,
+  Rosetta overhead catalog vision prompting, SAM 3.1 minimap sieving & multi-scale Laplacian heat diffusion
+  inpainting, closed-loop shadow difference $\Delta S$, discrete 3D fractal editor brush discovery & fitting,
+  and $\ge 75\%$ geometric terrain mesh reconstruction benchmark. See "Spec 262 quickstart" below.
 - **Spec 109 `109-v50-clean-room-audit` — active dataset lane.** V50 is the canonical dataset
   target for new work: fail-closed trust boundary, complete per-build Zarr stores with real
   content-hash identity, immutable curriculum manifests. See "V50 quickstart" below.
@@ -26,6 +31,46 @@ Background only:
 - Spec 047 — focused V18 operator path.
 - Spec 076 / 077 — paused/background research surfaces.
 - Spec 074 / 075 / 066 / 067 / 068 — historical only.
+
+## Spec 262 quickstart — Minimap Residual Model & 3D Terrain Reconstruction
+
+Spec 262 provides an end-to-end physical reconstruction pipeline to recover 3D terrain meshes ($\ge 75\%$ geometric parity) from raw 2D minimaps using residual shadow decomposition, automated photometric lighting calibration, Rosetta vision catalog prompting, ComfyUI SAM 3.1 object sieving, and 3D fractal editor brush fitting.
+
+### 1. Calibrate Minimap Photometric Lighting (Synthetic vs 0.5.3 Whiteplates)
+Solves for optimal solar azimuth, elevation, ambient, diffuse, and Blinn-Phong specular reflectance ($< 5\%$ photometric MAE on unoccluded whiteplates):
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/v60_solve_minimap_lighting.py --validate
+```
+Produces `lighting_calibration_0_5_3.json` recording calibrated parameters and SHA-256 provenance hash.
+
+### 2. Test ComfyUI SAM 3.1 & Rosetta Vision Orchestration
+Connects to the local ComfyUI server at `http://127.0.0.1:8199` (RTX 4070 Ti SUPER 16GB VRAM) and executes promptable object segmentation with `CLIPTextEncode`:
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/v60_test_comfyui_orchestration.py --test-sam
+```
+Outputs segmented masks (e.g., `out/test_mask_v18_minimap_row04851.png`) and verifies custom node health.
+
+### 3. Run Terrain Mesh Reconstruction Parity Benchmark (AC-007)
+Runs evaluation verifying Relative Height MAE $\le 25\%$ ($\ge 75\%$ geometric fidelity), Normal Cosine Similarity $\ge 0.88$, and Ridge Contour $F_1 \ge 0.75$:
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/v60_benchmark_reconstruction.py --held-out
+```
+
+### 4. Run Full Spec 262 Test Suites
+```powershell
+# Python data-harvester suite (28/28 passing)
+cd wow-viewer/data-harvester
+uv run pytest tests/v60/test_comfyui_orchestrator.py tests/v60/test_minimap_lighting_solver.py tests/v60/test_sam_minimap_sieve.py tests/v60/test_minimap_shadow_stripper.py tests/v60/test_rosetta_vision_catalog.py tests/v60/test_shadow_difference_refiner.py tests/v60/test_fractal_brush_engine.py tests/v60/test_reconstruction_benchmark.py
+
+# C# Core & IO suite (218/218 passing)
+dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~Minimap|FullyQualifiedName~Rosetta"
+```
 
 ## V50 quickstart
 

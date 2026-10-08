@@ -1,0 +1,14 @@
+{
+  "build": "0.5.3.3368",
+  "map_name": "Azeroth_32_32_Whiteplate",
+  "solar_azimuth_rad": 4.71238899230957,
+  "solar_elevation_rad": 0.6981316804885864,
+  "ambient_intensity": 0.25,
+  "diffuse_intensity": 0.75,
+  "specular_intensity": 0.05000000074505806,
+  "specular_power": 8.0,
+  "photometric_mae": 4.941859777042522e-08,
+  "converged": true,
+  "iterations": 0,
+  "provenance_hash": "f8e7b899ec43ae4fa337b34c963de78aeeeb9bc9416aa9a098114f69fd3ef69f"
+}

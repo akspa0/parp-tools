@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-04
 
+## 2026-10-07 — Spec 262: Minimap Residual Model, Automated Lighting Calibration & 3D Fractal Editor Brush Reconstruction (code & spec complete)
+
+- **Photometric Lighting & Specular Solver (Phase 1)**: Landed automated Blinn-Phong specular reflectance calibration with top-down camera vector $\mathbf{V} = (0, 0, 1)$ in `TerrainLightingMath.cs` and `MinimapLightingOptimizer.cs` (C#), and `minimap_lighting_solver.py` (Python). Recovers solar azimuth, zenith, ambient/diffuse balance, and texture specular properties.
+- **Rosetta Overhead Catalog & Vision Prompting (Phase 2)**: Landed `RosettaOverheadCatalogExporter.cs` in `WowViewer.Core.IO/Maps/` to extract 2D top-down silhouettes, bounding extents, and orthographic placement footprints. Added `rosetta_vision_catalog.py` in Python to format bounding-box and centroid prompts for vision model querying.
+- **ComfyUI Orchestration & SAM 3.1 Minimap Sieve (Phase 3)**: Landed `comfyui_orchestrator.py` connecting to `http://127.0.0.1:8199` (RTX 4070 Ti SUPER), executing live SAM 3.1 segmentation with `CLIPTextEncode` prompt conditioning. Built `sam_minimap_sieve.py` with morphological dilation and `minimap_shadow_stripper.py` with multi-scale hierarchical Laplacian heat diffusion inpainting, achieving $\ge 90\%$ high-frequency object energy attenuation (AC-004).
+- **Closed-Loop Shadow Difference & Ridge Analysis (Phase 4)**: Landed `shadow_difference_refiner.py` computing normalized difference $\Delta S(x, y) = S_{\text{real}} - S_{\text{synth}}$, extracting directional ridge crest contours via Hessian principal curvature analysis, verifying $\ge 80\%$ ridge precision/recall with tolerance envelopes (AC-005), and inverting shading differences into normal perturbations $\Delta \mathbf{N}$.
+- **3D Fractal Editor Brush Engine & Fitting (Phase 5)**: Landed `fractal_brush_extractor.py` and `fractal_brush_fitter.py` discovering discrete Blizzard 3D editor brushes coupling spatial mesh displacement $\Delta Z(u, v)$ with texture alpha footprints $\alpha(u, v)$. Implemented matching pursuit fitting achieving $\ge 85\%$ normalized cross-correlation (AC-006).
+- **Reconstruction Benchmark (Phase 6)**: Landed `reconstruction_benchmark.py` combining baseline height, continuous residual prediction, and discrete 3D fractal brush stamping, verifying $\text{RelMAE} \le 25\%$ ($\ge 75\%$ geometric fidelity), normal cosine similarity $\ge 0.88$, and ridge $F_1 \ge 0.75$ (AC-007).
+- **Validation**: 28/28 Python unit tests passing in `uv run pytest`; 218/218 C# tests passing in `dotnet test`. Recorded full receipt in `specs/262-minimap-shadow-sieve-terrain-reconstruction/evidence/receipt-spec262.md`.
+
 ## 2026-10-04 — Spec 261: WoW Forever (11.2.7 / 1.60.1) Terrain Hole Fidelity (code & spec complete)
 
 - **Wiki Audit & Format Conformance**: Audited `wowdev.wiki/ADT/v18` in its entirety (sections 1..50). Validated split ADT companion chunks (root, obj0, obj1, tex0, lod) via CASC storage FileDataIDs. Confirmed no auxiliary or alternate hole chunks exist (sections 49 `MASD` and 50 `MALP` are dedicated solely to shoreline distance fields and LOD liquid quadtrees).

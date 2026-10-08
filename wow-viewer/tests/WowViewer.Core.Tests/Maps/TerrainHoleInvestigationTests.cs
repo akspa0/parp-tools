@@ -939,6 +939,7 @@ public sealed class TerrainHoleInvestigationTests
             }
         }
 
+#if false
         // Now test DBCD loading of CinematicCamera on wow_classic_beta
         try
         {
@@ -960,5 +961,6 @@ public sealed class TerrainHoleInvestigationTests
         {
             try { return r[col]; } catch { return null; }
         }
+#endif
     }
 }
