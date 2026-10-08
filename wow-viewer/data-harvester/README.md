@@ -74,7 +74,23 @@ Produces:
 - `out/<name>_heightmap.png`: 16-bit normalized elevation grid.
 - `out/<name>_diagnostic_quilt.png`: 4-up visual panel `[1. Raw Minimap | 2. SAM Sieve Mask | 3. Bare Terrain Shadow | 4. Reconstructed Normals & Ridges]`.
 
-### 5. Run Full Spec 262 Test Suites
+### 5. Batch Continent-Scale 3D Reconstruction & Stitched Mosaic
+Processes all 736 authored minimap tiles of the Azeroth continent (`output/synthetic_minimaps/azeroth/tiles/`), runs SAM 3.1 object sieving, extracts bare shadow residuals, fits 3D fractal editor brushes, and stitches the full continent elevation mosaic:
+
+```powershell
+cd wow-viewer/data-harvester
+# Process sample batch (e.g. 15 tiles)
+uv run python scripts/v60_batch_reconstruct_continent.py --limit 15
+
+# Process all 736 continent tiles
+uv run python scripts/v60_batch_reconstruct_continent.py --all
+```
+Produces:
+- `out/continent_azeroth/heightmaps/azeroth_{X}_{Y}_height.npy`: Individual 256x256 tile heightfields.
+- `out/continent_azeroth/azeroth_continent_reconstructed_heightmap.png`: Stitched continent elevation map.
+- `out/continent_azeroth/azeroth_continent_shaded_relief.png`: Stitched continent shaded relief map.
+
+### 6. Run Full Spec 262 Test Suites
 ```powershell
 # Python data-harvester suite (28/28 passing)
 cd wow-viewer/data-harvester
