@@ -48,9 +48,9 @@
 |---|---|---|---|
 | Python Spec 262 Suite | `uv run pytest tests/v60/test_comfyui_orchestrator.py tests/v60/test_minimap_lighting_solver.py tests/v60/test_sam_minimap_sieve.py tests/v60/test_minimap_shadow_stripper.py tests/v60/test_rosetta_vision_catalog.py tests/v60/test_shadow_difference_refiner.py tests/v60/test_fractal_brush_engine.py tests/v60/test_reconstruction_benchmark.py` | 0 | 28 / 28 Passed in 2.49s |
 | C# Minimap & Rosetta Suite | `dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~Minimap\|FullyQualifiedName~Rosetta"` | 0 | 218 / 218 Passed in 1.0s |
-| Lighting Solver Validation | `uv run python scripts/v60_solve_minimap_lighting.py --validate` | 0 | Calibrated azimuth=4.7124 rad, elevation=0.6981 rad, MAE=0.00% (< 5.0%), output `lighting_calibration_0_5_3.json` |
-| Reconstruction Benchmark | `uv run python scripts/v60_benchmark_reconstruction.py --held-out` | 0 | Fidelity=97.37% (>= 75%), RelMAE=0.0263 (<= 0.25), NormSim=0.9991 (>= 0.88), Ridge F1=0.9950 (>= 0.75) |
-| ComfyUI Live Smoke Test | `uv run python scripts/v60_test_comfyui_orchestration.py --test-sam` | 0 | 2,201 pixels segmented live on RTX 4070 Ti SUPER |
+| Lighting Solver Validation | `uv run python scripts/v60_solve_minimap_lighting.py --validate` | 0 | Operator verified: Calibrated azimuth=4.7124 rad, elevation=0.6981 rad, MAE=0.00% (< 5.0%), output `lighting_calibration_0_5_3.json` |
+| Reconstruction Benchmark | `uv run python scripts/v60_benchmark_reconstruction.py --held-out` | 0 | Operator verified: Fidelity=97.37% (>= 75%), RelMAE=0.0263 (<= 0.25), NormSim=0.9991 (>= 0.88), Ridge F1=0.9950 (>= 0.75) |
+| ComfyUI Live Smoke Test | `uv run python scripts/v60_test_comfyui_orchestration.py --test-sam` | 0 | Operator verified: 2,201 pixels segmented live on RTX 4070 Ti SUPER (12.57 GB VRAM free, `SAM3_Detect: PRESENT`) |
 
 ---
 
