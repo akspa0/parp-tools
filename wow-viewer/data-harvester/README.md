@@ -62,7 +62,19 @@ cd wow-viewer/data-harvester
 uv run python scripts/v60_benchmark_reconstruction.py --held-out
 ```
 
-### 4. Run Full Spec 262 Test Suites
+### 4. One-Shot Minimap to 3D Terrain Mesh Reconstruction
+Takes ANY raw minimap image (e.g. 0.5.3 or LK crop), queries SAM 3.1 on ComfyUI to excise buildings/doodads, strips diffuse albedo, extracts Hessian ridges, fits discrete 3D fractal editor brushes, and exports a textured Wavefront OBJ mesh, 16-bit heightmap, and a 4-panel diagnostic comparison quilt:
+
+```powershell
+cd wow-viewer/data-harvester
+uv run python scripts/v60_reconstruct_minimap.py --image v18_minimap_row04851.png
+```
+Produces:
+- `out/<name>_reconstructed.obj` & `.mtl`: 3D terrain mesh scaled to WoW coordinate dimensions.
+- `out/<name>_heightmap.png`: 16-bit normalized elevation grid.
+- `out/<name>_diagnostic_quilt.png`: 4-up visual panel `[1. Raw Minimap | 2. SAM Sieve Mask | 3. Bare Terrain Shadow | 4. Reconstructed Normals & Ridges]`.
+
+### 5. Run Full Spec 262 Test Suites
 ```powershell
 # Python data-harvester suite (28/28 passing)
 cd wow-viewer/data-harvester
