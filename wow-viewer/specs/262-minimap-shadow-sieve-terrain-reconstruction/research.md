@@ -89,3 +89,25 @@ When reconstructing terrain from residual signals:
 2. **Phase 2 Builds on Rosetta**: Export Rosetta top-down exhibits into our unified Zarr v3 datastore for PaliGemma 2 training.
 3. **Phase 3 Uses SAM 2.1**: Integrate `sam2` PyPI package to generate `object_contamination_mask_256`, inpainting diffuse albedo to isolate `stripped_residual_shadow_256`.
 4. **Phase 5 Recovers 3D Brushes**: Combine continuous residual inversion with discrete 3D fractal editor brush stamping to beat the $75\%$ geometric fidelity threshold with razor-sharp terrain relief.
+
+---
+
+## 5. WoW 1.60 Engine Shift: MCCV as Terrain Shadow Ground-Truth & Modern Renderer Hint
+
+### 5.1 The Modern Engine Relocation
+In legacy WoW (0.5.3–1.12.1), `MCCV` (MCNK chunk vertex colors, 145 vertices per chunk) was largely unused or held uniform neutral gray ($127, 127, 127$), with terrain shadowing baked into 1-bit `MCSH` chunk bitmasks.
+
+In modern WoW 1.60 (`wow_classic_beta` / 11.2.7 / 12.0 client engine used in **WoW: Forever**):
+- Blizzard's terrain pipeline fundamentally changed: the high-resolution terrain self-shadow and ambient occlusion field was **baked directly into `MCCV`**.
+- The modern terrain shader multiplies ambient and diffuse lighting passes by `MCCV`, providing the added depth and ridge/crease self-shadowing needed in modern deferred/PBR rendering passes without requiring runtime shadow map recalculation.
+
+### 5.2 Comparative Empirical Baseline (1.12.1 vs 1.60)
+Because 1.60 Classic maps are built directly from 1.12.1 assets:
+- The 1.60 client's `MCCV` data acts as an official, independent **empirical ground truth** of Blizzard's own baked terrain shadow field.
+- By extracting the 1.60 `MCCV` vertex colors (580 bytes BGRA across 145 vertices per chunk $\times$ 256 chunks) and interpolating them to a $256 \times 256$ raster, we can directly compute the Normalized Cross-Correlation (NCC) against our minimap-extracted `stripped_residual_shadow_256` and $\Delta S(x, y)$.
+- A high correlation validates mathematically that our minimap shadow extraction isolates the exact physical terrain self-shadow and ambient occlusion field that Blizzard's modern baking pipeline computed.
+
+### 5.3 Modern Renderer Hint & Bidirectional Synthesis Bridge
+Implemented in [`mccv_shadow_comparator.py`](file:///I:/parp/parp-tools/wow-viewer/data-harvester/src/harvester/v60/mccv_shadow_comparator.py):
+1. **Validation**: Measures NCC, MAE, and structural similarity between minimap residuals and 1.60 `MCCV`.
+2. **Synthesis Bridge**: For Alpha / Vanilla / WotLK maps where `MCCV` was missing, our extracted residual shadow field can be sampled at each chunk's 145 vertex coordinates and exported as authentic 1.60-compliant `MCCV` chunks to restore deep terrain self-shadowing inside WoW: Forever.
