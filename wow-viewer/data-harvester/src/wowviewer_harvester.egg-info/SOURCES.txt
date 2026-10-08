@@ -250,6 +250,7 @@ src/harvester/v50/wdl_prior_infer.py
 src/harvester/v50/wdl_prior_train.py
 src/harvester/v50/wdl_prior_visualize.py
 src/harvester/v60/__init__.py
+src/harvester/v60/building_foundation_carver.py
 src/harvester/v60/clean_signal_corpus.py
 src/harvester/v60/clean_signal_diagnostics.py
 src/harvester/v60/clean_signal_inputs.py
@@ -259,8 +260,16 @@ src/harvester/v60/clean_signal_targets.py
 src/harvester/v60/clean_signal_train.py
 src/harvester/v60/clean_signal_transfer.py
 src/harvester/v60/clean_signal_visual_review.py
+src/harvester/v60/comfyui_orchestrator.py
 src/harvester/v60/control_corpus.py
 src/harvester/v60/control_experiment.py
+src/harvester/v60/development_ground_truth.py
+src/harvester/v60/fractal_brush_extractor.py
+src/harvester/v60/fractal_brush_fitter.py
+src/harvester/v60/mccv_shadow_comparator.py
+src/harvester/v60/mesh_exporter.py
+src/harvester/v60/minimap_lighting_solver.py
+src/harvester/v60/minimap_shadow_stripper.py
 src/harvester/v60/object_library_sieve.py
 src/harvester/v60/object_marker.py
 src/harvester/v60/object_sieve.py
@@ -270,7 +279,12 @@ src/harvester/v60/real_object_mask_model.py
 src/harvester/v60/real_synthetic_pairs.py
 src/harvester/v60/real_terrain_synthetic.py
 src/harvester/v60/real_terrain_synthetic_zarr.py
+src/harvester/v60/reconstruction_benchmark.py
 src/harvester/v60/rgb_method_benchmark.py
+src/harvester/v60/rosetta_vision_catalog.py
+src/harvester/v60/sam_minimap_sieve.py
+src/harvester/v60/shadow_difference_refiner.py
+src/harvester/v60/shadow_height_calibrator.py
 src/harvester/v60/store.py
 src/harvester/v60/terrain_method_translation.py
 src/harvester/v60/terrain_models.py

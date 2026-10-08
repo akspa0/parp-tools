@@ -94,25 +94,52 @@ def reconstruct_single_tile(
         normalize_albedo=True,
     )
 
-    # 3. Directional Ridge & Normal Inversion along Sun Vector (270 deg azimuth, 40 deg elevation)
-    azimuth = 4.7124
-    elevation = 0.6981
-    cos_el = np.cos(elevation, dtype=np.float32)
-    sun_dir = np.array([np.cos(azimuth) * cos_el, np.sin(azimuth) * cos_el, np.sin(elevation)], dtype=np.float32)
+    # 3. Water Mask Detection
+    lum = 0.299 * raw_np[..., 0] + 0.587 * raw_np[..., 1] + 0.114 * raw_np[..., 2]
+    water_candidate = (lum > 0.82) & (ndimage.gaussian_filter(lum, 2.0) > 0.80)
+    has_water = float(np.mean(water_candidate)) > 0.08
+    clean_shadow = stripped_shadow.copy()
+    if has_water:
+        clean_shadow[water_candidate] = 0.0
 
-    diff_from_mean = stripped_shadow - np.mean(stripped_shadow)
-    dz_dx = -diff_from_mean * sun_dir[0] * 2.5
-    dz_dy = -diff_from_mean * sun_dir[1] * 2.5
+    # 4. 2D Isotropic Poisson Height Integration
+    az_deg = 140.0 if has_water else 225.0
+    rad = np.radians(az_deg)
+    lx = float(np.cos(rad))
+    ly = float(np.sin(rad))
+
+    H, W = 256, 256
+    u = np.fft.fftfreq(W) * 2.0 * np.pi
+    v = np.fft.fftfreq(H) * 2.0 * np.pi
+    U, V = np.meshgrid(u, v)
+
+    k_par = U * lx + V * ly
+    k2 = U**2 + V**2
+
+    # Isotropic Poisson formulation: Z = (1j * k_par * S) / (k2 + lambda)
+    lam = 0.025
+    S = np.fft.fft2(clean_shadow)
+    Z_freq = (1j * k_par * S) / (k2 + lam)
+    Z_freq[0, 0] = 0.0
+    height_map = np.fft.ifft2(Z_freq).real.astype(np.float32)
+
+    # Water conditioning & sea-level clamping
+    if has_water:
+        land_bool = ~water_candidate
+        height_map[water_candidate] = 0.0
+        if np.any(land_bool):
+            height_map[land_bool] -= np.percentile(height_map[land_bool], 1)
+            height_map = np.maximum(height_map, 0.0)
+            height_map[water_candidate] = 0.0
+
+    # Recover surface normals from height field
+    dz_dy, dz_dx = np.gradient(height_map)
     recovered_normals = np.zeros((256, 256, 3), dtype=np.float32)
     recovered_normals[..., 0] = -dz_dx
     recovered_normals[..., 1] = -dz_dy
     recovered_normals[..., 2] = 1.0
     norm_lens = np.linalg.norm(recovered_normals, axis=-1, keepdims=True)
     recovered_normals /= np.maximum(norm_lens, 1e-6)
-
-    # 4. Height Recovery via Frankot-Chellappa Fourier Integration
-    height_map = reconstruct_height_from_normals(recovered_normals, apply_window=False)
-    height_map = height_map.astype(np.float32)
 
     # 5. Discrete Fractal Brush Fitting
     stamps, _ = brush_fitter.fit_stamps(height_map, max_stamps=max_stamps)

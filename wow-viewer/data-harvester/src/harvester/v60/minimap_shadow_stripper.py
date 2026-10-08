@@ -121,8 +121,16 @@ class MinimapShadowStripper:
         minimap_rgb: np.ndarray,
         object_mask: np.ndarray,
         normalize_albedo: bool = True,
+        alpha_mask: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, float]:
         """Strip albedo and inpaint masked regions.
+
+        Parameters:
+            minimap_rgb: RGB minimap image array in [0, 1] or [0, 255].
+            object_mask: Binary mask of rooftops, doodads, and buildings to inpaint.
+            normalize_albedo: Whether to divide out base texture albedo.
+            alpha_mask: Optional texture splat alpha map (from _tex0.adt MCAL/MCLY). When provided,
+                isolates genuine terrain shadows by decoupling texture splat boundaries.
 
         Returns:
             (stripped_shadow, energy_attenuation_ratio)
@@ -143,10 +151,26 @@ class MinimapShadowStripper:
 
         # 2. Diffuse albedo normalization
         if normalize_albedo:
-            # Low-pass filter to estimate smooth baseline albedo floor
-            baseline_albedo = ndimage.gaussian_filter(luma, sigma=4.0)
-            albedo_floor = np.maximum(baseline_albedo, 0.15)
-            shadow_candidate = np.clip(luma / albedo_floor, 0.0, 1.0)
+            if alpha_mask is not None and np.any(alpha_mask > 1e-4):
+                # Alpha mask encodes texture splat blending boundaries
+                # Fit linear albedo model against alpha mask to isolate pure terrain shadow
+                a_flat = alpha_mask.flatten()
+                l_flat = luma.flatten()
+                var_a = float(np.var(a_flat))
+                if var_a > 1e-4:
+                    p = np.polyfit(a_flat, l_flat, 1)
+                    albedo_floor = np.maximum(p[0] * alpha_mask + p[1], 0.15)
+                else:
+                    baseline_albedo = ndimage.gaussian_filter(luma, sigma=4.0)
+                    albedo_floor = np.maximum(baseline_albedo, 0.15)
+                shadow_candidate = np.clip(luma / albedo_floor, 0.0, 1.5)
+                s_min = float(np.min(shadow_candidate))
+                s_max = float(np.max(shadow_candidate))
+                shadow_candidate = (shadow_candidate - s_min) / max(1e-5, s_max - s_min)
+            else:
+                baseline_albedo = ndimage.gaussian_filter(luma, sigma=4.0)
+                albedo_floor = np.maximum(baseline_albedo, 0.15)
+                shadow_candidate = np.clip(luma / albedo_floor, 0.0, 1.0)
         else:
             shadow_candidate = luma
 

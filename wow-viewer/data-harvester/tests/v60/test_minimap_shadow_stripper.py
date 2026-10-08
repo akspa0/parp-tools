@@ -62,3 +62,35 @@ def test_shadow_stripper_energy_attenuation_ac004():
     # AC-004 requires >= 90% attenuation (0.90) of object high-frequency contrast
     assert attenuation >= 0.90, f"Expected >= 90% attenuation, got {attenuation * 100:.2f}%"
     assert cleaned_shadow.shape == (h, w)
+
+
+def test_shadow_stripper_with_alpha_mask_albedo_decoupling():
+    """Verify that alpha mask decoupled albedo normalizer isolates clean shadow."""
+    h, w = 64, 64
+    # Ground truth shadow signal: smooth diagonal gradient
+    y_coords, x_coords = np.mgrid[0:h, 0:w]
+    true_shadow = ((x_coords + y_coords) / (h + w)).astype(np.float32)
+
+    # Texture splat alpha mask: patch of dark dirt in quadrant
+    alpha_mask = np.zeros((h, w), dtype=np.float32)
+    alpha_mask[10:40, 10:40] = 0.8
+
+    # Albedo modulated by alpha mask: dirt has 0.5 reflectance, grass has 0.9
+    albedo = 0.9 - 0.4 * alpha_mask
+
+    # Composite minimap luminance: albedo * shadow
+    composite = albedo * true_shadow
+    mask = np.zeros((h, w), dtype=bool)
+
+    stripper = MinimapShadowStripper(inpaint_scales=2, iterations=10)
+    cleaned, _ = stripper.strip_and_inpaint(
+        composite,
+        mask,
+        normalize_albedo=True,
+        alpha_mask=alpha_mask,
+    )
+
+    # Cleaned shadow should correlate strongly with true shadow, not with alpha mask
+    c_shadow = float(np.corrcoef(cleaned.flatten(), true_shadow.flatten())[0, 1])
+    assert c_shadow >= 0.85, f"Expected strong correlation with true shadow, got {c_shadow:.4f}"
+

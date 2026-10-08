@@ -25,15 +25,21 @@ def export_obj_mesh(
     obj_path: Path,
     tile_size_yards: float = 533.333,
     height_scale: float = 40.0,
+    is_world_yards: bool = False,
+    placements: Optional[List[Any]] = None,
+    export_building_boxes: bool = False,
 ) -> None:
-    """Export heightmap grid (H, W) to textured Wavefront OBJ + MTL.
+    """Export heightmap grid (H, W) to textured Wavefront OBJ + MTL with optional 3D building bounding boxes.
 
     Parameters:
         height: 2D array of elevation values (e.g. 256x256 or 257x257).
         texture_path: Path to texture image file referenced by the MTL.
         obj_path: Output path for the .obj file.
         tile_size_yards: Lateral footprint size in yards (default 533.333 yards = 1 ADT tile).
-        height_scale: Scaling factor applied to normalized heights in meters/yards.
+        height_scale: Scaling factor applied to normalized heights when is_world_yards is False.
+        is_world_yards: If True, uses height array directly as world Z elevation in yards.
+        placements: Optional list of WmoPlacement / M2Placement objects.
+        export_building_boxes: If True, appends 3D collision bounding boxes for placed buildings.
     """
     h, w = height.shape
     rows = h - 1
@@ -41,10 +47,13 @@ def export_obj_mesh(
     mtl_name = obj_path.stem + ".mtl"
     mtl_path = obj_path.with_suffix(".mtl")
 
-    h_min = float(np.min(height))
-    h_max = float(np.max(height))
-    h_span = max(1e-5, h_max - h_min)
-    h_norm = ((height - h_min) / h_span) * height_scale
+    if is_world_yards:
+        h_world = height.astype(np.float32)
+    else:
+        h_min = float(np.min(height))
+        h_max = float(np.max(height))
+        h_span = max(1e-5, h_max - h_min)
+        h_world = ((height - h_min) / h_span) * height_scale
 
     # Write MTL
     with mtl_path.open("w", encoding="utf-8") as f:
@@ -53,10 +62,16 @@ def export_obj_mesh(
         f.write("Kd 1.0 1.0 1.0\n")
         f.write("Ks 0.05 0.05 0.05\n")
         f.write(f"map_Kd {texture_path.name}\n")
+        if export_building_boxes and placements:
+            f.write("\nnewmtl building_bounds\n")
+            f.write("Ka 1.0 0.2 0.2\n")
+            f.write("Kd 1.0 0.2 0.2\n")
+            f.write("d 0.7\n")
 
     # Write OBJ
     with obj_path.open("w", encoding="utf-8") as f:
         f.write(f"mtllib {mtl_name}\n")
+        f.write("o Terrain\n")
         f.write("usemtl terrain\n")
 
         # Vertices (WoW coordinates: X East, Y North, Z Up)
@@ -64,7 +79,7 @@ def export_obj_mesh(
             for x in range(w):
                 wx = (x / cols) * tile_size_yards
                 wy = (y / rows) * tile_size_yards
-                wz = float(h_norm[y, x])
+                wz = float(h_world[y, x])
                 f.write(f"v {wx:.3f} {wy:.3f} {wz:.3f}\n")
 
         # Texture coordinates (glTF/OBJ UV: U in [0, 1], V in [0, 1])
@@ -89,6 +104,46 @@ def export_obj_mesh(
                 f.write(f"f {v1}/{v1}/{v1} {v2}/{v2}/{v2} {v3}/{v3}/{v3}\n")
                 f.write(f"f {v1}/{v1}/{v1} {v3}/{v3}/{v3} {v4}/{v4}/{v4}\n")
 
+        # Placed building 3D bounding boxes (opt-in only)
+        if export_building_boxes and placements:
+            v_offset = h * w
+            f.write("\no Buildings\n")
+            f.write("usemtl building_bounds\n")
+            for idx, p in enumerate(placements):
+                px_min, py_min, px_max, py_max = getattr(p, "pixel_box", (0, 0, 0, 0))
+                if px_max <= px_min or py_max <= py_min:
+                    continue
+                bx0 = (px_min / 256.0) * tile_size_yards
+                bx1 = (px_max / 256.0) * tile_size_yards
+                by0 = (py_min / 256.0) * tile_size_yards
+                by1 = (py_max / 256.0) * tile_size_yards
+
+                b_name = getattr(p, "name", f"Building_{idx}")
+                b_z = getattr(p, "pos", (0, 0, 0))[2]
+                bz0 = float(b_z) if b_z != 0 else float(np.mean(h_world))
+                bz1 = bz0 + 15.0  # Height of structure box
+
+                # 8 vertices of box
+                corners = [
+                    (bx0, by0, bz0), (bx1, by0, bz0), (bx1, by1, bz0), (bx0, by1, bz0),
+                    (bx0, by0, bz1), (bx1, by0, bz1), (bx1, by1, bz1), (bx0, by1, bz1),
+                ]
+                for cx, cy, cz in corners:
+                    f.write(f"v {cx:.3f} {cy:.3f} {cz:.3f}\n")
+
+                # 6 quad faces (12 triangles)
+                # Bottom: 1, 2, 3, 4 | Top: 5, 6, 7, 8 | Sides
+                b_base = v_offset + 1
+                box_faces = [
+                    (1, 2, 3, 4), (5, 8, 7, 6), (1, 5, 6, 2),
+                    (2, 6, 7, 3), (3, 7, 8, 4), (4, 8, 5, 1)
+                ]
+                for f1, f2, f3, f4 in box_faces:
+                    i1, i2, i3, i4 = b_base + f1 - 1, b_base + f2 - 1, b_base + f3 - 1, b_base + f4 - 1
+                    f.write(f"f {i1} {i2} {i3}\n")
+                    f.write(f"f {i1} {i3} {i4}\n")
+                v_offset += 8
+
     logger.info("Exported OBJ mesh to %s (vertices: %d, faces: %d)", obj_path, h * w, rows * cols * 2)
 
 
@@ -98,6 +153,7 @@ def export_glb_mesh(
     glb_path: Path,
     tile_size_yards: float = 533.333,
     height_scale: float = 40.0,
+    is_world_yards: bool = False,
 ) -> None:
     """Export heightmap grid (H, W) to standalone binary glTF 2.0 (.glb) with embedded texture.
 
@@ -108,22 +164,26 @@ def export_glb_mesh(
         texture: PIL Image, NumPy array (H, W, 3), or Path to image.
         glb_path: Output path for the .glb file.
         tile_size_yards: Lateral footprint size in yards (default 533.333).
-        height_scale: Elevation amplitude scaling factor.
+        height_scale: Elevation amplitude scaling factor when is_world_yards is False.
+        is_world_yards: If True, uses height array directly as world elevation in yards.
     """
     h, w = height.shape
     rows = h - 1
     cols = w - 1
 
-    h_min = float(np.min(height))
-    h_max = float(np.max(height))
-    h_span = max(1e-5, h_max - h_min)
-    h_norm = ((height - h_min) / h_span) * height_scale
+    if is_world_yards:
+        h_world = height.astype(np.float32)
+    else:
+        h_min = float(np.min(height))
+        h_max = float(np.max(height))
+        h_span = max(1e-5, h_max - h_min)
+        h_world = ((height - h_min) / h_span) * height_scale
 
     # Coordinates: glTF convention is X Right, Y Up (elevation), Z Forward (South)
     xs = np.linspace(0, tile_size_yards, w, dtype=np.float32)
     zs = np.linspace(0, tile_size_yards, h, dtype=np.float32)
     xx, zz = np.meshgrid(xs, zs)
-    yy = h_norm.astype(np.float32)
+    yy = h_world.astype(np.float32)
 
     positions = np.stack([xx, yy, zz], axis=-1).reshape(-1, 3).astype(np.float32)
 
