@@ -1,5 +1,13 @@
 """parp-tools ComfyUI Custom Node Extension Package."""
 
+import sys
+from pathlib import Path
+
+# Automatically inject data-harvester/src into sys.path when loaded inside ComfyUI
+_src_dir = Path(__file__).resolve().parent.parent / "src"
+if _src_dir.is_dir() and str(_src_dir) not in sys.path:
+    sys.path.insert(0, str(_src_dir))
+
 from .nodes import (
     WoW_AdtLoader,
     WoW_HardZCalibrator,
