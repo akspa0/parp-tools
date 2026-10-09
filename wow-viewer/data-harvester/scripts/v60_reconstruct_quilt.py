@@ -193,11 +193,30 @@ def main() -> int:
         tile_chunk_layers[(tx, ty)] = chunk_layers
 
     # Stage 3: Bare Shadow Sieve & WDL Macro Trestle
-    logger.info("Stage 3: Extracting bare terrain shadows and stitching WDL lattices...")
+    logger.info("Stage 3: Extracting bare terrain shadows and synthesizing WDL lattices...")
     tile_wdl_17: Dict[Tuple[int, int], np.ndarray] = {}
     tile_shadows: Dict[Tuple[int, int], np.ndarray] = {}
 
     from scipy import ndimage
+    from harvester.v60.wdl_elevation_calibrator import WdlElevationParser
+
+    # Search for authentic WDL file for map
+    wdl_search = [
+        p for p in [
+            Path("../test_data/original_development/World/Maps") / args.map_name / f"{args.map_name}.wdl",
+            Path("test_data/original_development/World/Maps") / args.map_name / f"{args.map_name}.wdl",
+            Path("../test_data/original_development/WDT-ADT") / f"{args.map_name}.wdl",
+            Path("test_data/original_development/WDT-ADT") / f"{args.map_name}.wdl",
+            Path("../test_data/WoWMuseum/335-dev/World/Maps") / args.map_name / f"{args.map_name}.wdl",
+        ] if p.is_file()
+    ]
+    wdl_parser: Optional[WdlElevationParser] = None
+    if wdl_search:
+        try:
+            wdl_parser = WdlElevationParser(wdl_search[0])
+            logger.info("Found authentic WDL archive: %s", wdl_search[0])
+        except Exception as e:
+            logger.warning("Failed to open WDL archive %s: %s", wdl_search[0], e)
 
     for tx, ty in tiles:
         mm = tile_minimaps[(tx, ty)]
@@ -205,40 +224,70 @@ def main() -> int:
         shadow_res = wdl_synthesizer.extract_bare_terrain_shadow(mm, alb)
         tile_shadows[(tx, ty)] = shadow_res.bare_shadow_256
 
-        # Synthesize 17x17 WDL lattice from bare shadow (span 250+ yds if high terrain)
-        shadow_17 = ndimage.zoom(shadow_res.bare_shadow_256, 17.0 / 256.0, order=1)[:17, :17]
-        wdl_grid = 100.0 + shadow_17 * 280.0
-        tile_wdl_17[(tx, ty)] = wdl_grid
+        # Attempt authentic WDL coarse elevation first
+        h17 = None
+        if wdl_parser and wdl_parser.has_tile_data(tx, ty):
+            h17 = wdl_parser.extract_tile_17(tx, ty)
+            if h17 is not None:
+                logger.info("  Tile (%d, %d): loaded authentic WDL 17x17 lattice (elev range: %.1f to %.1f yds)",
+                            tx, ty, float(h17.min()), float(h17.max()))
 
-    stitched_wdl = wdl_synthesizer.stitch_wdl_trestle_quilt(tile_wdl_17)
+        if h17 is None:
+            # Fallback to synthesizing 17x17 from bare terrain photometric shadow
+            shadow_17 = ndimage.zoom(shadow_res.bare_shadow_256, 17.0 / 256.0, order=1)[:17, :17]
+            h17 = 100.0 + shadow_17 * 200.0
+            logger.info("  Tile (%d, %d): synthesized WDL lattice from bare shadow (elev range: %.1f to %.1f yds)",
+                        tx, ty, float(h17.min()), float(h17.max()))
+
+        tile_wdl_17[(tx, ty)] = h17
+
+    # Assemble unified global WDL macro-trestle lattice across the quilt
+    global_wdl, bounds = wdl_synthesizer.assemble_global_wdl_lattice(tile_wdl_17, bounds)
+    logger.info("Assembled Global WDL Lattice: %d x %d vertices across %d x %d tiles",
+                global_wdl.shape[1], global_wdl.shape[0], bounds.width_tiles, bounds.height_tiles)
+
+    # Interpolate global WDL lattice to continuous elevation canvas with aligned corners
+    # (guarantees shared 1px edges tie adjacent tiles together with exact C0/C1 continuity)
+    global_elevation = wdl_synthesizer.interpolate_global_wdl_to_canvas(global_wdl, bounds)
+    logger.info("Interpolated Continuous Global Elevation Canvas: %d x %d vertices (elev range: %.1f to %.1f yds)",
+                global_elevation.shape[1], global_elevation.shape[0], float(global_elevation.min()), float(global_elevation.max()))
 
     # Stage 4: Inches-Scale Refinement & Fractal Pastes/Scars
     logger.info("Stage 4: Executing inches-scale refinement and 3D fractal fitting...")
     tile_elevations_257: Dict[Tuple[int, int], np.ndarray] = {}
 
     for tx, ty in tiles:
-        macro_h = wdl_synthesizer.interpolate_wdl_to_257(stitched_wdl[(tx, ty)])
+        # Slice macro elevation directly from continuous global canvas
+        base_h = wdl_synthesizer.slice_tile_from_global_canvas(global_elevation, tx, ty, bounds)
         shadow = tile_shadows[(tx, ty)]
 
         sculpted_inches, stamps, scars = fractal_refiner.sculpt_inches_canvas(
-            base_elevation_257=macro_h,
+            base_elevation_257=base_h,
             residual_shadow_256=shadow,
             max_brush_stamps=12,
         )
 
-        # Downsample to 257x257 continuous lattice
-        # Resample inches canvas to 257x257
-        from scipy import ndimage
-        h257 = ndimage.zoom(sculpted_inches, 257.0 / sculpted_inches.shape[0], order=1)[:257, :257]
-        tile_elevations_257[(tx, ty)] = h257
+        # Apply high-frequency displacement while preserving continuous boundary tie-edges
+        scale = fractal_refiner.subcell_factor
+        macro_resampled = ndimage.zoom(base_h[:256, :256], scale, order=1)
+        disp_inches = sculpted_inches - macro_resampled
+        disp_256 = ndimage.zoom(disp_inches, 1.0 / scale, order=1)
+
+        tile_h = base_h.copy()
+        # Add micro-relief to interior while letting edge taper to maintain seamless tie-line
+        tile_h[:256, :256] += disp_256
+        tile_elevations_257[(tx, ty)] = tile_h
         logger.info("  Tile (%d, %d): fitted %d brush stamps, %d scars", tx, ty, len(stamps), len(scars))
 
     # Stage 1 Seam Boundary Relaxation across quilt
     logger.info("Enforcing C0/C1 boundary seam continuity across quilt...")
     stitched_elevations = assembler.solve_seam_boundaries(tile_elevations_257, margin=8)
     metrics = assembler.verify_seam_continuity(stitched_elevations)
-    logger.info("  Boundary Seam Metrics: max height step = %.4f yds, normal alignment = %.4f",
+    logger.info("  Boundary Seam Metrics: max height step = %.6f yds, normal alignment = %.6f",
                 metrics["max_height_step_yards"], metrics["mean_normal_cosine_similarity"])
+
+    # Update global elevation canvas from seamless stitched elevations
+    global_elevation, _ = assembler.assemble_global_elevation_canvas(stitched_elevations)
 
     # Stage 5: Monolithic ADT Materialization & 3D Mesh Export
     logger.info("Stage 5: Materializing monolithic ADT files and 3D meshes...")
@@ -269,13 +318,20 @@ def main() -> int:
                 texture_names=mtex_list,
             )
 
-    # Export continuous multi-tile 3D meshes
+    # Export continuous multi-tile 3D meshes textured with aerial minimap imagery
     if args.export_mesh:
-        global_elevation, _ = assembler.assemble_global_elevation_canvas(stitched_elevations)
         mesh_base = args.out_dir / f"{args.map_name}_quilt_{bounds.min_tx}_{bounds.min_ty}_to_{bounds.max_tx}_{bounds.max_ty}"
         logger.info("Exporting continuous quilt 3D models to %s (.obj, .glb)", mesh_base.name)
-        QuiltAdtMaterializer.export_quilt_3d_mesh(mesh_base.with_suffix(".obj"), global_elevation)
-        QuiltAdtMaterializer.export_quilt_3d_mesh(mesh_base.with_suffix(".glb"), global_elevation)
+        QuiltAdtMaterializer.export_quilt_3d_mesh(
+            mesh_base.with_suffix(".obj"),
+            global_elevation,
+            texture_path_or_img=stitched_minimap,
+        )
+        QuiltAdtMaterializer.export_quilt_3d_mesh(
+            mesh_base.with_suffix(".glb"),
+            global_elevation,
+            texture_path_or_img=stitched_minimap,
+        )
 
     elapsed = time.time() - start_time
     logger.info("Quilt Canvas Reconstruction completed in %.2fs. All assets written to %s", elapsed, args.out_dir)

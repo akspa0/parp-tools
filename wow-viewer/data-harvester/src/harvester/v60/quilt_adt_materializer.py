@@ -232,7 +232,7 @@ class QuiltAdtMaterializer:
     def export_quilt_3d_mesh(
         out_mesh_path: Path,
         global_elevation_canvas: np.ndarray,
-        texture_path_or_img: Optional[Path] = None,
+        texture_path_or_img: Optional[Union[Path, Image.Image, np.ndarray, str]] = None,
         bounds_origin_yards: Tuple[float, float] = (0.0, 0.0),
         yard_step: float = TILE_WORLD_SIZE / 256.0,
     ) -> None:
@@ -240,25 +240,45 @@ class QuiltAdtMaterializer:
         from PIL import Image
 
         ext = out_mesh_path.suffix.lower()
-        tex_path = texture_path_or_img
-        if tex_path is None or not Path(tex_path).is_file():
+        tex_path = out_mesh_path.with_name(f"{out_mesh_path.stem}_tex.png")
+
+        if isinstance(texture_path_or_img, (str, Path)) and Path(texture_path_or_img).is_file():
+            tex_path = Path(texture_path_or_img)
+        elif isinstance(texture_path_or_img, Image.Image):
+            texture_path_or_img.save(tex_path)
+        elif isinstance(texture_path_or_img, np.ndarray):
+            arr = texture_path_or_img
+            if arr.dtype != np.uint8:
+                arr = (np.clip(arr, 0.0, 1.0) * 255.0).astype(np.uint8)
+            if arr.ndim == 2:
+                arr = np.repeat(arr[..., None], 3, axis=-1)
+            Image.fromarray(arr).save(tex_path)
+        elif not tex_path.is_file():
             # Create neutral terrain texture PNG next to mesh
-            tex_path = out_mesh_path.with_name(f"{out_mesh_path.stem}_tex.png")
             tex_img = Image.new("RGB", (64, 64), (100, 130, 80))
             tex_img.save(tex_path)
+
+        h_grid, w_grid = global_elevation_canvas.shape
+        width_yards = ((w_grid - 1) / 256.0) * TILE_WORLD_SIZE
+        height_yards = ((h_grid - 1) / 256.0) * TILE_WORLD_SIZE
 
         if ext == ".obj":
             export_obj_mesh(
                 height=global_elevation_canvas,
                 texture_path=tex_path,
                 obj_path=out_mesh_path,
+                width_yards=width_yards,
+                height_yards=height_yards,
                 is_world_yards=True,
+                y_up=True,
             )
         elif ext == ".glb":
             export_glb_mesh(
                 height=global_elevation_canvas,
                 texture=tex_path,
                 glb_path=out_mesh_path,
+                width_yards=width_yards,
+                height_yards=height_yards,
                 is_world_yards=True,
             )
         else:
@@ -266,11 +286,16 @@ class QuiltAdtMaterializer:
                 height=global_elevation_canvas,
                 texture_path=tex_path,
                 obj_path=out_mesh_path.with_suffix(".obj"),
+                width_yards=width_yards,
+                height_yards=height_yards,
                 is_world_yards=True,
+                y_up=True,
             )
             export_glb_mesh(
                 height=global_elevation_canvas,
                 texture=tex_path,
                 glb_path=out_mesh_path.with_suffix(".glb"),
+                width_yards=width_yards,
+                height_yards=height_yards,
                 is_world_yards=True,
             )

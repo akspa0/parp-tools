@@ -70,3 +70,36 @@ def test_wdl_upsampling_to_257():
     assert elev_257.shape == (257, 257)
     # Peak at center (128, 128)
     assert elev_257[128, 128] >= 350.0
+
+
+def test_global_wdl_canvas_stitching_and_slicing():
+    """Verify assembling global WDL lattice and interpolating to continuous canvas guarantees exact 1px shared edge tie-line."""
+    synthesizer = WdlQuiltSynthesizer()
+
+    # 1x2 tile quilt (e.g. (16, 32) and (16, 33))
+    wdl_top = np.full((17, 17), 150.0, dtype=np.float32)
+    wdl_top[16, :] = 200.0  # shared south edge
+    wdl_bottom = np.full((17, 17), 250.0, dtype=np.float32)
+    wdl_bottom[0, :] = 200.0  # shared north edge
+
+    lattices = {(16, 32): wdl_top, (16, 33): wdl_bottom}
+    global_lattice, bounds = synthesizer.assemble_global_wdl_lattice(lattices)
+
+    assert global_lattice.shape == (33, 17)
+    assert np.allclose(global_lattice[16, :], 200.0)
+
+    # Interpolate to continuous (513, 257) canvas
+    canvas = synthesizer.interpolate_global_wdl_to_canvas(global_lattice, bounds)
+    assert canvas.shape == (513, 257)
+
+    # Slice tile heightmaps
+    top_257 = synthesizer.slice_tile_from_global_canvas(canvas, 16, 32, bounds)
+    bottom_257 = synthesizer.slice_tile_from_global_canvas(canvas, 16, 33, bounds)
+
+    assert top_257.shape == (257, 257)
+    assert bottom_257.shape == (257, 257)
+
+    # The 1px edge (row 256 of top and row 0 of bottom) must be BIT-FOR-BIT IDENTICAL
+    assert np.array_equal(top_257[256, :], bottom_257[0, :])
+    # The seam height matches the expected shared trestle elevation
+    assert np.allclose(top_257[256, :], 200.0, atol=1e-4)

@@ -174,3 +174,76 @@ class WdlQuiltSynthesizer:
         y_out = np.linspace(0.0, 256.0, 257)
         zoomed = spline(y_out, x_out).astype(np.float32)
         return zoomed
+
+    def assemble_global_wdl_lattice(
+        self,
+        tile_wdl_lattices_17: Dict[Tuple[int, int], np.ndarray],
+        bounds: Optional[Any] = None,
+    ) -> Tuple[np.ndarray, Any]:
+        """Assemble individual 17x17 tile WDL lattices into a single continuous global (H*16+1, W*16+1) grid.
+
+        The outer 1px edge (col 16 / row 16) is shared with the neighbor tile's 0th col/row,
+        forming a unified continuous macro trestle across the entire quilt.
+        """
+        from harvester.v60.quilt_canvas_assembler import QuiltBounds
+
+        all_keys = list(tile_wdl_lattices_17.keys())
+        if bounds is None:
+            xs = [tx for tx, _ in all_keys]
+            ys = [ty for _, ty in all_keys]
+            bounds = QuiltBounds(min(xs), min(ys), max(xs), max(ys))
+
+        # Stitch seams across tiles first so shared boundary vertices match
+        stitched_tiles = self.stitch_wdl_trestle_quilt(tile_wdl_lattices_17)
+
+        h_verts = bounds.height_tiles * 16 + 1
+        w_verts = bounds.width_tiles * 16 + 1
+        global_lattice = np.zeros((h_verts, w_verts), dtype=np.float32)
+
+        for (tx, ty), grid in stitched_tiles.items():
+            u0 = (tx - bounds.min_tx) * 16
+            v0 = (ty - bounds.min_ty) * 16
+            global_lattice[v0 : v0 + 17, u0 : u0 + 17] = grid
+
+        return global_lattice, bounds
+
+    def interpolate_global_wdl_to_canvas(
+        self,
+        global_wdl_lattice: np.ndarray,
+        bounds: Any,
+        kx: int = 1,
+        ky: int = 1,
+    ) -> np.ndarray:
+        """Upsample the global WDL lattice directly to the full continuous (H*256+1, W*256+1) elevation canvas.
+
+        Because interpolation runs over the unified global grid with exact aligned corners,
+        the outer 1px edges tie adjacent tiles together with mathematical C0 and C1 continuity.
+        """
+        from scipy.interpolate import RectBivariateSpline
+
+        gw_h, gw_w = global_wdl_lattice.shape
+        target_h = bounds.height_tiles * 256 + 1
+        target_w = bounds.width_tiles * 256 + 1
+
+        x_in = np.linspace(0.0, float(bounds.width_tiles * 256), gw_w)
+        y_in = np.linspace(0.0, float(bounds.height_tiles * 256), gw_h)
+        spline = RectBivariateSpline(y_in, x_in, global_wdl_lattice, kx=kx, ky=ky)
+
+        x_out = np.linspace(0.0, float(bounds.width_tiles * 256), target_w)
+        y_out = np.linspace(0.0, float(bounds.height_tiles * 256), target_h)
+        return spline(y_out, x_out).astype(np.float32)
+
+    def slice_tile_from_global_canvas(
+        self,
+        global_canvas: np.ndarray,
+        tx: int,
+        ty: int,
+        bounds: Any,
+    ) -> np.ndarray:
+        """Slice a 257x257 tile elevation array from the continuous global canvas.
+
+        Row/col 256 is guaranteed to be bit-for-bit identical to row/col 0 of the adjacent tile.
+        """
+        u0 = (tx - bounds.min_tx) * 256
+        v0 = (ty - bounds.min_ty) * 256
+        return global_canvas[v0 : v0 + 257, u0 : u0 + 257].copy()

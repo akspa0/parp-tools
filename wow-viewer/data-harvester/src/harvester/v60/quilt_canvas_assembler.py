@@ -125,6 +125,24 @@ class QuiltCanvasAssembler:
 
         return canvas, bounds
 
+    def stitch_2d_field(
+        self,
+        tile_fields_256: Dict[Tuple[int, int], np.ndarray],
+        fill_val: float = 0.0,
+    ) -> Tuple[np.ndarray, QuiltBounds]:
+        """Stitch 2D (256, 256) float fields (e.g. bare shadows, albedos) into a continuous canvas."""
+        bounds = self.compute_bounds()
+        canvas = np.full(
+            (bounds.pixel_height, bounds.pixel_width),
+            fill_val,
+            dtype=np.float32,
+        )
+        for (tx, ty), crop in tile_fields_256.items():
+            u0 = (tx - bounds.min_tx) * 256
+            v0 = (ty - bounds.min_ty) * 256
+            canvas[v0 : v0 + 256, u0 : u0 + 256] = crop[:256, :256]
+        return canvas, bounds
+
     def solve_seam_boundaries(
         self,
         tile_elevations_257: Optional[Dict[Tuple[int, int], np.ndarray]] = None,
