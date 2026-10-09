@@ -52,6 +52,14 @@ def multiscale_laplacian_inpaint(
     if not np.any(m):
         return img
 
+    if img.ndim == 3:
+        out = np.zeros_like(img)
+        for c in range(img.shape[2]):
+            out[..., c] = multiscale_laplacian_inpaint(
+                img[..., c], mask, num_scales=num_scales, iterations_per_scale=iterations_per_scale
+            )
+        return out
+
     h, w = img.shape[:2]
 
     # Build image and mask pyramid

@@ -66,13 +66,10 @@ class BuildingFoundationCarver:
 
             if np.any(perimeter):
                 perimeter_heights = out_height[perimeter]
-                # Foundation elevation is median perimeter height or authored placement Z
-                if abs(wmo.pos[2]) > 0.1:
-                    foundation_z = float(wmo.pos[2])
-                else:
-                    foundation_z = float(np.median(perimeter_heights))
+                # Foundation elevation is always the median average height of the surrounding terrain in the area
+                foundation_z = float(np.median(perimeter_heights))
             else:
-                foundation_z = float(wmo.pos[2]) if abs(wmo.pos[2]) > 0.1 else float(np.mean(out_height[building_footprint]))
+                foundation_z = float(np.mean(out_height[building_footprint]))
 
             plateaus.append((wmo.name, foundation_z))
 
@@ -98,3 +95,49 @@ class BuildingFoundationCarver:
             foundation_mask=total_foundation_mask,
             plateau_elevations=plateaus,
         )
+
+    def carve_masked_objects(
+        self,
+        terrain_height_257: np.ndarray,
+        object_mask_257: np.ndarray,
+    ) -> np.ndarray:
+        """Carve level foundation plateaus for all masked objects (WMOs, M2s, sieves).
+
+        For each connected component of the object mask, sets the terrain height
+        to the median average height of surrounding terrain in the local area,
+        with Hermite smoothstep perimeter blending.
+        """
+        out_height = terrain_height_257.copy().astype(np.float32)
+        m = (object_mask_257 > 0).astype(bool)
+        if not np.any(m):
+            return out_height
+
+        labeled_mask, num_features = ndimage.label(m)
+        if num_features == 0:
+            return out_height
+
+        # Global terrain median fallback
+        valid_terrain = out_height[~m]
+        global_median = float(np.median(valid_terrain)) if valid_terrain.size > 0 else float(np.median(out_height))
+
+        for feat_idx in range(1, num_features + 1):
+            comp = (labeled_mask == feat_idx)
+            dilated = ndimage.binary_dilation(comp, iterations=max(2, self.blend_margin + 1))
+            perimeter = dilated & (~m)
+
+            if np.any(perimeter):
+                median_z = float(np.median(out_height[perimeter]))
+            else:
+                median_z = global_median
+
+            dist_outside = ndimage.distance_transform_edt(~comp)
+            blend_zone = (dist_outside <= self.blend_margin) & (~m)
+
+            out_height[comp] = median_z
+            if np.any(blend_zone):
+                t = np.clip(dist_outside[blend_zone] / float(self.blend_margin), 0.0, 1.0)
+                smooth_w = t * t * (3.0 - 2.0 * t)
+                natural_z = out_height[blend_zone]
+                out_height[blend_zone] = (1.0 - smooth_w) * median_z + smooth_w * natural_z
+
+        return out_height

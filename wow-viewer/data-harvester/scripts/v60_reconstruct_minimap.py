@@ -46,6 +46,10 @@ from harvester.v60.minimap_shadow_stripper import MinimapShadowStripper
 from harvester.v60.sam_minimap_sieve import SamMinimapSieve
 from harvester.v60.shadow_difference_refiner import extract_ridge_contours
 from harvester.v60.shadow_height_calibrator import ShadowHeightCalibrator
+from harvester.v60.terrain_feature_synthesizer import (
+    compute_surface_normals,
+    synthesize_multiband_terrain,
+)
 from harvester.v60.wdl_elevation_calibrator import (
     WdlElevationCalibrator,
     WdlElevationParser,
@@ -356,8 +360,8 @@ def main() -> int:
     if has_water:
         clean_shadow[water_mask] = 0.0
 
-    # Solar Azimuth: 140 deg for coastal development tiles, 210 deg for inland
-    az_deg = 140.0 if has_water else 210.0
+    # Solar Azimuth: 220 deg matches empirical maximum lighting correlation across WoW minimaps
+    az_deg = 220.0
     rad = np.radians(az_deg)
     lx = float(np.cos(rad))
     ly = float(np.sin(rad))
@@ -466,11 +470,21 @@ def main() -> int:
         with torch.no_grad():
             pred_delta_z, pred_bounds = unet(feat_t)
             delta_z_np = pred_delta_z.numpy()[0]
-
-        calibrated_h = (cur_wdl_257 + delta_z_np).astype(np.float32)
-        if water_mask_257 is not None:
-            calibrated_h[water_mask_257] = 0.0
+        calibrated_h, recovered_normals, synth_metrics = synthesize_multiband_terrain(
+            macro_wdl_257=cur_wdl_257,
+            integrated_sfs_256=integrated_height,
+            ridge_mask_256=ridge_mask,
+            water_mask_257=water_mask_257,
+            neural_residual_257=delta_z_np,
+            object_mask_256=mask,
+            alpha_mask_256=alpha_mask,
+            target_relief_yards=getattr(args, "target_relief_yards", 3.5),
+            ridge_boost_yards=getattr(args, "ridge_boost_yards", 1.5),
+            sfs_sigma_cut=12.0,
+        )
         print(f"  Trestle Macro Anchor: span={np.ptp(cur_wdl_257):.2f} yds [{np.min(cur_wdl_257):.1f} .. {np.max(cur_wdl_257):.1f}]")
+        print(f"  Multiband SfS Relief: span={synth_metrics['relief_ptp']:.2f} yds (scale={synth_metrics['scale_yards']:.1f}x)")
+        print(f"  Ridge Crest Boost:    max={synth_metrics['ridge_max_boost']:.2f} yds")
         print(f"  Neural Residual dZ:   span={np.ptp(delta_z_np):.2f} yds (mean={np.mean(delta_z_np):.2f} yds)")
         print(f"  Final Reconstructed:  span={np.ptp(calibrated_h):.2f} yds [{np.min(calibrated_h):.1f} .. {np.max(calibrated_h):.1f}]")
 
@@ -555,21 +569,44 @@ def main() -> int:
             pearson_r = float(c_matrix[0, 1]) if not np.isnan(c_matrix[0, 1]) else 0.0
             print(f"  [Neural Verification vs GT] MAE: {mae:.2f} yds | RMSE: {rmse:.2f} yds | Pearson r: {pearson_r:.4f}")
     else:
-        print("\n[Stage 5/6] Shadow-to-Height Calibration (Physical Yards)...")
-        calibrator = ShadowHeightCalibrator()
-        calibrated_h, metrics = calibrator.calibrate_height(
-            raw_height=h_257_raw,
-            target_scale=args.height_scale,
-            minimap_rgb=raw_np,
-            stripped_shadow=stripped_shadow,
-            ground_truth_257=gt_height_257,
-            water_mask_257=water_mask_257,
-        )
-        if water_mask_257 is not None:
-            calibrated_h[water_mask_257] = 0.0
-        print(f"  Calibrated Vertical Relief: {metrics.scale_yards:.2f} yards (Base Z: {metrics.base_elevation:.2f} yards).")
+        if wdl_h_257 is not None:
+            print("\n[Stage 5/6] Multi-Band Terrain Synthesis (Macro WDL + SfS Relief + Ridge Spines)...")
+            calibrated_h, recovered_normals, synth_metrics = synthesize_multiband_terrain(
+                macro_wdl_257=wdl_h_257,
+                integrated_sfs_256=integrated_height,
+                ridge_mask_256=ridge_mask,
+                water_mask_257=water_mask_257,
+                object_mask_256=mask,
+                alpha_mask_256=alpha_mask,
+                target_relief_yards=getattr(args, "target_relief_yards", 3.5),
+                ridge_boost_yards=getattr(args, "ridge_boost_yards", 1.5),
+                sfs_sigma_cut=12.0,
+            )
+            print(f"  Trestle Macro Anchor: span={np.ptp(wdl_h_257):.2f} yds [{np.min(wdl_h_257):.1f} .. {np.max(wdl_h_257):.1f}]")
+            print(f"  Multiband SfS Relief: span={synth_metrics['relief_ptp']:.2f} yds (scale={synth_metrics['scale_yards']:.1f}x)")
+            print(f"  Ridge Crest Boost:    max={synth_metrics['ridge_max_boost']:.2f} yds")
+            print(f"  Final Reconstructed:  span={np.ptp(calibrated_h):.2f} yds [{np.min(calibrated_h):.1f} .. {np.max(calibrated_h):.1f}]")
+        else:
+            print("\n[Stage 5/6] Shadow-to-Height Calibration (Physical Yards)...")
+            calibrator = ShadowHeightCalibrator()
+            calibrated_h, metrics = calibrator.calibrate_height(
+                raw_height=h_257_raw,
+                target_scale=args.height_scale,
+                minimap_rgb=raw_np,
+                stripped_shadow=stripped_shadow,
+                ground_truth_257=gt_height_257,
+                water_mask_257=water_mask_257,
+            )
+            if water_mask_257 is not None:
+                calibrated_h[water_mask_257] = 0.0
+            print(f"  Calibrated Vertical Relief: {metrics.scale_yards:.2f} yards (Base Z: {metrics.base_elevation:.2f} yards).")
         if gt_height_257 is not None:
-            print(f"  [Verification vs Ground Truth] MAE: {metrics.mae:.2f} yds | RMSE: {metrics.rmse:.2f} yds | Pearson r: {metrics.pearson_r:.4f} | R^2: {metrics.r2:.4f}")
+            diff = np.abs(calibrated_h - gt_height_257)
+            mae = float(np.mean(diff))
+            rmse = float(np.sqrt(np.mean(diff**2)))
+            c_matrix = np.corrcoef(calibrated_h.flatten(), gt_height_257.flatten())
+            pearson_r = float(c_matrix[0, 1]) if not np.isnan(c_matrix[0, 1]) else 0.0
+            print(f"  [Verification vs Ground Truth] MAE: {mae:.2f} yds | RMSE: {rmse:.2f} yds | Pearson r: {pearson_r:.4f}")
 
     # 8. Building Foundation Plateau Carving
     print("\n[Stage 6/6] Building Foundation Plateau Carving...")

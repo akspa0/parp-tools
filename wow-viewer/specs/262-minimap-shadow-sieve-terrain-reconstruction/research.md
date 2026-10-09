@@ -38,10 +38,10 @@ Official 0.5.3 minimap BLPs are compressed using DXT1 (BC1):
 
 ---
 
-## 2. Archaeological 3D Editor Brushes: WoWEdit Toolchain Realities
+## 2. Archaeological 3D Editor Brushes: World Editor Toolchain Realities
 
 ### 2.1 The Procedural/Fractal Stamp Hypothesis
-In early Warcraft world building (2001–2003 Alpha 0.5.3), terrain relief was sculpted using **procedural and fractal stamp brushes** inside Blizzard's internal world editor (`WoWEdit`):
+In early Warcraft world building (2001–2003 Alpha 0.5.3), terrain relief was sculpted using **procedural and fractal stamp brushes** inside Blizzard's internal world editor:
 - Level designers did not sculpt terrain purely vertex-by-vertex; they used preset fractal displacement stamps (e.g. mountainous ridge, rolling dune, sharp ravine, riverbed depression).
 - Crucially, these brushes applied **coupled operations**:
   1. A vertical height displacement kernel: $\Delta Z(u, v)$ across the chunk's 145 vertices,

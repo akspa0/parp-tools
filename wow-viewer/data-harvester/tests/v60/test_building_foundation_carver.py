@@ -34,13 +34,13 @@ def test_carver_levels_foundation_footprint():
     assert result.carved_height_257.shape == (257, 257)
     assert np.any(result.foundation_mask)
 
-    # Inside footprint, elevation should be level at 25.0
+    # Inside footprint, elevation should be level at median perimeter height
     footprint = result.foundation_mask
     footprint_heights = result.carved_height_257[footprint]
 
     slope_variance = float(np.var(footprint_heights))
     assert slope_variance <= 1e-4, f"Foundation must be flat/level, got variance {slope_variance}"
-    assert np.allclose(footprint_heights, 25.0, atol=1e-3)
+    assert np.allclose(footprint_heights, 48.0, atol=0.5)
 
 
 def test_carver_smooth_perimeter_transition():
@@ -82,3 +82,23 @@ def test_carver_empty_placements():
     assert np.array_equal(result.carved_height_257, terrain)
     assert not np.any(result.foundation_mask)
     assert len(result.plateau_elevations) == 0
+
+
+def test_carve_masked_objects_levels_to_perimeter_median():
+    """Verify carve_masked_objects flattens arbitrary object masks to the local perimeter median."""
+    carver = BuildingFoundationCarver(blend_margin=3)
+    y, x = np.mgrid[0:257, 0:257]
+    terrain = (x * 0.1 + y * 0.1 + 50.0).astype(np.float32)
+
+    # Artificially raise a tower inside the mask
+    mask = np.zeros((257, 257), dtype=bool)
+    mask[80:100, 80:100] = True
+    terrain[mask] += 100.0  # +100 yd tower
+
+    carved = carver.carve_masked_objects(terrain, mask)
+
+    # Footprint should be level at surrounding terrain height (~68 yards)
+    footprint_heights = carved[82:98, 82:98]
+    assert np.var(footprint_heights) < 1e-4
+    assert np.all(footprint_heights < 75.0)
+    assert np.all(footprint_heights > 60.0)

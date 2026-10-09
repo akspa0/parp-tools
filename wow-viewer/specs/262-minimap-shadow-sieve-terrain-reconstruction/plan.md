@@ -96,7 +96,7 @@
   - Saves them as discrete **3D Editor Brushes**: coupled kernels $(\Delta Z(u, v), \alpha_k(u, v))$ with defined spatial metrics (16m, 32m, 64m footprints).
 - **Brush Inversion & Fitting**: `wow-viewer/data-harvester/src/harvester/v60/fractal_brush_fitter.py`:
   - Fits parameterized stamp invocations $(\mathcal{B}_j, \mathbf{p}_i, \sigma_i, \theta_i, A_i)$ to explain recognized fractal residual contours.
-  - Generates discrete mesh sculpting steps and texture splats corresponding to authentic early WoWEdit operations.
+  - Generates discrete mesh sculpting steps and texture splats corresponding to authentic early terrain editor operations.
 
 ### 2.6 Component 6: Terrain Mesh Reconstruction ($\ge 75\%$ Parity)
 - **Model Architecture**: `clean_signal_model.py` / `residual_height_model.py`:

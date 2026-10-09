@@ -33,7 +33,7 @@ The 2021 group tried to fix the development map by hand and got close on some ob
 
 **The downstream goal**: Match PM4 collision/pathfinding objects to real WMO/M2 assets, then place them correctly on the development map. This eliminates the need for expensive model training to match objects to PM4 data — the format itself encodes the answer, if we can read it correctly.
 
-**The ground truth**: Two screenshots from WoWEdit (Data 1.9.0) in "The WoW Diary" by John Staats show what the PM4 data represents:
+**The ground truth**: Two screenshots from the internal world editor (Data 1.9.0) in "The WoW Diary" by John Staats show what the PM4 data represents:
 1. **Outdoor view**: Terrain mesh (gray), wall/barrier edges (red), navigation nodes (blue markers) — the pathfinding collision mesh with graph nodes
 2. **Interior view**: WMO dungeon with floor surfaces, walls, staircase (multi-level), and M2 doodads (candelabras, banner) — MPRL stores doodad placements as collision obstacles
 

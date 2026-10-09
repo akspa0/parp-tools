@@ -76,7 +76,7 @@ public readonly record struct MinimapLightingParameters(
 namespace WowViewer.Core.Maps;
 
 /// <summary>
-/// Discrete 3D editor brush reproducing authentic WoWEdit procedural/fractal stamping operations.
+/// Discrete 3D editor brush reproducing authentic procedural/fractal stamping operations.
 /// </summary>
 public sealed class FractalEditorBrush3D
 {

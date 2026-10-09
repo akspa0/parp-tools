@@ -11,7 +11,7 @@
 Reconstructing 3D terrain heightmaps from 2D minimaps is fundamentally a **residual image modeling problem**:
 1. A minimap tile is a composite rendering where diffuse surface albedo (MCAL splatted texture layers) overlays terrain relief, dynamic time-of-day lighting, cast shadows, doodads (M2 models), buildings (WMO structures), roads, and water bodies, compressed via DXT1/BC1.
 2. When albedo is stripped or normalized, what remains is the **residual image signal**: the pure physical shading, self-shadowing, ridge relief, and micro-topography.
-3. Crucially, the early terrain of World of Warcraft (0.5.3 and early Alpha 2001–2003) was sculpted and painted using **procedural and fractal stamp brushes** inside Blizzard's internal world editor (`WoWEdit`). These brushes were not arbitrary continuous noise: they were discrete, parameterized 3D tools that simultaneously stamped **3D mesh height displacement** ($\Delta Z(u, v)$) and **texture alpha splatting** ($\alpha_k(u, v)$).
+3. Crucially, the early terrain of World of Warcraft (0.5.3 and early Alpha 2001–2003) was sculpted and painted using **procedural and fractal stamp brushes** inside Blizzard's internal world editor. These brushes were not arbitrary continuous noise: they were discrete, parameterized 3D tools that simultaneously stamped **3D mesh height displacement** ($\Delta Z(u, v)$) and **texture alpha splatting** ($\alpha_k(u, v)$).
 4. By discovering, cataloging, and fitting these **literal 3D editor brushes** from residual signals, the reconstruction engine avoids muddy neural blurring, achieving authentic, razor-sharp archaeological relief and exact spatial-texture relationships.
 
 Because our engine already features:
