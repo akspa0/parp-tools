@@ -108,6 +108,7 @@ def main() -> int:
     parser.add_argument("--d1-checkpoint", type=Path, default=Path("checkpoints/d1_best.pt"), help="Model D1 checkpoint")
     parser.add_argument("--wdl-checkpoint", type=Path, default=Path("checkpoints/minimap_to_wdl_best.pt"), help="MinimapToWdlNet checkpoint")
     parser.add_argument("--trestle-checkpoint", type=Path, default=Path("../output/models/trestle_elevation_v1.pt"), help="TrestleElevationUNet checkpoint")
+    parser.add_argument("--v15-checkpoint", type=Path, default=Path("checkpoints/v15_best.pt"), help="V15 ConvNeXt V2 Nano terrain model checkpoint")
     args = parser.parse_args()
 
     # Determine tile list
@@ -223,6 +224,7 @@ def main() -> int:
     # Load neural MinimapToWdlNet model if checkpoint exists
     import torch
     from harvester.v60.minimap_to_wdl_model import MinimapToWdlNet
+    from harvester.v15_model import V15Model
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     wdl_net: Optional[MinimapToWdlNet] = None
@@ -239,6 +241,28 @@ def main() -> int:
         except Exception as e:
             logger.warning("Failed to load MinimapToWdlNet checkpoint %s: %s", args.wdl_checkpoint, e)
 
+    # Load V15 ConvNeXt V2 Nano terrain model if checkpoint exists
+    v15_net: Optional[V15Model] = None
+    v15_candidates = [
+        args.v15_checkpoint,
+        Path("checkpoints/v15_best.pt"),
+        Path("../checkpoints/v15_best.pt"),
+    ]
+    v15_p = next((p for p in v15_candidates if p and p.is_file()), None)
+    if v15_p:
+        try:
+            v_data = torch.load(v15_p, map_location=device, weights_only=False)
+            raw_s = v_data.get("model_state_dict", v_data)
+            clean_s = {k.replace("_orig_mod.", ""): v for k, v in raw_s.items()}
+            v15_net = V15Model().to(device)
+            v15_net.load_state_dict(clean_s, strict=False)
+            v15_net.eval()
+            logger.info("Loaded V15 ConvNeXt V2 Nano terrain model from %s", v15_p)
+        except Exception as e:
+            logger.warning("Failed to load V15 model from %s: %s", v15_p, e)
+
+    tile_direct_h257: Dict[Tuple[int, int], np.ndarray] = {}
+
     for tx, ty in tiles:
         mm = tile_minimaps[(tx, ty)]
         alb = tile_albedos[(tx, ty)]
@@ -254,7 +278,20 @@ def main() -> int:
                             tx, ty, float(h17.min()), float(h17.max()))
 
         if h17 is None:
-            if wdl_net is not None:
+            if v15_net is not None:
+                # Direct feature-reconstructive neural elevation from ConvNeXt V2 Nano V15Model
+                inp_t = torch.from_numpy(mm.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+                with torch.no_grad():
+                    res = v15_net(inp_t)
+                    h_z = res[0].squeeze().cpu().numpy()
+                # Scale from normalized z-score to authentic terrain yards
+                # (calibrated to authentic development relief: mean 100 yds, std 50 yds)
+                h257_direct = 100.0 + h_z * 50.0
+                tile_direct_h257[(tx, ty)] = h257_direct
+                h17 = h257_direct[::16, ::16]
+                logger.info("  Tile (%d, %d): reconstructed dense terrain via V15 ConvNeXt (elev range: %.1f to %.1f yds, span: %.1f yds)",
+                            tx, ty, float(h257_direct.min()), float(h257_direct.max()), float(np.ptp(h257_direct)))
+            elif wdl_net is not None:
                 # Synthesize authentic 17x17 WDL lattice via learned MinimapToWdlNet neural model
                 h17 = wdl_net.predict_tile(mm, shadow=shadow_res.bare_shadow_256, device=device)
                 logger.info("  Tile (%d, %d): synthesized WDL lattice via MinimapToWdlNet (elev range: %.1f to %.1f yds, span: %.1f yds)",
@@ -306,6 +343,13 @@ def main() -> int:
             logger.warning("Failed to load TrestleElevationUNet from %s: %s", trestle_ckpt, e)
 
     for tx, ty in tiles:
+        if (tx, ty) in tile_direct_h257:
+            # Use direct feature-faithful reconstruction from V15Model (carved roads, mountain boulders, canyons)
+            tile_h = tile_direct_h257[(tx, ty)].copy()
+            tile_elevations_257[(tx, ty)] = tile_h
+            logger.info("  Tile (%d, %d): preserved direct V15 neural reconstruction (feature-faithful terrain)", tx, ty)
+            continue
+
         # Slice macro elevation directly from continuous global canvas
         base_h = wdl_synthesizer.slice_tile_from_global_canvas(global_elevation, tx, ty, bounds)
         shadow = tile_shadows[(tx, ty)]
