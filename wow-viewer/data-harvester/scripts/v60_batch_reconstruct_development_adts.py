@@ -298,7 +298,7 @@ def main() -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Loading TrestleElevationUNet on {device}...")
     model = TrestleElevationUNet().to(device)
-    ckpt = torch.load(args.trestle_model, map_location=device, weights_only=True)
+    ckpt = torch.load(args.trestle_model, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
 
@@ -307,6 +307,20 @@ def main() -> int:
     if args.auth_wdl and Path(args.auth_wdl).is_file():
         auth_wdl = WdlElevationParser(args.auth_wdl)
         print(f"Loaded Authentic development.wdl from {args.auth_wdl}")
+
+    trestle_synth: Optional[TrestleWdlSynthesizer] = None
+    synth_candidates = [
+        Path(args.synthesized_wdl) if args.synthesized_wdl else None,
+        Path("../output/development_synthesized_wdl.npz"),
+        Path("output/development_synthesized_wdl.npz"),
+    ]
+    synth_p = next((p for p in synth_candidates if p and p.is_file()), None)
+    if synth_p:
+        try:
+            trestle_synth = TrestleWdlSynthesizer.load_npz(synth_p)
+            print(f"Loaded Synthesized WDL database from {synth_p}")
+        except Exception as e:
+            print(f"Failed to load synthesized WDL database from {synth_p}: {e}")
 
     # 3. Discover all minimap tiles for development
     mmap_dir = Path(args.minimap_dir)
@@ -326,6 +340,15 @@ def main() -> int:
                     h17 = auth_wdl.extract_tile_17(tx, ty)
                     if h17 is not None:
                         grid_64[ty, tx] = float(np.mean(np.maximum(h17, 0.0)))
+                        mask_64[ty, tx] = True
+
+    if trestle_synth is not None:
+        for ty in range(64):
+            for tx in range(64):
+                if not mask_64[ty, tx] and trestle_synth.has_tile(tx, ty):
+                    h17 = trestle_synth.get_trestle_17(tx, ty)
+                    if h17 is not None and float(h17.min()) > -500.0 and float(h17.max() - h17.min()) > 1.0:
+                        grid_64[ty, tx] = float(np.mean(h17))
                         mask_64[ty, tx] = True
 
     for mf in mmap_files:
@@ -361,14 +384,24 @@ def main() -> int:
     if auth_wdl is not None:
         for ty in range(64):
             for tx in range(64):
-                if mask_64[ty, tx]:
+                if auth_wdl.has_tile_data(tx, ty):
                     h17 = auth_wdl.extract_tile_17(tx, ty)
                     if h17 is not None:
                         sy = ty * 16
                         sx = tx * 16
                         global_lattice[sy : sy + 17, sx : sx + 17] = np.maximum(h17, 0.0)
 
-    print("  [OK] Continuous Macro Field assembled (0 to 912 yds, zero discontinuities)")
+    if trestle_synth is not None:
+        for ty in range(64):
+            for tx in range(64):
+                if not (auth_wdl and auth_wdl.has_tile_data(tx, ty)) and trestle_synth.has_tile(tx, ty):
+                    h17 = trestle_synth.get_trestle_17(tx, ty)
+                    if h17 is not None and float(h17.min()) > -500.0 and float(h17.max() - h17.min()) > 1.0:
+                        sy = ty * 16
+                        sx = tx * 16
+                        global_lattice[sy : sy + 17, sx : sx + 17] = h17
+
+    print("  [OK] Continuous Macro Field assembled (with transferred Northrend WDL priors)")
 
     # Parse coordinates
     tile_jobs: List[Tuple[int, int, Path]] = []
