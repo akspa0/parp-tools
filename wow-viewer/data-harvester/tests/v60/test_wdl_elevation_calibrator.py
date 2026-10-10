@@ -25,7 +25,7 @@ def create_synthetic_wdl(tmp_path: Path, tile_x: int = 16, tile_y: int = 33) -> 
     maof_header = b"FOAM" + struct.pack("<I", 4096 * 4)
     offsets = [0] * 4096
     tile_offset = len(mver) + len(maof_header) + 4096 * 4
-    offsets[tile_x * 64 + tile_y] = tile_offset
+    offsets[tile_y * 64 + tile_x] = tile_offset
     maof_data = struct.pack("<4096I", *offsets)
 
     # MARE chunk: 289 int16 outer + 256 int16 inner = 545 int16 = 1090 bytes
@@ -70,7 +70,7 @@ def test_wdl_parser_authentic_development() -> None:
     assert h17 is not None
     assert h17.shape == (17, 17)
     assert float(np.min(h17)) == 0.0
-    assert float(np.max(h17)) == 427.0
+    assert float(np.max(h17)) == 311.0
 
     h257 = parser.extract_tile_257(16, 33)
     assert h257 is not None

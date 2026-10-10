@@ -106,6 +106,8 @@ def main() -> int:
     parser.add_argument("--template-dir", type=Path, default=None, help="Directory containing template ADT files")
     parser.add_argument("--export-mesh", action="store_true", default=True, help="Export continuous 3D OBJ and GLB meshes")
     parser.add_argument("--d1-checkpoint", type=Path, default=Path("checkpoints/d1_best.pt"), help="Model D1 checkpoint")
+    parser.add_argument("--wdl-checkpoint", type=Path, default=Path("checkpoints/minimap_to_wdl_best.pt"), help="MinimapToWdlNet checkpoint")
+    parser.add_argument("--trestle-checkpoint", type=Path, default=Path("../output/models/trestle_elevation_v1.pt"), help="TrestleElevationUNet checkpoint")
     args = parser.parse_args()
 
     # Determine tile list
@@ -218,6 +220,25 @@ def main() -> int:
         except Exception as e:
             logger.warning("Failed to open WDL archive %s: %s", wdl_search[0], e)
 
+    # Load neural MinimapToWdlNet model if checkpoint exists
+    import torch
+    from harvester.v60.minimap_to_wdl_model import MinimapToWdlNet
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    wdl_net: Optional[MinimapToWdlNet] = None
+    if args.wdl_checkpoint.is_file():
+        try:
+            ckpt = torch.load(args.wdl_checkpoint, map_location=device, weights_only=False)
+            base_channels = ckpt.get("base_channels", 32)
+            in_channels = ckpt.get("in_channels", 6)
+            wdl_net = MinimapToWdlNet(in_channels=in_channels, base_channels=base_channels).to(device)
+            wdl_net.load_state_dict(ckpt["model_state_dict"])
+            wdl_net.eval()
+            logger.info("Loaded MinimapToWdlNet neural model from %s (best val MAE: %.2f yds, device: %s)",
+                        args.wdl_checkpoint, ckpt.get("val_mae", 0.0), device)
+        except Exception as e:
+            logger.warning("Failed to load MinimapToWdlNet checkpoint %s: %s", args.wdl_checkpoint, e)
+
     for tx, ty in tiles:
         mm = tile_minimaps[(tx, ty)]
         alb = tile_albedos[(tx, ty)]
@@ -233,11 +254,17 @@ def main() -> int:
                             tx, ty, float(h17.min()), float(h17.max()))
 
         if h17 is None:
-            # Fallback to synthesizing 17x17 from bare terrain photometric shadow
-            shadow_17 = ndimage.zoom(shadow_res.bare_shadow_256, 17.0 / 256.0, order=1)[:17, :17]
-            h17 = 100.0 + shadow_17 * 200.0
-            logger.info("  Tile (%d, %d): synthesized WDL lattice from bare shadow (elev range: %.1f to %.1f yds)",
-                        tx, ty, float(h17.min()), float(h17.max()))
+            if wdl_net is not None:
+                # Synthesize authentic 17x17 WDL lattice via learned MinimapToWdlNet neural model
+                h17 = wdl_net.predict_tile(mm, shadow=shadow_res.bare_shadow_256, device=device)
+                logger.info("  Tile (%d, %d): synthesized WDL lattice via MinimapToWdlNet (elev range: %.1f to %.1f yds, span: %.1f yds)",
+                            tx, ty, float(h17.min()), float(h17.max()), float(np.ptp(h17)))
+            else:
+                # Fallback to synthesizing 17x17 from bare terrain photometric shadow
+                shadow_17 = ndimage.zoom(shadow_res.bare_shadow_256, 17.0 / 256.0, order=1)[:17, :17]
+                h17 = 100.0 + shadow_17 * 200.0
+                logger.info("  Tile (%d, %d): synthesized WDL lattice from bare shadow (elev range: %.1f to %.1f yds)",
+                            tx, ty, float(h17.min()), float(h17.max()))
 
         tile_wdl_17[(tx, ty)] = h17
 
@@ -252,14 +279,56 @@ def main() -> int:
     logger.info("Interpolated Continuous Global Elevation Canvas: %d x %d vertices (elev range: %.1f to %.1f yds)",
                 global_elevation.shape[1], global_elevation.shape[0], float(global_elevation.min()), float(global_elevation.max()))
 
-    # Stage 4: Inches-Scale Refinement & Fractal Pastes/Scars
-    logger.info("Stage 4: Executing inches-scale refinement and 3D fractal fitting...")
+    # Stage 4: Inches-Scale Refinement & Fractal Pastes/Scars (with Neural Trestle Carving)
+    logger.info("Stage 4: Executing neural carving, inches-scale refinement, and 3D fractal fitting...")
     tile_elevations_257: Dict[Tuple[int, int], np.ndarray] = {}
+
+    from harvester.v60.trestle_elevation_model import TrestleElevationUNet
+    from harvester.v60.trestle_dataset import compute_photometric_normals
+
+    trestle_net: Optional[TrestleElevationUNet] = None
+    trestle_candidates = [
+        args.trestle_checkpoint,
+        Path("../output/models/trestle_elevation_v1.pt"),
+        Path("output/models/trestle_elevation_v1.pt"),
+    ]
+    trestle_ckpt = next((p for p in trestle_candidates if p and p.is_file()), None)
+    if trestle_ckpt:
+        try:
+            t_data = torch.load(trestle_ckpt, map_location=device, weights_only=False)
+            t_base_ch = t_data.get("base_channels", 32)
+            trestle_net = TrestleElevationUNet(in_channels=6, base_channels=t_base_ch).to(device)
+            trestle_net.load_state_dict(t_data["model_state_dict"])
+            trestle_net.eval()
+            logger.info("Loaded TrestleElevationUNet model from %s (val MAE: %.2f yds)",
+                        trestle_ckpt, t_data.get("val_mae", 0.0))
+        except Exception as e:
+            logger.warning("Failed to load TrestleElevationUNet from %s: %s", trestle_ckpt, e)
 
     for tx, ty in tiles:
         # Slice macro elevation directly from continuous global canvas
         base_h = wdl_synthesizer.slice_tile_from_global_canvas(global_elevation, tx, ty, bounds)
         shadow = tile_shadows[(tx, ty)]
+
+        # Neural residual carving via TrestleElevationUNet (Spec 266)
+        if trestle_net is not None:
+            rgb_f = tile_minimaps[(tx, ty)].astype(np.float32) / 255.0
+            normals = compute_photometric_normals(rgb_f)
+            cur_wdl_256 = ndimage.zoom(base_h, (256.0 / 257.0, 256.0 / 257.0), order=1)[:256, :256]
+            norm_trestle = ((cur_wdl_256 - 150.0) / 350.0).astype(np.float32)
+            feat_np = np.concatenate([rgb_f, norm_trestle[..., None], normals], axis=-1)
+            feat_t = torch.from_numpy(feat_np).permute(2, 0, 1).unsqueeze(0).float().to(device)
+            with torch.no_grad():
+                delta_z_t, _ = trestle_net(feat_t)
+                delta_z = delta_z_t.cpu().numpy()[0]
+            # Taper outer border by 1px so exact quilt boundary tie-edges are preserved
+            delta_z[0, :] *= 0.0
+            delta_z[-1, :] *= 0.0
+            delta_z[:, 0] *= 0.0
+            delta_z[:, -1] *= 0.0
+            base_h += delta_z
+            logger.info("  Tile (%d, %d): carved neural residual delta_z (range: %.2f to %.2f yds)",
+                        tx, ty, float(delta_z.min()), float(delta_z.max()))
 
         sculpted_inches, stamps, scars = fractal_refiner.sculpt_inches_canvas(
             base_elevation_257=base_h,
