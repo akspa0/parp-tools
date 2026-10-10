@@ -108,6 +108,7 @@ def main() -> int:
     parser.add_argument("--d1-checkpoint", type=Path, default=Path("checkpoints/d1_best.pt"), help="Model D1 checkpoint")
     parser.add_argument("--wdl-checkpoint", type=Path, default=Path("checkpoints/minimap_to_wdl_best.pt"), help="MinimapToWdlNet checkpoint")
     parser.add_argument("--trestle-checkpoint", type=Path, default=Path("../output/models/trestle_elevation_v1.pt"), help="TrestleElevationUNet checkpoint")
+    parser.add_argument("--synth-wdl", type=Path, default=Path("../output/development_synthesized_wdl.npz"), help="Path to synthesized development WDL NPZ (Spec 266)")
     args = parser.parse_args()
 
     # Determine tile list
@@ -220,24 +221,25 @@ def main() -> int:
         except Exception as e:
             logger.warning("Failed to open WDL archive %s: %s", wdl_search[0], e)
 
-    # Load neural MinimapToWdlNet model if checkpoint exists
+    # Load TrestleWdlSynthesizer database and device
     import torch
-    from harvester.v60.minimap_to_wdl_model import MinimapToWdlNet
+    from harvester.v60.trestle_wdl_synthesizer import TrestleWdlSynthesizer
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    wdl_net: Optional[MinimapToWdlNet] = None
-    if args.wdl_checkpoint.is_file():
+
+    trestle_synth: Optional[TrestleWdlSynthesizer] = None
+    synth_candidates = [
+        args.synth_wdl,
+        Path("../output/development_synthesized_wdl.npz"),
+        Path("output/development_synthesized_wdl.npz"),
+    ]
+    synth_p = next((p for p in synth_candidates if p and p.is_file()), None)
+    if synth_p:
         try:
-            ckpt = torch.load(args.wdl_checkpoint, map_location=device, weights_only=False)
-            base_channels = ckpt.get("base_channels", 32)
-            in_channels = ckpt.get("in_channels", 6)
-            wdl_net = MinimapToWdlNet(in_channels=in_channels, base_channels=base_channels).to(device)
-            wdl_net.load_state_dict(ckpt["model_state_dict"])
-            wdl_net.eval()
-            logger.info("Loaded MinimapToWdlNet neural model from %s (best val MAE: %.2f yds, device: %s)",
-                        args.wdl_checkpoint, ckpt.get("val_mae", 0.0), device)
+            trestle_synth = TrestleWdlSynthesizer.load_npz(synth_p)
+            logger.info("Loaded TrestleWdlSynthesizer macro-lattice database from %s", synth_p)
         except Exception as e:
-            logger.warning("Failed to load MinimapToWdlNet checkpoint %s: %s", args.wdl_checkpoint, e)
+            logger.warning("Failed to load synthesized WDL database from %s: %s", synth_p, e)
 
     for tx, ty in tiles:
         mm = tile_minimaps[(tx, ty)]
@@ -245,7 +247,7 @@ def main() -> int:
         shadow_res = wdl_synthesizer.extract_bare_terrain_shadow(mm, alb)
         tile_shadows[(tx, ty)] = shadow_res.bare_shadow_256
 
-        # Attempt authentic WDL coarse elevation first
+        # 1. Attempt authentic WDL coarse elevation first
         h17 = None
         if wdl_parser and wdl_parser.has_tile_data(tx, ty):
             h17 = wdl_parser.extract_tile_17(tx, ty)
@@ -253,18 +255,55 @@ def main() -> int:
                 logger.info("  Tile (%d, %d): loaded authentic WDL 17x17 lattice (elev range: %.1f to %.1f yds)",
                             tx, ty, float(h17.min()), float(h17.max()))
 
+        # 2. Attempt transferred Northrend lineage macro-trestle from TrestleWdlSynthesizer
+        if h17 is None and trestle_synth and trestle_synth.has_tile(tx, ty):
+            cand_h17 = trestle_synth.get_trestle_17(tx, ty)
+            # Ensure candidate has valid authored land data (not unauthored ocean void -652 yds)
+            if cand_h17 is not None and float(cand_h17.min()) > -500.0 and float(cand_h17.max() - cand_h17.min()) > 1.0:
+                h17 = cand_h17
+                meta = trestle_synth.get_metadata(tx, ty) or {}
+                logger.info("  Tile (%d, %d): loaded synthesized WDL macro-trestle (%s, sim=%.3f, span: %.1f yds, elev: %.1f..%.1f)",
+                            tx, ty, meta.get("origin_tile", "Transferred"), meta.get("similarity", 1.0),
+                            float(h17.max() - h17.min()), float(h17.min()), float(h17.max()))
+
+        # 3. For unauthored minimap-only tiles: reconstruct coarse 17x17 lattice from 2D Poisson SfS and tie-edge anchor
         if h17 is None:
-            if wdl_net is not None:
-                # Synthesize authentic 17x17 WDL lattice via learned MinimapToWdlNet neural model
-                h17 = wdl_net.predict_tile(mm, shadow=shadow_res.bare_shadow_256, device=device)
-                logger.info("  Tile (%d, %d): synthesized WDL lattice via MinimapToWdlNet (elev range: %.1f to %.1f yds, span: %.1f yds)",
-                            tx, ty, float(h17.min()), float(h17.max()), float(np.ptp(h17)))
-            else:
-                # Fallback to synthesizing 17x17 from bare terrain photometric shadow
-                shadow_17 = ndimage.zoom(shadow_res.bare_shadow_256, 17.0 / 256.0, order=1)[:17, :17]
-                h17 = 100.0 + shadow_17 * 200.0
-                logger.info("  Tile (%d, %d): synthesized WDL lattice from bare shadow (elev range: %.1f to %.1f yds)",
-                            tx, ty, float(h17.min()), float(h17.max()))
+            rad = np.radians(220.0)
+            lx = float(np.cos(rad))
+            ly = float(np.sin(rad))
+            H_s, W_s = shadow_res.bare_shadow_256.shape
+            u = np.fft.fftfreq(W_s) * 2.0 * np.pi
+            v = np.fft.fftfreq(H_s) * 2.0 * np.pi
+            U, V = np.meshgrid(u, v)
+            k_par = U * lx + V * ly
+            k2 = U**2 + V**2
+            S = np.fft.fft2(shadow_res.bare_shadow_256)
+            Z_freq = (1j * k_par * S) / (k2 + 0.025)
+            Z_freq[0, 0] = 0.0
+            z_sfs = np.fft.ifft2(Z_freq).real.astype(np.float32)
+
+            h17_rel = ndimage.zoom(z_sfs, (17.0 / 256.0, 17.0 / 256.0), order=1)[:17, :17]
+            span_rel = max(1e-4, float(np.ptp(h17_rel)))
+            h17_scaled = (h17_rel - float(h17_rel.min())) / span_rel * 200.0
+
+            # Tie-edge boundary anchoring to already resolved adjacent quilt tile
+            anchor_offset = 100.0
+            if (tx, ty - 1) in tile_wdl_17:
+                north_bottom = tile_wdl_17[(tx, ty - 1)][16, :]
+                anchor_offset = float(np.mean(north_bottom)) - float(np.mean(h17_scaled[0, :]))
+            elif (tx - 1, ty) in tile_wdl_17:
+                west_right = tile_wdl_17[(tx - 1, ty)][:, 16]
+                anchor_offset = float(np.mean(west_right)) - float(np.mean(h17_scaled[:, 0]))
+            elif (tx, ty + 1) in tile_wdl_17:
+                south_top = tile_wdl_17[(tx, ty + 1)][0, :]
+                anchor_offset = float(np.mean(south_top)) - float(np.mean(h17_scaled[16, :]))
+            elif (tx + 1, ty) in tile_wdl_17:
+                east_left = tile_wdl_17[(tx + 1, ty)][:, 0]
+                anchor_offset = float(np.mean(east_left)) - float(np.mean(h17_scaled[:, 16]))
+
+            h17 = h17_scaled + anchor_offset
+            logger.info("  Tile (%d, %d): inferred WDL lattice from Poisson SfS & quilt seam anchor (range: %.1f to %.1f yds, span: %.1f yds)",
+                        tx, ty, float(h17.min()), float(h17.max()), float(np.ptp(h17)))
 
         tile_wdl_17[(tx, ty)] = h17
 
@@ -330,23 +369,16 @@ def main() -> int:
             logger.info("  Tile (%d, %d): carved neural residual delta_z (range: %.2f to %.2f yds)",
                         tx, ty, float(delta_z.min()), float(delta_z.max()))
 
+        # Discover archeological 3D fractal editor brush stamps and fossil scars
         sculpted_inches, stamps, scars = fractal_refiner.sculpt_inches_canvas(
             base_elevation_257=base_h,
             residual_shadow_256=shadow,
-            max_brush_stamps=12,
+            max_brush_stamps=8,
         )
+        logger.info("  Tile (%d, %d): discovered %d authoring brush stamps, %d fossil scars",
+                    tx, ty, len(stamps), len(scars))
 
-        # Apply high-frequency displacement while preserving continuous boundary tie-edges
-        scale = fractal_refiner.subcell_factor
-        macro_resampled = ndimage.zoom(base_h[:256, :256], scale, order=1)
-        disp_inches = sculpted_inches - macro_resampled
-        disp_256 = ndimage.zoom(disp_inches, 1.0 / scale, order=1)
-
-        tile_h = base_h.copy()
-        # Add micro-relief to interior while letting edge taper to maintain seamless tie-line
-        tile_h[:256, :256] += disp_256
-        tile_elevations_257[(tx, ty)] = tile_h
-        logger.info("  Tile (%d, %d): fitted %d brush stamps, %d scars", tx, ty, len(stamps), len(scars))
+        tile_elevations_257[(tx, ty)] = base_h
 
     # Stage 1 Seam Boundary Relaxation across quilt
     logger.info("Enforcing C0/C1 boundary seam continuity across quilt...")
