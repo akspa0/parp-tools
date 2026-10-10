@@ -33,6 +33,10 @@ from harvester.v60.trestle_elevation_model import (
     TrestleElevationUNet,
     trestle_composite_loss,
 )
+from harvester.v60.zarr_elevation_dataset import (
+    ZarrElevationDataset,
+    build_or_load_zarr_elevation_corpus,
+)
 
 
 def compute_pearson_r(x: np.ndarray, y: np.ndarray) -> float:
@@ -45,11 +49,17 @@ def compute_pearson_r(x: np.ndarray, y: np.ndarray) -> float:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Train Trestle Elevation UNet (Spec 266)")
+    parser = argparse.ArgumentParser(description="Train Trestle Elevation UNet (Spec 266 / Spec 269)")
     parser.add_argument("--epochs", type=int, default=35, help="Training epochs")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size")
     parser.add_argument("--lr", type=float, default=6e-4, help="Learning rate")
     parser.add_argument("--base-channels", type=int, default=32, help="Base channel width")
+    parser.add_argument("--zarr-store", default=None,
+                        help="Path to unified or per-build v60 Zarr datastore (Spec 269)")
+    parser.add_argument("--maps", default="Kalimdor,Azeroth",
+                        help="Target maps when training from Zarr store (default: Kalimdor,Azeroth)")
+    parser.add_argument("--focus-indentations", action="store_true", default=True,
+                        help="Weight Felwood and classic indentation corridors higher during training")
     parser.add_argument("--trestle-corpus", default="../output/datasets/trestle_elevation_corpus.npz")
     parser.add_argument("--base-corpus", default="../output/datasets/development_elevation_corpus.npz")
     parser.add_argument("--synth-wdl", default="../output/development_synthesized_wdl.npz")
@@ -64,7 +74,7 @@ def main() -> int:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("=================================================================")
-    print("Spec 266: Trestle Elevation UNet Training (Modern v7 Successor)")
+    print("Spec 266/269: Trestle Elevation UNet Training (Modern v7 Successor)")
     print(f"Device: {device}")
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
@@ -73,15 +83,30 @@ def main() -> int:
     print("=================================================================")
 
     # 1. Load Dataset
-    train_samples, val_samples = build_or_load_trestle_corpus(
-        cache_path=trestle_corpus_path,
-        base_corpus_path=base_corpus_path,
-        synth_wdl_path=synth_wdl_path,
-        force_rebuild=False,
-    )
-
-    train_ds = TrestleElevationDataset(train_samples, augment=True)
-    val_ds = TrestleElevationDataset(val_samples, augment=False)
+    if args.zarr_store:
+        zarr_path = Path(args.zarr_store)
+        if not zarr_path.is_absolute():
+            zarr_path = (Path(__file__).resolve().parent.parent / zarr_path).resolve()
+        target_maps = [m.strip() for m in args.maps.split(",") if m.strip()]
+        print(f"[ZarrCorpus] Loading Zarr store from {zarr_path} for maps {target_maps} (focus_indentations={args.focus_indentations})...")
+        train_samples, val_samples = build_or_load_zarr_elevation_corpus(
+            zarr_store_path=zarr_path,
+            cache_path=trestle_corpus_path if str(trestle_corpus_path).endswith(".npz") else None,
+            target_maps=target_maps,
+            focus_indentations=args.focus_indentations,
+        )
+        train_ds = ZarrElevationDataset(train_samples, augment=True)
+        val_ds = ZarrElevationDataset(val_samples, augment=False)
+        print(f"[ZarrCorpus] Prepared {len(train_ds)} train and {len(val_ds)} val samples.")
+    else:
+        train_samples, val_samples = build_or_load_trestle_corpus(
+            cache_path=trestle_corpus_path,
+            base_corpus_path=base_corpus_path,
+            synth_wdl_path=synth_wdl_path,
+            force_rebuild=False,
+        )
+        train_ds = TrestleElevationDataset(train_samples, augment=True)
+        val_ds = TrestleElevationDataset(val_samples, augment=False)
 
     train_loader = DataLoader(
         train_ds,

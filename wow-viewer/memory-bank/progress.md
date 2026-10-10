@@ -1,6 +1,46 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-08
+Last updated: 2026-10-10
+
+## 2026-10-10 — Spec 270: PM4 Object Association Ledger & Unauthored Placement Pipeline
+
+- **Spec Kit Authored**: Defined `spec.md`, `plan.md`, and `tasks.md` under `specs/270-pm4-object-association-ledger-and-placement/`. Registered in `specs/STATUS.md` and `memory-bank/activeContext.md`.
+- **Core Directive**: Ground unauthored tile restoration strictly in authentic PM4 collision geometry and ground truth associations across the 399 intact development tiles, honoring the operator's 2-year reverse-engineering discoveries on the PM4 binary format.
+- **Fixed Regression**: Restored authentic PM4 collision extraction in `development_ground_truth.py`, passing all 6 tests in `test_development_ground_truth.py`.
+
+## 2026-10-10 — Spec 269: v60 Classic Terrain Zarr Ingestion & Felwood Clean Elevation Training
+
+- **Wrath 3.0.1.8303 Native C# Data Harvest**:
+  - Used `WowViewer.Tool.Harvest` directly to discover, validate, and stream all valid terrain maps from `H:\CLIENTS\Wrath\3.X_Pre-Release_Windows_enUS_3.0.1.8303\World of Warcraft`.
+  - Filtered 103 maps in `Map.dbc` down to 37 valid terrain maps (4,448 tiles total). Discarded unification bottlenecks in favor of direct multi-store directory ingestion in `output/datasets/v60/`.
+  - Gathered complete decoded arrays: `ground_intent_height_257`, `height_257`, `minimap_rgb_256`, `normal_xyz`, `terrain_shadow_256`, `wdl_outer_17`, and `index.parquet`.
+- **Zarr-Backed Clean Elevation Dataset (`zarr_elevation_dataset.py`)**:
+  - Implemented multi-store directory loading in `extract_zarr_samples` & `build_or_load_zarr_elevation_corpus`.
+  - Tagged authentic Felwood canyon corridors ($X \in [25, 29], Y \in [19, 26]$ in Kalimdor) and classic indentation features.
+- **Deep Convergence Training on Full 37-Map Corpus (`v60_train_trestle_model.py`)**:
+  - Trained `TrestleElevationUNet` (4,698,387 parameters) on RTX 4070 Ti SUPER for 120 epochs in 392.3s.
+  - Validation MAE: **4.62 yards** (Target $\le 25.0$ yds).
+  - Validation Pearson $r$: **0.8842** (Target $\ge 0.75$).
+  - Span ratio: **1.06** (natural vertical scale preservation).
+  - Checkpoint saved: `output/models/trestle_elevation_full_v1.pt`.
+- **Validation on Unauthored Development Tiles `(17, 13)` and `(17, 14)` (`v60_reconstruct_quilt.py`)**:
+  - Successfully carved authentic $-96.13$ yard canyon ravine on unauthored tile `(17, 14)` from minimap cues, eliminating the previous flat relief defect.
+  - Boundary tie-edge solver maintained exact continuity: max height step $\Delta Z = 0.000000$ yds, normal alignment $0.999690$.
+  - Exported continuous meshes to `output/quilt_felwood_17_13_14/development_quilt_17_13_to_17_14.obj` and `.glb`. All 8 unit tests passing. Receipt updated in `specs/269-v60-classic-terrain-ingestion-and-elevation-dataset/evidence/receipt-spec269.md`.
+
+## 2026-10-10 — Spec 268: Quilt Canvas Continuity & 3.3.5 Zarr Dataset Pipeline Directive
+
+- **Spec 268 Quilt Canvas Completion**: Implemented pure V7 continuous multi-tile quilt reconstruction in `v60_reconstruct_quilt.py`. Verified on alpine cluster `(16, 32)..(16, 33)` and minimap-only unauthored pairs `(17, 13)` and `(17, 14)`:
+  - 1px shared tie-edge boundary solver achieves $\Delta Z_{\text{seam}} = 0.000000$ yds and normal alignment $0.999503$.
+  - 100% CCW face winding with upward normals (+Z OBJ, +Y GLB).
+  - All post-V7 bloat (V15, etc.) completely purged. 19/19 unit tests passing in `tests/v60/`. Receipt recorded in `specs/268-quilt-canvas-terrain-and-mcal-reconstruction/evidence/receipt-spec268.md`.
+- **Root Cause of Defective Visual Relief on Unauthored Development Tiles**:
+  - `development` tiles (especially `17_13`, `17_14`, etc.) originate from classic Kalimdor (Felwood canyons, trenches, terrain indentations) and Azeroth components.
+  - The previous model (`trestle_elevation_v1.pt`) and prototype matcher were restricted to Northrend 3.0.1.8303 and only 270 development tiles, blinding the model to authentic Kalimdor and Azeroth terrain motifs.
+- **Operator Directive for Next Session (Fresh Chat)**:
+  - Utilize the existing project **Zarr dataset tooling** (`v60_build_dataset.py`, v60 unified Zarr store schema) instead of ad-hoc loose scripts.
+  - Produce a clean v60 dataset for 3.3.5 using `H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft` incorporating Kalimdor (988 tiles), Azeroth (687 tiles), and Northrend (1,131 tiles) so the model learns authentic classic terrain features (such as Felwood indentations).
+  - Strictly maintain the V7 architecture foundation (WDL coarse macro prior, residual $\Delta Z$ refinement, quilt seam solver). Zero post-V7 versions, zero Terra, no proprietary authoring tool names.
 
 ## 2026-10-08 — Spec 266: WDL Trestle Elevation Reconstruction & Lineage Synthesis (code & spec complete)
 

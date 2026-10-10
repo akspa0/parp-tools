@@ -322,8 +322,85 @@ class DevelopmentGroundTruthExtractor:
         tile_x: int,
         tile_y: int,
     ) -> Tuple[List[WmoPlacement], np.ndarray]:
-        """PM4 collision extraction disabled: PM4 collision data is not used for minimap object masking."""
-        return [], np.zeros((256, 256), dtype=bool)
+        """Extract object placements and footprints from authentic PM4 collision geometry (MSVT/MSUR)."""
+        pm4_file = Path(pm4_path)
+        if not pm4_file.is_file():
+            return [], np.zeros((256, 256), dtype=bool)
+
+        data = pm4_file.read_bytes()
+        pos = 0
+        chunks = {}
+        total_len = len(data)
+        while pos + 8 <= total_len:
+            magic = data[pos : pos + 4][::-1].decode("latin1", errors="ignore")
+            sz = struct.unpack_from("<I", data, pos + 4)[0]
+            chunks[magic] = (pos + 8, sz)
+            pos += 8 + sz
+
+        if "MSVT" not in chunks:
+            return [], np.zeros((256, 256), dtype=bool)
+
+        msvt_off, msvt_sz = chunks["MSVT"]
+        num_verts = msvt_sz // 12
+        if num_verts == 0:
+            return [], np.zeros((256, 256), dtype=bool)
+
+        verts = np.frombuffer(data[msvt_off : msvt_off + msvt_sz], dtype=np.float32).reshape(-1, 3)
+
+        # Tile coordinate origin in WoW world space
+        # Tile Y maps to X in world coordinates (East-West), Tile X maps to Y (North-South)
+        x_origin = tile_y * TILE_WORLD_SIZE
+        y_origin = tile_x * TILE_WORLD_SIZE
+
+        # Cluster vertices into discrete structures using 3D spatial adjacency (r = 15 yards)
+        tree = cKDTree(verts)
+        pairs = tree.query_pairs(r=15.0)
+
+        building_mask = np.zeros((256, 256), dtype=bool)
+        placements: List[WmoPlacement] = []
+
+        if pairs:
+            rows = [p[0] for p in pairs]
+            cols = [p[1] for p in pairs]
+            adj = sparse.coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(verts), len(verts)))
+            n_comp, labels = connected_components(adj, directed=False)
+        else:
+            n_comp = 1
+            labels = np.zeros(len(verts), dtype=int)
+
+        for comp_id in range(n_comp):
+            c_verts = verts[labels == comp_id]
+            if len(c_verts) < 6:
+                continue
+
+            min_x, max_x = float(np.min(c_verts[:, 0])), float(np.max(c_verts[:, 0]))
+            min_y, max_y = float(np.min(c_verts[:, 1])), float(np.max(c_verts[:, 1]))
+            min_z, max_z = float(np.min(c_verts[:, 2])), float(np.max(c_verts[:, 2]))
+
+            px0 = int(np.clip((min_x - x_origin) / TILE_WORLD_SIZE * 256.0, 0, 255))
+            px1 = int(np.clip((max_x - x_origin) / TILE_WORLD_SIZE * 256.0, 0, 255))
+            py0 = int(np.clip((min_y - y_origin) / TILE_WORLD_SIZE * 256.0, 0, 255))
+            py1 = int(np.clip((max_y - y_origin) / TILE_WORLD_SIZE * 256.0, 0, 255))
+
+            if px1 > px0 and py1 > py0:
+                building_mask[py0 : py1 + 1, px0 : px1 + 1] = True
+
+            center_x = (min_x + max_x) * 0.5
+            center_y = (min_y + max_y) * 0.5
+
+            placements.append(
+                WmoPlacement(
+                    name=f"PM4_Structure_{comp_id}",
+                    unique_id=comp_id,
+                    pos=(center_x, center_y, min_z),
+                    rot=(0.0, 0.0, 0.0),
+                    bounds_min=(min_x, min_y, min_z),
+                    bounds_max=(max_x, max_y, max_z),
+                    pixel_box=(px0, py0, px1, py1),
+                )
+            )
+
+        return placements, building_mask
 
     def load_tile(self, tile_x: int, tile_y: int) -> Optional[DevelopmentTileData]:
         """Load paired ground truth and minimap for a development tile."""
