@@ -86,6 +86,9 @@ switch (area)
 	case "pm4":
 		RunPm4(tail);
 		break;
+	case "restore-unauthored":
+		WowViewer.Tool.Inspect.Pm4RestoreUnauthoredSupport.Run(tail);
+		break;
 	case "dbc":
 		if (tail.Length > 0 && string.Equals(tail[0], "dump", StringComparison.OrdinalIgnoreCase))
 		{
@@ -2504,6 +2507,9 @@ case "fingerprint-scan":
 		break;
 	case "match-surfaces":
 		RunPm4MatchSurfaces(tail);
+		break;
+	case "restore-unauthored":
+		WowViewer.Tool.Inspect.Pm4RestoreUnauthoredSupport.Run(tail);
 		break;
 		default:
 			Console.Error.WriteLine($"Unknown pm4 command '{command}'.");

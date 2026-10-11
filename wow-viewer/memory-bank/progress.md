@@ -4,9 +4,28 @@ Last updated: 2026-10-10
 
 ## 2026-10-10 — Spec 270: PM4 Object Association Ledger & Unauthored Placement Pipeline
 
-- **Spec Kit Authored**: Defined `spec.md`, `plan.md`, and `tasks.md` under `specs/270-pm4-object-association-ledger-and-placement/`. Registered in `specs/STATUS.md` and `memory-bank/activeContext.md`.
-- **Core Directive**: Ground unauthored tile restoration strictly in authentic PM4 collision geometry and ground truth associations across the 399 intact development tiles, honoring the operator's 2-year reverse-engineering discoveries on the PM4 binary format.
-- **Fixed Regression**: Restored authentic PM4 collision extraction in `development_ground_truth.py`, passing all 6 tests in `test_development_ground_truth.py`.
+- **Spec Kit Authored & Landed**: Authored `spec.md`, `plan.md`, `tasks.md`, and verification receipt `evidence/receipt-spec270.md` under `specs/270-pm4-object-association-ledger-and-placement/`. Registered in `specs/STATUS.md` and `memory-bank/activeContext.md`.
+- **Core Directive Fulfilled**: Grounded unauthored tile restoration strictly in authentic PM4 collision geometry, honoring the operator's 2-year reverse-engineering discoveries on PM4 binary structures.
+- **Persistent Rosetta Ledger Extraction (`pm4_object_association_ledger.json`)**:
+  - Harvested 1,929 PM4 objects across 616 development files (1.89 MB dataset).
+  - Confirmed 904 WMO instances matched across 243 source assets with bit-exact Z ($MatchDelta = 0.000$).
+  - Confirmed 19,124 M2 doodad components in $CK24 == 0$ match MDDF placements (95.1%), with distances down to **0.00 yards** and `MSLK.GroupObjectId` having **99.9% distinctness**.
+  - Shape-only scoring cross-validation verified: **78.63% top-5 accuracy** on pure unoriented bounding box shapes.
+- **Split `_obj0.adt` Writer (`SplitAdtObjWriter.cs`)**:
+  - Implemented compliant split ADT object writer in `WowViewer.Core.IO.Maps`.
+  - Emits `MVER`, `MMDX`, `MMID`, `MWMO`, `MWID`, `MDDF`, `MODF`, and 256 empty `MCNK` chunks.
+  - Verified 100% round-trip reading through `AdtPlacementReader.Read()`.
+- **Multi-Signal Unauthored Placement Solver (`Pm4UnauthoredPlacementResolver.cs`)**:
+  - Synthesizes 4 resolution strategies: adjacent cross-tile spillover, persistent ledger exact Z keys, neighbor thematic asset pools, and global shape library matching.
+  - Breakthrough cross-tile discovery: **Stormwind Harbor** spans across `development_16_35`, `16_36`, `14_35`, and `14_36` at bit-exact $Z = 101.96$ yds.
+  - Restored **Tauren Fortress Complex** on unauthored tile `development_13_50` (14 WMO buildings) matching neighbor palette `development_14_51`.
+- **Full Map Restoration Execution (`Pm4RestoreUnauthoredSupport.cs`)**:
+  - Restored all **130 unauthored development tiles** in `output/restored_development/World/Maps/development/`.
+  - Restored **577 authentic WMOs** and **113 M2 doodads**.
+  - Verified **130 PASS / 0 FAIL (100% round-trip verification)** through `AdtPlacementReader.Read()`.
+  - Serialized detailed per-tile breakdown to `output/restored_development/restoration_manifest.json`.
+- **Automated Regression Suite (`Pm4UnauthoredPlacementResolverTests.cs`)**:
+  - Added 4 unit tests verifying Stormwind Harbor spillover, Tauren fortress resolution, and split ADT round-tripping. All 4 tests green (101 ms).
 
 ## 2026-10-10 — Spec 269: v60 Classic Terrain Zarr Ingestion & Felwood Clean Elevation Training
 
