@@ -545,12 +545,87 @@ internal sealed partial class Pm4WorkbenchService
                     ImGui.TextDisabled("Load a game folder to enable WMO matching.");
                 }
             }
+            else
+            {
+                ImGui.Separator();
+                ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), "M2 Doodad Detection");
+
+                string? clientRoot = _dataSourceSession.GetActiveGamePath();
+                if (!string.IsNullOrWhiteSpace(clientRoot) && _dataSourceSession.GetCurrentSessionMapName() != null)
+                {
+                    string matchKey = PmM2GroupMatchService.GetMatchKey(
+                        _dataSourceSession.GetCurrentSessionMapName()!, debugInfo.TileX, debugInfo.TileY, debugInfo.ObjectPartId);
+
+                    if (_pm2MatchStore == null)
+                        _pm2MatchStore = new PmM2MatchStore(AppContext.BaseDirectory);
+                    if (_pm2MatchEntries.Count == 0)
+                        _pm2MatchEntries = _pm2MatchStore.Load();
+
+                    bool hasSaved = _pm2MatchEntries.TryGetValue(matchKey, out var saved);
+                    if (hasSaved && saved != null)
+                    {
+                        ImGui.TextColored(new Vector4(0.95f, 0.85f, 0.35f, 1f), $"Matched: {saved.ModelName}");
+                        ImGui.TextDisabled(saved.M2Path);
+                        ImGui.SameLine();
+                        if (ImGui.SmallButton("Clear##M2"))
+                        {
+                            _pm2MatchEntries.Remove(matchKey);
+                            _pm2MatchStore.Save(_pm2MatchEntries);
+                            _pm2GroupMatchResult = null;
+                        }
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled("No saved M2 match for this doodad collision.");
+                    }
+
+                    ImGui.Spacing();
+                    if (ImGui.Button("Find M2 Match", new Vector2(180f, 28f)))
+                    {
+                        _pm2GroupMatchResult = PmM2GroupMatchService.MatchFromPlacement(
+                            clientRoot, _dataSourceSession.GetCurrentSessionMapName()!,
+                            debugInfo.TileX, debugInfo.TileY, debugInfo.ObjectPartId,
+                            debugInfo.BoundsMin, debugInfo.BoundsMax, debugInfo.Center);
+                        _pm2MatchStatus = _pm2GroupMatchResult.ErrorMessage ?? "";
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Shape Search##M2", new Vector2(120f, 28f)))
+                    {
+                        var adtMatches = _dataSourceSession.GetCurrentSessionMapName() is { Length: > 0 } shapeMapName
+                            ? PmM2GroupMatchService.SearchAdtPlacementsByShape(
+                                clientRoot, shapeMapName, debugInfo.BoundsMin, debugInfo.BoundsMax)
+                            : Array.Empty<PmM2FallbackCandidate>();
+
+                        _pm2GroupMatchResult = new PmM2MatchResult(
+                            false,
+                            Array.Empty<PmM2PlacementResult>(),
+                            adtMatches);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(_pm2MatchStatus))
+                        ImGui.TextColored(new Vector4(1f, 0.7f, 0.3f, 1f), _pm2MatchStatus);
+
+                    if (_pm2GroupMatchResult != null)
+                    {
+                        int placements = _pm2GroupMatchResult.Placements.Count;
+                        int fallbacks = _pm2GroupMatchResult.FallbackCandidates.Count;
+                        ImGui.TextDisabled($"Placements: {placements}  Fallback candidates: {fallbacks}");
+                    }
+                }
+                else
+                {
+                    ImGui.TextDisabled("Load a game folder to enable M2 matching.");
+                }
+            }
         }
 
         DrawSelectedPm4RegionSummary("WorkbenchSelectedRegion");
 
         if (ImGui.CollapsingHeader("Match details"))
+        {
             DrawPm4WmoGroupMatchDetail();
+            DrawPmM2GroupMatchDetail();
+        }
     }
 
     private void DrawPm4WmoGroupMatchDetail()
@@ -757,6 +832,111 @@ internal sealed partial class Pm4WorkbenchService
                     ImGui.EndTable();
                 }
 
+                ImGui.TreePop();
+            }
+        }
+    }
+
+    private void DrawPmM2GroupMatchDetail()
+    {
+        if (_pm2GroupMatchResult == null)
+            return;
+
+        int tileX = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.tileX ?? 0;
+        int tileY = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.tileY ?? 0;
+        int partId = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.objectPart ?? 0;
+        string? mapName = _dataSourceSession.GetCurrentSessionMapName();
+        string matchKey = mapName != null
+            ? PmM2GroupMatchService.GetMatchKey(mapName, tileX, tileY, partId)
+            : "";
+        _pm2MatchEntries.TryGetValue(matchKey, out var savedEntry);
+
+        ImGui.Separator();
+        ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), "M2 Candidates in Vicinity:");
+
+        if (_pm2GroupMatchResult.Placements.Count == 0 && !_pm2GroupMatchResult.HasAdtData)
+        {
+            ImGui.TextDisabled("No ADT placement data found.");
+        }
+        else if (_pm2GroupMatchResult.Placements.Count == 0)
+        {
+            ImGui.TextDisabled("No matching M2 doodads in vicinity.");
+        }
+
+        foreach (var placement in _pm2GroupMatchResult.Placements)
+        {
+            bool isSaved = savedEntry != null && string.Equals(savedEntry.M2Path, placement.ModelPath, StringComparison.OrdinalIgnoreCase);
+            if (isSaved) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.95f, 0.85f, 0.35f, 1f));
+
+            if (ImGui.TreeNodeEx($"##M2Placement_{placement.UniqueId}", ImGuiTreeNodeFlags.DefaultOpen, $"{placement.ModelName} [uid={placement.UniqueId}] (dist: {placement.DistanceToPm4Center:F1} yd)"))
+            {
+                if (isSaved) ImGui.PopStyleColor();
+
+                ImGui.TextDisabled($"Path: {placement.ModelPath}");
+                ImGui.TextDisabled($"Position: ({placement.PlacementPosition.X:F1}, {placement.PlacementPosition.Y:F1}, {placement.PlacementPosition.Z:F1})");
+                ImGui.TextDisabled($"Rotation: ({placement.PlacementRotation.X:F1}°, {placement.PlacementRotation.Y:F1}°, {placement.PlacementRotation.Z:F1}°)  Scale: {placement.PlacementScale:F2}");
+
+                float score = placement.MatchScore;
+                Vector4 sc = score >= 0.7f ? new Vector4(0.3f, 1f, 0.3f, 1f) : (score >= 0.4f ? new Vector4(1f, 0.85f, 0.3f, 1f) : new Vector4(1f, 0.5f, 0.5f, 1f));
+                ImGui.TextColored(sc, $"Match Confidence: {score:P0}");
+
+                if (!isSaved)
+                {
+                    if (ImGui.SmallButton($"Confirm Match##M2_{placement.UniqueId}"))
+                    {
+                        _pm2MatchEntries[matchKey] = new PmM2MatchEntry
+                        {
+                            MapName = mapName ?? "",
+                            TileX = tileX,
+                            TileY = tileY,
+                            ObjectPartId = partId,
+                            M2Path = placement.ModelPath,
+                            ModelName = placement.ModelName,
+                            Source = "manual",
+                        };
+                        _pm2MatchStore?.Save(_pm2MatchEntries);
+                        _pm2MatchStatus = $"Saved M2 match: {placement.ModelName}";
+                    }
+                }
+
+                ImGui.TreePop();
+            }
+            else if (isSaved)
+            {
+                ImGui.PopStyleColor();
+            }
+        }
+
+        if (_pm2GroupMatchResult.FallbackCandidates.Count > 0)
+        {
+            ImGui.Spacing();
+            if (ImGui.TreeNodeEx("Fallback M2 Shape Candidates", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                if (ImGui.BeginTable("##M2FallbackTable", 3,
+                    ImGuiTableFlags.BordersV | ImGuiTableFlags.BordersOuterH | ImGuiTableFlags.RowBg))
+                {
+                    ImGui.TableSetupColumn("M2 Model", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableSetupColumn("Volume", ImGuiTableColumnFlags.WidthFixed, 65f);
+                    ImGui.TableSetupColumn("Score", ImGuiTableColumnFlags.WidthFixed, 55f);
+                    ImGui.TableHeadersRow();
+
+                    foreach (var fb in _pm2GroupMatchResult.FallbackCandidates)
+                    {
+                        ImGui.TableNextRow();
+                        ImGui.TableNextColumn();
+                        ImGui.TextDisabled(fb.ModelName);
+
+                        ImGui.TableNextColumn();
+                        ImGui.TextDisabled($"{fb.VolumeRatio:P0}");
+
+                        ImGui.TableNextColumn();
+                        float score = fb.CombinedScore;
+                        Vector4 sc = score >= 0.7f ? new Vector4(0.3f, 1f, 0.3f, 1f) : (score >= 0.4f ? new Vector4(1f, 0.85f, 0.3f, 1f) : new Vector4(1f, 0.5f, 0.5f, 1f));
+                        ImGui.TextColored(sc, $"{score:P0}");
+                    }
+
+                    ImGui.EndTable();
+                }
                 ImGui.TreePop();
             }
         }

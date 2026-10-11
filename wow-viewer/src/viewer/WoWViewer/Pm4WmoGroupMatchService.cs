@@ -85,7 +85,7 @@ public static class Pm4WmoGroupMatchService
                     continue;
 
                 AdtPlacementCatalog catalog = AdtPlacementReader.Read(adtPath);
-                wmoPlacements.AddRange(catalog.WorldModelPlacements);
+                wmoPlacements.AddRange(catalog.WorldModelPlacements.Where(w => !w.ModelPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase)));
             }
 
             if (wmoPlacements.Count == 0)
@@ -246,6 +246,12 @@ public static class Pm4WmoGroupMatchService
                 string fileName = Path.GetFileNameWithoutExtension(wmoFile);
                 string relPath = GetRelativeWmoPath(clientRoot, wmoFile);
 
+                if (fileName.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase)
+                    || relPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 candidates.Add((new Pm4WmoFallbackCandidate(
                     relPath, fileName,
                     summary.BoundsMin, summary.BoundsMax,
@@ -310,6 +316,9 @@ public static class Pm4WmoGroupMatchService
 
                 foreach (AdtWorldModelPlacement placement in catalog.WorldModelPlacements)
                 {
+                    if (placement.ModelPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
                     Vector3 size = placement.BoundsMax - placement.BoundsMin;
                     float volume = size.X * size.Y * size.Z;
                     float footprint = size.X * size.Y;

@@ -302,7 +302,8 @@ internal sealed partial class InspectorPayloadsService
 
         builder.AddSection("Model Actions")
             .Action("frame_selection", "Frame in Camera")
-            .Action("copy_asset_path", "Copy Asset Path");
+            .Action("copy_asset_path", "Copy Asset Path")
+            .Action("open_pm4_workbench", "Open in PM4 Tools");
     }
 
     private void BuildStandaloneModelInspector(InspectorContentBuilder builder)

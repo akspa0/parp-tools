@@ -19,6 +19,26 @@ public enum Pm4PlacementResolutionMethod
 }
 
 /// <summary>
+/// Ground truth placement record from the persistent Rosetta ledger.
+/// </summary>
+public sealed record Pm4LedgerPlacementRecord(
+    string AssetPath,
+    string AssetKind,
+    float PosX,
+    float PosY,
+    float PosZ,
+    float RotX,
+    float RotY,
+    float RotZ,
+    float MinX,
+    float MinY,
+    float MinZ,
+    float MaxX,
+    float MaxY,
+    float MaxZ,
+    int SurfaceCount);
+
+/// <summary>
 /// Record of an individual resolved object placement with its provenance evidence.
 /// </summary>
 public sealed record Pm4ResolvedObjectRecord(
@@ -67,7 +87,8 @@ public static class Pm4UnauthoredPlacementResolver
         string mapDirectory,
         Func<string, AdtPlacementCatalog>? neighborCatalogReader = null,
         IReadOnlyDictionary<string, List<Vector3>>? shapeLibrary = null,
-        int uniqueIdOffset = 0)
+        int uniqueIdOffset = 0,
+        IReadOnlyDictionary<uint, Pm4LedgerPlacementRecord>? ledgerLookup = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pm4Path);
         ArgumentException.ThrowIfNullOrWhiteSpace(mapDirectory);
@@ -78,9 +99,9 @@ public static class Pm4UnauthoredPlacementResolver
         if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileFirst, out int tileSecond))
             throw new ArgumentException($"Cannot parse tile coordinates from '{pm4Path}'.");
 
-        // Canonical tile indices: 31 - band (workstream-pm4-decode.md)
-        int tileX = 31 - tileSecond;
-        int tileY = 31 - tileFirst;
+        // Canonical tile indices: tileFirst and tileSecond in filename map directly to tile grid coordinates
+        int tileX = tileFirst;
+        int tileY = tileSecond;
 
         Pm4ResearchDocument doc = Pm4ResearchReader.ReadFile(pm4Path);
         Pm4KnownChunkSet chunks = doc.KnownChunks;
@@ -95,11 +116,31 @@ public static class Pm4UnauthoredPlacementResolver
         var resolvedWmos = new List<Pm4ResolvedObjectRecord>();
         var modfPlacements = new List<AdtWorldModelPlacement>();
         var wmoNames = new List<string>();
+        var claimedSpillovers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (Pm4RawObjectGroup group in wmoGroups)
         {
-            Pm4ResolvedObjectRecord resolved = ResolveWmo(group, neighborCatalogs, shapeLibrary);
+            Pm4ResolvedObjectRecord resolved = ResolveWmo(group, neighborCatalogs, shapeLibrary, ledgerLookup);
             resolvedWmos.Add(resolved);
+
+            // Honor spanned PM4 objects: only take the placement that can exist in the tile itself in ADT space.
+            // Spanned objects (e.g. Stormwind Harbor) spanning across multiple tiles are owned and emitted
+            // exclusively by the tile holding the placement origin, preventing multi-instance copies.
+            if (!Pm4CoordinateService.IsWithinPlacementTileBounds(resolved.Position, tileFirst, tileSecond))
+            {
+                continue;
+            }
+
+            if (resolved.Method == Pm4PlacementResolutionMethod.AdjacentSpillover)
+            {
+                // Unique instance key based on model and parent position to avoid multi-instance stacking
+                string instanceKey = $"{resolved.ModelPath}_{resolved.Position.X:F1}_{resolved.Position.Y:F1}";
+                if (!claimedSpillovers.Add(instanceKey))
+                {
+                    // Spillover already represented in placement catalog, skip duplicate MODF entry
+                    continue;
+                }
+            }
 
             string normPath = resolved.ModelPath;
             int nameIndex = wmoNames.FindIndex(n => n.Equals(normPath, StringComparison.OrdinalIgnoreCase));
@@ -131,11 +172,17 @@ public static class Pm4UnauthoredPlacementResolver
 
         foreach (Pm4RawObjectGroup group in doodadGroups)
         {
-            Pm4ResolvedObjectRecord? resolved = ResolveDoodad(group, neighborCatalogs);
+            Pm4ResolvedObjectRecord? resolved = ResolveDoodad(group, neighborCatalogs, shapeLibrary);
             if (resolved is null)
                 continue;
 
             resolvedDoodads.Add(resolved);
+
+            // Honor spanned PM4 doodads: only take placements that exist in this tile itself in ADT space.
+            if (!Pm4CoordinateService.IsWithinPlacementTileBounds(resolved.Position, tileFirst, tileSecond))
+            {
+                continue;
+            }
 
             string normPath = resolved.ModelPath;
             int nameIndex = m2Names.FindIndex(n => n.Equals(normPath, StringComparison.OrdinalIgnoreCase));
@@ -174,19 +221,51 @@ public static class Pm4UnauthoredPlacementResolver
     private static Pm4ResolvedObjectRecord ResolveWmo(
         Pm4RawObjectGroup group,
         Dictionary<string, AdtPlacementCatalog> neighborCatalogs,
-        IReadOnlyDictionary<string, List<Vector3>>? shapeLibrary)
+        IReadOnlyDictionary<string, List<Vector3>>? shapeLibrary,
+        IReadOnlyDictionary<uint, Pm4LedgerPlacementRecord>? ledgerLookup = null)
     {
         float zFloat = group.PlacementZ;
         Vector3 shape = ShapeOf(group.BoundsMin, group.BoundsMax);
+        float footprintYaw = ComputeFootprintYawDegrees(group.Vertices);
+        Vector3 defaultRotation = new(0f, 0f, footprintYaw);
+
+        // Strategy 0: Check persistent Rosetta ledger for bit-exact Z key
+        if (ledgerLookup != null && group.Key != 0 && ledgerLookup.TryGetValue(group.Key, out Pm4LedgerPlacementRecord? ledgerRec))
+        {
+            if (!string.IsNullOrWhiteSpace(ledgerRec.AssetPath) && !ledgerRec.AssetPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
+            {
+                Vector3 ledgerPos = new(ledgerRec.PosX, ledgerRec.PosY, ledgerRec.PosZ);
+                Vector3 ledgerRot = new(ledgerRec.RotX, ledgerRec.RotY, ledgerRec.RotZ);
+                return new Pm4ResolvedObjectRecord(
+                    ledgerRec.AssetPath,
+                    ledgerRec.AssetKind ?? "WMO",
+                    group.Key,
+                    zFloat,
+                    group.SurfaceCount,
+                    group.VertexCount,
+                    ledgerPos,
+                    ledgerRot,
+                    group.BoundsMin,
+                    group.BoundsMax,
+                    shape,
+                    Pm4PlacementResolutionMethod.LedgerExactZ,
+                    1.0,
+                    $"Bit-exact Z {zFloat:F3} matched persistent Rosetta ledger entry {ledgerRec.AssetPath}");
+            }
+        }
 
         // Strategy 1: Check neighbor catalogs for identical placement Z or overlapping bounds
         foreach (var (neighborTile, cat) in neighborCatalogs)
         {
             foreach (AdtWorldModelPlacement placed in cat.WorldModelPlacements)
             {
+                if (placed.ModelPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 // Bit-exact or near-exact Z match (within 0.05 yds)
                 if (MathF.Abs(placed.Position.Z - zFloat) <= 0.05f)
                 {
+                    Vector3 rot = placed.Rotation != Vector3.Zero ? placed.Rotation : defaultRotation;
                     return new Pm4ResolvedObjectRecord(
                         placed.ModelPath,
                         "WMO",
@@ -194,8 +273,8 @@ public static class Pm4UnauthoredPlacementResolver
                         zFloat,
                         group.SurfaceCount,
                         group.VertexCount,
-                        group.Centroid,
-                        placed.Rotation,
+                        placed.Position,
+                        rot,
                         group.BoundsMin,
                         group.BoundsMax,
                         shape,
@@ -204,9 +283,11 @@ public static class Pm4UnauthoredPlacementResolver
                         $"Exact Z {zFloat:F3} matched neighbor {neighborTile} placement {placed.ModelPath}");
                 }
 
-                // Check 2D bounding box overlap with neighbor WMO
-                if (BoxesOverlap2D(group.BoundsMin, group.BoundsMax, placed.BoundsMin, placed.BoundsMax, padding: 5.0f))
+                // Check 3D bounding box containment with neighbor WMO
+                if (BoxesOverlap2D(group.BoundsMin, group.BoundsMax, placed.BoundsMin, placed.BoundsMax, padding: 5.0f)
+                    && MathF.Abs(placed.Position.Z - zFloat) <= 2.5f)
                 {
+                    Vector3 rot = placed.Rotation != Vector3.Zero ? placed.Rotation : defaultRotation;
                     return new Pm4ResolvedObjectRecord(
                         placed.ModelPath,
                         "WMO",
@@ -214,8 +295,8 @@ public static class Pm4UnauthoredPlacementResolver
                         zFloat,
                         group.SurfaceCount,
                         group.VertexCount,
-                        group.Centroid,
-                        placed.Rotation,
+                        placed.Position,
+                        rot,
                         group.BoundsMin,
                         group.BoundsMax,
                         shape,
@@ -227,10 +308,9 @@ public static class Pm4UnauthoredPlacementResolver
         }
 
         // Strategy 2: Neighbor Thematic Asset Pool
-        // If neighbors place a distinct set of assets (e.g. Tauren huts/gates or Stormwind buildings),
-        // score the group against neighbor models by surface count and shape
         var neighborModels = neighborCatalogs.Values
             .SelectMany(c => c.WorldModelPlacements)
+            .Where(p => !p.ModelPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
             .GroupBy(p => p.ModelPath, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -240,23 +320,27 @@ public static class Pm4UnauthoredPlacementResolver
                 .Select(g =>
                 {
                     double dist = double.MaxValue;
+                    Vector3 sampleSpan = g.First().BoundsMax - g.First().BoundsMin;
                     if (shapeLibrary != null && shapeLibrary.TryGetValue(g.Key, out var refShapes) && refShapes.Count > 0)
                     {
                         dist = refShapes.Min(s => ShapeDistance(shape, s));
                     }
                     else
                     {
-                        Vector3 sampleSpan = g.First().BoundsMax - g.First().BoundsMin;
                         Vector3 refShape = ShapeOf(Vector3.Zero, sampleSpan);
                         dist = ShapeDistance(shape, refShape);
                     }
-                    return (Model: g.Key, Rot: g.First().Rotation, Dist: dist);
+                    return (Model: g.Key, Rot: g.First().Rotation, Span: sampleSpan, Dist: dist);
                 })
                 .OrderBy(t => t.Dist)
                 .FirstOrDefault();
 
-            if (bestThematic.Model is not null && bestThematic.Dist <= 0.60)
+            if (bestThematic.Model is not null && bestThematic.Dist <= 0.18)
             {
+                float alignedYaw = ComputeModelAlignedYaw(group.Vertices, bestThematic.Span);
+                Vector3 rot = MathF.Abs(alignedYaw) > 0.01f ? new Vector3(0f, 0f, alignedYaw) : (bestThematic.Rot != Vector3.Zero ? bestThematic.Rot : defaultRotation);
+                Vector3 attractedPos = AttractPositionToPm4Mesh(group.Centroid, zFloat, rot.Z, Vector3.Zero, bestThematic.Span);
+
                 return new Pm4ResolvedObjectRecord(
                     bestThematic.Model,
                     "WMO",
@@ -264,8 +348,8 @@ public static class Pm4UnauthoredPlacementResolver
                     zFloat,
                     group.SurfaceCount,
                     group.VertexCount,
-                    group.Centroid,
-                    bestThematic.Rot,
+                    attractedPos,
+                    rot,
                     group.BoundsMin,
                     group.BoundsMax,
                     shape,
@@ -279,10 +363,14 @@ public static class Pm4UnauthoredPlacementResolver
         if (shapeLibrary is { Count: > 0 })
         {
             string? bestAsset = null;
+            Vector3 bestRefShape = Vector3.Zero;
             double bestScore = double.MaxValue;
 
             foreach (var (asset, shapes) in shapeLibrary)
             {
+                if (asset.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 foreach (Vector3 refShape in shapes)
                 {
                     double d = ShapeDistance(shape, refShape);
@@ -290,12 +378,17 @@ public static class Pm4UnauthoredPlacementResolver
                     {
                         bestScore = d;
                         bestAsset = asset;
+                        bestRefShape = refShape;
                     }
                 }
             }
 
-            if (bestAsset is not null && bestScore <= 0.35)
+            if (bestAsset is not null && bestScore <= 0.18)
             {
+                float alignedYaw = ComputeModelAlignedYaw(group.Vertices, bestRefShape);
+                Vector3 rot = new(0f, 0f, alignedYaw);
+                Vector3 attractedPos = AttractPositionToPm4Mesh(group.Centroid, zFloat, rot.Z, Vector3.Zero, bestRefShape);
+
                 return new Pm4ResolvedObjectRecord(
                     bestAsset,
                     "WMO",
@@ -303,8 +396,8 @@ public static class Pm4UnauthoredPlacementResolver
                     zFloat,
                     group.SurfaceCount,
                     group.VertexCount,
-                    group.Centroid,
-                    Vector3.Zero,
+                    attractedPos,
+                    rot,
                     group.BoundsMin,
                     group.BoundsMax,
                     shape,
@@ -323,7 +416,7 @@ public static class Pm4UnauthoredPlacementResolver
             group.SurfaceCount,
             group.VertexCount,
             group.Centroid,
-            Vector3.Zero,
+            defaultRotation,
             group.BoundsMin,
             group.BoundsMax,
             shape,
@@ -334,38 +427,100 @@ public static class Pm4UnauthoredPlacementResolver
 
     private static Pm4ResolvedObjectRecord? ResolveDoodad(
         Pm4RawObjectGroup group,
-        Dictionary<string, AdtPlacementCatalog> neighborCatalogs)
+        Dictionary<string, AdtPlacementCatalog> neighborCatalogs,
+        IReadOnlyDictionary<string, List<Vector3>>? shapeLibrary = null)
     {
         // Only components with sufficient surfaces/vertices are physical doodads (filter trivial terrain remnants)
         if (group.SurfaceCount < 1 || group.VertexCount < 3)
             return null;
 
         Vector2 planar = new(group.Centroid.X, group.Centroid.Y);
+        float doodadYaw = ComputeFootprintYawDegrees(group.Vertices);
+        Vector3 defaultRotation = new(0f, 0f, doodadYaw);
 
-        // Check neighbor M2 placements for spatial coincidence (r <= 5.0 yds)
+        // Strategy 1: Check neighbor M2 placements for spatial coincidence (r <= 35.0 yds)
+        AdtModelPlacement? bestNeighbor = null;
+        float bestDist = float.MaxValue;
+        string bestNeighborTile = "";
+
         foreach (var (neighborTile, cat) in neighborCatalogs)
         {
             foreach (AdtModelPlacement m in cat.ModelPlacements)
             {
+                if (m.ModelPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 float d = Vector2.Distance(new Vector2(m.Position.X, m.Position.Y), planar);
-                if (d <= 5.0f)
+                if (d <= 35.0f && d < bestDist)
                 {
-                    return new Pm4ResolvedObjectRecord(
-                        m.ModelPath,
-                        "M2",
-                        group.Key,
-                        group.Centroid.Z,
-                        group.SurfaceCount,
-                        group.VertexCount,
-                        group.Centroid,
-                        m.Rotation,
-                        group.BoundsMin,
-                        group.BoundsMax,
-                        ShapeOf(group.BoundsMin, group.BoundsMax),
-                        Pm4PlacementResolutionMethod.AdjacentSpillover,
-                        1.0,
-                        $"Matched neighbor {neighborTile} M2 doodad at distance {d:F2} yds");
+                    bestDist = d;
+                    bestNeighbor = m;
+                    bestNeighborTile = neighborTile;
                 }
+            }
+        }
+
+        if (bestNeighbor != null)
+        {
+            Vector3 rot = MathF.Abs(doodadYaw) > 0.1f ? defaultRotation : bestNeighbor.Rotation;
+            return new Pm4ResolvedObjectRecord(
+                bestNeighbor.ModelPath,
+                "M2",
+                group.Key,
+                group.Centroid.Z,
+                group.SurfaceCount,
+                group.VertexCount,
+                group.Centroid,
+                rot,
+                group.BoundsMin,
+                group.BoundsMax,
+                ShapeOf(group.BoundsMin, group.BoundsMax),
+                Pm4PlacementResolutionMethod.AdjacentSpillover,
+                1.0,
+                $"Matched neighbor {bestNeighborTile} M2 doodad at distance {bestDist:F2} yds");
+        }
+
+        // Strategy 2: Neighbor Thematic M2 Pool matching by shape
+        var neighborM2s = neighborCatalogs.Values
+            .SelectMany(c => c.ModelPlacements)
+            .Where(m => !m.ModelPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(m => m.ModelPath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (neighborM2s.Count > 0 && shapeLibrary != null)
+        {
+            Vector3 doodadShape = ShapeOf(group.BoundsMin, group.BoundsMax);
+            var bestThematic = neighborM2s
+                .Select(g =>
+                {
+                    double dist = double.MaxValue;
+                    if (shapeLibrary.TryGetValue(g.Key, out var refShapes) && refShapes.Count > 0)
+                    {
+                        dist = refShapes.Min(s => ShapeDistance(doodadShape, s));
+                    }
+                    return (Model: g.Key, First: g.First(), Dist: dist);
+                })
+                .Where(t => t.Dist <= 0.22)
+                .OrderBy(t => t.Dist)
+                .FirstOrDefault();
+
+            if (bestThematic.Model is not null)
+            {
+                return new Pm4ResolvedObjectRecord(
+                    bestThematic.Model,
+                    "M2",
+                    group.Key,
+                    group.Centroid.Z,
+                    group.SurfaceCount,
+                    group.VertexCount,
+                    group.Centroid,
+                    defaultRotation,
+                    group.BoundsMin,
+                    group.BoundsMax,
+                    doodadShape,
+                    Pm4PlacementResolutionMethod.NeighborThematic,
+                    Math.Max(0.5, 1.0 - bestThematic.Dist),
+                    $"Thematic M2 match from adjacent tiles with shape distance {bestThematic.Dist:F3}");
             }
         }
 
@@ -400,10 +555,12 @@ public static class Pm4UnauthoredPlacementResolver
             if (verts.Count == 0)
                 continue;
 
+            List<Vector3> placedVerts = new(verts.Count);
             Vector3 min = new(float.MaxValue), max = new(float.MinValue), sum = Vector3.Zero;
             foreach (Vector3 v in verts)
             {
                 Vector3 p = Pm4CoordinateService.Pm4LocalToAdtPlacement(v);
+                placedVerts.Add(p);
                 min = Vector3.Min(min, p);
                 max = Vector3.Max(max, p);
                 sum += p;
@@ -419,7 +576,8 @@ public static class Pm4UnauthoredPlacementResolver
                 verts.Count,
                 min,
                 max,
-                centroid));
+                centroid,
+                placedVerts));
         }
 
         return groups;
@@ -516,10 +674,12 @@ public static class Pm4UnauthoredPlacementResolver
             if (verts.Count < 4)
                 continue;
 
+            List<Vector3> placedVerts = new(verts.Count);
             Vector3 min = new(float.MaxValue), max = new(float.MinValue), sum = Vector3.Zero;
             foreach (Vector3 v in verts)
             {
                 Vector3 p = Pm4CoordinateService.Pm4LocalToAdtPlacement(v);
+                placedVerts.Add(p);
                 min = Vector3.Min(min, p);
                 max = Vector3.Max(max, p);
                 sum += p;
@@ -539,7 +699,8 @@ public static class Pm4UnauthoredPlacementResolver
                 verts.Count,
                 min,
                 max,
-                centroid));
+                centroid,
+                placedVerts));
         }
 
         return groups;
@@ -567,28 +728,37 @@ public static class Pm4UnauthoredPlacementResolver
                 if (nf < 0 || nf >= 64 || ns < 0 || ns >= 64)
                     continue;
 
-                // Probe for companion _obj0.adt in mapDirectory (both unpadded and padded)
-                string unpadded = Path.Combine(mapDirectory, $"development_{nf}_{ns}_obj0.adt");
-                string padded = Path.Combine(mapDirectory, $"development_{nf:02d}_{ns:02d}_obj0.adt");
-                string? companion = File.Exists(unpadded) ? unpadded : (File.Exists(padded) ? padded : null);
+                // Probe for candidate files in mapDirectory: monolithic .adt, split _obj0.adt, unpadded and padded
+                string[] candidates =
+                [
+                    Path.Combine(mapDirectory, $"development_{nf}_{ns}.adt"),
+                    Path.Combine(mapDirectory, $"development_{nf}_{ns}_obj0.adt"),
+                    Path.Combine(mapDirectory, $"development_{nf:02d}_{ns:02d}.adt"),
+                    Path.Combine(mapDirectory, $"development_{nf:02d}_{ns:02d}_obj0.adt")
+                ];
 
-                // Also check sibling WDT-ADT directory if present
-                if (companion is null)
-                {
-                    string wdtAdt = Path.Combine(mapDirectory, "..", "..", "WDT-ADT");
-                    if (Directory.Exists(wdtAdt))
-                    {
-                        string w1 = Path.Combine(wdtAdt, $"development_{nf}_{ns}_obj0.adt");
-                        string w2 = Path.Combine(wdtAdt, $"development_{nf:02d}_{ns:02d}_obj0.adt");
-                        companion = File.Exists(w1) ? w1 : (File.Exists(w2) ? w2 : null);
-                    }
-                }
+                string? companion = candidates.FirstOrDefault(File.Exists);
 
-                if (companion is not null && File.Exists(companion))
+                if (companion is not null)
                 {
                     try
                     {
-                        catalogs[Path.GetFileName(companion)] = neighborCatalogReader(companion);
+                        AdtPlacementCatalog cat = neighborCatalogReader(companion);
+                        // Filter out dummy Noggit OILPLATFORM_LOW placeholders
+                        var filteredWmos = cat.WorldModelPlacements
+                            .Where(w => !w.ModelPath.Contains("OILPLATFORM_LOW", StringComparison.OrdinalIgnoreCase))
+                            .ToList();
+
+                        if (filteredWmos.Count > 0 || cat.ModelPlacements.Count > 0)
+                        {
+                            catalogs[Path.GetFileName(companion)] = new AdtPlacementCatalog(
+                                cat.SourcePath,
+                                cat.Kind,
+                                cat.ModelNames,
+                                cat.WorldModelNames,
+                                cat.ModelPlacements,
+                                filteredWmos);
+                        }
                     }
                     catch
                     {
@@ -599,6 +769,88 @@ public static class Pm4UnauthoredPlacementResolver
         }
 
         return catalogs;
+    }
+
+    /// <summary>
+    /// Computes the principal 2D yaw orientation (in degrees) of a set of surface vertices
+    /// using covariance analysis on the horizontal placement plane (X, Y).
+    /// </summary>
+    public static float ComputeFootprintYawDegrees(IReadOnlyList<Vector3> vertices)
+    {
+        if (vertices == null || vertices.Count < 3)
+            return 0f;
+
+        float sumX = 0f, sumY = 0f;
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            sumX += vertices[i].X;
+            sumY += vertices[i].Y;
+        }
+        float meanX = sumX / vertices.Count;
+        float meanY = sumY / vertices.Count;
+
+        float cxx = 0f, cyy = 0f, cxy = 0f;
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            float dx = vertices[i].X - meanX;
+            float dy = vertices[i].Y - meanY;
+            cxx += dx * dx;
+            cyy += dy * dy;
+            cxy += dx * dy;
+        }
+
+        if (MathF.Abs(cxx - cyy) < 1e-4f && MathF.Abs(cxy) < 1e-4f)
+            return 0f;
+
+        float angleRad = 0.5f * MathF.Atan2(2f * cxy, cxx - cyy);
+        float angleDeg = angleRad * (180f / MathF.PI);
+
+        while (angleDeg > 180f) angleDeg -= 360f;
+        while (angleDeg < -180f) angleDeg += 360f;
+
+        return angleDeg;
+    }
+
+    /// <summary>
+    /// Computes the principal horizontal yaw (in degrees around Z) from the PM4 vertices,
+    /// aligned to the canonical forward orientation of the model.
+    /// </summary>
+    public static float ComputeModelAlignedYaw(IReadOnlyList<Vector3> vertices, Vector3 modelSpan)
+    {
+        float footprintYaw = ComputeFootprintYawDegrees(vertices);
+
+        // In WoW model coordinates, if the model's primary axis is along local Y instead of local X:
+        if (MathF.Abs(modelSpan.Y) > MathF.Abs(modelSpan.X) * 1.15f)
+        {
+            footprintYaw += 90f;
+            while (footprintYaw > 180f) footprintYaw -= 360f;
+            while (footprintYaw < -180f) footprintYaw += 360f;
+        }
+
+        return footprintYaw;
+    }
+
+    /// <summary>
+    /// Magnetically attracts an object's placement origin so that the model's geometric center
+    /// coincides with the PM4 collision mesh centroid, correcting for local model coordinate offsets.
+    /// </summary>
+    public static Vector3 AttractPositionToPm4Mesh(
+        Vector3 pm4Centroid,
+        float targetZ,
+        float yawDegrees,
+        Vector3 modelBoundsMin,
+        Vector3 modelBoundsMax)
+    {
+        Vector3 modelCenter = (modelBoundsMin + modelBoundsMax) * 0.5f;
+        float rotZRad = yawDegrees * (MathF.PI / 180f);
+        Matrix4x4 rotMatrix = Matrix4x4.CreateRotationZ(MathF.PI) * Matrix4x4.CreateRotationZ(rotZRad);
+        Vector3 rotatedCenter = Vector3.Transform(modelCenter, rotMatrix);
+
+        float z = targetZ != 0f ? targetZ : (pm4Centroid.Z - rotatedCenter.Z);
+        return new Vector3(
+            pm4Centroid.X - rotatedCenter.X,
+            pm4Centroid.Y - rotatedCenter.Y,
+            z);
     }
 
     private static Vector3 ShapeOf(Vector3 min, Vector3 max)
@@ -631,5 +883,6 @@ public static class Pm4UnauthoredPlacementResolver
         int VertexCount,
         Vector3 BoundsMin,
         Vector3 BoundsMax,
-        Vector3 Centroid);
+        Vector3 Centroid,
+        List<Vector3> Vertices);
 }

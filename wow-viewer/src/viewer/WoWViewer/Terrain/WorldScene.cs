@@ -1176,6 +1176,16 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         foreach (var p in result.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
+
+            // Honor spanned objects: only instantiate placements that exist in this tile itself in ADT space.
+            // Spanned objects duplicated across neighboring tiles in source ADTs must only be instantiated
+            // once by their home tile to prevent multi-instance stacking.
+            if (TryGetTerrainChunkKey(p.Position.X, p.Position.Y, out var homeTileKey)
+                && (homeTileKey.tileX != tileX || homeTileKey.tileY != tileY)
+                && adapter.TileExists(homeTileKey.tileX, homeTileKey.tileY))
+            {
+                continue;
+            }
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
 
@@ -1226,6 +1236,16 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         foreach (var p in result.ModfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
+
+            // Honor spanned objects: only instantiate placements that exist in this tile itself in ADT space.
+            // Spanned objects (e.g. Stormwind Harbor) duplicated across neighboring tiles in source ADTs
+            // must only be instantiated once by their home tile to prevent multi-instance stacking.
+            if (TryGetTerrainChunkKey(p.Position.X, p.Position.Y, out var homeTileKey)
+                && (homeTileKey.tileX != tileX || homeTileKey.tileY != tileY)
+                && adapter.TileExists(homeTileKey.tileX, homeTileKey.tileY))
+            {
+                continue;
+            }
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
             var transform = WorldPlacementTransform.Build(p.Position, p.Rotation);
 

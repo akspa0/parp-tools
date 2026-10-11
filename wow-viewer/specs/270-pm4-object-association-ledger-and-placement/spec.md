@@ -48,19 +48,21 @@ As an ML engineer, I want the ledger to store rich geometric invariants (surface
 - **AC-2.1**: Each ledger asset entry indexes the distribution of shapes observed across multiple instances (min/max/mean surfaces, extents $[L, W, H]$).
 - **AC-2.2**: Unique assets placed in multiple locations provide cross-instance invariance validation.
 
-### US-3: Automated Unauthored Tile Placement Generator
-As a developer, I want a pipeline that takes any unauthored PM4 tile (e.g. `development_17_13.pm4`, `17_14.pm4`), queries the PM4 ledger, and generates a valid, authentic `_obj0.adt` file containing recovered WMO and M2 placements.
+### US-3: Automated Unauthored Tile Placement Generator & Monolithic LK ADT Assembly
+As a developer, I want a pipeline that takes unauthored PM4 tiles, queries the PM4 ledger and neighbor context with strict spillover deduplication, recovers authentic 2D PCA Yaw orientation, and outputs standard monolithic LK ADTs (`development_XX_YY.adt`) merged with surviving terrain meshes.
 
-- **AC-3.1**: Generates standard ADT placement chunks (`MMDX`, `MMID`, `MWMO`, `MWID`, `MDDF`, `MODF`).
-- **AC-3.2**: Accurately places WMOs at the exact PM4 centroids with correct base elevations.
-- **AC-3.3**: Places recovered M2 doodads matching the connected component clusters in `CK24 == 0`.
-- **AC-3.4**: Round-trip verified: generated `_obj0.adt` files must parse cleanly with `AdtPlacementReader.Read()`.
+- **AC-3.1**: Ground-truth preservation: The 255 hand-authored tiles in `test_data/WoWMuseum/335-dev/` are strictly protected and never overwritten or altered.
+- **AC-3.2**: Spillover deduplication: Large neighbor WMOs crossing tile boundaries are capped to 1 instance per parent placement with bit-exact Z validation, eliminating duplicate stacking.
+- **AC-3.3**: Tight geometric distance threshold ($\le 0.18$) with vertex/surface plausibility to prevent false building assignment.
+- **AC-3.4**: Orientation recovery: Derives authentic Yaw rotation in degrees from 2D PCA on the object's $(X, Y)$ vertices, aligned to the model's canonical frame.
+- **AC-3.5**: Monolithic LK ADT format: Injects recovered placements into the base terrain from `335-dev` using `BlankAdtFactory.WithPlacements` and writes standard monolithic `.adt` files via `LkAdtWriter.Build(..., MapConversionTargetFormat.LkAdtV18)`.
+- **AC-3.6**: Round-trip verification: Generated monolithic `.adt` files parse losslessly via `LkAdtReader.Read()` with 0 missing/failed tiles in `WoWViewer`.
 
 ### US-4: Viewer Outliner & Visual Verification
 As an operator, I want to inspect restored placements directly in `WoWViewer` alongside the PM4 collision overlay to visually confirm alignment with zero clipping or drift.
 
-- **AC-4.1**: Restored `_obj0.adt` files load seamlessly in `WoWViewer` with the PM4 Scene Graph panel.
-- **AC-4.2**: Visual parity between PM4 collision surfaces and rendered 3D geometry.
+- **AC-4.1**: Restored monolithic `.adt` files load seamlessly in `WoWViewer` with 0 missing/failed tile errors.
+- **AC-4.2**: Visual parity between PM4 collision surfaces and rendered 3D geometry with authentic building yaw orientation.
 
 ---
 
@@ -69,10 +71,23 @@ As an operator, I want to inspect restored placements directly in `WoWViewer` al
 - **Core Ledger Harvest**:
   - `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4ObjectLedgerHarvester.cs`
   - `wow-viewer/src/core/WowViewer.Core.PM4/Models/Pm4ObjectLedger.cs`
+- **Core Placement & Rotation Resolver**:
+  - `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4UnauthoredPlacementResolver.cs`
+  - `wow-viewer/src/core/WowViewer.Core.IO/Maps/BlankAdtFactory.cs`
+  - `wow-viewer/src/core/WowViewer.Core.IO/Maps/LkAdtWriter.cs`
 - **Tooling & CLI**:
-  - `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4ObjectLedgerCommand.cs`
-  - `wow-viewer/data-harvester/scripts/build_pm4_object_ledger.py`
+  - `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4RestoreUnauthoredSupport.cs`
+- **Ground Truth Base**:
+  - `wow-viewer/test_data/WoWMuseum/335-dev/World/Maps/development/`
 - **Output Artifacts**:
   - `wow-viewer/output/datasets/pm4_object_association_ledger.json`
-- **Restored Placements**:
-  - `wow-viewer/output/restored_development/World/Maps/development/`
+  - `wow-viewer/output/restored_development/World/Maps/development/` (monolithic `.adt` files)
+
+---
+
+## 4. Scope Amendment (2026-10-10)
+
+- **Monolithic LK ADT Delivery**: Replaced split `_obj0.adt` output with monolithic 3.3.5 `.adt` files to resolve the 66 failed/unreadable tile defect.
+- **Strict Ground Truth Protection**: Enforced guard on all 255 hand-authored tiles from `WoWMuseum/335-dev` to ensure hand-authored Dragon Isles, Zul'Aman, Duskwood, Goldshire, and Redridge are never replaced.
+- **2D PCA Yaw Orientation**: Added principal component covariance analysis on $(X, Y)$ vertices to compute authentic building yaw rotation matching PM4 collision bounds.
+- **Multi-Instance Spillover Cap**: Capped border-crossing WMOs to single instances per parent placement to prevent duplicate stacking (e.g. 18 Stormwind Harbors on a single tile).

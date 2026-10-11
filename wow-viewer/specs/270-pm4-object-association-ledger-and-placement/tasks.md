@@ -22,8 +22,11 @@
 
 ---
 
-## Phase 3 — Verification & Visual Outliner Smoke
+## Phase 4 — High-Precision Monolithic LK Pipeline & Ground Truth Guard (2026-10-10)
 
-- [x] **T09**: Write automated unit tests for ledger serialization, matching score, and placement round-trip (`Pm4UnauthoredPlacementResolverTests.cs` — 4/4 PASS).
-- [ ] **T10**: Visual inspection in `WoWViewer` outliner to confirm 3D alignment between PM4 collision surfaces and restored geometry (Operator-owned via UI).
-- [x] **T11**: Author completion receipt `evidence/receipt-spec270.md` with real outputs and verification results.
+- [x] **T12**: Implement 2D PCA Yaw rotation calculation (`ComputeFootprintYawDegrees`) in `Pm4UnauthoredPlacementResolver.cs` using $(X, Y)$ covariance principal axes.
+- [x] **T13**: Implement spillover deduplication (max 1 instance per parent WMO) and tighten geometric distance threshold to $\le 0.18$ in `Pm4UnauthoredPlacementResolver.cs`.
+- [x] **T14**: Implement ground truth barrier in `Pm4RestoreUnauthoredSupport.cs` using `WoWMuseum/335-dev/` (strictly preserve all 255 hand-authored tiles).
+- [x] **T15**: Implement monolithic LK 3.3.5 ADT generator in `Pm4RestoreUnauthoredSupport.cs` using `LkAdtReader.Read`, `BlankAdtFactory.WithPlacements`, and `LkAdtWriter.Build(..., MapConversionTargetFormat.LkAdtV18)`.
+- [x] **T16**: Run reconstruction on unauthored PM4 tiles (e.g. `13_50`, `14_36`, `16_36`, and full corpus) producing valid monolithic `.adt` files.
+- [x] **T17**: Validate with C# test suite (`dotnet test`) and update completion receipt (`evidence/receipt-spec270.md`).

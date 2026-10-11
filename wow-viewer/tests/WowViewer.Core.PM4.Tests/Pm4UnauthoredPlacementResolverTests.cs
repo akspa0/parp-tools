@@ -103,4 +103,42 @@ public sealed class Pm4UnauthoredPlacementResolverTests
             Assert.Equal(result.Catalog.WorldModelPlacements[0].Position.Z, readBack.WorldModelPlacements[0].Position.Z, 0.001f);
         }
     }
+
+    [Fact]
+    public void ComputeFootprintYawDegrees_RecoversOrientation()
+    {
+        // Elongated points along X axis (yaw ~ 0 deg)
+        var horizontalPoints = new List<Vector3>
+        {
+            new(-10f, 0f, 0f),
+            new(10f, 0f, 0f),
+            new(-10f, 1f, 0f),
+            new(10f, 1f, 0f),
+        };
+        float yaw0 = Pm4UnauthoredPlacementResolver.ComputeFootprintYawDegrees(horizontalPoints);
+        Assert.InRange(MathF.Abs(yaw0), 0f, 1f);
+
+        // Elongated points along Y axis (yaw ~ 90 deg or -90 deg)
+        var verticalPoints = new List<Vector3>
+        {
+            new(0f, -10f, 0f),
+            new(0f, 10f, 0f),
+            new(1f, -10f, 0f),
+            new(1f, 10f, 0f),
+        };
+        float yaw90 = MathF.Abs(Pm4UnauthoredPlacementResolver.ComputeFootprintYawDegrees(verticalPoints));
+        Assert.InRange(yaw90, 89f, 91f);
+
+        // Elongated points along 45 degree line (X == Y)
+        var diagPoints = new List<Vector3>
+        {
+            new(-10f, -10f, 0f),
+            new(10f, 10f, 0f),
+            new(-10f + 0.5f, -10f - 0.5f, 0f),
+            new(10f + 0.5f, 10f - 0.5f, 0f),
+        };
+        float yaw45 = Pm4UnauthoredPlacementResolver.ComputeFootprintYawDegrees(diagPoints);
+        Assert.InRange(yaw45, 44f, 46f);
+    }
 }
+

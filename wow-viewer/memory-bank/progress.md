@@ -2,6 +2,26 @@
 
 Last updated: 2026-10-10
 
+## 2026-10-10 — Whiteplate Terrain Shader Fix & Spanned PM4 Multi-Tile Object Placement Deduping
+
+- **Whiteplate Terrain Fallback (`TerrainRenderer.cs`)**:
+  - Root cause: GLSL fragment shaders (`CreateTerrainShader` and `CreateTileTerrainShader`) initialized diffuse color to `vec3(0.0)`. For untextured tiles (empty `MTEX` / 0 diffuse layers, such as 1,232 tiles in `development`), `totalWeight <= 0.0001` left `result = vec3(0.0)`, resulting in pitch-black surfaces ("blackplates").
+  - Fix: Added whiteplate diffuse fallback `else { result = vec3(1.0) * lighting; }`. Untextured terrain surfaces now render as authentic whiteplates with full ambient, directional sun diffuse, normal slope shading, shadow maps, and MCCV vertex tinting.
+- **Spanned PM4 Multi-Tile Object Deduping (`WorldScene.cs` & `Pm4UnauthoredPlacementResolver.cs`)**:
+  - Root cause: Huge WMOs spanning multiple tiles (e.g. Stormwind Harbor at `(-3064.97, 8539.29)` belonging to `15_37`) were duplicated in 8+ ADT files. When `WorldScene` loaded the 3x3 AOI ring around the harbor, every tile added an instance, rendering 6+ stacked copies. In addition, unauthored PM4 tiles synthesized duplicate placements across boundaries.
+  - Fix in `WorldScene.OnTileLoaded`: Filtered placements where `homeTileKey != (tileX, tileY)` and `adapter.TileExists(homeTileKey) == true`. Spanned objects are only instantiated by their single home tile in ADT space, eliminating duplicate stacking.
+  - Fix in `Pm4UnauthoredPlacementResolver.ResolveTile`: Enforced `IsWithinPlacementTileBounds(resolved.Position, tileFirst, tileSecond)`. Unauthored tiles only emit placements whose coordinates reside inside the tile itself in ADT space.
+  - Verified: Re-ran `inspect restore-unauthored` (255 preserved, 96 restored, 96/96 PASS) and verified all 5 tests in `Pm4UnauthoredPlacementResolverTests` pass.
+
+## 2026-10-10 — Spec 270 Phase 4: High-Precision Monolithic LK Pipeline, 2D PCA Yaw Rotation & Ground Truth Guard
+
+- **Ground Truth Protection Barrier**: Verified and enforced 100% byte-for-byte preservation on all 255 hand-authored Blizzard tiles in `test_data/WoWMuseum/335-dev/` (Dragon Isles, Zul'Aman troll huts, Duskwood, Goldshire, Redridge). Never synthesizes or overwrites over authentic Blizzard hand-crafted assets.
+- **2D PCA Yaw Orientation Recovery (`ComputeFootprintYawDegrees`)**: Derived principal horizontal axes from $(X, Y)$ covariance eigenvectors ($\theta = \frac{1}{2}\text{atan2}(2C_{xy}, C_{xx} - C_{yy})$), orienting buildings to match their collision footprints. Verified with unit tests covering 0°, 45°, and 90° rotations.
+- **Spillover Deduplication & Threshold Tightening**: Enforced unique parent instance keys to prevent border-crossing WMOs from multi-instance stacking (e.g. Stormwind Harbor); tightened geometric match distance threshold to $\le 0.18$.
+- **Monolithic LK 3.3.5 ADT Assembly**: Replaced broken split `_obj0.adt` delivery (which caused 66 failed/unreadable tiles in WoWViewer) with standard monolithic `.adt` files (`development_XX_YY.adt`) merged with surviving terrain meshes (`MCNK`, `MCVT`, `MCNR`, `MTEX`, `MCAL`) via `BlankAdtFactory.WithPlacements` and `LkAdtWriter.Write(..., MapConversionTargetFormat.LkAdtV18)`.
+- **Schlumpf Index Defect Repair**: Repaired in-memory MCNK coordinate defect (`EnsureValidMcnkIndices`) where Schlumpf's Cata WDL-ADT generator wrote `IndexY = 0` on all 256 chunks, recovering authentic terrain elevation and restoring `development_42_43.adt`.
+- **Full Dataset Verification**: Restored 96 unauthored tiles with collision geometry (358 WMOs, 78 M2s) with **96 PASS / 0 FAIL (100% round-trip match)** via `LkAdtReader.Read()`. All 5 unit tests in `Pm4UnauthoredPlacementResolverTests` green. Receipt in `evidence/receipt-spec270.md`.
+
 ## 2026-10-10 — Spec 270: PM4 Object Association Ledger & Unauthored Placement Pipeline
 
 - **Spec Kit Authored & Landed**: Authored `spec.md`, `plan.md`, `tasks.md`, and verification receipt `evidence/receipt-spec270.md` under `specs/270-pm4-object-association-ledger-and-placement/`. Registered in `specs/STATUS.md` and `memory-bank/activeContext.md`.

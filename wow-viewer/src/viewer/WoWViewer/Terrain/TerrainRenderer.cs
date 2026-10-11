@@ -1721,6 +1721,9 @@ void main() {
             result += c3.rgb * w3;
         }
         result = (result / totalWeight) * lighting;
+    } else {
+        // Whiteplate fallback: untextured terrain diffuse is pure white lit by scene lighting.
+        result = vec3(1.0) * lighting;
     }
 
     // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.
@@ -2004,6 +2007,9 @@ void main() {
             }
         }
         result = (result / totalWeight) * lighting;
+    } else {
+        // Whiteplate fallback: untextured terrain diffuse is pure white lit by scene lighting.
+        result = vec3(1.0) * lighting;
     }
 
     // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.

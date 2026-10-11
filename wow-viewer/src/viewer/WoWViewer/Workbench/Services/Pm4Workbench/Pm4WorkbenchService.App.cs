@@ -60,6 +60,10 @@ internal sealed partial class Pm4WorkbenchService
     private int _selectedPm4ObjectMatchCandidateIndex;
     private Pm4WmoMatchResult? _pm4WmoGroupMatchResult;
     private string _pm4WmoMatchStatus = "";
+    private PmM2MatchResult? _pm2GroupMatchResult;
+    private string _pm2MatchStatus = "";
+    private PmM2MatchStore? _pm2MatchStore;
+    private Dictionary<string, PmM2MatchEntry> _pm2MatchEntries = [];
     private Pm4WmoCorrelationReport? _pm4WmoCorrelationReport;
     private int _pm4WmoCorrelationMaxMatchesPerPlacement = 8;
     private int _selectedPm4WmoCorrelationPlacementIndex = -1;

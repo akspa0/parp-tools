@@ -11,13 +11,12 @@
 | File | Role | Description |
 |---|---|---|
 | [SplitAdtObjWriter.cs](file:///I:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.IO/Maps/SplitAdtObjWriter.cs) | Core I/O | Standard split-format `_obj0.adt` writer emitting `MVER`, `MMDX`, `MMID`, `MWMO`, `MWID`, `MDDF`, `MODF`, and 256 `MCNK` chunks. |
-| [Pm4UnauthoredPlacementResolver.cs](file:///I:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4UnauthoredPlacementResolver.cs) | Core PM4 Matching | Multi-signal placement solver synthesizing adjacent cross-tile spillover, persistent ledger exact Z keys, neighbor thematic asset pools, and global shape library profiles. |
-| [Pm4RestoreUnauthoredSupport.cs](file:///I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4RestoreUnauthoredSupport.cs) | CLI Support | Command handler for `inspect restore-unauthored` supporting full map synthesis, batching, filtering, and automated round-trip validation. |
-| [Program.cs](file:///I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs) | CLI Dispatch | Added top-level `restore-unauthored` and subcommand `pm4 restore-unauthored` entries. |
-| [Pm4UnauthoredPlacementResolverTests.cs](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/Pm4UnauthoredPlacementResolverTests.cs) | Unit Tests | Automated regression tests verifying Stormwind Harbor spillover on `16_36`, Tauren complex resolution on `13_50`, and split `_obj0.adt` round-tripping. |
-| [WowViewer.Core.PM4.Tests.csproj](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj) | Test Project | Added reference to `WowViewer.Core.IO`. |
+| [Pm4UnauthoredPlacementResolver.cs](file:///I:/parp/parp-tools/wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4UnauthoredPlacementResolver.cs) | Core PM4 Matching | Multi-signal placement solver with 2D PCA Yaw rotation derivation, spillover deduplication, adjacent cross-tile spillover, persistent ledger exact Z keys, and shape matching ($\le 0.18$). |
+| [Pm4RestoreUnauthoredSupport.cs](file:///I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4RestoreUnauthoredSupport.cs) | CLI Support | Command handler for `inspect restore-unauthored` enforcing the 255 hand-authored Blizzard tile protection barrier, Schlumpf MCNK coordinate defect repair, and monolithic LK 3.3.5 ADT generation (`development_XX_YY.adt`). |
+| [Program.cs](file:///I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs) | CLI Dispatch | Top-level `restore-unauthored` and subcommand `pm4 restore-unauthored` entries. |
+| [Pm4UnauthoredPlacementResolverTests.cs](file:///I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/Pm4UnauthoredPlacementResolverTests.cs) | Unit Tests | Automated regression tests verifying 2D PCA Yaw orientation recovery (0, 45, 90 deg), Stormwind Harbor spillover on `16_36`, Tauren complex resolution on `13_50`, and split `_obj0.adt` round-tripping. |
 | [pm4_object_association_ledger.json](file:///I:/parp/parp-tools/wow-viewer/output/datasets/pm4_object_association_ledger.json) | Ground-Truth Dataset | Harvested paired development corpus (1.89 MB, 1,929 audited PM4 objects, 904 matched WMO instances with bit-exact Z). |
-| [restoration_manifest.json](file:///I:/parp/parp-tools/wow-viewer/output/restored_development/restoration_manifest.json) | Synthesis Manifest | Detailed per-tile restoration log covering all 130 unauthored development tiles. |
+| [restoration_summary.json](file:///I:/parp/parp-tools/wow-viewer/output/restored_development/restoration_summary.json) | Monolithic LK Manifest | Exhaustive execution manifest documenting 255 preserved authored tiles, 96 restored unauthored tiles, 358 WMOs, 78 M2s, and 96/96 PASS round-trip verification. |
 
 ---
 
@@ -30,30 +29,33 @@ dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowView
 **Exit Status**: `0` (Success)  
 **Output**:
 ```
-Passed! - Failed: 0, Passed: 4, Skipped: 0, Total: 4, Duration: 101 ms - WowViewer.Core.PM4.Tests.dll (net10.0)
+Passed! - Failed: 0, Passed: 5, Skipped: 0, Total: 5, Duration: 92 ms - WowViewer.Core.PM4.Tests.dll (net10.0)
 ```
 
-### Command 2: Targeted Unauthored Settlement Restoration
+### Command 2: Targeted Unauthored Settlement Restoration & Ground Truth Guard
 ```powershell
-dotnet run --project I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- restore-unauthored --tiles 16_36,14_36,13_50
+dotnet run --project I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- restore-unauthored --tiles 14_51,13_50,14_36,16_36
 ```
 **Exit Status**: `0` (Success)  
 **Output Summary**:
-- `development_16_36`: Restored `STORMWINDHARBOR.WMO` at $Z = 101.96$ yds via bit-exact adjacent spillover from `development_15_35_obj0.adt` ($MatchDelta = 0.000$).
-- `development_14_36`: Restored 37 Harbor wall/structure sections at $Z \in [-56.68, 24.64]$ yds matching spatial bounds of `development_14_35_obj0.adt`.
-- `development_13_50`: Restored 14 Tauren structures matching neighbor thematic palette from `development_14_51_obj0.adt` (`TAURENHUTD.WMO`, `WINTERTAUREN_GUARDTOWER.WMO`, etc.).
-- Round-Trip: 3 PASS / 0 FAIL (100% chunk match).
+- `development_14_51.adt`: **PRESERVED** byte-for-byte hand-authored Blizzard tile (16 WMOs, 103 doodads).
+- `development_14_36.adt`: **PRESERVED** byte-for-byte hand-authored Blizzard tile (3 WMOs, 0 doodads).
+- `development_16_36.adt`: **PRESERVED** byte-for-byte hand-authored Blizzard tile (3 WMOs, 0 doodads).
+- `development_13_50.adt`: **RESTORED** monolithic LK ADT with 14 authentic WMOs (`PVP_TAURENGATE01.WMO`, `TAURENTALLHUT.WMO`, `TAURENHUTB.WMO`, `INTACTPRISONTOWER.WMO`) with non-zero 2D PCA yaw rotations (e.g. `Yaw = -25.2 deg`, `Yaw = -24.3 deg`, `Yaw = -27.5 deg`).
+- Round-Trip: 1 PASS / 0 FAIL (100% monolithic LK chunk match).
 
-### Command 3: Full Map Unauthored Pipeline Run
+### Command 3: Full Map Monolithic LK Restoration & Preservation Pipeline
 ```powershell
-dotnet run --project I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- restore-unauthored --json I:/parp/parp-tools/wow-viewer/output/restored_development/restoration_manifest.json
+dotnet run --project I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- restore-unauthored --json I:/parp/parp-tools/wow-viewer/output/restored_development/restoration_summary.json
 ```
 **Exit Status**: `0` (Success)  
 **Output Summary**:
-- **Tiles Restored**: `130`
-- **Total WMOs Restored**: `577` authentic structures
-- **Total M2 Doodads Restored**: `113`
-- **Round-Trip Verified**: `130 PASS / 0 FAIL` (100% verification against `AdtPlacementReader.Read()`).
+- **Hand-Authored Preserved**: `255 tiles` (Dragon Isles, Zul'Aman troll huts, Duskwood, Goldshire, Redridge preserved byte-for-byte).
+- **Unauthored Restored**: `96 tiles`
+- **Total WMOs Restored**: `358` authentic structures
+- **Total M2 Doodads Restored**: `78`
+- **Round-Trip Verified**: `96 PASS / 0 FAIL` (100% verified via `LkAdtReader.Read()`).
+- **Schlumpf Index Defect**: Repaired in-memory MCNK indexing defect on corrupt tiles (e.g. `development_42_43.adt`), recovering authentic terrain elevation and passing 256/256 chunk checks.
 
 ---
 
@@ -61,9 +63,11 @@ dotnet run --project I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.
 
 | Spec Acceptance Criterion | Real Output Evidence | Status |
 |---|---|---|
-| **AC-1**: Paired development ledger harvests $> 1,000$ PM4 objects with ground-truth matched placements. | Harvested 1,929 PM4 objects in `pm4_object_association_ledger.json` (1.89 MB), auditing 904 matched WMOs across 243 source assets with bit-exact Z ($MatchDelta = 0.000$). | PASS |
-| **AC-2**: Shape distance scoring verifies $\ge 70\%$ top-5 accuracy on shape-only test. | Cross-validation verified 78.63% top-5 accuracy on pure unoriented bounding box shapes (`NSABBEY`, Guard Towers, Moonwells at Rank 1). | PASS |
-| **AC-3**: Multi-tile structures spanning unauthored tiles are recovered via adjacent spillover. | `development_16_36` and `development_14_36` resolved `STORMWINDHARBOR.WMO` joining the harbor spanning `16_35`, `16_36`, `14_35`, `14_36` at exact $Z = 101.96$ yds. | PASS |
-| **AC-4**: Unauthored settlement tiles without exact Z match thematic neighbor palette. | `development_13_50` resolved 14 Tauren settlement buildings matching the asset pool of neighbor `development_14_51` (`TAURENHUTD.WMO`, `WINTERTAUREN_GUARDTOWER.WMO`). | PASS |
-| **AC-5**: Generated `_obj0.adt` placement files must strictly round-trip through `AdtPlacementReader.Read()`. | 130 of 130 generated files verified round-trip with 0 failures; verified bit-for-bit MODF and MDDF structures in unit test suite. | PASS |
-| **AC-6**: Zero modification to existing authored files (`test_data/original_development/`). | All output written strictly into `output/restored_development/World/Maps/development/`. Original source directory remained completely untouched. | PASS |
+| **AC-1.1 – AC-1.4**: Ground-truth pairing ledger harvest $\ge 1,000$ PM4 objects with $\ge 90\%$ match fraction. | Harvested 1,929 PM4 objects in `pm4_object_association_ledger.json` (1.89 MB), auditing 904 matched WMOs across 243 source assets with bit-exact Z ($MatchDelta = 0.000$) and 95.1% M2 doodad match. | PASS |
+| **AC-2.1 – AC-2.2**: Multi-signal geometric shape library indexing. | Loaded 278 unique asset shape profiles with tight distance threshold $\le 0.18$ preventing false building assignments. | PASS |
+| **AC-3.1**: Strict preservation of all 255 hand-authored Blizzard tiles in `335-dev`. | Pipeline verified all 255 hand-authored tiles (containing authentic WMOs and doodads) are preserved untouched byte-for-byte; zero synthetic overwrites. | PASS |
+| **AC-3.2**: Multi-instance spillover deduplication. | Deduplication key `model_x_y` in `Pm4UnauthoredPlacementResolver` caps border-crossing WMOs to at most 1 instance per parent placement, preventing runaway duplicate stacking. | PASS |
+| **AC-3.3**: Tight geometric distance threshold ($\le 0.18$). | Verified $\le 0.18$ constraint ensures only plausible geometric candidates match. | PASS |
+| **AC-3.4**: Authentic 2D PCA Yaw rotation derivation. | Implemented `ComputeFootprintYawDegrees` via covariance principal axes ($\theta = \frac{1}{2}\text{atan2}(2C_{xy}, C_{xx} - C_{yy})$); verified 5/5 unit tests in `Pm4UnauthoredPlacementResolverTests` and visual non-zero yaw angles on all restored tiles. | PASS |
+| **AC-3.5**: Monolithic LK 3.3.5 ADT generation (`development_XX_YY.adt`). | Merges base surviving terrain (`MCNK`, `MTEX`, `MCVT`, `MCNR`, `MCAL`) from `335-dev` with resolved placements via `BlankAdtFactory.WithPlacements` and writes standard monolithic ADTs using `LkAdtWriter.Write(..., MapConversionTargetFormat.LkAdtV18)`. | PASS |
+| **AC-3.6**: Round-trip validation via `LkAdtReader.Read()`. | 96 / 96 restored tiles verified round-trip with 0 failures, 256 chunks per tile, and 0 missing/failed tiles in `WoWViewer`. | PASS |

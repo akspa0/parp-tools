@@ -92,26 +92,33 @@ For $CK24 == 0$:
 }
 ```
 
-### 2.5 Placement Synthesis (`LkAdtWriter` / `AdtPlacementWriter`)
-For unauthored tiles (e.g. `development_17_13`):
+### 2.5 Placement Synthesis & Monolithic LK ADT Assembly (`LkAdtWriter` / `BlankAdtFactory`)
+For unauthored tiles (e.g. `development_13_50`, `14_36`, `16_36`):
 1. Extract all objects ($CK24 \neq 0$) and doodad components ($CK24 == 0$).
-2. Query ledger using multidimensional geometric similarity metric (surface count + oriented extents + vertex density).
-3. If score $> 0.85$, assign top asset path.
-4. Construct `MODF` and `MDDF` records.
-5. Write standard `_obj0.adt` via `LkAdtWriter.Build()`.
+2. Query ledger and neighbor context using strict spillover deduplication and multi-feature shape matching (extents + surface count + vertex density).
+3. Compute 2D principal axis yaw rotation ($\theta_{\text{pca}} = \frac{1}{2}\text{atan2}(2C_{xy}, C_{xx} - C_{yy})$) and apply canonical model orientation offset.
+4. Construct `MODF` and `MDDF` placement records.
+5. Ingest surviving base terrain (`MCNK`, `MTEX`, `MCVT`, `MCNR`) from `test_data/WoWMuseum/335-dev/` via `LkAdtReader.Read()`.
+6. Inject resolved placements via `BlankAdtFactory.WithPlacements()`.
+7. Serialize monolithic LK 3.3.5 ADT (`.adt`) using `LkAdtWriter.Build(..., MapConversionTargetFormat.LkAdtV18)`.
 
 ---
 
 ## 3. Phased Implementation Roadmap
 
-- **Phase 1: Ledger Engine & Extraction**
+- **Phase 1: Ledger Engine & Extraction (Complete)**
   - Implement `Pm4ObjectLedgerHarvester` scanning 399 paired tiles.
   - Produce `output/datasets/pm4_object_association_ledger.json`.
   - Validate $>95\%$ match accuracy across the 399 tiles.
-- **Phase 2: Unauthored Tile Placement Resolver**
-  - Implement matching engine querying the ledger for unauthored PM4 tiles.
-  - Implement `AdtPlacementWriter` or `LkAdtWriter` pipeline.
-- **Phase 3: Verification & Ground-Truth Parity**
-  - Test round-trip verification on paired tiles (held-out test set).
-  - Generate restored `_obj0.adt` files for priority unauthored development tiles.
-  - Load in `WoWViewer` and verify alignment in PM4 Scene Graph outliner.
+- **Phase 2: High-Precision Placement Resolver & Rotation Engine**
+  - Implement 2D PCA Yaw rotation calculation on $(X, Y)$ vertices.
+  - Implement strict spillover deduplication (1 instance per parent WMO across border).
+  - Tighten geometric distance threshold to $\le 0.18$.
+- **Phase 3: Ground Truth Protection & Monolithic LK ADT Assembly**
+  - Enforce pristine preservation for all 255 hand-authored tiles in `WoWMuseum/335-dev/`.
+  - Read base terrain from `335-dev`, strip placeholder `OILPLATFORM_LOW`, and inject resolved placements.
+  - Serialize monolithic 3.3.5 `.adt` files with 100% round-trip validation.
+- **Phase 4: Viewer Verification & Receipts**
+  - Verify 0 missing/failed tiles in `WoWViewer`.
+  - Confirm visual rotation alignment with PM4 collision wireframes.
+  - Update completion receipts.
