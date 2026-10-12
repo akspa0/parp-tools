@@ -1,6 +1,8 @@
 # WoWViewer Toolkit (`wow-viewer`)
 
-The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data across the active project eras, primarily Alpha 0.5.3 through WotLK 3.3.5a, plus (alpha, v0.6.0-alpha) modern CASC installs of **WoW: Forever** (`wow_classic_beta` 1.60.1, 12.0-based client).
+The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data. **v0.6.0** is the first stable v0.6 release: complete support for clients **0.5.3 – 0.11**, partial support for **0.12 – 5.x**, and stable modern CASC support for **WoW: Forever** (`wow_classic_beta` 1.60.1, 12.0-based client).
+
+> **Bring your own data.** parp-tools ships no game data. Point it at your own client install, MPQ set, CASC install or extracted map folder.
 
 ---
 
@@ -8,7 +10,9 @@ The primary development and runtime workspace for `parp-tools`. This project pro
 
 ### 1. 3D World Viewer (`src/viewer/WoWViewer`)
 An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
-- **Modern CASC Clients (alpha)**: File → Open CASC Install (local, or local + CDN fill), then pick the game version. Tested with WoW: Forever (`wow_classic_beta` 1.60.1.69876). Covers FileDataID-era maps (`MAID`, `MDID`, FileDataID placements), chunked `MD21` M2s, `GFID`/`MODI` WMOs with modern per-LOD groups and materials, and DB2 tables. Terrain blends up to 8 tileset layers per chunk at full resolution. v0.6.0-alpha4 brings full 64-bit high-resolution terrain holes, hole-aware raycasting/picking into caves/dungeons, M2 opacity controls, customizable wireframe overlay colors, and major streaming performance improvements. See [release notes](docs/releases/v0.6.0-alpha4.md).
+- **Modern CASC Clients**: File → Open CASC Install (local, or local + CDN fill), then pick the game version. Tested with WoW: Forever (`wow_classic_beta` 1.60.1.69876); works with every build since support landed. Covers FileDataID-era maps (`MAID`, `MDID`, FileDataID placements), chunked `MD21` M2s, `GFID`/`MODI` WMOs with modern per-LOD groups and materials, and DB2 tables. Terrain blends up to 8 tileset layers per chunk with 64-bit high-resolution holes. See the [v0.6.0 release notes](docs/releases/v0.6.0.md).
+- **Archaeology: phase maps & map layering**: the Archaeology tab lists the DBC/DB2-defined phase maps for the loaded base map when the client has them; otherwise any map can be loaded on top of any other map.
+- **Development-map restoration (partial)**: PM4 collision meshes are matched to museum object placements (persistent association ledger), minimap-only terrain is baked to vertex colour, and restored tiles are written as monolithic LK 3.3.5 ADTs. Objects on tiles adjacent to PM4-covered tiles are still missing — see [Spec 270](specs/270-pm4-object-association-ledger-and-placement/spec.md).
 - **DAT v26 Terrain (alpha)**: File → Open DAT v26 Terrain Folder renders the raw terrain project files that shipped in that build — heights (inches), normals, vertex colours, layers and `ACDO` objects — and File → Export Nearby Tiles as DAT v26 (experimental) writes them back ([format write-up](docs/architecture/adt-v26-format.md)).
 - **Terrain Streaming**: Bounded camera-centered tile streaming with directional lookahead and WDL low-detail horizon fallback.
 - **WMO Portals & Interiors**: Hierarchical culling with bounded portal traversal and group-level admission.
@@ -92,7 +96,7 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.T
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  WoWViewer v0.6.0-alpha4                                       [_][□][X]    │
+│  WoWViewer v0.6.0                                              [_][□][X]    │
 ├──────────────┬───────────────────────────────────────────────┬──────────────┤
 │  NAVIGATOR   │                                               │  WORKBENCH   │
 │  (Left Bar)  │               3D VIEWPORT                     │  (Right Bar) │
@@ -142,7 +146,9 @@ See the **[CLI tooling README](tools/README.md)** for the canonical tool index, 
 | **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
 | **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
 | **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
-| **WoW: Forever** | 1.60.1.69876 (`wow_classic_beta`, 12.0-based, CASC) | **Alpha (v0.6.0-alpha4)** | Local CASC + optional CDN fill + game-version picker; `MAID`/`MDID` terrain with up to 8 blended layers and 64-bit high-res holes, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO with modern materials/LOD, DB2 via WoWDBDefs; DAT v26 terrain project files (reader, renderer, experimental writer); streamed/shared textures, GPU-instanced M2s, GPU skinning, and optimized frame streaming (v0.6.0-alpha4) |
+| **WoW: Forever** | 1.60.1.69876 (`wow_classic_beta`, 12.0-based, CASC) | **Stable (v0.6.0)** | Local CASC + optional CDN fill + game-version picker; `MAID`/`MDID` terrain with up to 8 blended layers and 64-bit high-res holes, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO with modern materials/LOD, DB2 via WoWDBDefs; DAT v26 terrain project files (alpha); streamed/shared textures, GPU-instanced M2s, GPU skinning |
+
+**Support summary (v0.6.0):** clients 0.5.3 – 0.11 complete; 0.12 – 5.x partial; WoW: Forever 1.60.1 stable.
 
 Other retail CASC builds are untested; the FileDataID-era readers are not yet validated beyond `wow_classic_beta` 1.60.1.
 

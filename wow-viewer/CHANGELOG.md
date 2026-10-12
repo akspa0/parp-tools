@@ -3,6 +3,14 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.6.0 — 2026-10-11
+
+Stable release: **WoW: Forever 1.60 support, development-map restoration (PM4 objects, minimap-only terrain),
+Archaeology phase maps and map layering.** Clients 0.5.3–0.11 complete, 0.12–5.x partial. Bring your own data.
+Restored ADTs keep their original alpha maps. Integrated help and an image guide follow in v0.6.1.
+
+Full notes: [`docs/releases/v0.6.0.md`](docs/releases/v0.6.0.md)
+
 ## v0.6.0-alpha4 — 2026-10-01
 
 Release (not a pre-release): **modern ADT 64-bit high-resolution terrain holes, major performance gains, M2 opacity, wireframe styling, and 3D cursor picking**.

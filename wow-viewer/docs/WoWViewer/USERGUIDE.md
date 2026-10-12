@@ -1,9 +1,13 @@
 # WoWViewer Comprehensive User Guide
 
-**Application Version**: `v0.5.3.1`  
+**Application Version**: `v0.6.0`  
 **Platform Support**: Windows x64, Linux x64, macOS (Apple Silicon arm64 / Intel x64)
 
-`WoWViewer` is an interactive 3D desktop application for inspecting, analyzing, rendering, and reconciling World of Warcraft client data from pre-release Alpha 0.5.3 through Cataclysm 4.0.x.
+`WoWViewer` is an interactive 3D desktop application for inspecting, analyzing, rendering, and reconciling World of Warcraft client data.
+
+**Bring your own data.** No game data is shipped. Open your own client install, MPQ set, CASC install or extracted map folder.
+
+**Supported clients:** 0.5.3 – 0.11 **complete**; 0.12 – 5.x **partial**; WoW: Forever 1.60.1 (`wow_classic_beta`, CASC) **stable**.
 
 ---
 
@@ -19,9 +23,11 @@
 9. [PM4 Object Reconciliation Workbench (Spec 176)](#9-pm4-object-reconciliation-workbench-spec-176)
 10. [Phased Terrain Dual-Map Overlay (Spec 135 & 137)](#10-phased-terrain-dual-map-overlay-spec-135--137)
 11. [Rosetta Multi-Version Zarr Datastore & Cross-Era Loading (Spec 190)](#11-rosetta-multi-version-zarr-datastore--cross-era-loading-spec-190)
-12. [Modern CASC Clients: WoW: Forever (alpha)](#12-modern-casc-clients-wow-forever-alpha)
+12. [Modern CASC Clients: WoW: Forever](#12-modern-casc-clients-wow-forever)
 13. [DAT v26 Terrain Project Files (alpha)](#13-dat-v26-terrain-project-files-alpha)
-14. [Troubleshooting and FAQ](#14-troubleshooting-and-faq)
+14. [Archaeology: Phase Maps and Map Layering](#14-archaeology-phase-maps-and-map-layering)
+15. [Development Map Restoration and Experimental Research](#15-development-map-restoration-and-experimental-research)
+16. [Troubleshooting and FAQ](#16-troubleshooting-and-faq)
 
 ---
 
@@ -301,7 +307,7 @@ The former File > Load from Rosetta Datastore menu has been retired.
 
 ---
 
-## 12. Modern CASC Clients: WoW: Forever (alpha)
+## 12. Modern CASC Clients: WoW: Forever
 
 Added in v0.5.4-alpha. Tested against **WoW: Forever**, the `wow_classic_beta` product, build 1.60.1.69876 (a 12.0-based client).
 
@@ -343,7 +349,51 @@ Shadows (`ASHD`) are all zero in the corpus and are not rendered. The format has
 
 ---
 
-## 14. Troubleshooting and FAQ
+## 14. Archaeology: Phase Maps and Map Layering
+
+The **Archaeology** tab of the right Workbench is where one map is shown over another.
+
+- **Phase maps from client data.** For the base map you have loaded, the tab shows the phase maps that the
+  client's own DBC/DB2 tables define for that base map — when the loaded client has such tables and entries.
+  Pick one to overlay it.
+- **Any map over any map.** If the client defines no phase map for the base map (or you want a different
+  pairing), you can load **any available map on top of any other map** of your choosing. Tiles present in the
+  overlay map replace the base tiles; everything else stays the base map.
+- **Clearing.** Clear the overlay to return to the unmodified base map.
+
+Section 10 describes the overlay behaviour (terrain, chunk textures, doodads, minimap) in detail. Annotated
+screenshots for this tab will ship with the integrated help in v0.6.1 (Spec 271).
+
+---
+
+## 15. Development Map Restoration and Experimental Research
+
+### Restoring the `development` map (v0.6.0, partial)
+
+PM4 collision meshes are matched to object placements from the museum `development` tiles, and restored tiles
+are written as monolithic LK 3.3.5 ADTs:
+
+```powershell
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
+  restore-unauthored --all-tiles --json output/restored_development/restoration_summary.json
+```
+
+- Hand-authored tiles are preserved byte-for-byte; only tiles that need it are rewritten.
+- Matched objects keep their authentic position and rotation and sit flush on their PM4 collision mesh.
+- Tiles with no texture layers are baked from their minimap into vertex colour (MCCV) so they are not black.
+- **Known gap:** objects on tiles adjacent to PM4-covered tiles that exist in the museum data are still missing.
+- Needs your own copy of the development data; paths default to `test_data/` and can be overridden with
+  `--base`, `--pm4`, `--minimap`, `--output`.
+
+### Terrain reconstruction research (experimental, unstable)
+
+The Zarr datasets, elevation/trestle models and ComfyUI nodes under `data-harvester/` reconstruct terrain from
+images with little human interaction. This work is **unexplored and unstable**, needs your own data and a GPU,
+and is intentionally not documented here beyond this note.
+
+---
+
+## 16. Troubleshooting and FAQ
 
 ### Q: A CASC map shows untextured terrain or models?
 **A**: The install probably lacks the texture data on disk. Reopen it with **File → Open CASC Install (local + CDN fill)...**.

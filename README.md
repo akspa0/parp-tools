@@ -2,7 +2,7 @@
 
 Preservation, conversion, reverse engineering, analysis, and 3D visualization tooling for World of Warcraft client data.
 
-**Current Release Line**: `v0.6.0-alpha4` (v0.6 line)
+**Current Release Line**: `v0.6.0` (stable) — clients 0.5.3–0.11 complete, 0.12–5.x partial, WoW: Forever 1.60.1 stable. **Bring your own data** — no game data is shipped. [Release notes](wow-viewer/docs/releases/v0.6.0.md)
 **Primary Project Directory**: `wow-viewer/`  
 **Target Runtime**: .NET 10 (`net10.0`) & Python 3.12+ (`uv`)
 
@@ -140,7 +140,7 @@ dotnet run --project wow-viewer/tools/converter/WowViewer.Tool.Converter/WowView
 | **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
 | **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
 | **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
-| **WoW: Forever** | 1.60.1.69876 (`wow_classic_beta`, 12.0-based, CASC) | **Alpha (v0.6.0-alpha)** | Local CASC + CDN fill + version picker; `MAID`/`MDID` terrain with up to 8 blended layers, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO, DB2 via WoWDBDefs; DAT v26 terrain reader/renderer/experimental writer |
+| **WoW: Forever** | 1.60.1.69876 (`wow_classic_beta`, 12.0-based, CASC) | **Stable (v0.6.0)** | Local CASC + CDN fill + version picker; `MAID`/`MDID` terrain with up to 8 blended layers, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO, DB2 via WoWDBDefs; DAT v26 terrain reader/renderer/experimental writer |
 
 Later client terrain formats are outside the current project scope unless a future spec explicitly reopens that lane; the WoW: Forever modern-data lane was opened by Specs 237–240 on the v0.6 line.
 

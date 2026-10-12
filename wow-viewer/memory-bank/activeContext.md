@@ -1,6 +1,12 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-26 · Branch: `v0.6.0-dev`
+Last updated: 2026-10-11 · **v0.6.0 released from `main`** (tag `v0.6.0`); active branch `v0.6.1-dev`
+
+**Next on `v0.6.1-dev` (fresh chat start here):**
+1. Spec 271 Phase B — integrated Help + image guide (operator captures screenshots; agent prepares shot list and `HelpGuideService`).
+2. Spec 270 open gap — objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing from restored tiles (operator report 2026-10-11).
+3. Separate spec needed: `LkAdtReader` adds 8 bytes to MCAL/MCSH offsets (restore tool repairs locally in `RepairAlphaAndShadow`).
+4. Operator smoke owed on regenerated `output/restored_development` (alpha masks, no orange tint, 63_5 huts flush).
 
 ## Fresh-chat route
 

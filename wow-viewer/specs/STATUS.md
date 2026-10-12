@@ -47,7 +47,8 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 | [266 WDL Trestle Elevation Reconstruction & Lineage Synthesis](266-wdl-trestle-elevation-reconstruction/spec.md) | Modern lean successor to Feb 2026 v7 WDL trestle model (4.7M params vs 100M+); synthesizes missing development WDL lattices from Northrend 3.0.1.8303 prototype matches, restoring authentic $>250$ yd mountain relief (measured 424.8 yds) and upright CCW meshes | Complete (2026-10-08); validation MAE 5.20 yds (target $\le 25$), $r=0.8754$, 100% upward normals (+Z) verified; receipt in `tasks.md` |
 | [267 Generative 3D Foundation Refinement & ComfyUI Nodes](267-trellis-pixel3d-comfyui-adt-refinement/spec.md) | Downstream 3D foundation model refinement (Microsoft Trellis.2 / Pixel3D); hard-Z metric WDL elevation anchor; semantic ADT aspect dissection; parp-tools ComfyUI custom node package (`http://127.0.0.1:8199`) | Proposed / Specified (2026-10-08); Spec Kit authored; Phase 1 discovery queued |
 | [269 v60 Classic Terrain Zarr Ingestion & Felwood Clean Elevation Training](269-v60-classic-terrain-ingestion-and-elevation-dataset/spec.md) | Ingest Wrath 3.0.1.8303 terrain (37 maps, 4,448 tiles) via C# harvest engine into `output/datasets/v60/`, train `TrestleElevationUNet` on authentic Felwood canyons/indentations (120 epochs, MAE 4.62 yds, $r=0.8842$), and carve $-96.13$ yd canyon into unauthored quilt tile `(17, 14)` | Complete (2026-10-10); receipt in `evidence/receipt-spec269.md` |
-| [270 PM4 Object Association Ledger & Unauthored Placement Pipeline](270-pm4-object-association-ledger-and-placement/spec.md) | Harvest PM4 $\leftrightarrow$ ADT ground-truth object associations across 399 intact development tiles into a persistent Rosetta Ledger (`pm4_object_association_ledger.json`), fingerprint multi-feature geometry, and synthesize authentic `_obj0.adt` placements on unauthored tiles | Complete (2026-10-10); receipt in `evidence/receipt-spec270.md`; 130 unauthored tiles restored (577 WMOs, 113 M2s, 100% round-trip verified) |
+| [270 PM4 Object Association Ledger & Unauthored Placement Pipeline](270-pm4-object-association-ledger-and-placement/spec.md) | Harvest PM4 $\leftrightarrow$ ADT ground-truth object associations across 399 intact development tiles into a persistent Rosetta Ledger (`pm4_object_association_ledger.json`), fingerprint multi-feature geometry, and synthesize authentic `_obj0.adt` placements on unauthored tiles | Complete (2026-10-11, shipped in v0.6.0); receipt in `evidence/receipt-spec270.md`; 616/616 tiles round-trip; **open gap**: objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing |
+| [271 v0.6.0 Release & Integrated Help / Image Guide](271-v060-release-and-integrated-help/spec.md) | Ship v0.6.0 (docs rewrite, BYO-data, support matrix, Archaeology phase maps) and build in-app help + image guide on `v0.6.1-dev` | Phase A (release) in progress 2026-10-11; Phase B (help system, operator-captured images) queued for `v0.6.1-dev` |
 
 
 ## Operator verification owed on shipped code
@@ -59,9 +60,9 @@ buttons).
 
 ## Release line
 
-`eng/Version.props` = `0.6.0` / `0.6.0-alpha2` (released 2026-09-21). The v0.6 theme — modern data
-access + experimental terrain formats — is now items F-01…F-12 (Epic 248) and R-01, R-02, R-10
-(Epic 249). Release scope is re-pinned after triage.
+`eng/Version.props` = `0.6.0` / `0.6.0` (released 2026-10-11, tag `v0.6.0` on `main`). Active development continues on branch `v0.6.1-dev`.
+The v0.6 theme — modern data access + experimental terrain formats — maps to items F-01…F-12 (Epic 248)
+and R-01, R-02, R-10 (Epic 249). Release scope for v0.6.1 is set by Spec 271 Phase B and operator triage.
 
 ## Status rules
 
