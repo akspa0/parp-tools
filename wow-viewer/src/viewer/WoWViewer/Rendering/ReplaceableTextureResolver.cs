@@ -3,7 +3,6 @@ using DBCD.Providers;
 using WoWViewer.Catalog;
 using WoWViewer.DataSources;
 using WoWViewer.Logging;
-using WowViewer.Core.IO.Files;
 
 namespace WoWViewer.Rendering;
 
@@ -173,7 +172,7 @@ public class ReplaceableTextureResolver
             int baseSection = TryGetInt(row, "BaseSection") ?? 0;
             int variationIndex = TryGetInt(row, "VariationIndex") ?? 0;
             int colorIndex = TryGetInt(row, "ColorIndex") ?? 0;
-            string[] textureNames = ReadStringArray(name => Field(row, name), "TextureName", 3);
+            string[] textureNames = ReadStringArray(row, "TextureName", 3);
 
             if (raceId <= 0 || !textureNames.Any(static name => !string.IsNullOrWhiteSpace(name)))
                 continue;
@@ -281,7 +280,10 @@ public class ReplaceableTextureResolver
             var row = storage[key];
             int id = key;
 
-            string? modelName = ReadModelName(name => Field(row, name));
+            string? modelName = TryGetString(row, "ModelName")
+                             ?? TryGetString(row, "ModelPath")
+                             ?? TryGetString(row, "FileDataID");
+
             if (string.IsNullOrEmpty(modelName)) continue;
 
             string normalized = modelName.ToLowerInvariant().Replace('/', '\\').Trim();
@@ -360,7 +362,8 @@ public class ReplaceableTextureResolver
             if (extraId > 0)
                 _modelToExtraDisplayId.TryAdd(modelId, extraId);
 
-            var variations = ReadTextureVariations(name => Field(row, name));
+            // Read TextureVariation array — DBCD returns string[] for array fields
+            var variations = ReadStringArray(row, "TextureVariation", 3);
 
             if (!_displayVariations.ContainsKey(modelId))
                 _displayVariations[modelId] = new List<string[]>();
@@ -416,11 +419,11 @@ public class ReplaceableTextureResolver
             int id = key;
 
             // ModelName[2] — left/right model paths
-            var modelNames = ReadStringArray(name => Field(row, name), "ModelName", 2);
+            var modelNames = ReadStringArray(row, "ModelName", 2);
             // ModelTexture[2] — left/right model textures
-            var modelTextures = ReadStringArray(name => Field(row, name), "ModelTexture", 2);
+            var modelTextures = ReadStringArray(row, "ModelTexture", 2);
             // Texture[8] — armor region textures
-            var textures = ReadStringArray(name => Field(row, name), "Texture", 8);
+            var textures = ReadStringArray(row, "Texture", 8);
 
             _itemDisplayInfo[id] = new ItemDisplayData(modelNames, modelTextures, textures);
             count++;
@@ -1404,11 +1407,6 @@ public class ReplaceableTextureResolver
     /// </summary>
     private static string BuildTexturePath(string texName, string modelPath)
     {
-        // A FileDataID virtual path (fdid:<id>) is read directly by FileDataID-aware data sources;
-        // appending .blp or a model directory would break it.
-        if (FileDataIdPaths.TryParse(texName, out _))
-            return texName;
-
         // If the texture name already contains a path separator, it's a full relative path
         if (texName.Contains('\\') || texName.Contains('/'))
         {
@@ -1537,38 +1535,42 @@ public class ReplaceableTextureResolver
     /// DBCD represents DBD array fields like TextureVariation[3] as indexable arrays.
     /// Tries multiple access patterns to handle different DBCD versions.
     /// </summary>
-    private static string[] ReadStringArray(Func<string, object?> field, string fieldName, int expectedCount)
+    private static string[] ReadStringArray(dynamic row, string fieldName, int expectedCount)
     {
         var result = new string[expectedCount];
 
         // Pattern 1: DBCD returns the array field directly as string[]
-        var val = field(fieldName);
-        if (val is string[] arr)
+        try
         {
-            for (int i = 0; i < Math.Min(arr.Length, expectedCount); i++)
-                result[i] = arr[i] ?? "";
-            return result;
+            var val = row[fieldName];
+            if (val is string[] arr)
+            {
+                for (int i = 0; i < Math.Min(arr.Length, expectedCount); i++)
+                    result[i] = arr[i] ?? "";
+                return result;
+            }
+            // Could be object[] that needs casting
+            if (val is object[] objArr)
+            {
+                for (int i = 0; i < Math.Min(objArr.Length, expectedCount); i++)
+                    result[i] = objArr[i]?.ToString() ?? "";
+                return result;
+            }
+            // Single string value (shouldn't happen for arrays but handle gracefully)
+            if (val is string s && !s.StartsWith("System."))
+            {
+                result[0] = s;
+                return result;
+            }
         }
-        // Could be object[] that needs casting
-        if (val is object[] objArr)
-        {
-            for (int i = 0; i < Math.Min(objArr.Length, expectedCount); i++)
-                result[i] = objArr[i]?.ToString() ?? "";
-            return result;
-        }
-        // Single string value (shouldn't happen for arrays but handle gracefully)
-        if (val is string single && !single.StartsWith("System."))
-        {
-            result[0] = single;
-            return result;
-        }
+        catch { /* Field not accessible as array, try indexed access */ }
 
         // Pattern 2: Indexed access — FieldName[0], FieldName[1], etc.
         bool anyFound = false;
         for (int i = 0; i < expectedCount; i++)
         {
-            string? v = field($"{fieldName}[{i}]") as string
-                     ?? field($"{fieldName}_{i}") as string;
+            string? v = TryGetString(row, $"{fieldName}[{i}]")
+                     ?? TryGetString(row, $"{fieldName}_{i}");
             result[i] = v ?? "";
             if (!string.IsNullOrEmpty(v)) anyFound = true;
         }
@@ -1576,7 +1578,7 @@ public class ReplaceableTextureResolver
         // Pattern 3: If nothing found, try pipe-separated single field
         if (!anyFound)
         {
-            string? texVar = val as string;
+            string? texVar = TryGetString(row, fieldName);
             if (!string.IsNullOrEmpty(texVar) && !texVar.StartsWith("System."))
             {
                 var parts = texVar.Split('|', StringSplitOptions.None);
@@ -1587,76 +1589,6 @@ public class ReplaceableTextureResolver
 
         return result;
     }
-
-    /// <summary>Reads one field off a DBCD row; a missing or unreadable field is null.</summary>
-    private static object? Field(dynamic row, string name)
-    {
-        try { return row[name]; }
-        catch { return null; }
-    }
-
-    /// <summary>
-    /// The model file a <c>CreatureModelData</c> row names. Legacy layouts carry a
-    /// <c>ModelName</c>/<c>ModelPath</c> string; the 1.60.1 layout (BUILD 1.60.1.69876) replaces it
-    /// with <c>FileDataID<u32></c>, which is resolved through the active listfile. Reading the
-    /// id as a string would key the table on "116912" instead of a path, so every
-    /// <see cref="FindModelId"/> lookup would miss and the model would bind the error texture.
-    /// </summary>
-    public static string? ReadModelName(Func<string, object?> field)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-
-        string? modelName = field("ModelName") as string ?? field("ModelPath") as string;
-        if (!string.IsNullOrEmpty(modelName))
-            return modelName;
-
-        return AsUInt(field("FileDataID")) is uint fileDataId and not 0
-            ? FileDataIdPaths.Resolve(fileDataId)
-            : null;
-    }
-
-    /// <summary>
-    /// The creature texture variations a <c>CreatureDisplayInfo</c> row names. Legacy layouts carry
-    /// <c>TextureVariation[3]</c> strings; the 1.60.1 layout (BUILD 1.60.1.69876) replaces them with
-    /// <c>TextureVariationFileDataID<32>[4]</c>, resolved through the active listfile.
-    /// </summary>
-    public static string[] ReadTextureVariations(Func<string, object?> field)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-
-        string[] variations = ReadStringArray(field, "TextureVariation", 3);
-        if (variations.Any(static name => !string.IsNullOrWhiteSpace(name)))
-            return variations;
-
-        return ReadFileDataIdArray(field, "TextureVariationFileDataID", 4);
-    }
-
-    /// <summary>
-    /// Reads a FileDataID array field (e.g. the modern TextureVariationFileDataID[4]) and resolves
-    /// each id to its listfile path. Ids without a listfile name resolve to <c>fdid:<id></c>,
-    /// which FileDataID-aware data sources read directly.
-    /// </summary>
-    private static string[] ReadFileDataIdArray(Func<string, object?> field, string fieldName, int expectedCount)
-    {
-        var result = new string[expectedCount];
-        for (int i = 0; i < expectedCount; i++)
-        {
-            uint? id = AsUInt(field($"{fieldName}[{i}]")) ?? AsUInt(field($"{fieldName}_{i}"));
-            if (id is uint value and not 0)
-                result[i] = FileDataIdPaths.Resolve(value);
-        }
-
-        return result;
-    }
-
-    private static uint? AsUInt(object? value) => value switch
-    {
-        uint u => u,
-        int i => (uint)i,
-        ushort us => us,
-        short s => (uint)s,
-        _ => null,
-    };
 
     private static string ResolveBuild(string buildOrAlias)
     {

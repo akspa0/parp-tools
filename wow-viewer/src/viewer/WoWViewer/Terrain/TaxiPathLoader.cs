@@ -3,6 +3,7 @@ using DBCD;
 using DBCD.Providers;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
+using WowViewer.Core.IO.Files;
 
 namespace WoWViewer.Terrain;
 
@@ -246,13 +247,47 @@ public class TaxiPathLoader
         foreach (var key in storage.Keys)
         {
             var row = storage[key];
-            string? modelName = TryGetString(row, "ModelName") ?? TryGetString(row, "ModelPath");
+            string? modelName = ReadCreatureModelName(name => Field(row, name));
             if (!string.IsNullOrWhiteSpace(modelName))
                 results[key] = modelName.Replace('/', '\\');
         }
 
         return results;
     }
+
+    /// <summary>
+    /// The model file a <c>CreatureModelData</c> row names. Legacy layouts (0.5.3-5.x) carry a
+    /// <c>ModelName</c>/<c>ModelPath</c> string; from 6.0.0 the field is a <c>FileDataID</c>
+    /// resolved through the active listfile. Both eras must resolve, so neither replaces the other.
+    /// </summary>
+    public static string? ReadCreatureModelName(Func<string, object?> field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+
+        string? modelName = field("ModelName") as string ?? field("ModelPath") as string;
+        if (!string.IsNullOrWhiteSpace(modelName))
+            return modelName;
+
+        return AsUInt(field("FileDataID")) is uint fileDataId and not 0
+            ? FileDataIdPaths.Resolve(fileDataId)
+            : null;
+    }
+
+    /// <summary>Reads one field off a DBCD row; a missing or unreadable field is null.</summary>
+    private static object? Field(dynamic row, string name)
+    {
+        try { return row[name]; }
+        catch { return null; }
+    }
+
+    private static uint? AsUInt(object? value) => value switch
+    {
+        uint u => u,
+        int i => (uint)i,
+        ushort us => us,
+        short s => (uint)s,
+        _ => null,
+    };
 
     private static IDBCDStorage LoadDbc(DBCD.DBCD dbcd, string tableName, string build)
     {

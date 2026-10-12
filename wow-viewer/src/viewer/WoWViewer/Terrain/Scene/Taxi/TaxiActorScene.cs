@@ -243,6 +243,11 @@ public sealed class TaxiActorScene
         return ResolveDefaultTaxiActorModelPath();
     }
 
+    /// <summary>
+    /// The fallback mount model when a taxi node names no mount of its own. The candidates are
+    /// legacy <c>.mdx</c> paths (0.5.3-5.x MPQ clients); from 6.0.0 the same asset ships as
+    /// <c>.m2</c>, so each candidate is also probed with the modern extension before giving up.
+    /// </summary>
     private string ResolveDefaultTaxiActorModelPath()
     {
         if (_dataSource != null)
@@ -251,6 +256,10 @@ public sealed class TaxiActorScene
             {
                 if (_dataSource.FileExists(candidate))
                     return candidate;
+
+                string modernVariant = Path.ChangeExtension(candidate, ".m2");
+                if (_dataSource.FileExists(modernVariant))
+                    return modernVariant;
             }
         }
 

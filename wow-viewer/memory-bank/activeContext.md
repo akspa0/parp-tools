@@ -2,14 +2,28 @@
 
 Last updated: 2026-10-12 · **v0.6.0 released from `main`** (tag `v0.6.0`); active branch `v0.6.1-dev`
 
-**Immediate M2 texture issue (1.60.1):** older assets (taxi gryphon, `Troll.m2/mdx`) load geometry
-but show the error texture. Root cause found in code: the 1.60.1 `CreatureModelData` layout
-(BUILD 1.60.1.69876) replaces `ModelName` with `FileDataID<u32>`, and `CreatureDisplayInfo` replaces
-`TextureVariation[3]` strings with `TextureVariationFileDataID<32>[4]`. The resolver read the id as a
-string, so `FindModelId` never matched and every replaceable slot fell through to the missing-texture
-placeholder. Both tables now resolve ids through the listfile (`FileDataIdPaths`), and `fdid:<id>`
-virtual paths pass through unchanged. 5 new tests + 12 existing camera tests pass; viewer builds clean.
-Operator must confirm the gryphon/Troll now texture on `wow_classic_beta` 1.60.1.
+**Immediate taxi mount issue (1.60.1):** the gryphon never loaded because
+[`TaxiPathLoader.LoadCreatureModelPaths`](wow-viewer/src/viewer/WoWViewer/Terrain/TaxiPathLoader.cs:231)
+read only `ModelName`/`ModelPath` — absent from 6.0.0 — so every mount resolved to null and every
+actor fell onto the hardcoded `Creature\Gryphon\Gryphon.mdx` default. Fixed with the same both-era
+pattern: string first, else `FileDataID` → listfile. The default candidate list now also probes the
+`.m2` variant of each legacy `.mdx` path. 3 new tests; 18/18 focused tests pass.
+
+**Immediate WMO area issue (open):** inside `MD_CryptOneRm.wmo` (header UniqueId 85944) in Tirisfal,
+the status bar reads `Area: Crypt84 [Riverglades]`. The 1.60.1 DBD layout declares a relation
+`WMOID<u16>` and has no `InlineWMOID`; it does **not** establish that this relation shares the
+header UniqueId's numeric domain. The global `WMOGroupID` fallback can collide across WMOs, but the
+bad row/match is not yet confirmed. A temporary log probe was removed: operator reports the viewer
+log is not selectable/exportable and does not provide usable evidence. The operator's hypothesis is
+a client-data remap/copy-link error; treat it as plausible, not proven. Next proof must be available
+in-viewer or extracted directly from the relevant client rows.
+
+**M2 texture resolver status (2026-10-12):** the broad FileDataID attempt and ItemDisplayInfo
+resource-chain changes were reverted after the operator reported that many character M2 textures
+stopped rendering. `ReplaceableTextureResolver.cs` is restored to the proven baseline; its new tests
+were removed. No FileDataID correction for creature textures or item-display texture chains is
+currently active. Operator must confirm character M2s load again after the rollback. **Do not refactor
+`ReadStringArray` or its call sites again** without a narrowly scoped, proven change.
 
 **Immediate M2 camera issue:** M2/MDX camera keys are tile-local until their matching
 `CinematicCamera` origin/facing is applied. Warm Path's 64×64 grid spacing was corrected from
@@ -25,13 +39,14 @@ the path. Operator must verify the actual client DB2 row/origin and visual playb
 still unexplained; exact bytes remain unavailable, so do not widen the reader based on that report.
 
 **Next on `v0.6.1-dev` (fresh chat start here):**
-1. Operator verifies the actual 1.60.1 `CinematicCamera` row for FileDataID 116912 and plays/warmups FlybyUndead on base Azeroth with the intended phase layers enabled; record whether origin/facing and tile `(28,28)` agree.
-2. Operator confirms the gryphon/Troll and other legacy M2s now texture on `wow_classic_beta` 1.60.1 after the CreatureModelData/CreatureDisplayInfo FileDataID fix.
-2. Operator-requested public format docs: prepare wowdev.wiki-style articles for the 0.5.5 prototype ADT, WMO v14, MDX, Alpha WDT, and a substantial PM4/PD4 refresh. Ground each in repo evidence; distinguish verified facts from open interpretations.
-3. Spec 271 Phase B — integrated Help + image guide (operator captures screenshots; agent prepares shot list and `HelpGuideService`).
-4. Spec 270 open gap — objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing from restored tiles (operator report 2026-10-11).
-5. Separate spec needed: `LkAdtReader` adds 8 bytes to MCAL/MCSH offsets (restore tool repairs locally in `RepairAlphaAndShadow`).
-6. Operator smoke owed on regenerated `output/restored_development` (alpha masks, no orange tint, 63_5 huts flush).
+1. Operator runs the viewer on 1.60.1 inside `MD_CryptOneRm.wmo` and provides `[WMOAreaLookup]` diagnostics; do not implement a key/fallback change before reading the matching row IDs.
+2. Operator confirms character M2s render again after the `ReplaceableTextureResolver` rollback; FileDataID texture support remains unresolved.
+3. Operator verifies the actual 1.60.1 `CinematicCamera` row for FileDataID 116912 and plays/warmups FlybyUndead on base Azeroth with intended phase layers; record whether origin/facing and tile `(28,28)` agree.
+4. Operator-requested public format docs: prepare wowdev.wiki-style articles for the 0.5.5 prototype ADT, WMO v14, MDX, Alpha WDT, and a substantial PM4/PD4 refresh. Ground each in repo evidence; distinguish verified facts from open interpretations.
+5. Spec 271 Phase B — integrated Help + image guide (operator captures screenshots; agent prepares shot list and `HelpGuideService`).
+6. Spec 270 open gap — objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing from restored tiles (operator report 2026-10-11).
+7. Separate spec needed: `LkAdtReader` adds 8 bytes to MCAL/MCSH offsets (restore tool repairs locally in `RepairAlphaAndShadow`).
+8. Operator smoke owed on regenerated `output/restored_development` (alpha masks, no orange tint, 63_5 huts flush).
 
 The repeatable procedure is now documented in [Development Map Restoration](../docs/WoWViewer/development-map-restoration.md);
 that guide does not close the operator visual smoke item above. The README uses its native Markdown support matrix

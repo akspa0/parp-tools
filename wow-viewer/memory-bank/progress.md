@@ -2,30 +2,85 @@
 
 Last updated: 2026-10-12
 
-## 2026-10-12 — 1.60.1 Legacy M2 Textures: CreatureModelData/CreatureDisplayInfo FileDataID Gap
+## 2026-10-12 — WMO Interior Area Shows the Wrong Zone (open; no fix)
+
+- **Operator report:** inside `MD_CryptOneRm.wmo` (header UniqueId 85944) in Tirisfal Glades the
+  status bar reads `Area: Crypt84 [Riverglades]`.
+- **Code path:** `AreaContextService` → `AreaTableService.ResolveWmoArea(wmoR.WmoId, groupIndex,
+  wmoGroupId, mapId, rawGroupName)`. `WmoRenderer.WmoId` exposes the root MOHD ID as UInt32.
+- **Verified schema only:** `WMOAreaTable.dbd` assigns 1.60.1.69876 a `$relation$WMOID<u16>` field
+  and no `InlineWMOID`. This does not prove that the relation's numeric domain is the root MOHD ID;
+  the earlier u16-overflow explanation is unverified. The resolver also has global-group and row-ID
+  fallbacks that can select unrelated entries, but the offending row/branch is not yet known.
+- **Operator hypothesis:** the WMO area may be a client-data remap/copy-link error: a reused/copied
+  WMO may retain an area identity that now names Riverglades. Similar erroneous area links have
+  caused real gameplay bugs before. This is plausible context, not yet confirmed for this asset.
+- **Evidence limitation:** a temporary `[WMOAreaLookup]` logger probe was removed because the
+  operator reports the viewer log cannot be selected/exported and is not useful for this diagnosis.
+  The existing screenshot's bottom status shows Deathknell/Tirisfal terrain context, while the
+  earlier Riverglades report concerns the camera inside the WMO; these are not equivalent samples.
+- **Not fixed:** do not alter matching or hardcode an area correction without inspectable row evidence.
+  Any in-viewer selectable/exportable WMO table inspector is separate scope and needs explicit approval.
+
+## 2026-10-12 — ItemDisplayInfo FileDataID Chain (REVERTED)
+
+- The proposed chain from `ItemDisplayInfo.ModelResourcesID` / `ModelMaterialResourcesID` through
+  material-resource tables to texture FileDataIDs was implemented within
+  `ReplaceableTextureResolver.cs`, then reverted with the rest of the resolver changes after the
+  operator reported widespread character-M2 texture failures.
+- Its new row-shape tests were removed. No ItemDisplayInfo FileDataID chain is active; modern
+  equipment texture support remains open. Do not infer visual proof from the earlier tests/build.
+
+## 2026-10-12 — Taxi Mount Models: CreatureModelData FileDataID Gap
+
+- **Operator report:** the gryphon for the taxi "doesn't use the fileDataID for those models".
+- **Root cause:** [`TaxiPathLoader.LoadCreatureModelPaths`](../src/viewer/WoWViewer/Terrain/TaxiPathLoader.cs)
+  read only `ModelName`/`ModelPath`. The 1.60.1 `CreatureModelData` layout (BUILD 1.60.1.69876)
+  has `FileDataID<u32>` and neither string, so the dictionary came back empty, every
+  `TaxiNode.MountModelPath` was null, and `TaxiActorScene.GetResolvedTaxiActorModelPath` fell
+  through to the hardcoded `Creature\Gryphon\Gryphon.mdx` / `Creature\FelBat\BatTaxi.mdx` list —
+  which the 1.60.1 listfile does not carry under those exact legacy paths.
+- **Fix (both eras, additive):** new `TaxiPathLoader.ReadCreatureModelName` reads the string first
+  and falls back to `FileDataID` → `FileDataIdPaths.Resolve`. `ResolveDefaultTaxiActorModelPath`
+  now also probes the `.m2` variant of each legacy `.mdx` candidate before giving up.
+- **Verification:** 3 new tests in `TaxiMountModelResolutionTests.cs`; 18/18 focused tests pass;
+  viewer Debug build 0 errors. Row-shape tests only — no live DBCD read, no visual proof.
+- **Known follow-up (not in scope):** the 1.60.1 `ItemDisplayInfo` layout has no
+  `ModelName`/`ModelTexture`/`Texture` string fields at all — it uses `ModelResourcesID[2]` and
+  `ModelMaterialResourcesID[2]` indirection. `ReplaceableTextureResolver.TryLoadItemDisplayInfo`
+  therefore reads nothing on modern builds, so `ResolveFromItemDisplay` can never resolve. Needs
+  its own spec.
+
+## 2026-10-12 — 1.60.1 Legacy M2 Textures: FileDataID Attempt Reverted
 
 - **Operator report:** older assets (taxi gryphon, `Troll.m2/mdx`) load geometry but show the error
   texture on 1.60.1; suspected the auto-texture-replacer.
-- **Root cause (code + DBD evidence):** the 1.60.1 layouts identify assets by FileDataID, not name.
+- **Root cause (DBD + code):** from 6.0.0 the layouts identify assets by FileDataID, not filename.
   `CreatureModelData` (BUILD 1.60.1.69876) has `FileDataID<u32>` and no `ModelName` string;
-  `CreatureDisplayInfo` (same build) has `TextureVariationFileDataID<32>[4]` and no `TextureVariation`
-  string array. `ReplaceableTextureResolver.LoadCreatureModelData` read the id through
-  `TryGetString`, so the table was keyed on `"116912"` instead of a path and every `FindModelId`
-  lookup missed; `LoadCreatureDisplayInfo` read an absent string array, so every variation was empty.
-  Either alone sends the section to `M2Renderer.AcquireMissingTexture()` — the client's
-  `Textures\ShaneCube.blp` error texture, or a generated checkerboard.
-- **Fix:** `ReadModelName`/`ReadTextureVariations` now resolve FileDataIDs through
-  `FileDataIdPaths` (the same listfile bridge M2 TXID/SFID already uses). `BuildTexturePath` passes
-  `fdid:<id>` virtual paths through unchanged so FileDataID-aware data sources read them directly.
-  Row-shape interpretation was extracted into public seams taking a `Func<string, object?>` field
-  accessor, because the DBCD `dynamic` binder is unavailable in the test project.
-- **Verification:** `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~ReplaceableTextureFileDataIdRowTests|FullyQualifiedName~CinematicCameraOriginResolverTests|FullyQualifiedName~M2CameraPathTileFootprintSelectorTests|FullyQualifiedName~M2CameraPathTests" --artifacts-path wow-viewer/output/tmp/camera-origin-artifacts` (exit 0; 17/17 passed);
-  `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug` (exit 0; 0 errors).
-  Tests cover the row shapes only — no live DBCD read or visual proof. Operator must confirm the
-  gryphon/Troll now texture on `wow_classic_beta` 1.60.1.
-- **Not addressed:** the taxi gryphon's hardcoded `Creature\Gryphon\Gryphon.mdx` default candidate
-  list in `TaxiActorScene` still resolves by legacy path; if the 1.60.1 listfile lacks that exact
-  path the actor model itself will not load. Separate from the texture defect above.
+  `CreatureDisplayInfo` (same build) has `TextureVariationFileDataID<32>[4]` and no
+  `TextureVariation` string array. `LoadCreatureModelData` read the id through `TryGetString`, so
+  the table was keyed on `"116912"` instead of a path and every `FindModelId` lookup missed;
+  `LoadCreatureDisplayInfo` read an absent string array, so every variation was empty. Either alone
+  sends the section to `M2Renderer.AcquireMissingTexture()` — the client's `Textures\ShaneCube.blp`
+  error texture, or a generated checkerboard.
+- **Operator directive:** support BOTH — filenames for 0.5.3–5.x, FileDataIDs for 6.0.0+. Never
+  replace one with the other.
+- **REGRESSION (first attempt, commit `0cff77e5`):** the first fix also refactored `ReadStringArray`
+  from `dynamic row` to a `Func<string, object?>` accessor and rewired its four call sites
+  (`CharSections.TextureName`, `ItemDisplayInfo.ModelName/ModelTexture/Texture`). Operator reported
+  it broke a large number of M2 textures — those two tables feed every character and every item, on
+  every client era. **`ReadStringArray` and all four call sites are now byte-identical to the
+  baseline; do not refactor it again.**
+- **Regression:** the operator reported that this attempt caused many character M2s to stop rendering.
+  The attempted FileDataID implementation was reverted to the proven `ReplaceableTextureResolver.cs`
+  baseline; tests covering the reverted seams were removed. No FileDataID texture fix is active.
+- **Preserve:** `ReadStringArray` and its call sites were the suspected regression surface; do not
+  refactor them again without an isolated implementation and both-era regression proof.
+- **Verification after rollback:** focused tests and viewer build passed (see the session command
+  output); this only validates compilation/unit behavior, not client rendering.
+- **Still operator-owned:** confirm previously-working character M2s render after rollback. The
+  separate additive taxi mount FileDataID/path fallback work remains in place, with row-shape tests
+  only and no live visual confirmation.
 
 ## 2026-10-12 — Client Coverage Matrix & M2 Camera Import Investigation
 
