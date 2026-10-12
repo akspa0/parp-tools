@@ -1,6 +1,6 @@
 # Implementation Plan: V16 Inference Output Contract & Patch Pipeline
 
-**Branch**: `001-v16-inference-output-contract-and-patch-pipeline` | **Date**: 2026-05-18 | **Spec**: [spec.md](./spec.md)
+**Branch**: `001-v16-inference-output-contract-and-patch-pipeline` | **Date**: 2026-05-18 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `wow-viewer/specs/001-v16-inference-output-contract-and-patch-pipeline/spec.md`
 

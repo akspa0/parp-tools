@@ -49,8 +49,22 @@ internal static class MinimapHelpers
         // Clip to minimap area
         drawList.PushClipRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), true);
 
-        // Draw existing tiles
-        foreach (var (tx, ty) in existingTiles)
+        // Draw existing tiles and phase layer tiles
+        var baseTileSet = new HashSet<(int tx, int ty)>(existingTiles);
+        var allTiles = new HashSet<(int tx, int ty)>(existingTiles);
+        if (worldScene != null)
+        {
+            foreach (var (_, footprint) in worldScene.GetLayerFootprints())
+            {
+                foreach ((int ftx, int fty) in footprint)
+                {
+                    if (ftx >= 0 && ftx < 64 && fty >= 0 && fty < 64)
+                        allTiles.Add((ftx, fty));
+                }
+            }
+        }
+
+        foreach (var (tx, ty) in allTiles)
         {
             if (tx + 1 < viewMinTx || tx > viewMaxTx || ty + 1 < viewMinTy || ty > viewMaxTy)
                 continue;
@@ -137,7 +151,7 @@ internal static class MinimapHelpers
                 }
             }
 
-            if (!drewTexture)
+            if (!drewTexture && baseTileSet.Contains((tx, ty)))
             {
                 bool loaded = isTileLoaded(tx, ty);
                 uint color = loaded ? 0xFF00AA00 : 0xFF004400;
@@ -183,9 +197,9 @@ internal static class MinimapHelpers
 
         // LIT markers are a diagnostic layer only. They deliberately share the same loaded source
         // and selected index as the Lighting panel and never change fog or lighting selection.
-        if (worldScene?.ShowLitMinimapMarkers == true && worldScene.LitLoader is { HasData: true } lit)
+        if (worldScene?.Atmosphere.ShowLitMinimapMarkers == true && worldScene.Atmosphere.LitLoader is { HasData: true } lit)
         {
-            float timeOfDay = worldScene.LastLitSample?.TimeOfDay ?? 0.5f;
+            float timeOfDay = worldScene.Atmosphere.LastLitSample?.TimeOfDay ?? 0.5f;
             for (int lightIndex = 0; lightIndex < lit.Lights.Count; lightIndex++)
             {
                 LitLoader.LitLight light = lit.Lights[lightIndex];
@@ -193,7 +207,7 @@ internal static class MinimapHelpers
                     continue;
 
                 uint color = ToImGuiColor(lit.EvaluateOverlayColor(light, timeOfDay));
-                bool selected = lightIndex == worldScene.SelectedLitLightIndex;
+                bool selected = lightIndex == worldScene.Atmosphere.SelectedLitLightIndex;
                 float coverageRadius = Math.Clamp(
                     MathF.Max(3f, MathF.Max(light.Radius, light.Dropoff) / MinimapWorldTileSize * cellSize),
                     3f,
@@ -211,11 +225,11 @@ internal static class MinimapHelpers
         }
 
         // Taxi paths
-        if (worldScene?.TaxiLoader != null && worldScene.ShowTaxi)
+        if (worldScene?.TaxiActors.TaxiLoader != null && worldScene.TaxiActors.ShowTaxi)
         {
-            foreach (var route in worldScene.TaxiLoader.Routes)
+            foreach (var route in worldScene.TaxiActors.TaxiLoader.Routes)
             {
-                if (!worldScene.IsTaxiRouteVisible(route)) continue;
+                if (!worldScene.TaxiActors.IsTaxiRouteVisible(route)) continue;
                 for (int i = 0; i < route.Waypoints.Count - 1; i++)
                 {
                     var a = route.Waypoints[i];
@@ -227,9 +241,9 @@ internal static class MinimapHelpers
                     drawList.AddLine(new Vector2(ax, ay), new Vector2(bx, by), 0xFFFFFF00, 1.5f);
                 }
             }
-            foreach (var node in worldScene.TaxiLoader.Nodes)
+            foreach (var node in worldScene.TaxiActors.TaxiLoader.Nodes)
             {
-                if (!worldScene.IsTaxiNodeVisible(node)) continue;
+                if (!worldScene.TaxiActors.IsTaxiNodeVisible(node)) continue;
                 float nx = cursorPos.X + ((WoWConstants.MapOrigin - node.Position.Y) / MinimapWorldTileSize - viewMinTy) * cellSize;
                 float ny = cursorPos.Y + ((WoWConstants.MapOrigin - node.Position.X) / MinimapWorldTileSize - viewMinTx) * cellSize;
                 if (nx >= cursorPos.X && nx <= cursorPos.X + mapSize && ny >= cursorPos.Y && ny <= cursorPos.Y + mapSize)
@@ -352,7 +366,7 @@ internal static class MinimapHelpers
         out int lightIndex)
     {
         lightIndex = -1;
-        if (worldScene?.ShowLitMinimapMarkers != true || worldScene.LitLoader is not { HasData: true } lit)
+        if (worldScene?.Atmosphere.ShowLitMinimapMarkers != true || worldScene.Atmosphere.LitLoader is not { HasData: true } lit)
             return false;
 
         float bestDistanceSquared = float.MaxValue;

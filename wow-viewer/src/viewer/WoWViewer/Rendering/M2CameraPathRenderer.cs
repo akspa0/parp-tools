@@ -83,7 +83,8 @@ public sealed class M2CameraPathRenderer : IModelRenderer
         Vector3 cameraPos,
         Vector3 lightDir,
         Vector3 lightColor,
-        Vector3 ambientColor)
+        Vector3 ambientColor,
+        SceneLightManager? sceneLights = null)
     {
     }
 
@@ -103,7 +104,8 @@ public sealed class M2CameraPathRenderer : IModelRenderer
         Vector3? cameraPos = null,
         Vector3? lightDir = null,
         Vector3? lightColor = null,
-        Vector3? ambientColor = null)
+        Vector3? ambientColor = null,
+        SceneLightManager? sceneLights = null)
     {
         if (pass == RenderPass.Transparent || _cameraPaths.Count == 0)
             return;

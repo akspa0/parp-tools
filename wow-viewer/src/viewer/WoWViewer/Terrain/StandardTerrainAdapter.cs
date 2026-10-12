@@ -9,6 +9,7 @@ using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using WowViewer.Core.Diagnostics;
 using WowViewer.Core.IO.Dbc;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Lk;
 using WowViewer.Core.IO.Liquids;
 using WowViewer.Core.IO.Maps;
@@ -66,6 +67,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
     public IList<PhaseLayerSettings> PhaseLayers => _phaseLayers;
 
     /// <summary>
+    /// Spec 247 US5: height divisor applied to DAT folder layers. DAT stores heights in inches, so 36 puts a
+    /// donor in the same yards as this adapter's own terrain (see <see cref="AhdrTerrainAdapter.HeightDivisor"/>).
+    /// </summary>
+    public float DatLayerHeightDivisor { get; set; } = 36f;
+
+    /// <summary>
     /// Single-overlay shim over <see cref="PhaseLayers"/>, kept so existing callers and saved
     /// settings keep working. Reads the first enabled layer; assigning replaces the whole stack.
     /// </summary>
@@ -91,6 +98,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly object _placementLock = new();
     private readonly Dictionary<string, int> _mdxNameIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _wmoNameIndex = new(StringComparer.OrdinalIgnoreCase);
+    private string? _currentLoadingMapName;
 
     public StandardTerrainAdapter(
         byte[] wdtBytes,
@@ -111,6 +119,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Parse MAIN chunk to enumerate tiles
         _existingTiles = ResolveExistingTiles(wdtBytes);
         _existingTileSet = new HashSet<int>(_existingTiles);
+        RegisterMaidTileAliases(wdtBytes);
 
         _adtProfile = ResolveTerrainProfile(buildVersion, _existingTiles);
         _mcnkParseOptions = new Mcnk.ParseOptions
@@ -168,6 +177,41 @@ public class StandardTerrainAdapter : ITerrainAdapter
             if (ViewerLog.Verbose)
                 ViewerLog.Trace($"[Terrain] Tile[{di}]: rawIdx={idx}, tx={tx}(row), ty={ty}(col), file={fn}, exists={exists}");
         }
+    }
+
+    /// <summary>
+    /// Spec 239: FileDataID-era WDTs name each tile's files in MAID (8 uint32 per MAIN slot: root, obj0,
+    /// obj1, tex0, lod, mapTexture, mapTextureN, minimap). Registering them as path aliases lets every
+    /// existing path-based lookup find the exact files this build uses, with or without listfile names.
+    /// Measured on wow_classic_beta 1.60.1: development.wdt MAID has 82 tiles, all root/obj0/tex0 readable.
+    /// </summary>
+    private void RegisterMaidTileAliases(byte[] wdtBytes)
+    {
+        int maidOffset = FindChunk(wdtBytes, "MAID");
+        if (maidOffset < 0 || maidOffset + 8 > wdtBytes.Length)
+            return;
+
+        int size = BitConverter.ToInt32(wdtBytes, maidOffset + 4);
+        int payload = maidOffset + 8;
+        string[] suffixes = [".adt", "_obj0.adt", "_obj1.adt", "_tex0.adt", "_lod.adt"];
+        int registered = 0;
+        for (int slot = 0; slot < 4096 && payload + (slot + 1) * 32 <= payload + size && payload + (slot + 1) * 32 <= wdtBytes.Length; slot++)
+        {
+            int row = slot / 64;
+            int column = slot % 64;
+            string basePath = $"{_mapDir}\\{_mapName}_{column}_{row}";
+            for (int field = 0; field < suffixes.Length; field++)
+            {
+                uint fileDataId = BitConverter.ToUInt32(wdtBytes, payload + slot * 32 + field * 4);
+                if (fileDataId == 0)
+                    continue;
+
+                _dataSource.RegisterFileDataIdAlias(basePath + suffixes[field], fileDataId);
+                registered++;
+            }
+        }
+
+        ViewerLog.Important(ViewerLog.Category.Terrain, $"WDT MAID: registered {registered} tile file FileDataIDs for '{_mapName}'");
     }
 
     private AdtProfile ResolveTerrainProfile(string? buildVersion, IReadOnlyList<int> existingTiles)
@@ -244,6 +288,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (string.IsNullOrEmpty(overlayMapName))
             return false;
 
+        // Spec 247 US5: a DAT folder donor is not in this adapter's data source.
+        if (DatLayerSource.IsDatSource(overlayMapName))
+            return DatLayerSource.Resolve(overlayMapName, DatLayerHeightDivisor)?.TileExists(tileX, tileY) ?? false;
+
         string overlayBase = $"World\\Maps\\{overlayMapName}\\{overlayMapName}_{tileY}_{tileX}";
         return HasTilePayload(overlayBase);
     }
@@ -257,6 +305,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
     {
         if (string.IsNullOrWhiteSpace(mapName))
             return false;
+
+        if (DatLayerSource.IsDatSource(mapName))
+            return DatLayerSource.Resolve(mapName, DatLayerHeightDivisor) is not null;
 
         // The base map is trivially resolvable — this adapter is its WDT/ADT source.
         if (string.Equals(mapName, _mapName, StringComparison.OrdinalIgnoreCase))
@@ -280,6 +331,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
     {
         if (string.IsNullOrWhiteSpace(mapName))
             return Array.Empty<(int, int)>();
+
+        // Spec 247 US5: a DAT donor's footprint comes from its own content sniff, not a WDT.
+        if (DatLayerSource.IsDatSource(mapName))
+            return DatLayerSource.OccupiedTiles(mapName, DatLayerHeightDivisor);
 
         if (_occupiedTileCache.TryGetValue(mapName, out var cached))
             return cached;
@@ -380,9 +435,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     phase.Result.ModfPlacements.Clear();
                     phase.Result.ModfPlacements.AddRange(transformedModf);
                 }
+                else
+                {
+                    RehomeChunksForTarget(phase.Result.Chunks, tileX, tileY, 0f, 0f, layer.ZOffset, layer.ZScale);
+                }
             }
-            if ((layer.HasTileOffset || layer.HasCellOffset) && !phase.Result.PlacementsPreTransformed)
-                TranslatePhasePlacements(phase, layer);
+            if ((source.SourceTileX != tileX || source.SourceTileY != tileY || layer.HasTileOffset || layer.HasCellOffset) && !phase.Result.PlacementsPreTransformed)
+                TranslatePhasePlacements(phase, source.SourceTileX, source.SourceTileY, tileX, tileY, layer);
 
             MergePhaseTile(parent, phase, layer, tileX, tileY);
         }
@@ -390,6 +449,35 @@ public class StandardTerrainAdapter : ITerrainAdapter
         PublishTileTextures(tileX, tileY, parent.Textures);
         PostProcessTileAlpha(parent.Result.Chunks);
         return parent.Result;
+    }
+
+    private static void RehomeChunksForTarget(
+        List<TerrainChunkData> chunks,
+        int tileX,
+        int tileY,
+        float cellDx = 0f,
+        float cellDy = 0f,
+        float zOffset = 0f,
+        float zScale = 1f)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        const float chunkSpan = tileSpan / 16f;
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            TerrainChunkData chunk = chunks[i];
+            chunk.TileX = tileX;
+            chunk.TileY = tileY;
+            Vector3 worldPos = new Vector3(
+                WoWConstants.MapOrigin - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx,
+                WoWConstants.MapOrigin - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy,
+                chunk.WorldPosition.Z + zOffset);
+            chunk.WorldPosition = worldPos;
+            if (chunk.Liquid != null)
+            {
+                chunk.Liquid = chunk.Liquid.WithRehoming(tileX, tileY, worldPos, zOffset, zScale);
+            }
+            chunks[i] = chunk;
+        }
     }
 
     /// <summary>
@@ -419,39 +507,37 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         const float tileSpan = WoWConstants.ChunkSize;
         const float chunkSpan = tileSpan / 16f;
-        (float tileDx, float tileDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
-            layer.TileOffsetX, layer.TileOffsetY, tileSpan);
+        float tileDx = -(tileX - source.SourceTileX) * tileSpan;
+        float tileDy = -(tileY - source.SourceTileY) * tileSpan;
         (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
             layer.CellOffsetX, layer.CellOffsetY, chunkSpan);
         float totalDx = tileDx + cellDx;
         float totalDy = tileDy + cellDy;
 
-        float chunkDx = source.Transforms.Count > 0 ? cellDx : totalDx;
-        float chunkDy = source.Transforms.Count > 0 ? cellDy : totalDy;
-
         var shiftedChunks = new List<TerrainChunkData>(donor.Result.Chunks.Count);
         for (int i = 0; i < donor.Result.Chunks.Count; i++)
         {
             TerrainChunkData chunk = donor.Result.Chunks[i];
+            float wx = WoWConstants.MapOrigin - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx;
+            float wy = WoWConstants.MapOrigin - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy;
+            Vector3 worldPos = new Vector3(wx, wy, (chunk.WorldPosition.Z * layer.ZScale) + layer.ZOffset);
             shiftedChunks.Add(new TerrainChunkData
             {
                 McinIndex = chunk.McinIndex,
-                TileX = chunk.TileX,
-                TileY = chunk.TileY,
+                TileX = tileX,
+                TileY = tileY,
                 ChunkX = chunk.ChunkX,
                 ChunkY = chunk.ChunkY,
                 Heights = chunk.Heights,
                 Normals = chunk.Normals,
                 HoleMask = chunk.HoleMask,
+                HoleMask64 = chunk.HoleMask64,
                 Layers = chunk.Layers,
                 AlphaMaps = chunk.AlphaMaps,
                 ShadowMap = chunk.ShadowMap,
                 MccvColors = chunk.MccvColors,
-                Liquid = chunk.Liquid,
-                WorldPosition = new Vector3(
-                    chunk.WorldPosition.X + chunkDx,
-                    chunk.WorldPosition.Y + chunkDy,
-                    chunk.WorldPosition.Z),
+                Liquid = chunk.Liquid?.WithRehoming(tileX, tileY, worldPos, layer.ZOffset, layer.ZScale),
+                WorldPosition = worldPos,
                 AreaId = chunk.AreaId,
                 McnkFlags = chunk.McnkFlags,
                 AlphaSourceFlags = chunk.AlphaSourceFlags,
@@ -467,7 +553,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             placement.Position = new Vector3(
                 placement.Position.X + totalDx,
                 placement.Position.Y + totalDy,
-                placement.Position.Z);
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             mddf.Add(placement);
         }
 
@@ -478,7 +564,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             placement.Position = new Vector3(
                 placement.Position.X + totalDx,
                 placement.Position.Y + totalDy,
-                placement.Position.Z);
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             modf.Add(placement);
         }
 
@@ -496,70 +582,94 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
     private ParsedTileSource LoadMapTile(string mapName, int tileX, int tileY)
     {
-        var result = new TileLoadResult();
-        string mapDir = $"World\\Maps\\{mapName}";
-        string basePath = $"{mapDir}\\{mapName}_{tileY}_{tileX}";
-        string rootPath = $"{basePath}.adt";
-        CompanionPaths companions = ResolveCompanionPaths(basePath);
-
-        string? texPath = companions.TexturePath;
-        string? objPath = companions.ObjectPath;
-
-        byte[]? texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
-        byte[]? objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
-        byte[]? adtBytes = _dataSource.ReadFile(rootPath);
-
-        // MPQ-era clients (Cata+ / MoP) ship patched ADTs as PTCH/BSDIFF artifacts; the native
-        // resource layer hands MapArea already-reconstructed bytes (MapAdtFileData.cpp). The
-        // viewer must apply the same reconstruction before parsing, otherwise the artifact bytes
-        // reach ParseAdt and the tile silently produces zero chunks.
-        adtBytes = ResolvePatchArtifactBytes(adtBytes, rootPath);
-        if (texPath != null)
-            texBytes = ResolvePatchArtifactBytes(texBytes, texPath);
-        if (objPath != null)
-            objBytes = ResolvePatchArtifactBytes(objBytes, objPath);
-
-        if (adtBytes == null || adtBytes.Length == 0)
+        // Spec 247 US5: DAT donors are read by their own adapter and handed over in the shared
+        // TileLoadResult shape, so the rest of composition (transform, channel gating, merge) is unchanged.
+        if (DatLayerSource.IsDatSource(mapName))
         {
-            bool rootIsEmptyPlaceholder = adtBytes != null && adtBytes.Length == 0;
-            if (objBytes != null && objBytes.Length >= 16)
-            {
-                ViewerLog.Important(ViewerLog.Category.Terrain,
-                    rootIsEmptyPlaceholder
-                        ? $"[StandardADT] Root ADT is a zero-byte placeholder for tile ({tileX},{tileY}); loading placements from {objPath} only."
-                        : $"[StandardADT] Root ADT missing for tile ({tileX},{tileY}); loading placements from {objPath} only.");
-                if (TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr) && objMhdr != null)
-                    CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
-                else
-                    CollectPlacementsFlat(objBytes, tileX, tileY, result);
-            }
-            else
-            {
-                ViewerLog.Trace(rootIsEmptyPlaceholder
-                    ? $"[StandardADT] ADT is a zero-byte placeholder: {rootPath}"
-                    : $"[StandardADT] ADT not found or empty: {rootPath}");
-            }
+            AhdrTerrainAdapter? dat = DatLayerSource.Resolve(mapName, DatLayerHeightDivisor);
+            if (dat is null || !dat.TileExists(tileX, tileY))
+                return new ParsedTileSource(new TileLoadResult(), []);
 
-            return new ParsedTileSource(result, []);
+            TileLoadResult datResult = dat.LoadTileWithPlacements(tileX, tileY);
+            List<string> datTextures = dat.TileTextures.TryGetValue((tileX, tileY), out List<string>? names)
+                ? names
+                : [];
+            return new ParsedTileSource(datResult, datTextures);
         }
 
-        ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}', companionBand={FormatCompanionBand(companions.SelectedBand)}");
+        string? prevLoadingMap = _currentLoadingMapName;
+        _currentLoadingMapName = mapName;
         try
         {
-            List<string> textures = ParseAdt(
-                adtBytes,
-                texBytes,
-                objBytes,
-                tileX,
-                tileY,
-                result,
-                companions.SelectedBand);
-            return new ParsedTileSource(result, textures);
+            var result = new TileLoadResult();
+            string mapDir = $"World\\Maps\\{mapName}";
+            string basePath = $"{mapDir}\\{mapName}_{tileY}_{tileX}";
+            string rootPath = $"{basePath}.adt";
+            CompanionPaths companions = ResolveCompanionPaths(basePath);
+
+            string? texPath = companions.TexturePath;
+            string? objPath = companions.ObjectPath;
+
+            byte[]? texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
+            byte[]? objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
+            byte[]? adtBytes = _dataSource.ReadFile(rootPath);
+
+            // MPQ-era clients (Cata+ / MoP) ship patched ADTs as PTCH/BSDIFF artifacts; the native
+            // resource layer hands MapArea already-reconstructed bytes (MapAdtFileData.cpp). The
+            // viewer must apply the same reconstruction before parsing, otherwise the artifact bytes
+            // reach ParseAdt and the tile silently produces zero chunks.
+            adtBytes = ResolvePatchArtifactBytes(adtBytes, rootPath);
+            if (texPath != null)
+                texBytes = ResolvePatchArtifactBytes(texBytes, texPath);
+            if (objPath != null)
+                objBytes = ResolvePatchArtifactBytes(objBytes, objPath);
+
+            if (adtBytes == null || adtBytes.Length == 0)
+            {
+                bool rootIsEmptyPlaceholder = adtBytes != null && adtBytes.Length == 0;
+                if (objBytes != null && objBytes.Length >= 16)
+                {
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        rootIsEmptyPlaceholder
+                            ? $"[StandardADT] Root ADT is a zero-byte placeholder for tile ({tileX},{tileY}); loading placements from {objPath} only."
+                            : $"[StandardADT] Root ADT missing for tile ({tileX},{tileY}); loading placements from {objPath} only.");
+                    if (TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr) && objMhdr != null)
+                        CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
+                    else
+                        CollectPlacementsFlat(objBytes, tileX, tileY, result);
+                }
+                else
+                {
+                    ViewerLog.Trace(rootIsEmptyPlaceholder
+                        ? $"[StandardADT] ADT is a zero-byte placeholder: {rootPath}"
+                        : $"[StandardADT] ADT not found or empty: {rootPath}");
+                }
+
+                return new ParsedTileSource(result, []);
+            }
+
+            ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}', companionBand={FormatCompanionBand(companions.SelectedBand)}");
+            try
+            {
+                List<string> textures = ParseAdt(
+                    adtBytes,
+                    texBytes,
+                    objBytes,
+                    tileX,
+                    tileY,
+                    result,
+                    companions.SelectedBand);
+                return new ParsedTileSource(result, textures);
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Error(ViewerLog.Category.Terrain, $"Failed to parse ADT ({tileX},{tileY}) from '{mapName}': {ex.Message}");
+                return new ParsedTileSource(result, []);
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"Failed to parse ADT ({tileX},{tileY}) from '{mapName}': {ex.Message}");
-            return new ParsedTileSource(result, []);
+            _currentLoadingMapName = prevLoadingMap;
         }
     }
 
@@ -691,6 +801,41 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
     }
 
+    private static void TranslatePhasePlacements(
+        ParsedTileSource phase, int sourceTileX, int sourceTileY, int tileX, int tileY, PhaseLayerSettings layer)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        const float chunkSpan = tileSpan / 16f;
+        float tileDx = -(tileX - sourceTileX) * tileSpan;
+        float tileDy = -(tileY - sourceTileY) * tileSpan;
+        (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+            layer.CellOffsetX, layer.CellOffsetY, chunkSpan);
+        float dx = tileDx + cellDx;
+        float dy = tileDy + cellDy;
+
+        for (int i = 0; i < phase.Result.MddfPlacements.Count; i++)
+        {
+            MddfPlacement placement = phase.Result.MddfPlacements[i];
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
+            phase.Result.MddfPlacements[i] = placement;
+        }
+
+        for (int i = 0; i < phase.Result.ModfPlacements.Count; i++)
+        {
+            ModfPlacement placement = phase.Result.ModfPlacements[i];
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
+            phase.Result.ModfPlacements[i] = placement;
+        }
+
+        phase.Result.PlacementsPreTransformed = true;
+    }
+
     private static void TranslatePhasePlacements(ParsedTileSource phase, PhaseLayerSettings layer)
     {
         // One tile of offset = one ADT in the 64x64 grid = 533.33 yds. Despite its name,
@@ -710,16 +855,24 @@ public class StandardTerrainAdapter : ITerrainAdapter
         for (int i = 0; i < phase.Result.MddfPlacements.Count; i++)
         {
             MddfPlacement placement = phase.Result.MddfPlacements[i];
-            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             phase.Result.MddfPlacements[i] = placement;
         }
 
         for (int i = 0; i < phase.Result.ModfPlacements.Count; i++)
         {
             ModfPlacement placement = phase.Result.ModfPlacements[i];
-            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             phase.Result.ModfPlacements[i] = placement;
         }
+
+        phase.Result.PlacementsPreTransformed = true;
     }
 
     /// <summary>
@@ -744,6 +897,16 @@ public class StandardTerrainAdapter : ITerrainAdapter
             parent.Result.MddfPlacements.Clear();
             contributed |= PhaseDataChannel.Doodads;
         }
+        else if ((contributed & PhaseDataChannel.Heightmap) != 0 && layer.ZOffset != 0f)
+        {
+            // Heightmap shifted by ZOffset but doodads were preserved from base: shift them to match the new elevation.
+            for (int i = 0; i < parent.Result.MddfPlacements.Count; i++)
+            {
+                var p = parent.Result.MddfPlacements[i];
+                p.Position = new Vector3(p.Position.X, p.Position.Y, (p.Position.Z * layer.ZScale) + layer.ZOffset);
+                parent.Result.MddfPlacements[i] = p;
+            }
+        }
 
         if (PhaseCompositionPolicy.PhaseOwnsPlacements(layer.Channels, PhaseDataChannel.WorldObjects, phase.Result.ModfPlacements.Count))
         {
@@ -755,6 +918,16 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             parent.Result.ModfPlacements.Clear();
             contributed |= PhaseDataChannel.WorldObjects;
+        }
+        else if ((contributed & PhaseDataChannel.Heightmap) != 0 && layer.ZOffset != 0f)
+        {
+            // Heightmap shifted by ZOffset but WMOs were preserved from base: shift them to match the new elevation.
+            for (int i = 0; i < parent.Result.ModfPlacements.Count; i++)
+            {
+                var p = parent.Result.ModfPlacements[i];
+                p.Position = new Vector3(p.Position.X, p.Position.Y, (p.Position.Z * layer.ZScale) + layer.ZOffset);
+                parent.Result.ModfPlacements[i] = p;
+            }
         }
     }
 
@@ -1082,6 +1255,17 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 textures.AddRange(ParseMtexViaMhdr(texBytes, texMhdrStart, texMhdr));
             }
 
+            // Spec 239: FileDataID-era _tex0 files have no MTEX; MCLY texture ids index MDID (diffuse FileDataIDs).
+            if (textures.Count == 0)
+            {
+                textures.AddRange(ReadMdidTextureNames(texBytes));
+                // Start terrain texture reads (possibly CDN downloads) before the renderer asks for them.
+                foreach (string texture in textures)
+                {
+                    if (texture.Length > 0)
+                        _dataSource.PrefetchFile(texture);
+                }
+            }
         }
 
         // Find MHDR in root ADT — all other chunks located via MHDR offsets (or flat scan fallback)
@@ -1331,6 +1515,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 // Hole mask
                 int holeMask = (int)mcnk.Header.Holes;
+                ulong holeMask64 = mcnk.Header.HolesHighRes;
 
                 // Cataclysm+/MoP object companions carry per-slot reference
                 // streams in headerless MCNK wrappers. Preserve those streams
@@ -1385,6 +1570,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Heights = heights,
                     Normals = normals,
                     HoleMask = holeMask,
+                    HoleMask64 = holeMask64,
                     Layers = layers,
                     AlphaMaps = alphaMaps,
                     ShadowMap = shadowMap,
@@ -1733,7 +1919,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             bool chunkBigAlpha = InferBigAlphaForChunk(mcnk, useBigAlpha);
             int mcalLength = mcnk.McalRawData.Length;
 
-            for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
+            for (int i = 1; i < mcnk.TextureLayers.Count && i < TerrainTileMeshBuilder.MaxLayers; i++)
             {
                 var layer = mcnk.TextureLayers[i];
                 byte[]? alpha = null;
@@ -1801,7 +1987,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             int mcalLength = mcnk.McalRawData.Length;
             int layerCount = mcnk.TextureLayers.Count;
-            for (int i = 1; i < layerCount && i < 4; i++)
+            for (int i = 1; i < layerCount && i < TerrainTileMeshBuilder.MaxLayers; i++)
             {
                 int offset = unchecked((int)mcnk.TextureLayers[i].AlphaMapOffset);
                 if (offset < 0 || offset >= mcalLength)
@@ -1839,7 +2025,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             int offset = 0;
             int nLayers = mcnk.TextureLayers.Count;
-            for (int layer = 1; layer < nLayers && layer < 4; layer++)
+            for (int layer = 1; layer < nLayers && layer < TerrainTileMeshBuilder.MaxLayers; layer++)
             {
                 int alphaSize = chunkBigAlphaLegacy ? 4096 : 2048;
                 if (offset + alphaSize > mcnk.McalRawData.Length)
@@ -1874,9 +2060,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
             chunkLookup[(chunk.ChunkX, chunk.ChunkY)] = chunk;
 
         foreach (var chunk in chunks)
-            SynthesizeCataclysm400ResidualAlpha(chunk, useBigAlpha);
-
-        foreach (var chunk in chunks)
         {
             bool doNotFixAlphaMap = (((uint)chunk.AlphaSourceFlags) & 0x8000u) != 0;
             if (!doNotFixAlphaMap)
@@ -1884,47 +2067,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
     }
 
-    private static void SynthesizeCataclysm400ResidualAlpha(TerrainChunkData chunk, bool useBigAlpha)
-    {
-        if (!useBigAlpha || chunk.Layers.Length <= 1)
-            return;
-
-        int layerCount = Math.Min(4, chunk.Layers.Length);
-        for (int targetLayerIndex = 1; targetLayerIndex < layerCount; targetLayerIndex++)
-        {
-            if (chunk.AlphaMaps.ContainsKey(targetLayerIndex))
-                continue;
-
-            if ((chunk.Layers[targetLayerIndex].Flags & 0x100u) != 0)
-                continue;
-
-            var residualAlpha = new byte[64 * 64];
-            for (int pixelIndex = 0; pixelIndex < residualAlpha.Length; pixelIndex++)
-            {
-                int residual = 255;
-                for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
-                {
-                    if (layerIndex == targetLayerIndex)
-                        continue;
-
-                    if (!chunk.AlphaMaps.TryGetValue(layerIndex, out var otherAlpha) || otherAlpha.Length <= pixelIndex)
-                        continue;
-
-                    residual -= otherAlpha[pixelIndex];
-                }
-
-                residualAlpha[pixelIndex] = (byte)Math.Clamp(residual, 0, 255);
-            }
-
-            chunk.AlphaMaps[targetLayerIndex] = residualAlpha;
-        }
-    }
-
     private static void StitchCataclysm400ChunkEdges(
         TerrainChunkData chunk,
         IReadOnlyDictionary<(int chunkX, int chunkY), TerrainChunkData> chunkLookup)
     {
-        int layerCount = Math.Min(4, chunk.Layers.Length);
+        int layerCount = Math.Min(TerrainTileMeshBuilder.MaxLayers, chunk.Layers.Length);
         for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
         {
             if (!chunk.AlphaMaps.TryGetValue(layerIndex, out var alpha) || alpha.Length < 64 * 64)
@@ -1932,13 +2079,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             int textureIndex = chunk.Layers[layerIndex].TextureIndex;
 
-            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX, chunk.ChunkY + 1, textureIndex, out var eastAlpha))
+            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX + 1, chunk.ChunkY, textureIndex, out var eastAlpha))
             {
                 for (int row = 0; row < 64; row++)
                     alpha[row * 64 + 63] = eastAlpha[row * 64];
             }
 
-            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX + 1, chunk.ChunkY, textureIndex, out var southAlpha))
+            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX, chunk.ChunkY + 1, textureIndex, out var southAlpha))
                 Buffer.BlockCopy(southAlpha, 0, alpha, 63 * 64, 64);
 
             if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX + 1, chunk.ChunkY + 1, textureIndex, out var diagonalAlpha))
@@ -1958,7 +2105,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (!chunkLookup.TryGetValue((neighborChunkX, neighborChunkY), out var neighborChunk))
             return false;
 
-        int layerCount = Math.Min(4, neighborChunk.Layers.Length);
+        int layerCount = Math.Min(TerrainTileMeshBuilder.MaxLayers, neighborChunk.Layers.Length);
         for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
         {
             if (neighborChunk.Layers[layerIndex].TextureIndex != textureIndex)
@@ -2131,7 +2278,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         if (mcnk.TextureLayers != null)
         {
-            for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
+            for (int i = 1; i < mcnk.TextureLayers.Count && i < TerrainTileMeshBuilder.MaxLayers; i++)
             {
                 if ((mcnk.TextureLayers[i].Flags & MclyFlags.CompressedAlpha) != 0)
                     return true;
@@ -2951,6 +3098,25 @@ public class StandardTerrainAdapter : ITerrainAdapter
             ViewerLog.Trace($"[Terrain] Tile({tileX},{tileY}) flat placements: mddf={mddfOff >= 0}, modf={modfOff >= 0}, mmid={mmidEntries?.Count ?? 0}, mwid={mwidEntries?.Count ?? 0}");
     }
 
+    /// <summary>Spec 239: texture names from MDID (uint32 FileDataID per texture index), resolved through the listfile.</summary>
+    private static IEnumerable<string> ReadMdidTextureNames(byte[] texBytes)
+    {
+        int mdidOffset = FindChunk(texBytes, "MDID");
+        if (mdidOffset < 0 || mdidOffset + 8 > texBytes.Length)
+            yield break;
+
+        int size = BitConverter.ToInt32(texBytes, mdidOffset + 4);
+        for (int i = 0; i + 4 <= size && mdidOffset + 8 + i + 4 <= texBytes.Length; i += 4)
+        {
+            uint fileDataId = BitConverter.ToUInt32(texBytes, mdidOffset + 8 + i);
+            yield return fileDataId == 0 ? string.Empty : FileDataIdPaths.Resolve(fileDataId);
+        }
+    }
+
+    // MDDF flag 0x40 / MODF flag 0x8: the record's name id is a FileDataID, not an MMID/MWID index.
+    private const ushort MddfNameIdIsFileDataId = 0x40;
+    private const ushort ModfNameIdIsFileDataId = 0x8;
+
     /// <summary>
     /// Resolve a name from xID[index] → byte offset into string block.
     /// </summary>
@@ -2992,10 +3158,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
             float rotZ = BitConverter.ToSingle(data, pos + 24);
             float rotY = BitConverter.ToSingle(data, pos + 28);
             ushort scale = BitConverter.ToUInt16(data, pos + 32);
+            ushort mddfFlags = entrySize >= 36 ? BitConverter.ToUInt16(data, pos + 34) : (ushort)0;
 
             lock (_placementLock)
             {
-                string name = ResolveNameViaXid(nameId, mmidEntries, mmdxData);
+                string name = (mddfFlags & MddfNameIdIsFileDataId) != 0
+                    ? FileDataIdPaths.Resolve(nameId)
+                    : ResolveNameViaXid(nameId, mmidEntries, mmdxData);
                 int nameIdx = GetOrAddMdxName(name);
 
                 // Convert WoW coords to renderer: rendererX=MapOrigin-wowY, rendererY=MapOrigin-wowX, rendererZ=wowZ
@@ -3011,7 +3180,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Scale = scale / 1024f
                 };
 
-                MddfPlacements.Add(placement);
+                if (string.Equals(_currentLoadingMapName ?? _mapName, _mapName, StringComparison.OrdinalIgnoreCase))
+                {
+                    MddfPlacements.Add(placement);
+                }
                 result.MddfPlacements.Add(placement);
             }
         }
@@ -3050,7 +3222,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             lock (_placementLock)
             {
-                string name = ResolveNameViaXid(nameId, mwidEntries, mwmoData);
+                string name = (flags & ModfNameIdIsFileDataId) != 0
+                    ? FileDataIdPaths.Resolve(nameId)
+                    : ResolveNameViaXid(nameId, mwidEntries, mwmoData);
                 int nameIdx = GetOrAddWmoName(name);
 
                 // Convert WoW coords to renderer: rendererX=MapOrigin-wowY, rendererY=MapOrigin-wowX, rendererZ=wowZ
@@ -3075,7 +3249,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Flags = flags
                 };
 
-                ModfPlacements.Add(placement);
+                if (string.Equals(_currentLoadingMapName ?? _mapName, _mapName, StringComparison.OrdinalIgnoreCase))
+                {
+                    ModfPlacements.Add(placement);
+                }
                 result.ModfPlacements.Add(placement);
             }
         }

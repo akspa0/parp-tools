@@ -21,6 +21,7 @@ public unsafe class ParticleRenderer : IDisposable
     private int _uHasTexture;
     private int _uAlphaTest;
     private int _uRows, _uColumns, _uCellIndex;
+    private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAdditive;
 
     private bool _disposed;
 
@@ -39,6 +40,7 @@ layout(location = 0) in vec2 aQuadPos;   // -0.5..0.5 unit quad
 layout(location = 1) in vec2 aTexCoord;  // 0..1
 
 out vec2 vTexCoord;
+out vec3 vWorldPos;
 
 uniform mat4 uView;
 uniform mat4 uProj;
@@ -57,6 +59,7 @@ void main()
         + uCameraRight * aQuadPos.x * uParticleSize
         + uCameraUp    * aQuadPos.y * uParticleSize;
     
+    vWorldPos = worldPos;
     gl_Position = uProj * uView * vec4(worldPos, 1.0);
 
     // Atlas UV: subdivide texture by rows/columns, pick cell
@@ -74,22 +77,43 @@ void main()
         string fragmentShader = @"
 #version 330 core
 in vec2 vTexCoord;
+in vec3 vWorldPos;
 out vec4 FragColor;
 
 uniform sampler2D uTexture;
 uniform vec4 uParticleColor;
 uniform int uHasTexture;
 uniform int uAlphaTest;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform vec3 uCameraPos;
+uniform int uAdditive;
 
 void main()
 {
-    vec4 texColor = (uHasTexture == 1) ? texture(uTexture, vTexCoord) : vec4(0.0);
+    vec4 texColor = (uHasTexture == 1) ? texture(uTexture, vTexCoord) : vec4(1.0);
     vec4 color = texColor * uParticleColor;
     if (uAlphaTest == 1 && color.a < 0.5)
         discard;
-    FragColor = color;
-    if (FragColor.a < 0.01)
+    if (uAdditive == 1)
+    {
+        if (color.a < 0.001 && max(color.r, max(color.g, color.b)) < 0.01)
+            discard;
+    }
+    else if (color.a < 0.01)
+    {
         discard;
+    }
+
+    float distanceToCamera = distance(vWorldPos, uCameraPos);
+    float fogRange = max(uFogEnd - uFogStart, 0.001);
+    float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
+    vec3 finalRgb = (uAdditive == 1)
+        ? (color.rgb * fogFactor)
+        : mix(uFogColor, color.rgb, fogFactor);
+
+    FragColor = vec4(finalRgb, color.a);
 }
 ";
 
@@ -125,6 +149,19 @@ void main()
         _uRows         = _gl.GetUniformLocation(_shaderProgram, "uRows");
         _uColumns      = _gl.GetUniformLocation(_shaderProgram, "uColumns");
         _uCellIndex    = _gl.GetUniformLocation(_shaderProgram, "uCellIndex");
+        _uFogColor     = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
+        _uFogStart     = _gl.GetUniformLocation(_shaderProgram, "uFogStart");
+        _uFogEnd       = _gl.GetUniformLocation(_shaderProgram, "uFogEnd");
+        _uCameraPos    = _gl.GetUniformLocation(_shaderProgram, "uCameraPos");
+        _uAdditive     = _gl.GetUniformLocation(_shaderProgram, "uAdditive");
+
+        _gl.UseProgram(_shaderProgram);
+        _gl.Uniform3(_uFogColor, 0f, 0f, 0f);
+        _gl.Uniform1(_uFogStart, 99999f);
+        _gl.Uniform1(_uFogEnd, 100000f);
+        _gl.Uniform3(_uCameraPos, 0f, 0f, 0f);
+        _gl.Uniform1(_uAdditive, 0);
+        _gl.UseProgram(0);
     }
     
     private void InitBuffers()
@@ -177,6 +214,7 @@ void main()
         Matrix4x4 modelTransform)
     {
         // Count total live particles
+        if (MdxRenderer.GlobalOpacity <= 0.001f) return;
         int total = 0;
         foreach (var e in emitters) total += e.Particles.Count;
         if (total == 0) return;
@@ -265,6 +303,7 @@ void main()
             foreach (var p in emitter.Particles)
             {
                 var color = emitter.GetParticleColor(p);
+                color.W *= MdxRenderer.GlobalOpacity;
                 float size = emitter.GetParticleSize(p);
                 Vector3 particlePos = Vector3.Transform(p.Position, modelTransform);
 
@@ -284,6 +323,127 @@ void main()
         _gl.BindVertexArray(0);
 
         // Restore state
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
+    }
+
+    /// <summary>
+    /// Render all particles from M2 particle emitters.
+    /// Supports distance-based fog attenuation, additive fading, and instance model transform.
+    /// </summary>
+    public void RenderM2(
+        IReadOnlyList<M2ParticleEmitter> emitters,
+        Matrix4x4 view, Matrix4x4 proj,
+        Vector3 cameraPos,
+        Vector3 fogColor, float fogStart, float fogEnd,
+        Matrix4x4 modelTransform)
+    {
+        if (M2Renderer.GlobalOpacity <= 0.001f) return;
+        int total = 0;
+        for (int i = 0; i < emitters.Count; i++)
+            total += emitters[i].Particles.Count;
+        if (total == 0) return;
+
+        Matrix4x4.Invert(view, out var invView);
+        Vector3 camRight = new(invView.M11, invView.M21, invView.M31);
+        Vector3 camUp = new(invView.M12, invView.M22, invView.M32);
+
+        float modelScale = new Vector3(modelTransform.M11, modelTransform.M12, modelTransform.M13).Length();
+        if (modelScale <= 0.0001f) modelScale = 1.0f;
+
+        _gl.UseProgram(_shaderProgram);
+        _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+        _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+        _gl.Uniform3(_uCameraRight, camRight.X, camRight.Y, camRight.Z);
+        _gl.Uniform3(_uCameraUp, camUp.X, camUp.Y, camUp.Z);
+        _gl.Uniform3(_uCameraPos, cameraPos.X, cameraPos.Y, cameraPos.Z);
+        _gl.Uniform3(_uFogColor, fogColor.X, fogColor.Y, fogColor.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform1(_uTexture, 0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+
+        _gl.Enable(EnableCap.Blend);
+        _gl.DepthMask(false);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.Disable(EnableCap.CullFace);
+
+        _gl.BindVertexArray(_vao);
+
+        for (int eIdx = 0; eIdx < emitters.Count; eIdx++)
+        {
+            var emitter = emitters[eIdx];
+            if (!emitter.IsActive || emitter.Particles.Count == 0 || emitter.TextureId == 0)
+                continue;
+
+            switch (emitter.BlendingType)
+            {
+                case 0:
+                    _gl.BlendFunc(BlendingFactor.One, BlendingFactor.Zero);
+                    break;
+                case 1:
+                    _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.Zero);
+                    break;
+                case 2:
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    break;
+                case 3:
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    break;
+                case 4:
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+                    break;
+                case 5:
+                    _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.SrcColor);
+                    break;
+                case 6:
+                    _gl.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
+                    break;
+                default:
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    break;
+            }
+
+            _gl.Uniform1(_uAdditive, emitter.IsAdditive ? 1 : 0);
+            _gl.Uniform1(_uAlphaTest, emitter.BlendingType == 3 ? 1 : 0);
+            _gl.BindTexture(TextureTarget.Texture2D, emitter.TextureId);
+            _gl.Uniform1(_uHasTexture, 1);
+
+            int rows = Math.Max(emitter.Rows, 1);
+            int cols = Math.Max(emitter.Columns, 1);
+            int totalCells = rows * cols;
+            _gl.Uniform1(_uRows, rows);
+            _gl.Uniform1(_uColumns, cols);
+
+            var particles = emitter.Particles;
+            for (int pIdx = 0; pIdx < particles.Count; pIdx++)
+            {
+                var p = particles[pIdx];
+                Vector4 color = emitter.GetParticleColor(p);
+                float op = M2Renderer.GlobalOpacity;
+                color.W *= op;
+                if (emitter.IsAdditive)
+                {
+                    color.X *= op;
+                    color.Y *= op;
+                    color.Z *= op;
+                }
+                float size = emitter.GetParticleSize(p) * modelScale;
+                Vector3 particlePos = Vector3.Transform(p.Position, modelTransform);
+
+                int cellIdx = Math.Clamp((int)(p.LifePhase * (totalCells - 1)), 0, totalCells - 1);
+
+                _gl.Uniform3(_uParticlePos, particlePos.X, particlePos.Y, particlePos.Z);
+                _gl.Uniform4(_uParticleColor, color.X, color.Y, color.Z, color.W);
+                _gl.Uniform1(_uParticleSize, size);
+                _gl.Uniform1(_uCellIndex, cellIdx);
+
+                _gl.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedShort, null);
+                ModelDrawCallCounter.Record();
+            }
+        }
+
+        _gl.BindVertexArray(0);
         _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
     }

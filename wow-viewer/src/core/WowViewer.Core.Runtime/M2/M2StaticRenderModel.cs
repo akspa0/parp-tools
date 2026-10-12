@@ -10,7 +10,9 @@ public sealed class M2StaticRenderModel
         IReadOnlyList<M2StaticRenderSection> sections,
         IReadOnlyList<M2StructuredRenderSection> structuredSections,
         IReadOnlyList<ushort> boneLookup,
-        bool usesCompatibilityFallback)
+        bool usesCompatibilityFallback,
+        IReadOnlyList<M2GeometryTexture>? textures = null,
+        IReadOnlyList<ushort>? textureLookup = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(sections);
@@ -22,6 +24,8 @@ public sealed class M2StaticRenderModel
         StructuredSections = structuredSections;
         BoneLookup = boneLookup;
         UsesCompatibilityFallback = usesCompatibilityFallback;
+        Textures = textures ?? [];
+        TextureLookup = textureLookup ?? [];
     }
 
     public M2ModelDocument Model { get; }
@@ -33,6 +37,10 @@ public sealed class M2StaticRenderModel
     public IReadOnlyList<ushort> BoneLookup { get; }
 
     public bool UsesCompatibilityFallback { get; }
+
+    public IReadOnlyList<M2GeometryTexture> Textures { get; }
+
+    public IReadOnlyList<ushort> TextureLookup { get; }
 
     public Vector3 BoundsMin => Model.BoundsMin;
 

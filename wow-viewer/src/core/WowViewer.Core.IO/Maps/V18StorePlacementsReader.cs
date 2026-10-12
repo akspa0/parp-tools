@@ -141,10 +141,12 @@ public static class V18StorePlacementsReader
         if (mtexTexturePaths is null)
             return paths;
 
-        foreach (string p in mtexTexturePaths)
+        foreach (string? p in mtexTexturePaths)
         {
+            if (string.IsNullOrWhiteSpace(p))
+                continue;
             string norm = p.Replace('\\', '/').Trim();
-            if (!string.IsNullOrWhiteSpace(norm) && norm.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+            if (norm.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
                 paths.Add(norm);
         }
 

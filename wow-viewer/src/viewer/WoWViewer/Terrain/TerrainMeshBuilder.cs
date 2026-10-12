@@ -110,7 +110,7 @@ public class TerrainMeshBuilder
         }
 
         // Build index buffer: 8×8 cells, each split into 4 triangles via center vertex = 256 triangles
-        var indices = BuildIndices(ignoreHoles ? 0 : chunk.HoleMask);
+        var indices = BuildIndices(ignoreHoles ? 0UL : chunk.HoleMask64, ignoreHoles ? 0 : chunk.HoleMask);
 
         if (indices.Length == 0) return null;
 
@@ -166,7 +166,9 @@ public class TerrainMeshBuilder
     /// Each cell has 4 corners (outer) and 1 center (inner), forming 4 triangles.
     /// Holes are skipped based on the hole mask (4×4 groups of 2×2 cells).
     /// </summary>
-    private static ushort[] BuildIndices(int holeMask)
+    private static ushort[] BuildIndices(int holeMask) => BuildIndices(0UL, holeMask);
+
+    private static ushort[] BuildIndices(ulong holeMask64, int holeMask)
     {
         var indices = new List<ushort>(256 * 3);
 
@@ -174,14 +176,15 @@ public class TerrainMeshBuilder
         {
             for (int cellX = 0; cellX < 8; cellX++)
             {
-                // Check hole mask: 4×4 groups, each covering 2×2 cells
-                if (holeMask != 0)
+                if (holeMask64 != 0UL)
                 {
-                    int holeX = cellX / 2;
-                    int holeY = cellY / 2;
-                    int holeBit = 1 << (holeY * 4 + holeX);
-                    if ((holeMask & holeBit) != 0)
-                        continue; // This cell is a hole
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled64(holeMask64, cellX, cellY))
+                        continue;
+                }
+                else if (holeMask != 0)
+                {
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled16((ushort)holeMask, cellX, cellY))
+                        continue;
                 }
 
                 // Four outer corners of this cell

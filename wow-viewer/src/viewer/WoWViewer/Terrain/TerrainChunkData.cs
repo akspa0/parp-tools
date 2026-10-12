@@ -11,10 +11,10 @@ public class TerrainChunkData
     public int McinIndex { get; init; } = -1;
 
     /// <summary>Tile X in the 64×64 grid.</summary>
-    public int TileX { get; init; }
+    public int TileX { get; set; }
 
     /// <summary>Tile Y in the 64×64 grid.</summary>
-    public int TileY { get; init; }
+    public int TileY { get; set; }
 
     /// <summary>Chunk X within the tile (0-15).</summary>
     public int ChunkX { get; init; }
@@ -31,7 +31,20 @@ public class TerrainChunkData
     /// <summary>Hole mask from MCNK header (16-bit, one bit per 2×2 cell group).</summary>
     public int HoleMask { get; init; }
 
-    /// <summary>Texture layers for this chunk (up to 4).</summary>
+    /// <summary>Full 64-bit hole mask (1 bit per 1x1 cell, row-major cellY * 8 + cellX). Supports modern high_res_holes.</summary>
+    public ulong HoleMask64 { get; init; }
+
+    /// <summary>Returns true if the 1x1 cell (0..7, 0..7) is marked as a hole.</summary>
+    public bool IsCellHoled(int cellX, int cellY)
+    {
+        if (HoleMask64 != 0UL)
+            return WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled64(HoleMask64, cellX, cellY);
+        if (HoleMask != 0)
+            return WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled16((ushort)HoleMask, cellX, cellY);
+        return false;
+    }
+
+    /// <summary>Texture layers for this chunk (all MCLY entries; the tile renderer draws up to 8).</summary>
     public TerrainLayer[] Layers { get; init; } = Array.Empty<TerrainLayer>();
 
     /// <summary>Alpha map data per layer (layer index → 64×64 byte array). Layer 0 has no alpha.</summary>
@@ -47,7 +60,7 @@ public class TerrainChunkData
     public LiquidChunkData? Liquid { get; set; }
 
     /// <summary>World-space position of this chunk's corner.</summary>
-    public Vector3 WorldPosition { get; init; }
+    public Vector3 WorldPosition { get; set; }
 
     /// <summary>AreaID from MCNK header (Alpha: Unknown3 at offset 0x38). Used for AreaTable DBC lookup.</summary>
     public int AreaId { get; init; }

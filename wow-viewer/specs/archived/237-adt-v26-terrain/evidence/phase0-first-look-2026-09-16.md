@@ -1,0 +1,85 @@
+# Phase 0 first look: ADT v26, the first analysis of a brand-new format (2026-09-16)
+
+**Status**: preliminary measurement ahead of the Phase 0 inventory tooling (T011–T017). The Python
+probes in [scripts/](scripts/) will be replaced by the C# inventory; the numbers below are what that
+tooling must reproduce.
+
+## Corpus
+
+| Item | Value |
+|---|---|
+| Location | `wow-viewer/test_data/v22_adts/unknown/` (git-ignored) |
+| Files | 700 = 699 extensionless + `6893600.adt` (a byte-identical copy of `6893600`; SHA-256 `AC99569C…F199`) |
+| Filenames | FileDataIDs 6893600–6894299. **They encode no tile position** (operator-confirmed) and are absent from the vendored listfile (`parts/world-maps.csv` max id 7936286) |
+| File-list hash | SHA-256 of sorted `name:size` lines = `54AF5D58…E128E` |
+| Provenance | **Public**: shipped in the 2026-09-16 `wow_classic_beta` build (the first WoW: Forever build on Battle.net). Identified at a glance as "v22" before measurement. They are **ADT v26, a completely new format**: first shipped publicly ~8 hours before this analysis, tip-off ~1 hour before. This is the first analysis of the format anywhere. **No WDT, map table entry or listfile names exist for them** (operator-confirmed) |
+
+Commands (PowerShell, from repo root):
+
+```powershell
+python wow-viewer\specs\237-adt-v26-terrain\evidence\scripts\walk_v26.py
+python wow-viewer\specs\237-adt-v26-terrain\evidence\scripts\dump_v26.py
+python wow-viewer\specs\237-adt-v26-terrain\evidence\scripts\seam_probe.py
+```
+
+## Finding 1: the files are MVER 26 + AHDR, not AHDR-first
+
+- Every file (700/700): top-level order `MVER AHDR ALOC AOCH AVTX ANRM [ATEX×n] ADOO×n ACNK×256 ACVT`.
+- `MVER` = **26**. `AHDR.version` = **26** (not 22 or 23 as the wiki documents).
+- Every file walks with **0 unaccounted bytes** and no overruns, using an unpadded top-level walk.
+- **Consequence**: `WowFileDetector` only checks for `AHDR` as the *first* chunk, so it never recognizes these files. They take the `MVER` branch, and the kind they currently receive is unverified. Spec FR-001 must detect by `AHDR` as the second chunk after `MVER`.
+
+## Finding 2: AHDR
+
+The layout matches the wiki's first five fields; one reserved slot is non-zero.
+
+`(26, 129, 129, 16, 16, 8396383, 0 × 10)`, identical in all files.
+- `8396383` at +0x14: unexplained. It is in the FileDataID range just above the vendored listfile's coverage. Do not name it until the tile data explains it.
+
+## Finding 3: ALOC is the tile location (MEASURED)
+
+- 20 bytes = 5×uint32: `(2869, a, b, a, b)`. Field 0 is constant 2869. Fields 1/3 equal each other (18–45), and fields 2/4 equal each other (16–40).
+- 699 distinct `(a, b)` pairs, one per unique file.
+- **Seam proof** (`seam_probe.py`, AVTX outer 129×129 float32, row-major hypothesis):
+
+| Neighbour | Best edge pairing | median \|Δh\| | Runner-up | Pairs |
+|---|---|---|---|---|
+| field1 + 1 | this.col128 ↔ next.col0 | **0.0000** | 796.9 | 35 |
+| field2 + 1 | this.row128 ↔ next.row0 | **0.0000** | 651.5 | 36 |
+
+- **Conclusion**: `ALOC[1]` = tile X (the grid's column axis), `ALOC[2]` = tile Y (row axis). AVTX outer is row-major. Heights are continuous across tile edges with no per-tile offset.
+- **Detector power**: all 16 edge pairings × 2 axes were scored; the true seam is exactly 0 and every alternative is ≥650. A wrong axis or orientation cannot pass.
+- **Open**: `ALOC[0]` = 2869 (constant, unexplained) and the duplicated fields 3/4. **No WDT, map table entry or listfile names exist for these files (operator-confirmed)**, so any explanation must come from the tile files.
+
+## Finding 4: content shape
+
+- **669/699 tiles are perfectly flat** (height range < 0.001). Only 30 carry terrain. Overall height range is −18798.58..9965.19; the extremes need a check for sentinel values on flat tiles.
+- File sizes: 640 files are 400,141 bytes, and those files' `ACNK`s are all header-only (64 bytes). 25 are 533,261 bytes, 5 are 537,881 bytes, and the rest are unique sizes (larger, non-flat tiles).
+- Chunk sizes all match the header dimensions: `AVTX` 132100 = (129²+128²)×4, `ANRM` 99075 = (129²+128²)×3, `ACVT` 132100 = (129²+128²)×4 RGBA. The wiki's v23-only `ACVT` is present in every file.
+- `AOCH` (new, 2048 bytes): **all zero in all 700 files**.
+- `ADST` (new, 12 bytes): **321 chunks in 7 files** (corrected 2026-09-16; the first pass counted chunks as files). They form a run between the last `ACNK` and `ACVT` (2, 2, 18, 31, 59, 70 and 139 per file). Values look like `(63420377, 190719, 1)`, and the first field falls in the `ACDO` uniqueId range (~63.42M). Unexplained.
+- `ATEX`: **one chunk per name**. 33 distinct names; **669 files have none** (corrected: the first pass said 484), and only 30 files carry `ATEX`. Tilesets are TirisFall, SilverPine and Wetlands (Lordaeron/Eastern Kingdoms content).
+- `ADOO`: **one chunk per name**, 225 or 285 per file. The same model names repeat in (almost) every file, so this looks like a map-global model table copied per tile. Examples: `WORLD\LORDAERON\SILVERPINE\...\SILVERPINETREE03.M2`, `...\TIRISFALLGLADECANOPYTREE07.M2`.
+- **Corrected**: the first pass sampled only each file's first `ACNK` and wrongly reported the index fields as 0. Across all 178,944 `ACNK`s, `+0x00` = i % 16 and `+0x04` = i / 16 for the i-th `ACNK` in file order, so they are **chunk-local** indices (row-major). **Tile** position still comes only from `ALOC`.
+
+## Finding 5: ACNK contents (`scripts/acnk_v26.py`, `scripts/acnk_index_v26.py`)
+
+- 163,840 `ACNK`s are the 64-byte header only; 15,104 carry sub-chunks. Walking the sub-chunks after the header leaves 0 gaps.
+- Sub-chunk order: `ALYR × 0..4`, then `ASHD` (always, 512 bytes), then an optional `ACDO` (5,298 × 56 bytes, 11 × 60 bytes).
+- `ALYR`: 4,136 bytes = 0x20 fixed part + a nested `AMAP` of **4,096 bytes** (uncompressed 8-bit 64×64). Flags are `0x100` on **every** layer, including the first; bytes 0x08–0x1F are always zero.
+- Header: `+0x08` = `0xD000` in every chunk; `+0x0C` = 0 in every chunk (the wiki's areaId). Bytes `0x10..0x2B` vary, with `0x55555555` / `0xAAAAAAAA` patterns consistent with the wiki's 2-bit `lowdetailtextureingmap` at 0x12. `+0x2C` and `+0x3C` are always 0.
+- `ACDO` (56 bytes) samples, read as the wiki struct: modelid 5/16/7; "position" component 0 and 2 within ±600, component 1 within ±1406; "rotation" e.g. (0, 280.5, 0); the wiki's "scale[3], float" read as e.g. (0.72, 1.0, 0.0, −0.0029); uniqueId ~63.42M; trailing 8 bytes `00000000 00000100`. Field meanings beyond modelid/uniqueId are **not yet tested**.
+
+## Finding 6: every referenced asset has a FileDataID (`scripts/names_to_fdid_v26.py`)
+
+- Against the vendored community listfile (`libs/wowdev/wow-listfile/parts/*.csv`, 2,204,732 entries): **33/33** distinct `ATEX` names and **285/285** distinct `ADOO` names resolve to FileDataIDs.
+- `ATEX` names are all `.blp`; `ADOO` names are `.m2` and `.wmo`.
+- The tile files themselves have no listfile entries; only the assets they reference do.
+
+## Spec consequences (applied in the same pass)
+
+1. Detection: `MVER` + `AHDR` second, with the version read from `AHDR` (26 observed). The spec is retitled to ADT v26; wiki v22/v23 remain detected relatives only.
+2. Tile coordinates come from `ALOC` (measured), not filenames or ACNK indices.
+3. New chunks `ALOC`, `AOCH`, `ADST` join the known set; `ACVT` is not v23-only.
+4. Name tables are chunk-per-name.
+5. Research R4 (vertex order) is **answered for the outer grid** (row-major, X = column). Research R5 (height frame) is **answered at tile edges** (absolute, continuous). The inner grid, normals, placements and alpha remain open.

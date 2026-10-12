@@ -70,7 +70,7 @@ public static class WorldTerrainTileBuilder
             int indexY = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x08, 4)));
             int layerCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x0C, 4)));
             uint areaId = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0x34, 4));
-            ushort holes = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(0x3C, 2));
+            var (holes64, holes) = Maps.TerrainHoleMath.ReadHoleMasks(payload, flags);
             float baseHeight = BinaryPrimitives.ReadSingleLittleEndian(payload.AsSpan(0x70, 4));
             float[]? heights = TryReadMcvtHeights(payload, baseHeight, applyBaseHeightOffset);
             Vector3[]? normals = TryReadMcnrNormals(payload);
@@ -89,7 +89,8 @@ public static class WorldTerrainTileBuilder
                 heights,
                 textureChunk?.Layers,
                 normals,
-                textureChunk?.ShadowMap));
+                textureChunk?.ShadowMap,
+                holeMask64: holes64));
         }
 
         return new WorldTerrainTileData(fileSummary.SourcePath, fileSummary.Kind, chunks, BuildHeightmap(chunks));

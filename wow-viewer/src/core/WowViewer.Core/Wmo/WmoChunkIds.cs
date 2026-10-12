@@ -37,4 +37,7 @@ public static class WmoChunkIds
     public static readonly FourCC Mocv = FourCC.FromString("MOCV");
     public static readonly FourCC Mliq = FourCC.FromString("MLIQ");
     public static readonly FourCC Modr = FourCC.FromString("MODR");
+    public static readonly FourCC Mddl = FourCC.FromString("MDDL");
+    public static readonly FourCC Moc2 = FourCC.FromString("MOC2");
+    public static readonly FourCC Mgi2 = FourCC.FromString("MGI2");
 }

@@ -138,14 +138,30 @@ public static class LkAdtWriter
         }
 
         byte[] mfboData = BuildMfboPayload(adt.MfboFlightBounds);
+        int mfboRelativeOffset = 0;
+        uint mhdrFlags = adt.MhdrFlags;
         if (mfboData.Length > 0)
         {
+            // MHDR.ofsMFBO was hardcoded to 0, so MFBO was written where nothing could find it, and
+            // flag 0x1 (mhdr_MFBO) was never set to announce it.
+            mfboRelativeOffset = (int)(ms.Position - mhdrPosition);
             WriteDataChunk(bw, "MFBO", mfboData);
+            mhdrFlags |= 0x1u;
+        }
+
+        // MTXF: one uint32 of texture flags per MTEX entry. WotLK reads it through MHDR.ofsMTXF, which was
+        // also hardcoded to 0. Zero is the correct default value for every entry; the chunk's presence and
+        // its length agreeing with MTEX is what matters.
+        int mtxfRelativeOffset = 0;
+        if (adt.TextureNames.Count > 0)
+        {
+            mtxfRelativeOffset = (int)(ms.Position - mhdrPosition);
+            WriteDataChunk(bw, "MTXF", new byte[adt.TextureNames.Count * 4]);
         }
 
         byte[] result = ms.ToArray();
 
-        PatchMhdr(result, (int)mhdrPosition, adt.MhdrFlags,
+        PatchMhdr(result, (int)mhdrPosition, mhdrFlags,
             (int)(mcinStart - mhdrPosition - ChunkHeaderSize),
             (int)mtexOffset,
             (int)mmdxOffset,
@@ -154,7 +170,9 @@ public static class LkAdtWriter
             (int)mwidOffset,
             (int)mddfOffset,
             (int)modfOffset,
-            mh2oRelativeOffset);
+            mh2oRelativeOffset,
+            mfboRelativeOffset,
+            mtxfRelativeOffset);
 
         PatchMcin(result, (int)mcinStart + ChunkHeaderSize, mcnkOffsets, mcnkSizes);
 
@@ -371,6 +389,13 @@ public static class LkAdtWriter
             bw.Write(chunk.MclvLighting);
         }
 
+        // MCSE is expected in every MCNK, empty or not: real LK tiles carry ofsSndEmitters pointing at a
+        // zero-length MCSE with nSndEmitters = 0. Omitting the chunk entirely leaves the offset at 0, which
+        // readers that walk by offset (the client, Noggit) treat as a malformed chunk.
+        int mcseOffset = (int)ms.Position;
+        bw.Write(FourCC.FromString("MCSE").ToFileBytes());
+        bw.Write(0);
+
         int totalSize = (int)ms.Position - 8;
         ms.Position = sizePosition;
         bw.Write(totalSize);
@@ -385,6 +410,20 @@ public static class LkAdtWriter
         BinaryPrimitives.WriteInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x28), mcalSize);
         BinaryPrimitives.WriteInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x2C), mcshOffset);
         BinaryPrimitives.WriteInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x30), mcshSize);
+
+        // These were computed and thrown away: MCCV/MCLV were written into the file with their header
+        // offsets left at 0, so nothing could find them, and MCSE was never written at all.
+        BinaryPrimitives.WriteInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x58), mcseOffset);
+        BinaryPrimitives.WriteInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x5C), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x74), mccvOffset);
+        BinaryPrimitives.WriteInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x78), mclvOffset);
+
+        // MCNK flag 0x40 announces MCCV. Writing the chunk without the flag leaves it ignored.
+        if (mccvOffset != 0)
+        {
+            int flags = BinaryPrimitives.ReadInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x00));
+            BinaryPrimitives.WriteInt32LittleEndian(ms.GetBuffer().AsSpan((int)ChunkHeaderSize + 0x00), flags | 0x40);
+        }
 
         ms.Position = ms.Length;
         return ms.ToArray();
@@ -601,7 +640,9 @@ public static class LkAdtWriter
     private static void PatchMhdr(byte[] result, int mhdrStart, uint flags,
         int ofsMcin, int ofsMtex, int ofsMmdx, int ofsMmid,
         int ofsMwmo, int ofsMwid, int ofsMddf, int ofsModf,
-        int ofsMh2o)
+        int ofsMh2o,
+        int ofsMfbo,
+        int ofsMtxf)
     {
         int dataStart = mhdrStart + ChunkHeaderSize;
         BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(dataStart + 0), flags);
@@ -613,10 +654,9 @@ public static class LkAdtWriter
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 24), ofsMwid);
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 28), ofsMddf);
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 32), ofsModf);
-        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 36), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 36), ofsMfbo);
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 40), ofsMh2o);
-        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 44), 0);
-        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 48), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + 44), ofsMtxf);
         for (int i = 48; i < MhdrDataSize; i += 4)
             BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(dataStart + i), 0);
     }

@@ -48,7 +48,7 @@ public sealed record Pm4Region(
     int TotalObjectCount)
 {
     public int TileCount => TileCoordinates.Count;
-    public bool IsEmptyStubRegion => RegionId == 1;
+    public bool IsEmptyStubRegion => RegionId == 1 || (TotalObjectCount == 0 && TotalSurfaceCount == 0);
 }
 
 /// <summary>

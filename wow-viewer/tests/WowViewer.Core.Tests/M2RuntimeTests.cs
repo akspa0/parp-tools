@@ -172,6 +172,46 @@ public sealed class M2RuntimeTests
     }
 
     [Fact]
+    public void BonePoseEvaluator_WorldMatricesMatchEvaluateAndCachedKeyFramesSampleIdentically()
+    {
+        // Spec 256 amendment A: EvaluateWorldMatrices is Evaluate's math without per-bone objects, and key
+        // frames are decoded once per track (M2TrackKeyFrameCache). Sampling the same track at many times,
+        // in any order, must give what a first decode gives.
+        SyntheticTrackPayloadBuilder payload = new();
+        M2ModelDocument model = CreateModel(
+            payload.ToArray,
+            bones:
+            [
+                new M2BoneDefinition(
+                    0, -1, flags: 0, parentBone: -1, submeshId: 0, boneNameCrc: 0,
+                    payload.AddTrack(M2TrackInterpolation.Linear, -1, [0u, 1000u], [Vector3.Zero, new Vector3(2.0f, 0.0f, 0.0f)]),
+                    EmptyCompressedRotationTrack(),
+                    EmptyVectorTrack(),
+                    Vector3.Zero),
+                new M2BoneDefinition(
+                    1, -1, flags: 0, parentBone: 0, submeshId: 0, boneNameCrc: 0,
+                    payload.AddTrack(M2TrackInterpolation.Linear, -1, [0u, 1000u], [Vector3.Zero, new Vector3(0.0f, 1.0f, 0.0f)]),
+                    EmptyCompressedRotationTrack(),
+                    EmptyVectorTrack(),
+                    Vector3.Zero),
+            ]);
+
+        Matrix4x4[] matrices = new Matrix4x4[model.Bones.Count];
+        bool[] solved = new bool[model.Bones.Count];
+        foreach (int timeMs in new[] { 250, 500, 0, 999, 500, 1000, 250 })
+        {
+            M2BonePoseState pose = M2BonePoseEvaluator.Evaluate(model, sequenceIndex: 0, timeMs: timeMs);
+            M2BonePoseEvaluator.EvaluateWorldMatrices(model, 0, timeMs, null, matrices, solved);
+            for (int bone = 0; bone < model.Bones.Count; bone++)
+                Assert.Equal(pose.Matrices[bone], matrices[bone]);
+        }
+
+        M2BonePoseState atHalf = M2BonePoseEvaluator.Evaluate(model, sequenceIndex: 0, timeMs: 500);
+        Assert.Equal(new Vector3(1.0f, 0.0f, 0.0f), atHalf.Bones[0].Translation);
+        Assert.Equal(new Vector3(0.0f, 0.5f, 0.0f), atHalf.Bones[1].Translation);
+    }
+
+    [Fact]
     public void SkinnedRenderModelBuilder_PrefersSkinBoneEntriesOverRawVertexBoneIndices()
     {
         M2ModelDocument model = CreateModel(

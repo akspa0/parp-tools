@@ -13,7 +13,7 @@ public enum TemporalStratum
     /// <summary>Moderate compression (4x to 8x) from late editing passes or smoothing passes.</summary>
     LateRevision_4x_8x = 1,
 
-    /// <summary>Classic WoWEdit compression (~30x to 33.334x = 1/0.03) from terrain erasure/wiping.</summary>
+    /// <summary>Classic authoring editor compression (~30x to 33.334x = 1/0.03) from terrain erasure/wiping.</summary>
     ClassicErasure_33x = 2,
 
     /// <summary>Sub-millimeter early prototype relief or extreme scale down (64x to 512x).</summary>

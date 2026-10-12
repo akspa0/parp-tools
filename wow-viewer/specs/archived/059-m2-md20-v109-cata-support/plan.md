@@ -1,6 +1,6 @@
 # Implementation Plan: M2 MD20 v0x109+ Cataclysm Support
 
-**Branch**: `059-m2-md20-v109-cata-support` | **Date**: 2026-06-11 | **Spec**: [spec.md](./spec.md)
+**Branch**: `059-m2-md20-v109-cata-support` | **Date**: 2026-06-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/059-m2-md20-v109-cata-support/spec.md`
 

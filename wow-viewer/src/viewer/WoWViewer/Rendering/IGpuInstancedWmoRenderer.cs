@@ -27,6 +27,18 @@ public interface IGpuInstancedWmoRenderer
         Vector3 lightColor,
         Vector3 ambientColor);
 
+    void BeginGpuInstanceBatch(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        Vector3 fogColor,
+        float fogStart,
+        float fogEnd,
+        Vector3 cameraPos,
+        Vector3 lightDir,
+        Vector3 lightColor,
+        Vector3 ambientColor,
+        SceneLightManager? sceneLights);
+
     void QueueGpuInstance(Matrix4x4 modelMatrix);
 
     void EndGpuInstanceBatch();

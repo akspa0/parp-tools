@@ -1,6 +1,6 @@
 # Implementation Plan: PM4 Scene Graph Semantics and Panel
 
-**Branch**: `058-pm4-scene-graph-semantics-and-panel` | **Date**: 2026-06-11 | **Spec**: [spec.md](./spec.md)
+**Branch**: `058-pm4-scene-graph-semantics-and-panel` | **Date**: 2026-06-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/058-pm4-scene-graph-semantics-and-panel/spec.md`
 

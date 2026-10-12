@@ -1,6 +1,6 @@
 # Implementation Plan: Native Renderer Parity
 
-**Branch**: `032-native-renderer-parity` | **Date**: 2026-05-30 | **Spec**: [spec.md](./spec.md)
+**Branch**: `032-native-renderer-parity` | **Date**: 2026-05-30 | **Spec**: [spec.md](spec.md)
 
 **Convergence Note**: Active renderer-owner planning now lives in [specs/036-renderer-improvements/plan.md](../036-renderer-improvements/plan.md). This document remains a source-slice reference for broader runtime parity goals.
 

@@ -12,7 +12,8 @@ public sealed class WmoRenderDocument
         IReadOnlyList<WmoPortalDetail> portals,
         IReadOnlyList<WmoPortalReferenceDetail> portalReferences,
         IReadOnlyList<WmoDoodadSetDetail> doodadSets,
-        IReadOnlyList<WmoDoodadPlacementDetail> doodadPlacements)
+        IReadOnlyList<WmoDoodadPlacementDetail> doodadPlacements,
+        WmoDetailDoodadDocument? detailDoodads = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentNullException.ThrowIfNull(summary);
@@ -34,6 +35,7 @@ public sealed class WmoRenderDocument
         PortalReferences = portalReferences;
         DoodadSets = doodadSets;
         DoodadPlacements = doodadPlacements;
+        DetailDoodads = detailDoodads;
     }
 
     public string SourcePath { get; }
@@ -55,4 +57,6 @@ public sealed class WmoRenderDocument
     public IReadOnlyList<WmoDoodadSetDetail> DoodadSets { get; }
 
     public IReadOnlyList<WmoDoodadPlacementDetail> DoodadPlacements { get; }
-}
+
+    public WmoDetailDoodadDocument? DetailDoodads { get; }
+}

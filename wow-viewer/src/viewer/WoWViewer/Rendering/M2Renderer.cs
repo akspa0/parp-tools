@@ -6,12 +6,13 @@ using Silk.NET.OpenGL;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using WowViewer.Core.M2;
+using WowViewer.Core.Mdx;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.Runtime.M2;
 
 namespace WoWViewer.Rendering;
 
-public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
+public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLightEmitter
 {
     private readonly GL? _gl;
     private readonly IDataSource? _dataSource;
@@ -25,6 +26,12 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
     private readonly List<bool> _sectionVisibility = new();
     private readonly Dictionary<string, uint> _loadedTextureCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> _ownedTextureIds = new();
+    private readonly M2ParticleController? _particleController;
+
+    // Spec 256 P2b: world-streamed models read/decode textures off the render thread (M2TextureStreamer).
+    private readonly bool _deferTextureLoads;
+    private int _textureGeneration;
+    private bool _disposed;
     private readonly string _modelDir = string.Empty;
     private readonly int? _selectedReplaceableDisplayIndex;
     private int _characterHairVariationId;
@@ -41,6 +48,7 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
     private Vector3 _batchLightColor;
     private Vector3 _batchAmbientColor;
     private DateTime _lastAnimationUpdateTime = DateTime.UtcNow;
+    private IReadOnlyList<M2AnimatedLightState>? _lastAnimatedLights;
 
     private static uint _shaderProgram;
     private static int _uModel;
@@ -65,6 +73,7 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
     private static int _uUvTranslation;
     private static int _uUvScale;
     private static int _uUvRotation;
+    private static int _uAdditive;
     private static bool _shaderInitialized;
     private static int _shaderRefCount;
 
@@ -95,8 +104,10 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
             $"[M2] wow-viewer runtime metadata + legacy draw backend ready for {Path.GetFileName(SourceModelPath)}: sections={runtimeModel.Sections.Count}, compatibilityFallback={runtimeModel.UsesCompatibilityFallback}");
     }
 
-    public M2Renderer(GL gl, M2StaticRenderModel runtimeModel, string sourceModelPath, IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null)
+    public M2Renderer(GL gl, M2StaticRenderModel runtimeModel, string sourceModelPath, IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null,
+        bool deferTextureLoads = false)
     {
+        _deferTextureLoads = deferTextureLoads;
         ArgumentNullException.ThrowIfNull(gl);
         ArgumentNullException.ThrowIfNull(runtimeModel);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceModelPath);
@@ -118,7 +129,13 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
 
         InitShaders();
         InitBuffers();
+        BlpCompressedTexture.DetectSupport(gl); // Spec 256 P2c, render thread
         LoadSectionTextures();
+
+        if (_runtimeModel?.Model.Particles.Count > 0)
+        {
+            _particleController = new M2ParticleController(_gl, _runtimeModel, ResolveParticleTexture);
+        }
 
         if (_texResolver != null)
         {
@@ -147,17 +164,25 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
 
     public Vector3 BoundsMax => _runtimeModel?.BoundsMax ?? _legacyRenderer?.BoundsMax ?? Vector3.Zero;
 
+    public static float GlobalOpacity { get; set; } = 1.0f;
+
     public bool HasTransparentWorldPass
     {
         get
         {
+            if (GlobalOpacity < 0.999f)
+                return true;
+
             if (_legacyRenderer != null)
                 return _legacyRenderer.HasTransparentWorldPass;
+
+            if (_particleController?.HasActiveParticles == true)
+                return true;
 
             for (int index = 0; index < _sections.Count; index++)
             {
                 SectionBuffers section = _sections[index];
-                if (section.Visible && section.Material.IsTransparent)
+                if (section.Visible && (section.Material.IsTransparent || section.AnimatedAlpha < 0.999f || section.Material.BlendMode is WowViewer.Core.M2.M2BlendMode.Add or WowViewer.Core.M2.M2BlendMode.NoAlphaAdd or WowViewer.Core.M2.M2BlendMode.BlendAdd))
                     return true;
             }
 
@@ -165,16 +190,50 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
         }
     }
 
-    // Static legacy-backed M2s can use the shared world batch path. The native
-    // runtime backend owns a different shader/state path, so keep it isolated
-    // until a backend-specific batch key exists.
-    public bool RequiresUnbatchedWorldRender => _legacyRenderer is null || _legacyRenderer.RequiresUnbatchedWorldRender;
+    // Spec 256 P3: the native backend batches too. Every batched draw (RenderInstance, the instanced
+    // path) binds its own program and sets all of its uniforms, so it cannot inherit another backend's
+    // state; wireframe stays per instance, as for MdxRenderer.
+    public bool RequiresUnbatchedWorldRender => _legacyRenderer?.RequiresUnbatchedWorldRender ?? _wireframe;
 
     public bool SupportsGpuInstancedOpaque
         => _legacyRenderer is IGpuInstancedModelRenderer gpuRenderer
-            && gpuRenderer.SupportsGpuInstancedOpaque;
+            ? gpuRenderer.SupportsGpuInstancedOpaque
+            : NativeSupportsGpuInstancedOpaque;
 
     public IAnimationController? Animator => _legacyRenderer?.Animator ?? _runtimeAnimator;
+
+    public void CollectSceneLights(Matrix4x4 modelMatrix, ICollection<SceneLight> lights, string sourceKey)
+    {
+        ArgumentNullException.ThrowIfNull(lights);
+
+        if (_legacyRenderer is ISceneLightEmitter legacyEmitter)
+        {
+            legacyEmitter.CollectSceneLights(modelMatrix, lights, sourceKey);
+            return;
+        }
+
+        IReadOnlyList<M2AnimatedLightState>? animatedLights = _lastAnimatedLights;
+        if (animatedLights == null || animatedLights.Count == 0)
+            return;
+
+        for (int i = 0; i < animatedLights.Count; i++)
+        {
+            M2AnimatedLightState light = animatedLights[i];
+            if (!light.Visible || light.Type != 0)
+                continue;
+
+            Vector3 position = Vector3.Transform(light.Position, modelMatrix);
+            Vector3 color = new(
+                MdxMaterialRenderPolicy.ClampFinite(light.DiffuseColor.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.DiffuseColor.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.DiffuseColor.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
+            float intensity = MdxMaterialRenderPolicy.ClampFinite(light.DiffuseIntensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
+            float start = MdxMaterialRenderPolicy.ClampFinite(light.AttenuationStart, 0.0f, 100000.0f);
+            float end = MathF.Max(MdxMaterialRenderPolicy.ClampFinite(light.AttenuationEnd, 0.0f, 100000.0f), start + 0.001f);
+
+            lights.Add(new SceneLight(position, color, intensity, start, end, "M2-LITE", sourceKey));
+        }
+    }
 
     public int SubObjectCount => _runtimeModel?.Sections.Count ?? _legacyRenderer?.SubObjectCount ?? _sections.Count;
 
@@ -286,24 +345,45 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
             return;
         }
 
-        if (_runtimeAnimator == null || _runtimeModel == null || _gl == null)
-            return;
-
         DateTime now = DateTime.UtcNow;
         float deltaMs = (float)(now - _lastAnimationUpdateTime).TotalMilliseconds;
         _lastAnimationUpdateTime = now;
-        _runtimeAnimator.Update(Math.Clamp(deltaMs, 0.0f, 100.0f));
+        float clampedDeltaMs = Math.Clamp(deltaMs, 0.0f, 100.0f);
+
+        if (_runtimeAnimator == null || _runtimeModel == null || _gl == null)
+        {
+            _particleController?.Update(clampedDeltaMs / 1000f, null, -1, 0);
+            return;
+        }
+
+        _runtimeAnimator.Update(clampedDeltaMs);
 
         if (!_runtimeAnimator.TryPrepareCurrentSequence(out int sequenceIndex, out int timeMs, out M2ExternalAnimationRuntimeState? externalAnimationState))
+        {
+            _particleController?.Update(clampedDeltaMs / 1000f, null, -1, 0);
             return;
+        }
 
         try
         {
             M2AnimatedRenderState animatedState = M2AnimatedRenderStateEvaluator.Evaluate(_runtimeModel.Model, _runtimeModel, sequenceIndex, timeMs, externalAnimationState);
+            if (_gpuSkinning)
+            {
+                // Spec 256 A: the vertex shader skins with these matrices; no per-frame vertex rebuild or upload.
+                M2BonePoseEvaluator.EvaluateWorldMatrices(_runtimeModel.Model, sequenceIndex, timeMs, externalAnimationState, _boneMatrices, _boneSolvedScratch);
+                _hasBonePose = true;
+                _lastAnimatedLights = animatedState.Lights;
+                ApplyAnimatedPassStates(M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState));
+                _particleController?.Update(clampedDeltaMs / 1000f, _boneMatrices, sequenceIndex, timeMs);
+                return;
+            }
+
             M2BonePoseState bonePoseState = M2BonePoseEvaluator.Evaluate(_runtimeModel.Model, sequenceIndex, timeMs, externalAnimationState);
             M2SkinnedRenderModel skinnedRenderModel = M2SkinnedRenderModelBuilder.ApplyPose(_runtimeModel, bonePoseState);
             M2RenderConsumerFrameState consumerState = M2RenderConsumerFrameStateBuilder.Build(_runtimeModel, animatedState);
+            _lastAnimatedLights = animatedState.Lights;
             ApplyAnimatedFrame(skinnedRenderModel, consumerState);
+            _particleController?.Update(clampedDeltaMs / 1000f, _boneMatrices, sequenceIndex, timeMs);
         }
         catch (Exception ex)
         {
@@ -329,11 +409,12 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
         Vector3 cameraPos,
         Vector3 lightDir,
         Vector3 lightColor,
-        Vector3 ambientColor)
+        Vector3 ambientColor,
+        SceneLightManager? sceneLights = null)
     {
         if (_legacyRenderer != null)
         {
-            _legacyRenderer.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+            _legacyRenderer.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor, sceneLights);
             return;
         }
 
@@ -364,23 +445,34 @@ public sealed class M2Renderer : IModelRenderer, IGpuInstancedModelRenderer
         {
             gpuRenderer.BeginGpuInstanceBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
                 lightDir, lightColor, ambientColor);
+            return;
         }
+
+        if (_legacyRenderer == null)
+            BeginNativeGpuInstanceBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
     }
 
     public void QueueGpuInstance(Matrix4x4 modelMatrix, float fadeAlpha = 1.0f)
     {
         if (_legacyRenderer is IGpuInstancedModelRenderer gpuRenderer)
             gpuRenderer.QueueGpuInstance(modelMatrix, fadeAlpha);
+        else if (_legacyRenderer == null)
+            QueueNativeGpuInstance(modelMatrix, fadeAlpha);
     }
 
     public void EndGpuInstanceBatch()
     {
         if (_legacyRenderer is IGpuInstancedModelRenderer gpuRenderer)
             gpuRenderer.EndGpuInstanceBatch();
+        else if (_legacyRenderer == null)
+            EndNativeGpuInstanceBatch();
     }
 
 public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         if (_legacyRenderer != null)
         {
             _legacyRenderer.RenderInstance(modelMatrix, pass, fadeAlpha);
@@ -405,11 +497,15 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         Vector3? cameraPos = null,
         Vector3? lightDir = null,
         Vector3? lightColor = null,
-        Vector3? ambientColor = null)
+        Vector3? ambientColor = null,
+        SceneLightManager? sceneLights = null)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         if (_legacyRenderer != null)
         {
-            _legacyRenderer.RenderWithTransform(modelMatrix, view, proj, pass, fadeAlpha, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+            _legacyRenderer.RenderWithTransform(modelMatrix, view, proj, pass, fadeAlpha, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor, sceneLights);
             return;
         }
 
@@ -441,6 +537,9 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         Vector3 lightColor,
         Vector3 ambientColor)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         if (_legacyRenderer != null)
         {
             _legacyRenderer.RenderBackdrop(modelMatrix, view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
@@ -465,9 +564,12 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
     {
         if (_legacyRenderer != null)
         {
-            _legacyRenderer.RenderWireframeOverlay(modelMatrix, view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
+            _legacyRenderer.RenderWireframeOverlay(modelMatrix, view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor, wireframeColor);
             return;
         }
+
+        if (GlobalOpacity <= 0.001f)
+            return;
 
         bool previousWireframe = _wireframe;
         _wireframe = true;
@@ -501,7 +603,10 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             _gl.DeleteBuffer(section.Ebo);
         }
 
+        _disposed = true;
         _sections.Clear();
+        DeleteInstanceBuffer();
+        _particleController?.Dispose();
 
         ReleaseOwnedTextures();
 
@@ -520,13 +625,18 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         if (_gl == null || _runtimeModel == null)
             return;
 
+        CreateInstanceBuffer(); // Spec 256 P3
+        InitGpuSkinning(); // Spec 256 A
+        int stride = _gpuSkinning ? GpuSkinnedVertexFloats : 10;
+
         foreach (M2StaticRenderSection section in _runtimeModel.Sections)
         {
-            float[] vertexData = new float[section.Vertices.Count * 10];
+            float[] vertexData = new float[section.Vertices.Count * stride];
+            M2StructuredRenderSection? skinSource = _gpuSkinning ? FindSkinSource(section) : null;
             for (int index = 0; index < section.Vertices.Count; index++)
             {
                 M2StaticRenderVertex vertex = section.Vertices[index];
-                int offset = index * 10;
+                int offset = index * stride;
                 vertexData[offset + 0] = vertex.Position.X;
                 vertexData[offset + 1] = vertex.Position.Y;
                 vertexData[offset + 2] = vertex.Position.Z;
@@ -537,6 +647,8 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
                 vertexData[offset + 7] = vertex.TextureCoords0.Y;
                 vertexData[offset + 8] = vertex.TextureCoords1.X;
                 vertexData[offset + 9] = vertex.TextureCoords1.Y;
+                if (_gpuSkinning)
+                    WriteSkinningAttributes(vertexData, offset, skinSource, index);
             }
 
             uint[] indices = section.Indices.ToArray();
@@ -550,7 +662,7 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             {
                 fixed (float* vertexPtr = vertexData)
                 {
-                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), vertexPtr, _runtimeAnimator != null ? BufferUsageARB.DynamicDraw : BufferUsageARB.StaticDraw);
+                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertexData.Length * sizeof(float)), vertexPtr, _runtimeAnimator != null && !_gpuSkinning ? BufferUsageARB.DynamicDraw : BufferUsageARB.StaticDraw);
                 }
 
                 _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
@@ -559,16 +671,25 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
                     _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(uint)), indexPtr, BufferUsageARB.StaticDraw);
                 }
 
-                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)0);
+                uint strideBytes = (uint)stride * sizeof(float);
+                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, strideBytes, (void*)0);
                 _gl.EnableVertexAttribArray(0);
-                _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(3 * sizeof(float)));
+                _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, strideBytes, (void*)(3 * sizeof(float)));
                 _gl.EnableVertexAttribArray(1);
-                _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(6 * sizeof(float)));
+                _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, strideBytes, (void*)(6 * sizeof(float)));
                 _gl.EnableVertexAttribArray(2);
-                _gl.VertexAttribPointer(3, 2, VertexAttribPointerType.Float, false, 10u * sizeof(float), (void*)(8 * sizeof(float)));
+                _gl.VertexAttribPointer(3, 2, VertexAttribPointerType.Float, false, strideBytes, (void*)(8 * sizeof(float)));
                 _gl.EnableVertexAttribArray(3);
+                if (_gpuSkinning)
+                {
+                    _gl.VertexAttribPointer(SkinBoneIndexAttribute, 4, VertexAttribPointerType.Float, false, strideBytes, (void*)(10 * sizeof(float)));
+                    _gl.EnableVertexAttribArray(SkinBoneIndexAttribute);
+                    _gl.VertexAttribPointer(SkinBoneWeightAttribute, 4, VertexAttribPointerType.Float, false, strideBytes, (void*)(14 * sizeof(float)));
+                    _gl.EnableVertexAttribArray(SkinBoneWeightAttribute);
+                }
             }
 
+            ConfigureInstanceAttributes(); // bound VAO; left disabled until an instanced draw
             _gl.BindVertexArray(0);
 
             var buffers = new SectionBuffers(section.SectionIndex, section.SkinSectionId, vao, vbo, ebo, section.Vertices.Count, (uint)indices.Length, section.Material)
@@ -582,9 +703,21 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
 
     private void ApplyAnimatedFrame(M2SkinnedRenderModel skinnedRenderModel, M2RenderConsumerFrameState consumerState)
     {
-        Dictionary<int, M2RenderConsumerPassState> firstPassBySection = consumerState.Passes
-            .GroupBy(static pass => pass.AnimatedPass.SectionIndex)
-            .ToDictionary(static group => group.Key, static group => group.First());
+        ApplyAnimatedPassStates(consumerState);
+
+        foreach (M2SkinnedRenderSection section in skinnedRenderModel.Sections)
+            UploadAnimatedVertices(section);
+    }
+
+    // Reused every frame (was a LINQ GroupBy/ToDictionary per frame): the first pass of each section.
+    private readonly Dictionary<int, M2RenderConsumerPassState> _firstPassBySection = new();
+
+    private void ApplyAnimatedPassStates(M2RenderConsumerFrameState consumerState)
+    {
+        Dictionary<int, M2RenderConsumerPassState> firstPassBySection = _firstPassBySection;
+        firstPassBySection.Clear();
+        foreach (M2RenderConsumerPassState pass in consumerState.Passes)
+            firstPassBySection.TryAdd(pass.AnimatedPass.SectionIndex, pass);
 
         for (int index = 0; index < _sections.Count; index++)
         {
@@ -605,16 +738,17 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
                 ResetAnimatedTextureState(section);
             }
         }
-
-        foreach (M2SkinnedRenderSection section in skinnedRenderModel.Sections)
-            UploadAnimatedVertices(section);
     }
 
     private void ApplyAnimatedTextureState(SectionBuffers section, M2RenderConsumerPassState passState)
     {
-        M2RenderConsumerTextureState? textureState = passState.Textures
-            .OrderBy(static texture => texture.StageIndex)
-            .FirstOrDefault();
+        // First texture with the lowest stage (what the stable OrderBy(StageIndex).FirstOrDefault() picked).
+        M2RenderConsumerTextureState? textureState = null;
+        foreach (M2RenderConsumerTextureState texture in passState.Textures)
+        {
+            if (textureState == null || texture.StageIndex < textureState.StageIndex)
+                textureState = texture;
+        }
 
         if (textureState == null)
         {
@@ -695,10 +829,12 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         Vector3 ambientColor,
         bool backdrop)
     {
-        if (_gl == null)
+        if (_gl == null || GlobalOpacity <= 0.001f)
             return;
 
         _gl.UseProgram(_shaderProgram);
+        _gl.Uniform1(_uInstanced, 0);
+        ApplySkinningUniforms();
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&modelMatrix);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
@@ -721,14 +857,33 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             _gl.DepthFunc(DepthFunction.Lequal);
         }
 
-        _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
+        if (_wireframe)
+        {
+            _gl.LineWidth(WireframeOverlaySettings.LineWidth);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _gl.DepthMask(false);
+        }
+        else
+        {
+            _gl.LineWidth(1.0f);
+            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        }
 
         foreach (SectionBuffers section in _sections)
         {
-            if (!section.Visible)
+            if (!section.Visible || section.TexturePending)
                 continue;
 
-            bool transparent = section.Material.IsTransparent;
+            float effectiveAlpha = Math.Clamp(fadeAlpha * section.AnimatedAlpha * GlobalOpacity, 0.0f, 1.0f);
+            bool isEffectLayer = section.Material.BlendMode is WowViewer.Core.M2.M2BlendMode.Add
+                or WowViewer.Core.M2.M2BlendMode.NoAlphaAdd
+                or WowViewer.Core.M2.M2BlendMode.BlendAdd
+                or WowViewer.Core.M2.M2BlendMode.Mod
+                or WowViewer.Core.M2.M2BlendMode.Mod2X;
+
+            bool transparent = section.Material.IsTransparent || effectiveAlpha < 0.999f || isEffectLayer;
             if (pass == RenderPass.Opaque && transparent)
                 continue;
             if (pass == RenderPass.Transparent && !transparent)
@@ -738,45 +893,46 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
             // pure runtime renderer has proven stable winding or projected-pass rules.
             _gl.Disable(EnableCap.CullFace);
 
-            if (transparent)
+            if (_wireframe)
             {
-                _gl.Enable(EnableCap.Blend);
-                ConfigureBlendMode(section.Material.BlendMode);
-                _gl.DepthMask(false);
+                // Wireframe passes draw flat-colored untextured lines with configured color & alpha
+                Vector3 lineColor = _wireframeColorOverride ?? WireframeOverlaySettings.DefaultColor;
+                float wireframeAlpha = (WireframeOverlaySettings.FollowModelOpacity ? GlobalOpacity : 1.0f) * WireframeOverlaySettings.BaseIntensity;
+                ApplySectionUniforms(section, lineColor, wireframeAlpha, isEffectLayer: false);
             }
             else
             {
-                _gl.Disable(EnableCap.Blend);
-                _gl.DepthMask(!backdrop);
+                if (transparent)
+                {
+                    _gl.Enable(EnableCap.Blend);
+                    if (isEffectLayer || section.Material.IsTransparent)
+                        ConfigureBlendMode(section.Material.BlendMode);
+                    else
+                        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    _gl.DepthMask(false);
+                }
+                else
+                {
+                    _gl.Disable(EnableCap.Blend);
+                    _gl.Uniform1(_uAdditive, 0);
+                    _gl.DepthMask(!backdrop);
+                }
+
+                Vector3 baseColor = ComputeSectionColor(section, fadeAlpha);
+                ApplySectionUniforms(section, baseColor, effectiveAlpha, isEffectLayer);
             }
-
-            // Wireframe passes draw flat-colored untextured lines: with the textured fill
-            // shader the lines landed on identically-colored surfaces (invisible) and
-            // alpha-cutout foliage degraded into scattered orange fragments.
-            Vector3 baseColor = _wireframe
-                ? (_wireframeColorOverride ?? WireframeLineColor)
-                : ComputeSectionColor(section, fadeAlpha);
-            _gl.Uniform3(_uBaseColor, baseColor.X, baseColor.Y, baseColor.Z);
-            _gl.Uniform1(_uUnshaded, section.Material.IsUnshaded ? 1 : 0);
-            _gl.Uniform1(_uHasTexture, (!_wireframe && section.HasTexture) ? 1 : 0);
-            _gl.Uniform1(_uUvSet, section.UvSet);
-            _gl.Uniform1(_uGeneratedTexCoord, section.GeneratedTexCoord ? 1 : 0);
-            _gl.Uniform1(_uAlphaCutout, (!_wireframe && section.AlphaCutout) ? 1 : 0);
-            _gl.Uniform1(_uAlpha, Math.Clamp(fadeAlpha * section.AnimatedAlpha, 0.0f, 1.0f));
-            _gl.Uniform1(_uHasUvTransform, section.HasAnimatedUvTransform ? 1 : 0);
-            _gl.Uniform2(_uUvTranslation, section.AnimatedUvTranslation.X, section.AnimatedUvTranslation.Y);
-            _gl.Uniform2(_uUvScale, section.AnimatedUvScale.X, section.AnimatedUvScale.Y);
-            _gl.Uniform2(_uUvRotation, section.AnimatedUvRotation.X, section.AnimatedUvRotation.Y);
-
-            _gl.ActiveTexture(TextureUnit.Texture0);
-            _gl.BindTexture(TextureTarget.Texture2D, (!_wireframe && section.HasTexture) ? section.TextureId : 0u);
-            _gl.Uniform1(_uTexture0, 0);
 
             _gl.BindVertexArray(section.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, section.IndexCount, DrawElementsType.UnsignedInt, null);
             ModelDrawCallCounter.Record();
         }
 
+        if (!_wireframe && (pass == RenderPass.Transparent || pass == RenderPass.Both))
+        {
+            _particleController?.Render(modelMatrix, view, proj, cameraPos, fogColor, fogStart, fogEnd);
+        }
+
+        _gl.LineWidth(1.0f);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.BindVertexArray(0);
         _gl.Disable(EnableCap.Blend);
@@ -786,28 +942,63 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
 
+    // Per-section material uniforms and texture, shared by RenderCore and the instanced draw.
+    private void ApplySectionUniforms(SectionBuffers section, Vector3 baseColor, float alpha, bool isEffectLayer = false)
+    {
+        _gl!.Uniform3(_uBaseColor, baseColor.X, baseColor.Y, baseColor.Z);
+        _gl.Uniform1(_uUnshaded, (_wireframe || section.Material.IsUnshaded || isEffectLayer) ? 1 : 0);
+        _gl.Uniform1(_uHasTexture, (!_wireframe && section.HasTexture) ? 1 : 0);
+        _gl.Uniform1(_uUvSet, section.UvSet);
+        _gl.Uniform1(_uGeneratedTexCoord, section.GeneratedTexCoord ? 1 : 0);
+        _gl.Uniform1(_uAlphaCutout, (!_wireframe && section.AlphaCutout) ? 1 : 0);
+        _gl.Uniform1(_uAlpha, alpha);
+        _gl.Uniform1(_uHasUvTransform, section.HasAnimatedUvTransform ? 1 : 0);
+        _gl.Uniform2(_uUvTranslation, section.AnimatedUvTranslation.X, section.AnimatedUvTranslation.Y);
+        _gl.Uniform2(_uUvScale, section.AnimatedUvScale.X, section.AnimatedUvScale.Y);
+        _gl.Uniform2(_uUvRotation, section.AnimatedUvRotation.X, section.AnimatedUvRotation.Y);
+
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, (!_wireframe && section.HasTexture) ? section.TextureId : 0u);
+        _gl.Uniform1(_uTexture0, 0);
+    }
+
     private void ConfigureBlendMode(WowViewer.Core.M2.M2BlendMode blendMode)
     {
         if (_gl == null)
             return;
 
+        bool isAdditive = false;
         switch (blendMode)
         {
             case WowViewer.Core.M2.M2BlendMode.Add:
-            case WowViewer.Core.M2.M2BlendMode.NoAlphaAdd:
-            case WowViewer.Core.M2.M2BlendMode.BlendAdd:
                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+                isAdditive = true;
+                break;
+
+            case WowViewer.Core.M2.M2BlendMode.NoAlphaAdd:
+                _gl.BlendFunc(BlendingFactor.One, BlendingFactor.One);
+                isAdditive = true;
+                break;
+
+            case WowViewer.Core.M2.M2BlendMode.BlendAdd:
+                _gl.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
+                isAdditive = true;
                 break;
 
             case WowViewer.Core.M2.M2BlendMode.Mod:
-            case WowViewer.Core.M2.M2BlendMode.Mod2X:
                 _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.Zero);
+                break;
+
+            case WowViewer.Core.M2.M2BlendMode.Mod2X:
+                _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.SrcColor);
                 break;
 
             default:
                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 break;
         }
+
+        _gl.Uniform1(_uAdditive, isAdditive ? 1 : 0);
     }
 
     private static Vector3 ComputeSectionColor(SectionBuffers section, float fadeAlpha)
@@ -835,11 +1026,24 @@ layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aTexCoord0;
 layout (location = 3) in vec2 aTexCoord1;
+// Spec 256 P3: per-instance model matrix (four rows as columns, as uModel is uploaded) and fade.
+layout (location = 4) in vec4 aInstanceModel0;
+layout (location = 5) in vec4 aInstanceModel1;
+layout (location = 6) in vec4 aInstanceModel2;
+layout (location = 7) in vec4 aInstanceModel3;
+layout (location = 8) in float aInstanceFade;
+// Spec 256 A: GPU skinning (model bone indices, weights <= 0 mark unused or unresolved influences).
+layout (location = 9) in vec4 aBoneIndices;
+layout (location = 10) in vec4 aBoneWeights;
+uniform int uSkinned;
+uniform mat4 uBones[128];
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
+uniform int uInstanced;
 
+out float vInstanceFade;
 out vec3 vWorldPos;
 out vec3 vNormal;
 out vec3 vViewNormal;
@@ -848,9 +1052,47 @@ out vec2 vTexCoord1;
 
 void main()
 {
-    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    mat4 model = uInstanced == 1
+        ? mat4(aInstanceModel0, aInstanceModel1, aInstanceModel2, aInstanceModel3)
+        : uModel;
+    vInstanceFade = uInstanced == 1 ? aInstanceFade : 1.0;
+
+    // Same weighting as M2SkinnedRenderModelBuilder.ApplyVertex (the CPU path this replaces).
+    vec3 localPos = aPos;
+    vec3 localNormal = aNormal;
+    if (uSkinned == 1)
+    {
+        vec3 skinnedPos = vec3(0.0);
+        vec3 skinnedNormal = vec3(0.0);
+        float totalWeight = 0.0;
+        for (int influence = 0; influence < 4; influence++)
+        {
+            float weight = aBoneWeights[influence];
+            if (weight <= 0.0)
+                continue;
+
+            mat4 bone = uBones[int(aBoneIndices[influence])];
+            skinnedPos += (bone * vec4(aPos, 1.0)).xyz * weight;
+            skinnedNormal += (mat3(bone) * aNormal) * weight;
+            totalWeight += weight;
+        }
+
+        if (totalWeight > 0.0)
+        {
+            if (abs(totalWeight - 1.0) > 0.0001)
+            {
+                skinnedPos /= totalWeight;
+                skinnedNormal /= totalWeight;
+            }
+
+            localPos = skinnedPos;
+            localNormal = skinnedNormal;
+        }
+    }
+
+    vec4 worldPos = model * vec4(localPos, 1.0);
     vWorldPos = worldPos.xyz;
-    vNormal = normalize(mat3(uModel) * aNormal);
+    vNormal = normalize(mat3(model) * localNormal);
     vViewNormal = mat3(uView) * vNormal;
     vTexCoord0 = aTexCoord0;
     vTexCoord1 = aTexCoord1;
@@ -873,6 +1115,7 @@ uniform vec3 uLightColor;
 uniform vec3 uAmbientColor;
 uniform vec3 uBaseColor;
 uniform int uUnshaded;
+uniform int uAdditive;
 uniform int uHasTexture;
 uniform int uUvSet;
 uniform int uGeneratedTexCoord;
@@ -886,6 +1129,7 @@ uniform vec2 uUvRotation;
 
 in vec2 vTexCoord0;
 in vec2 vTexCoord1;
+in float vInstanceFade;
 
 out vec4 FragColor;
 
@@ -916,15 +1160,24 @@ void main()
         discard;
 
     vec3 surfaceNormal = normalize(vNormal);
-    if (!gl_FrontFacing)
-        surfaceNormal = -surfaceNormal;
-    float diffuseStrength = uUnshaded == 1 ? 1.0 : max(dot(surfaceNormal, normalize(uLightDir)), 0.0);
-    vec3 litColor = (uBaseColor * textureSample.rgb) * (uAmbientColor + (uLightColor * diffuseStrength));
+    float diffuseStrength = 1.0;
+    if (uUnshaded != 1)
+    {
+        float nDotL = dot(surfaceNormal, normalize(uLightDir));
+        float diff = nDotL * 0.5 + 0.5;
+        diffuseStrength = diff * diff;
+    }
+    vec3 lightMultiplier = uUnshaded == 1
+        ? vec3(1.0)
+        : (uAmbientColor + (uLightColor * diffuseStrength));
+    vec3 litColor = (uBaseColor * clamp(vInstanceFade, 0.1, 1.0) * textureSample.rgb) * lightMultiplier;
     float distanceToCamera = distance(vWorldPos, uCameraPos);
     float fogRange = max(uFogEnd - uFogStart, 0.001);
     float fogFactor = clamp((uFogEnd - distanceToCamera) / fogRange, 0.0, 1.0);
-    vec3 finalColor = mix(uFogColor, litColor, fogFactor);
-    FragColor = vec4(finalColor, textureSample.a * uAlpha);
+    vec3 finalColor = uAdditive == 1
+        ? (litColor * fogFactor)
+        : mix(uFogColor, litColor, fogFactor);
+    FragColor = vec4(finalColor, textureSample.a * clamp(uAlpha * vInstanceFade, 0.0, 1.0));
 }
 """;
 
@@ -954,6 +1207,7 @@ void main()
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
         _uBaseColor = _gl.GetUniformLocation(_shaderProgram, "uBaseColor");
         _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
+        _uAdditive = _gl.GetUniformLocation(_shaderProgram, "uAdditive");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uUvSet = _gl.GetUniformLocation(_shaderProgram, "uUvSet");
         _uGeneratedTexCoord = _gl.GetUniformLocation(_shaderProgram, "uGeneratedTexCoord");
@@ -964,6 +1218,9 @@ void main()
         _uUvTranslation = _gl.GetUniformLocation(_shaderProgram, "uUvTranslation");
         _uUvScale = _gl.GetUniformLocation(_shaderProgram, "uUvScale");
         _uUvRotation = _gl.GetUniformLocation(_shaderProgram, "uUvRotation");
+        _uInstanced = _gl.GetUniformLocation(_shaderProgram, "uInstanced");
+        _uSkinned = _gl.GetUniformLocation(_shaderProgram, "uSkinned");
+        _uBones = _gl.GetUniformLocation(_shaderProgram, "uBones");
         _shaderInitialized = true;
     }
 
@@ -1003,6 +1260,12 @@ void main()
     {
         if (_gl == null)
             return;
+
+        if (_deferTextureLoads)
+        {
+            StreamSectionTextures();
+            return;
+        }
 
         foreach (SectionBuffers section in _sections)
         {
@@ -1069,8 +1332,10 @@ void main()
         if (_gl == null)
             return;
 
+        // Spec 256 P2a: textures are shared across native M2s; the last release deletes them.
+        _textureGeneration++; // results still streaming for the old textures are dropped
         foreach (uint textureId in _ownedTextureIds)
-            _gl.DeleteTexture(textureId);
+            M2TextureCache.Release(_gl, _dataSource, textureId);
 
         _ownedTextureIds.Clear();
         _loadedTextureCache.Clear();
@@ -1102,8 +1367,15 @@ void main()
                 continue;
 
             // In WoW M2 files, textures repeat by default. Flags 0x1 and 0x2 request clamp-to-edge on S and T.
-            bool clampS = (candidate.TextureFlags & 0x1u) != 0;
-            bool clampT = (candidate.TextureFlags & 0x2u) != 0;
+            // M2Texture.flags (offset 0x04): bit 0x1 = "texture wrap X", 0x2 = "texture wrap Y".
+            // The bit SET means REPEAT, so clamping is the absence of the bit. 64ce5aaa inverted this to
+            // `!= 0` while chasing smeared UVs on ballista/wood models; that made every texture which
+            // declares wrap clamp instead, which is what breaks cylinders - tree trunks and lighthouse
+            // tubes smear at the seam because their UVs run past 1.0 all the way round. The UV garbage
+            // that inversion was really chasing came from the M2Era100 vertex-layout offsets, fixed
+            // separately in the same series.
+            bool clampS = (candidate.TextureFlags & 0x1u) == 0;
+            bool clampT = (candidate.TextureFlags & 0x2u) == 0;
             if (TryGetOrLoadTexture(resolvedPath, clampS, clampT, out textureId))
             {
                 uvSet = candidate.UvSet;
@@ -1112,20 +1384,10 @@ void main()
             }
         }
 
-        // Safety fallback: if no candidate texture was loaded (e.g. directory/name mismatch, or missing
-        // replaceableId metadata on untextured mesh passes), attempt resolving creature skin slots (11, then 1).
-        uint[] fallbackSlots = { 11, 1 };
-        foreach (uint slot in fallbackSlots)
-        {
-            string? fallbackPath = ResolveReplaceableTexture(slot);
-            if (!string.IsNullOrWhiteSpace(fallbackPath) && TryGetOrLoadTexture(fallbackPath, false, false, out textureId))
-            {
-                ViewerLog.Info(ViewerLog.Category.Mdx, $"[M2] Applied fallback texture {Path.GetFileName(fallbackPath)} (slot #{slot}) for section in {Path.GetFileName(SourceModelPath)}");
-                return true;
-            }
-        }
-
-        return false;
+        // Nothing loaded: bind the missing-texture placeholder (Spec 256 amendment 2026-09-27) rather than
+        // searching other replaceable slots for a substitute.
+        textureId = AcquireMissingTexture();
+        return textureId != 0;
     }
 
     private static IEnumerable<(string? TexturePath, uint ReplaceableId, uint TextureFlags, int UvSet, bool GeneratedTexCoord)> EnumerateTextureCandidates(M2StaticRenderMaterial material)
@@ -1156,239 +1418,70 @@ void main()
         return textureCoordLookupValue == ushort.MaxValue;
     }
 
-    private static readonly Dictionary<uint, string> DefaultReplaceableTextures = new()
-    {
-        { 1,  @"Textures\ReplaceableTextures\CreatureSkin\CreatureSkin01.blp" },
-        { 2,  @"Textures\ReplaceableTextures\ObjectSkin\ObjectSkin01.blp" },
-        { 3,  @"Textures\ReplaceableTextures\WeaponBlade\WeaponBlade01.blp" },
-        { 4,  @"Textures\ReplaceableTextures\WeaponHandle\WeaponHandle01.blp" },
-        { 5,  @"Textures\ReplaceableTextures\Environment\Environment01.blp" },
-        { 6,  @"Textures\ReplaceableTextures\CharHair\CharHair00_00.blp" },
-        { 7,  @"Textures\ReplaceableTextures\CharFacialHair\CharFacialHair00_00.blp" },
-        { 8,  @"Textures\ReplaceableTextures\SkinExtra\SkinExtra01.blp" },
-        { 9,  @"Textures\ReplaceableTextures\UISkin\UISkin01.blp" },
-        { 10, @"Textures\ReplaceableTextures\TaurenMane\TaurenMane00_00.blp" },
-        { 11, @"Textures\ReplaceableTextures\Monster\Monster01_01.blp" },
-        { 12, @"Textures\ReplaceableTextures\Monster\Monster01_02.blp" },
-        { 13, @"Textures\ReplaceableTextures\Monster\Monster01_03.blp" },
-    };
-
-    private static readonly string[] CreatureVariantSuffixes = new[]
-    {
-        "Armored", "Armor", "Caster", "Overlord", "Rider", "Boss", "Ghost",
-        "Dire", "Giant", "Elder", "Young", "Pet", "Spawn", "Small", "Large",
-        "Warrior", "Mage", "Shaman", "Warlock", "Hunter", "Priest", "Rogue",
-        "Variant", "Red", "Blue", "Green", "Black", "Bronze", "White", "Dark"
-    };
-
-    private static string StripVariantSuffix(string name)
-    {
-        foreach (string suffix in CreatureVariantSuffixes)
-        {
-            if (name.Length > suffix.Length && name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-            {
-                return name[..^suffix.Length];
-            }
-        }
-        return name;
-    }
-
-    private string? FindExistingTexturePath(string candidatePath)
-    {
-        if (string.IsNullOrWhiteSpace(candidatePath))
-            return null;
-
-        if (_dataSource is MpqDataSource mpqDataSource)
-        {
-            string? actual = mpqDataSource.FindInFileSet(candidatePath)
-                ?? mpqDataSource.FindInFileSet(candidatePath.Replace('\\', '/'));
-            if (!string.IsNullOrWhiteSpace(actual))
-                return actual.Replace('/', '\\');
-        }
-
-        if (_dataSource != null)
-        {
-            byte[]? data = _dataSource.ReadFile(candidatePath)
-                ?? _dataSource.ReadFile(candidatePath.Replace('\\', '/'));
-            if (data != null && data.Length > 0)
-                return candidatePath.Replace('/', '\\');
-        }
-
-        if (File.Exists(candidatePath))
-            return Path.GetFullPath(candidatePath);
-
-        return null;
-    }
-
+    // Spec 256 amendment 2026-09-27 (operator): a replaceable slot resolves from the client database records
+    // only. No record → null, and the section binds the missing-texture placeholder like the client does,
+    // instead of probing naming conventions and scanning every .blp in the data source for a look-alike.
     private string? ResolveReplaceableTexture(uint replaceableId)
     {
-        // Strategy 1: DBC-based resolver
-        if (_texResolver != null)
-        {
-            string? resolved = _texResolver.Resolve(
-                SourceModelPath,
-                replaceableId,
-                _selectedReplaceableDisplayIndex ?? 0,
-                _characterHairVariationId,
-                _characterFacialHairVariationId);
-            if (!string.IsNullOrWhiteSpace(resolved))
-                return resolved;
-        }
+        string? resolved = _texResolver?.Resolve(
+            SourceModelPath,
+            replaceableId,
+            _selectedReplaceableDisplayIndex ?? 0,
+            _characterHairVariationId,
+            _characterFacialHairVariationId);
+        if (!string.IsNullOrWhiteSpace(resolved))
+            return resolved;
 
-        // Strategy 2: Search model's directory for BLPs matching naming conventions
-        if (!string.IsNullOrEmpty(_modelDir))
-        {
-            string modelBase = Path.GetFileNameWithoutExtension(SourceModelPath);
-            string folderBase = Path.GetFileName(_modelDir);
-            string strippedBase = StripVariantSuffix(modelBase);
-
-            List<string> candidateBases = new() { modelBase };
-            if (!string.IsNullOrEmpty(folderBase) && !candidateBases.Contains(folderBase, StringComparer.OrdinalIgnoreCase))
-                candidateBases.Add(folderBase);
-            if (!string.IsNullOrEmpty(strippedBase) && !candidateBases.Contains(strippedBase, StringComparer.OrdinalIgnoreCase))
-                candidateBases.Add(strippedBase);
-
-            string[] suffixes = replaceableId switch
-            {
-                1 or 11 or 12 or 13 => new[] { "Skin", "_Skin", "Body", "_Body", "Bark", "_Bark", "Trunk", "_Trunk", "" },
-                2 => new[] { "Leaf", "_Leaf", "Leaves", "_Leaves", "Detail", "_Detail", "Foliage", "_Foliage", "NakedPelvisSkin00_00", "NakedPelvisSkin", "Pelvis", "Underwear", "" },
-                8 => new[] { "NakedPelvisSkin00_00", "NakedPelvisSkin", "NakedTorsoSkin00_00", "PelvisSkin00_00", "Pelvis", "Underwear", "SkinExtra", "_Extra", "" },
-                6 => new[] { "Hair", "_Hair", "" },
-                7 => new[] { "FacialHair", "_FacialHair", "Facial", "" },
-                10 => new[] { "Mane", "_Mane", "Hair", "" },
-                _ => new[] { "" }
-            };
-
-            foreach (string basePrefix in candidateBases)
-            {
-                foreach (string suffix in suffixes)
-                {
-                    string baseName = string.IsNullOrEmpty(suffix) ? basePrefix : (suffix.StartsWith('_') ? basePrefix + suffix : basePrefix + suffix);
-                    string candidate = Path.Combine(_modelDir, baseName + ".blp");
-                    string? found = FindExistingTexturePath(candidate);
-                    if (found != null)
-                    {
-                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (naming convention)");
-                        return found;
-                    }
-
-                    for (int n = 0; n <= 3; n++)
-                    {
-                        candidate = Path.Combine(_modelDir, $"{baseName}{n:D2}.blp");
-                        found = FindExistingTexturePath(candidate);
-                        if (found != null)
-                        {
-                            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (naming+num)");
-                            return found;
-                        }
-                    }
-                }
-            }
-
-            // Strategy 3: Scan all BLPs in model directory for fuzzy match
-            if (_dataSource != null)
-            {
-                var files = _dataSource.GetFileList(".blp");
-                string modelDirLower = _modelDir.ToLowerInvariant();
-                string modelBaseLower = modelBase.ToLowerInvariant();
-                string folderBaseLower = folderBase.ToLowerInvariant();
-                string strippedBaseLower = strippedBase.ToLowerInvariant();
-
-                var dirCandidates = files
-                    .Where(f =>
-                    {
-                        string fLower = f.ToLowerInvariant();
-                        string fDir = Path.GetDirectoryName(fLower)?.Replace('/', '\\') ?? "";
-                        return fDir == modelDirLower;
-                    })
-                    .OrderBy(f => f.Length)
-                    .ToList();
-
-                if (dirCandidates.Count > 0)
-                {
-                    var scoredCandidates = dirCandidates
-                        .Select(c =>
-                        {
-                            string fname = Path.GetFileNameWithoutExtension(c).ToLowerInvariant();
-                            int score = 0;
-
-                            if (replaceableId == 1 || replaceableId >= 11)
-                            {
-                                if (fname.Contains("skin")) score += 100;
-                                if (fname.Contains("body") || fname.Contains("bark") || fname.Contains("trunk")) score += 80;
-                                if (fname.StartsWith(modelBaseLower)) score += 60;
-                                else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 40;
-                                if (fname.Contains("detail") || fname.Contains("extra") || fname.Contains("hair") || fname.Contains("facial")) score -= 60;
-                            }
-                            else if (replaceableId == 2 || replaceableId == 8)
-                            {
-                                if (fname.Contains("pelvis") || fname.Contains("naked") || fname.Contains("underwear")) score += 100;
-                                if (fname.Contains("extra") || fname.Contains("detail") || fname.Contains("leaf") || fname.Contains("leaves")) score += 80;
-                                if (fname.StartsWith(modelBaseLower)) score += 50;
-                                else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 30;
-                            }
-                            else if (replaceableId == 6 || replaceableId == 10)
-                            {
-                                if (fname.Contains("hair") || fname.Contains("mane")) score += 100;
-                                if (fname.StartsWith(modelBaseLower)) score += 50;
-                            }
-                            else if (replaceableId == 7)
-                            {
-                                if (fname.Contains("facial") || fname.Contains("beard")) score += 100;
-                                if (fname.StartsWith(modelBaseLower)) score += 50;
-                            }
-                            else
-                            {
-                                if (fname.StartsWith(modelBaseLower)) score += 50;
-                                else if (fname.StartsWith(folderBaseLower)) score += 30;
-                            }
-
-                            return new { Path = c, Score = score };
-                        })
-                        .OrderByDescending(c => c.Score)
-                        .ThenBy(c => c.Path.Length)
-                        .ToList();
-
-                    foreach (var candidate in scoredCandidates)
-                    {
-                        if (candidate.Score <= 0 && scoredCandidates[0].Score > 0)
-                            break;
-
-                        string? found = FindExistingTexturePath(candidate.Path);
-                        if (found != null)
-                        {
-                            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (dir scan, score {candidate.Score})");
-                            return found;
-                        }
-                    }
-
-                    // Fallback to first existing BLP in directory if no positive match
-                    foreach (var c in dirCandidates)
-                    {
-                        string? found = FindExistingTexturePath(c);
-                        if (found != null)
-                        {
-                            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (dir first fallback)");
-                            return found;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Strategy 4: Hardcoded default replaceable texture paths
-        if (DefaultReplaceableTextures.TryGetValue(replaceableId, out string? defaultPath))
-        {
-            string? found = FindExistingTexturePath(defaultPath);
-            if (found != null)
-            {
-                ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} -> {Path.GetFileName(found)} (hardcoded default)");
-                return found;
-            }
-        }
-
-        ViewerLog.Info(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} UNRESOLVED for {Path.GetFileName(SourceModelPath)}");
+        ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Replaceable #{replaceableId} has no database texture for {Path.GetFileName(SourceModelPath)}");
         return null;
+    }
+
+    private uint ResolveParticleTexture(ushort textureIndex)
+    {
+        if (_gl == null || _disposed)
+            return 0u;
+
+        string? path = null;
+        uint replaceableId = 0;
+        uint flags = 0;
+
+        int actualIndex = textureIndex;
+        if (_runtimeModel?.TextureLookup != null && textureIndex < _runtimeModel.TextureLookup.Count)
+            actualIndex = _runtimeModel.TextureLookup[textureIndex];
+
+        if (_runtimeModel?.Textures != null && actualIndex >= 0 && actualIndex < _runtimeModel.Textures.Count)
+        {
+            M2GeometryTexture geomTex = _runtimeModel.Textures[actualIndex];
+            path = geomTex.Filename;
+            replaceableId = geomTex.ReplaceableId;
+            flags = geomTex.Flags;
+        }
+
+        if (replaceableId != 0)
+        {
+            string? resolved = ResolveReplaceableTexture(replaceableId);
+            if (!string.IsNullOrWhiteSpace(resolved))
+                path = resolved;
+        }
+
+        if (string.IsNullOrWhiteSpace(path) && _sections.Count > 0)
+        {
+            foreach (SectionBuffers sec in _sections)
+            {
+                if (sec.HasTexture && sec.TextureId != 0)
+                    return sec.TextureId;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            bool clampS = (flags & 0x1u) == 0;
+            bool clampT = (flags & 0x2u) == 0;
+            if (TryGetOrLoadTexture(path, clampS, clampT, out uint texId))
+                return texId;
+        }
+
+        return 0u;
     }
 
     private bool TryGetOrLoadTexture(string texturePath, bool clampS, bool clampT, out uint textureId)
@@ -1398,28 +1491,58 @@ void main()
         if (_loadedTextureCache.TryGetValue(cacheKey, out textureId))
             return textureId != 0;
 
-        if (TryLoadTexture(texturePath, clampS, clampT, out textureId, out string resolvedPath))
+        // Spec 256 P2a: another native M2 on this data source may already hold this exact texture.
+        string requestKey = BuildSharedRequestKey(cacheKey);
+        if (M2TextureCache.TryAcquire(_dataSource, requestKey, out textureId))
+        {
+            _loadedTextureCache[cacheKey] = textureId;
+            KeepOneReference(textureId);
+            return true;
+        }
+
+        if (TryLoadTexture(texturePath, clampS, clampT, requestKey, out textureId, out string resolvedPath))
         {
             _loadedTextureCache[cacheKey] = textureId;
             _loadedTextureCache[BuildTextureCacheKey(resolvedPath, clampS, clampT)] = textureId;
-            _ownedTextureIds.Add(textureId);
+            KeepOneReference(textureId);
             return true;
         }
 
         return false;
     }
 
-    private bool TryLoadTexture(string texturePath, bool clampS, bool clampT, out uint textureId, out string resolvedPath)
+    // Resolution of a requested texture path depends on the path, the clamp flags and this model's
+    // directory (EnumerateTexturePathCandidates); the shared cache is already per data source.
+    private string BuildSharedRequestKey(string cacheKey) => $"req|{_modelDir}|{cacheKey}";
+
+    private static string BuildSharedResolvedKey(string resolvedPath, bool clampS, bool clampT)
+        => "res|" + BuildTextureCacheKey(resolvedPath, clampS, clampT);
+
+    // A renderer holds one shared reference per texture; drop any extra acquired through an alias.
+    private void KeepOneReference(uint textureId)
+    {
+        if (!_ownedTextureIds.Add(textureId))
+            M2TextureCache.Release(_gl!, _dataSource, textureId);
+    }
+
+    private bool TryLoadTexture(string texturePath, bool clampS, bool clampT, string requestKey, out uint textureId, out string resolvedPath)
     {
         textureId = 0;
         resolvedPath = texturePath.Replace('/', '\\');
 
         if (TryResolveImagePath(texturePath, ".png", out string pngPath))
         {
+            if (TryAcquireResolved(pngPath, clampS, clampT, requestKey, out textureId))
+            {
+                resolvedPath = pngPath;
+                return true;
+            }
+
             textureId = LoadTextureFromImage(pngPath, clampS, clampT);
             if (textureId != 0)
             {
                 resolvedPath = pngPath;
+                M2TextureCache.Add(_dataSource, textureId, requestKey, BuildSharedResolvedKey(pngPath, clampS, clampT));
                 return true;
             }
         }
@@ -1427,8 +1550,25 @@ void main()
         if (!TryReadTextureBytes(texturePath, out byte[]? blpData, out resolvedPath) || blpData == null || blpData.Length == 0)
             return false;
 
+        if (TryAcquireResolved(resolvedPath, clampS, clampT, requestKey, out textureId))
+            return true;
+
         textureId = LoadTextureFromBlp(blpData, resolvedPath, clampS, clampT);
+        if (textureId != 0)
+            M2TextureCache.Add(_dataSource, textureId, requestKey, BuildSharedResolvedKey(resolvedPath, clampS, clampT));
+
         return textureId != 0;
+    }
+
+    // Another request already decoded and uploaded this file with the same clamp flags: share it and
+    // remember this request as an alias, so the next identical request needs no read.
+    private bool TryAcquireResolved(string resolvedPath, bool clampS, bool clampT, string requestKey, out uint textureId)
+    {
+        if (!M2TextureCache.TryAcquire(_dataSource, BuildSharedResolvedKey(resolvedPath, clampS, clampT), out textureId))
+            return false;
+
+        M2TextureCache.AddAlias(_dataSource, requestKey, textureId);
+        return true;
     }
 
     private bool TryReadTextureBytes(string texturePath, out byte[]? bytes, out string resolvedPath)
@@ -1436,7 +1576,10 @@ void main()
         bytes = null;
         resolvedPath = texturePath.Replace('/', '\\');
 
-        IEnumerable<string> candidates = EnumerateTexturePathCandidates(texturePath);
+        // Spec 256 amendment 2026-09-27: the exact path only. A path with a directory that is not in the data
+        // source is missing — it is not retried inside the model's directory. A bare file name has no
+        // directory of its own, so it still resolves next to the model.
+        IEnumerable<string> candidates = EnumerateTexturePathCandidates(texturePath, modelDirectoryVariants: IsBareFileName(texturePath));
         foreach (string candidate in candidates)
         {
             if (_dataSource is MpqDataSource mpqDataSource)
@@ -1476,13 +1619,16 @@ void main()
         return false;
     }
 
-    private IEnumerable<string> EnumerateTexturePathCandidates(string texturePath)
+    private static bool IsBareFileName(string texturePath)
+        => texturePath.Replace('/', '\\').TrimStart('\\').IndexOf('\\') < 0;
+
+    private IEnumerable<string> EnumerateTexturePathCandidates(string texturePath, bool modelDirectoryVariants = true)
     {
         string normalized = texturePath.Replace('/', '\\').TrimStart('\\');
         yield return normalized;
 
         string fileName = Path.GetFileName(normalized);
-        if (!string.IsNullOrWhiteSpace(_modelDir) && !string.IsNullOrWhiteSpace(fileName))
+        if (modelDirectoryVariants && !string.IsNullOrWhiteSpace(_modelDir) && !string.IsNullOrWhiteSpace(fileName))
         {
             yield return Path.Combine(_modelDir, fileName);
             yield return Path.Combine(_modelDir, normalized);
@@ -1507,6 +1653,11 @@ void main()
 
     private unsafe uint LoadTextureFromBlp(byte[] blpData, string name, bool clampS, bool clampT)
     {
+        // Spec 256 P2c: DXT BLPs go to the GPU compressed with their own mip levels (operator-approved
+        // visual change for distant mips); anything else decodes as before.
+        if (BlpCompressedTexture.TryCreate(blpData, name) is { } compressed)
+            return UploadCompressedTexture(compressed, clampS, clampT);
+
         try
         {
             using MemoryStream memoryStream = new(blpData, writable: false);
@@ -1566,6 +1717,33 @@ void main()
         return textureId;
     }
 
+    private unsafe uint UploadCompressedTexture(BlpCompressedTexture compressed, bool clampS, bool clampT)
+    {
+        if (_gl == null)
+            return 0;
+
+        uint textureId = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, textureId);
+        fixed (byte* dataPtr = compressed.Data)
+        {
+            for (int level = 0; level < compressed.Levels.Count; level++)
+            {
+                (int width, int height, int offset, int length) = compressed.Levels[level];
+                _gl.CompressedTexImage2D(TextureTarget.Texture2D, level, compressed.Format,
+                    (uint)width, (uint)height, 0, (uint)length, dataPtr + offset);
+            }
+        }
+
+        // Only the levels present in the file: capping the max level keeps a short chain complete.
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureBaseLevel, 0);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLevel, compressed.Levels.Count - 1);
+        TextureWrapMode wrapS = clampS ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
+        TextureWrapMode wrapT = clampT ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
+        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: compressed.Levels.Count > 1, wrapS, wrapT);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        return textureId;
+    }
+
     private static string BuildTextureCacheKey(string texturePath, bool clampS, bool clampT)
     {
         string normalizedPath = texturePath.Replace('/', '\\').ToLowerInvariant();
@@ -1605,6 +1783,9 @@ void main()
         public uint TextureId { get; set; }
 
         public bool HasTexture { get; set; }
+
+        /// <summary>Spec 256 P2b: texture still streaming; the section is not drawn until it resolves.</summary>
+        public bool TexturePending { get; set; }
 
         public int UvSet { get; set; }
 

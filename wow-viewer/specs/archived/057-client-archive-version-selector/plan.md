@@ -1,6 +1,6 @@
 # Implementation Plan: Client Archive Version Selector
 
-**Branch**: `057-client-archive-version-selector` | **Date**: 2026-06-11 | **Spec**: [spec.md](./spec.md)
+**Branch**: `057-client-archive-version-selector` | **Date**: 2026-06-11 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/057-client-archive-version-selector/spec.md`
 

@@ -1,6 +1,6 @@
 # Implementation Plan: Weak Signal Amplifier — Cross-Signal Terrain Data Restoration
 
-**Branch**: `061-weak-signal-terrain-restoration` | **Date**: 2026-06-13 | **Spec**: [spec.md](./spec.md)
+**Branch**: `061-weak-signal-terrain-restoration` | **Date**: 2026-06-13 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/061-weak-signal-terrain-restoration/spec.md`
 

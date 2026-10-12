@@ -1,139 +1,103 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-09-10 (compacted during a Spec 224 `speckit-cleanup` pass)
+Last updated: 2026-10-11 · **v0.6.0 released from `main`** (tag `v0.6.0`); active branch `v0.6.1-dev`
+
+**Next on `v0.6.1-dev` (fresh chat start here):**
+1. Spec 271 Phase B — integrated Help + image guide (operator captures screenshots; agent prepares shot list and `HelpGuideService`).
+2. Spec 270 open gap — objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing from restored tiles (operator report 2026-10-11).
+3. Separate spec needed: `LkAdtReader` adds 8 bytes to MCAL/MCSH offsets (restore tool repairs locally in `RepairAlphaAndShadow`).
+4. Operator smoke owed on regenerated `output/restored_development` (alpha masks, no orange tint, 63_5 huts flush).
 
 ## Fresh-chat route
 
-1. [Spec status](../specs/STATUS.md) — select exactly one active owner.
+1. [Spec status](../specs/STATUS.md) — 7 active epics (248–254), all **triage pending**.
 2. This compact handoff.
-3. That owner's `spec.md`, `plan.md`, and `tasks.md`, and linked receipt only.
+3. [TRIAGE.md](../specs/TRIAGE.md) — the operator's Want / Drop / Later decisions.
+4. Only then one epic's `spec.md` → `plan.md` → `tasks.md`, and only the archived design documents
+   its `plan.md` adopts for the selected item.
 
-The [documentation router](../docs/README.md), [spec routing registry](../specs/registry.md),
-[progress ledger](progress.md) (dated session history), and [archives](archive/README.md) are
-on-demand context, never default reading. Landed-work narrative lives in `progress.md`, not here —
-this file states only the current lane and what's still open.
+[Progress ledger](progress.md), [memory archive](archive/README.md) and `specs/archived/` are
+on-demand history, never default reading.
 
-## Spec 224 governance audit — COMPLETE (2026-09-11)
+## Current lanes — operator P1s (both marked Want 2026-09-23)
 
-224-T201's receipt/symbol audit now covers all 5 active specs carrying checked tasks. 227 clean
-(2026-09-10); 232 had 8 of 12 checks corrected to `[ ]` (2026-09-10); **233 clean** (3/3 receipts,
-14 checks); **231 clean** (0 un-checked — T001 resolved to PASS via `inventory-v3-baseline.md`;
-T074 kept checked but flagged "receipt not in evidence/"); **223 had 16 receipt-less pre-§9.2 checks
-un-checked** (T101–T107, Gate A, T201, T202, T301–T302, Gate B, T401, T501–T502) and is listed for
-operator decision. Reports:
-[cleanup-2026-09-11.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-11.md) (this pass)
-and [cleanup-2026-09-10.md](../specs/224-speckit-governance/evidence/cleanup-2026-09-10.md).
-224-T201 closes on operator acknowledgment; 224-T202 (archival) and Gate 2 remain open.
+| Lane | Code | Owed (operator) | Next agent step |
+|---|---|---|---|
+| **R-10** modern-data lighting perf (Epic 249) | T002, T005, T006 landed 2026-09-23; **T004's per-placement WMO gate reverted 2026-09-27** (operator saw <1 FPS; T009) | check FPS after the revert on `wow_classic_beta` 1.60.1 `Azeroth` (0 WMO placements batched while lights exist); T003/T007 captures | redesign WMO instancing only after a before/after capture |
+| **R-39** CASC minimap streaming cost (Epic 249) | code landed and **reverted** 2026-09-27 (operator: performance worse); code = `c2e9517` | say whether to add per-tile read/decode/upload timing + GC counts, then capture on a CASC client | no minimap change before measurement |
+| **Spec 256** modern-data streaming & M2 submission | P0 `77f6f02`, minimap `b15e553`, P1 `4f1e6b4`; capture showed ≈ 57 ms/M2 in texture work → P2a shared textures `c9cf7b6`, P2b off-thread decode `6a326d3`, P2c compressed DXT + authored mips `bad4884`; P2b fallback fix `328866d`; missing textures → error texture, no search `983c8ac`; D WMO doodad loads + shared cache `b09654b`; P3 native M2 instancing `2c609f3`; Perf panel out of PM4 service `93d7461`; A animation: cached key frames + GPU skinning `e437673`; T060/T092 file splits landed (`WorldAssetManager.cs` 1,576 lines, `WmoRenderer.cs` 1,937 lines) | T102 capture (MdxAnimation, entering animated areas) + T042 visual A/B (Utilities > Perf > Frame history > Submission efficiency) | operator captures (T015, T022, T042, T081, T102) |
+| **Spec 257** unified video recording & automation | **Complete 2026-10-02**: fixed taxi node stop-crash (null deref), unified `RecordingCoordinatorService` in `Recording/`, CLI video recording automation (`--record-taxi-route`, `--record-camera-path`, `--record-feature-tour`), camera path & feature tour integration | Operator smoke test of manual and automated recording | None (code & spec complete; receipt in `evidence/receipt-spec257.md`) |
+| **Spec 258** taxi playlists & marketing showreel tour | **Complete 2026-10-02**: multi-route taxi playlists, continuous multi-segment recording, dynamic showreel telemetry HUD, large centered cinematic zone transition banners, landmark callouts; strict tour-mode viewport gating | Operator smoke test of playlist playback and showreel overlays | None (code & spec complete; receipt in `evidence/receipt-spec258.md`) |
+| **Spec 259** ground effects & WMO detail doodads | **Complete 2026-10-02**: dynamic grass/foliage on terrain and WMO surfaces (`MDDL`), client slope ($Z \ge 0.4$) & MCCV rules from recent wowdev.wiki disclosures, 1.60 CASC support, and instanced GPU rendering; UI controls in RenderQuality; receipt in `evidence/receipt-spec259.md` | Operator visual smoke on terrain maps and WMO surfaces | None (code & spec complete) |
+| **Spec 260** engine diagnostics & hitch telemetry HUD | **Complete 2026-10-02**: real-time engine pipeline metrics (M2 instancing %, flora count, WMO batches, ADT chunks, RAM & draw calls), rolling hitch detection with dominant stage attribution, flashing crimson/amber alert badge, multi-stage expanded timing panel, UI toggles, and CLI flags; receipt in `evidence/receipt-spec260.md` | Operator smoke test during recording and live viewport preview | None (code & spec complete) |
+| **Spec 261** WoW Forever terrain hole fidelity | **Complete 2026-10-04**: verified ADT v18 format conformance, 64-bit high-res hole decoding at MCNK offset 0x14 with Little-Endian mapping (`cellY * 8 + cellX`), 100% seam boundary continuity, real CASC test cases for WoW Forever 1.60.1 / 11.2.7 (Deathknell church crypt and graves); receipt in `evidence/receipt-spec261.md` | Operator visual smoke on WoW Forever (1.60.1) Deathknell/caves/crypts | None (code & spec complete) |
+| **Spec 262** minimap residual model & 3D fractal brush reconstruction | **Complete 2026-10-07**: Photometric Blinn-Phong specular solver, Rosetta catalog vision indexer, ComfyUI SAM 3.1 sieve & inpainting, closed-loop shadow difference $\Delta S$, discrete 3D fractal brush discovery & matching pursuit, and $\ge 75\%$ terrain reconstruction benchmark; operator smoke verified live on RTX 4070 Ti SUPER (`cuda:0`, 12.6 GB VRAM free, 2,201 segmented pixels, 97.37% geometric fidelity); receipt in `evidence/receipt-spec262.md` | Operator smoke test passed | None (code & spec complete; 28/28 Python + 218/218 C# tests green) |
+| **Spec 263** 1.60 MCCV terrain shadow validation & synthesis | **Complete 2026-10-07**: empirical cross-validation between 1.12 bare minimap residual shadows and 1.60 MCCV vertex data (145 vertices BGRA: 580 bytes), geographic sampling stratification (Westfall/Elwynn/STV as Tier 1 baselines vs composite cities/Wetlands/Badlands as Tier 2 excluded), bidirectional ADT synthesis & injection bridge (`MccvTerrainShadowService.cs`, `mccv_shadow_comparator.py`, `v60_compare_mccv_residuals.py`); road-safe sieve preserving 2D alpha texture splats, labeled 4-panel diagnostic sheets with headers/legends, and 3D Wavefront OBJ + binary glTF 2.0 (`.glb`) mesh exports for side-by-side surface comparison in Windows 3D Viewer/Blender; verified NCC 0.9252 (Westfall) / 0.8778 (STV) and 100% / 87.5% ridge coincidence; receipt in `evidence/receipt-spec263.md` | Operator smoke verified | None (code & spec complete; all 6 C# + 11 Python tests green) |
+| **Spec 264** authentic development shadow-to-height & Rosetta object placement | **In Progress (Active Dead End on Poisson SFS)**: Shape-from-shading / Poisson integration hits a mathematical dead end: land-only Pearson $r = 0.3345$, land MAE $= 31.74$ yds, max error $= 179.30$ yds (prior $0.94$ metric was skewed by flat $Z=0$ water plane). Pure shading integration cannot resolve macro-elevation or texture-albedo confusion. Next step: train an end-to-end multi-scale elevation network directly mapping authentic minimap RGB $\to$ absolute Z yards on the 198 development tiles without relying on test-time ground truth. | Operator review | Build deep elevation network on 198 authentic development tiles |
+| **Spec 265** two-stage residual elevation refinement & scale calibration | **Active 2026-10-08**: Cascaded Stage 2 residual refiner predicting $\Delta Z = Z_{\text{gt}} - Z_{\text{initial}}$ to uncompress squashed mountain spans (39 yds $\to >200$ yds on `development_16_33`) and correct systematic texture/altitude offsets. Spec Kit authored (`specs/265-residual-elevation-refinement-and-scale-calibration/`); Phase 1 residual dataset extraction underway. | Operator review | Implement Phase 1 residual dataset caching |
+| **Spec 266** WDL trestle elevation reconstruction & lineage synthesis | **Complete 2026-10-08**: Modern lean successor to Feb 2026 v7 WDL trestle model (4.7M params vs 100M+); synthesizes missing development WDL lattices from Northrend 3.0.1.8303 prototype matches (2,035 tiles transferred); restores authentic $>250$ yd mountain relief (measured 424.8 yds on `development_16_33`); 100% upward CCW mesh normals (+Z OBJ, +Y GLB); validation MAE 2.87 yds, $r=0.9943$. Fixed oversized sieve: replaced AABB bounding boxes with tight oriented OBB footprinting ($31\times$ reduction on doodads, 0 painted text masked, PM4 collision extraction disabled). Batch generated all 2,252 development LK ADTs with full multi-band SfS Poisson meso-relief, 220° solar normals, and ridge crest spines in 134.7s (16.7 tiles/sec) in `output/development_reconstructed_lk/` with updated `development.wdt`. Receipts in `specs/266-wdl-trestle-elevation-reconstruction/tasks.md`. | Operator smoke test | None (code & spec complete; 6/6 tests green) |
+| **Spec 267** Trellis.2 / Pixel3D ComfyUI ADT refinement | **Active / Phases 1-3 Complete 2026-10-08**: Discovered running ComfyUI models (Trellis.2 / Pixel3D on RTX 4070 Ti SUPER, 2,933 nodes cataloged); created `comfyui_parp_nodes` package with `WoW_AdtLoader`, `WoW_ObjectSieveConditioner`, `WoW_HardZCalibrator`, `WoW_MeshExporter` (5/5 tests green). **Complete Chunk & Data Transfer**: Monolithic 3.3.5 ADT preservation for all 2,252 tiles — keeps 100% of authentic chunks (`MTEX`, `MCLY`, `MCAL`, `MMDX`, `MWMO`, `MDDF`, `MODF`, `MCRF`, `MCSE`, `MCSH`, `MCLQ`/`MH2O`, `MFBO`, `MCCV`). Cleaned 447 stray `_obj0`/`_tex0` companion files from output root, enforcing `AdtProfile_335` so WoWViewer loads all textures and objects. **Tileset Texture Stripping & De-Bumping**: Decomposed minimap luminance into structural illumination ($\sigma=4.5$) vs tileset texture noise ($T = I - S$); gated ridge detection to genuine macro relief ($|\nabla Z| \ge 0.08$); smoothed meso SfS relief ($\sigma=2.0$, $1.0$ yd amplitude) and wrote smooth surface normals into `MCNR`. Batch generated all 2,252 monolithic ADTs in 791.0s with updated `development.wdt`. | Operator reload & visual smoke test in WoWViewer | Complete Phase 4 end-to-end ComfyUI workflow JSON |
+| **Spec 268** quilt canvas terrain reconstruction & MCAL deciphering | **Phases 1-5 Complete 2026-10-09**: Continuous multi-tile quilt canvas stitching, 1px shared tie-edge boundary solver (C0/C1, $\Delta Z = 0.0000$ yds, normal alignment $0.9995$), minimap albedo de-mixing & dynamic MCAL layer stacking ($\le 4$ per chunk), authentic WDL global macro-trestle lattice interpolation, 36x inches-scale 3D fractal refiner (8 brush stamps + scars), monolithic LK ADT materialization, and textured 3D OBJ/GLB mesh exports; verified on alpine massif `(16, 32)`/`(16, 33)`, 2x2 cluster, and unauthored minimap-only tiles `(17, 13)`/`(17, 14)` via pure V7 foundation; all post-V7 models purged; receipt in `evidence/receipt-spec268.md`. | Operator smoke passed | Complete (2026-10-09) |
+| [**Spec 269** v60 classic terrain Zarr ingestion & Felwood clean elevation training](../specs/269-v60-classic-terrain-ingestion-and-elevation-dataset/spec.md) | **Complete 2026-10-10**: Ingest Wrath 3.0.1.8303 terrain (37 maps, 4,448 tiles) via C# harvest engine into `output/datasets/v60/`, train `TrestleElevationUNet` on authentic Felwood canyons/indentations (120 epochs, MAE 4.62 yds, $r=0.8842$), and carve $-96.13$ yd canyon into unauthored quilt tile `(17, 14)`. Receipt in `evidence/receipt-spec269.md`. | Operator harvest & training runs | Complete (2026-10-10) |
+| [**Spec 270** PM4 object association ledger & placement pipeline](../specs/270-pm4-object-association-ledger-and-placement/spec.md) | **Complete 2026-10-11**: Harvested 1,929 ground-truth objects into Rosetta Ledger (`pm4_object_association_ledger.json`). **Phase 4 & 5 Monolithic LK Pipeline**: Strict barrier preserving 255 hand-authored Blizzard tiles; 2D PCA Yaw; repaired Schlumpf index defect; restored unauthored PM4 tiles. **Phase 5 Multi-Source Placement Convergence & Magnetic Collision Fix**: Fixed model pivot origin vs bounding centroid Z offset in Strategy 0 and vertical attraction; preserved authentic authored rotations over synthetic PCA; deduplicated stacked instances with proximity gating (20 yds WMO, 5 yds M2); sampled 256x256 minimap PNGs into 256 145-vertex MCCV chunks via `AdtMccvImageSampler` (195 untextured tiles colored, 0 black tiles). Full map batch executed: 616 tiles processed, 1,654 WMOs, 64,301 M2s, 616 PASS / 0 FAIL round-trip. | Operator review & visual smoke in WoWViewer | Complete (2026-10-11) |
+| **U-01** god-class decomposition (Epic 251) | **E1 + E3 + ViewerApp campaign landed 2026-09-25**: PM4 overlay → `Terrain/Pm4/` (`WorldScene.cs` 17,175 → 8,326); `ViewerApp` class 42,973 lines / 29 files → 2,512 / 6 (51 services + 3 static helpers under `Workbench/Services/`) | U01-T003 E1 smoke; U01-T007 / T013 smoke of every moved ViewerApp surface; U01-T009 E4 hover/click smoke; **Spec 255 T018** smoke of W0–W7 | E4 landed 2026-09-26; **Spec 255 W0–W7 landed 2026-09-27** (`WorldScene.cs` 8,275 → 4,922; 7 scene services + PM4 helpers). W8/W9 and E2 `Render()` split wait for R-10's after-capture |
 
-## New operator-reported gaps (2026-09-10, not yet investigated)
+Receipts: [E1](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e1-pm4-extraction-2026-09-25.md) ·
+[ViewerApp campaign](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-viewerapp-extraction-2026-09-25.md) ·
+[Spec 255 W0–W7](../specs/255-worldscene-decomposition/evidence/w0-w7-extraction-2026-09-27.md) ·
+[E4 selection](../specs/251-epic-viewer-ux-and-code-health/evidence/u01-e4-selection-2026-09-26.md).
+**Where code lives now:** viewer features are owned services under `src/viewer/WoWViewer/Workbench/Services/<Feature>/`
+(namespace `WoWViewer`); they reach app state only through `IViewerAppHost` (implemented in
+`ViewerApp_Host.cs`). `ViewerApp.cs` is the shell: fields, composition root, window lifecycle. New behaviour
+goes into the owning service; if it needs more app state, add one `IViewerAppHost` member + its one-line
+implementation. PM4 overlay code lives in `Terrain/Pm4/` (`WorldScene.Pm4Overlay.X`). World-scene features live in
+`Terrain/Scene/<Feature>/` services (`WorldScene.HoverPick`, `.TaxiActors`, `.ObjectFilters`, `.Selection`, `.Atmosphere`,
+`.ExternalSpawns`, `.TerrainQueries`); they read scene state only through `IWorldSceneHost` (explicit impls in `WorldScene.cs`).
 
-Filed as new tasks, not fixed: Spec 232 gained Phase 7 (T067 remove "Bake MCSH shadows" minimap
-option permanently; T068 "Include WMO geometry" minimap checkbox broken; T069 no-water minimap
-shading glitches; T070 cell fine-tune needs true 1-cell X/Y granularity — Hellfire Ramparts vs
-Expansion01 won't align closer than 1–3/1–2 cells with current tooling; T071 offset counters too
-small to show a signed two-digit value, must scale with UI text). Spec 231 gained Phase 8 (T080
-hovered-WMO doodad-set combo disappears on mouse-leave). Operator also re-stated the save-pipeline
-gap directly — that's Spec 234 below, already the whole point of the spec.
+All other epic items remain untriaged in [TRIAGE.md](../specs/TRIAGE.md); nothing else is scheduled.
+Receipt for the 2026-09-23 reconciliation:
+[reconciliation README](../specs/archived/reconciliation-2026-09-23/README.md).
 
-## Active lane — Spec 235 Legacy MDX/M2 Rendering (1.0.0-3.0.1) — Phases 0–4 Implemented & Receipted (2026-09-11)
+**Linux build note (agent sessions):** the viewer builds and tests on Linux with
+`-p:EnableWindowsTargeting=true` after `git submodule update --init` of the six `wow-viewer/libs/*`
+submodules. 26 tests fail on `HEAD` there for environmental reasons (missing `test_data/`,
+Windows-path expectations) — compare against that set, not zero. One Curation test rewrites
+`data-harvester/tests/fixtures/spec122_curation_manifest/.../curation_run.json` with the local path;
+revert it before staging.
 
-[235-legacy-mdx-m2-rendering/spec.md](../specs/235-legacy-mdx-m2-rendering/spec.md) — Implementation complete for Phases 0 through 4 on branch `235-legacy-mdx-m2-rendering`.
-- **Core Reader Unification (`M2ModelReaderDispatcher.cs`, `M2Era100ModelReader.cs`)**:
-  - Dropped the `0x102`–`0x107` `NotSupportedException` refusal wall.
-  - Supports MD20 versions `<= 0x107` with classic division layout in `M2Era100ModelReader`.
-  - Implemented 108-byte (`0x6C`, version `0x100`) and 112-byte (`0x70`, version `0x104`–`0x107` with `boneNameCrc` at `+0x0C`) bone parsing with track normalization.
-  - Populates `EmbeddedSkinDocuments` from embedded division records; `M2SkinProfileRuntime` initializes directly without looking for non-existent external `.skin` files.
-- **World Placement & Fallback (`WorldAssetManager.cs`, `WowViewerM2RuntimeBridge.cs`)**:
-  - Added explicit handling for `M2Era1121EraTag.Md20_1X_V100_Era100` routing directly to the runtime bridge.
-  - Implemented FR-005 Bounding-Box Fallback (`BuildBoundingBoxFallbackModel`, 8-vertex, 12-triangle unit box with `usesCompatibilityFallback: true`) so models with no drawable geometry render bounds rather than remaining invisible.
-- **Tooling (`WowViewer.Tool.Inspect`)**:
-  - `RunM2Inspect` generates `M2GeometryDocument` for `Md20_1X_V100_Era100` using `GlobalVertices`.
-- **Verification Across Staged Clients (All Pass Exit 0)**:
-  - 1.0.0.3980 (`xyz.m2`): `ERA: 1.0.0 (MD20 v0x100)`, bones=1, geometry available=true, vertices=72.
-  - 2.0.0.5610 (`BloodElfMale.m2`): `ERA: 1.0.0 (MD20 v0x100)`, bones=138, geometry available=true, vertices=4864.
-  - 2.4.3.8606 (`BloodElfMale.m2`): `ERA: 1.0.0 (MD20 v0x100)`, bones=143, geometry available=true, vertices=5712.
-  - 3.0.1.8303 (`BloodElfMale.m2`): `ERA: 1.0.0 (MD20 v0x100)`, bones=143, geometry available=true, vertices=5712.
-  - 3.3.0.10958 (`BloodElfMale.m2`): `ERA: 3.3.5 (MD20 v0x108)`, bones=151, geometry available=true, vertices=6778.
-- **Unit Tests & Build**:
-  - `M2Era100ModelReaderTests`: 11 passed, 0 failed.
-  - `ModelRouteClassifierTests`: 7 passed, 0 failed.
-  - Full solution build: 0 errors.
-- **Receipt**: [phase1-reader-unification.md](../specs/235-legacy-mdx-m2-rendering/evidence/phase1-reader-unification.md).
-- **2.0.0 .mdx -> .m2 Resolution & UV/Vertex Layout Fix (2026-09-12)**:
-  - Fixed `FormatProfileRegistry.M2Profile20xUnknown` by lowering `MinSupportedVersion` from `0x104` to `0x100` so 2.0.0 MD20 version `0x100` models pass profile validation without throwing `InvalidDataException`.
-  - Added `_dataSource.FileExists` fallback to `WorldAssetManager.ResolveCanonicalModelPath` and `WmoRenderer.ResolveCanonicalDoodadPath` for alternate extensions (`.m2`, `.mdl`) when listfile resolution misses.
-  - Updated `resolvedModelPath` from `_resolvedReadPathCache` in `WorldAssetManager.LoadMdxModel` so skin resolution operates on the true `.m2` asset.
-  - Fixed `M2Era100Constants.cs` vertex layout offsets: corrected inverted offsets so Normal (`0x14`), UV0 (`0x20`), UV1 (`0x28`), BoneWeights (`0x0C`), and BoneIndices (`0x10`) match the standard WoW 48-byte M2Vertex binary layout, fixing flat/stretched distorted textures and broken UVs. Added unit test `Era100Reader_ReadsVertexAttributes_WithStandardM2LayoutOffsets` (12/12 tests pass).
-  - Evidence receipt: [2.0.0-mdx-m2-rendering-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/2.0.0-mdx-m2-rendering-fix.md).
-- **FX Emitter Bounds Fallback & Texture UV Clamping Corrections (2026-09-12)**:
-  - Fixed giant solid opaque white bounding-box cubes covering scenes: particle/sound/emitter doodads (`stratholmefloatingembers.m2`, `hellfire_fireparticle.m2`) have `rawVertexCount == 0` on disk by design. In `WowViewerM2RuntimeBridge.cs`, early-return an empty `M2StaticRenderModel` with 0 sections rather than generating an FR-005 bounding box cube.
-  - Fixed flat untextured surfaces and single-color streaks on complex 3D meshes (`ballistaruined.m2`, wood, arrows, wheels): in `M2Renderer.cs`, corrected texture clamping flags from `(flags & 0x1u) == 0` to `!= 0`, ensuring textures repeat by default (`TextureWrapMode.Repeat`) and only clamp when bit 0x1 (S) or 0x2 (T) is set. In `ModelRenderer.cs`, corrected adapter clamp deriving and disabled aggressive `ClampToEdge` override on non-opaque textures in `NormalizeAdaptedM2TextureSampling`.
-- **Skybox Blending & Transparent Cutout Materials Corrections (2026-09-12)**:
-  - Fixed skybox rendering as low-res "N64 polygonal blobs": in `M2Renderer.cs`, line 731 had `if (!backdrop && transparent)`, which disabled blending for all transparent backdrop passes, turning atmospheric domes, cloud layers, star fields, and horizon glows into solid opaque polygons. Changed to `if (transparent)` so blending is enabled for transparent sections regardless of `backdrop`.
-  - Fixed plant foliage (`zangarplantgroup05.m2`) and spiderwebs rendering as solid opaque planes: in `M2Era100Constants.cs` / `M2Era100ModelReader.cs`, dynamically compute embedded division section stride (supporting 48-byte records with sort center/radius in 0x104+ models rather than hardcoding 32-byte stride). In `WarcraftNetM2Adapter.cs`, prevented `ShouldPreferProfiledRenderFlags` from overwriting valid render flags when `current` has plausible blend modes, and capped candidate scoring to prevent large tables from overriding genuine materials with 0s (`Opaque`). In `M2StaticRenderModelBuilder.cs`, removed invalid `((batch.GeosetIndex & 0x2) != 0)` projection flag check. In `WowViewerM2RuntimeBridge.cs`, preserved full combiner family mapping including `AlphaKey`.
-  - Added unit test `ReadDetailed_ZangarPlantGroup05_ParsesMaterialsAndEmbeddedSectionsCorrectly` (14/14 tests pass).
-  - Evidence receipt: [skybox-blending-and-transparent-materials-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/skybox-blending-and-transparent-materials-fix.md).
-- **Bone Quaternion Normalization & AlphaKey Cutout Material Transfer Corrections (2026-09-13)**:
-  - Fixed 0x100 character models crumpling into mangled limbs (`TrollFemale.m2`): classic 0x100 models store bone rotation tracks on disk as 16-byte uncompressed IEEE 754 float quaternions (`C4Quaternion`: X, Y, Z, W), NOT 8-byte `M2CompQuaternion`. When read as 8-byte compressed shorts, identity rotation `(0,0,0,1)` decoded to `(-0.5,-0.5,-0.5,-0.5)`, distorting bones by 120° and collapsing the skeleton. In `M2Era100ModelReader.cs`, added `IsUncompressedQuaternionTrack` detector and converted 16-byte float quaternions into canonical 8-byte `M2CompQuaternion` structures in `_extension`, allowing standard runtime sampling (`M2TrackSampler`) to evaluate identity and animation rotations without distortion.
-  - Fixed 0x100 foliage and canopies rendering with solid black/white margins (`terokkartreelarge.mdx`, `razorfen_canopy01_hole.mdx`): in `WarcraftNetM2Adapter.ParseEra100Model`, replaced placeholder loop that hardcoded all render flags to `Opaque` (0), propagating `geometry.Materials[i].Flags` and `geometry.Materials[i].BlendMode`. In `M2Renderer.cs`, initialized `buffers.AlphaCutout = section.Material.BlendMode == M2BlendMode.AlphaKey`.
-  - Added unit tests `Era100_Synthetic_UncompressedQuaternion_NormalizedAndSampled`, `Era100_Synthetic_MaterialsWithAlphaKey_ParsedCorrectly`, and `BuildEmbeddedStaticRenderModel_SyntheticEra100_TransfersAlphaKeyBlendMode` (17/17 Era100 tests pass, 3/3 embedded profile tests pass).
-  - Evidence receipt: [quaternion-normalization-and-alphakey-transfer-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/quaternion-normalization-and-alphakey-transfer-fix.md).
-- **Creature Variant & Replaceable Texture Resolution Corrections (2026-09-13)**:
-  - Fixed 0x100 creature variants (`DragonSpawnArmored.mdx`) rendering completely untextured / flat white: in `WowViewerM2RuntimeBridge.cs:BuildEra100Material`, enforced `stageCount = Math.Max(1, (int)batch.TextureCount)`, added direct texture indexing fallback (`geometry.Textures[lookupIndex]`) when `lookupIndex >= geometry.TextureLookup.Count`, and defaulted empty-filename passes to creature skin slot 11.
-  - In `M2Renderer.cs`, `ReplaceableTextureResolver.cs`, and `ModelRenderer.cs`: added creature variant suffix stripping (`StripVariantSuffix`), candidate base searching (`[ modelBase, folderBase, strippedBase ]`), scored directory scan for `.blp` textures in `_modelDir`, and safety-net fallback in `TryLoadMaterialTexture` so untextured passes attempt creature skin resolution before rendering.
-  - In `ReplaceableTextureResolver.cs`: added `baseSection: 5` (Underwear) prioritization and real client underwear filenames (`NakedPelvisSkin`, `NakedTorsoSkin`); pruned robe skirts (`1201`), cloaks (`1101`), tabards (`1301`), and shoulders (`1401`/`1501`) from `DefaultCharacterSelectionGroups`.
-  - Added unit test `BuildEra100StaticRenderModel_TransfersTextureBindingsAndFallbackSlots` (18/18 Era100 tests pass).
-  - Evidence receipt: [creature-variant-and-replaceable-texture-resolution-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/creature-variant-and-replaceable-texture-resolution-fix.md).
-- **2.0.0 M2 Animation Playback, Sequence Resolution, and Character Geoset/Texture Fix (2026-09-13)**:
-  - Fixed frozen animations where only eyes blinked: in 0x100 models, keyframes in `OldTrack` use global timeline timestamps `[startTimestamp, endTimestamp]`. Normalized sampling in `M2TrackSampler.cs` with `sampleTime = checked((int)start) + ResolveSampleTime(timeMs, duration)`, maintaining 100% regression freedom on 3.x/4.x models (`StartTimestamp = 0`).
-  - Fixed 0x44 sequence stride reading offsets in `M2Era100ModelReader.cs` and `M2Era1121ModelReader.cs` (`startTimestamp` at `+0x04`, `endTimestamp` at `+0x08`, derived duration `end - start`).
-  - Added complete AnimationData.dbc mapping (IDs 0..248) in `M2AnimationNameResolver.cs`, resolving names like 50 (`Loot`) and 107 (`AttackThrown`).
-  - Fixed character models missing midsections and loading with all 51 geosets enabled: added basic body submeshes `0..8` to `DefaultCharacterSelectionGroups`, corrected `_sectionVisibility[i] = visible` loop indexing in `M2Renderer.cs`, and unconditionally applied default customization on model load in `ViewerApp.cs`.
-  - Added regression test `Inspect200OrcFemaleSequencesAndBones` verifying continuous bone rotation across time.
-  - Evidence receipt: [2.0.0-animation-and-character-geoset-fix.md](../specs/235-legacy-mdx-m2-rendering/evidence/2.0.0-animation-and-character-geoset-fix.md).
+## Release state
 
-## Current lane — Spec 234 Map Save & New Map Creator
+`eng/Version.props` = `0.6.0` / `InformationalVersion 0.6.0-alpha4`, release 2026-10-01 (tag
+`v0.6.0-alpha4`, all four self-contained binaries). Notes: `docs/releases/v0.6.0-alpha4.md`.
 
-[234-map-save-new-map/spec.md](../specs/234-map-save-new-map/spec.md) — Draft, **not planned**.
-Save merged/composed maps to Alpha 0.5.3 WDT and LK v18 ADT from both Archaeology and the Editor's
-Data I/O page (one shared pipeline), plus a New Map creator in the Editor. Multi-map explicitly out
-of scope. Supersedes Spec 230 US2/US3. **Next: speckit-plan.**
+**Shipped unverified in alpha2** (operator verification, tracked as V-tasks in the epics): the M2
+texture-wrap fix (every M2 era); `LkAdtWriter` chunk-completeness fixes (17 call sites); no exported
+map loaded in a client or Noggit; no DAT Cartography layer composed on screen; new export menu and
+sidebar buttons never clicked.
 
-## Other open lanes (all implemented-with-operator-gates; see each spec's tasks.md for detail)
+## Measured gaps worth knowing before any work (details: TRIAGE §1)
 
-- **Spec 232** (cartography composition) — T056/T057/T058/T059/T064/T066 source-landed; operator
-  visual witnesses owed for all. T051 (lock badge), T053 (WL inspector), T054 (default page), T015d
-  (rotated-seam screenshot) also await witnesses. Next after witnesses: T055 (UniqueId color-coding),
-  T065 (chunk off-by-one re-audit).
-- **Spec 233** (marketing capture automation) — P1 source landed; **T015 operator tour witness**
-  (`FlybyUndead`, Warm Path, Feature Tour + Video) is the next concrete action, then Phase 4 receipts.
-- **Spec 231** (Editor/Archaeology UI overhaul) — Phases 0–4, 6-batch-1, and 7 landed; Phase 6
-  batch 2 (T061–T064) and Phase 5 (navigation smoke, inventory v3 final) open.
-- **Spec 227** (UI re-audit) — only T001/T002 done; **T004 gate genuinely still open** (confirmed
-  by 2026-09-10 audit), which is why Spec 228 stays blocked.
-- **Spec 228** (source decomposition) — blocked on 227 T004, 0 tasks landed.
-- **Spec 223** (UI consolidation) — operator retest owed (fog, WMO-only global WMO, playback/
-  capture, ffmpeg, spatial UI) with a real client; video-capture release hardening also needs a
-  real with/without-UI recording + playback + Play+Video witness before shipping.
-- **Spec 226** (renderer polish) — wireframe root causes fixed; captures still owed.
-- v0.5.3-rc1 — tag push + GitHub Actions release are operator-owned; visual pass on wireframe/
-  selection/toolbar changes still owed.
+- No map save pipeline exists (`MapSaveService` absent; `EditorSession.SaveAll()` writes nothing).
+- Editor undo reverses only 2 of 5+ operation kinds.
+- Zone music is disabled by policy and still reads `ZoneMusic` as a SoundEntries id.
+- Modern data: the scene-light gate disables WMO instancing (~5.5 FPS, 16,431 WMO draws pre-R-10); R-10's per-placement gate made it worse (<1 FPS, operator) and was reverted 2026-09-27.
+- v22 DAT blends layer 0 only; `AMAP` codec unidentified.
+- `WorldScene.cs` 4,922 lines (after Spec 255 W0–W7, 2026-09-27), `ViewerApp` class 2,512 lines in 6 files — no new members (AGENTS.md §10).
 
 ## Non-negotiable constraints
 
 - Preserve MPQ/ADT/WMO/M2/MDX readers and `AlphaWdtWriter`; no feature scope rides on a refactor.
-- Runtime visual, input, FPS, audio, video, and client-data proof are operator-owned.
-- Preserve unrelated dirty work; stage named files only.
-- New UI work follows Spec 228 (owned service classes, no new `ViewerApp_*`/`WorldScene` members)
-  and AGENTS.md §9 receipts.
+- Runtime visual, input, FPS, audio, video and client-data proof are operator-owned.
+- Training, harvests, GPU and cloud runs are operator-run; hand over PowerShell-ready commands.
+- Preserve unrelated dirty work (`imgui.ini`); stage named files only.
+- New scope needs operator-approved wording (AGENTS.md §9.1); receipts per §9.2.
 
 ## Handoff
 
-**Immediate:** the Spec 224 audit is done and its report says so — the next bounded action is
-`speckit-plan` for Spec 234. Operator decisions owed: the 16 un-checked Spec 223 checks (accept or
-supply retroactive receipts) and the Spec 231 T074 receipt gap.
-
-**Do not claim:** any Spec 232/233/223/226 visual/runtime acceptance; the Spec 223 Phase 1–5 source
-tasks are now un-checked pending receipts; and the Spec 235 plan rewrite stays blocked on a real-file
-inspection (read `tools/inspect` usage + the `--client`/`--game-path` invocations in specs 104/154/205
-first).
+**Immediate:** operator runs R10-T003/T007 captures and the U-01 smoke passes (U01-T003 PM4 overlay;
+U01-T007/T013 every moved ViewerApp surface — checklist in the campaign receipt). U01-T009 E4 hover/click smoke and
+[Spec 255](../specs/255-worldscene-decomposition/spec.md) T018 (W0–W7 smoke — checklist in its
+[receipt](../specs/255-worldscene-decomposition/evidence/w0-w7-extraction-2026-09-27.md)) are owed too.
+Next agent-owned U-01 work: Spec 255 W8/W9 and E2, after R-10's after-capture (R10-T007). Do not start any other epic
+item before it is marked Want. Superseded dashboard:
+[archive/2026-09-23-pre-reconciliation-active-context.md](archive/2026-09-23-pre-reconciliation-active-context.md).

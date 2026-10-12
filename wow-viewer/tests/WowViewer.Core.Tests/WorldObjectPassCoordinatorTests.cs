@@ -210,6 +210,49 @@ public sealed class WorldObjectPassCoordinatorTests
         Assert.Equal([4, 5], plan.FallbackVisibleIndices);
     }
 
+    [Fact]
+    public void PlanOpaqueWmoBatches_LitPlacementsKeepThePerPlacementPath()
+    {
+        // Epic 249 R-10b: a placement a scene light reaches must not be batched, others still batch.
+        var candidates = new[]
+        {
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\House.wmo", true, 0),
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\House.wmo", true, 1, ReachedBySceneLight: true, EmitsSceneLights: true),
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\House.wmo", true, 2),
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\Barn.wmo", true, 3, ReachedBySceneLight: true),
+            new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate("World\\Portal.wmo", false, 4, ReachedBySceneLight: true),
+        };
+
+        WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan plan =
+            WorldObjectPassCoordinator.PlanOpaqueWmoBatches(candidates);
+
+        Assert.Single(plan.Batches);
+        Assert.Equal([0, 2], plan.Batches[0].VisibleIndices);
+        Assert.Equal([1, 3, 4], plan.FallbackVisibleIndices);
+        Assert.Equal(2, plan.BatchedPlacementCount);
+        Assert.Equal(2, plan.LitFallbackCount); // placement 4 cannot batch anyway, so it is not counted as lit
+        Assert.Equal(1, plan.SelfLitFallbackCount);
+    }
+
+    [Fact]
+    public void PlanOpaqueWmoBatches_PartitionIsDeterministic()
+    {
+        // Archived Spec 242 FR-004: identical lighting and placement state gives an identical partition.
+        var candidates = Enumerable.Range(0, 64)
+            .Select(i => new WorldObjectPassCoordinator.WorldWmoOpaqueBatchCandidate(
+                $"World\\Model{i % 5}.wmo", i % 7 != 0, i, ReachedBySceneLight: i % 3 == 0))
+            .ToArray();
+
+        WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan first = WorldObjectPassCoordinator.PlanOpaqueWmoBatches(candidates);
+        WorldObjectPassCoordinator.WorldWmoOpaqueBatchPlan second = WorldObjectPassCoordinator.PlanOpaqueWmoBatches(candidates);
+
+        Assert.Equal(first.FallbackVisibleIndices, second.FallbackVisibleIndices);
+        Assert.Equal(first.Batches.Select(b => b.ModelKey), second.Batches.Select(b => b.ModelKey));
+        for (int i = 0; i < first.Batches.Count; i++)
+            Assert.Equal(first.Batches[i].VisibleIndices, second.Batches[i].VisibleIndices);
+        Assert.Equal(first.LitFallbackCount, second.LitFallbackCount);
+    }
+
     private static WorldVisibleMdxEntry CreateMdx(string modelKey, float distanceSq, bool hasOpaqueRenderContent = true, bool hasTransparentRenderContent = true)
     {
         return new WorldVisibleMdxEntry(CreateInstance(modelKey, hasOpaqueRenderContent, hasTransparentRenderContent), distanceSq, 1.0f, 1.0f, false);

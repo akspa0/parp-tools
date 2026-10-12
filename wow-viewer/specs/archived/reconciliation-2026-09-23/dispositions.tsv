@@ -1,0 +1,137 @@
+009	COLD	251	Historical reimplementation reference; not an execution contract.
+046	SUPERSEDED	253	Superseded by 065 surface-triangle correlation.
+056	COLD	249	81-task refactor never executed; its perf intent landed piecemeal via 136/153/207/236. Evergreen constraints only.
+065	FOLDED	253	Correlation + fingerprint matching shipped; placement restore shipped outside the spec (inspect pm4 restore-placements). Residue: T034-T036, rotation.
+069	SUPERSEDED	251	Tab-bar design never built; replaced by the Workbench navigator (231).
+072	COMPLETE	251	Hotfix complete (T005 width scoping inaccurate, not reopened).
+073	SUPERSEDED	251	Converters piece owned by 231; rest never planned.
+104	SUPERSEDED	248	Absorbed by 235 (own supersession notice).
+105	FOLDED	248	Residue: FR-008..FR-014 profile unification, FR-001..FR-007 animation addressing.
+106	FOLDED	249	Direction constants shipped; residue FR-004/FR-012 calibration, FR-008..FR-010 provenance (verify vs 109/122).
+107	COMPLETE	249	Quick lighting + far-plane + single-ray hover shipped.
+108	FOLDED	254	Code shipped; residue T012/T013/T015 user-run training.
+109	COMPLETE	254	v50 clean-room dataset built; T050/T051 doc-only residue.
+110	FOLDED	251	US1/US5/US7 shipped; US2 to 248 (via 235), US3/US4 residue.
+111	COMPLETE	254	Calibration shipped; T009/T019 operator runs owed.
+112	SUPERSEDED	254	US3 training happened under 114-T017.
+114	FOLDED	254	Geometry chain complete; residue Phase 6/7 texture-family + alpha-stack.
+115	COMPLETE	254	Classifier + retrain shipped (its quickstart.md is stale).
+117	SUPERSEDED	254	Premise closed by 123.
+118	COMPLETE	254	Instance/occlusion masks shipped; real paired training comparisons owed.
+123	FOLDED	254	Entire spec open (next-model design, no code).
+124	FOLDED	254	Entire spec open (legacy python detangle + C# RunPod tooling).
+125	SUPERSEDED	254	Superseded by 126/133/139; parked residue FR-021 super-res, FR-010/FR-012.
+126	SUPERSEDED	254	Core ambition moved to 139; parked residue US5 seams, US6/US8 texture tier.
+127	FOLDED	254	Residue US1/US3 + US2 UI wiring.
+128	FOLDED	253	Entire spec open, gated on 130.
+129	FOLDED	253	Entire spec open, gated on 130.
+130	FOLDED	253	Decode phases open; partially advanced by 188/189 research.
+132	FOLDED	254	US1 shipped; US2..US6 residue (merged with 140).
+133	COMPLETE	254	terrain_shadow_256 delivered end-to-end.
+134	FOLDED	254	Shares clean_signal modules with 139; residue US6 later-client adapters.
+135	SUPERSEDED	250	Generalized by PhaseLayers (222/232).
+136	FOLDED	249	Code landed; T008/T011 operator proofs owed.
+137	SUPERSEDED	250	Minimap phase tiles via PhaseLayers; Armed teleport via 147 US1.
+138	COLD	249	Broad 4.x evidence epic cold; residue: WmoRenderer.DrawBatch access violation.
+139	FOLDED	254	Live clean-signal lane; residue cross-tile family regression, promotion.
+140	FOLDED	254	Entire spec open (merged with 132).
+141	FOLDED	254	Residue US4 research-lead ledger.
+142	FOLDED	249	Graph + bounded admission shipped (graph selector default-off); residue US4/US5, T048, T054-T057, promotion gates.
+143	FOLDED	252	US1 area names + Alpha world clock shipped; US2/US3/US5 to 252, US4 lighting to 249.
+144	FOLDED	252	Code complete; 5 user-run capture proofs owed.
+146	FOLDED	252	WorldAudioRuntime shipped; residue US1/US3/US4/US5, T017a (merged with 148).
+147	FOLDED	249	US1 minimap gesture shipped; US2 fog residency, US3 doodad batching, US4 diagnostics open.
+148	FOLDED	249	Phase 1 audio shipped; Phases 2-4 to 249 (merged with 147), Phase 5 + T006/T006a to 252.
+149	FOLDED	253	US4 area overlay shipped; residue US1/US2 + audio enablement.
+150	SUPERSEDED	249	Superseded by 152/153.
+151	FOLDED	249	US1 portal slice shipped; T030 + US5 to 249; US2 to 251; US3/US4 to 252.
+152	FOLDED	249	Phase 0/1 shipped; Phase 6 era lighting to 249, Phase 7 UI ownership to 251.
+153	COMPLETE	249	Phases 0-3 landed; residue Phase 5 step 2 async decode, WMO admission handoff.
+154	SUPERSEDED	248	Absorbed by 235; US4 cross-era rig comparison parked.
+155	FOLDED	248	US1 inventory shipped; US2..US6 open.
+156	FOLDED	252	Cursor covered by 210/211; residue triangle-precise picking (252), PM4 match library (253).
+157	COMPLETE	248	LIT documentation drafted; wiki submission is an operator action.
+158	FOLDED	252	US1 via 159; residue US2..US6.
+159	FOLDED	252	Sweep tool shipped; residue full build sweep, --listfile rerun.
+160	FOLDED	249	Entire spec open.
+166	COMPLETE	250	Plugin host shipped and tested; FR-006/SC-003 minor residue.
+167	FOLDED	250	Bridge partial; residue FR-007 staging retirement, applier completion.
+168	FOLDED	250	Session partial; residue exit warning, all-ops undo/save.
+169	FOLDED	250	Migration not started.
+170	FOLDED	250	Entire spec open.
+171	FOLDED	250	Entire spec open.
+172	FOLDED	250	Entire spec open.
+173	FOLDED	250	Gate shell only; residue validators, census.
+174	FOLDED	250	Entire spec open (after 173).
+175	FOLDED	250	Residue FR-002 add placement, session routing.
+176	FOLDED	250	8/13 tasks; residue T002-T008.
+177	FOLDED	250	Entire spec open.
+178	FOLDED	251	Entire spec open (merged with 213).
+179	FOLDED	254	Entire spec open (datastore gate).
+180	FOLDED	254	Entire spec open.
+181	FOLDED	254	Entire spec open.
+182	FOLDED	254	Entire spec open.
+183	FOLDED	254	Entire spec open.
+184	FOLDED	253	Entire spec open.
+185	FOLDED	253	Merged with the 188/189 field-semantics thread.
+186	FOLDED	252	Entire spec open.
+187	FOLDED	252	Entire spec open (after 186).
+188	FOLDED	253	Residue US1..US3 (merged).
+189	FOLDED	253	Residue MSLK._0x04, AdtPm4MaskBuilder space.
+190	COMPLETE	250	Rosetta corpus shipped.
+191	FOLDED	250	Residue T022-T024 (overlaps 236 US4).
+192	COMPLETE	250	Template brush library + generator shipped.
+193	FOLDED	248	Benilla oracle methodology unused; T101-T303 parked.
+194	COMPLETE	250	Stratigraphy shipped; runtime NFR proofs owed.
+196	COMPLETE	250	WDL magnetization shipped; AC-002/AC-005 runtime proofs owed.
+197	FOLDED	248	Phase 5 MoP to 248; Phases 1-4 workspace/editor mode to 251.
+198	FOLDED	249	Entire spec open.
+199	FOLDED	248	Entire spec open.
+200	FOLDED	249	Entire spec open.
+201	FOLDED	249	Phase 1 landed; T005/T006 + Phase 2 open.
+202	FOLDED	249	Phase 0/1 landed; Phases 2-6 open (batching anchor).
+203	FOLDED	250	Composition shipped; residue FR-002/FR-003 uniqueId reconciliation.
+204	FOLDED	249	Entire spec open.
+205	COMPLETE	248	MH2O LiquidObject resolution shipped; operator verifications owed.
+206	FOLDED	254	Entire spec open (datastore residue).
+207	FOLDED	249	Phase 1 landed; Phase 2/3 open.
+208	SUPERSEDED	250	Built inside 219/222/232; narrow residue FR-007, picker, FR-008.
+209	FOLDED	248	Diagnosis complete; T4-T6 fix open.
+210	FOLDED	252	Shipped; T401-T404 owed.
+211	FOLDED	252	Shipped; T407/T505 owed.
+212	FOLDED	251	US6 selection silhouettes carried; rest cold.
+213	FOLDED	251	Entire spec open (merged with 178).
+214	FOLDED	252	.phys reader + policy shipped; T002, T021-T031 open.
+215	FOLDED	252	Entire spec open.
+216	FOLDED	252	Entire spec open.
+217	FOLDED	252	Entire spec open.
+218	FOLDED	252	Entire spec open.
+219	FOLDED	250	Phases 1/2/5 largely live; Phases 3/4/6/7/8 open.
+220	FOLDED	250	Entire spec open.
+221	FOLDED	248	Phase 0 findings landed; Phases 1-4 open.
+222	FOLDED	250	Residue T109-T114.
+223	FOLDED	251	Residue T101-T107, T201-T203, T301/T302, T401, T501/T502, T609/T610.
+224	FOLDED	251	Rules codified in AGENTS.md section 9; Gate 1 + ledger sync open.
+225	FOLDED	251	Phase 1 open.
+226	FOLDED	249	US1/US2 open.
+227	FOLDED	251	T001/T002 done; US2..US4 open.
+228	FOLDED	251	Entire spec open (blocked on 227-T004).
+229	FOLDED	251	Entire spec open.
+230	FOLDED	250	US1 Rosetta placement open; US2/US3 went to 234.
+231	FOLDED	251	Residue T041, T050-T052, T061-T064, T080.
+232	FOLDED	250	Residue T020-T022, T030-T032, T055, T060-T071 + witnesses.
+233	FOLDED	249	US1 source landed; residue T015-T029.
+234	FOLDED	250	Save pipeline FR-001..FR-007 open; New Map creator partly exists.
+235	FOLDED	248	Phases 0-4 landed; residue FR-014, FR-015, US4, US5 + visual gates.
+236	FOLDED	249	Phases 1/2 landed; T013 + Phase 3 to 249, Phase 4/5 to 250.
+237	COMPLETE	248	DAT v22/v23/v26 read + render shipped; v22 AMAP carried via 247.
+238	FOLDED	248	Local CASC shipped; residue US2 CDN streaming, US3 builds by id.
+239	FOLDED	248	FDID readers shipped; residue FR-001 resolver, FR-008 survey, tier A/B.
+240	FOLDED	248	T000a-f shipped; survey + Phases 3-7 open.
+241	COLD	248	Operator-deferred; one-way export lives in 247.
+242	FOLDED	249	Entire spec open.
+243	FOLDED	248	Plan authored; entire implementation open.
+244	FOLDED	248	Entire spec open.
+245	FOLDED	248	Entire survey open (one scoping note exists).
+246	FOLDED	249	Entire spec open.
+247	FOLDED	248	US3/US5 shipped; US1 AMAP, US2 capture, witnesses open.

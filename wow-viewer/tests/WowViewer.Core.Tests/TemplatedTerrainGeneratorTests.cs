@@ -98,4 +98,115 @@ public class TemplatedTerrainGeneratorTests
         Assert.Equal(257, alphaTile.Heightmap.GetLength(1));
         Assert.True(alphaTile.TextureNames.Count >= 3);
     }
+
+    [Fact]
+    public void BiomePalette_AllThemes_UseAuthenticBlpPaths()
+    {
+        foreach (BiomeTheme theme in Enum.GetValues<BiomeTheme>())
+        {
+            BiomePalette palette = BiomePalette.ForTheme(theme);
+            Assert.False(string.IsNullOrWhiteSpace(palette.BaseGroundTexture));
+            Assert.False(string.IsNullOrWhiteSpace(palette.PathTexture));
+            Assert.False(string.IsNullOrWhiteSpace(palette.PlazaFloorTexture));
+            Assert.False(string.IsNullOrWhiteSpace(palette.AccentTexture));
+
+            string[] paths = [palette.BaseGroundTexture, palette.PathTexture, palette.PlazaFloorTexture, palette.AccentTexture];
+            foreach (string path in paths)
+            {
+                Assert.EndsWith(".blp", path, StringComparison.OrdinalIgnoreCase);
+                Assert.StartsWith("TILESET\\", path, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("whitemarble", path, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("elwynngrass.blp", path, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    [Fact]
+    public void GenerateMap_UsesAuthenticModelPaths()
+    {
+        var template = new TerrainMapTemplate
+        {
+            MapName = "AuthenticModelTest",
+            Theme = BiomeTheme.GardenMuseum,
+            TileRows = 1,
+            TileCols = 1,
+            BaseTileX = 32,
+            BaseTileY = 32,
+            PlazaSpacingChunks = 2
+        };
+
+        TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template);
+        LkAdtData tile = result.Tiles[(32, 32)];
+
+        Assert.NotEmpty(tile.ModelNames);
+        foreach (string model in tile.ModelNames)
+        {
+            Assert.True(model.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) ||
+                        model.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase));
+            Assert.StartsWith("World\\", model, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void GenerateMap_WritesMcnrInDiskXzyOrderSoTerrainNormalsPointUp()
+    {
+        var template = new TerrainMapTemplate
+        {
+            MapName = "NormalOrderTest",
+            Theme = BiomeTheme.GardenMuseum,
+            TileRows = 1,
+            TileCols = 1,
+            BaseTileX = 30,
+            BaseTileY = 30,
+            PlazaSpacingChunks = 4
+        };
+
+        TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template);
+        LkAdtData tile = result.Tiles[(30, 30)];
+
+        // Disk MCNR component order is signed X, Z, Y (BlankAdtFactory.CreateUpNormals,
+        // AlphaTerrainAdapter.DecodeNormal). A regression that wrote (X, Y, Z) put the up
+        // component into the horizontal Y axis, so every generated slope shaded on the wrong
+        // side. Decode with the disk order and require the up component to dominate.
+        foreach (LkMcnkData chunk in tile.Chunks)
+        {
+            for (int vertex = 0; vertex < 145; vertex++)
+            {
+                int offset = vertex * 3;
+                float nz = (sbyte)chunk.Normals[offset + 1] / 127f;
+                Assert.True(
+                    nz > 0.5f,
+                    $"Chunk ({chunk.IndexX},{chunk.IndexY}) vertex {vertex} decoded Z={nz:0.000}; " +
+                    "MCNR must be written in disk (X, Z, Y) order so terrain normals point up.");
+            }
+        }
+    }
+
+    [Fact]
+    public void GenerateMap_SynthesizesContinuousFractalReliefInNatureChunks()
+    {
+        var template = new TerrainMapTemplate
+        {
+            MapName = "FractalReliefTest",
+            Theme = BiomeTheme.GardenMuseum,
+            TileRows = 1,
+            TileCols = 1,
+            BaseTileX = 30,
+            BaseTileY = 30,
+            PlazaSpacingChunks = 4
+        };
+
+        TemplatedMapResult result = TemplatedTerrainGenerator.GenerateMap(template);
+        LkAdtData tile = result.Tiles[(30, 30)];
+
+        // Find a pure nature chunk far from plazas and pathways (e.g. index 1, 1 when spacing is 4)
+        LkMcnkData natureChunk = tile.Chunks.First(c => c.IndexX == 1 && c.IndexY == 1);
+
+        // Verify height variation exists (fractal harmonic noise)
+        float min = natureChunk.Heights.Min();
+        float max = natureChunk.Heights.Max();
+        float spread = max - min;
+
+        Assert.True(spread > 0.05f, $"Nature chunk had zero/flat relief (spread: {spread}), expected fractal noise variation.");
+    }
 }

@@ -205,6 +205,12 @@ public static class AdtFormatProfiles
             if (key.Major == 4)
                 return AdtProfile40xUnknown;
 
+            // Clients built after 3.3.5a (12340) use split ADTs whatever their version number says:
+            // retail 5.x+ and the modern Classic lines (1.13+, 1.60 "WoW: Forever", 2.5.x, 3.4.x) all
+            // ship root/tex0/obj0 tiles with MH2O and Cataclysm-style alpha.
+            if (key.Major >= 5 || key.Build > 12340)
+                return AdtProfile40xUnknown;
+
             if (key.Major == 0 && (key.Minor == 6 || key.Minor == 7))
                 return AdtProfile060070Baseline;
         }

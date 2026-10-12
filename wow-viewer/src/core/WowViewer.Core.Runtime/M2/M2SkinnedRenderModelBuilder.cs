@@ -110,7 +110,8 @@ public static class M2SkinnedRenderModelBuilder
         return new M2SkinnedRenderVertex(skinnedPosition, skinnedNormal, vertex.TextureCoords0, vertex.BoneIndices, vertex.BoneWeights);
     }
 
-    private static int ResolveBoneIndex(M2StaticRenderModel renderModel, M2StructuredRenderSection section, int sectionBoneIndex)
+    /// <summary>Model bone index of a vertex's section-local bone index (as used by <see cref="ApplyPose"/>).</summary>
+    public static int ResolveBoneIndex(M2StaticRenderModel renderModel, M2StructuredRenderSection section, int sectionBoneIndex)
     {
         if (sectionBoneIndex < 0)
             return -1;

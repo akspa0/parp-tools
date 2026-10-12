@@ -1,5 +1,7 @@
 # Alpha 0.5.3 Renderer Performance Workstream
 
+> **Owner since 2026-09-23:** Epic 249 (Renderer) — [249-epic-renderer-performance-and-correctness](../specs/249-epic-renderer-performance-and-correctness/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
+
 Last updated: 2026-08-14
 
 This is an evidence/planning note for Spec 150. It does not claim native-client or viewer FPS parity.

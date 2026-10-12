@@ -104,7 +104,15 @@ public static class M2StaticRenderModelBuilder
         }
 
         ushort[] boneLookup = geometry.BoneLookup.Select(static entry => entry.BoneIndex).ToArray();
-        return new M2StaticRenderModel(geometry.Model, compatibilitySections, structuredSections, boneLookup, activeSkinProfile.UsesCompatibilityFallback);
+        ushort[] textureLookup = geometry.TextureLookup.Select(static entry => entry.TextureId).ToArray();
+        return new M2StaticRenderModel(
+            geometry.Model,
+            compatibilitySections,
+            structuredSections,
+            boneLookup,
+            activeSkinProfile.UsesCompatibilityFallback,
+            geometry.Textures,
+            textureLookup);
     }
 
     private static bool TryGetSkinBoneIndices(M2SkinDocument skin, ushort localSkinVertexIndex, out Vector4 boneIndices)

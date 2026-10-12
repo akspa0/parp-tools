@@ -1,6 +1,6 @@
 # Implementation Plan: MdxViewer Migration to wow-viewer
 
-**Branch**: `033-mdxviewer-migration` | **Date**: 2026-05-30 | **Spec**: [spec.md](./spec.md)
+**Branch**: `033-mdxviewer-migration` | **Date**: 2026-05-30 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `wow-viewer/specs/033-mdxviewer-migration/spec.md`
 

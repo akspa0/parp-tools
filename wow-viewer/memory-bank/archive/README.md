@@ -17,3 +17,5 @@
 | `2026-09-06-pre-context-cleanup-active-context.md` | Superseded dashboard before the compact fresh-chat routing pass |
 | `2026-09-06-pre-context-cleanup-progress.md` | Preserved same-day narrative before the compact current ledger |
 | `2026-09-10-pre-cleanup-active-context.md` | Full dashboard before the first real Spec 224 `speckit-cleanup` audit pass; content duplicated `progress.md`'s dated entries |
+| `2026-09-23-pre-reconciliation-active-context.md` | Dashboard immediately before the 2026-09-23 spec reconciliation (claims there were re-audited; e.g. "zone music playback added" was overstated) |
+| `2026-09-23-progress-pre-2026-09-15.md` | `progress.md` entries 2026-09-06 … 2026-09-13, moved out by the reconciliation |

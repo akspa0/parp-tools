@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-06
 
-**START HERE: [`specs/NEXT-DAY-PLAN.md`](../specs/NEXT-DAY-PLAN.md)** — the ordered pass through the
+**START HERE: [`specs/archived/status-history/2026-09-02-next-day-plan.md`](../../specs/archived/status-history/2026-09-02-next-day-plan.md)** — the ordered pass through the
 open specs, with the reasoning for the order. This section is the session summary behind it.
 
 ## Active 2026-09-06 — Spec 223 acceptance remediation; Spec 212 interactive HUD still unimplemented
@@ -19,7 +19,7 @@ open specs, with the reasoning for the order. This section is the session summar
   tests passed 29/29. This proves neither live fog input nor GL WMO rendering, nor ffmpeg invocation,
   output validity, camera-path capture, layout quality, or spatial interaction.
 - **Current target / proof owner:** operator reruns the bounded matrix in
-  [`phase6-validation.md`](../specs/223-ui-consolidation-audit/evidence/phase6-validation.md): all
+  [`phase6-validation.md`](../../specs/archived/223-ui-consolidation-audit/evidence/phase6-validation.md): all
   fog entry points, a known WMO-only map, Playback & Capture with a real ffmpeg output, and compact
   routes. Record root/build/map/ffmpeg/output result. Do not close Phase 6 or update the user guide
   from source evidence alone.
@@ -43,7 +43,7 @@ open specs, with the reasoning for the order. This section is the session summar
 - **OpenSCAD MCP 3D HUD Primitives**:
   - High-fidelity 3D assets generated and committed to `Assets/OpenScad/`: `camera_hud_curved_bezel.off/.scad` (curved visor bezel), `camera_hud_reticle_tactical.off/.scad` (segmented multi-ring reticle), `camera_hud_compass_tape.off/.scad` (graduated cylindrical heading tape).
 - **Spec 212 (3D Spatial UI Shell & Camera HUD)**:
-  - Technical design plan ([`specs/212-spatial-ui-shell/plan.md`](../specs/212-spatial-ui-shell/plan.md)) and task breakdown ([`specs/212-spatial-ui-shell/tasks.md`](../specs/212-spatial-ui-shell/tasks.md)) authored.
+  - Technical design plan ([`specs/archived/212-spatial-ui-shell/plan.md`](../../specs/archived/212-spatial-ui-shell/plan.md)) and task breakdown ([`specs/archived/212-spatial-ui-shell/tasks.md`](../../specs/archived/212-spatial-ui-shell/tasks.md)) authored.
   - Camera-space attachment transform, Tab key visibility toggle (`_hideUiChrome`), and OpenSCAD asset loading defined.
 - **Build & Tests**: Clean build (0 errors, 565 warnings), Core unit tests 16/16 pass.
 
@@ -82,9 +82,9 @@ open specs, with the reasoning for the order. This section is the session summar
 - **Operator accepted the workbench deal with expanded scope**: any TILE, not just any map, bundled
   with copy/paste/rotate, as one right-sidebar **Cartography** feature replacing the phase panel,
   the chunk manipulator (195), and the scattered selection surfaces — multiple layers of tile data
-  from multiple maps. Spec 222 v2 ([spec](../specs/222-map-composition-workbench/spec.md) ·
-  [plan](../specs/222-map-composition-workbench/plan.md) ·
-  [tasks](../specs/222-map-composition-workbench/tasks.md)): footprints AND tile placements drawn
+  from multiple maps. Spec 222 v2 ([spec](../../specs/archived/222-map-composition-workbench/spec.md) ·
+  [plan](../../specs/archived/222-map-composition-workbench/plan.md) ·
+  [tasks](../../specs/archived/222-map-composition-workbench/tasks.md)): footprints AND tile placements drawn
   and dragged on the minimap; transform tools wrap the validated Spec 219 seam (`TileContentTransform`);
   full-channel paste fixes 195's partial-paste defect; old surfaces retired in the same change
   (FR-11). Composition semantics unchanged. **Next: 222-T101.**
@@ -99,7 +99,7 @@ open specs, with the reasoning for the order. This section is the session summar
 - 3D aids on selected doodads: cyan origin octahedron + gold position pin at the MODD point, RGB
   axis tripod through the placement transform, sized from the box. Placeholder (model unloaded)
   bounds draw an ORANGE accent — never readable as real extent. Tasks 211-T501..T505 in
-  [`specs/211-wmo-interior-picking-ghost-wireframe/tasks.md`](../specs/211-wmo-interior-picking-ghost-wireframe/tasks.md);
+  [`specs/archived/211-wmo-interior-picking-ghost-wireframe/tasks.md`](../../specs/archived/211-wmo-interior-picking-ghost-wireframe/tasks.md);
   T505 is the operator's interactive check.
 
 ## Next lane — Spec 221: alpha round-trip — 3 defects fixed, 1 open (2026-09-04)
@@ -116,7 +116,7 @@ open specs, with the reasoning for the order. This section is the session summar
   through pack256→LK→pack256 proves at least one more defect; suspect the nearest-upsample
   `y*16/64` mapping in `SliceChunkAlphaBytes` or layer-span inference in `LkToAlphaConverter`).
   Also known: the Alpha→LK leg consumes the LOSSY 256 pack (4× alpha resolution loss by design).
-- Evidence with the full defect trail: [`specs/221-converter-validation-harness/evidence/phase0-baseline.md`](../specs/221-converter-validation-harness/evidence/phase0-baseline.md).
+- Evidence with the full defect trail: [`specs/archived/221-converter-validation-harness/evidence/phase0-baseline.md`](../../specs/archived/221-converter-validation-harness/evidence/phase0-baseline.md).
 - **Next bounded step**: one focused debug pass on the pinned test (its synthetic fixture isolates
   the chain — no MPQ needed); then 221-T101 object corpus validator. Do not widen scope past the
   pinned test's chain until it is green.
@@ -125,7 +125,7 @@ open specs, with the reasoning for the order. This section is the session summar
 
 - Operator follow-up to 211's doodad picking: edit MODD placements (move/rotate/scale/add/delete),
   author MODS doodad sets, save the WMO back in the opened file's version. Full Spec Kit trio at
-  [`specs/220-wmo-doodad-editing/`](../specs/220-wmo-doodad-editing/spec.md); registered in STATUS.md.
+  [`specs/archived/220-wmo-doodad-editing/`](../../specs/archived/220-wmo-doodad-editing/spec.md); registered in STATUS.md.
 - Feasibility measured before writing: V17 canonical read model, a V14 root writer
   (`WmoV17ToV14Converter.WriteWmoV14`), MODD/MODS/MODN detail readers, Core.Editor ops+undo patterns,
   and 211's selection pipeline all already exist — the spec composes them, no forks, readers frozen.
@@ -289,7 +289,7 @@ MCLQ coverage**, creating empty waterline strips along coastlines (23,192 cells 
 (mean ΔH = 0.00).
 
 **Spec 208 — Cross-Map Transplant Phase 0 Complete.** Completed technical audit & reconciliation
-([`evidence/phase0-reconciliation.md`](../specs/208-cross-map-tile-transplant/evidence/phase0-reconciliation.md)):
+([`evidence/phase0-reconciliation.md`](../../specs/archived/208-cross-map-tile-transplant/evidence/phase0-reconciliation.md)):
 (1) Map identity enters at source chunkReader and target MCLY texture re-mapping boundaries. (2) Source
 inspection proved 195 fails to rotate normals, placement rotations, and placement relative positions
 (defect in 195 to fix there). (3) Reconciled `ChunkTranspositionOptions` directly onto `PhaseDataChannel`
@@ -382,13 +382,13 @@ writing + scoring + baseline + the visual A/B.
   transcribing its algorithms would make this a derivative of Blizzard's engine. Library selection and
   license verification are `plan.md` deliverables, and cloth must be a selection criterion rather than
   a discovery. The client culls physics by distance, so an unbudgeted implementation is both
-  unfaithful and a frame-cost regression on top of a known one. The new [`plan.md`](../specs/214-mop-physics-domino/plan.md),
-  [`research.md`](../specs/214-mop-physics-domino/research.md), [`data-model.md`](../specs/214-mop-physics-domino/data-model.md),
-  contract, quickstart, and [`tasks.md`](../specs/214-mop-physics-domino/tasks.md) enforce the format/solver gate:
+  unfaithful and a frame-cost regression on top of a known one. The new [`plan.md`](../../specs/archived/214-mop-physics-domino/plan.md),
+  [`research.md`](../../specs/archived/214-mop-physics-domino/research.md), [`data-model.md`](../../specs/archived/214-mop-physics-domino/data-model.md),
+  contract, quickstart, and [`tasks.md`](../../specs/archived/214-mop-physics-domino/tasks.md) enforce the format/solver gate:
   read-only caller attribution, adapter-to-model-sidecar discovery, real-client manifest, and exact-version
   BepuPhysics/Jitter2 license + deterministic-cloth evaluation. **No parser, package, simulation, cloth,
   or viewer path starts first.**
-  **Current-source audit complete:** [`current-implementation-audit.md`](../specs/214-mop-physics-domino/evidence/current-implementation-audit.md)
+  **Current-source audit complete:** [`current-implementation-audit.md`](../../specs/archived/214-mop-physics-domino/evidence/current-implementation-audit.md)
   confirms `M2ModelDocument.HasPhysicsSidecar` is unconsumed metadata and MDX `CLID`, camera collision,
   and particle gravity are unrelated adjacent paths. **Landed policy slice:** `PhysicsRuntimePolicy.cs`
   reuses `ClientBuildKey` for exact 0.5.3.3368 disabled / exact 5.0.1.15464 enabled / all others
@@ -418,8 +418,8 @@ writing + scoring + baseline + the visual A/B.
   was built from **header-string xrefs, not ~90 decompilations**, which is far cheaper but sees 58
   functions where the direct-xref count sees ~90; the delta is call sites in Ghidra-undefined regions
   and hoisted string operands, and is recorded rather than papered over. Evidence:
-  [`domino-caller-map.md`](../specs/214-mop-physics-domino/evidence/domino-caller-map.md),
-  [`physics-adapter-contract.md`](../specs/214-mop-physics-domino/evidence/physics-adapter-contract.md).
+  [`domino-caller-map.md`](../../specs/archived/214-mop-physics-domino/evidence/domino-caller-map.md),
+  [`physics-adapter-contract.md`](../../specs/archived/214-mop-physics-domino/evidence/physics-adapter-contract.md).
   **T007 solver selection also PASSED 2026-09-03: Jitter2 2.8.10, BepuPhysics v2 rejected.** Not on
   licensing — Apache-2.0 was acceptable — but because Bepu has **no cloth/soft-body support and no
   determinism evidence**, the two properties this feature exists to deliver. Jitter2 is **MIT**
@@ -433,7 +433,7 @@ writing + scoring + baseline + the visual A/B.
   not "call a supported Cloth class". Saying that plainly now is the whole point of making cloth a
   selection criterion. **No package reference was added** — Phase 3, needs operator go-ahead.
   **Open risk: shoulder and weld joints have no obvious Jitter2 counterpart**; only spherical maps
-  cleanly. Evidence: [`solver-selection.md`](../specs/214-mop-physics-domino/evidence/solver-selection.md).
+  cleanly. Evidence: [`solver-selection.md`](../../specs/archived/214-mop-physics-domino/evidence/solver-selection.md).
   **Both Phase 0 gates are now answered. US1 is closed** (T006 contract + T008 review: PASS, with
   SC-002's line-level attribution recorded as a **partial** and recommended for acceptance —
   Domino-internal line numbers have no consumer, since we never reproduce those algorithms, so
@@ -462,7 +462,7 @@ writing + scoring + baseline + the visual A/B.
   already tasked at 72 tasks / 8 phases. Weather drives them through interfaces; FR-015 forbids a
   parallel model. Wind is its own interface, the single join with 214, so neither blocks the other.
   **Next: speckit-plan.**
-- **[`workstream-atmosphere-501-ghidra.md`](workstream-atmosphere-501-ghidra.md)** — shared 5.0.1
+- **[`workstream-atmosphere-501-ghidra.md`](../workstream-atmosphere-501-ghidra.md)** — shared 5.0.1
   native evidence (physics, weather, sky, light, fog anchors + the Light\* DBC chain), consumed by
   214, 215, **and** 160/147/143. Read-only Ghidra session; the program was opened but nothing was
   edited. Carries the era warning: **5.0.1 is the complete implementation and is not evidence about
@@ -527,7 +527,7 @@ field and gate their vertex-block switch on `Resolved` (`Mh2oChunk.Parse` is the
 each unresolved value once (FR-004). 15 new tests including a two-decoder parity test; full
 Core.Tests 1282 passed with the same 9 pre-existing failures. **Proof owner: operator** — load
 `HawaiiMainLand` and confirm the waterways slope and the chunk-boundary steps are gone. Evidence:
-[`phase1-dbc-chain-verified.md`](../specs/205-mh2o-liquid-object-vertex-format/evidence/phase1-dbc-chain-verified.md).
+[`phase1-dbc-chain-verified.md`](../../specs/archived/205-mh2o-liquid-object-vertex-format/evidence/phase1-dbc-chain-verified.md).
 
 **Spec 206 — Zarr-first asset residency (NEW, drafted 2026-09-01).** Operator asked for the render
 data to live in a Zarr dataset from the start instead of a cache folder, as a universal interchange
@@ -560,8 +560,8 @@ Fix is the DBC chain `LiquidObject → LiquidType → LiquidMaterial → LVF`; n
 `LiquidObject` nor `LiquidMaterial` has a reader yet, and the offsets are wiki-documented and
 **unverified against this client** (Phase 1 gate). The float-plausibility probe that made the
 diagnosis is **not** acceptable as the decoder — 0.3% false positives on ocean.
-See [`specs/205-mh2o-liquid-object-vertex-format/`](../specs/205-mh2o-liquid-object-vertex-format/spec.md).
-Tool: [`AdtLiquidFormatSupport.cs`](../tools/inspect/WowViewer.Tool.Inspect/AdtLiquidFormatSupport.cs).
+See [`specs/archived/205-mh2o-liquid-object-vertex-format/`](../../specs/archived/205-mh2o-liquid-object-vertex-format/spec.md).
+Tool: [`AdtLiquidFormatSupport.cs`](../../tools/inspect/WowViewer.Tool.Inspect/AdtLiquidFormatSupport.cs).
 
 **204 — Off-thread asset decode (do second).** `DeferredAssetLoads` owns 12 of 13 recent
 hitches at 26.4–68.1 ms on a 2048-frame MoP flight (median 75.26, p95 144.59, p99 235.37,
@@ -576,7 +576,7 @@ which nothing read until today (now surfaced in the frame panel). The CPU thrott
 **without reducing the hitch**, a self-reinforcing spiral. **Phase 1 is a hard gate**: GL
 objects live on static fields and `MdxTextureDiagnosticLogger` is a process-global
 `StreamWriter` re-opened per model from a renderer constructor.
-See [`specs/204-off-thread-asset-decode/`](../specs/204-off-thread-asset-decode/spec.md).
+See [`specs/archived/204-off-thread-asset-decode/`](../../specs/archived/204-off-thread-asset-decode/spec.md).
 
 **202 T301 — Native-M2 instancing (do third).** Batching still reports `route requires
 unbatched render` for every M2. Cause: `WowViewerM2RuntimeBridge.PreferNativeStaticRenderer`
@@ -620,7 +620,7 @@ PTCH/BSDIFF patch artifacts, and the viewer fed them raw to `ParseAdt` (zero
 already-reconstructed bytes — the load-complete callback `FUN_00BB70F0`
 (`MapAdtFileData.cpp`) stores final `(fileData, size)`; the cache helpers
 (`FUN_00BB71B0`, `FUN_00BB7C80`) are pure hash-table plumbing. Fix shipped:
-[`AdtPatchArtifact.cs`](../src/core/WowViewer.Core.IO/Maps/AdtPatchArtifact.cs)
+[`AdtPatchArtifact.cs`](../../src/core/WowViewer.Core.IO/Maps/AdtPatchArtifact.cs)
 (PTCH parse + BSDIFF40 apply + MD5-matched base selection), `ReadFileCopies`
 base-copy enumeration on `IDataSource`/`MpqDataSource`/`IArchiveCatalog`, and a
 reconstruction hook in `StandardTerrainAdapter.LoadMapTile` for root + tex/obj
@@ -628,16 +628,16 @@ companions (failure logs Important and treats the file as missing). 7 new tests
 in `AdtPatchArtifactTests.cs`; focused run 12/12 passed; full Core.Tests 1245
 passed with 9 pre-existing failures verified identical at HEAD (disjoint
 modules). Evidence note:
-[`5.0.1-adt-ptch-patch-artifacts.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-adt-ptch-patch-artifacts.md).
+[`5.0.1-adt-ptch-patch-artifacts.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-adt-ptch-patch-artifacts.md).
 **Proof owner: user** — reload Thunder Isle from MoPBeta and confirm missing
 tiles render plus `Reconstructed patched ADT` log lines. Out of scope: multi-step
 patch-chain base synthesis, patched-WDT reconstruction, editing patched companions.
 
 **Spec 197 implementation handoff (2026-08-31).** The read-only 5.0.1 native
 evidence has been written into the focused
-[`5.0.1-dead-dormant-partial-rendering.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md)
+[`5.0.1-dead-dormant-partial-rendering.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/evidence/5.0.1-dead-dormant-partial-rendering.md)
 note and consolidated
-[`wow-5.0.1-adt-wdt-definitive.md`](../docs/architecture/wow-5.0.1-adt-wdt-definitive.md)
+[`wow-5.0.1-adt-wdt-definitive.md`](../../docs/architecture/wow-5.0.1-adt-wdt-definitive.md)
 guide. The liquid geometry factory default branch is classified as partial;
 DepthCache/GBuffer as capability-gated; atlas, doodad batching, particle
 batching, and water-detail settings as optional/configuration paths; and terrain
@@ -658,7 +658,7 @@ and a slot-aware native split writer.
 plugin is healthy and serves the `Mists of Pandaria 5.0.1.15464` project with
 `Wow.exe` over `http://127.0.0.1:8089`; its status dialog reports UDS and TCP
 running, version 6.0.0, and 222 endpoints. The broken part was only the local
-MCP launcher: both [`.mcp.json`](../../.mcp.json) and [`.roo/mcp.json`](../../.roo/mcp.json)
+MCP launcher: both [`.mcp.json`](../../../.mcp.json) and [`.roo/mcp.json`](../../../.roo/mcp.json)
 pointed at a nonexistent Ghidra `.venv` and passed the unsupported
 `--ghidra-server` option. Installed `ghidra_mcp_bridge-6.0.0` with `uv tool
 install`; both configs now launch the installed `bridge-mcp-ghidra.exe` with
@@ -668,7 +668,7 @@ project, and registers the live schema (221 tools observed during startup;
 the Ghidra endpoint itself reports 222). Program proof: `Wow.exe`, PE x86,
 image base `0x00400000`, 38,405 functions, 175,352 symbols, 790 data types,
 and 766 `.cpp`-matching strings. The first T117 evidence pass is now recorded in
-[`research-ghidra-5.0.1.md`](../specs/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md:173).
+[`research-ghidra-5.0.1.md`](../../specs/archived/197-workspace-profiles-editor-and-mop-adt-pipeline/research-ghidra-5.0.1.md:173).
 Native 5.0.1 requires `MVER == 0x12`, builds root + one selected
 `_obj0`/`_obj1` and `_tex0`/`_tex1` companion pair, requires 256 outer MCNK
 records in every file-data object, consumes the 128-byte MCNK header only in
@@ -716,8 +716,8 @@ semantics remain gated on further review.
 3. **Restored Terrain Export Pipeline**: Implemented `StratigraphyTileExporter` and connected in-viewer ADT / Alpha WDT export with zero runtime loss.
 4. **Corpus-Wide CLI Tooling**: Authored `TerrainStratigraphyScanCommand` in `WowViewer.Tool.Inspect` (`terrain-stratigraphy-scan`) emitting structured `stratigraphy_manifest.json` + `stratigraphy_summary.csv`, and `TerrainStratigraphyPatchCommand` in `WowViewer.Tool.Converter` (`terrain-stratigraphy-patch`) for offline batch patching.
 5. **Validation**: 10/10 stratigraphy unit tests passing 100% green (`StratigraphyLevelAnalyzerTests`, `TemporalMeshRestorerTests`). Solution builds with 0 errors across both Windows and Cross-Platform configurations.
-1. **Spec Kit Architecture Pack Authored**: Created [`specs/193-benilla-112-client-reference/`](file:///I:/parp/parp-tools/wow-viewer/specs/193-benilla-112-client-reference/) with `spec.md`, `research.md`, `plan.md`, and `tasks.md` defining the role of [Benilla (`samwhosung/benilla`)](https://github.com/samwhosung/benilla) as an active clean-room Rust 1.12.1 reference/oracle for 1.x M2 model parsing (`MD20 0x100`), embedded skin view unpacking (`ofsViews`), submesh partitions, material blend states, and forward kinematics while maintaining 100% native C# tooling.
-2. **Cross-Spec Reference Links**: Registered Spec 193 in `specs/STATUS.md` and added reference documentation in `specs/104-legacy-m2-rendering/research.md` and `specs/154-m2-era-reader-parity/research.md`.
+1. **Spec Kit Architecture Pack Authored**: Created [`specs/archived/193-benilla-112-client-reference/`](file:///I:/parp/parp-tools/wow-viewer/specs/archived/193-benilla-112-client-reference/) with `spec.md`, `research.md`, `plan.md`, and `tasks.md` defining the role of [Benilla (`samwhosung/benilla`)](https://github.com/samwhosung/benilla) as an active clean-room Rust 1.12.1 reference/oracle for 1.x M2 model parsing (`MD20 0x100`), embedded skin view unpacking (`ofsViews`), submesh partitions, material blend states, and forward kinematics while maintaining 100% native C# tooling.
+2. **Cross-Spec Reference Links**: Registered Spec 193 in `specs/STATUS.md` and added reference documentation in `specs/archived/104-legacy-m2-rendering/research.md` and `specs/archived/154-m2-era-reader-parity/research.md`.
 
 **Cross-Platform ImGui File/Folder Picker & Dual-Era Generator lane (2026-08-30, checkpoint 44).** Cross-Platform BCL ImGui File Browser & Dual-Era Map Output — COMPLETE:
 1. **Cross-Platform In-App ImGui File Browser**: Upgraded `ImGuiPathPicker` into a full-featured BCL (`System.IO`)-based in-app modal file and folder browser supporting `OpenFolder`, `OpenFile`, and `SaveFile` modes. Features drive shortcuts (`[C:]`, `[D:]`, `[H:]`, `[I:]`), `[CLIENTS (H:)]` and `[App Directory]` quick navigation, editable path bar, breadcrumbs, search filtering, inline folder creation (`+ New Folder`), and multi-extension filter parsing (e.g. `".pm4;.pd4"`, `".wdt;.mpq"`, `".json"`).
@@ -937,7 +937,7 @@ vertex layout is interleaved 9-8 rows, not row-major 17×17; painter now mirrors
 Output is now a standalone map (`{map}.wdt` with MCCV flag, flat `{map}.wdl`, optional `--pm4-dir`
 PM4 copies); existing files never overwritten. 5 focused tests pass; solution builds clean; 9
 pre-existing unrelated Core.Tests failures remain. Spec:
-[190-rosetta-calibration-corpus](../specs/190-rosetta-calibration-corpus/spec.md). Next: user re-runs
+[190-rosetta-calibration-corpus](../../specs/archived/190-rosetta-calibration-corpus/spec.md). Next: user re-runs
 `rosetta-generate` into a fresh output dir and confirms objects render + labels legible (user-owned),
 then US2 reference-library builder.
 
@@ -971,7 +971,7 @@ fix. The instrumentation landed; the measurement has not been taken.**
 
 - **Next bounded action, user-owned:** fly Stormwind, open Utilities > Perf > **"WMO admission (this
   frame)"**, and record the numbers into
-  [Spec 151 research.md](../specs/151-portal-game-mode-surface/research.md). The panel names the
+  [Spec 151 research.md](../../specs/archived/151-portal-game-mode-surface/research.md). The panel names the
   dominant rule. **Do not change an admission rule before that reading exists.**
 - **Confirmed by the Stormwind capture (2048 frames), taken after the Spec 153 fixes:**
   `PrepareObjectPhase` max **283.4 → 2.5 ms** and gone from the hitch list; `SceneMaintenance` max
@@ -1004,7 +1004,7 @@ fix. The instrumentation landed; the measurement has not been taken.**
 ---
 
 **Spec 153 detail (shipped in v0.5.2.1, confirmed by capture).** Full numbers and both capture
-tables are in [Spec 153 research.md](../specs/153-renderer-hitch-and-batching/research.md).
+tables are in [Spec 153 research.md](../../specs/archived/153-renderer-hitch-and-batching/research.md).
 
 - **Defect A was `AudioRuntime.Update`, and it was never audio.** `RefreshEmitterDiagnosticsIfDue`
   rebuilt an `AudioTriggerDiagnostic` per resident emitter (5565) on a **wall-clock 250 ms** timer on

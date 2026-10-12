@@ -1,4 +1,4 @@
-# Workspace Instructions & Multi-LLM Routing Guide
+# Workspace Instructions & Agent Guidelines
 
 These instructions apply to `I:/parp/parp-tools` and its active projects. Keep this file
 operational, clear, and actionable across all LLM models and agent harnesses (Codex, Claude,
@@ -19,48 +19,16 @@ Use **Spec Kit / Specify** for all design and implementation planning: **specify
 
 ---
 
-## 2. Multi-LLM Model & Agent Routing Matrix
+## 2. Sub-Agent Strategy & General Rules
 
-### General Rule: NEVER USE TERRA
-Never route implementation, planning, exploration, or review to Terra.
-
-### Model-Specific Routing Profiles
-
-| LLM Family / Ecosystem | Planning & Review Role | Implementation & Sub-Agent Role | Recommended Effort / Parameters |
-|---|---|---|---|
-| **Codex / OpenAI** | **Sol** (Planning / Review) | **Luna** (Implementation) | Sol at **High / Extra-High**; Luna at **Extra-High / Max**. Sol returns review findings only; Luna remediates. |
-| **Anthropic Claude** | **Claude Opus** (Master Architecture & Guidance) | **Claude Sonnet** (Sub-agents & Implementation) | Opus provides global plan/review; Sonnet sub-agents run focused slices. |
-| **Google Gemini** | **Gemini 3.7 Flash** | **Gemini 3.7 Flash** | Use **High Effort / Thinking High** across all Gemini primary tasks and subagents. |
-| **DeepSeek** | **DeepSeek Pro / Reasoner (v4 via OpenRouter)** | **DeepSeek Flash (v4 via OpenRouter)** | DeepSeek Pro v4 owns architectural planning & review; DeepSeek Flash v4 executes implementation & sub-agents. |
-
-### Hybrid / Cross-Model Workflow
-When operating across multiple tools or models:
-1. **Plan & Specify**: Plan with **DeepSeek Pro (v4)**, **Claude Opus**, or **Sol High**.
-2. **Execute & Remediate**: Implement separately with **DeepSeek Flash (v4)**, **Luna (Max)**, **Claude Sonnet**, **Gemini 3.7 Flash (High)**, or **ChatGPT/Codex**.
-3. **Review & Gate**: Review against the plan before closing the phase or passing to the operator.
-
-### Codex / Standard Review Loop
-```text
-[Planning] Sol (High/Extra-High) -> plan.md / tasks.md
-    ↓
-[Implementation] Luna (Max) implements phase
-    ↓
-[Focused Verification] Run unit/integration tests for changed owner
-    ↓
-[Scope Gate] Run affected project test suites
-    ↓
-[Review] Sol reviews diff + done-when criteria
-    ↓
-CHANGES REQUIRED → Luna remediates → focused verification → re-review (max 6 cycles)
-BLOCKED          → Stop and report to operator
-PASS             → Report completion / await operator approval (Do not self-merge)
-```
+- **Sub-Agent Strategy**: Use sub-agents at low effort thinking when possible to accomplish complex tasks.
+- **General Rule: NEVER USE TERRA**: Never route implementation, planning, exploration, or review to Terra.
 
 ---
 
 ## 3. Sub-Agent Execution Guidelines
 
-- Use sub-agents by default for independent, safely parallelizable discovery, analysis, focused
+- Use sub-agents by default at low effort thinking for independent, safely parallelizable discovery, analysis, focused
   verification, or bounded implementation slices. Look for these opportunities before starting
   the main work, and run independent slices in parallel when that improves throughput.
 - **Disjoint Scopes**: Give each sub-agent an explicit question or deliverable and a strictly bounded
@@ -154,7 +122,8 @@ Never claim runtime, visual, FPS, GPU, audible, or real-client proof from compil
 
 ## 9. Governance — Scope Fidelity, Receipts & Spec Hygiene (Spec 224; added 2026-09-06)
 
-Owner spec: `wow-viewer/specs/224-speckit-governance/spec.md`. These rules are **binding on every
+Owner: Epic 251 (`wow-viewer/specs/251-epic-viewer-ux-and-code-health/spec.md`, item U-02); origin
+spec `wow-viewer/specs/archived/224-speckit-governance/spec.md`. These rules are **binding on every
 agent and harness**. Violating them is a process failure, not a style choice.
 
 ### 9.1 Scope freeze
@@ -187,23 +156,33 @@ the spec in the same change or add a dated amendment note. Code and spec agree a
   active registry; implemented-spec detail is not reloaded into session context.
 - Run the `speckit-cleanup` skill on the first session of each month (or on operator request): audit
   tasks against real code, un-check receipt-less tasks, archive closed specs, compress memory banks,
-  update the ledger below, and write a dated report under `specs/224-speckit-governance/evidence/`.
+  update the ledger below, and write a dated report under
+  `specs/251-epic-viewer-ux-and-code-health/evidence/` (reports before 2026-09-23 live under
+  `specs/archived/224-speckit-governance/evidence/`).
 
 **Cleanup ledger**
-- Last cleanup: 2026-09-11 (224-T201 receipt/symbol audit **COMPLETE** — all 5 active specs carrying
+- Last cleanup: 2026-09-23 — full reconciliation (operator-directed): 137 specs audited against code;
+  16 complete, 104 folded, 13 superseded, 4 cold; all archived to `specs/archived/` and replaced by
+  Epics 248–254; backlog awaiting operator triage in `specs/TRIAGE.md`. Receipt:
+  `specs/archived/reconciliation-2026-09-23/README.md`.
+- Previous: 2026-09-11 (224-T201 receipt/symbol audit **COMPLETE** — all 5 active specs carrying
   checked tasks audited). 227 clean (2026-09-10); 232 had 8 stale checks corrected to `[ ]`
   (2026-09-10); 233 clean (3/3 receipts, 14 checks verified); 231 clean (0 un-checked — T001
   contradiction resolved to PASS via `inventory-v3-baseline.md`, T074 flagged as
   "receipt not in evidence/"); **223 had 16 receipt-less pre-§9.2 checks un-checked** (T101–T107,
   Gate A, T201, T202, T301, T302, Gate B, T401, T501, T502) and listed for operator decision.
-  See `specs/224-speckit-governance/evidence/cleanup-2026-09-11.md`.
+  See `specs/archived/224-speckit-governance/evidence/cleanup-2026-09-11.md`.
 - Next cleanup due: 2026-10-01 (monthly cadence)
 
 ---
 
 ## 10. Source Decomposition — God-Class Freeze (Spec 228; added 2026-09-06)
 
-Owner spec: `wow-viewer/specs/228-source-decomposition/spec.md`. The `ViewerApp_*` partial-class
+Owner: Epic 251 item U-01 (origin spec `wow-viewer/specs/archived/228-source-decomposition/spec.md`;
+measured 2026-09-23: `WorldScene.cs` 17,153 lines, `ViewerApp.cs` 16,746 lines; re-measured 2026-09-25 after
+U-01 E1/E3 and the ViewerApp campaign: `WorldScene.cs` 8,326, whole `ViewerApp` partial class 2,512 lines in 6 files;
+2026-09-26 after E4: `WorldScene.cs` 8,275;
+2026-09-27 after Spec 255 W0–W7: `WorldScene.cs` 4,922). The `ViewerApp_*` partial-class
 split FAILED to contain growth: partial classes share one state space, so every session still loads
 ~33k lines of god-class context. Binding rules:
 
@@ -218,11 +197,11 @@ split FAILED to contain growth: partial classes share one state space, so every 
 
 ---
 
-## 11. UI Standardization (Spec 227; added 2026-09-06)
+## 11. UI Standardization (Spec 227; added 2026-09-06; owner now Epic 251 items U-10–U-19)
 
 - Every sidebar/workbench surface uses the `SharedUiWidgets` primitives — no bespoke section
   styling. A styling mismatch (e.g., Archaeology) is a defect, not a theme.
 - Every data surface has exactly one authoritative home (Spec 223 FR-3); the
-  [UI re-audit](wow-viewer/specs/227-ui-reaudit/spec.md) inventory v2 is the enforcement artifact.
+  [UI re-audit](wow-viewer/specs/archived/227-ui-reaudit/spec.md) inventory v2 is the enforcement artifact.
 - New UI features must register a row in the inventory (Spec 223 FR-9) AND follow §10 (owned
   service class) in the same change.

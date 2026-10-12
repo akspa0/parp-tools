@@ -1,0 +1,216 @@
+using ImGuiNET;
+using WoWViewer.Audio;
+using WoWViewer.Terrain;
+using WowViewer.Core.Audio;
+using static WoWViewer.ViewerApp;
+
+namespace WoWViewer;
+
+/// <summary>
+/// Audio panel: zone ambience/music and sound-emitter controls.
+/// Viewer controls for proving the active client's resident audio path.
+/// This is intentionally a small diagnostic surface; camera transport and
+/// MIDI/DLS synthesis remain separate Spec 148 slices.
+/// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
+/// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
+/// names the moved code used inside ViewerApp, so no moved body was edited.
+/// </summary>
+internal sealed partial class AudioPanelService
+{
+    private readonly IViewerAppHost _host;
+
+    internal AudioPanelService(IViewerAppHost host)
+    {
+        _host = host;
+    }
+
+    // Host bridge: see AudioPanelService.Host.cs.
+
+    private int _audioPreviewSoundEntryId;
+    private bool _audioPreviewLoop = true;
+    private float _audioMasterGain = 1f;
+    private float _audioEmitterGain = 1f;
+    private string _audioPanelMessage = "Select a resident SoundEntries ID or enter one manually.";
+
+    internal void DrawAudioContent()
+    {
+        WorldScene? scene = _worldScene;
+        if (scene is null)
+        {
+            ImGui.TextDisabled("Load a world to configure client audio.");
+            return;
+        }
+
+        ImGui.TextWrapped(scene.AudioStatus);
+        ImGui.TextWrapped($"Area music: {scene.AreaMusicStatus}");
+
+        bool areaMusicEnabled = scene.AreaMusicPlaybackEnabled;
+        if (ImGui.Checkbox("Enable Zone/WMO Music Playback", ref areaMusicEnabled))
+            scene.SetAreaMusicPlaybackEnabled(areaMusicEnabled);
+        ImGui.SameLine();
+        if (ImGui.Button("Play Now##ZoneMusic"))
+            scene.PlayAreaMusicNow();
+        ImGui.SameLine();
+        if (ImGui.Button("Stop##ZoneMusic"))
+            scene.StopAreaMusicNow();
+
+        if (!scene.AreaMusicPlaybackEnabled)
+            ImGui.TextDisabled("Zone/WMO music playback is paused/muted; check box or click 'Play Now' to start.");
+        ImGui.Text(scene.AudioMuted ? "Output: MUTED" : "Output: ON");
+        ImGui.Text($"Resident emitters: {scene.ResidentAudioEmitterCount}  |  Active: {scene.ActiveAudioEmitterCount}");
+        ImGui.Text($"SoundEntries rows: {scene.ResolvedAudioSoundEntryCount}  |  SoundWaterType rows: {scene.ResolvedAudioSoundWaterTypeCount}");
+
+        bool worldTriggersEnabled = scene.AudioWorldTriggersEnabled;
+        if (ImGui.Checkbox("Enable MCSE/MCNK world triggers", ref worldTriggersEnabled))
+            scene.SetAudioWorldTriggersEnabled(worldTriggersEnabled);
+        ImGui.TextDisabled("Off by default: resident rows remain inspectable, but looping world samples do not start automatically.");
+
+        bool showEmitterMarkers = scene.ShowAudioEmitterMarkers;
+        if (ImGui.Checkbox("Show 3D sound-emitter markers", ref showEmitterMarkers))
+            scene.ShowAudioEmitterMarkers = showEmitterMarkers;
+        ImGui.TextDisabled("Amber = MCSE speaker; cyan = MCNK water; purple = MCNK environment. Markers never start audio.");
+        if (showEmitterMarkers)
+            ImGui.Text($"Visible resident markers: {scene.AudioEmitterMarkers.Count}");
+
+        if (scene.AudioBackendReady)
+            ImGui.TextColored(new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f), "OpenAL backend ready");
+        else
+            ImGui.TextColored(new System.Numerics.Vector4(1f, 0.65f, 0.35f, 1f), "OpenAL backend unavailable");
+
+        ImGui.Separator();
+        ImGui.Text("Emitter diagnostics");
+        ImGui.TextDisabled("This inspects resident MCSE and MCNK liquid/environment records without starting audio sources.");
+        if (ImGui.Button("Refresh decisions"))
+            scene.RefreshAudioEmitterDiagnostics(probeFiles: false);
+        ImGui.SameLine();
+        if (ImGui.Button("Probe current emitters"))
+            scene.RefreshAudioEmitterDiagnostics(probeFiles: true);
+
+        // This panel is the only consumer of the diagnostics list, and the rebuild is gated on being
+        // observed — it cost a 283 ms render-thread stall four times a second when it was
+        // unconditional. Declaring the read here is what keeps the rows live while the panel is up.
+        scene.NoteAudioEmitterDiagnosticsObserved();
+        IReadOnlyList<AudioTriggerDiagnostic> diagnostics = scene.AudioEmitterDiagnostics;
+        ImGui.Text($"Trigger rows near camera: {diagnostics.Count}"
+            + $"   (scanned {scene.AudioScannedEmitterCount}, in range {scene.AudioInRangeEmitterCount})");
+        ImGui.TextDisabled($"Scoped to the camera tile +/-{WorldAudioRuntime.AudibleTileRadius}; distant streamed tiles are not audible and are not listed.");
+
+        // Settles whether MCSE positions are actually chunk-local, which is what ConvertSoundPosition
+        // assumes without evidence. If they are not, every MCSE emitter is thrown off-map and reads
+        // as permanently out of range, while MCNK liquid rows keep working because their positions
+        // never pass through that transform.
+        McseFrameEvidence frame = scene.AudioMcseFrame;
+        if (frame.SampleCount > 0)
+        {
+            bool frameLooksWrong = frame.WithinChunkBounds < frame.SampleCount;
+            ImGui.TextColored(
+                frameLooksWrong ? new System.Numerics.Vector4(1f, 0.55f, 0.2f, 1f)
+                                : new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f),
+                $"MCSE frame: {frame.Verdict}");
+            ImGui.TextDisabled(
+                $"raw X [{frame.MinX:0.#}..{frame.MaxX:0.#}]  Y [{frame.MinY:0.#}..{frame.MaxY:0.#}]  Z [{frame.MinZ:0.#}..{frame.MaxZ:0.#}]"
+                + $"   chunk edge {McseFrameEvidence.ChunkEdge:0.##}, tile edge {McseFrameEvidence.TileEdge:0.##}");
+        }
+        if (ImGui.BeginChild("##audio_emitter_diagnostics", new System.Numerics.Vector2(0f, 250f), true))
+        {
+            foreach (AudioTriggerDiagnostic diagnostic in diagnostics)
+            {
+                System.Numerics.Vector4 color = diagnostic.TerminalState switch
+                {
+                    AudioTriggerTerminalState.Active or AudioTriggerTerminalState.Ready
+                        => new System.Numerics.Vector4(0.45f, 0.9f, 0.55f, 1f),
+                    AudioTriggerTerminalState.OutOfRange or AudioTriggerTerminalState.Muted
+                        or AudioTriggerTerminalState.Disabled
+                        => new System.Numerics.Vector4(0.85f, 0.8f, 0.35f, 1f),
+                    _ => new System.Numerics.Vector4(1f, 0.45f, 0.35f, 1f)
+                };
+
+                ImGui.TextColored(
+                    color,
+                    $"{diagnostic.TerminalState}  {diagnostic.TriggerKind}  SoundPoint={diagnostic.SoundPointId} SoundName={diagnostic.SoundNameId}");
+                ImGui.Text(
+                    $"Tile=({diagnostic.TileX},{diagnostic.TileY}) Chunk=({diagnostic.ChunkX},{diagnostic.ChunkY}) " +
+                    $"Distance={diagnostic.DistanceToListener:F1}/{diagnostic.MaxDistance:F1}");
+                ImGui.TextWrapped(
+                    $"Raw XYZ=({diagnostic.RawPosition.X:F1}, {diagnostic.RawPosition.Y:F1}, {diagnostic.RawPosition.Z:F1})  " +
+                    $"World XYZ=({diagnostic.WorldPosition.X:F1}, {diagnostic.WorldPosition.Y:F1}, {diagnostic.WorldPosition.Z:F1})");
+                ImGui.TextWrapped(
+                    $"Profile={diagnostic.CoordinateProfile}  Source={diagnostic.ResourceSource}  " +
+                    $"Read={(diagnostic.BytesRead ? "yes" : "no")}  Decode={diagnostic.DecodeStatus}");
+                if (diagnostic.TriggerKind == AudioTriggerKind.McnkLiquid)
+                    ImGui.TextWrapped($"MCNK flags=0x{diagnostic.McnkFlags:X8}  LiquidFamily={diagnostic.LiquidFamily}  SoundSubtype={diagnostic.SoundWaterSubtype}");
+                if (!string.IsNullOrWhiteSpace(diagnostic.SelectedVirtualPath))
+                    ImGui.TextWrapped($"Path: {diagnostic.SelectedVirtualPath}");
+                ImGui.TextWrapped($"Backend={diagnostic.BackendStatus}  {diagnostic.Detail}");
+                ImGui.Separator();
+            }
+
+            ImGui.EndChild();
+        }
+
+        ImGui.Separator();
+        ImGui.Text("SoundEntries preview");
+        ImGui.TextDisabled("Preview plays the resolved client file at the current camera listener.");
+
+        int[] residentIds = scene.ResidentAudioSoundEntryIds.ToArray();
+        if (residentIds.Length > 0)
+        {
+            ImGui.SetNextItemWidth(-1f);
+            if (ImGui.BeginCombo("Resident emitter", $"SoundEntries {_audioPreviewSoundEntryId}"))
+            {
+                foreach (int id in residentIds)
+                {
+                    bool selected = id == _audioPreviewSoundEntryId;
+                    if (ImGui.Selectable($"SoundEntries {id}", selected))
+                        _audioPreviewSoundEntryId = id;
+                    if (selected)
+                        ImGui.SetItemDefaultFocus();
+                }
+
+                ImGui.EndCombo();
+            }
+        }
+
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputInt("SoundEntries ID", ref _audioPreviewSoundEntryId);
+        _audioPreviewSoundEntryId = Math.Max(0, _audioPreviewSoundEntryId);
+        ImGui.Checkbox("Loop preview", ref _audioPreviewLoop);
+        if (ImGui.Button("Preview at Camera"))
+        {
+            if (_audioPreviewSoundEntryId <= 0)
+            {
+                _audioPanelMessage = "Enter a positive SoundEntries ID first.";
+            }
+            else if (scene.TryPreviewAudioSoundEntry((uint)_audioPreviewSoundEntryId, _audioPreviewLoop, out string reason))
+            {
+                _audioPanelMessage = reason;
+            }
+            else
+            {
+                _audioPanelMessage = reason;
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Stop Preview"))
+        {
+            scene.StopAudioPreview();
+            _audioPanelMessage = "Audio preview stopped.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(scene.AudioPreviewPath))
+            ImGui.TextWrapped($"Preview: {scene.AudioPreviewPath}");
+        ImGui.TextWrapped(_audioPanelMessage);
+        ImGui.TextDisabled($"Last diagnostic: {scene.AudioLastDiagnostic}");
+
+        ImGui.Separator();
+        ImGui.Text("Volume");
+        if (ImGui.SliderFloat("Master", ref _audioMasterGain, 0f, 2f, "%.2fx"))
+            scene.SetAudioMasterGain(_audioMasterGain);
+        if (ImGui.SliderFloat("Emitters", ref _audioEmitterGain, 0f, 2f, "%.2fx"))
+            scene.SetAudioEmitterGain(_audioEmitterGain);
+
+        ImGui.Separator();
+        ImGui.TextDisabled("World triggers are bounded to loaded tiles and opt-in. DBC ZoneMusic is resolved from the active area; MIDI/DLS synthesis and Play + Video audio remain separate work.");
+    }
+}

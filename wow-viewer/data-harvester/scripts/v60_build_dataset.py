@@ -64,7 +64,17 @@ def _find_harvest_dll() -> Path:
     raise RuntimeError("harvest tool DLL not found after build")
 
 
-def _discover_clients(client_root: str) -> list[tuple[str, str]]:
+def _normalize_build_id(folder_name: str) -> str:
+    """Normalize client folder name like '3.X_Retail_Windows_enUS_3.3.5.12340' to '3_3_5_12340'."""
+    import re
+
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)\.(\d+)", folder_name)
+    if m:
+        return f"{m.group(1)}_{m.group(2)}_{m.group(3)}_{m.group(4)}"
+    return folder_name
+
+
+def _discover_clients(client_root: str, override_build_id: str = "") -> list[tuple[str, str]]:
     r"""Enumerate client root, return list of (build_id, client_path) for every WoW client root.
 
     Searches recursively so era-folder layouts work (e.g. ``Vanilla/0.x/<client>/World of Warcraft``
@@ -74,16 +84,25 @@ def _discover_clients(client_root: str) -> list[tuple[str, str]]:
     if not root.exists():
         print(f"  WARNING: client root not found: {root}", flush=True)
         return []
+
+    # 1. Direct client root check (e.g. H:\CLIENTS\...\World of Warcraft or a root containing Data/WTF directly)
+    if (root / "Data").is_dir() or (root / "WTF").is_dir():
+        folder_name = root.parent.name if root.name.lower() == "world of warcraft" else root.name
+        bid = override_build_id or _normalize_build_id(folder_name)
+        return [(bid, str(root))]
+
     clients: list[tuple[str, str]] = []
     for wow_path in sorted(root.rglob("World of Warcraft")):
         if not wow_path.is_dir():
             continue
-        clients.append((wow_path.parent.name, str(wow_path)))
+        bid = override_build_id or _normalize_build_id(wow_path.parent.name)
+        clients.append((bid, str(wow_path)))
     # Also accept a client folder that IS the root (has Data/WTF directly).
     if not clients:
         for entry in sorted(root.iterdir()):
             if entry.is_dir() and ((entry / "Data").is_dir() or (entry / "WTF").is_dir()):
-                clients.append((entry.name, str(entry)))
+                bid = override_build_id or _normalize_build_id(entry.name)
+                clients.append((bid, str(entry)))
     return clients
 
 
@@ -157,6 +176,8 @@ def _stream_tiles(
     client_path: str,
     build_id: str,
     map_name: str,
+    tile_workers: int = 4,
+    limit: int | None = None,
 ) -> list[dict]:
     """Run harvest-stream for one build/map and return all tile dicts.
 
@@ -174,9 +195,12 @@ def _stream_tiles(
         "--client-root", client_path,
         "--map", map_name,
         "--stream-profile", "v22",
+        "--tile-workers", str(max(1, tile_workers)),
     ]
+    if limit is not None and limit > 0:
+        cmd.extend(["--limit", str(limit)])
 
-    print(f"  Streaming {build_id} / {map_name} ...", flush=True)
+    print(f"  Streaming {build_id} / {map_name} (workers={tile_workers}) ...", flush=True)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     import queue
@@ -233,6 +257,11 @@ def _stream_tiles(
             try:
                 tile = read_tile_blob(blob)
                 if tile:
+                    meta = tile.get("_metadata", {})
+                    if "tile_x" not in tile and "tile_x" in meta:
+                        tile["tile_x"] = meta["tile_x"]
+                    if "tile_y" not in tile and "tile_y" in meta:
+                        tile["tile_y"] = meta["tile_y"]
                     tile["_build_id"] = build_id
                     tile["_map"] = map_name
                     tiles.append(tile)
@@ -342,7 +371,7 @@ def _merge_into_unified(
         all_signal_names.update(g.array_keys())
     all_signal_names = sorted(all_signal_names)
 
-    # First pass: build index + determine shapes (no arrays held in memory).
+    # First pass: build index + determine shapes directly from Zarr metadata.
     index_rows: list[dict] = []
     signal_shapes: dict[str, tuple] = {}
     signal_dtypes: dict[str, np.dtype] = {}
@@ -351,14 +380,12 @@ def _merge_into_unified(
     for store in per_build_stores:
         g = zarr.open_group(str(store), mode="r")
         idx = pq.read_table(store / "index.parquet").to_pylist()
-        for row_id, row in enumerate(idx):
-            index_rows.append(row)
-            for name in all_signal_names:
-                if name in g and row_id < g[name].shape[0]:
-                    arr = np.asarray(g[name][row_id])
-                    if name not in signal_shapes:
-                        signal_shapes[name] = arr.shape
-                        signal_dtypes[name] = arr.dtype
+        index_rows.extend(idx)
+        for name in all_signal_names:
+            if name in g and name not in signal_shapes:
+                arr = g[name]
+                signal_shapes[name] = arr.shape[1:]
+                signal_dtypes[name] = arr.dtype
 
     pq.write_table(pa.Table.from_pylist(index_rows), str(staging / "index.parquet"))
     total_rows = len(index_rows)
@@ -381,28 +408,32 @@ def _merge_into_unified(
         )
         written += 1
 
-    # Second pass: write each signal row-by-row.
+    # Second pass: write each signal in contiguous block slices.
     for name in all_signal_names:
         if name not in signal_shapes:
             continue
         shape = signal_shapes[name]
         dtype = signal_dtypes[name]
         target = group[name]
-        row = 0
+        row_offset = 0
         for store in per_build_stores:
             g = zarr.open_group(str(store), mode="r")
-            idx = pq.read_table(store / "index.parquet").to_pylist()
-            for row_id in range(len(idx)):
-                if name in g and row_id < g[name].shape[0]:
-                    arr = np.asarray(g[name][row_id])
-                    if arr.shape == shape:
-                        target[row] = arr.astype(dtype) if arr.dtype != dtype else arr
-                    else:
-                        target[row] = np.zeros(shape, dtype=dtype)
+            idx = pq.read_table(store / "index.parquet")
+            store_rows = len(idx)
+            if name in g:
+                src = g[name]
+                actual_rows = min(store_rows, src.shape[0])
+                if src.shape[1:] == shape:
+                    target[row_offset : row_offset + actual_rows] = np.asarray(src[:actual_rows], dtype=dtype)
                 else:
-                    target[row] = np.zeros(shape, dtype=dtype)
-                row += 1
+                    target[row_offset : row_offset + actual_rows] = np.zeros((actual_rows, *shape), dtype=dtype)
+                if store_rows > actual_rows:
+                    target[row_offset + actual_rows : row_offset + store_rows] = np.zeros((store_rows - actual_rows, *shape), dtype=dtype)
+            else:
+                target[row_offset : row_offset + store_rows] = np.zeros((store_rows, *shape), dtype=dtype)
+            row_offset += store_rows
         print(f"  Wrote {name}: shape=({total_rows}, *{shape}) dtype={dtype}", flush=True)
+
 
     group.attrs.update({
         "store_schema": STORE_SCHEMA_V60,
@@ -653,6 +684,8 @@ def main() -> int:
                         help="Output v60 Zarr store path (e.g. ../output/datasets/v60/v60/unified.zarr)")
     parser.add_argument("--v50-store-root", type=Path, default=V50_STORE_ROOT,
                         help="v50 per-build store directory to consolidate (default: the canonical v50.1 root)")
+    parser.add_argument("--no-consolidate-v50", action="store_true",
+                        help="Do not consolidate preexisting v50 stores; only include newly harvested stores.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print what would be harvested without running anything")
     parser.add_argument("--release", default=DEFAULT_RELEASE_V60)
@@ -662,6 +695,15 @@ def main() -> int:
     parser.add_argument("--skip-builds", default="",
                         help="Comma-separated build IDs to skip entirely (e.g. '3.3.5.12340'). "
                              "Matches by substring against the client folder name.")
+    parser.add_argument("--maps", default="",
+                        help="Comma-separated map names to harvest (e.g. 'Kalimdor,Azeroth'). "
+                             "If omitted, all discovered maps are harvested.")
+    parser.add_argument("--build-id", default="",
+                        help="Override build identifier (e.g. '3_3_5_12340').")
+    parser.add_argument("--tile-workers", type=int, default=4,
+                        help="Number of parallel tile workers per map passed to harvest-stream (default 4).")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="Optional limit on number of tiles to harvest per map (useful for test/smoke).")
     parser.add_argument("--workers", type=int, default=4,
                         help="Number of parallel harvest workers (default 4). Each worker streams "
                              "one build/map at a time.")
@@ -671,9 +713,13 @@ def main() -> int:
     if skip_builds:
         print(f"Skipping builds: {skip_builds}", flush=True)
 
+    target_maps = [m.strip() for m in args.maps.split(",") if m.strip()]
+    if target_maps:
+        print(f"Targeting maps: {target_maps}", flush=True)
+
     client_root = str(args.client_root).replace("\\", "/")
 
-    clients = _discover_clients(client_root)
+    clients = _discover_clients(client_root, override_build_id=args.build_id)
     if not clients:
         raise SystemExit(f"ERROR: no WoW client roots found under {client_root}")
 
@@ -683,7 +729,7 @@ def main() -> int:
 
     # Which builds/maps already exist in the v50 datastore?
     v50_store_root = args.v50_store_root
-    existing_v50 = _existing_v50_maps(v50_store_root)
+    existing_v50 = _existing_v50_maps(v50_store_root) if not args.no_consolidate_v50 else {}
     print(f"Existing v50 stores: {len(existing_v50)} builds", flush=True)
     for build, maps in existing_v50.items():
         print(f"  {build}: {sorted(maps)}", flush=True)
@@ -692,6 +738,8 @@ def main() -> int:
         print("\nDiscovered clients:")
         for build_id, client_path in clients:
             maps = _discover_maps(harvest_dll, client_path)
+            if target_maps:
+                maps = [m for m in maps if m in target_maps or any(m.lower() == tm.lower() for tm in target_maps)]
             print(f"  {build_id}: {client_path} -> {len(maps)} maps: {maps[:5]}{'...' if len(maps) > 5 else ''}")
         print(f"\nOutput: {args.output}")
         return 0
@@ -701,11 +749,12 @@ def main() -> int:
     per_build_stores: list[Path] = []
 
     try:
-        # 1. Consolidate existing v50 stores (already built, no re-harvest).
-        for v50_store in sorted(v50_store_root.glob("*.zarr")):
-            dest = _copy_v50_store_into_work(v50_store, work_dir)
-            if dest is not None:
-                per_build_stores.append(dest)
+        # 1. Consolidate existing v50 stores (if not disabled).
+        if not args.no_consolidate_v50 and v50_store_root.exists():
+            for v50_store in sorted(v50_store_root.glob("*.zarr")):
+                dest = _copy_v50_store_into_work(v50_store, work_dir)
+                if dest is not None:
+                    per_build_stores.append(dest)
 
         # 2. Harvest builds/maps NOT already in v50, in parallel.
         import concurrent.futures
@@ -722,8 +771,10 @@ def main() -> int:
                 continue
             already = existing_v50.get(build_id, set())
             to_stream = [m for m in maps if m not in already]
+            if target_maps:
+                to_stream = [m for m in to_stream if m in target_maps or any(m.lower() == tm.lower() for tm in target_maps)]
             if not to_stream:
-                print(f"  SKIP {build_id}: all maps already in v50 ({sorted(already)})", flush=True)
+                print(f"  SKIP {build_id}: all maps already in v50 ({sorted(already)}) or filtered out", flush=True)
                 continue
             print(f"  {build_id}: {len(to_stream)} new maps to stream "
                   f"(skipping {len(already)} already in v50)", flush=True)
@@ -736,7 +787,14 @@ def main() -> int:
             if store.exists():
                 print(f"  SKIP {build_id}/{map_name}: already harvested", flush=True)
                 return store
-            tiles = _stream_tiles(harvest_dll, client_path, build_id, map_name)
+            tiles = _stream_tiles(
+                harvest_dll,
+                client_path,
+                build_id,
+                map_name,
+                tile_workers=args.tile_workers,
+                limit=args.limit if args.limit > 0 else None,
+            )
             if not tiles:
                 return None
             n = _write_per_build_store(store, tiles, build_id, map_name)

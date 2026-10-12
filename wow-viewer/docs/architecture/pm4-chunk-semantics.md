@@ -93,7 +93,7 @@ The version bump from 7 to 8 is intentional: the old per-window cache blobs are 
 ## Cross-references
 
 - **Spec 051** (`wow-viewer/specs/051-pm4-mscn-mspv-visualization/`) — owns the per-object signature and the per-cube visualization (the work that surfaced this reading).
-- **Spec 046** (`wow-viewer/specs/046-pm4-asset-matching/`) — owns the future PM4 → WMO/M2 matching pipeline. Will use TypeFlags + per-object signature as matcher pre-filters.
+- **Spec 046** (`wow-viewer/specs/archived/046-pm4-asset-matching/`) — owns the future PM4 → WMO/M2 matching pipeline. Will use TypeFlags + per-object signature as matcher pre-filters.
 - **Spec 050 / 052** — owns the WMO group matching and signature matcher. Will consume the signature fields exported by spec 051.
 - **Spec 054** (`wow-viewer/specs/054-pm4-camera-window-cache/`) — owns the per-file + per-window two-layer cache. The version bump 7 → 8 in the per-window cache magic and the new per-file cache layer (`PM4F`, version 8) are the artifacts of this work.
 - **PM4 Color Palette** (`wow-viewer/docs/architecture/pm4-color-palette.md`) — `Pm4ColorMscn` and `Pm4ColorMspv` are the saturated cyan/magenta tokens for the cubes. Future work may add a `TypeFlags`-tinted sub-family (0x03 cyan-tinted, 0x10 white-cyan, 0x12 darker cyan) so the cyan blob reads as "walkable structure" vs "wall" at a glance.

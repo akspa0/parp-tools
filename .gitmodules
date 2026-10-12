@@ -65,3 +65,6 @@
 [submodule "wow-viewer/libs/wowdev/wow-listfile"]
 	path = wow-viewer/libs/wowdev/wow-listfile
 	url = https://github.com/wowdev/wow-listfile.git
+[submodule "wow-viewer/libs/wowdev/TACTSharp"]
+	path = wow-viewer/libs/wowdev/TACTSharp
+	url = https://github.com/wowdev/TACTSharp

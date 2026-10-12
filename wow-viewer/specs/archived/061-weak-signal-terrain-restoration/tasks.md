@@ -1,6 +1,6 @@
 # Tasks: Weak Signal Amplifier — Cross-Signal Terrain Data Restoration
 
-**Spec**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
+**Spec**: [spec.md](spec.md) | **Plan**: [plan.md](plan.md)
 
 ## Phase 1: Mismatch Detection (US1)
 

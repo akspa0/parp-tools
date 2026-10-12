@@ -1,5 +1,7 @@
 # Weak-Signal Tile Archaeology — capability note
 
+> **Owner since 2026-09-23:** Epic 254 (Datasets & ML, item D-20) / 250 (stratigraphy) — [254-epic-datasets-and-terrain-ml](../specs/254-epic-datasets-and-terrain-ml/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
+
 Recorded: 2026-08-03. Status: tooling built, validated, and parked. Not a training dependency.
 
 ## What this is

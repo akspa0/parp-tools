@@ -6,7 +6,7 @@ flythroughs and the `Cameras\*.m2` files). This is the camera analogue of the ta
 follower you already have: sample a spline over a timeline and drive the view from it.
 
 Traced from **WoW.exe 1.0.0.3980**. Evidence + decompilations:
-[`evidence/1.0.0-ghidra/m2_camera.c`](wow-viewer/specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/m2_camera.c).
+[`evidence/1.0.0-ghidra/m2_camera.c`](wow-viewer/specs/archived/104-legacy-m2-rendering/evidence/1.0.0-ghidra/m2_camera.c).
 Confidence: **[V]** verified in decomp, **[I]** inferred/standard.
 
 ---

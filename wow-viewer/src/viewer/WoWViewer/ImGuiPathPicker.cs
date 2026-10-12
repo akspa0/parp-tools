@@ -363,8 +363,43 @@ internal sealed class ImGuiPathPicker
     private float GetFooterHeight()
         => _mode == ImGuiPathPickerMode.OpenFolder ? 45f : 80f;
 
+    /// <summary>
+    /// Commits a path typed or pasted into the path bar. The bar navigates only on Enter or "Go", so
+    /// without this a pasted path that was never committed is silently discarded and the picker returns
+    /// the directory it happened to be opened on (the process working directory on first use).
+    /// </summary>
+    private bool TryCommitPathBar()
+    {
+        string typed = _pathInputBuffer.Trim();
+        if (typed.Length == 0 || string.Equals(typed, _currentDirectory, StringComparison.Ordinal))
+            return true;
+
+        if (Directory.Exists(typed) || File.Exists(typed))
+        {
+            NavigateToInputPath();
+            return true;
+        }
+
+        // Save mode accepts a not-yet-existing file inside an existing directory.
+        string? parent = Path.GetDirectoryName(typed);
+        if (_mode == ImGuiPathPickerMode.SaveFile && !string.IsNullOrEmpty(parent) && Directory.Exists(parent))
+        {
+            _currentDirectory = Path.GetFullPath(parent);
+            _fileName = Path.GetFileName(typed);
+            _pathInputBuffer = _currentDirectory;
+            _error = string.Empty;
+            return true;
+        }
+
+        _error = $"Path '{typed}' does not exist.";
+        return false;
+    }
+
     private string? ResolveSelection()
     {
+        if (!TryCommitPathBar())
+            return null;
+
         if (_mode == ImGuiPathPickerMode.OpenFolder)
         {
             if (!Directory.Exists(_currentDirectory))

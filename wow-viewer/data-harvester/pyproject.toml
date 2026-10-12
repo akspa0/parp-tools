@@ -62,6 +62,7 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
+pythonpath = [".", "src"]
 testpaths = ["tests", "src/harvester"]
 markers = [
     "v23: Spec 089 V23 height predictor tests",

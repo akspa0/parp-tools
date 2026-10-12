@@ -23,54 +23,54 @@ public enum RoadNetworkTopology
 /// </summary>
 public sealed class BiomePalette
 {
-    public string BaseGroundTexture { get; init; } = @"tileset\elwynn\elwynngrass.blp";
-    public string PathTexture { get; init; } = @"tileset\city\stormwindcobble.blp";
-    public string PlazaFloorTexture { get; init; } = @"tileset\city\whitemarble.blp";
-    public string AccentTexture { get; init; } = @"tileset\generic\rock.blp";
+    public string BaseGroundTexture { get; init; } = @"TILESET\ELWYNN\ElwynnGrassBase.blp";
+    public string PathTexture { get; init; } = @"TILESET\StormwindCity\SW_Cobble_A.blp";
+    public string PlazaFloorTexture { get; init; } = @"TILESET\ELWYNN\ElwynnCobbleStoneBase.blp";
+    public string AccentTexture { get; init; } = @"TILESET\ELWYNN\ELWYNNDIRTBASE.BLP";
 
     public static BiomePalette ForTheme(BiomeTheme theme) => theme switch
     {
         BiomeTheme.GardenMuseum => new BiomePalette
         {
-            BaseGroundTexture = @"tileset\elwynn\elwynngrass.blp",
-            PathTexture = @"tileset\city\stormwindcobble.blp",
-            PlazaFloorTexture = @"tileset\city\whitemarble.blp",
-            AccentTexture = @"tileset\generic\dirt.blp"
+            BaseGroundTexture = @"TILESET\ELWYNN\ElwynnGrassBase.blp",
+            PathTexture = @"TILESET\StormwindCity\SW_Cobble_A.blp",
+            PlazaFloorTexture = @"TILESET\ELWYNN\ElwynnCobbleStoneBase.blp",
+            AccentTexture = @"TILESET\ELWYNN\ELWYNNDIRTBASE.BLP"
         },
         BiomeTheme.ElwynnForest => new BiomePalette
         {
-            BaseGroundTexture = @"tileset\elwynn\elwynngrass.blp",
-            PathTexture = @"tileset\generic\dirt.blp",
-            PlazaFloorTexture = @"tileset\city\stormwindcobble.blp",
-            AccentTexture = @"tileset\generic\rock.blp"
+            BaseGroundTexture = @"TILESET\ELWYNN\ElwynnGrassBase.blp",
+            PathTexture = @"TILESET\ELWYNN\ELWYNNDIRTBASE.BLP",
+            PlazaFloorTexture = @"TILESET\StormwindCity\SW_Cobble_A.blp",
+            AccentTexture = @"TILESET\ELWYNN\ElwynnCobbleStoneBase.blp"
         },
         BiomeTheme.CobblestoneCity => new BiomePalette
         {
-            BaseGroundTexture = @"tileset\city\stormwindcobble.blp",
-            PathTexture = @"tileset\city\whitemarble.blp",
-            PlazaFloorTexture = @"tileset\city\whitemarble.blp",
-            AccentTexture = @"tileset\elwynn\elwynngrass.blp"
+            BaseGroundTexture = @"TILESET\StormwindCity\SW_Cobble_A.blp",
+            PathTexture = @"TILESET\StormwindCity\SWC_DirtA.blp",
+            PlazaFloorTexture = @"TILESET\StormwindCity\SW_Cobble_LeavesA.blp",
+            AccentTexture = @"TILESET\StormwindCity\SWC_GrassMidA.blp"
         },
         BiomeTheme.DunMorogh => new BiomePalette
         {
-            BaseGroundTexture = @"tileset\dunmorogh\dunmoroghsnow.blp",
-            PathTexture = @"tileset\generic\dirt.blp",
-            PlazaFloorTexture = @"tileset\city\whitemarble.blp",
-            AccentTexture = @"tileset\generic\rock.blp"
+            BaseGroundTexture = @"TILESET\EXPANSION02\DRAGONBLIGHT\DragonBlightFreshSmoothSnowA.blp",
+            PathTexture = @"TILESET\ALTERACMTNS\AlteracDirtBase.blp",
+            PlazaFloorTexture = @"TILESET\StormwindCity\SW_Cobble_A.blp",
+            AccentTexture = @"TILESET\ALTERACMTNS\AlteracGrassBase.blp"
         },
         BiomeTheme.Barrens => new BiomePalette
         {
-            BaseGroundTexture = @"tileset\barrens\barrensdirt.blp",
-            PathTexture = @"tileset\generic\dirt.blp",
-            PlazaFloorTexture = @"tileset\city\whitemarble.blp",
-            AccentTexture = @"tileset\generic\rock.blp"
+            BaseGroundTexture = @"TILESET\Barrens\BarrensBaseDirt.blp",
+            PathTexture = @"TILESET\Barrens\BarrensBaseDirt02.blp",
+            PlazaFloorTexture = @"TILESET\StormwindCity\SW_Cobble_A.blp",
+            AccentTexture = @"TILESET\Barrens\BarrensBaseGrass.blp"
         },
         BiomeTheme.Ashenvale => new BiomePalette
         {
-            BaseGroundTexture = @"tileset\ashenvale\ashenvalegrass.blp",
-            PathTexture = @"tileset\generic\dirt.blp",
-            PlazaFloorTexture = @"tileset\city\whitemarble.blp",
-            AccentTexture = @"tileset\generic\rock.blp"
+            BaseGroundTexture = @"TILESET\ASHENVALE\AshenvaleGrass.blp",
+            PathTexture = @"TILESET\ASHENVALE\AshenvaleDirt.blp",
+            PlazaFloorTexture = @"TILESET\StormwindCity\SW_Cobble_A.blp",
+            AccentTexture = @"TILESET\ASHENVALE\AshenvaleFerns.blp"
         },
         _ => new BiomePalette()
     };

@@ -7,7 +7,7 @@ geometry is actually drawn** — the M2/doodad batch pipeline, terrain surface, 
 the blend-mode / render-state model — so the viewer can match the real surface look.
 
 Traced from **WoW.exe 1.0.0.3980**. Decompilations:
-[`evidence/1.0.0-ghidra/world_render_systems.c`](wow-viewer/specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/world_render_systems.c).
+[`evidence/1.0.0-ghidra/world_render_systems.c`](wow-viewer/specs/archived/104-legacy-m2-rendering/evidence/1.0.0-ghidra/world_render_systems.c).
 **[V]** verified, **[I]** inferred/standard.
 
 ---

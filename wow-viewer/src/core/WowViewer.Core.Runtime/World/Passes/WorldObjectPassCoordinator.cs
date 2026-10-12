@@ -4,19 +4,54 @@ namespace WowViewer.Core.Runtime.World.Passes;
 
 public static class WorldObjectPassCoordinator
 {
-    public readonly record struct WorldWmoOpaqueBatchCandidate(string ModelKey, bool CanBatch, int VisibleIndex);
+    /// <param name="ModelKey">Placement's model key; placements batch by model.</param>
+    /// <param name="CanBatch">Renderer supports the GPU-instanced opaque shell.</param>
+    /// <param name="VisibleIndex">Index into the frame's visible WMO list.</param>
+    /// <param name="ReachedBySceneLight">
+    /// A scene light's attenuation reaches this placement's world bounds. Such placements keep the
+    /// per-placement path so they get their own light set (Epic 249 R-10b / archived Spec 242 FR-002).
+    /// </param>
+    /// <param name="EmitsSceneLights">The placement's own model emits scene lights (diagnostics only).</param>
+    public readonly record struct WorldWmoOpaqueBatchCandidate(
+        string ModelKey,
+        bool CanBatch,
+        int VisibleIndex,
+        bool ReachedBySceneLight = false,
+        bool EmitsSceneLights = false);
 
     public readonly record struct WorldWmoOpaqueBatch(string ModelKey, IReadOnlyList<int> VisibleIndices);
 
+    /// <param name="LitFallbackCount">Placements that could batch but a scene light reaches.</param>
+    /// <param name="SelfLitFallbackCount">Of those, placements whose own model emits lights.</param>
     public readonly record struct WorldWmoOpaqueBatchPlan(
         IReadOnlyList<WorldWmoOpaqueBatch> Batches,
-        IReadOnlyList<int> FallbackVisibleIndices);
+        IReadOnlyList<int> FallbackVisibleIndices,
+        int LitFallbackCount = 0,
+        int SelfLitFallbackCount = 0)
+    {
+        public int BatchedPlacementCount
+        {
+            get
+            {
+                int count = 0;
+                for (int i = 0; i < Batches.Count; i++)
+                    count += Batches[i].VisibleIndices.Count;
+                return count;
+            }
+        }
+    }
 
+    /// <summary>
+    /// Partitions visible WMO placements into per-model instanced batches and a per-placement fallback.
+    /// Deterministic: identical candidates always give the identical partition and fallback order.
+    /// </summary>
     public static WorldWmoOpaqueBatchPlan PlanOpaqueWmoBatches(
         IReadOnlyList<WorldWmoOpaqueBatchCandidate> candidates)
     {
         var batchIndicesByModel = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         var fallbackVisibleIndices = new List<int>();
+        int litFallbackCount = 0;
+        int selfLitFallbackCount = 0;
 
         for (int i = 0; i < candidates.Count; i++)
         {
@@ -24,6 +59,15 @@ public static class WorldObjectPassCoordinator
             if (!candidate.CanBatch || string.IsNullOrWhiteSpace(candidate.ModelKey))
             {
                 fallbackVisibleIndices.Add(candidate.VisibleIndex);
+                continue;
+            }
+
+            if (candidate.ReachedBySceneLight)
+            {
+                fallbackVisibleIndices.Add(candidate.VisibleIndex);
+                litFallbackCount++;
+                if (candidate.EmitsSceneLights)
+                    selfLitFallbackCount++;
                 continue;
             }
 
@@ -40,7 +84,7 @@ public static class WorldObjectPassCoordinator
         foreach ((string modelKey, List<int> visibleIndices) in batchIndicesByModel)
             batches.Add(new WorldWmoOpaqueBatch(modelKey, visibleIndices));
 
-        return new WorldWmoOpaqueBatchPlan(batches, fallbackVisibleIndices);
+        return new WorldWmoOpaqueBatchPlan(batches, fallbackVisibleIndices, litFallbackCount, selfLitFallbackCount);
     }
 
     public static int ExecuteVisibleWmoOpaque(WorldVisibilityFrame visibility, Action<WorldVisibleWmoEntry> renderVisibleWmo)

@@ -393,7 +393,7 @@ zero-filled. This eliminates per-sample feature gating complexity.
 
 ## 8. V50 Clean-Room Dataset (Current Canonical Lane)
 
-**V50 is the active dataset lane** (Spec 109, `specs/109-v50-clean-room-audit/`). It supersedes V16/
+**V50 is the active dataset lane** (Spec 109, `specs/archived/109-v50-clean-room-audit/`). It supersedes V16/
 V22/V23 above for new work: a fail-closed trust boundary (nothing is "verified" by name alone),
 complete per-build Zarr stores with real content-hash identity, and immutable curriculum manifests
 instead of duplicated data copies. The sections above remain accurate for the older NPZ/V16 formats
@@ -458,7 +458,7 @@ for the full history — two rounds of real user-run bugs, both now fixed.
 ### 8.2 Running one map by hand
 
 Useful when iterating on one map, or debugging a single stage. See
-`specs/109-v50-clean-room-audit/quickstart.md` section 5 for the full command reference; the shape
+`specs/archived/109-v50-clean-room-audit/quickstart.md` section 5 for the full command reference; the shape
 is:
 
 ```powershell
@@ -550,7 +550,7 @@ all-source runs are refused until the curriculum records corrected `NoonWhiteGlo
 The confirmed run writes `run_identity.json`, checkpoints, and a machine-readable
 `training_summary.json` with target-contract version, per-epoch validation MAE, the tile-mean
 baseline, and an epoch-1 structural-failure flag. Exact proof and estimates live in
-`specs/114-direct-terrain-reconstruction/quickstart.md`. The old `v50_train_wdl_prior.py` and
+`specs/archived/114-direct-terrain-reconstruction/quickstart.md`. The old `v50_train_wdl_prior.py` and
 `v50_train_terrain.py` commands remain only for the rejected Spec 103/108 legacy lane.
 
 ### 8.5 Minimap super-resolution (Spec 113, corrected-light visual gate pending)
@@ -591,7 +591,7 @@ relief/OBJ inference CLI are implemented and fixture-proven. Every CLI is dry-ru
 confirmation flag is present. Build the small exact-v50 curriculum index, verify its 808 Kalimdor
 train / 143 Kalimdor validation / 678 Azeroth compatibility rows and zero leaks, then the user
 launches the exact CUDA command in
-`specs/114-direct-terrain-reconstruction/quickstart.md`. The old WoW-only checkpoint is rejected
+`specs/archived/114-direct-terrain-reconstruction/quickstart.md`. The old WoW-only checkpoint is rejected
 negative evidence and must not be presented as the universal model.
 
 ### 8.7 Everything else (verify, curriculum, cleanup audit)
@@ -600,7 +600,7 @@ negative evidence and must not be presented as the universal model.
 `curriculum` (immutable row-selection manifests, no array payloads) subcommands, and
 `v50_audit_artifacts.py` / `v50_cleanup_artifacts.py` handle the read-only trust inventory and
 reviewed disk-cleanup plan/apply. All of these, their exact flags, and their fixture-proof results
-are documented in `specs/109-v50-clean-room-audit/quickstart.md`, which is the authoritative
+are documented in `specs/archived/109-v50-clean-room-audit/quickstart.md`, which is the authoritative
 reference this section summarizes.
 
 ---

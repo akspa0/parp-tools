@@ -139,6 +139,9 @@ string[] tail = args.Skip(1).ToArray();
 	case "convert-lk-to-alpha":
 		LkToAlphaCommand.Run(tail);
 		break;
+	case "extract-minimap-tiles":
+		ExtractMinimapTilesCommand.Run(tail);
+		break;
 	case "convert-wmo-v17-to-v14":
 		WmoV17ToV14Command.Run(tail);
 		break;

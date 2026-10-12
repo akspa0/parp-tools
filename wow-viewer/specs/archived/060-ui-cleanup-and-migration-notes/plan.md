@@ -1,6 +1,6 @@
 # Implementation Plan: Viewer UI Cleanup + ImGui Migration Notes
 
-**Branch**: `060-ui-cleanup-and-migration-notes` | **Date**: 2026-06-12 | **Spec**: [spec.md](./spec.md)
+**Branch**: `060-ui-cleanup-and-migration-notes` | **Date**: 2026-06-12 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/060-ui-cleanup-and-migration-notes/spec.md`
 

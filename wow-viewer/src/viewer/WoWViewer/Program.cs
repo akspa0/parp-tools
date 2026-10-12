@@ -13,6 +13,30 @@ class Program
 {
     static void Main(string[] args)
     {
+        AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+        {
+            try
+            {
+                string crashText = $"[{DateTime.UtcNow:O}] FATAL UNHANDLED EXCEPTION: {e.ExceptionObject}\n";
+                File.AppendAllText("crash.log", crashText);
+                string userCrashPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WoWViewer", "crash.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(userCrashPath)!);
+                File.AppendAllText(userCrashPath, crashText);
+            }
+            catch { }
+        };
+
+        TaskScheduler.UnobservedTaskException += (sender, e) =>
+        {
+            try
+            {
+                string crashText = $"[{DateTime.UtcNow:O}] UNOBSERVED TASK EXCEPTION: {e.Exception}\n";
+                File.AppendAllText("crash.log", crashText);
+            }
+            catch { }
+            e.SetObserved();
+        };
+
         if (AssetProbe.TryRun(args))
             return;
 

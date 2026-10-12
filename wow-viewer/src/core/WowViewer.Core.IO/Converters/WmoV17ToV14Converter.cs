@@ -125,6 +125,7 @@ public class WmoV17ToV14Converter
             Flags = v17.Flags,
             BoundsMin = v17.BoundingBox1,
             BoundsMax = v17.BoundingBox2,
+            DetailDoodads = v17.DetailDoodads,
         };
 
         // Textures
@@ -256,6 +257,7 @@ public class WmoV17ToV14Converter
                 IntBatchCount = g.IntBatchCount,
                 ExtBatchCount = g.ExtBatchCount,
                 GroupLiquid = g.GroupLiquid,
+                WmoGroupId = g.UniqueId,
             };
 
             // Resolve group name from raw MOGN blob via byte offset
@@ -292,7 +294,7 @@ public class WmoV17ToV14Converter
             {
                 foreach (var b in g.Batches)
                 {
-                    byte materialId = b.MaterialId;
+                    ushort materialId = b.MaterialId;
                     if ((materialId == byte.MaxValue || materialId >= model.Materials.Count) && g.MaterialInfo != null && g.MaterialInfo.Length >= 2)
                     {
                         int firstFace = (int)(b.StartIndex / 3u);
@@ -342,6 +344,7 @@ public class WmoV17ToV14Converter
         var data = new WmoV17Data();
         int expectedRootChunkIndex = 0;
         bool sawOptionalMcvp = false;
+        var seenRootChunks = new HashSet<string>(StringComparer.Ordinal);
 
         while (reader.BaseStream.Position + 8 <= reader.BaseStream.Length)
         {
@@ -354,21 +357,24 @@ public class WmoV17ToV14Converter
             // Reverse for comparison (chunks stored reversed on disk)
             var chunkId = new string(magic.Reverse().ToArray());
 
-            if (expectedRootChunkIndex < RootRequiredChunkOrder090.Length)
+            // Spec 239: the classic root order is a list of *known* chunks, not a required sequence.
+            // FileDataID-era roots omit some (MOTX, MODN, MOSB, MOVV, MOVB), insert others anywhere
+            // (MGI2, MOPE, MOLV, MDDI, MNLD, MFED, MAVG, MAVD, GFID, MODI) and may move MODI ahead of MODD.
+            // Measured on wow_classic_beta 1.60.1 development map: 3 distinct root sequences across 72 WMOs.
+            // Unknown chunks are skipped; a known chunk may be absent but must not appear before one
+            // already passed.
+            int knownIndex = Array.IndexOf(RootRequiredChunkOrder090, chunkId);
+            if (knownIndex >= 0)
             {
-                string expected = RootRequiredChunkOrder090[expectedRootChunkIndex];
-                if (chunkId != expected)
+                if (knownIndex < expectedRootChunkIndex)
                     throw new InvalidDataException(
-                        $"WMO root chunk order mismatch at offset 0x{payloadStart - 8:X}: got '{chunkId}', expected '{expected}'.");
-                expectedRootChunkIndex++;
+                        $"WMO root chunk order mismatch at offset 0x{payloadStart - 8:X}: '{chunkId}' after '{RootRequiredChunkOrder090[expectedRootChunkIndex - 1]}'.");
+                expectedRootChunkIndex = knownIndex + 1;
+                seenRootChunks.Add(chunkId);
             }
-            else
+            else if (chunkId == "MCVP")
             {
-                // Tolerant: skip unknown trailing root chunks (e.g., MCVP or
-                // version-specific chunks from different WoW builds).
-                if (chunkId == "MCVP" && !sawOptionalMcvp)
-                    sawOptionalMcvp = true;
-                // Any other trailing chunk: just skip it silently.
+                sawOptionalMcvp = true;
             }
 
             switch (chunkId)
@@ -447,18 +453,186 @@ public class WmoV17ToV14Converter
                 case "MCVP":
                     data.McvpRaw = reader.ReadBytes((int)effectiveSize);
                     break;
+                case "GFID":
+                    data.GroupFileDataIds = ReadUInt32Array(reader, effectiveSize);
+                    break;
+                case "MODI":
+                    data.DoodadFileDataIds = ReadUInt32Array(reader, effectiveSize);
+                    break;
+                case "MDDL":
+                    data.DetailDoodads = WowViewer.Core.IO.Wmo.WmoMddlReader.Read(reader.ReadBytes((int)effectiveSize));
+                    break;
             }
 
             reader.BaseStream.Position = chunkEnd;
         }
 
-        if (expectedRootChunkIndex != RootRequiredChunkOrder090.Length)
+        foreach (string required in RootChunksAlwaysRequired)
         {
-            throw new InvalidDataException(
-                $"WMO root terminated early: parsed {expectedRootChunkIndex}/{RootRequiredChunkOrder090.Length} required chunks.");
+            if (!seenRootChunks.Contains(required))
+                throw new InvalidDataException($"WMO root is missing required chunk '{required}'.");
         }
 
+        SynthesizeNameTablesFromFileDataIds(data);
         return data;
+    }
+
+    private static readonly string[] RootChunksAlwaysRequired = ["MVER", "MOHD"];
+
+    /// <summary>
+    /// Reads one level-of-detail's group FileDataIDs from a v17 root's GFID without parsing the rest.
+    /// <para>
+    /// GFID holds <c>MOHD.nGroups</c> ids per LOD when MOHD flag 0x10 (lod) is set: numLod lists, or 3 when
+    /// numLod is 0 (wowdev WMO#GFID). Measured 2026-09-16 on wow_classic_beta 1.60.1: ND_Dalaran has
+    /// nGroups 91 and 364 GFID ids, 11DL_Dalaran 126 and 504; LOD 0 has no zero ids, LOD 1-3 do. Reading
+    /// the whole array as one group list drew LOD 1 copies over the full-detail groups.
+    /// </para>
+    /// </summary>
+    public static uint[] ReadGroupFileDataIds(byte[] rootBytes, int lodLevel = 0)
+    {
+        uint groupCount = 0;
+        uint[]? all = null;
+        int position = 0;
+        while (position + 8 <= rootBytes.Length)
+        {
+            string chunkId = new(Encoding.ASCII.GetString(rootBytes, position, 4).Reverse().ToArray());
+            int size = BitConverter.ToInt32(rootBytes, position + 4);
+            if (size < 0 || position + 8L + size > rootBytes.Length)
+                break;
+
+            if (chunkId == "MOHD" && size >= 8)
+            {
+                groupCount = BitConverter.ToUInt32(rootBytes, position + 8 + 4);
+            }
+            else if (chunkId == "GFID")
+            {
+                all = new uint[size / 4];
+                for (int i = 0; i < all.Length; i++)
+                    all[i] = BitConverter.ToUInt32(rootBytes, position + 8 + (i * 4));
+            }
+
+            position += 8 + size;
+        }
+
+        if (all is null)
+            return [];
+
+        if (groupCount == 0 || groupCount >= all.Length)
+            return lodLevel == 0 ? all : [];
+
+        long start = (long)groupCount * lodLevel;
+        if (lodLevel < 0 || start + groupCount > all.Length)
+            return [];
+
+        return all.AsSpan((int)start, (int)groupCount).ToArray();
+    }
+
+    /// <summary>
+    /// Spec 239: when a root has no MOTX/MODN, build equivalent string tables from FileDataIDs so the
+    /// offset-based consumers downstream (materials, WmoRenderer doodad names) work unchanged.
+    /// Names come from <see cref="Files.FileDataIdPaths.Resolve"/> (listfile path or <c>fdid:&lt;id&gt;</c>).
+    /// </summary>
+    private static void SynthesizeNameTablesFromFileDataIds(WmoV17Data data)
+    {
+        if (data.TextureNamesRaw.Length == 0 && data.Materials.Count > 0)
+        {
+            var table = new FileDataIdStringTable();
+            foreach (WmoMaterial material in data.Materials)
+            {
+                material.Texture1 = table.OffsetOf(material.Texture1);
+                material.Texture2 = table.OffsetOf(material.Texture2);
+                material.Texture3 = table.OffsetOf(material.Texture3);
+            }
+
+            data.TextureNamesRaw = table.ToArray();
+            data.TextureNames = table.Names;
+        }
+
+        if (data.DoodadNamesRaw.Length == 0 && data.DoodadFileDataIds.Length > 0)
+        {
+            var table = new FileDataIdStringTable();
+            foreach (WmoDoodadDef doodad in data.DoodadDefs)
+            {
+                // MODD's low 24 bits index MODI in the FileDataID era; the high byte carries flags.
+                uint index = doodad.NameOfs & 0x00FF_FFFF;
+                uint fileDataId = index < data.DoodadFileDataIds.Length ? data.DoodadFileDataIds[index] : 0;
+                doodad.NameOfs = table.OffsetOf(fileDataId);
+            }
+
+            data.DoodadNamesRaw = table.ToArray();
+            data.DoodadNames = table.Names;
+        }
+    }
+
+    /// <summary>String table builder: offset 0 is the empty string (FileDataID 0 = no reference).</summary>
+    private sealed class FileDataIdStringTable
+    {
+        private readonly MemoryStream _blob = new();
+        private readonly Dictionary<uint, uint> _offsets = [];
+
+        public FileDataIdStringTable() => _blob.WriteByte(0);
+
+        public List<string> Names { get; } = [];
+
+        public uint OffsetOf(uint fileDataId)
+        {
+            if (fileDataId == 0)
+                return 0;
+
+            if (!_offsets.TryGetValue(fileDataId, out uint offset))
+            {
+                string name = Files.FileDataIdPaths.Resolve(fileDataId);
+                offset = (uint)_blob.Position;
+                byte[] bytes = Encoding.ASCII.GetBytes(name);
+                _blob.Write(bytes);
+                _blob.WriteByte(0);
+                _offsets[fileDataId] = offset;
+                Names.Add(name);
+            }
+
+            return offset;
+        }
+
+        public byte[] ToArray() => _blob.ToArray();
+    }
+
+    /// <summary>MPY2 (uint16 flags, uint16 materialId per face) → MOPY (byte flags, byte materialId).</summary>
+    private static byte[] ConvertMpy2ToMopy(byte[] mpy2)
+    {
+        int faces = mpy2.Length / 4;
+        var mopy = new byte[faces * 2];
+        for (int i = 0; i < faces; i++)
+        {
+            ushort flags = BitConverter.ToUInt16(mpy2, i * 4);
+            ushort materialId = BitConverter.ToUInt16(mpy2, i * 4 + 2);
+            mopy[i * 2] = (byte)(flags & 0xFF);
+            mopy[i * 2 + 1] = materialId > 0xFE ? (byte)0xFF : (byte)materialId;
+        }
+
+        return mopy;
+    }
+
+    /// <summary>MOVX (uint32 indices) → MOVI (uint16). Returns null when any index exceeds 16 bits.</summary>
+    private static ushort[]? ConvertMovxToMovi(byte[] movx)
+    {
+        var indices = new ushort[movx.Length / 4];
+        for (int i = 0; i < indices.Length; i++)
+        {
+            uint value = BitConverter.ToUInt32(movx, i * 4);
+            if (value > ushort.MaxValue)
+                return null;
+            indices[i] = (ushort)value;
+        }
+
+        return indices;
+    }
+
+    private static uint[] ReadUInt32Array(BinaryReader reader, uint size)
+    {
+        var values = new uint[size / 4];
+        for (int i = 0; i < values.Length; i++)
+            values[i] = reader.ReadUInt32();
+        return values;
     }
 
     private WmoV17GroupData ParseWmoV17Group(string path)
@@ -588,15 +762,22 @@ public class WmoV17ToV14Converter
             uint effectiveSize = (uint)Math.Max(0, chunkEnd - payloadStart);
             var chunkId = new string(magic.Reverse().ToArray());
 
-            if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length)
+            // Spec 239: FileDataID-era groups insert new sub-chunks (e.g. MOGX) and replace MOPY/MOVI with
+            // MPY2/MOVX (measured on wow_classic_beta 1.60.1). Treat the classic chain as known-in-order:
+            // unknown sub-chunks are skipped, known ones may be absent but not go backwards.
+            int requiredIndex = Array.IndexOf(GroupRequiredChunkOrder090, chunkId);
+            if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length && requiredIndex >= expectedRequiredSubchunkIndex)
             {
-                string expectedSubchunk = GroupRequiredChunkOrder090[expectedRequiredSubchunkIndex];
-                if (chunkId != expectedSubchunk)
-                {
-                    throw new InvalidDataException(
-                        $"MOGP required subchunk order mismatch at 0x{payloadStart - 8:X}: got '{chunkId}', expected '{expectedSubchunk}'. Flags=0x{data.Flags:X}.");
-                }
-                expectedRequiredSubchunkIndex++;
+                expectedRequiredSubchunkIndex = requiredIndex + 1;
+            }
+            else if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length && requiredIndex >= 0)
+            {
+                throw new InvalidDataException(
+                    $"MOGP required subchunk order mismatch at 0x{payloadStart - 8:X}: '{chunkId}' appears after '{GroupRequiredChunkOrder090[expectedRequiredSubchunkIndex - 1]}'. Flags=0x{data.Flags:X}.");
+            }
+            else if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length)
+            {
+                // Unknown sub-chunk inside the required chain: skip it.
             }
             else
             {
@@ -624,8 +805,19 @@ public class WmoV17ToV14Converter
                 case "MOPY":
                     data.MaterialInfo = reader.ReadBytes((int)effectiveSize);
                     break;
+                case "MPY2":
+                    // Spec 239: 4 bytes per face (uint16 flags, uint16 materialId). Down-convert to MOPY's
+                    // 2-byte form when no MOPY was present; material ids above 0xFE cannot be represented.
+                    if (data.MaterialInfo == null || data.MaterialInfo.Length == 0)
+                        data.MaterialInfo = ConvertMpy2ToMopy(reader.ReadBytes((int)effectiveSize));
+                    break;
                 case "MOVI":
                     data.Indices = ReadUInt16Array(reader, effectiveSize);
+                    break;
+                case "MOVX":
+                    // Spec 239: 32-bit indices. Used only when MOVI is absent and every index fits 16 bits.
+                    if (data.Indices == null || data.Indices.Length == 0)
+                        data.Indices = ConvertMovxToMovi(reader.ReadBytes((int)effectiveSize));
                     break;
                 case "MOVT":
                     data.Vertices = ReadVector3Array(reader, effectiveSize);
@@ -684,11 +876,10 @@ public class WmoV17ToV14Converter
             reader.BaseStream.Position = chunkEnd;
         }
 
-        if (expectedRequiredSubchunkIndex != GroupRequiredChunkOrder090.Length)
-        {
-            throw new InvalidDataException(
-                $"MOGP missing required subchunks: parsed {expectedRequiredSubchunkIndex}/{GroupRequiredChunkOrder090.Length}. Flags=0x{data.Flags:X}.");
-        }
+        // A short chain is valid data, not corruption. Measured 2026-09-16 over 9,860 local
+        // wow_classic_beta 1.60.1 WMO roots: all 275 parse failures were groups that end before MOBA
+        // (collision/portal groups: MOPY MOVI MOVT MONR [MOTV] MOBN MOBR, no batches) or carry only
+        // MOPL (no geometry at all). Such groups convert with whatever they have and draw nothing.
 
         EnsureAllFlaggedOptionalMogpSubchunksPresent(seenOptionalSubchunks, multiOccurrenceCounters, data.Flags);
     }
@@ -1208,7 +1399,13 @@ public class WmoV17ToV14Converter
             result[i].StartVertex = r.ReadUInt16();
             result[i].EndVertex = r.ReadUInt16();
             result[i].Flags = r.ReadByte();
-            result[i].MaterialId = r.ReadByte();
+            byte materialId = r.ReadByte();
+
+            // Legion+ SMOBatch: bytes 0x0A-0x0B hold material_id_large, used when flag 0x2 is set (wowdev WMO#MOBA).
+            // Measured 2026-09-16 over wow_classic_beta 1.60.1 WMOs: 252,161 of 393,397 batches set the flag,
+            // 242,028 of those differ from material_id, and ids reach 473, so the 8-bit id is wrong for most batches.
+            ushort materialIdLarge = (ushort)(result[i].BoundingBox[5] & 0xFFFF);
+            result[i].MaterialId = (result[i].Flags & 0x2) != 0 ? materialIdLarge : materialId;
         }
         return result;
     }
@@ -1463,10 +1660,13 @@ public class WmoV17ToV14Converter
         public List<WmoDoodadSet> DoodadSets = new();
         public List<string> DoodadNames = new();
         public byte[] DoodadNamesRaw = Array.Empty<byte>(); // Raw MODN blob for byte-offset resolution
+        public uint[] GroupFileDataIds = Array.Empty<uint>(); // GFID (FileDataID era)
+        public uint[] DoodadFileDataIds = Array.Empty<uint>(); // MODI (FileDataID era)
         public List<WmoDoodadDef> DoodadDefs = new();
         public List<WmoFog> Fogs = new();
         public byte[] McvpRaw = Array.Empty<byte>();
         public List<WmoV17GroupData> Groups = new();
+        public WowViewer.Core.Wmo.WmoDetailDoodadDocument? DetailDoodads;
     }
 
     private class WmoV17GroupData
@@ -1599,7 +1799,9 @@ public class WmoV17ToV14Converter
         public ushort StartVertex;
         public ushort EndVertex;
         public byte Flags;
-        public byte MaterialId;
+
+        /// <summary>MOMT index: material_id, or material_id_large when flag 0x2 is set (Legion+).</summary>
+        public ushort MaterialId;
     }
 
     #endregion

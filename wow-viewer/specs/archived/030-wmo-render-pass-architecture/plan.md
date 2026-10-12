@@ -1,5 +1,5 @@
 # Implementation Plan: WMO Render Pass Architecture
-**Branch**: `030-wmo-render-pass-architecture` | **Date**: 2026-05-30 | **Spec**: [spec.md](./spec.md)
+**Branch**: `030-wmo-render-pass-architecture` | **Date**: 2026-05-30 | **Spec**: [spec.md](spec.md)
 
 **Convergence Note**: Active renderer-owner planning now lives in [specs/036-renderer-improvements/plan.md](../036-renderer-improvements/plan.md). This document remains a source-slice reference for WMO-specific architecture details.
 

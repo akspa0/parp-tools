@@ -1,9 +1,13 @@
 # WoWViewer Comprehensive User Guide
 
-**Application Version**: `v0.5.3`  
+**Application Version**: `v0.6.0`  
 **Platform Support**: Windows x64, Linux x64, macOS (Apple Silicon arm64 / Intel x64)
 
-`WoWViewer` is an interactive 3D desktop application for inspecting, analyzing, rendering, and reconciling World of Warcraft client data from pre-release Alpha 0.5.3 through Cataclysm 4.0.x.
+`WoWViewer` is an interactive 3D desktop application for inspecting, analyzing, rendering, and reconciling World of Warcraft client data.
+
+**Bring your own data.** No game data is shipped. Open your own client install, MPQ set, CASC install or extracted map folder.
+
+**Supported clients:** 0.5.3 – 0.11 **complete**; 0.12 – 5.x **partial**; WoW: Forever 1.60.1 (`wow_classic_beta`, CASC) **stable**.
 
 ---
 
@@ -17,7 +21,13 @@
 7. [Audio System and Positional Emitters](#7-audio-system-and-positional-emitters)
 8. [Lighting, Atmosphere, and Time of Day](#8-lighting-atmosphere-and-time-of-day)
 9. [PM4 Object Reconciliation Workbench (Spec 176)](#9-pm4-object-reconciliation-workbench-spec-176)
-10. [Troubleshooting and FAQ](#10-troubleshooting-and-faq)
+10. [Phased Terrain Dual-Map Overlay (Spec 135 & 137)](#10-phased-terrain-dual-map-overlay-spec-135--137)
+11. [Rosetta Multi-Version Zarr Datastore & Cross-Era Loading (Spec 190)](#11-rosetta-multi-version-zarr-datastore--cross-era-loading-spec-190)
+12. [Modern CASC Clients: WoW: Forever](#12-modern-casc-clients-wow-forever)
+13. [DAT v26 Terrain Project Files (alpha)](#13-dat-v26-terrain-project-files-alpha)
+14. [Archaeology: Phase Maps and Map Layering](#14-archaeology-phase-maps-and-map-layering)
+15. [Development Map Restoration and Experimental Research](#15-development-map-restoration-and-experimental-research)
+16. [Troubleshooting and FAQ](#16-troubleshooting-and-faq)
 
 ---
 
@@ -297,7 +307,96 @@ The former File > Load from Rosetta Datastore menu has been retired.
 
 ---
 
-## 12. Troubleshooting and FAQ
+## 12. Modern CASC Clients: WoW: Forever
+
+Added in v0.5.4-alpha. Tested against **WoW: Forever**, the `wow_classic_beta` product, build 1.60.1.69876 (a 12.0-based client).
+
+### Opening an install
+1. **File → Open CASC Install (local + CDN fill)...** (or **(local)...** to read only what is on disk) and pick the folder that contains `.build.info` (for example the `World of Warcraft` folder the Battle.net launcher installed). Picking a game folder such as `_retail_` also works.
+2. The **Open CASC Install** window lists every game version in `.build.info` (for example `1.60.1.69876 wow_classic_beta` and `1.15.9.69722 wow_classic_era`), and shows which ones have a game folder on disk. Select one.
+   - **Fetch missing files from Blizzard's CDN** starts ticked when opened with **(local + CDN fill)** and unticked with **(local)**. It downloads files the build lists but the install does not have on disk, for the same build, and caches them under `output\cache\casc`. In the tested install most `wow_classic_beta` textures were not on disk, so without it terrain and models render untextured. With it off, no game data is downloaded; if the launcher has updated `.build.info` before downloading that build's manifests, those manifests alone are fetched and this is logged.
+   - **Fall back to the other products for missing files** (off by default) reads a file from another listed version when the selected one lacks it. This mixes data across game versions.
+   - The selected version's build number picks the DB2 definitions.
+3. The map list is read from the build's `Map.db2` (for example **[451] Development Land**). Load a map as usual.
+
+### What is supported
+- Terrain tiles from the WDT's `MAID` table. Full-resolution tileset textures blended per chunk from `MDID`, up to 8 layers per chunk. The layer bar shows L4–L7 once loaded terrain uses them (Azeroth in 1.60.1 has chunks with 5 to 8 layers).
+- M2 models (`MD21`): skins from `SFID`, textures from `TXID`.
+- WMO buildings: groups from `GFID`, material textures from `MOMT` FileDataIDs, doodads from `MODI`.
+- Area names, lights and liquid types from the build's DB2 tables, using WoWDBDefs.
+
+### Loading speed
+- The first visit to a map downloads its textures (with CDN fill). Downloads run in parallel in the background. Later visits read from the cache.
+- Measured on `development`: the 460 WMO textures took 5.3 s to download in parallel, and about 1 s to read once cached.
+
+### Known limitations
+- Up to 8 texture layers per chunk (raised from 4 in v0.6.0-alpha). Layers whose texture FileDataID is 0 in the shipped data have no texture.
+- Height-based texture blending (`MHID`) is not applied yet.
+- The Azeroth WDT's `MAI2` chunk is not interpreted.
+
+---
+
+## 13. DAT v26 Terrain Project Files (alpha)
+
+DAT v26 files are raw terrain project files: the uncompiled data client ADTs are built from. They shipped in the same `wow_classic_beta` build. Format details: [`docs/architecture/adt-v26-format.md`](../architecture/adt-v26-format.md). The reader and renderer were added in v0.5.4-alpha; decoded objects/normals/colours and the experimental writer were added in v0.6.0-alpha.
+
+1. (Optional, for textures) open the CASC install first, as in section 12.
+2. **File → Open DAT v26 Terrain Folder...** and pick a folder of DAT v26 files. File names do not matter: files are recognised by content and placed by their `ALOC` tile coordinates. Heights, normals (`ANRM`), vertex colours (`ACVT`), texture layers and `ACDO` object placements render.
+3. **File → DAT v26 Height Scale** changes the height divisor and reloads the folder. The default ÷36 treats heights as inches: −18,559.47 ÷ 36 = −515.54, matching the shipped ocean floor. The other options are 1×, ÷12 and ÷100.
+4. **File → Export Nearby Tiles as DAT v26 (experimental)** writes the ADT tiles within 2 tiles of the camera (terrain, texture layers, vertex colours, normals, objects) to `output/dat_v26_export`. Reopen that folder with the step 2 command to compare.
+
+Shadows (`ASHD`) are all zero in the corpus and are not rendered. The format has no liquid, hole or area data in this corpus, and it is not the project's save/interchange format (Spec 241, deferred). The horizontal scale relative to shipped ADTs is not established.
+
+---
+
+## 14. Archaeology: Phase Maps and Map Layering
+
+The **Archaeology** tab of the right Workbench is where one map is shown over another.
+
+- **Phase maps from client data.** For the base map you have loaded, the tab shows the phase maps that the
+  client's own DBC/DB2 tables define for that base map — when the loaded client has such tables and entries.
+  Pick one to overlay it.
+- **Any map over any map.** If the client defines no phase map for the base map (or you want a different
+  pairing), you can load **any available map on top of any other map** of your choosing. Tiles present in the
+  overlay map replace the base tiles; everything else stays the base map.
+- **Clearing.** Clear the overlay to return to the unmodified base map.
+
+Section 10 describes the overlay behaviour (terrain, chunk textures, doodads, minimap) in detail. Annotated
+screenshots for this tab will ship with the integrated help in v0.6.1 (Spec 271).
+
+---
+
+## 15. Development Map Restoration and Experimental Research
+
+### Restoring the `development` map (v0.6.0, partial)
+
+PM4 collision meshes are matched to object placements from the museum `development` tiles, and restored tiles
+are written as monolithic LK 3.3.5 ADTs:
+
+```powershell
+dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
+  restore-unauthored --all-tiles --json output/restored_development/restoration_summary.json
+```
+
+- Hand-authored tiles are preserved byte-for-byte; only tiles that need it are rewritten.
+- Matched objects keep their authentic position and rotation and sit flush on their PM4 collision mesh.
+- Tiles with no texture layers are baked from their minimap into vertex colour (MCCV) so they are not black.
+- **Known gap:** objects on tiles adjacent to PM4-covered tiles that exist in the museum data are still missing.
+- Needs your own copy of the development data; paths default to `test_data/` and can be overridden with
+  `--base`, `--pm4`, `--minimap`, `--output`.
+
+### Terrain reconstruction research (experimental, unstable)
+
+The Zarr datasets, elevation/trestle models and ComfyUI nodes under `data-harvester/` reconstruct terrain from
+images with little human interaction. This work is **unexplored and unstable**, needs your own data and a GPU,
+and is intentionally not documented here beyond this note.
+
+---
+
+## 16. Troubleshooting and FAQ
+
+### Q: A CASC map shows untextured terrain or models?
+**A**: The install probably lacks the texture data on disk. Reopen it with **File → Open CASC Install (local + CDN fill)...**.
 
 ### Q: Why is terrain black or missing textures?
 **A**: Ensure your client root points to the folder containing the `Data` directory (or loose `World\` folders). If the client uses MPQ archives, verify `ArchiveCatalog` has enumerated the listfiles.

@@ -24,7 +24,7 @@ public static class MapGlbExporter
 
     public static void ExportTile(
         TerrainManager terrain,
-        IDataSource dataSource,
+        IDataSource? dataSource,
         Md5TranslateIndex? md5Index,
         int tileX,
         int tileY,
@@ -60,8 +60,13 @@ public static class MapGlbExporter
             $"(chunks={result.Chunks.Count}, mddf={result.MddfPlacements.Count}, modf={result.ModfPlacements.Count})");
     }
 
-    private static void AddPlacements(SceneBuilder scene, ITerrainAdapter adapter, TileLoadResult result, IDataSource dataSource)
+    private static void AddPlacements(SceneBuilder scene, ITerrainAdapter adapter, TileLoadResult result, IDataSource? dataSource)
     {
+        // A DAT folder can be opened with no client data source; the terrain still exports, but
+        // placements need model bytes, so skip them rather than throw.
+        if (dataSource is null)
+            return;
+
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
 
@@ -145,14 +150,14 @@ public static class MapGlbExporter
         int tileY,
         IReadOnlyList<TerrainChunkData> chunks,
         string mapName,
-        IDataSource dataSource,
+        IDataSource? dataSource,
         Md5TranslateIndex? md5Index)
     {
         // Material: minimap tile if available.
         var terrainMat = new MaterialBuilder("terrain");
         terrainMat.WithDoubleSide(true);
 
-        byte[]? minimapPng = TryLoadMinimapPngBytes(dataSource, md5Index, mapName, tileX, tileY);
+        byte[]? minimapPng = dataSource is null ? null : TryLoadMinimapPngBytes(dataSource, md5Index, mapName, tileX, tileY);
         if (minimapPng != null)
         {
             terrainMat.WithBaseColor(new SharpGLTF.Memory.MemoryImage(minimapPng));
@@ -224,7 +229,7 @@ public static class MapGlbExporter
         for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
         {
             var chunk = chunks[chunkIndex];
-            var indices = BuildChunkIndices(chunk.HoleMask);
+            var indices = BuildChunkIndices(chunk.HoleMask64, chunk.HoleMask);
             var verts = chunkVertices[chunkIndex];
 
             for (int t = 0; t + 2 < indices.Length; t += 3)
@@ -242,12 +247,15 @@ public static class MapGlbExporter
     private static Vector3 ZupToYup(float x, float y, float z) => new(x, z, -y);
 
     private static byte[]? TryLoadMinimapPngBytes(
-        IDataSource dataSource,
+        IDataSource? dataSource,
         Md5TranslateIndex? md5Index,
         string mapName,
         int tileX,
         int tileY)
     {
+        if (dataSource is null)
+            return null;
+
         string plainPath = MinimapService.GetMinimapTilePath(mapName, tileX, tileY);
 
         byte[]? data = null;
@@ -288,8 +296,11 @@ public static class MapGlbExporter
         }
     }
 
-    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? TryLoadMdxMesh(string modelPath, IDataSource dataSource)
+    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? TryLoadMdxMesh(string modelPath, IDataSource? dataSource)
     {
+        if (dataSource is null)
+            return null;
+
         try
         {
             byte[]? mdxData = dataSource.ReadFile(modelPath);
@@ -308,8 +319,30 @@ public static class MapGlbExporter
 
             if (mdxData == null || mdxData.Length == 0) return null;
 
-            using var ms = new MemoryStream(mdxData);
-            var mdx = MdxFile.Load(ms);
+            MdxFile mdx;
+            if (WarcraftNetM2Adapter.IsMd20(mdxData) || WarcraftNetM2Adapter.IsMd21(mdxData))
+            {
+                byte[]? skinBytes = null;
+                foreach (var skinPath in WarcraftNetM2Adapter.BuildSkinCandidates(modelPath))
+                {
+                    skinBytes = dataSource.ReadFile(skinPath);
+                    if (skinBytes != null && skinBytes.Length > 0)
+                        break;
+                }
+
+                var converter = new WoWViewer.Transfer.M2ToMdxConverter();
+                byte[]? convertedBytes = converter.ConvertToBytes(mdxData, skinBytes, null);
+                if (convertedBytes == null || convertedBytes.Length == 0)
+                    return null;
+
+                using var ms = new MemoryStream(convertedBytes);
+                mdx = MdxFile.Load(ms);
+            }
+            else
+            {
+                using var ms = new MemoryStream(mdxData);
+                mdx = MdxFile.Load(ms);
+            }
 
             var mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>($"mdx_{Path.GetFileNameWithoutExtension(modelPath)}");
 
@@ -359,8 +392,11 @@ public static class MapGlbExporter
         }
     }
 
-    private static byte[]? TryResolveMdxTexturePngBytes(MdxFile mdx, MdlGeoset geoset, IDataSource dataSource)
+    private static byte[]? TryResolveMdxTexturePngBytes(MdxFile mdx, MdlGeoset geoset, IDataSource? dataSource)
     {
+        if (dataSource is null)
+            return null;
+
         int texId = -1;
         if (geoset.MaterialId >= 0 && geoset.MaterialId < mdx.Materials.Count)
         {
@@ -374,7 +410,12 @@ public static class MapGlbExporter
         var tex = mdx.Textures[texId];
         if (string.IsNullOrEmpty(tex.Path)) return null;
 
-        byte[]? blpData = dataSource.ReadFile(tex.Path) ?? dataSource.ReadFile(tex.Path.Replace('/', '\\'));
+        string p = tex.Path;
+        byte[]? blpData = dataSource.ReadFile(p)
+            ?? dataSource.ReadFile(p.Replace('/', '\\'))
+            ?? dataSource.ReadFile(Path.ChangeExtension(p, ".blp"))
+            ?? dataSource.ReadFile(Path.ChangeExtension(p, ".blp").Replace('/', '\\'));
+
         if (blpData == null || blpData.Length == 0)
             return null;
 
@@ -399,8 +440,11 @@ public static class MapGlbExporter
             new VertexTexture1(uv));
     }
 
-    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? TryLoadWmoMesh(string modelPath, IDataSource dataSource)
+    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? TryLoadWmoMesh(string modelPath, IDataSource? dataSource)
     {
+        if (dataSource is null)
+            return null;
+
         try
         {
             byte[]? data = dataSource.ReadFile(modelPath);
@@ -477,7 +521,7 @@ public static class MapGlbExporter
     private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty> BuildWmoMesh(
         WmoV14ToV17Converter.WmoV14Data wmo,
         string modelPath,
-        IDataSource dataSource)
+        IDataSource? dataSource)
     {
         string baseName = Path.GetFileNameWithoutExtension(modelPath);
         var mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>($"wmo_{baseName}");
@@ -494,9 +538,9 @@ public static class MapGlbExporter
             matBuilder.WithDoubleSide(true);
 
             // Best-effort texture resolve via data source.
-            if (!string.IsNullOrEmpty(wmoMat.Texture1Name))
+            if (!string.IsNullOrEmpty(wmoMat.BaseTextureName))
             {
-                byte[]? png = TryResolveWmoTexturePngBytes(wmoMat.Texture1Name, dataSource);
+                byte[]? png = TryResolveWmoTexturePngBytes(wmoMat.BaseTextureName, dataSource);
                 if (png != null)
                     matBuilder.WithBaseColor(new SharpGLTF.Memory.MemoryImage(png));
                 else
@@ -564,8 +608,11 @@ public static class MapGlbExporter
         return new Vector4(r, g, b, 1.0f);
     }
 
-    private static byte[]? TryResolveWmoTexturePngBytes(string textureName, IDataSource dataSource)
+    private static byte[]? TryResolveWmoTexturePngBytes(string textureName, IDataSource? dataSource)
     {
+        if (dataSource is null)
+            return null;
+
         byte[]? blp = dataSource.ReadFile(textureName) ?? dataSource.ReadFile(textureName.Replace('/', '\\'));
         if (blp == null || blp.Length == 0)
             return null;
@@ -656,7 +703,9 @@ public static class MapGlbExporter
     private static int OuterIndex(int outerRow, int outerCol) => outerRow * 17 + outerCol;
     private static int InnerIndex(int innerRow, int innerCol) => innerRow * 17 + 9 + innerCol;
 
-    private static ushort[] BuildChunkIndices(int holeMask)
+    private static ushort[] BuildChunkIndices(int holeMask) => BuildChunkIndices(0UL, holeMask);
+
+    private static ushort[] BuildChunkIndices(ulong holeMask64, int holeMask)
     {
         // Matches TerrainTileMeshBuilder.BuildIndices.
         var indices = new List<ushort>(256 * 3);
@@ -665,12 +714,14 @@ public static class MapGlbExporter
         {
             for (int cellX = 0; cellX < 8; cellX++)
             {
-                if (holeMask != 0)
+                if (holeMask64 != 0UL)
                 {
-                    int holeX = cellX / 2;
-                    int holeY = cellY / 2;
-                    int holeBit = 1 << (holeY * 4 + holeX);
-                    if ((holeMask & holeBit) != 0)
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled64(holeMask64, cellX, cellY))
+                        continue;
+                }
+                else if (holeMask != 0)
+                {
+                    if (WowViewer.Core.Maps.TerrainHoleMath.IsCellHoled16((ushort)holeMask, cellX, cellY))
                         continue;
                 }
 

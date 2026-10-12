@@ -56,7 +56,7 @@ public class TileLoadResult
     /// Spec 232 FR-9: true when placements already carry the full layer transform — the merge
     /// must not translate them again.
     /// </summary>
-    public bool PlacementsPreTransformed { get; init; }
+    public bool PlacementsPreTransformed { get; set; }
 }
 
 public sealed record TerrainSoundEmitter(
@@ -498,9 +498,17 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                         ModfPlacements = AlphaChunkTransform.TransformModfPlacementPoses(
                             fullTile.ModfPlacements, layer),
                         SoundEmitters = phase.SoundEmitters,
+                        PlacementsPreTransformed = true,
                     };
                 }
+                else
+                {
+                    RehomeChunksForTarget(phase.Chunks, tileX, tileY, 0f, 0f, layer.ZOffset, layer.ZScale);
+                }
             }
+            if ((source.SourceTileX != tileX || source.SourceTileY != tileY || layer.HasTileOffset || layer.HasCellOffset) && !phase.PlacementsPreTransformed)
+                TranslatePhasePlacements(phase, source.SourceTileX, source.SourceTileY, tileX, tileY, layer);
+
             RemapPhasePlacementNameIndices(phase, phaseAdapter);
             MergePhaseTile(
                 result,
@@ -514,6 +522,35 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
 
         return result;
+    }
+
+    private static void RehomeChunksForTarget(
+        List<TerrainChunkData> chunks,
+        int tileX,
+        int tileY,
+        float cellDx = 0f,
+        float cellDy = 0f,
+        float zOffset = 0f,
+        float zScale = 1f)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        const float chunkSpan = tileSpan / 16f;
+        for (int i = 0; i < chunks.Count; i++)
+        {
+            TerrainChunkData chunk = chunks[i];
+            chunk.TileX = tileX;
+            chunk.TileY = tileY;
+            Vector3 worldPos = new Vector3(
+                17066.666f - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx,
+                17066.666f - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy,
+                chunk.WorldPosition.Z + zOffset);
+            chunk.WorldPosition = worldPos;
+            if (chunk.Liquid != null)
+            {
+                chunk.Liquid = chunk.Liquid.WithRehoming(tileX, tileY, worldPos, zOffset, zScale);
+            }
+            chunks[i] = chunk;
+        }
     }
 
     /// <summary>
@@ -531,39 +568,37 @@ public class AlphaTerrainAdapter : ITerrainAdapter
 
         const float tileSpan = 533.33333f;
         const float chunkSpan = tileSpan / 16f;
-        (float tileDx, float tileDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
-            layer.TileOffsetX, layer.TileOffsetY, tileSpan);
+        float tileDx = -(tileX - source.SourceTileX) * tileSpan;
+        float tileDy = -(tileY - source.SourceTileY) * tileSpan;
         (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
             layer.CellOffsetX, layer.CellOffsetY, chunkSpan);
         float totalDx = tileDx + cellDx;
         float totalDy = tileDy + cellDy;
 
-        float chunkDx = source.Transforms.Count > 0 ? cellDx : totalDx;
-        float chunkDy = source.Transforms.Count > 0 ? cellDy : totalDy;
-
         var shiftedChunks = new List<TerrainChunkData>(donor.Chunks.Count);
         for (int i = 0; i < donor.Chunks.Count; i++)
         {
             TerrainChunkData chunk = donor.Chunks[i];
+            float wx = 17066.666f - tileX * tileSpan - chunk.ChunkY * chunkSpan + cellDx;
+            float wy = 17066.666f - tileY * tileSpan - chunk.ChunkX * chunkSpan + cellDy;
+            Vector3 worldPos = new Vector3(wx, wy, (chunk.WorldPosition.Z * layer.ZScale) + layer.ZOffset);
             shiftedChunks.Add(new TerrainChunkData
             {
                 McinIndex = chunk.McinIndex,
-                TileX = chunk.TileX,
-                TileY = chunk.TileY,
+                TileX = tileX,
+                TileY = tileY,
                 ChunkX = chunk.ChunkX,
                 ChunkY = chunk.ChunkY,
                 Heights = chunk.Heights,
                 Normals = chunk.Normals,
                 HoleMask = chunk.HoleMask,
+                HoleMask64 = chunk.HoleMask64,
                 Layers = chunk.Layers,
                 AlphaMaps = chunk.AlphaMaps,
                 ShadowMap = chunk.ShadowMap,
                 MccvColors = chunk.MccvColors,
-                Liquid = chunk.Liquid,
-                WorldPosition = new Vector3(
-                    chunk.WorldPosition.X + chunkDx,
-                    chunk.WorldPosition.Y + chunkDy,
-                    chunk.WorldPosition.Z),
+                Liquid = chunk.Liquid?.WithRehoming(tileX, tileY, worldPos, layer.ZOffset, layer.ZScale),
+                WorldPosition = worldPos,
                 AreaId = chunk.AreaId,
                 McnkFlags = chunk.McnkFlags,
                 AlphaSourceFlags = chunk.AlphaSourceFlags,
@@ -579,7 +614,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             placement.Position = new Vector3(
                 placement.Position.X + totalDx,
                 placement.Position.Y + totalDy,
-                placement.Position.Z);
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             mddf.Add(placement);
         }
 
@@ -590,7 +625,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             placement.Position = new Vector3(
                 placement.Position.X + totalDx,
                 placement.Position.Y + totalDy,
-                placement.Position.Z);
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             modf.Add(placement);
         }
 
@@ -670,6 +705,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                     Heights = transformed.Heights,
                     Normals = transformed.Normals,
                     HoleMask = transformed.HoleMask,
+                    HoleMask64 = transformed.HoleMask64,
                     Layers = transformed.Layers,
                     AlphaMaps = transformed.AlphaMaps,
                     ShadowMap = transformed.ShadowMap,
@@ -705,6 +741,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 Heights = TileContentTransform.TransformHeightsRaw(chunk.Heights, indexMap),
                 Normals = TileContentTransform.TransformNormalsRaw(chunk.Normals, indexMap, normalTransform),
                 HoleMask = TileContentTransform.TransformHoleMaskRaw(chunk.HoleMask, kind),
+                HoleMask64 = WowViewer.Core.Maps.TerrainHoleMath.UpsampleLowResToHighRes((ushort)TileContentTransform.TransformHoleMaskRaw(chunk.HoleMask, kind)),
                 Layers = chunk.Layers,
                 AlphaMaps = TransformAlphaMaps(chunk.AlphaMaps, kind),
                 AlphaSourceFlags = chunk.AlphaSourceFlags,
@@ -1060,6 +1097,16 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             parent.MddfPlacements.AddRange(phase.MddfPlacements);
             contributed |= PhaseDataChannel.Doodads;
         }
+        else if ((contributed & PhaseDataChannel.Heightmap) != 0 && layer.ZOffset != 0f)
+        {
+            // Heightmap shifted by ZOffset but doodads were preserved from base: shift them to match the new elevation.
+            for (int i = 0; i < parent.MddfPlacements.Count; i++)
+            {
+                var p = parent.MddfPlacements[i];
+                p.Position = new Vector3(p.Position.X, p.Position.Y, (p.Position.Z * layer.ZScale) + layer.ZOffset);
+                parent.MddfPlacements[i] = p;
+            }
+        }
 
         bool phaseReplacesWorldObjects = PhaseCompositionPolicy.PhaseOwnsPlacements(
             layer.Channels,
@@ -1070,6 +1117,16 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             parent.ModfPlacements.Clear();
             parent.ModfPlacements.AddRange(phase.ModfPlacements);
             contributed |= PhaseDataChannel.WorldObjects;
+        }
+        else if ((contributed & PhaseDataChannel.Heightmap) != 0 && layer.ZOffset != 0f)
+        {
+            // Heightmap shifted by ZOffset but WMOs were preserved from base: shift them to match the new elevation.
+            for (int i = 0; i < parent.ModfPlacements.Count; i++)
+            {
+                var p = parent.ModfPlacements[i];
+                p.Position = new Vector3(p.Position.X, p.Position.Y, (p.Position.Z * layer.ZScale) + layer.ZOffset);
+                parent.ModfPlacements[i] = p;
+            }
         }
 
         TileTextures[(tileX, tileY)] = mergedTextures;
@@ -1114,6 +1171,41 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
     }
 
+    private static void TranslatePhasePlacements(
+        TileLoadResult phase, int sourceTileX, int sourceTileY, int tileX, int tileY, PhaseLayerSettings layer)
+    {
+        const float tileSpan = WoWConstants.ChunkSize;
+        const float chunkSpan = tileSpan / 16f;
+        float tileDx = -(tileX - sourceTileX) * tileSpan;
+        float tileDy = -(tileY - sourceTileY) * tileSpan;
+        (float cellDx, float cellDy) = PhaseCompositionPolicy.TileOffsetToWorldTranslation(
+            layer.CellOffsetX, layer.CellOffsetY, chunkSpan);
+        float dx = tileDx + cellDx;
+        float dy = tileDy + cellDy;
+
+        for (int i = 0; i < phase.MddfPlacements.Count; i++)
+        {
+            MddfPlacement placement = phase.MddfPlacements[i];
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
+            phase.MddfPlacements[i] = placement;
+        }
+
+        for (int i = 0; i < phase.ModfPlacements.Count; i++)
+        {
+            ModfPlacement placement = phase.ModfPlacements[i];
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
+            phase.ModfPlacements[i] = placement;
+        }
+
+        phase.PlacementsPreTransformed = true;
+    }
+
     private static void TranslatePhasePlacements(TileLoadResult phase, PhaseLayerSettings layer)
     {
         // One tile of offset = one ADT in the 64x64 grid = 533.33 yds. Despite its name,
@@ -1133,16 +1225,24 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         for (int i = 0; i < phase.MddfPlacements.Count; i++)
         {
             MddfPlacement placement = phase.MddfPlacements[i];
-            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             phase.MddfPlacements[i] = placement;
         }
 
         for (int i = 0; i < phase.ModfPlacements.Count; i++)
         {
             ModfPlacement placement = phase.ModfPlacements[i];
-            placement.Position = new Vector3(placement.Position.X + dx, placement.Position.Y + dy, placement.Position.Z);
+            placement.Position = new Vector3(
+                placement.Position.X + dx,
+                placement.Position.Y + dy,
+                (placement.Position.Z * layer.ZScale) + layer.ZOffset);
             phase.ModfPlacements[i] = placement;
         }
+
+        phase.PlacementsPreTransformed = true;
     }
 
     private static void RemapPhaseTextureIndices(
@@ -1362,6 +1462,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 Heights = sourceChunk.Heights,
                 Normals = sourceChunk.Normals,
                 HoleMask = sourceChunk.HoleMask,
+                HoleMask64 = sourceChunk.HoleMask64,
                 Layers = sourceChunk.Layers.Select(static layer => new TerrainLayer
                 {
                     TextureIndex = layer.TextureIndex,
@@ -1682,6 +1783,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             Heights = heights,
             Normals = normals,
             HoleMask = mcnk.Holes,
+            HoleMask64 = WowViewer.Core.Maps.TerrainHoleMath.UpsampleLowResToHighRes((ushort)mcnk.Holes),
             Layers = layers,
             AlphaMaps = alphaMaps,
             ShadowMap = shadowMap,

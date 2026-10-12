@@ -140,7 +140,7 @@ after the `[disk:...]` marker.
 
 For the future playback/runtime work, see
 [`audio-engine-plan-2026-04-21.md`](audio-engine-plan-2026-04-21.md) and
-[Spec 146](../../specs/146-audio-camera-playback/spec.md). The current
+[Spec 146](../../specs/archived/146-audio-camera-playback/spec.md). The current
 capability boundary is “MCSE decoded-PCM runtime path implemented; audible
 client and synchronized capture proof still user-run; Alpha MIDI+DLS pairs are
 validated but their renderer is not yet wired.”

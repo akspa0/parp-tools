@@ -1,5 +1,7 @@
 # Alpha 0.5.3 Area Overlay Ghidra Evidence
 
+> **Owner since 2026-09-23:** Epic 252 (World) / 253 (PM4) — [252-epic-world-simulation-and-audio](../specs/252-epic-world-simulation-and-audio/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
+
 Last verified: 2026-08-14 against the open Ghidra `WoWClient.exe` program in project `0.5.3`.
 
 This note records the native data boundary used by Spec 149's resident Zone/SubZone overlay. It does

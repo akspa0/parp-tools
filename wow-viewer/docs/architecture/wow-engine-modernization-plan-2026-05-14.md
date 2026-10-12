@@ -33,4 +33,4 @@ No separate engine extraction. No Vulkan backend. No WebGL. No Museums profile.
 - `../archive/architecture/game-viewer-plan-pack-2026-05-14/` — historical micro-plan pack;
   current execution is selected only through `specs/STATUS.md`.
 - `specs/055-unreal-engine-bridge/` — correct backend strategy, supersedes Vulkan-first direction
-- `specs/056-viewerapp-gpu-lod-modernization/` — OpenGL modernization within the viewer, not a multi-backend effort
+- `specs/archived/056-viewerapp-gpu-lod-modernization/` — OpenGL modernization within the viewer, not a multi-backend effort

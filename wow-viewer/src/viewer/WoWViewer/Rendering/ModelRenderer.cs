@@ -79,7 +79,7 @@ public enum RenderPass
 /// Renders an MDX model using OpenGL.
 /// Handles per-geoset VAO/VBO setup, shader management, BLP2 textured rendering.
 /// </summary>
-public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
+public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLightEmitter
 {
     private readonly GL _gl;
     private readonly MdxFile _mdx;
@@ -163,6 +163,38 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     private static readonly object SharedTextureCacheLock = new();
     private static readonly Dictionary<string, SharedTextureEntry> SharedTextureCache = new(StringComparer.OrdinalIgnoreCase);
 
+    public void CollectSceneLights(Matrix4x4 modelMatrix, ICollection<SceneLight> lights, string sourceKey)
+    {
+        ArgumentNullException.ThrowIfNull(lights);
+
+        for (int i = 0; i < _mdx.Lights.Count; i++)
+        {
+            MdlLight light = _mdx.Lights[i];
+            if (light.Type != (int)MdxLightType.Omni)
+                continue;
+
+            Vector3 position = Vector3.Transform(
+                new Vector3(light.Pivot.X, light.Pivot.Y, light.Pivot.Z),
+                modelMatrix);
+            Vector3 color = new(
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.Color.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
+            float intensity = MdxMaterialRenderPolicy.ClampFinite(light.Intensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
+            float start = MdxMaterialRenderPolicy.ClampFinite(light.AttenuationStart, 0.0f, 100000.0f);
+            float end = MathF.Max(MdxMaterialRenderPolicy.ClampFinite(light.AttenuationEnd, 0.0f, 100000.0f), start + 0.001f);
+
+            lights.Add(new SceneLight(
+                position,
+                color,
+                intensity,
+                start,
+                end,
+                _isM2AdapterModel ? "M2-LITE" : "MDX-LITE",
+                sourceKey));
+        }
+    }
+
     private enum TextureAlphaKind
     {
         Opaque,
@@ -192,6 +224,8 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     private Matrix4x4 _cachedView, _cachedProj;
     private Vector3 _cachedCameraPos;
     private Matrix4x4 _currentModelMatrix = Matrix4x4.Identity;
+    private SceneLightManager? _batchSceneLights;
+    private readonly SceneLight[] _sceneLightUploadScratch = new SceneLight[MaxMdxLocalLights];
     private readonly Vector3 _effectiveBoundsMin;
     private readonly Vector3 _effectiveBoundsMax;
     private readonly Vector3 _renderableBoundsMin;
@@ -207,7 +241,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     /// <summary>Tight geometry-derived max corner, for selection highlighting and picking.</summary>
     public Vector3 SelectionBoundsMax => _renderableBoundsMax;
     public bool IsM2AdapterModel => _isM2AdapterModel;
-    public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
+    public bool HasTransparentWorldPass => !_forceM2SolidDebug && (GlobalOpacity < 0.999f || ComputeHasTransparentWorldPass());
     // Only state that changes how the OPAQUE geosets are drawn belongs here — this property is
     // consulted by the opaque batch planner and by WMO opaque doodad collection, and by nothing
     // else.
@@ -269,6 +303,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         => _gpuInstancingShaderAvailable
            && GpuInstancingEnabled
            && !RequiresUnbatchedWorldRender
+           && GlobalOpacity >= 0.999f
            && _mdx.Lights.Count == 0;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
@@ -463,6 +498,8 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         ReloadCharacterTextures(reasonLabel);
         return true;
     }
+
+    public static float GlobalOpacity { get; set; } = 1.0f;
 
     public bool IsWireframe => _wireframe;
 
@@ -815,11 +852,13 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     /// </summary>
     public unsafe void BeginBatch(Matrix4x4 view, Matrix4x4 proj,
         Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
-        Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
+        Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor,
+        SceneLightManager? sceneLights = null)
     {
         _cachedView = view;
         _cachedProj = proj;
         _cachedCameraPos = cameraPos;
+        _batchSceneLights = sceneLights;
 
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
@@ -846,6 +885,12 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
         Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
     {
+        if (GlobalOpacity <= 0.001f)
+        {
+            _gpuInstanceBatchActive = false;
+            return;
+        }
+
         BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos, lightDir, lightColor, ambientColor);
         _gpuInstanceData.Clear();
         _gpuInstanceFadedData.Clear();
@@ -863,7 +908,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     /// </remarks>
     public void QueueGpuInstance(Matrix4x4 modelMatrix, float fadeAlpha = 1.0f)
     {
-        if (!_gpuInstanceBatchActive || !SupportsGpuInstancedOpaque)
+        if (!_gpuInstanceBatchActive || !SupportsGpuInstancedOpaque || GlobalOpacity <= 0.001f)
             return;
 
         if (fadeAlpha >= GpuInstanceOpaqueFadeThreshold)
@@ -924,10 +969,13 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     /// </summary>
     public unsafe void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         _currentModelMatrix = modelMatrix;
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
-        UploadMdxLights(modelMatrix);
+        UploadMdxLights(modelMatrix, _batchSceneLights);
 
         // Upload bone matrices if animated.
         if (ShouldUploadBoneMatrices())
@@ -962,8 +1010,12 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
     /// </summary>
     public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, RenderPass pass = RenderPass.Both, float fadeAlpha = 1.0f,
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
-        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null,
+        SceneLightManager? sceneLights = null)
     {
+        if (GlobalOpacity <= 0.001f)
+            return;
+
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
@@ -1009,7 +1061,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         _gl.Uniform3(_uLightDir, ld.X, ld.Y, ld.Z);
         _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
         _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
-        UploadMdxLights(modelMatrix);
+        UploadMdxLights(modelMatrix, sceneLights);
 
         if (_wireframe)
         {
@@ -1103,16 +1155,68 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
         _gl.DepthMask(true);
     }
 
-    /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
-    private void UploadMdxLights(Matrix4x4 modelMatrix)
+    /// <summary>
+    /// Uploads the bounded set of local point lights the MDX fragment shader evaluates. With a
+    /// <paramref name="sceneLights"/> manager (Spec 236 FR-007 world doodads) the shared scene-light
+    /// set is used, which already contains this model's own emitted omni lights, so neighbours light
+    /// each other without double-counting the emitter. Without one the model's own MDX LITE entries
+    /// are used, preserving standalone/editor behavior.
+    /// </summary>
+    private void UploadMdxLights(Matrix4x4 modelMatrix, SceneLightManager? sceneLights = null)
     {
         if (_uLocalLightCount < 0)
             return;
 
+        // Ambient-type MDX lights always contribute through uLocalAmbientColor, independently of
+        // whichever point-light set fills the bounded per-fragment slots below.
+        Vector3 ambient = Vector3.Zero;
+        for (int i = 0; i < _mdx.Lights.Count; i++)
+        {
+            MdlLight light = _mdx.Lights[i];
+            if (light.Type != (int)MdxLightType.Ambient)
+                continue;
+
+            Vector3 ambientColor = new(
+                MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
+            ambient += ambientColor * MdxMaterialRenderPolicy.ClampFinite(light.AmbientIntensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
+        }
+
+        if (sceneLights != null)
+        {
+            TransformAabb(BoundsMin, BoundsMax, modelMatrix, out Vector3 worldMin, out Vector3 worldMax);
+            int sceneCount = sceneLights.QueryAffecting(worldMin, worldMax, _sceneLightUploadScratch);
+            _gl.Uniform1(_uLocalLightCount, sceneCount);
+
+            for (int i = 0; i < sceneCount; i++)
+            {
+                SceneLight light = _sceneLightUploadScratch[i];
+                Vector3 color = new(
+                    MdxMaterialRenderPolicy.ClampFinite(light.Color.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                    MdxMaterialRenderPolicy.ClampFinite(light.Color.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
+                    MdxMaterialRenderPolicy.ClampFinite(light.Color.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
+                float intensity = MdxMaterialRenderPolicy.ClampFinite(light.Intensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
+                float start = MdxMaterialRenderPolicy.ClampFinite(light.AttenuationStart, 0.0f, 100000.0f);
+                float end = MathF.Max(MdxMaterialRenderPolicy.ClampFinite(light.AttenuationEnd, 0.0f, 100000.0f), start + 0.001f);
+
+                // External scene lights are omni (type 0) -- the only type the bounded MDX
+                // per-fragment path evaluates.
+                _gl.Uniform1(_uLocalLightType[i], (int)MdxLightType.Omni);
+                _gl.Uniform3(_uLocalLightPos[i], light.Position.X, light.Position.Y, light.Position.Z);
+                _gl.Uniform3(_uLocalLightColor[i], color.X, color.Y, color.Z);
+                _gl.Uniform1(_uLocalLightIntensity[i], intensity);
+                _gl.Uniform1(_uLocalLightStart[i], start);
+                _gl.Uniform1(_uLocalLightEnd[i], end);
+            }
+
+            _gl.Uniform3(_uLocalAmbientColor, ambient.X, ambient.Y, ambient.Z);
+            return;
+        }
+
         int count = Math.Min(_mdx.Lights.Count, MaxMdxLocalLights);
         _gl.Uniform1(_uLocalLightCount, count);
 
-        Vector3 ambient = Vector3.Zero;
         for (int i = 0; i < count; i++)
         {
             MdlLight light = _mdx.Lights[i];
@@ -1132,18 +1236,28 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
             _gl.Uniform1(_uLocalLightIntensity[i], intensity);
             _gl.Uniform1(_uLocalLightStart[i], start);
             _gl.Uniform1(_uLocalLightEnd[i], end);
-
-            if (light.Type == (int)MdxLightType.Ambient)
-            {
-                Vector3 ambientColor = new(
-                    MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.X, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
-                    MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.Y, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent),
-                    MdxMaterialRenderPolicy.ClampFinite(light.AmbientColor.Z, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent));
-                ambient += ambientColor * MdxMaterialRenderPolicy.ClampFinite(light.AmbientIntensity, 0.0f, MdxMaterialRenderPolicy.MaxLocalLightComponent);
-            }
         }
 
         _gl.Uniform3(_uLocalAmbientColor, ambient.X, ambient.Y, ambient.Z);
+    }
+
+    private static void TransformAabb(Vector3 min, Vector3 max, Matrix4x4 transform, out Vector3 outMin, out Vector3 outMax)
+    {
+        outMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        outMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+        Span<float> xs = stackalloc float[] { min.X, max.X };
+        Span<float> ys = stackalloc float[] { min.Y, max.Y };
+        Span<float> zs = stackalloc float[] { min.Z, max.Z };
+
+        foreach (float x in xs)
+        foreach (float y in ys)
+        foreach (float z in zs)
+        {
+            Vector3 transformed = Vector3.Transform(new Vector3(x, y, z), transform);
+            outMin = Vector3.Min(outMin, transformed);
+            outMax = Vector3.Max(outMax, transformed);
+        }
     }
 
     /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
@@ -1233,6 +1347,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer
                     // A faded instance batch carries per-instance alpha below 1, so it must blend
                     // even where the material alone would have been opaque.
                     bool needsBlend = _gpuInstanceFadedPass
+                        || GlobalOpacity < 0.999f
                         || (!isAlphaCutout && (l > 0 || effectiveBlendMode != MdlTexOp.Load));
 
                     // Filter by render pass — alpha cutout renders in opaque pass
@@ -1396,7 +1511,7 @@ if (isAlphaCutout)
 
                     ApplyLayerUvTransform(layer);
 
-                    float alpha = EvaluateLayerAlpha(layer) * fadeAlpha;
+                    float alpha = Math.Clamp(EvaluateLayerAlpha(layer) * fadeAlpha * GlobalOpacity, 0.0f, 1.0f);
                     // Apply geoset animation alpha override if present
                     if (_geosetAlphaOverrides.TryGetValue(gb.GeosetIndex, out float geoAlpha))
                         alpha *= geoAlpha;
@@ -1460,7 +1575,9 @@ if (isAlphaCutout)
     {
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
-        _gl.Disable(EnableCap.Blend);
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.LineWidth(WireframeOverlaySettings.LineWidth);
         _gl.Uniform1(_uHasTexture, 0);
         _gl.Uniform1(_uAlphaTest, 0);
         _gl.Uniform1(_uUseTextureAlpha, 0);
@@ -1470,8 +1587,9 @@ if (isAlphaCutout)
         _gl.Uniform1(_uSphereEnvMap, 0);
         _gl.Uniform1(_uUvSet, 0);
         ResetLayerUvTransform();
-        Vector3 lineColor = _wireframeLineColorOverride ?? new Vector3(1.0f, 0.85f, 0.3f);
-        _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, 1.0f);
+        Vector3 lineColor = _wireframeLineColorOverride ?? WireframeOverlaySettings.DefaultColor;
+        float wireframeAlpha = (WireframeOverlaySettings.FollowModelOpacity ? GlobalOpacity : 1.0f) * WireframeOverlaySettings.BaseIntensity;
+        _gl.Uniform4(_uColor, lineColor.X, lineColor.Y, lineColor.Z, wireframeAlpha);
 
         _gl.BindVertexArray(gb.Vao);
         if (_gpuInstanceDrawActive)
@@ -1480,6 +1598,8 @@ if (isAlphaCutout)
             _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
         ModelDrawCallCounter.Record();
         _gl.BindVertexArray(0);
+        _gl.LineWidth(1.0f);
+        _gl.Disable(EnableCap.Blend);
     }
 
     private unsafe void DrawForcedM2SolidGeoset(GeosetBuffers gb, bool forceBackdropState)
@@ -1952,14 +2072,14 @@ void main()
         discard;
 
     vec3 surfaceNormal = safeNormalize(vNormal);
-    if (!gl_FrontFacing)
-        surfaceNormal = -surfaceNormal;
 
+    // Half-Lambert diffuse wrapping: matches WmoRenderer and prevents harsh unlit black artifacts
     float diffuseStrength = 1.0;
     if (uUnshaded == 0)
     {
         float nDotL = dot(surfaceNormal, safeNormalize(uLightDir));
-        diffuseStrength = max(nDotL, 0.0);
+        float diff = nDotL * 0.5 + 0.5;
+        diffuseStrength = diff * diff;
     }
 
     vec3 localLight = max(uLocalAmbientColor, vec3(0.0));

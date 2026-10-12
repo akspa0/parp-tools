@@ -5,19 +5,30 @@ namespace WowViewer.Core.Maps;
 public sealed class TerrainChunkData
 {
     public int McinIndex { get; init; } = -1;
-    public int TileX { get; init; }
-    public int TileY { get; init; }
+    public int TileX { get; set; }
+    public int TileY { get; set; }
     public int ChunkX { get; init; }
     public int ChunkY { get; init; }
     public float[] Heights { get; init; } = [];
     public Vector3[] Normals { get; init; } = [];
     public int HoleMask { get; init; }
+    public ulong HoleMask64 { get; init; }
+
+    public bool IsCellHoled(int cellX, int cellY)
+    {
+        if (HoleMask64 != 0UL)
+            return TerrainHoleMath.IsCellHoled64(HoleMask64, cellX, cellY);
+        if (HoleMask != 0)
+            return TerrainHoleMath.IsCellHoled16((ushort)HoleMask, cellX, cellY);
+        return false;
+    }
+
     public TerrainLayer[] Layers { get; init; } = [];
     public Dictionary<int, byte[]> AlphaMaps { get; init; } = new();
     public byte[]? ShadowMap { get; init; }
     public byte[]? MccvColors { get; init; }
     public LiquidChunkData? Liquid { get; set; }
-    public Vector3 WorldPosition { get; init; }
+    public Vector3 WorldPosition { get; set; }
     public int AreaId { get; init; }
     public int McnkFlags { get; init; }
     public int AlphaSourceFlags { get; init; }

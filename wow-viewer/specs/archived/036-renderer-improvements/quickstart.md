@@ -6,9 +6,9 @@ Use this feature pack as the active owner plan for renderer modernization work t
 
 ## Read Order
 
-1. Read [spec.md](./spec.md)
-2. Read [plan.md](./plan.md)
-3. Read [research.md](./research.md)
+1. Read [spec.md](spec.md)
+2. Read [plan.md](plan.md)
+3. Read [research.md](research.md)
 4. Use specs `030`, `031`, and `032` only as source-slice references after the convergence documents
 
 ## Current Boundaries

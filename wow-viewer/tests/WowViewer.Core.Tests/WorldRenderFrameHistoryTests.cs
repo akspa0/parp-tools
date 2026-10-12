@@ -41,6 +41,24 @@ public class WorldRenderFrameHistoryTests
     }
 
     [Fact]
+    public void GcPause_IsReportedPerHitchAndNotSubtractedFromUnaccounted()
+    {
+        // Spec 256 P0: a 110 ms GC pause inside a 120 ms frame with a 5 ms stage. GC time is shown
+        // beside the stages; unaccounted stays total minus stages, so nothing is counted twice.
+        var history = new WorldRenderFrameHistory(capacity: 16);
+        history.Record(FrameOf(4.0), cameraMoved: false);
+        history.Record(FrameOf(120.0, WorldRenderStage.DeferredAssetLoads, 5.0) with { GcPauseMs = 110.0 }, cameraMoved: false);
+
+        WorldRenderFrameHistorySnapshot snapshot = history.Snapshot(hitchThresholdMs: 33.3);
+
+        WorldRenderHitch hitch = Assert.Single(snapshot.Hitches);
+        Assert.Equal(110.0, hitch.GcPauseMs, 6);
+        Assert.Equal(115.0, hitch.UnaccountedMs, 6);
+        Assert.Equal(110.0, snapshot.GcPause.MaxMs, 6);
+        Assert.Equal(2, snapshot.GcPause.SampleCount);
+    }
+
+    [Fact]
     public void InjectedHitch_IsFlaggedAtCorrectFrameWithCorrectMagnitude()
     {
         var history = new WorldRenderFrameHistory(capacity: 256);

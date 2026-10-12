@@ -34,6 +34,11 @@ public class TerrainRenderer : IDisposable
     private readonly int[] _uImplicitAlphaLoc = new int[4];
     private readonly int _uHasShadowLoc;
 
+    private const int MaxTerrainLocalLights = SceneLightManager.MaxShaderLights;
+    private readonly LocalLightUniforms _chunkLocalLights;
+    private readonly LocalLightUniforms _tileLocalLights;
+    private readonly SceneLight[] _localLightUploadScratch = new SceneLight[MaxTerrainLocalLights];
+
     private readonly uint[] _boundTexture2DByUnit = new uint[8];
     private int _activeTextureUnit = -1;
 
@@ -57,10 +62,39 @@ public class TerrainRenderer : IDisposable
 
     private bool _wireframe;
 
-    public bool ShowLayer0 { get; set; } = true;
-    public bool ShowLayer1 { get; set; } = true;
-    public bool ShowLayer2 { get; set; } = true;
-    public bool ShowLayer3 { get; set; } = true;
+    private readonly bool[] _showLayers = Enumerable.Repeat(true, TerrainTileMeshBuilder.MaxLayers).ToArray();
+
+    public bool ShowLayer0 { get => _showLayers[0]; set => _showLayers[0] = value; }
+    public bool ShowLayer1 { get => _showLayers[1]; set => _showLayers[1] = value; }
+    public bool ShowLayer2 { get => _showLayers[2]; set => _showLayers[2] = value; }
+    public bool ShowLayer3 { get => _showLayers[3]; set => _showLayers[3] = value; }
+
+    /// <summary>Visibility of texture layer <paramref name="layer"/> (0 = base, up to <see cref="TerrainTileMeshBuilder.MaxLayers"/> - 1).</summary>
+    public bool GetShowLayer(int layer) => (uint)layer < (uint)_showLayers.Length && _showLayers[layer];
+
+    public void SetShowLayer(int layer, bool visible)
+    {
+        if ((uint)layer < (uint)_showLayers.Length)
+            _showLayers[layer] = visible;
+    }
+
+    /// <summary>Highest per-chunk layer count among resident tiles; drives how many layer toggles the UI offers.</summary>
+    public int MaxResidentLayerCount => _tiles.Count == 0 ? 0 : _tiles.Max(static t => t.MaxChunkLayerCount);
+
+    private int ShowLayerMask
+    {
+        get
+        {
+            int mask = 0;
+            for (int layer = 0; layer < _showLayers.Length; layer++)
+            {
+                if (_showLayers[layer])
+                    mask |= 1 << layer;
+            }
+
+            return mask;
+        }
+    }
     public bool UseWorldUvForDiffuse { get; set; } = true;
     public bool ShowChunkGrid { get; set; }
     public bool ShowTileGrid { get; set; }
@@ -312,6 +346,9 @@ public class TerrainRenderer : IDisposable
         for (int i = 1; i < 4; i++)
             _uHasAlphaLoc[i] = _shader.GetUniformLocation($"uHasAlpha{i}");
 
+        _chunkLocalLights = LocalLightUniforms.Resolve(_shader);
+        _tileLocalLights = LocalLightUniforms.Resolve(_tileShader);
+
         InitializeSamplerUniforms();
         _lastTileFadeTimestamp = Stopwatch.GetTimestamp();
     }
@@ -454,7 +491,8 @@ public class TerrainRenderer : IDisposable
         Matrix4x4 proj,
         Vector3 cameraPos,
         FrustumCuller? frustum = null,
-        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys = null)
+        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys = null,
+        SceneLightManager? sceneLights = null)
     {
         LastFrameDrawCalls = 0;
         LastFrameUniform1Calls = 0;
@@ -476,7 +514,7 @@ public class TerrainRenderer : IDisposable
 
         if (_tiles.Count > 0)
         {
-            RenderTiles(view, proj, cameraPos, frustum, visibleTileKeys);
+            RenderTiles(view, proj, cameraPos, frustum, visibleTileKeys, sceneLights);
             return;
         }
 
@@ -542,6 +580,7 @@ public class TerrainRenderer : IDisposable
                 continue;
             }
 
+            UploadLocalLights(_chunkLocalLights, sceneLights, chunk.BoundsMin, chunk.BoundsMax);
             RenderChunk(chunk);
             ChunksRendered++;
             wireframeChunks?.Add(chunk);
@@ -602,12 +641,15 @@ public class TerrainRenderer : IDisposable
 
         foreach (var tile in _tiles)
         {
-            if (tile.AlphaShadowArrayTexture == 0)
-                continue;
+            foreach (uint arrayTexture in new[] { tile.AlphaShadowArrayTexture, tile.AlphaExtArrayTexture })
+            {
+                if (arrayTexture == 0)
+                    continue;
 
-            _gl.BindTexture(TextureTarget.Texture2DArray, tile.AlphaShadowArrayTexture);
-            _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, minFilter);
-            _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, magFilter);
+                _gl.BindTexture(TextureTarget.Texture2DArray, arrayTexture);
+                _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, minFilter);
+                _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, magFilter);
+            }
         }
 
         _gl.BindTexture(TextureTarget.Texture2D, 0);
@@ -689,7 +731,8 @@ public class TerrainRenderer : IDisposable
         Matrix4x4 proj,
         Vector3 cameraPos,
         FrustumCuller? frustum,
-        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys)
+        IReadOnlyList<(int tileX, int tileY)>? visibleTileKeys,
+        SceneLightManager? sceneLights)
     {
         UpdateTileFades();
 
@@ -716,14 +759,11 @@ public class TerrainRenderer : IDisposable
         _tileShader.SetFloat("uShadowStrength", Math.Clamp(ShadowStrength, 0f, 1f));
         _tileShader.SetInt("uShowContours", ShowContours ? 1 : 0);
         _tileShader.SetFloat("uContourInterval", ContourInterval);
-        _tileShader.SetInt("uShowLayer0", ShowLayer0 ? 1 : 0);
-        _tileShader.SetInt("uShowLayer1", ShowLayer1 ? 1 : 0);
-        _tileShader.SetInt("uShowLayer2", ShowLayer2 ? 1 : 0);
-        _tileShader.SetInt("uShowLayer3", ShowLayer3 ? 1 : 0);
+        _tileShader.SetInt("uShowLayerMask", ShowLayerMask);
 
         Uniform1Counted(_uTileUseWorldUvLoc, UseWorldUvForDiffuse ? 1 : 0);
         Uniform1Counted(_uTileUseMccvLoc, UseMccv ? 1 : 0);
-        Uniform1Counted(_uTileAlphaDebugChannelLoc, Math.Clamp(AlphaMaskChannel, 0, 3));
+        Uniform1Counted(_uTileAlphaDebugChannelLoc, Math.Clamp(AlphaMaskChannel, 0, TerrainTileMeshBuilder.MaxLayers - 1));
 
         // Wireframe overlay default: flat-color line pass (see chunk-path note).
         _tileShader.SetInt("uWireframe", 0);
@@ -736,7 +776,7 @@ public class TerrainRenderer : IDisposable
         LastFrameDrawCalls = 0;
 
         bool baseVisible = ShowLayer0;
-        bool overlayVisible = ShowLayer1 || ShowLayer2 || ShowLayer3;
+        bool overlayVisible = (ShowLayerMask & ~1) != 0;
         bool blendOverlaysOnly = !baseVisible && overlayVisible;
 
         List<TerrainTileMesh>? wireframeTiles = _wireframe ? new List<TerrainTileMesh>() : null;
@@ -790,9 +830,12 @@ public class TerrainRenderer : IDisposable
 
             BindTextureArray(0, tile.DiffuseArrayTexture);
             BindTextureArray(1, tile.AlphaShadowArrayTexture);
+            BindTextureArray(2, tile.AlphaExtArrayTexture);
             _gl.Uniform1(_uTileDiffuseLayerCountLoc, tile.DiffuseLayerCount);
+            _tileShader.SetInt("uHasAlphaExt", tile.AlphaExtArrayTexture != 0 ? 1 : 0);
             LastFrameUniform1Calls++;
             _tileShader.SetFloat("uOpacity", tileOpacity);
+            UploadLocalLights(_tileLocalLights, sceneLights, tile.BoundsMin, tile.BoundsMax);
 
             _gl.BindVertexArray(tile.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, tile.IndexCount, DrawElementsType.UnsignedShort, null);
@@ -1194,16 +1237,12 @@ public class TerrainRenderer : IDisposable
 
         for (int layer = 1; layer < 4; layer++)
         {
-            bool hasLayer = layer < chunk.Layers.Length;
-            bool usesAlphaMap = hasLayer && (chunk.Layers[layer].Flags & 0x100u) != 0;
-            bool implicitFullAlpha = hasLayer && !usesAlphaMap;
-
             bool hasAlpha = chunk.AlphaTextures.TryGetValue(layer, out uint alphaTexture) && alphaTexture != 0;
             if (hasAlpha)
                 BindTexture2D(3 + layer, alphaTexture);
 
             Uniform1Counted(_uHasAlphaLoc[layer], hasAlpha ? 1 : 0);
-            Uniform1Counted(_uImplicitAlphaLoc[layer], implicitFullAlpha ? 1 : 0);
+            Uniform1Counted(_uImplicitAlphaLoc[layer], 0);
         }
 
         bool hasShadow = chunk.ShadowTexture != 0;
@@ -1430,6 +1469,75 @@ public class TerrainRenderer : IDisposable
         return texture;
     }
 
+    private void UploadLocalLights(LocalLightUniforms uniforms, SceneLightManager? sceneLights, Vector3 boundsMin, Vector3 boundsMax)
+    {
+        if (uniforms.CountLocation < 0)
+            return;
+
+        int count = sceneLights == null
+            ? 0
+            : sceneLights.QueryAffecting(boundsMin, boundsMax, _localLightUploadScratch);
+
+        _gl.Uniform1(uniforms.CountLocation, count);
+        for (int i = 0; i < count; i++)
+        {
+            SceneLight light = _localLightUploadScratch[i];
+            Vector3 color = ClampVector(light.Color, 0.0f, 4.0f);
+            float intensity = Math.Clamp(FiniteOrDefault(light.Intensity, 0.0f), 0.0f, 4.0f);
+            float start = Math.Clamp(FiniteOrDefault(light.AttenuationStart, 0.0f), 0.0f, 100000.0f);
+            float end = MathF.Max(Math.Clamp(FiniteOrDefault(light.AttenuationEnd, 0.0f), 0.0f, 100000.0f), start + 0.001f);
+
+            _gl.Uniform3(uniforms.PosLocations[i], light.Position.X, light.Position.Y, light.Position.Z);
+            _gl.Uniform3(uniforms.ColorLocations[i], color.X, color.Y, color.Z);
+            _gl.Uniform1(uniforms.IntensityLocations[i], intensity);
+            _gl.Uniform1(uniforms.StartLocations[i], start);
+            _gl.Uniform1(uniforms.EndLocations[i], end);
+        }
+    }
+
+    private static Vector3 ClampVector(Vector3 value, float min, float max)
+        => new(
+            Math.Clamp(FiniteOrDefault(value.X, 0.0f), min, max),
+            Math.Clamp(FiniteOrDefault(value.Y, 0.0f), min, max),
+            Math.Clamp(FiniteOrDefault(value.Z, 0.0f), min, max));
+
+    private static float FiniteOrDefault(float value, float fallback)
+        => float.IsFinite(value) ? value : fallback;
+
+    private sealed class LocalLightUniforms
+    {
+        public int CountLocation { get; init; } = -1;
+
+        public int[] PosLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public int[] ColorLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public int[] IntensityLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public int[] StartLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public int[] EndLocations { get; } = new int[MaxTerrainLocalLights];
+
+        public static LocalLightUniforms Resolve(ShaderProgram shader)
+        {
+            var uniforms = new LocalLightUniforms
+            {
+                CountLocation = shader.GetUniformLocation("uLocalLightCount")
+            };
+
+            for (int i = 0; i < MaxTerrainLocalLights; i++)
+            {
+                uniforms.PosLocations[i] = shader.GetUniformLocation($"uLocalLightPos[{i}]");
+                uniforms.ColorLocations[i] = shader.GetUniformLocation($"uLocalLightColor[{i}]");
+                uniforms.IntensityLocations[i] = shader.GetUniformLocation($"uLocalLightIntensity[{i}]");
+                uniforms.StartLocations[i] = shader.GetUniformLocation($"uLocalLightStart[{i}]");
+                uniforms.EndLocations[i] = shader.GetUniformLocation($"uLocalLightEnd[{i}]");
+            }
+
+            return uniforms;
+        }
+    }
+
     private ShaderProgram CreateTerrainShader()
     {
         string vertSrc = @"
@@ -1445,6 +1553,7 @@ uniform mat4 uProj;
 uniform vec3 uLightDir;
 
 out vec3 vWorldPos;
+out vec3 vWorldNormal;
 out float vDiffuse;
 out vec2 vTexCoord;
 out vec4 vVertexColor;
@@ -1453,6 +1562,7 @@ void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
     vec3 worldNormal = normalize(mat3(uModel) * aNormal);
+    vWorldNormal = worldNormal;
     vDiffuse = max(dot(worldNormal, normalize(uLightDir)), 0.0);
     vTexCoord = aTexCoord;
     vVertexColor = aVertexColor;
@@ -1463,6 +1573,7 @@ void main() {
         string fragSrc = @"
 #version 330 core
 in vec3 vWorldPos;
+in vec3 vWorldNormal;
 in float vDiffuse;
 in vec2 vTexCoord;
 in vec4 vVertexColor;
@@ -1508,6 +1619,12 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform int uLocalLightCount;
+uniform vec3 uLocalLightPos[8];
+uniform vec3 uLocalLightColor[8];
+uniform float uLocalLightIntensity[8];
+uniform float uLocalLightStart[8];
+uniform float uLocalLightEnd[8];
 uniform float uOpacity;
 uniform int uWireframe;
 uniform vec4 uWireframeColor;
@@ -1533,9 +1650,9 @@ void main() {
     float texScale = 8.0 / 33.333;
     vec2 diffuseUV = (uUseWorldUV == 1) ? (vec2(-vWorldPos.y, -vWorldPos.x) * texScale) : (vTexCoord * 8.0);
 
-    float a1Raw = (uHasAlpha1 == 1) ? texture(uAlpha1, vTexCoord).r : ((uImplicitAlpha1 == 1) ? 1.0 : 0.0);
-    float a2Raw = (uHasAlpha2 == 1) ? texture(uAlpha2, vTexCoord).r : ((uImplicitAlpha2 == 1) ? 1.0 : 0.0);
-    float a3Raw = (uHasAlpha3 == 1) ? texture(uAlpha3, vTexCoord).r : ((uImplicitAlpha3 == 1) ? 1.0 : 0.0);
+    float a1Raw = (uHasAlpha1 == 1) ? texture(uAlpha1, vTexCoord).r : 0.0;
+    float a2Raw = (uHasAlpha2 == 1) ? texture(uAlpha2, vTexCoord).r : 0.0;
+    float a3Raw = (uHasAlpha3 == 1) ? texture(uAlpha3, vTexCoord).r : 0.0;
 
     float a1 = (uShowLayer1 == 1) ? a1Raw : 0.0;
     float a2 = (uShowLayer2 == 1) ? a2Raw : 0.0;
@@ -1561,24 +1678,52 @@ void main() {
     float shadowVisibility = (uShowShadowMap == 1 && uHasShadowMap == 1)
         ? 1.0 - clamp(texture(uShadowSampler, vTexCoord).r, 0.0, 1.0) * clamp(uShadowStrength, 0.0, 1.0)
         : 1.0;
-    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility;
-    vec3 result = vec3(1.0);
+    vec3 localLight = vec3(0.0);
+    for (int i = 0; i < 8; i++) {
+        if (i >= uLocalLightCount)
+            break;
 
-    if (uShowLayer0 == 1) {
-        vec4 c0 = SampleDiffuse(uHasTex0, uDiffuse0, diffuseUV);
-        result = c0.rgb * lighting;
+        vec3 toLight = uLocalLightPos[i] - vWorldPos;
+        float distanceToLight = length(toLight);
+        float attenuationRange = max(uLocalLightEnd[i] - uLocalLightStart[i], 0.001);
+        float attenuation = clamp((uLocalLightEnd[i] - distanceToLight) / attenuationRange, 0.0, 1.0);
+        vec3 toLightDir = distanceToLight > 0.0001 ? toLight / distanceToLight : vec3(0.0, 0.0, 1.0);
+        float localDiffuse = max(dot(normalize(vWorldNormal), toLightDir), 0.0);
+        localLight += max(uLocalLightColor[i], vec3(0.0))
+            * clamp(uLocalLightIntensity[i], 0.0, 4.0)
+            * attenuation
+            * localDiffuse;
     }
-    if (uShowLayer1 == 1 && uHasTex1 == 1) {
-        vec4 c1 = texture(uDiffuse1, diffuseUV);
-        result = mix(result, c1.rgb * lighting, a1);
-    }
-    if (uShowLayer2 == 1 && uHasTex2 == 1) {
-        vec4 c2 = texture(uDiffuse2, diffuseUV);
-        result = mix(result, c2.rgb * lighting, a2);
-    }
-    if (uShowLayer3 == 1 && uHasTex3 == 1) {
-        vec4 c3 = texture(uDiffuse3, diffuseUV);
-        result = mix(result, c3.rgb * lighting, a3);
+    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility + localLight;
+    float w1 = (uShowLayer1 == 1 && uHasTex1 == 1) ? a1 : 0.0;
+    float w2 = (uShowLayer2 == 1 && uHasTex2 == 1) ? a2 : 0.0;
+    float w3 = (uShowLayer3 == 1 && uHasTex3 == 1) ? a3 : 0.0;
+    float overlaySum = w1 + w2 + w3;
+    float w0 = (uShowLayer0 == 1 && uHasTex0 == 1) ? clamp(1.0 - overlaySum, 0.0, 1.0) : 0.0;
+    float totalWeight = w0 + overlaySum;
+
+    vec3 result = vec3(0.0);
+    if (totalWeight > 0.0001) {
+        if (w0 > 0.0) {
+            vec4 c0 = SampleDiffuse(uHasTex0, uDiffuse0, diffuseUV);
+            result += c0.rgb * w0;
+        }
+        if (w1 > 0.0) {
+            vec4 c1 = texture(uDiffuse1, diffuseUV);
+            result += c1.rgb * w1;
+        }
+        if (w2 > 0.0) {
+            vec4 c2 = texture(uDiffuse2, diffuseUV);
+            result += c2.rgb * w2;
+        }
+        if (w3 > 0.0) {
+            vec4 c3 = texture(uDiffuse3, diffuseUV);
+            result += c3.rgb * w3;
+        }
+        result = (result / totalWeight) * lighting;
+    } else {
+        // Whiteplate fallback: untextured terrain diffuse is pure white lit by scene lighting.
+        result = vec3(1.0) * lighting;
     }
 
     // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.
@@ -1674,11 +1819,7 @@ void main() {
 
     float outAlpha = 1.0;
     if (uShowLayer0 == 0) {
-        float inv = 1.0;
-        if (uShowLayer1 == 1) inv *= (1.0 - a1);
-        if (uShowLayer2 == 1) inv *= (1.0 - a2);
-        if (uShowLayer3 == 1) inv *= (1.0 - a3);
-        outAlpha = 1.0 - inv;
+        outAlpha = clamp(overlaySum, 0.0, 1.0);
     }
 
     FragColor = vec4(finalColor, outAlpha * uOpacity);
@@ -1708,6 +1849,7 @@ layout(location = 2) in vec2 aTexCoord;
 layout(location = 3) in uint aChunkSlice;
 layout(location = 4) in uvec4 aTexIdx;
 layout(location = 5) in vec4 aVertexColor;
+layout(location = 6) in uvec4 aTexIdxExt;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -1715,21 +1857,25 @@ uniform mat4 uProj;
 uniform vec3 uLightDir;
 
 out vec3 vWorldPos;
+out vec3 vWorldNormal;
 out float vDiffuse;
 out vec2 vTexCoord;
 out vec4 vVertexColor;
 flat out uint vChunkSlice;
 flat out uvec4 vTexIdx;
+flat out uvec4 vTexIdxExt;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
     vec3 worldNormal = normalize(mat3(uModel) * aNormal);
+    vWorldNormal = worldNormal;
     vDiffuse = max(dot(worldNormal, normalize(uLightDir)), 0.0);
     vTexCoord = aTexCoord;
     vVertexColor = aVertexColor;
     vChunkSlice = aChunkSlice;
     vTexIdx = aTexIdx;
+    vTexIdxExt = aTexIdxExt;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -1737,22 +1883,23 @@ void main() {
         string fragSrc = @"
 #version 330 core
 in vec3 vWorldPos;
+in vec3 vWorldNormal;
 in float vDiffuse;
 in vec2 vTexCoord;
 in vec4 vVertexColor;
 flat in uint vChunkSlice;
 flat in uvec4 vTexIdx;
+flat in uvec4 vTexIdxExt;
 
 uniform sampler2DArray uDiffuseArray;
 uniform sampler2DArray uAlphaShadowArray;
+uniform sampler2DArray uAlphaExtArray;
+uniform int uHasAlphaExt;
 uniform int uDiffuseLayerCount;
 uniform int uUseWorldUV;
 uniform int uUseMccv;
 uniform int uAlphaDebugChannel;
-uniform int uShowLayer0;
-uniform int uShowLayer1;
-uniform int uShowLayer2;
-    uniform int uShowLayer3;
+uniform int uShowLayerMask;
     uniform int uShowChunkGrid;
     uniform int uShowTileGrid;
     uniform int uShowCellGrid;
@@ -1767,6 +1914,12 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform int uLocalLightCount;
+uniform vec3 uLocalLightPos[8];
+uniform vec3 uLocalLightColor[8];
+uniform float uLocalLightIntensity[8];
+uniform float uLocalLightStart[8];
+uniform float uLocalLightEnd[8];
 uniform int uWireframe;
 uniform vec4 uWireframeColor;
 
@@ -1787,56 +1940,76 @@ void main() {
     vec2 diffuseUV = (uUseWorldUV == 1) ? (vec2(-vWorldPos.y, -vWorldPos.x) * texScale) : (vTexCoord * 8.0);
 
     vec4 alphaShadow = texture(uAlphaShadowArray, vec3(vTexCoord, float(vChunkSlice)));
-    bool has0 = HasLayer(vTexIdx.x);
-    bool has1 = HasLayer(vTexIdx.y);
-    bool has2 = HasLayer(vTexIdx.z);
-    bool has3 = HasLayer(vTexIdx.w);
+    vec4 alphaExt = (uHasAlphaExt == 1) ? texture(uAlphaExtArray, vec3(vTexCoord, float(vChunkSlice))) : vec4(0.0);
 
-    float a1Raw = alphaShadow.r;
-    float a2Raw = alphaShadow.g;
-    float a3Raw = alphaShadow.b;
-    float a1 = (uShowLayer1 == 1 && has1) ? a1Raw : 0.0;
-    float a2 = (uShowLayer2 == 1 && has2) ? a2Raw : 0.0;
-    float a3 = (uShowLayer3 == 1 && has3) ? a3Raw : 0.0;
+    // Up to 8 layers: indices 0..3 in vTexIdx and 4..7 in vTexIdxExt; alpha 1..3 in the shadow
+    // array RGB and alpha 4..7 in the extension array RGBA. Layer 0 has no alpha.
+    uint texIdx[8] = uint[8](vTexIdx.x, vTexIdx.y, vTexIdx.z, vTexIdx.w, vTexIdxExt.x, vTexIdxExt.y, vTexIdxExt.z, vTexIdxExt.w);
+    float alphaRaw[8] = float[8](1.0, alphaShadow.r, alphaShadow.g, alphaShadow.b, alphaExt.r, alphaExt.g, alphaExt.b, alphaExt.a);
+    bool visible[8];
+    for (int i = 0; i < 8; i++)
+        visible[i] = ((uShowLayerMask >> i) & 1) == 1 && HasLayer(texIdx[i]);
 
     float alphaDbg = -1.0;
     if (uShowAlphaMask == 1) {
         alphaDbg = 1.0;
-        if (uAlphaDebugChannel == 1) alphaDbg = (uShowLayer1 == 1 && has1) ? a1Raw : 0.0;
-        else if (uAlphaDebugChannel == 2) alphaDbg = (uShowLayer2 == 1 && has2) ? a2Raw : 0.0;
-        else if (uAlphaDebugChannel == 3) alphaDbg = (uShowLayer3 == 1 && has3) ? a3Raw : 0.0;
-        else {
+        if (uAlphaDebugChannel >= 1 && uAlphaDebugChannel <= 7) {
+            alphaDbg = visible[uAlphaDebugChannel] ? alphaRaw[uAlphaDebugChannel] : 0.0;
+        } else {
             float sum = 0.0;
             int count = 0;
-            if (uShowLayer1 == 1 && has1) { sum += a1Raw; count++; }
-            if (uShowLayer2 == 1 && has2) { sum += a2Raw; count++; }
-            if (uShowLayer3 == 1 && has3) { sum += a3Raw; count++; }
-            if (count > 0) alphaDbg = sum / float(count);
-            else alphaDbg = 0.0;
+            for (int i = 1; i < 8; i++) {
+                if (visible[i]) { sum += alphaRaw[i]; count++; }
+            }
+            alphaDbg = (count > 0) ? sum / float(count) : 0.0;
         }
     }
 
     float shadowVisibility = (uShowShadowMap == 1)
         ? 1.0 - clamp(alphaShadow.a, 0.0, 1.0) * clamp(uShadowStrength, 0.0, 1.0)
         : 1.0;
-    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility;
-    vec3 result = vec3(1.0);
+    vec3 localLight = vec3(0.0);
+    for (int i = 0; i < 8; i++) {
+        if (i >= uLocalLightCount)
+            break;
 
-    if (uShowLayer0 == 1 && has0) {
-        vec4 c0 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.x)));
-        result = c0.rgb * lighting;
+        vec3 toLight = uLocalLightPos[i] - vWorldPos;
+        float distanceToLight = length(toLight);
+        float attenuationRange = max(uLocalLightEnd[i] - uLocalLightStart[i], 0.001);
+        float attenuation = clamp((uLocalLightEnd[i] - distanceToLight) / attenuationRange, 0.0, 1.0);
+        vec3 toLightDir = distanceToLight > 0.0001 ? toLight / distanceToLight : vec3(0.0, 0.0, 1.0);
+        float localDiffuse = max(dot(normalize(vWorldNormal), toLightDir), 0.0);
+        localLight += max(uLocalLightColor[i], vec3(0.0))
+            * clamp(uLocalLightIntensity[i], 0.0, 4.0)
+            * attenuation
+            * localDiffuse;
     }
-    if (uShowLayer1 == 1 && has1) {
-        vec4 c1 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.y)));
-        result = mix(result, c1.rgb * lighting, a1);
+    vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility + localLight;
+    float weights[8];
+    float overlaySum = 0.0;
+    for (int i = 1; i < 8; i++) {
+        if (visible[i]) {
+            weights[i] = alphaRaw[i];
+            overlaySum += weights[i];
+        } else {
+            weights[i] = 0.0;
+        }
     }
-    if (uShowLayer2 == 1 && has2) {
-        vec4 c2 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.z)));
-        result = mix(result, c2.rgb * lighting, a2);
-    }
-    if (uShowLayer3 == 1 && has3) {
-        vec4 c3 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.w)));
-        result = mix(result, c3.rgb * lighting, a3);
+    weights[0] = visible[0] ? clamp(1.0 - overlaySum, 0.0, 1.0) : 0.0;
+    float totalWeight = weights[0] + overlaySum;
+
+    vec3 result = vec3(0.0);
+    if (totalWeight > 0.0001) {
+        for (int i = 0; i < 8; i++) {
+            if (weights[i] > 0.0) {
+                vec4 layerColor = texture(uDiffuseArray, vec3(diffuseUV, float(texIdx[i])));
+                result += layerColor.rgb * weights[i];
+            }
+        }
+        result = (result / totalWeight) * lighting;
+    } else {
+        // Whiteplate fallback: untextured terrain diffuse is pure white lit by scene lighting.
+        result = vec3(1.0) * lighting;
     }
 
     // MCCV is a BGRA CImVector whose RGB multiplies terrain colour, 127 being neutral.
@@ -1852,7 +2025,8 @@ void main() {
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
     vec3 finalColor = mix(uFogColor, result, fogFactor);
 
-    if (uShowContours == 1 && uShowLayer0 == 1) {
+    bool baseLayerShown = (uShowLayerMask & 1) == 1;
+    if (uShowContours == 1 && baseLayerShown) {
         float height = vWorldPos.z;
         float interval = max(uContourInterval, 0.5);
         float dh = fwidth(height);
@@ -1877,7 +2051,7 @@ void main() {
         finalColor = vec3(alphaDbg);
     }
 
-    if (uShowLayer0 == 1) {
+    if (baseLayerShown) {
         if (uShowChunkGrid == 1) {
             float chunkSize = 33.333;
             vec2 chunkUv = vWorldPos.xy / chunkSize;
@@ -1931,12 +2105,8 @@ void main() {
     }
 
     float outAlpha = 1.0;
-    if (uShowLayer0 == 0) {
-        float inv = 1.0;
-        if (uShowLayer1 == 1 && has1) inv *= (1.0 - a1);
-        if (uShowLayer2 == 1 && has2) inv *= (1.0 - a2);
-        if (uShowLayer3 == 1 && has3) inv *= (1.0 - a3);
-        outAlpha = 1.0 - inv;
+    if (!baseLayerShown) {
+        outAlpha = clamp(overlaySum, 0.0, 1.0);
     }
 
     FragColor = vec4(finalColor, outAlpha);
@@ -1947,6 +2117,7 @@ void main() {
         program.Use();
         program.SetInt("uDiffuseArray", 0);
         program.SetInt("uAlphaShadowArray", 1);
+        program.SetInt("uAlphaExtArray", 2);
         return program;
     }
 

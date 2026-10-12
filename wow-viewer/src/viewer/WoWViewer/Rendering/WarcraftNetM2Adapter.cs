@@ -1,6 +1,8 @@
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
+using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.M2Era1121;
 using WowViewer.Core.IO.M2Chunked;
@@ -137,8 +139,7 @@ internal static class WarcraftNetM2Adapter
     {
         if (files.Count == 0) return null;
 
-        string modelName = Path.GetFileNameWithoutExtension(modelPath).ToLowerInvariant();
-        string modelDir = (Path.GetDirectoryName(modelPath) ?? string.Empty).Replace('/', '\\').ToLowerInvariant();
+        (string modelName, string modelDir) = GetSkinQueryKeys(modelPath);
 
         string? bestPath = null;
         int bestScore = int.MinValue;
@@ -148,17 +149,7 @@ internal static class WarcraftNetM2Adapter
             if (!file.EndsWith(".skin", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            string normalized = file.Replace('/', '\\');
-            string fileName = Path.GetFileName(normalized).ToLowerInvariant();
-            string fileBase = Path.GetFileNameWithoutExtension(normalized).ToLowerInvariant();
-            string fileDir = (Path.GetDirectoryName(normalized) ?? string.Empty).ToLowerInvariant();
-
-            int score = 0;
-            if (fileBase.StartsWith(modelName, StringComparison.OrdinalIgnoreCase)) score += 50;
-            if (fileBase.Equals(modelName + "00", StringComparison.OrdinalIgnoreCase)) score += 50;
-            if (!string.IsNullOrEmpty(modelDir) && fileDir.Equals(modelDir, StringComparison.OrdinalIgnoreCase)) score += 100;
-            if (fileName.Equals(modelName + "00.skin", StringComparison.OrdinalIgnoreCase)) score += 20;
-
+            int score = ScoreSkinCandidate(file, modelName, modelDir, out string normalized);
             if (score > bestScore)
             {
                 bestScore = score;
@@ -167,6 +158,31 @@ internal static class WarcraftNetM2Adapter
         }
 
         return bestScore > 0 ? bestPath : null;
+    }
+
+    /// <summary>Lower-cased model name and directory in the form <see cref="FindSkinInFileList"/> scores against.</summary>
+    internal static (string ModelName, string ModelDir) GetSkinQueryKeys(string modelPath)
+        => (Path.GetFileNameWithoutExtension(modelPath).ToLowerInvariant(),
+            (Path.GetDirectoryName(modelPath) ?? string.Empty).Replace('/', '\\').ToLowerInvariant());
+
+    /// <summary>
+    /// The per-file score used by <see cref="FindSkinInFileList"/> (shared with <see cref="SkinPathIndex"/>
+    /// so both rank candidates identically). A positive score needs the file's base name to start with
+    /// the model name or its directory to equal the model's directory.
+    /// </summary>
+    internal static int ScoreSkinCandidate(string file, string modelName, string modelDir, out string normalized)
+    {
+        normalized = file.Replace('/', '\\');
+        string fileName = Path.GetFileName(normalized).ToLowerInvariant();
+        string fileBase = Path.GetFileNameWithoutExtension(normalized).ToLowerInvariant();
+        string fileDir = (Path.GetDirectoryName(normalized) ?? string.Empty).ToLowerInvariant();
+
+        int score = 0;
+        if (fileBase.StartsWith(modelName, StringComparison.OrdinalIgnoreCase)) score += 50;
+        if (fileBase.Equals(modelName + "00", StringComparison.OrdinalIgnoreCase)) score += 50;
+        if (!string.IsNullOrEmpty(modelDir) && fileDir.Equals(modelDir, StringComparison.OrdinalIgnoreCase)) score += 100;
+        if (fileName.Equals(modelName + "00.skin", StringComparison.OrdinalIgnoreCase)) score += 20;
+        return score;
     }
 
     public static MdxFile BuildRuntimeModel(byte[] m2Bytes, byte[]? skinBytes, string modelPath, string? buildVersion = null)
@@ -648,6 +664,7 @@ internal static class WarcraftNetM2Adapter
                 ParsedModelData data = ParsedModelData.FromWarcraftNet(md21);
                 TrySupplementAnimationMetadataFromWarcraftNet(md21, m2Bytes, fileName, data);
                 TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+                ApplyTextureFileDataIds(m2Bytes, fileName, data);
                 return data;
             }
             catch (Exception rawMd20Ex)
@@ -658,6 +675,7 @@ internal static class WarcraftNetM2Adapter
                     ParsedModelData data = ParsedModelData.FromWarcraftNet(wrapped.ModelInformation);
                     TrySupplementAnimationMetadataFromWarcraftNet(wrapped.ModelInformation, m2Bytes, fileName, data);
                     TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+                    ApplyTextureFileDataIds(m2Bytes, fileName, data);
                     return data;
                 }
 
@@ -673,11 +691,48 @@ internal static class WarcraftNetM2Adapter
             ParsedModelData data = ParsedModelData.FromWarcraftNet(m2Model.ModelInformation);
             TrySupplementAnimationMetadataFromWarcraftNet(m2Model.ModelInformation, m2Bytes, fileName, data);
             TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+            ApplyTextureFileDataIds(m2Bytes, fileName, data);
             return data;
         }
 
         throw new InvalidDataException("M2 is missing MD21 model information.");
     }
+
+    /// <summary>
+    /// Spec 239: chunked M2s store texture references in TXID (by texture index) and leave the
+    /// in-model filename empty. Fill each empty filename from TXID via the active FileDataID resolver.
+    /// </summary>
+    private static void ApplyTextureFileDataIds(byte[] m2Bytes, string fileName, ParsedModelData data)
+    {
+        if (!M2ChunkedFileIds.TryRead(m2Bytes, out M2ChunkedFileIds ids) || ids.TextureFileDataIds.Length == 0)
+            return;
+
+        int applied = 0;
+        for (int i = 0; i < data.Textures.Count && i < ids.TextureFileDataIds.Length; i++)
+        {
+            ParsedTextureData texture = data.Textures[i];
+            uint fileDataId = ids.TextureFileDataIds[i];
+            if (fileDataId == 0 || !string.IsNullOrWhiteSpace(texture.Filename))
+                continue;
+
+            data.Textures[i] = new ParsedTextureData
+            {
+                Type = texture.Type,
+                Flags = texture.Flags,
+                Filename = FileDataIdPaths.Resolve(fileDataId),
+            };
+            applied++;
+        }
+
+        if (applied > 0)
+            ViewerLog.Trace($"[M2] {fileName}: resolved {applied} texture(s) from TXID");
+    }
+
+    /// <summary>Spec 239: skin path from SFID (first entry), when the M2 is chunked and carries one.</summary>
+    public static string? TryGetSkinPathFromFileDataIds(byte[] m2Bytes) =>
+        M2ChunkedFileIds.TryRead(m2Bytes, out M2ChunkedFileIds ids) && ids.SkinFileDataIds is [var first, ..] && first != 0
+            ? FileDataIdPaths.Resolve(first)
+            : null;
 
     private static void TrySupplementAnimationMetadataFromWarcraftNet(MD21 md21, byte[] modelBytes, string fileName, ParsedModelData data)
     {

@@ -128,7 +128,8 @@ public sealed class M2CameraPathTests
             origin: new Vector3(1658.58f, 1662.91f, 141.234f),
             facingRadians: MathF.PI,
             tileX: 28,
-            tileY: 28);
+            tileY: 28,
+            soundId: 3500);
 
         M2CameraPathKeyframe key = Assert.Single(path.Keyframes);
         Assert.Equal(new Vector3(1657.58f, 1662.91f, 143.234f), key.Position, new Vector3EqualityComparer(0.001f));
@@ -137,6 +138,7 @@ public sealed class M2CameraPathTests
         Assert.True(path.HasCinematicCameraOrigin);
         Assert.Equal(28, path.CinematicCameraOriginTileX);
         Assert.Equal(28, path.CinematicCameraOriginTileY);
+        Assert.Equal(3500, path.CinematicCameraSoundId);
 
         M2CameraPathPlacement.ApplyCinematicCameraOrigin(
             path,

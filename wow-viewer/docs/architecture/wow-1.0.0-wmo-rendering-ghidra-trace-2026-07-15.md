@@ -893,7 +893,7 @@ Fills draw parameters from the batch struct.
 
 ### 18.6 Evidence
 
-Decompiled code saved to: `specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/wmo_render_pipeline.c`
+Decompiled code saved to: `specs/archived/104-legacy-m2-rendering/evidence/1.0.0-ghidra/wmo_render_pipeline.c`
 
 ---
 
@@ -1024,7 +1024,7 @@ This is consistent with the WMO root file being read by `CMapObj::Read()` in `Ma
 
 Follow-up decompilation pass resolving Open Follow-ups #2, #5, #6, #7, #8. Every
 function below was decompiled from WoW.exe 1.0.0.3980. Full annotated source:
-[`evidence/1.0.0-ghidra/wmo_scene_portal_bsp.c`](wow-viewer/specs/104-legacy-m2-rendering/evidence/1.0.0-ghidra/wmo_scene_portal_bsp.c).
+[`evidence/1.0.0-ghidra/wmo_scene_portal_bsp.c`](wow-viewer/specs/archived/104-legacy-m2-rendering/evidence/1.0.0-ghidra/wmo_scene_portal_bsp.c).
 
 ### 20.1 MOGP sub-chunk parsers
 

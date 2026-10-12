@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://parp-tools/wow-viewer/specs/243/merge-report.schema.json",
+  "title": "Modern-to-Legacy Conversion Merge Report",
+  "type": "object",
+  "required": ["target", "maps"],
+  "properties": {
+    "target": {
+      "type": "string",
+      "enum": ["lk-adt-v18", "alpha-wdt-0.5.3"]
+    },
+    "maps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["mapName", "status", "tilesConverted", "totalTiles"],
+        "properties": {
+          "mapName": { "type": "string" },
+          "status": { "type": "string", "enum": ["Succeeded", "Failed", "Skipped"] },
+          "tilesConverted": { "type": "integer", "minimum": 0 },
+          "totalTiles": { "type": "integer", "minimum": 0 },
+          "elapsedMs": { "type": "number", "minimum": 0 },
+          "error": { "type": ["string", "null"] },
+          "outputPath": { "type": ["string", "null"] },
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["tileX", "tileY", "chunkX", "chunkY"],
+              "properties": {
+                "tileX": { "type": "integer" },
+                "tileY": { "type": "integer" },
+                "chunkX": { "type": "integer" },
+                "chunkY": { "type": "integer" },
+                "keptLayers": { "type": "array", "items": { "type": "integer" } },
+                "mergedLayers": { "type": "array", "items": { "type": "integer" } },
+                "droppedLayers": { "type": "array", "items": { "type": "integer" } },
+                "unresolvedTextures": { "type": "array", "items": { "type": "integer" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "assets": {
+      "type": ["object", "null"],
+      "properties": {
+        "included": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "sourcePath", "outputRelativePath"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["Texture", "Model", "Minimap"] },
+              "sourcePath": { "type": "string" },
+              "outputRelativePath": { "type": "string" },
+              "sha256": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "unresolved": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "reference", "reason"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["Texture", "Model", "Minimap"] },
+              "reference": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

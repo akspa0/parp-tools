@@ -3,6 +3,123 @@
 Release notes for each tagged version live in [`docs/releases/`](docs/releases/) and are what the
 GitHub Release publishes. This file is the index and the short version.
 
+## v0.6.0 — 2026-10-11
+
+Stable release: **WoW: Forever 1.60 support, development-map restoration (PM4 objects, minimap-only terrain),
+Archaeology phase maps and map layering.** Clients 0.5.3–0.11 complete, 0.12–5.x partial. Bring your own data.
+Restored ADTs keep their original alpha maps. Integrated help and an image guide follow in v0.6.1.
+
+Full notes: [`docs/releases/v0.6.0.md`](docs/releases/v0.6.0.md)
+
+## v0.6.0-alpha4 — 2026-10-01
+
+Release (not a pre-release): **modern ADT 64-bit high-resolution terrain holes, major performance gains, M2 opacity, wireframe styling, and 3D cursor picking**.
+This build performs significantly better than the last released build across modern CASC clients. Caves, basements, and dungeon entrances
+now carve proper openings in modern ADT terrain meshes and raycasts/clicks pass cleanly through cave thresholds to select interior WMOs.
+Special thanks to **Kruithne** for `wow.export`.
+
+Full notes: [`docs/releases/v0.6.0-alpha4.md`](docs/releases/v0.6.0-alpha4.md)
+
+### Added
+- **Modern ADT 64-bit high-res holes**: full parsing and rendering of 64-bit `high_res_holes` (flag `0x10000`, 8-byte mask at offset `0x14`).
+- **Hole-aware raycasting and picking**: height sampling and raycasting allow rays and clicks to pass through cave thresholds into interior WMOs and doodads.
+- **M2 opacity slider**: interactive opacity control for M2 models.
+- **Synchronized wireframe overlay**: wireframe overlay for WMO/M2/MDX follows the opacity slider; customizable wireframe colors and styling in settings.
+- **Scene cursor picking**: 3D cursor rendering in scene for accurate object identification and selection.
+- **Community acknowledgment**: special thanks to Kruithne for `wow.export` added to viewer About box, README, and release documentation.
+
+### Changed & Fixed
+- **Toolbar & Sidebar cleanup**: Removed redundant and fragile WMO doodad-set combo from the bottom toolbar in favor of the Inspector panel; eliminated duplicate and nested "MCNK Flag Overlay" menus in the right sidebar.
+
+### Performance
+- Further optimized modern CASC data streaming, texture pre-filtering, and frame submission for higher framerates and lower stutter.
+
+## v0.6.0-alpha3 — 2026-09-27
+
+Release (not a pre-release): **rendering performance for modern CASC clients (WoW: Forever)**. On the
+same Azeroth spot the median frame went from 266 ms (≈ 4 FPS) to 77 ms with more of the map loaded; the
+per-frame streaming hitch dropped from ≈ 70 ms to 7.6 ms; every visible native M2 is now GPU-instanced.
+
+Full notes: [`docs/releases/v0.6.0-alpha3.md`](docs/releases/v0.6.0-alpha3.md)
+
+### Performance
+- **Textures**: native M2 textures shared across models, read/decoded off the render thread, and DXT BLPs uploaded compressed with their own mips.
+- **Missing textures** bind the error texture (`ShaneCube.blp`) instead of searching the data source for look-alikes.
+- **Model loading**: indexed `.skin` lookup; skipped the discarded adapter parse; WMO doodads get the same fixes plus one shared copy per model.
+- **GPU instancing** for native M2s (0 → 10,895 instanced in the capture).
+- **Animation**: key frames decoded once per track, allocation-free bone matrices, GPU skinning (≤ 128 bones). *Not yet measured.*
+- **CASC minimap** tiles upload by time budget and now load fully.
+
+### Diagnostics
+- Runtime Stats: per-phase model load timings, GC pauses, CASC and texture-streaming counters.
+
+### Known issues
+- Alpha 0.5.3 MDX models render overbright; cause not yet identified.
+
+## v0.6.0-alpha2 — 2026-09-21
+
+Alpha pre-release: M2 texture wrap fixed across every era, LK ADT output that carries the chunks the
+format requires, first load of **DAT v22** terrain, and DAT maps exportable as LK ADT or Alpha WDT.
+
+Full notes: [`docs/releases/v0.6.0-alpha2.md`](docs/releases/v0.6.0-alpha2.md)
+
+## v0.6.0-alpha — 2026-09-18
+
+Alpha pre-release on the v0.6 line: **modern data access + experimental terrain formats**. A CASC
+game-version picker, the full 8-layer terrain shader, modern WMO materials and LOD groups, the first
+decoded DAT v26 objects/normals/colours plus an experimental DAT v26 writer, and CASC reads in
+harvest and the `inspect` CLI.
+
+Full notes: [`docs/releases/v0.6.0-alpha.md`](docs/releases/v0.6.0-alpha.md)
+
+### Added
+- **CASC game-version picker**: choose which product in `.build.info` to read; newest remains the default.
+- **8-layer terrain shader**: chunks render up to 8 texture layers (raised from 4), blended at full resolution.
+- **Modern WMO**: per-LOD `GFID` groups, modern per-shader base textures, and 16-bit `MOBA` material ids.
+- **DAT v26 objects, normals & colours**: `ACDO` placements, `ANRM` normals and `ACVT` vertex colours decode and render.
+- **DAT v26 experimental writer**: File → Export Nearby Tiles as DAT v26 writes the ADT tiles around the camera; the writer round-trips the 700-file corpus byte-identically.
+- **CASC in harvest**: every `--client-root` command opens a CASC install when `.build.info` is present.
+
+### Fixed
+- **Synthesized minimap export** now works for edited tiles and CASC-backed worlds.
+
+### Docs
+- Format-conformance pass against the wowdev.wiki audit (Spec 240); DAT v26 interchange explicitly deferred (Spec 241).
+
+## v0.5.4-alpha — 2026-09-16
+
+Alpha pre-release: modern CASC install support for **WoW: Forever** (`wow_classic_beta` 1.60.1.69876,
+12.0-based client), FileDataID-era maps, M2 and WMO, DB2 tables for that build, and a first reader and
+renderer for the new DAT v26 terrain project format.
+
+Full notes: [`docs/releases/v0.5.4-alpha.md`](docs/releases/v0.5.4-alpha.md)
+
+### Added
+- **CASC installs**: File → Open CASC Install (local / local + CDN fill) with a game version picker, built on TACTSharp. Parallel reads, background prefetch, and a download cache.
+- **FileDataID assets**: WDT `MAID`, tex0 `MDID`, FileDataID placement flags, `MD21` M2 (`SFID`/`TXID`), WMO `GFID`/`MODI`/`MOMT` texture IDs, DB2 tables via WoWDBDefs.
+- **DAT v26 terrain**: File → Open DAT v26 Terrain Folder, `ALOC` tile placement, height scale option (default ÷36).
+- **CLI**: `inspect casc …` and `inspect adt-ahdr check`.
+
+### Fixed
+- Newer WMO root/group chunk layouts no longer crash the world (unknown chunks skipped; unparseable WMOs skipped with a log line).
+- Listfile resolution prefers the newest listfile instead of a stale bundled copy.
+
+## v0.5.3.1 — 2026-09-15
+
+Hotfix release: Mjollna community credit, authentic asset mappings in New Map Creator, GLB exports for active terrain & M2 models, cartography phase tile alignment, console window suppression, and startup resilience.
+
+Full notes: [`docs/releases/v0.5.3.1.md`](docs/releases/v0.5.3.1.md)
+
+### Added
+- **About Box Credits**: Added Mjollna to the list of community research, exploration, and development acknowledgments.
+
+### Fixed
+- **Authentic New Map Creator Assets**: Mapped all biome themes strictly to verified community listfile textures and models, eliminating fictitious fallback paths.
+- **Editor Data I/O GLB Exports**: Added GLB scene and collision mesh export support for loaded terrain tiles; enabled M2 doodad model conversion to MDX mesh for GLB inclusion.
+- **Phase Map Alignment**: Fixed donor tile world coordinate leaking and co-location tearing in `PhaseChunkMerger` and terrain adapters; corrected donor placement translation offsets.
+- **Windows Console Suppression**: Switched executable output to `WinExe` to prevent spawning an empty command prompt behind the GUI window.
+- **Startup Crash Logging & Resilience**: Global exception handlers logging to `crash.log` and bounded non-blocking listfile fetching.
+
 ## v0.5.3 — 2026-09-15
 
 Feature release: Legacy MDX/M2 model rendering & bone animation, Cartography composition with rigid cell shifting, in-viewer New Map Creator, Editor IA overhaul, marketing capture automation, and 5.0.1 era groundwork.

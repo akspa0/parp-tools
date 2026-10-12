@@ -10,5 +10,5 @@ public sealed class TileLoadResult
     /// Spec 232 FR-9: true when the placements in this result already carry the full layer
     /// transform (pose + offset + cell delta) — the merge must not translate them again.
     /// </summary>
-    public bool PlacementsPreTransformed { get; init; }
+    public bool PlacementsPreTransformed { get; set; }
 }

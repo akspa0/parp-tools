@@ -45,7 +45,9 @@ never rationalize a failed check. All work happens in `wow-viewer/`.
    - `Last cleanup: <today's date> (<n> specs audited, <n> tasks un-checked, <n> specs archived)`
    - `Next cleanup due: <first of next month>`
 
-6. **Write the report** to `wow-viewer/specs/224-speckit-governance/evidence/cleanup-<date>.md`
+6. **Write the report** to `wow-viewer/specs/251-epic-viewer-ux-and-code-health/evidence/cleanup-<date>.md`
+   (governance owner since the 2026-09-23 reconciliation; earlier reports live under
+   `wow-viewer/specs/archived/224-speckit-governance/evidence/`)
    containing: specs audited, tasks un-checked (with reason), specs archived, memory-bank lines
    moved, and any spec-sync flags. This report is the cleanup's own receipt (Spec 224 FR-2).
 

@@ -19,12 +19,15 @@
    - [Lighting Inspection (`lit` & `light`)](#lighting-inspection-lit--light)
    - [Audio Catalog Inspection (`audio alpha-area`)](#audio-catalog-inspection-audio-alpha-area)
    - [Archive & Listfile Caching](#archive--listfile-caching)
+   - [CASC Installs (`casc`)](#casc-installs-casc)
+   - [DAT v26 Terrain (`adt-ahdr`)](#dat-v26-terrain-adt-ahdr)
 2. [Format Converter (`wowviewer-converter`)](#2-format-converter-wowviewer-converter)
    - [Alpha WDT → LK Format (`alpha-to-lk`)](#alpha-wdt--lk-format-alpha-to-lk)
    - [LK Format → Alpha WDT (`lk-to-alpha`)](#lk-format--alpha-wdt-lk-to-alpha)
 3. [Terrain Tensor Harvester (`wowviewer-harvest`)](#3-terrain-tensor-harvester-wowviewer-harvest)
    - [Harvesting Maps to NPZ / Zarr](#harvesting-maps-to-npz--zarr)
    - [Synthesizing Minimaps (`synthetic-minimap`)](#synthesizing-minimaps-synthetic-minimap)
+   - [CASC Clients in Harvest](#casc-clients-in-harvest)
    - [Streaming Pipe to Python (`harvest-stream`)](#streaming-pipe-to-python-harvest-stream)
 4. [Python ML Toolchain (`data-harvester`)](#4-python-ml-toolchain-data-harvester)
 
@@ -212,6 +215,82 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect -c Debug --
   --cache-key "3.3.5.12340"
 ```
 
+### CASC Installs (`casc`)
+
+Added in v0.5.4-alpha. Reads a local CASC install through TACTSharp. `--install` is the folder containing
+`.build.info`; `--cache` is a local folder for decoded manifests and CDN downloads. `--listfile` takes
+community listfile CSVs (`id;path`) and may be repeated.
+
+```powershell
+$exe = 'wow-viewer\tools\inspect\WowViewer.Tool.Inspect\bin\Release\net10.0\WowViewer.Tool.Inspect.exe'
+$install = 'D:\Games\World of Warcraft'
+$listfile = "$env:LOCALAPPDATA\WoWViewer\community-listfile-withcapitals.csv"
+
+# Products and builds in .build.info
+& $exe casc products --install $install
+
+# Read one file by FileDataID or listfile path (--cdn-fill downloads data the install lacks)
+& $exe casc read --install $install --product wow_classic_beta --cache output\casc-cache --id 857684 --out output\development.wdt
+& $exe casc read --install $install --product wow_classic_beta --cache output\casc-cache `
+  --path 'World\Maps\Azeroth\Azeroth_31_40.adt' --listfile $listfile --out output\Azeroth_31_40.adt --cdn-fill
+
+# Which listed paths are readable (one product per line: NotPresent/NotLocal/KeyUnavailable/Failed counts;
+# two or more --product values report which product serves each path)
+& $exe casc exists --install $install --product wow_classic_beta --product wow_classic_era --cache output\casc-cache `
+  --paths-file paths.txt --listfile $listfile [--show-missing]
+
+# Parse a WMO (groups via GFID, textures/doodads via FileDataIDs) and report resolution
+& $exe casc wmo --install $install --product wow_classic_beta --cache output\casc-cache --listfile $listfile `
+  --path 'WORLD\WMO\AZEROTH\BUILDINGS\CHAPEL\DUSKWOODCHAPEL.WMO'
+
+# Build chunked M2s on the native render path (SFID skin, TXID textures)
+& $exe casc m2 --install $install --product wow_classic_beta --cache output\casc-cache --listfile $listfile `
+  --path 'WORLD\LORDAERON\SILVERPINE\PASSIVEDOODADS\TREES\SILVERPINETREE03.M2'
+
+# Decode DB2 tables with WoWDBDefs for the product's own build
+& $exe casc db2 --install $install --product wow_classic_beta --cache output\casc-cache `
+  --defs wow-viewer\libs\wowdev\WoWDBDefs\definitions --listfile $listfile --table Map --table AreaTable
+
+# Survey a map by WDT FileDataID: MAID tiles, MDID/MHID, MCLY/MCAL, placement flags,
+# WMO parse outcomes, native M2 build outcomes, asset readability
+& $exe casc map-survey --install $install --product wow_classic_beta --cache output\casc-cache --wdt-id 857684 [--cdn-fill]
+
+# Export absolute ADT outer-vertex heights for a tile rectangle (CSV: tileX,tileY,row,col,height)
+& $exe casc adt-heights --install $install --product wow_classic_beta --cache output\casc-cache `
+  --wdt-id 775971 --x0 24 --x1 38 --y0 14 --y1 30 --out output\azeroth_heights.csv
+
+# Loading benchmark: listfile load, file-list filtering, sequential vs parallel reads (with a
+# byte-identity check), WMO parse, WMO texture fetch and decode
+& $exe casc bench --install $install --product wow_classic_beta --cache output\casc-cache --wdt-id 857684 `
+  --listfile $listfile [--threads 12] [--cdn-fill]
+```
+
+
+Search DB2 tables for integer values (every column, arrays element-wise; also prints the nearest row IDs):
+
+```powershell
+& $exe casc db2 --install "I:\wow12\World of Warcraft" --product wow_classic_beta --cache output\cache\casc `
+  --defs libs\wowdev\WoWDBDefs\definitions --listfile $env:LOCALAPPDATA\WoWViewer\community-listfile-withcapitals.csv `
+  --table Map --table AreaTable --find 2869
+```
+
+### DAT v26 Terrain (`adt-ahdr`)
+
+`adt-ahdr check` was added in v0.5.4-alpha; `adt-ahdr roundtrip` and `adt-ahdr objects` were added in
+v0.6.0-alpha.
+
+```powershell
+# Decode every AHDR-family file in a folder (any names), check ACNK indices, and verify that
+# ALOC-adjacent tiles share identical edge heights
+& $exe adt-ahdr check --root test_data\v22_adts\unknown
+
+# Decode and re-encode every file with the experimental writer; reports byte-identical files
+& $exe adt-ahdr roundtrip --root test_data\v22_adts\unknown
+
+# Resolve ACDO object placements and measure their heights against the terrain (add --list to print each)
+& $exe adt-ahdr objects --root test_data\v22_adts\unknown
+```
+
 ---
 
 ## 2. Format Converter (`wowviewer-converter`)
@@ -268,9 +347,36 @@ Composes paired terrain and liquid minimap images directly from raw ADT elevatio
 ```powershell
 dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- `
   synthetic-minimap `
-  --input-dir "C:\Extracted\World\Maps\Azeroth" `
+  --client-root "H:\CLIENTS\World of Warcraft 3.3.5a" `
+  --map Azeroth `
   --output-dir "output/synthetic_minimaps/Azeroth"
 ```
+
+### CASC Clients in Harvest
+Added in v0.6.0-alpha. Every `--client-root` command opens a CASC install when the folder (or its
+parent) contains `.build.info`, and MPQ archives otherwise. FileDataID-era maps resolve their tile
+files and authored minimaps through the WDT `MAID` chunk, and split `_tex0.adt` textures through
+`MDID`. Tested with `synthetic-minimap` on `wow_classic_beta` 1.60.1.69876 (`development`).
+
+| Option | Description |
+|---|---|
+| `--casc-product <a,b>` | Products to read, newest version first (default: all listed) |
+| `--casc-listfile <csv>` | Community listfile (`id;path`). Default: `%LOCALAPPDATA%\WoWViewer\community-listfile-withcapitals.csv`, which the viewer downloads |
+| `--cdn-fill` | Fetch files the install lists but has no local data for, from Blizzard's CDN for the same build |
+| `--casc-cache <dir>` | CDN download cache (default `output/cache/casc`) |
+
+```powershell
+dotnet run --project wow-viewer/tools/harvest/WowViewer.Tool.Harvest -c Debug -- `
+  synthetic-minimap `
+  --client-root "I:\wow12\World of Warcraft" `
+  --casc-product wow_classic_beta --cdn-fill `
+  --map development `
+  --output-dir "output/synthetic_minimaps/development" `
+  --per-tile --whole-map --authored-reference
+```
+
+Texture slots whose `MDID` entry is 0 have no texture; the compositor substitutes a recorded RGB proxy
+and logs a warning for each.
 
 ### Streaming Pipe to Python (`harvest-stream`)
 Streams binary V22 tile blobs to standard output for direct consumption by Python data pipelines.
