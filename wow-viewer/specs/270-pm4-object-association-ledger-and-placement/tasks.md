@@ -30,3 +30,16 @@
 - [x] **T15**: Implement monolithic LK 3.3.5 ADT generator in `Pm4RestoreUnauthoredSupport.cs` using `LkAdtReader.Read`, `BlankAdtFactory.WithPlacements`, and `LkAdtWriter.Build(..., MapConversionTargetFormat.LkAdtV18)`.
 - [x] **T16**: Run reconstruction on unauthored PM4 tiles (e.g. `13_50`, `14_36`, `16_36`, and full corpus) producing valid monolithic `.adt` files.
 - [x] **T17**: Validate with C# test suite (`dotnet test`) and update completion receipt (`evidence/receipt-spec270.md`).
+
+---
+
+## Phase 5 — Multi-Source Placement Convergence & Minimap MCCV Ingestion (2026-10-11)
+
+- [x] **T18**: Implement `AdtMccvImageSampler` in `WowViewer.Core.IO/Maps/` to sample $256 \times 256$ RGBA minimap PNGs into 256 145-vertex `MCCV` BGRA chunks (580 bytes each) and set `McnkHasMccvFlag` (`0x40`).
+- [x] **T19**: Update `BlankAdtFactory` and terrain assembly in `Pm4RestoreUnauthoredSupport.cs` to inject synthesized `MCCV` colors and clean neutral diffuse layers onto any tile lacking texture layers.
+- [x] **T20**: Implement multi-source placement convergence in `Pm4RestoreUnauthoredSupport.cs`:
+  - Retain all authentic placements from `WoWMuseum/335-dev/` and `original_development` `_obj0.adt`.
+  - Refine transforms and magnetic 2D PCA Yaw rotation for existing placements when covered by PM4 collision.
+  - Append only net-new unauthored PM4 objects, strictly bounded by tile limits (`IsWithinPlacementTileBounds`).
+- [x] **T21**: Purge stray `_obj0.adt` and `_tex0.adt` companion files from `output/restored_development/World/Maps/development/` to prevent split-file loader desynchronization.
+- [x] **T22**: Verify in `WoWViewer` and run test suite (`dotnet test`): confirm 0 missing/failed tiles, full minimap-baked terrain coloration with zero black tiles, and deduplicated object placements.

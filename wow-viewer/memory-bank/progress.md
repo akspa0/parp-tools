@@ -1,6 +1,31 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-10
+Last updated: 2026-10-11
+
+## 2026-10-11 — Spec 270 Phase 5: Magnetic Collision Attachment Fix & Full Map Multi-Source Placement Convergence
+
+- **Alpha-mask scramble fix (operator report)**: `LkAdtReader` adds 8 bytes to MCAL/MCSH offsets that are already MCNK-start-relative, shifting every alpha/shadow map. `Pm4RestoreUnauthoredSupport.RepairAlphaAndShadow` re-extracts them tool-locally (shared reader untouched; separate spec needed to fix it). MCCV minimap bake now only on untextured tiles (T19) — it had tinted textured tiles orange. Evidence: after regeneration 0 chunks differ in MCAL vs `335-dev` source across 627 tiles (before: 268 tiles differed); remaining MCLY diffs are the intended neutral layer on untextured tiles. 616 tiles regenerated, 116 MCCV-baked, 616/616 round-trip.
+
+- **Magnetic Collision Attachment & Pivot Z Fix (`Pm4UnauthoredPlacementResolver.cs`)**:
+  - Root cause: Model placement origin `pos` represents the model local pivot `(0, 0, 0)` in renderer space. Strategy 0 previously replaced `pos` with the collision mesh centroid `(X, Y, meshCentroid.Z)`, floating buildings (e.g. troll huts on `63_5`) ~8 yards above the red collision mesh.
+  - Fix: Preserved authentic placement coordinates `(ledgerRec.PosX, ledgerRec.PosY, ledgerRec.PosZ)` from the ledger. In `AttractPositionToPm4Mesh`, correctly computed the vertical offset from mesh centroid down to local origin `pos.Z = pm4Centroid.Z - modelCenter.Z`.
+- **Authentic Yaw Rotation Preservation & Ground Truth Precedence (`Pm4RestoreUnauthoredSupport.cs`)**:
+  - Root cause: Synthetic 2D PCA yaw was overwriting authentic rotations (`563.80°`, `447.03°`) from companion `_obj0.adt` files, and `MergeCatalogs` gave precedence to lowered Z coordinates in `335-dev` over authentic `original_development` ground truth.
+  - Fix: Preserved authentic rotations; only apply PCA yaw when existing rotation is zero. Made `original_development` placements take precedence during catalog merging. Added proximity deduplication (20 yds WMO, 5 yds M2) to eliminate stacked duplicates.
+- **Minimap MCCV Ingestion & Full Map Batch**:
+  - `AdtMccvImageSampler` bakes 256x256 minimap PNGs into 256 145-vertex MCCV chunks (BGRA) for untextured tiles (`0x40` flag set).
+  - Executed full map convergence across 616 tiles: 195 minimap MCCV baked tiles, 1,654 WMOs, 64,301 M2s, 616 PASS / 0 FAIL round-trip verification. 109/109 PM4 tests green.
+
+## 2026-10-11 — Authentic MCCV Data Restored 100% Across All 2,252 ADTs
+
+- **100% Authentic MCCV Restored**:
+  - Reverted the destructive MCCV normalization logic in `patch_existing_adt` (`v60_batch_reconstruct_development_adts.py`).
+  - Restored 100% of the byte-for-byte authentic `MCCV` vertex colors from `test_data/WoWMuseum/335-dev/World/Maps/development/` into all 2,252 ADTs in `output/development_reconstructed_lk/World/Maps/development/`.
+  - Exactly preserved all 169 authentic near-black tiles (`mean RGB < 50`, e.g. `development_10_51`, `development_13_13`), 837 near-white tiles (`mean RGB > 200`), and 1,122 dynamic vertex lighting tiles (`50-200`) across 542,604 chunks.
+- **Whiteplate Rendering Confirmed (`TerrainRenderer.cs`)**:
+  - Untextured ADT chunks (`chunk.Layers.Length == 0` / empty `MTEX`, representing 1,232 tiles in `development`) use the whiteplate fallback: `result = vec3(1.0) * lighting;`.
+  - Authentic vertex color data is preserved and applied via `vVertexColor`: `result *= (uUseMccv == 1 ? clamp(vVertexColor.rgb * 2.0, 0.0, 2.0) : vec3(1.0));`.
+  - Untextured tiles render as visible whiteplates illuminated by scene lighting and tinted by their authored vertex data, never dropping to pitch-black `vec3(0.0)` or culled to nothing.
 
 ## 2026-10-10 — Whiteplate Terrain Shader Fix & Spanned PM4 Multi-Tile Object Placement Deduping
 

@@ -147,18 +147,7 @@ def patch_existing_adt(
                 nz = int(np.clip(norm145[i, 2] * 127.0, -127, 127))
                 struct.pack_into("<bbb", data, mcnr_data_off + i * 3, nx, ny, nz)
 
-        # Normalize MCCV to canonical Blizzard neutral whiteplate (127, 127, 127, 255)
-        # Prevents corrupted near-black template junk (24, 24, 24) from rendering patched tiles pitch black
-        mcnk_size = struct.unpack_from("<I", data, off + 4)[0]
-        sub_pos = off + 8 + 128
-        sub_end = off + 8 + mcnk_size
-        while sub_pos + 8 <= sub_end and sub_pos + 8 <= total_len:
-            sub_m = data[sub_pos : sub_pos + 4][::-1]
-            sub_s = struct.unpack_from("<I", data, sub_pos + 4)[0]
-            if sub_m == b"MCCV" and sub_s == 580:
-                data[sub_pos + 8 : sub_pos + 8 + 580] = b"\x7f\x7f\x7f\xff" * 145
-                break
-            sub_pos += 8 + sub_s
+        # Do NOT modify or normalize MCCV: authentic template vertex colors must be 100% preserved.
 
     out_path.write_bytes(data)
 

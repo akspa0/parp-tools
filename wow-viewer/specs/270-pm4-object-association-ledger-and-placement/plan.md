@@ -102,6 +102,23 @@ For unauthored tiles (e.g. `development_13_50`, `14_36`, `16_36`):
 6. Inject resolved placements via `BlankAdtFactory.WithPlacements()`.
 7. Serialize monolithic LK 3.3.5 ADT (`.adt`) using `LkAdtWriter.Build(..., MapConversionTargetFormat.LkAdtV18)`.
 
+### 2.6 Multi-Source Placement Convergence & Minimap MCCV Ingestion (`AdtMccvImageSampler`)
+To resolve black tiles and unify disparate assets into a single cohesive development map:
+1. **Multi-Source Catalog Aggregation**:
+   - Ingest existing placements from `335-dev` and `original_development` `_obj0.adt`.
+   - Maintain spatial hash map of existing placements.
+   - For each PM4 collision component:
+     - If an existing placement is within proximity ($\le 25\text{ yd}$), update its Yaw rotation to the PM4 2D PCA orientation and magnetically adjust its centroid without adding a second instance.
+     - If no existing placement matches the collision component, synthesize a new placement using shape-matching and append it.
+   - Enforce `IsWithinPlacementTileBounds` so that models spanning multiple tiles (e.g. Stormwind Harbor) exist only in their designated host tile.
+2. **Minimap PNG $\to$ MCCV Baking**:
+   - Ingest $256 \times 256$ RGBA PNG from `test_data/development/World/Textures/Minimap/development_{tileX}_{tileY}.png`.
+   - Sample each chunk vertex at $(cx + u, cy + v) / 16 \times (W-1, H-1)$ into BGRA color bytes.
+   - If an ADT tile lacks texture layers (`Chunks[0].Layers.Length == 0`), populate its 256 chunks with the synthesized `MCCV` payload, set `McnkHasMccvFlag` (`0x40`), and assign a clean whiteplate base layer (`tileset/ocean/westfallseafloor.blp` or neutral ground).
+3. **Monolithic LK ADT Delivery**:
+   - Write standard monolithic `.adt` files.
+   - Purge stray `_obj0.adt` and `_tex0.adt` files to prevent split-file chunk loader desynchronization.
+
 ---
 
 ## 3. Phased Implementation Roadmap
@@ -110,15 +127,20 @@ For unauthored tiles (e.g. `development_13_50`, `14_36`, `16_36`):
   - Implement `Pm4ObjectLedgerHarvester` scanning 399 paired tiles.
   - Produce `output/datasets/pm4_object_association_ledger.json`.
   - Validate $>95\%$ match accuracy across the 399 tiles.
-- **Phase 2: High-Precision Placement Resolver & Rotation Engine**
+- **Phase 2: High-Precision Placement Resolver & Rotation Engine (Complete)**
   - Implement 2D PCA Yaw rotation calculation on $(X, Y)$ vertices.
   - Implement strict spillover deduplication (1 instance per parent WMO across border).
   - Tighten geometric distance threshold to $\le 0.18$.
-- **Phase 3: Ground Truth Protection & Monolithic LK ADT Assembly**
+- **Phase 3: Ground Truth Protection & Monolithic LK ADT Assembly (Complete)**
   - Enforce pristine preservation for all 255 hand-authored tiles in `WoWMuseum/335-dev/`.
   - Read base terrain from `335-dev`, strip placeholder `OILPLATFORM_LOW`, and inject resolved placements.
   - Serialize monolithic 3.3.5 `.adt` files with 100% round-trip validation.
-- **Phase 4: Viewer Verification & Receipts**
+- **Phase 4: Viewer Verification & Receipts (Complete)**
   - Verify 0 missing/failed tiles in `WoWViewer`.
   - Confirm visual rotation alignment with PM4 collision wireframes.
   - Update completion receipts.
+- **Phase 5: Multi-Source Placement Convergence & Minimap MCCV Ingestion**
+  - Implement `AdtMccvImageSampler` in `WowViewer.Core.IO` for PNG $\to$ 145-vertex MCCV chunk sampling.
+  - Update `Pm4RestoreUnauthoredSupport.cs` to converge Museum, Original `_obj0`, and PM4 placements with deduplication.
+  - Bake minimap PNGs onto all untextured/missing tiles, eliminating black tiles.
+  - Purge stray `_obj0`/`_tex0` files from output root and verify in `WoWViewer`.

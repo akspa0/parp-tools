@@ -13,7 +13,7 @@ public static class BlankAdtFactory
     private const int ChunksPerSide = 16;
     private const int TotalChunks = ChunksPerSide * ChunksPerSide;
 
-    public static LkAdtData CreateBlank(string mapName, int tileX, int tileY, string l0Texture = "tileset\\ocean\\westfallseafloor.blp")
+    public static LkAdtData CreateBlank(string mapName, int tileX, int tileY, string l0Texture = "tileset\\ocean\\westfallseafloor.blp", IReadOnlyDictionary<int, byte[]>? mccvColors = null)
     {
         ArgumentNullException.ThrowIfNull(mapName);
         ArgumentOutOfRangeException.ThrowIfNegative(tileX);
@@ -32,11 +32,14 @@ public static class BlankAdtFactory
                 float chunkPosX = posX + cx * ChunkSize;
                 float chunkPosY = posY - cy * ChunkSize;
 
+                byte[]? chunkMccv = mccvColors != null && mccvColors.TryGetValue(i, out byte[]? cBytes) ? cBytes : null;
+                int flags = chunkMccv != null && chunkMccv.Length >= 580 ? 0x40 : 0;
+
                 chunks[i] = new LkMcnkData
                 {
                     IndexX = cx,
                     IndexY = cy,
-                    Flags = 0,
+                    Flags = flags,
                     AreaId = 0,
                     NLayers = 1,
                     HoleMask = 0,
@@ -50,7 +53,7 @@ public static class BlankAdtFactory
                     DoodadRefs = [],
                     WorldModelRefs = [],
                     LiquidData = null,
-                    MccvColors = null,
+                    MccvColors = chunkMccv,
                     MclvLighting = null,
                     PosX = chunkPosX,
                     PosY = chunkPosY,

@@ -12,9 +12,10 @@ namespace WowViewer.Tool.Inspect;
 
 /// <summary>
 /// CLI command handler for restoring authentic object placements on unauthored PM4 tiles
-/// (Spec 270 Phase 4). Enforces the ground-truth preservation barrier on all hand-authored
-/// Blizzard tiles in 335-dev, derives 2D PCA yaw rotations, and serializes standard monolithic
-/// LK 3.3.5 ADTs (development_XX_YY.adt) merged with surviving terrain.
+/// (Spec 270 Phase 4 & Phase 5). Converges authentic placements from WoWMuseum/335-dev and
+/// original_development _obj0 files with net-new PM4 collision objects, derives 2D PCA yaw
+/// rotations, bakes authentic 256x256 minimap PNGs into 145-vertex MCCV chunks on untextured tiles,
+/// and serializes standard monolithic LK 3.3.5 ADTs (development_XX_YY.adt).
 /// </summary>
 internal static class Pm4RestoreUnauthoredSupport
 {
@@ -22,6 +23,7 @@ internal static class Pm4RestoreUnauthoredSupport
     private const string DefaultPm4Path = @"I:\parp\parp-tools\wow-viewer\test_data\original_development\World\Maps\development";
     private const string DefaultOutputPath = @"I:\parp\parp-tools\wow-viewer\output\restored_development\World\Maps\development";
     private const string DefaultLedgerPath = @"I:\parp\parp-tools\wow-viewer\output\datasets\pm4_object_association_ledger.json";
+    private const string DefaultMinimapPath = @"I:\parp\parp-tools\wow-viewer\test_data\development\World\Textures\Minimap";
 
     public static void Run(string[] args)
     {
@@ -30,9 +32,14 @@ internal static class Pm4RestoreUnauthoredSupport
         string outputDir = DefaultOutputPath;
         string? targetTilesFilter = null;
         string ledgerPath = DefaultLedgerPath;
+        string minimapDir = DefaultMinimapPath;
         string? jsonOutPath = null;
         bool validate = true;
         bool writeSplitObj = false;
+        bool cleanCompanions = true;
+        bool bakeMccv = true;
+        bool converge = true;
+        bool allTiles = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -59,6 +66,10 @@ internal static class Pm4RestoreUnauthoredSupport
                 case "--ledger":
                     if (i + 1 < args.Length) ledgerPath = args[++i];
                     break;
+                case "--minimap":
+                case "-m":
+                    if (i + 1 < args.Length) minimapDir = args[++i];
+                    break;
                 case "--json":
                     if (i + 1 < args.Length) jsonOutPath = args[++i];
                     break;
@@ -67,6 +78,18 @@ internal static class Pm4RestoreUnauthoredSupport
                     break;
                 case "--split-obj":
                     writeSplitObj = true;
+                    break;
+                case "--no-clean-companions":
+                    cleanCompanions = false;
+                    break;
+                case "--no-bake-mccv":
+                    bakeMccv = false;
+                    break;
+                case "--no-converge":
+                    converge = false;
+                    break;
+                case "--all-tiles":
+                    allTiles = true;
                     break;
             }
         }
@@ -90,29 +113,61 @@ internal static class Pm4RestoreUnauthoredSupport
 
         Directory.CreateDirectory(outputDir);
 
+        if (cleanCompanions && Directory.Exists(outputDir))
+        {
+            PurgeStrayCompanions(outputDir);
+        }
+
         Console.WriteLine("=================================================================");
-        Console.WriteLine(" Spec 270: PM4 Unauthored Tile Placement Restoration Pipeline");
+        Console.WriteLine(" Spec 270: PM4 Object Association & Multi-Source Convergence");
         Console.WriteLine("=================================================================");
         Console.WriteLine($"Base ADT Directory: {resolvedBaseAdtDir}");
         Console.WriteLine($"PM4 Directory:      {resolvedPm4Dir}");
+        Console.WriteLine($"Minimap Directory:  {minimapDir}");
         Console.WriteLine($"Output Directory:   {outputDir}");
+        Console.WriteLine($"Bake Minimap MCCV:  {bakeMccv}");
+        Console.WriteLine($"Converge Objects:   {converge}");
 
         // Build shape library and exact Z ledger lookup from persistent ledger and authored tiles
         var (shapeLibrary, ledgerLookup) = LoadLibraries(resolvedBaseAdtDir, ledgerPath);
         Console.WriteLine($"Shape Library: Loaded {shapeLibrary.Count} unique asset shape profiles.");
         Console.WriteLine($"Ledger Lookup: Loaded {ledgerLookup.Count} bit-exact Z keys from persistent Rosetta ledger.");
 
-        // Find candidate PM4 tiles
-        var pm4Files = Directory.EnumerateFiles(resolvedPm4Dir, "*.pm4", SearchOption.TopDirectoryOnly)
-            .OrderBy(Path.GetFileName)
-            .ToList();
+        // Gather candidate tiles
+        var candidateTiles = new HashSet<(int X, int Y)>();
+        foreach (string pm4Path in Directory.EnumerateFiles(resolvedPm4Dir, "*.pm4", SearchOption.TopDirectoryOnly))
+        {
+            if (Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tx, out int ty))
+                candidateTiles.Add((tx, ty));
+        }
+
+        if (allTiles || (targetTilesFilter != null && targetTilesFilter.Equals("all", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (Directory.Exists(resolvedBaseAdtDir))
+            {
+                foreach (string adtPath in Directory.EnumerateFiles(resolvedBaseAdtDir, "*.adt", SearchOption.TopDirectoryOnly))
+                {
+                    if (Pm4CoordinateService.TryParseTileCoordinates(adtPath, out int tx, out int ty))
+                        candidateTiles.Add((tx, ty));
+                }
+            }
+
+            if (Directory.Exists(minimapDir))
+            {
+                foreach (string pngPath in Directory.EnumerateFiles(minimapDir, "*.png", SearchOption.TopDirectoryOnly))
+                {
+                    if (Pm4CoordinateService.TryParseTileCoordinates(pngPath, out int tx, out int ty))
+                        candidateTiles.Add((tx, ty));
+                }
+            }
+        }
 
         HashSet<string>? filterSet = null;
         if (!string.IsNullOrWhiteSpace(targetTilesFilter) && !targetTilesFilter.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
             filterSet = new HashSet<string>(
                 targetTilesFilter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .Select(s => s.Replace(".pm4", "", StringComparison.OrdinalIgnoreCase)),
+                    .Select(s => s.Replace(".pm4", "", StringComparison.OrdinalIgnoreCase).Replace(".adt", "", StringComparison.OrdinalIgnoreCase)),
                 StringComparer.OrdinalIgnoreCase);
         }
 
@@ -121,105 +176,124 @@ internal static class Pm4RestoreUnauthoredSupport
         int totalDoodads = 0;
         int roundTripPassed = 0;
         int roundTripFailed = 0;
-        int preservedAuthoredCount = 0;
         int processedCount = 0;
+        int mccvBakedCount = 0;
 
-        foreach (string pm4Path in pm4Files)
+        var sortedTiles = candidateTiles.OrderBy(t => t.X).ThenBy(t => t.Y).ToList();
+
+        foreach (var (tileX, tileY) in sortedTiles)
         {
-            string fileName = Path.GetFileName(pm4Path);
-            string tileStem = Path.GetFileNameWithoutExtension(pm4Path);
-
-            if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileX, out int tileY))
-                continue;
-
             string canonicalTileStem = $"development_{tileX}_{tileY}";
+            string tileStem0 = $"development_{tileX:02d}_{tileY:02d}";
 
             if (filterSet != null)
             {
-                bool matches = filterSet.Contains(tileStem) ||
-                               filterSet.Contains(canonicalTileStem) ||
+                bool matches = filterSet.Contains(canonicalTileStem) ||
+                               filterSet.Contains(tileStem0) ||
                                filterSet.Contains($"{tileX}_{tileY}") ||
-                               filterSet.Any(f => tileStem.EndsWith(f, StringComparison.OrdinalIgnoreCase));
+                               filterSet.Any(f => canonicalTileStem.EndsWith(f, StringComparison.OrdinalIgnoreCase));
                 if (!matches)
                     continue;
             }
 
-            // Probe candidate base ADT files in baseAdtDir
-            string[] candidateBaseAdtNames =
-            [
+            // 1. Probe candidate PM4
+            string[] candidatePm4Names = [
+                $"development_{tileX}_{tileY}.pm4",
+                $"development_{tileX:02d}_{tileY:02d}.pm4",
+                $"{tileX}_{tileY}.pm4"
+            ];
+            string? pm4Path = candidatePm4Names
+                .Select(name => Path.Combine(resolvedPm4Dir, name))
+                .FirstOrDefault(File.Exists);
+
+            // 2. Probe candidate base ADT files in baseAdtDir
+            string[] candidateBaseAdtNames = [
                 $"development_{tileX}_{tileY}.adt",
                 $"development_{tileX:02d}_{tileY:02d}.adt",
                 $"{tileX}_{tileY}.adt"
             ];
-
             string? baseAdtPath = candidateBaseAdtNames
                 .Select(name => Path.Combine(resolvedBaseAdtDir, name))
                 .FirstOrDefault(File.Exists);
 
-            // Ground Truth Barrier (T14): Detect if tile contains hand-authored Blizzard assets in 335-dev
-            bool isAuthored = false;
+            // 3. Probe candidate companion _obj0 in original_development
+            string[] candidateOrigObj0Names = [
+                $"development_{tileX}_{tileY}_obj0.adt",
+                $"development_{tileX:02d}_{tileY:02d}_obj0.adt",
+                $"{tileX}_{tileY}_obj0.adt"
+            ];
+            string? origObj0Path = candidateOrigObj0Names
+                .Select(name => Path.Combine(resolvedPm4Dir, name))
+                .FirstOrDefault(File.Exists);
+
+            // 4. Probe candidate minimap PNG
+            string[] candidateMinimapNames = [
+                $"development_{tileX}_{tileY}.png",
+                $"development_{tileX:02d}_{tileY:02d}.png",
+                $"map{tileX}_{tileY}.png",
+                $"{tileX}_{tileY}.png"
+            ];
+            string? minimapPngPath = Directory.Exists(minimapDir)
+                ? candidateMinimapNames.Select(name => Path.Combine(minimapDir, name)).FirstOrDefault(File.Exists)
+                : null;
+
+            // Ingest existing placements from base ADT and companion _obj0
             AdtPlacementCatalog? existingCatalog = null;
             if (baseAdtPath != null)
             {
                 try
                 {
                     existingCatalog = AdtPlacementReader.Read(baseAdtPath);
-                    bool hasRealWmo = existingCatalog.WorldModelPlacements.Any(w =>
-                        !w.ModelPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase));
-                    bool hasDoodads = existingCatalog.ModelPlacements.Count > 0;
-                    isAuthored = hasRealWmo || hasDoodads;
                 }
-                catch
-                {
-                    isAuthored = false;
-                }
+                catch { }
             }
 
-            if (isAuthored)
+            if (origObj0Path != null)
             {
-                // Ground truth preservation: Copy authentic Blizzard ADT byte-for-byte to output
-                string outAuthoredPath = Path.Combine(outputDir, $"development_{tileX}_{tileY}.adt");
-                if (!string.Equals(Path.GetFullPath(baseAdtPath!), Path.GetFullPath(outAuthoredPath), StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    File.Copy(baseAdtPath!, outAuthoredPath, overwrite: true);
+                    AdtPlacementCatalog origCatalog = AdtPlacementReader.Read(origObj0Path);
+                    existingCatalog = existingCatalog != null
+                        ? MergeCatalogs(origCatalog, existingCatalog)
+                        : origCatalog;
                 }
-
-                preservedAuthoredCount++;
-                Console.WriteLine($"[PRESERVED] Hand-authored Blizzard tile development_{tileX}_{tileY}.adt ({existingCatalog?.WorldModelPlacements.Count ?? 0} WMOs, {existingCatalog?.ModelPlacements.Count ?? 0} doodads).");
-                continue;
+                catch { }
             }
 
-            // Check if PM4 contains collision geometry
-            Pm4KnownChunkSet chunks = Pm4ResearchReader.ReadFile(pm4Path).KnownChunks;
-            if (chunks.Msur.Count == 0)
+            // Resolve PM4 placements if collision geometry exists
+            Pm4TileResolutionResult? pm4Result = null;
+            if (pm4Path != null && File.Exists(pm4Path))
             {
-                // No geometry on this unauthored tile: copy base terrain if available
-                if (baseAdtPath != null)
+                try
                 {
-                    string outBaseTerrainPath = Path.Combine(outputDir, $"development_{tileX}_{tileY}.adt");
-                    if (!string.Equals(Path.GetFullPath(baseAdtPath), Path.GetFullPath(outBaseTerrainPath), StringComparison.OrdinalIgnoreCase))
+                    Pm4KnownChunkSet chunks = Pm4ResearchReader.ReadFile(pm4Path).KnownChunks;
+                    if (chunks.Msur.Count > 0)
                     {
-                        File.Copy(baseAdtPath, outBaseTerrainPath, overwrite: true);
+                        pm4Result = Pm4UnauthoredPlacementResolver.ResolveTile(
+                            pm4Path,
+                            resolvedBaseAdtDir,
+                            companionPath => AdtPlacementReader.Read(companionPath),
+                            shapeLibrary,
+                            ledgerLookup: ledgerLookup);
                     }
                 }
-                continue;
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"Warning: Failed to resolve PM4 collision on '{canonicalTileStem}': {ex.Message}");
+                }
             }
 
-            processedCount++;
+            // Converge placements: retain authored, align matching yaw/elev, and append net-new PM4 objects
+            AdtPlacementCatalog convergedCatalog = converge
+                ? ConvergeCatalogs(existingCatalog, pm4Result?.Catalog, tileX, tileY)
+                : (pm4Result?.Catalog ?? existingCatalog ?? new AdtPlacementCatalog(string.Empty, MapFileKind.Adt, [], [], [], []));
 
-            try
+            // Ingest and prepare base terrain
+            LkAdtData baseTerrainAdt;
+            bool bakedMccvOnThisTile = false;
+            if (baseAdtPath != null && File.Exists(baseAdtPath))
             {
-                // Resolve authentic placements using 335-dev neighbor context, ledger, and 2D PCA yaw rotation
-                Pm4TileResolutionResult result = Pm4UnauthoredPlacementResolver.ResolveTile(
-                    pm4Path,
-                    resolvedBaseAdtDir,
-                    companionPath => AdtPlacementReader.Read(companionPath),
-                    shapeLibrary,
-                    ledgerLookup: ledgerLookup);
-
-                // Monolithic LK ADT Assembly (T15): Merge surviving base terrain with resolved placements
-                LkAdtData baseTerrainAdt;
-                if (baseAdtPath != null && File.Exists(baseAdtPath))
+                try
                 {
                     byte[] baseBytes = EnsureValidMcnkIndices(File.ReadAllBytes(baseAdtPath));
                     LkAdtData rawBase = LkAdtReader.Read(baseBytes, null, null, tileX, tileY);
@@ -235,22 +309,49 @@ internal static class Pm4RestoreUnauthoredSupport
                             WorldModelNames = [],
                             ModelPlacements = [],
                             WorldModelPlacements = [],
-                            Chunks = rawBase.Chunks,
+                            Chunks = RepairAlphaAndShadow(baseBytes, rawBase.Chunks),
                             MhdrFlags = rawBase.MhdrFlags,
                             MfboFlightBounds = rawBase.MfboFlightBounds
                         };
+
+                        // Check if terrain lacks textures or MCCV
+                        bool lacksTextures = baseTerrainAdt.TextureNames.Count == 0 ||
+                                              baseTerrainAdt.Chunks.All(c => c.Layers.Count == 0);
+                        bool lacksMccv = baseTerrainAdt.Chunks.All(c => c.MccvColors == null || c.MccvColors.Length < 580);
+
+                        // Spec 270 T19: minimap MCCV is only for tiles with no texture layers; baking it onto
+                        // textured tiles tints authored terrain (orange cast).
+                        if (bakeMccv && lacksTextures && minimapPngPath != null)
+                        {
+                            var mccv = AdtMccvImageSampler.SampleMccvFromPng(minimapPngPath);
+                            if (mccv != null)
+                            {
+                                baseTerrainAdt = AdtMccvImageSampler.InjectMccvIntoLkAdt(baseTerrainAdt, mccv);
+                                bakedMccvOnThisTile = true;
+                                mccvBakedCount++;
+                            }
+                        }
                     }
                     else
                     {
-                        baseTerrainAdt = BlankAdtFactory.CreateBlank("development", tileX, tileY);
+                        baseTerrainAdt = CreateBlankTileWithMccv(tileX, tileY, minimapPngPath, bakeMccv, ref mccvBakedCount, ref bakedMccvOnThisTile);
                     }
                 }
-                else
+                catch
                 {
-                    baseTerrainAdt = BlankAdtFactory.CreateBlank("development", tileX, tileY);
+                    baseTerrainAdt = CreateBlankTileWithMccv(tileX, tileY, minimapPngPath, bakeMccv, ref mccvBakedCount, ref bakedMccvOnThisTile);
                 }
+            }
+            else
+            {
+                baseTerrainAdt = CreateBlankTileWithMccv(tileX, tileY, minimapPngPath, bakeMccv, ref mccvBakedCount, ref bakedMccvOnThisTile);
+            }
 
-                LkAdtData restoredAdt = BlankAdtFactory.WithPlacements(baseTerrainAdt, result.Catalog);
+            processedCount++;
+
+            try
+            {
+                LkAdtData restoredAdt = BlankAdtFactory.WithPlacements(baseTerrainAdt, convergedCatalog);
 
                 string outAdtName = $"development_{tileX}_{tileY}.adt";
                 string outAdtPath = Path.Combine(outputDir, outAdtName);
@@ -259,9 +360,9 @@ internal static class Pm4RestoreUnauthoredSupport
 
                 if (writeSplitObj)
                 {
-                    string outObj0Name = $"{tileStem}_obj0.adt";
+                    string outObj0Name = $"{canonicalTileStem}_obj0.adt";
                     string outObj0Path = Path.Combine(outputDir, outObj0Name);
-                    SplitAdtObjWriter.Write(outObj0Path, result.Catalog);
+                    SplitAdtObjWriter.Write(outObj0Path, convergedCatalog);
                 }
 
                 bool rtOk = true;
@@ -271,8 +372,8 @@ internal static class Pm4RestoreUnauthoredSupport
                     {
                         byte[] writtenBytes = File.ReadAllBytes(outAdtPath);
                         LkAdtData readBack = LkAdtReader.Read(writtenBytes, null, null, tileX, tileY);
-                        if (readBack.WorldModelPlacements.Count != result.Catalog.WorldModelPlacements.Count ||
-                            readBack.ModelPlacements.Count != result.Catalog.ModelPlacements.Count ||
+                        if (readBack.WorldModelPlacements.Count != convergedCatalog.WorldModelPlacements.Count ||
+                            readBack.ModelPlacements.Count != convergedCatalog.ModelPlacements.Count ||
                             readBack.Chunks.Count != 256)
                         {
                             rtOk = false;
@@ -288,51 +389,33 @@ internal static class Pm4RestoreUnauthoredSupport
                 if (rtOk) roundTripPassed++;
                 else roundTripFailed++;
 
-                totalWmos += result.ResolvedWmos.Count;
-                totalDoodads += result.ResolvedDoodads.Count;
-                results.Add(result);
+                totalWmos += convergedCatalog.WorldModelPlacements.Count;
+                totalDoodads += convergedCatalog.ModelPlacements.Count;
 
-                Console.WriteLine($"\n[{processedCount}] Restored Monolithic ADT: {outAdtName} (Grid: [{result.TileX}, {result.TileY}])");
-                Console.WriteLine($"    WMO Placements:    {result.ResolvedWmos.Count}");
-                Console.WriteLine($"    Doodad Placements: {result.ResolvedDoodads.Count}");
+                if (pm4Result != null)
+                {
+                    results.Add(pm4Result);
+                }
+
+                string mccvBadge = bakedMccvOnThisTile ? " [MCCV BAKED]" : "";
+                Console.WriteLine($"\n[{processedCount}] Converged Monolithic ADT: {outAdtName} (Grid: [{tileX}, {tileY}]){mccvBadge}");
+                Console.WriteLine($"    WMO Placements:    {convergedCatalog.WorldModelPlacements.Count}");
+                Console.WriteLine($"    Doodad Placements: {convergedCatalog.ModelPlacements.Count}");
                 Console.WriteLine($"    Round-Trip Check:  {(rtOk ? "PASS (100% Monolithic LK Match)" : "FAIL")}");
-
-                foreach (Pm4ResolvedObjectRecord wmo in result.ResolvedWmos)
-                {
-                    string shortMethod = wmo.Method switch
-                    {
-                        Pm4PlacementResolutionMethod.AdjacentSpillover => "Spillover",
-                        Pm4PlacementResolutionMethod.LedgerExactZ => "Ledger-Z",
-                        Pm4PlacementResolutionMethod.NeighborThematic => "Neighbor-Theme",
-                        Pm4PlacementResolutionMethod.ShapeScore => "Shape-Score",
-                        _ => "Fallback"
-                    };
-                    Console.WriteLine($"    * WMO [{shortMethod}] {Path.GetFileName(wmo.ModelPath)} @ Z={wmo.PlacementZ:F2}, Yaw={wmo.Rotation.Y:F1} deg (Conf: {wmo.Confidence:P0}) - {wmo.SourceNote}");
-                }
-
-                if (result.ResolvedDoodads.Count > 0)
-                {
-                    var doodadSummary = result.ResolvedDoodads
-                        .GroupBy(d => Path.GetFileName(d.ModelPath))
-                        .OrderByDescending(g => g.Count())
-                        .Take(5)
-                        .Select(g => $"{g.Key} ({g.Count()})");
-                    Console.WriteLine($"    * Top Doodads: {string.Join(", ", doodadSummary)}");
-                }
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[ERROR] Failed to restore tile '{tileStem}': {ex.Message}");
+                Console.Error.WriteLine($"[ERROR] Failed to converge tile '{canonicalTileStem}': {ex.Message}");
             }
         }
 
         Console.WriteLine("\n=================================================================");
-        Console.WriteLine(" Restoration Summary");
+        Console.WriteLine(" Convergence & Restoration Summary");
         Console.WriteLine("=================================================================");
-        Console.WriteLine($"Hand-Authored Preserved: {preservedAuthoredCount} tiles");
-        Console.WriteLine($"Unauthored Restored:     {results.Count} tiles");
-        Console.WriteLine($"Total WMOs Restored:     {totalWmos}");
-        Console.WriteLine($"Total M2s Restored:      {totalDoodads}");
+        Console.WriteLine($"Total Tiles Processed: {processedCount} tiles");
+        Console.WriteLine($"Total Minimap MCCV Baked: {mccvBakedCount} tiles");
+        Console.WriteLine($"Total WMOs Converged:    {totalWmos}");
+        Console.WriteLine($"Total M2s Converged:     {totalDoodads}");
         Console.WriteLine($"Round-Trip Verified:     {roundTripPassed} PASS / {roundTripFailed} FAIL");
         Console.WriteLine($"Output Location:         {outputDir}");
         Console.WriteLine("=================================================================\n");
@@ -344,35 +427,280 @@ internal static class Pm4RestoreUnauthoredSupport
                 BaseAdtDirectory = resolvedBaseAdtDir,
                 Pm4Directory = resolvedPm4Dir,
                 OutputDirectory = outputDir,
-                AuthoredPreservedCount = preservedAuthoredCount,
-                TilesRestoredCount = results.Count,
-                TotalWmosRestored = totalWmos,
-                TotalDoodadsRestored = totalDoodads,
+                MinimapDirectory = minimapDir,
+                TilesProcessedCount = processedCount,
+                MccvBakedCount = mccvBakedCount,
+                TotalWmos = totalWmos,
+                TotalDoodads = totalDoodads,
                 RoundTripPassed = roundTripPassed,
                 RoundTripFailed = roundTripFailed,
-                Tiles = results.Select(r => new
-                {
-                    r.TileName,
-                    r.TileX,
-                    r.TileY,
-                    WmoCount = r.ResolvedWmos.Count,
-                    DoodadCount = r.ResolvedDoodads.Count,
-                    Wmos = r.ResolvedWmos.Select(w => new
-                    {
-                        w.ModelPath,
-                        w.PlacementZ,
-                        Method = w.Method.ToString(),
-                        w.Confidence,
-                        w.SourceNote,
-                        w.Position,
-                        w.Rotation
-                    })
-                })
             };
 
             File.WriteAllText(jsonOutPath, JsonSerializer.Serialize(summaryObj, new JsonSerializerOptions { WriteIndented = true }));
             Console.WriteLine($"Wrote detailed report to: {jsonOutPath}");
         }
+    }
+
+    private static void PurgeStrayCompanions(string outputDir)
+    {
+        try
+        {
+            int deleted = 0;
+            foreach (string file in Directory.EnumerateFiles(outputDir, "*.adt", SearchOption.AllDirectories))
+            {
+                string name = Path.GetFileName(file);
+                if (name.Contains("_obj0.adt", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("_obj1.adt", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("_tex0.adt", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("_lod.adt", StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(file);
+                    deleted++;
+                }
+            }
+
+            if (deleted > 0)
+            {
+                Console.WriteLine($"[CLEAN] Purged {deleted} stray split companion files (_obj0/_tex0) from output directory.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warning: Failed to clean companion files: {ex.Message}");
+        }
+    }
+
+    private static LkAdtData CreateBlankTileWithMccv(
+        int tileX,
+        int tileY,
+        string? minimapPngPath,
+        bool bakeMccv,
+        ref int mccvBakedCount,
+        ref bool bakedMccvOnThisTile)
+    {
+        Dictionary<int, byte[]>? mccv = null;
+        if (bakeMccv && minimapPngPath != null && File.Exists(minimapPngPath))
+        {
+            mccv = AdtMccvImageSampler.SampleMccvFromPng(minimapPngPath);
+            if (mccv != null)
+            {
+                bakedMccvOnThisTile = true;
+                mccvBakedCount++;
+            }
+        }
+
+        return BlankAdtFactory.CreateBlank(
+            "development",
+            tileX,
+            tileY,
+            "tileset\\ocean\\westfallseafloor.blp",
+            mccv);
+    }
+
+    private static AdtPlacementCatalog MergeCatalogs(AdtPlacementCatalog a, AdtPlacementCatalog b)
+    {
+        var wmos = a.WorldModelPlacements.ToList();
+        var doodads = a.ModelPlacements.ToList();
+
+        var existingWmoIds = new HashSet<int>(wmos.Select(w => w.UniqueId));
+        foreach (var w in b.WorldModelPlacements)
+        {
+            if (existingWmoIds.Add(w.UniqueId))
+                wmos.Add(w);
+        }
+
+        var existingDoodadIds = new HashSet<int>(doodads.Select(d => d.UniqueId));
+        foreach (var d in b.ModelPlacements)
+        {
+            if (existingDoodadIds.Add(d.UniqueId))
+                doodads.Add(d);
+        }
+
+        var modelNames = doodads.Select(d => d.ModelPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var worldModelNames = wmos.Select(w => w.ModelPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        return new AdtPlacementCatalog(a.SourcePath, a.Kind, modelNames, worldModelNames, doodads, wmos);
+    }
+
+    private static AdtPlacementCatalog ConvergeCatalogs(
+        AdtPlacementCatalog? existingCatalog,
+        AdtPlacementCatalog? pm4Catalog,
+        int tileX,
+        int tileY)
+    {
+        var convergedWmos = new List<AdtWorldModelPlacement>();
+        var convergedDoodads = new List<AdtModelPlacement>();
+
+        var matchedPm4Wmos = new HashSet<int>();
+        var matchedPm4Doodads = new HashSet<int>();
+
+        // 1. Ingest and refine existing WMOs
+        if (existingCatalog != null)
+        {
+            foreach (var existing in existingCatalog.WorldModelPlacements)
+            {
+                if (existing.ModelPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                int bestPm4Idx = -1;
+                float bestDist = 65.0f; // Proximity threshold for magnetic attraction
+
+                if (pm4Catalog != null)
+                {
+                    for (int i = 0; i < pm4Catalog.WorldModelPlacements.Count; i++)
+                    {
+                        if (matchedPm4Wmos.Contains(i)) continue;
+                        var pm4Wmo = pm4Catalog.WorldModelPlacements[i];
+                        float dist = Vector3.Distance(existing.Position, pm4Wmo.Position);
+
+                        // Strongly prioritize exact model match
+                        bool sameModel = existing.ModelPath.Equals(pm4Wmo.ModelPath, StringComparison.OrdinalIgnoreCase);
+                        float effectiveDist = sameModel ? dist * 0.5f : dist;
+
+                        if (effectiveDist < bestDist)
+                        {
+                            bestDist = effectiveDist;
+                            bestPm4Idx = i;
+                        }
+                    }
+                }
+
+                Vector3 finalRot = existing.Rotation;
+                Vector3 finalPos = existing.Position;
+                Vector3 boundsMin = existing.BoundsMin;
+                Vector3 boundsMax = existing.BoundsMax;
+
+                if (bestPm4Idx >= 0 && pm4Catalog != null)
+                {
+                    matchedPm4Wmos.Add(bestPm4Idx);
+                    var pm4Wmo = pm4Catalog.WorldModelPlacements[bestPm4Idx];
+
+                    // Magnetically snap Z if existing Z is zero or deviates slightly from exact PM4 collision key
+                    if (existing.Position.Z == 0f || (pm4Wmo.Position.Z != 0f && MathF.Abs(existing.Position.Z - pm4Wmo.Position.Z) > 0.05f && MathF.Abs(existing.Position.Z - pm4Wmo.Position.Z) < 5.0f))
+                    {
+                        finalPos = new Vector3(existing.Position.X, existing.Position.Y, pm4Wmo.Position.Z);
+                    }
+
+                    // Preserve authentic ADT rotation from existing; only use PM4 PCA rotation if unauthored/zero
+                    if (finalRot == Vector3.Zero && pm4Wmo.Rotation != Vector3.Zero)
+                        finalRot = pm4Wmo.Rotation;
+
+                    boundsMin = pm4Wmo.BoundsMin;
+                    boundsMax = pm4Wmo.BoundsMax;
+                }
+
+                convergedWmos.Add(new AdtWorldModelPlacement(
+                    existing.NameId,
+                    existing.ModelPath,
+                    existing.UniqueId,
+                    finalPos,
+                    finalRot,
+                    boundsMin,
+                    boundsMax,
+                    existing.Flags,
+                    existing.DoodadSet,
+                    existing.NameSet,
+                    existing.Scale));
+            }
+
+            // 2. Ingest and refine existing M2 doodads
+            foreach (var existing in existingCatalog.ModelPlacements)
+            {
+                int bestPm4Idx = -1;
+                float bestDist = 25.0f; // 25 yd proximity for doodads
+
+                if (pm4Catalog != null)
+                {
+                    for (int i = 0; i < pm4Catalog.ModelPlacements.Count; i++)
+                    {
+                        if (matchedPm4Doodads.Contains(i)) continue;
+                        var pm4Doodad = pm4Catalog.ModelPlacements[i];
+                        float dist = Vector3.Distance(existing.Position, pm4Doodad.Position);
+
+                        bool sameModel = existing.ModelPath.Equals(pm4Doodad.ModelPath, StringComparison.OrdinalIgnoreCase);
+                        float effectiveDist = sameModel ? dist * 0.5f : dist;
+
+                        if (effectiveDist < bestDist)
+                        {
+                            bestDist = effectiveDist;
+                            bestPm4Idx = i;
+                        }
+                    }
+                }
+
+                Vector3 finalRot = existing.Rotation;
+                Vector3 finalPos = existing.Position;
+                if (bestPm4Idx >= 0 && pm4Catalog != null)
+                {
+                    matchedPm4Doodads.Add(bestPm4Idx);
+                    var pm4Doodad = pm4Catalog.ModelPlacements[bestPm4Idx];
+
+                    // Magnetically snap Z if existing Z was unauthored or deviates slightly
+                    if (existing.Position.Z == 0f || (pm4Doodad.Position.Z != 0f && MathF.Abs(existing.Position.Z - pm4Doodad.Position.Z) > 0.05f && MathF.Abs(existing.Position.Z - pm4Doodad.Position.Z) < 5.0f))
+                        finalPos = new Vector3(existing.Position.X, existing.Position.Y, pm4Doodad.Position.Z);
+
+                    // Preserve authentic rotation
+                    if (finalRot == Vector3.Zero && pm4Doodad.Rotation != Vector3.Zero)
+                        finalRot = pm4Doodad.Rotation;
+                }
+
+                convergedDoodads.Add(new AdtModelPlacement(
+                    existing.NameId,
+                    existing.ModelPath,
+                    existing.UniqueId,
+                    finalPos,
+                    finalRot,
+                    existing.Scale));
+            }
+        }
+
+        // 3. Append net-new PM4 WMOs (with placement tile boundary containment and deduplication)
+        if (pm4Catalog != null)
+        {
+            for (int i = 0; i < pm4Catalog.WorldModelPlacements.Count; i++)
+            {
+                if (matchedPm4Wmos.Contains(i)) continue;
+                var newWmo = pm4Catalog.WorldModelPlacements[i];
+                if (Pm4CoordinateService.IsWithinPlacementTileBounds(newWmo.Position, tileX, tileY))
+                {
+                    bool alreadyPresent = convergedWmos.Any(w =>
+                        w.ModelPath.Equals(newWmo.ModelPath, StringComparison.OrdinalIgnoreCase)
+                        && Vector3.Distance(w.Position, newWmo.Position) < 20.0f);
+                    if (!alreadyPresent)
+                    {
+                        convergedWmos.Add(newWmo);
+                    }
+                }
+            }
+
+            // 4. Append net-new PM4 M2 doodads (with placement tile boundary containment and deduplication)
+            for (int i = 0; i < pm4Catalog.ModelPlacements.Count; i++)
+            {
+                if (matchedPm4Doodads.Contains(i)) continue;
+                var newDoodad = pm4Catalog.ModelPlacements[i];
+                if (Pm4CoordinateService.IsWithinPlacementTileBounds(newDoodad.Position, tileX, tileY))
+                {
+                    bool alreadyPresent = convergedDoodads.Any(d =>
+                        d.ModelPath.Equals(newDoodad.ModelPath, StringComparison.OrdinalIgnoreCase)
+                        && Vector3.Distance(d.Position, newDoodad.Position) < 5.0f);
+                    if (!alreadyPresent)
+                    {
+                        convergedDoodads.Add(newDoodad);
+                    }
+                }
+            }
+        }
+
+        var modelNames = convergedDoodads.Select(d => d.ModelPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var worldModelNames = convergedWmos.Select(w => w.ModelPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        return new AdtPlacementCatalog(
+            existingCatalog?.SourcePath ?? pm4Catalog?.SourcePath ?? string.Empty,
+            existingCatalog?.Kind ?? pm4Catalog?.Kind ?? MapFileKind.Adt,
+            modelNames,
+            worldModelNames,
+            convergedDoodads,
+            convergedWmos);
     }
 
     private static (Dictionary<string, List<Vector3>> shapeLibrary, Dictionary<uint, Pm4LedgerPlacementRecord> ledgerLookup)
@@ -487,6 +815,86 @@ internal static class Pm4RestoreUnauthoredSupport
         }
 
         return (shapeLibrary, ledgerLookup);
+    }
+
+    /// <summary>
+    /// LkAdtReader.ReadMcnkChunk adds the 8-byte MCNK header to MCAL/MCSH offsets that are already
+    /// MCNK-start-relative, so every alpha map and shadow map it returns is shifted 8 bytes. Rather than
+    /// touch the shared reader, re-extract both subchunks here with the correct base and swap them in.
+    /// Chunks whose offset does not land on an MCAL/MCSH tag keep the reader's data unchanged.
+    /// </summary>
+    private static IReadOnlyList<LkMcnkData> RepairAlphaAndShadow(byte[] bytes, IReadOnlyList<LkMcnkData> chunks)
+    {
+        var starts = new List<int>(256);
+        int pos = 0;
+        while (pos + 8 <= bytes.Length)
+        {
+            string tag = System.Text.Encoding.ASCII.GetString(bytes, pos, 4);
+            uint sz = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(pos + 4, 4));
+            if (tag == "MCNK" || tag == "KNCM")
+                starts.Add(pos);
+            long next = (long)pos + 8 + sz;
+            if (next > bytes.Length) break;
+            pos = (int)next;
+        }
+
+        static byte[]? Extract(byte[] b, int chunkStart, int ofs, int size, string fwd, string rev)
+        {
+            if (ofs <= 0 || size <= 8) return null;
+            long at = (long)chunkStart + ofs;
+            if (at + size > b.Length) return null;
+            string t = System.Text.Encoding.ASCII.GetString(b, (int)at, 4);
+            if (t != fwd && t != rev) return null;
+            byte[] data = new byte[size - 8];
+            Buffer.BlockCopy(b, (int)at + 8, data, 0, data.Length);
+            return data;
+        }
+
+        var result = new List<LkMcnkData>(chunks.Count);
+        foreach (LkMcnkData c in chunks)
+        {
+            int i = c.IndexY * 16 + c.IndexX;
+            if (i < 0 || i >= starts.Count)
+            {
+                result.Add(c);
+                continue;
+            }
+
+            int start = starts[i];
+            int ofsAl = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(start + 8 + 0x24, 4));
+            int szAl = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(start + 8 + 0x28, 4));
+            int ofsSh = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(start + 8 + 0x2C, 4));
+            int szSh = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(start + 8 + 0x30, 4));
+            byte[]? alpha = Extract(bytes, start, ofsAl, szAl, "MCAL", "LACM");
+            byte[]? shadow = Extract(bytes, start, ofsSh, szSh, "MCSH", "HSCM");
+
+            result.Add(new LkMcnkData
+            {
+                IndexX = c.IndexX,
+                IndexY = c.IndexY,
+                Flags = c.Flags,
+                AreaId = c.AreaId,
+                NLayers = c.NLayers,
+                HoleMask = c.HoleMask,
+                BaseHeight = c.BaseHeight,
+                Heights = c.Heights,
+                Normals = c.Normals,
+                ShadowMap = shadow ?? c.ShadowMap,
+                AlphaMapData = alpha ?? c.AlphaMapData,
+                AlphaMapSize = alpha?.Length ?? c.AlphaMapSize,
+                Layers = c.Layers,
+                DoodadRefs = c.DoodadRefs,
+                WorldModelRefs = c.WorldModelRefs,
+                LiquidData = c.LiquidData,
+                MccvColors = c.MccvColors,
+                MclvLighting = c.MclvLighting,
+                PosX = c.PosX,
+                PosY = c.PosY,
+                PosZ = c.PosZ
+            });
+        }
+
+        return result;
     }
 
     private static byte[] EnsureValidMcnkIndices(byte[] bytes)

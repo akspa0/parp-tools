@@ -140,5 +140,28 @@ public sealed class Pm4UnauthoredPlacementResolverTests
         float yaw45 = Pm4UnauthoredPlacementResolver.ComputeFootprintYawDegrees(diagPoints);
         Assert.InRange(yaw45, 44f, 46f);
     }
+
+    [Fact]
+    public void Test_63_05_Resolution()
+    {
+        string pm4Path = Path.Combine(DevelopmentMapDir, "development_63_05.pm4");
+        Assert.True(File.Exists(pm4Path), $"PM4 file '{pm4Path}' must exist.");
+
+        Pm4TileResolutionResult result = Pm4UnauthoredPlacementResolver.ResolveTile(
+            pm4Path,
+            DevelopmentMapDir,
+            neighborCatalogReader: path => AdtPlacementReader.Read(path));
+
+        _output.WriteLine($"Resolved {result.ResolvedWmos.Count} WMOs on 63_05:");
+        foreach (var wmo in result.ResolvedWmos)
+        {
+            _output.WriteLine($"  WMO: {wmo.ModelPath} @ Pos={wmo.Position} Rot={wmo.Rotation} via {wmo.Method} (Note: {wmo.SourceNote})");
+        }
+        _output.WriteLine($"Catalog MODF count: {result.Catalog.WorldModelPlacements.Count}");
+        foreach (var modf in result.Catalog.WorldModelPlacements)
+        {
+            _output.WriteLine($"  MODF: {modf.ModelPath} @ Pos={modf.Position} Rot={modf.Rotation}");
+        }
+    }
 }
 

@@ -64,6 +64,23 @@ As an operator, I want to inspect restored placements directly in `WoWViewer` al
 - **AC-4.1**: Restored monolithic `.adt` files load seamlessly in `WoWViewer` with 0 missing/failed tile errors.
 - **AC-4.2**: Visual parity between PM4 collision surfaces and rendered 3D geometry with authentic building yaw orientation.
 
+### US-5: Multi-Source Placement Convergence & Deduplication
+As a world builder, I want the restoration pipeline to converge across all available sources (`WoWMuseum/335-dev/`, `original_development/`, and `.pm4` navmeshes), keeping all existing authored placements intact, magnetically aligning transforms where PM4 collision geometry is superior, and injecting only net-new unauthored objects with strict tile-boundary containment so that large spanned models (e.g. Stormwind Harbor) exist only once.
+
+- **AC-5.1**: Existing authored placements (`MDDF`/`MODF`) from `335-dev` and `original_development` `_obj0.adt` are strictly preserved.
+- **AC-5.2**: Matches between existing placements and PM4 collision components are updated with authentic 2D PCA Yaw rotation and magnetic centroid offsets without creating duplicate records.
+- **AC-5.3**: Net-new PM4 collision components ($CK24 \neq 0$ WMOs and welded M2 doodads) are synthesized and appended only when no existing placement covers the collision component.
+- **AC-5.4**: Spanned multi-tile models are anchored strictly within their placement tile bounds (`IsWithinPlacementTileBounds`), preventing multi-tile cloning.
+
+### US-6: Minimap PNG $\to$ MCCV Baking for Untextured & Missing Tiles
+As an operator, I want all untextured, missing, or synthetic terrain tiles to be shaded with authentic colors from the 2,252 development minimap PNGs (`test_data/development/World/Textures/Minimap/development_{tileX}_{tileY}.png`) baked directly into 145-vertex `MCCV` chunks, eliminating pitch-black voids and giving every tile instant geographic recognition in `WoWViewer`.
+
+- **AC-6.1**: Reads authentic $256 \times 256$ RGBA minimap PNGs using `SixLabors.ImageSharp`.
+- **AC-6.2**: Samples minimap pixel colors at each of the 145 vertex locations across all 256 chunks ($37,120$ vertices per tile) into 580-byte BGRA payloads.
+- **AC-6.3**: Injects synthesized `MCCV` payloads into `MCNK` chunks and enables the `McnkHasMccvFlag` (`0x40`).
+- **AC-6.4**: Assigns clean neutral base diffuse layers in `MCLY`/`MTEX` so the terrain shader modulates diffuse lighting with the baked minimap colors.
+- **AC-6.5**: Zero black tiles: all generated monolithic LK ADTs display full-color terrain in `WoWViewer`.
+
 ---
 
 ## 3. Architecture & File Locations
@@ -75,19 +92,29 @@ As an operator, I want to inspect restored placements directly in `WoWViewer` al
   - `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4UnauthoredPlacementResolver.cs`
   - `wow-viewer/src/core/WowViewer.Core.IO/Maps/BlankAdtFactory.cs`
   - `wow-viewer/src/core/WowViewer.Core.IO/Maps/LkAdtWriter.cs`
+- **MCCV Image Sampler & Minimap Bridge**:
+  - `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtMccvImageSampler.cs`
+  - `wow-viewer/src/core/WowViewer.Core.IO/Maps/MccvTerrainShadowService.cs`
 - **Tooling & CLI**:
   - `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Pm4RestoreUnauthoredSupport.cs`
-- **Ground Truth Base**:
+- **Ground Truth & Minimap Base**:
   - `wow-viewer/test_data/WoWMuseum/335-dev/World/Maps/development/`
+  - `wow-viewer/test_data/development/World/Textures/Minimap/`
 - **Output Artifacts**:
   - `wow-viewer/output/datasets/pm4_object_association_ledger.json`
   - `wow-viewer/output/restored_development/World/Maps/development/` (monolithic `.adt` files)
 
 ---
 
-## 4. Scope Amendment (2026-10-10)
+## 4. Scope Amendments
 
-- **Monolithic LK ADT Delivery**: Replaced split `_obj0.adt` output with monolithic 3.3.5 `.adt` files to resolve the 66 failed/unreadable tile defect.
-- **Strict Ground Truth Protection**: Enforced guard on all 255 hand-authored tiles from `WoWMuseum/335-dev` to ensure hand-authored Dragon Isles, Zul'Aman, Duskwood, Goldshire, and Redridge are never replaced.
-- **2D PCA Yaw Orientation**: Added principal component covariance analysis on $(X, Y)$ vertices to compute authentic building yaw rotation matching PM4 collision bounds.
-- **Multi-Instance Spillover Cap**: Capped border-crossing WMOs to single instances per parent placement to prevent duplicate stacking (e.g. 18 Stormwind Harbors on a single tile).
+### 2026-10-10: Monolithic LK ADT Delivery & 2D PCA Yaw
+- Replaced split `_obj0.adt` output with monolithic 3.3.5 `.adt` files to resolve the 66 failed/unreadable tile defect.
+- Enforced guard on all 255 hand-authored tiles from `WoWMuseum/335-dev` byte-for-byte.
+- Added principal component covariance analysis on $(X, Y)$ vertices to compute authentic building yaw rotation matching PM4 collision bounds.
+- Capped border-crossing WMOs to single instances per parent placement to prevent duplicate stacking.
+
+### 2026-10-11: Multi-Source Placement Convergence & Minimap MCCV Baking (Phase 5)
+- **Multi-Source Convergence**: Pull from `335-dev`, `original_development` `_obj0.adt`, and `.pm4` navmeshes. Retain all existing authored placements, magnetically align matches, and append only net-new PM4 collision objects.
+- **Minimap PNG $\to$ MCCV Baking**: Sample all 2,252 authentic $256 \times 256$ development minimap PNGs into 145-vertex `MCCV` BGRA chunks for every untextured or missing tile, eliminating black tiles across the map.
+- **Monolithic Preservation**: Strip all companion `_obj0.adt` and `_tex0.adt` files to prevent split-file chunk desync in `WoWViewer`.

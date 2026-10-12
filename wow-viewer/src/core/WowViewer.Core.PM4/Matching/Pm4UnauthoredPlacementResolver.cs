@@ -234,8 +234,15 @@ public static class Pm4UnauthoredPlacementResolver
         {
             if (!string.IsNullOrWhiteSpace(ledgerRec.AssetPath) && !ledgerRec.AssetPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
             {
-                Vector3 ledgerPos = new(ledgerRec.PosX, ledgerRec.PosY, ledgerRec.PosZ);
+                float z = ledgerRec.PosZ != 0f ? ledgerRec.PosZ : (zFloat != 0f ? zFloat : group.Centroid.Z);
+                Vector3 ledgerPos = new(
+                    ledgerRec.PosX != 0f ? ledgerRec.PosX : group.Centroid.X,
+                    ledgerRec.PosY != 0f ? ledgerRec.PosY : group.Centroid.Y,
+                    z);
                 Vector3 ledgerRot = new(ledgerRec.RotX, ledgerRec.RotY, ledgerRec.RotZ);
+                if (ledgerRot == Vector3.Zero)
+                    ledgerRot = defaultRotation;
+
                 return new Pm4ResolvedObjectRecord(
                     ledgerRec.AssetPath,
                     ledgerRec.AssetKind ?? "WMO",
@@ -841,12 +848,17 @@ public static class Pm4UnauthoredPlacementResolver
         Vector3 modelBoundsMin,
         Vector3 modelBoundsMax)
     {
-        Vector3 modelCenter = (modelBoundsMin + modelBoundsMax) * 0.5f;
+        Vector3 modelCenter = Vector3.Zero;
+        if (modelBoundsMin != Vector3.Zero || modelBoundsMax != Vector3.Zero)
+        {
+            modelCenter = (modelBoundsMin + modelBoundsMax) * 0.5f;
+        }
+
         float rotZRad = yawDegrees * (MathF.PI / 180f);
         Matrix4x4 rotMatrix = Matrix4x4.CreateRotationZ(MathF.PI) * Matrix4x4.CreateRotationZ(rotZRad);
         Vector3 rotatedCenter = Vector3.Transform(modelCenter, rotMatrix);
 
-        float z = targetZ != 0f ? targetZ : (pm4Centroid.Z - rotatedCenter.Z);
+        float z = targetZ != 0f ? targetZ : (pm4Centroid.Z - modelCenter.Z);
         return new Vector3(
             pm4Centroid.X - rotatedCenter.X,
             pm4Centroid.Y - rotatedCenter.Y,
