@@ -6,7 +6,7 @@ namespace WowViewer.Core.Tests;
 public sealed class M2CameraPathTileFootprintSelectorTests
 {
     private const float MapOrigin = 17066.66666f;
-    private const float TileSize = 8533.33333f;
+    private const float WorldMapTileSize = 533.33333f;
 
     [Fact]
     public void SweptPathIncludesTilesBetweenSparseSamples()
@@ -22,7 +22,7 @@ public sealed class M2CameraPathTileFootprintSelectorTests
         };
 
         HashSet<(int tileX, int tileY)> tiles = CameraPathTileFootprintSelector.GetTiles(
-            path, MapOrigin, TileSize, 64, sampleSpacingMs: 1000, tileRadius: 0);
+            path, MapOrigin, WorldMapTileSize, 64, sampleSpacingMs: 1000, tileRadius: 0);
 
         Assert.Contains((32, 32), tiles);
         Assert.Contains((31, 32), tiles);
@@ -45,7 +45,7 @@ public sealed class M2CameraPathTileFootprintSelectorTests
         HashSet<(int tileX, int tileY)> tiles = CameraPathTileFootprintSelector.GetTiles(
             path,
             MapOrigin,
-            TileSize,
+            WorldMapTileSize,
             64,
             sampleSpacingMs: 1000,
             tileRadius: 1,
@@ -57,9 +57,74 @@ public sealed class M2CameraPathTileFootprintSelectorTests
         Assert.Equal(8, tiles.Count);
     }
 
+    [Fact]
+    public void FlybyUndeadOriginSelectsItsAvailableAzerothTile()
+    {
+        M2CameraPathDocument path = new()
+        {
+            Keyframes =
+            [
+                new()
+                {
+                    TimeMs = 0,
+                    Position = new Vector3(1658.58f, 1662.91f, 141.234f),
+                    Target = Vector3.UnitX,
+                },
+            ],
+        };
+
+        HashSet<(int tileX, int tileY)> tiles = CameraPathTileFootprintSelector.GetTiles(
+            path,
+            MapOrigin,
+            WorldMapTileSize,
+            64,
+            sampleSpacingMs: 1000,
+            tileRadius: 0,
+            tileExists: static (tileX, tileY) => tileX == 28 && tileY == 28);
+
+        Assert.Contains((28, 28), tiles);
+        Assert.Single(tiles);
+    }
+
+    [Fact]
+    public void TileLocalFlybyPathIsPlacedIntoItsMapTileBeforeWarmup()
+    {
+        M2CameraPathDocument path = new()
+        {
+            CoordinatesAreWorldSpace = false,
+            Keyframes =
+            [
+                new() { TimeMs = 0, Position = Vector3.Zero, Target = Vector3.UnitX },
+            ],
+        };
+
+        M2CameraPathPlacement.ApplyCinematicCameraOrigin(
+            path,
+            cameraId: 2,
+            modelPath: "Cameras\\FlybyUndead.M2",
+            origin: new Vector3(1658.58f, 1662.91f, 141.234f),
+            facingRadians: 0f,
+            tileX: 28,
+            tileY: 28);
+
+        HashSet<(int tileX, int tileY)> tiles = CameraPathTileFootprintSelector.GetTiles(
+            path,
+            MapOrigin,
+            WorldMapTileSize,
+            64,
+            sampleSpacingMs: 1000,
+            tileRadius: 0,
+            tileExists: static (tileX, tileY) => tileX == 28 && tileY == 28);
+
+        Assert.True(path.CoordinatesAreWorldSpace);
+        Assert.Equal(new Vector3(1658.58f, 1662.91f, 141.234f), path.Keyframes[0].Position);
+        Assert.Contains((28, 28), tiles);
+        Assert.Single(tiles);
+    }
+
     private static Vector3 WorldPosition(int tileX, int tileY)
         => new(
-            MapOrigin - ((tileX + 0.5f) * TileSize),
-            MapOrigin - ((tileY + 0.5f) * TileSize),
+            MapOrigin - ((tileX + 0.5f) * WorldMapTileSize),
+            MapOrigin - ((tileY + 0.5f) * WorldMapTileSize),
             0f);
 }

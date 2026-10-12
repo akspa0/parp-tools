@@ -1,12 +1,41 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-10-11 · **v0.6.0 released from `main`** (tag `v0.6.0`); active branch `v0.6.1-dev`
+Last updated: 2026-10-12 · **v0.6.0 released from `main`** (tag `v0.6.0`); active branch `v0.6.1-dev`
+
+**Immediate M2 texture issue (1.60.1):** older assets (taxi gryphon, `Troll.m2/mdx`) load geometry
+but show the error texture. Root cause found in code: the 1.60.1 `CreatureModelData` layout
+(BUILD 1.60.1.69876) replaces `ModelName` with `FileDataID<u32>`, and `CreatureDisplayInfo` replaces
+`TextureVariation[3]` strings with `TextureVariationFileDataID<32>[4]`. The resolver read the id as a
+string, so `FindModelId` never matched and every replaceable slot fell through to the missing-texture
+placeholder. Both tables now resolve ids through the listfile (`FileDataIdPaths`), and `fdid:<id>`
+virtual paths pass through unchanged. 5 new tests + 12 existing camera tests pass; viewer builds clean.
+Operator must confirm the gryphon/Troll now texture on `wow_classic_beta` 1.60.1.
+
+**Immediate M2 camera issue:** M2/MDX camera keys are tile-local until their matching
+`CinematicCamera` origin/facing is applied. Warm Path's 64×64 grid spacing was corrected from
+`TileSize` (8,533 units) to `ChunkSize` (533.333 units); FlybyUndead's documented origin maps to
+tile `(28,28)`. Modern 1.60.1 `CinematicCamera` rows have `FileDataID`, not `Model`; the resolver now
+matches the selected CASC asset's ID (community listfile: FlybyUndead is 116912). If lookup fails,
+tracks remain local and playback, key captures, and warmup reject them. A missed guard was found in
+plain Play and fixed. Focused camera tests pass (12/12), including local-origin-to-world-tile mapping.
+Phase layers merge donor content onto base-map target coordinates; camera binding still uses the
+base `TerrainManager.MapName`, so there is no code evidence that phase composition itself relocates
+the path. Operator must verify the actual client DB2 row/origin and visual playback on
+`wow_classic_beta` 1.60.1/Azeroth. Separately, the earlier reported `DD21` (`0x31324444`) magic is
+still unexplained; exact bytes remain unavailable, so do not widen the reader based on that report.
 
 **Next on `v0.6.1-dev` (fresh chat start here):**
-1. Spec 271 Phase B — integrated Help + image guide (operator captures screenshots; agent prepares shot list and `HelpGuideService`).
-2. Spec 270 open gap — objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing from restored tiles (operator report 2026-10-11).
-3. Separate spec needed: `LkAdtReader` adds 8 bytes to MCAL/MCSH offsets (restore tool repairs locally in `RepairAlphaAndShadow`).
-4. Operator smoke owed on regenerated `output/restored_development` (alpha masks, no orange tint, 63_5 huts flush).
+1. Operator verifies the actual 1.60.1 `CinematicCamera` row for FileDataID 116912 and plays/warmups FlybyUndead on base Azeroth with the intended phase layers enabled; record whether origin/facing and tile `(28,28)` agree.
+2. Operator confirms the gryphon/Troll and other legacy M2s now texture on `wow_classic_beta` 1.60.1 after the CreatureModelData/CreatureDisplayInfo FileDataID fix.
+2. Operator-requested public format docs: prepare wowdev.wiki-style articles for the 0.5.5 prototype ADT, WMO v14, MDX, Alpha WDT, and a substantial PM4/PD4 refresh. Ground each in repo evidence; distinguish verified facts from open interpretations.
+3. Spec 271 Phase B — integrated Help + image guide (operator captures screenshots; agent prepares shot list and `HelpGuideService`).
+4. Spec 270 open gap — objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing from restored tiles (operator report 2026-10-11).
+5. Separate spec needed: `LkAdtReader` adds 8 bytes to MCAL/MCSH offsets (restore tool repairs locally in `RepairAlphaAndShadow`).
+6. Operator smoke owed on regenerated `output/restored_development` (alpha masks, no orange tint, 63_5 huts flush).
+
+The repeatable procedure is now documented in [Development Map Restoration](../docs/WoWViewer/development-map-restoration.md);
+that guide does not close the operator visual smoke item above. The README uses its native Markdown support matrix
+instead of a separate graphic; worklog/spec and old release-note references were removed from viewer-facing documentation.
 
 ## Fresh-chat route
 

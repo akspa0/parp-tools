@@ -20,9 +20,9 @@
 6. [Camera Path Studio](#6-camera-path-studio)
 7. [Audio System and Positional Emitters](#7-audio-system-and-positional-emitters)
 8. [Lighting, Atmosphere, and Time of Day](#8-lighting-atmosphere-and-time-of-day)
-9. [PM4 Object Reconciliation Workbench (Spec 176)](#9-pm4-object-reconciliation-workbench-spec-176)
-10. [Phased Terrain Dual-Map Overlay (Spec 135 & 137)](#10-phased-terrain-dual-map-overlay-spec-135--137)
-11. [Rosetta Multi-Version Zarr Datastore & Cross-Era Loading (Spec 190)](#11-rosetta-multi-version-zarr-datastore--cross-era-loading-spec-190)
+9. [PM4 Object Reconciliation Workbench](#9-pm4-object-reconciliation-workbench)
+10. [Phased Terrain Dual-Map Overlay](#10-phased-terrain-dual-map-overlay)
+11. [Rosetta Multi-Version Zarr Datastore & Cross-Era Loading](#11-rosetta-multi-version-zarr-datastore--cross-era-loading)
 12. [Modern CASC Clients: WoW: Forever](#12-modern-casc-clients-wow-forever)
 13. [DAT v26 Terrain Project Files (alpha)](#13-dat-v26-terrain-project-files-alpha)
 14. [Archaeology: Phase Maps and Map Layering](#14-archaeology-phase-maps-and-map-layering)
@@ -247,7 +247,7 @@ Located under **Quick > Audio**, the OpenAL audio engine renders true 3D spatial
 
 ---
 
-## 9. PM4 Object Reconciliation Workbench (Spec 176)
+## 9. PM4 Object Reconciliation Workbench
 
 Located under **Archaeology > PM4 Analysis**:
 
@@ -275,7 +275,7 @@ Located under **Archaeology > PM4 Analysis**:
 
 ---
 
-## 10. Phased Terrain Dual-Map Overlay (Spec 135 & 137)
+## 10. Phased Terrain Dual-Map Overlay
 
 In Cataclysm (4.x) and later expansions, game zones feature dynamic phases where sparse ADT tiles modify specific regions of a continent (e.g. `Gilneas`, `Gilneas2`, `GilneasPhase1` over `Azeroth`).
 
@@ -291,7 +291,7 @@ In Cataclysm (4.x) and later expansions, game zones feature dynamic phases where
 
 ---
 
-## 11. Rosetta Multi-Version Zarr Datastore & Cross-Era Loading (Spec 190)
+## 11. Rosetta Multi-Version Zarr Datastore & Cross-Era Loading
 
 The Rosetta Datastore is a unified, version-agnostic interchange format stored in Zarr v3 with globally content-addressed deduplicated assets in Parquet (`global_assets/catalog.parquet`).
 
@@ -345,7 +345,7 @@ DAT v26 files are raw terrain project files: the uncompiled data client ADTs are
 3. **File → DAT v26 Height Scale** changes the height divisor and reloads the folder. The default ÷36 treats heights as inches: −18,559.47 ÷ 36 = −515.54, matching the shipped ocean floor. The other options are 1×, ÷12 and ÷100.
 4. **File → Export Nearby Tiles as DAT v26 (experimental)** writes the ADT tiles within 2 tiles of the camera (terrain, texture layers, vertex colours, normals, objects) to `output/dat_v26_export`. Reopen that folder with the step 2 command to compare.
 
-Shadows (`ASHD`) are all zero in the corpus and are not rendered. The format has no liquid, hole or area data in this corpus, and it is not the project's save/interchange format (Spec 241, deferred). The horizontal scale relative to shipped ADTs is not established.
+Shadows (`ASHD`) are all zero in the corpus and are not rendered. The format has no liquid, hole or area data in this corpus, and it is not the project's save/interchange format. The horizontal scale relative to shipped ADTs is not established.
 
 ---
 
@@ -362,7 +362,7 @@ The **Archaeology** tab of the right Workbench is where one map is shown over an
 - **Clearing.** Clear the overlay to return to the unmodified base map.
 
 Section 10 describes the overlay behaviour (terrain, chunk textures, doodads, minimap) in detail. Annotated
-screenshots for this tab will ship with the integrated help in v0.6.1 (Spec 271).
+screenshots for this tab are planned for the integrated help in v0.6.1.
 
 ---
 
@@ -370,20 +370,16 @@ screenshots for this tab will ship with the integrated help in v0.6.1 (Spec 271)
 
 ### Restoring the `development` map (v0.6.0, partial)
 
-PM4 collision meshes are matched to object placements from the museum `development` tiles, and restored tiles
-are written as monolithic LK 3.3.5 ADTs:
+The `restore-unauthored` PM4 command combines the `335-dev` base tiles, original development placements,
+PM4 collision data, the prepared association ledger, and minimap colors for untextured tiles. It writes
+monolithic LK 3.3.5 ADTs into a separate output tree and validates each written tile by reading it back.
+The command does not create a WDT; open the base `development.wdt` with the generated tree attached as a
+loose-map overlay.
 
-```powershell
-dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- `
-  restore-unauthored --all-tiles --json output/restored_development/restoration_summary.json
-```
-
-- Hand-authored tiles are preserved byte-for-byte; only tiles that need it are rewritten.
-- Matched objects keep their authentic position and rotation and sit flush on their PM4 collision mesh.
-- Tiles with no texture layers are baked from their minimap into vertex colour (MCCV) so they are not black.
-- **Known gap:** objects on tiles adjacent to PM4-covered tiles that exist in the museum data are still missing.
-- Needs your own copy of the development data; paths default to `test_data/` and can be overridden with
-  `--base`, `--pm4`, `--minimap`, `--output`.
+Follow the step-by-step [Development Map Restoration guide](development-map-restoration.md) for input
+layout, safe smoke/full-batch commands, output validation, viewer launch, and troubleshooting. The result
+is partial; in particular, museum objects on adjacent tiles that are not recovered by the current PM4
+resolver remain a known gap.
 
 ### Terrain reconstruction research (experimental, unstable)
 

@@ -1,6 +1,6 @@
 # WoWViewer Toolkit (`wow-viewer`)
 
-The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data. **v0.6.0** is the first stable v0.6 release: complete support for clients **0.5.3 – 0.11**, partial support for **0.12 – 5.x**, and stable modern CASC support for **WoW: Forever** (`wow_classic_beta` 1.60.1, 12.0-based client).
+The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data. **Current development version: v0.6.1-dev**, following the first stable v0.6.0 release. Coverage includes clients **0.5.3 – 0.11**; working support across **1.x – 4.x**; **5.0.1 tested**; and modern CASC tested on **WoW: Forever** (`wow_classic_beta` 1.60.1, build 703xx+, based on 11.2.7). The 12.x M2 path is Warcraft.NET-backed; support remains format/build-specific.
 
 > **Bring your own data.** parp-tools ships no game data. Point it at your own client install, MPQ set, CASC install or extracted map folder.
 
@@ -10,9 +10,9 @@ The primary development and runtime workspace for `parp-tools`. This project pro
 
 ### 1. 3D World Viewer (`src/viewer/WoWViewer`)
 An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
-- **Modern CASC Clients**: File → Open CASC Install (local, or local + CDN fill), then pick the game version. Tested with WoW: Forever (`wow_classic_beta` 1.60.1.69876); works with every build since support landed. Covers FileDataID-era maps (`MAID`, `MDID`, FileDataID placements), chunked `MD21` M2s, `GFID`/`MODI` WMOs with modern per-LOD groups and materials, and DB2 tables. Terrain blends up to 8 tileset layers per chunk with 64-bit high-resolution holes. See the [v0.6.0 release notes](docs/releases/v0.6.0.md).
+- **Modern CASC Clients**: File → Open CASC Install (local, or local + CDN fill), then pick the game version. Tested with WoW: Forever (`wow_classic_beta` 1.60.1.69876); works with every build since support landed. Covers FileDataID-era maps (`MAID`, `MDID`, FileDataID placements), chunked `MD21` M2s, `GFID`/`MODI` WMOs with modern per-LOD groups and materials, and DB2 tables. Terrain blends up to 8 tileset layers per chunk with 64-bit high-resolution holes.
 - **Archaeology: phase maps & map layering**: the Archaeology tab lists the DBC/DB2-defined phase maps for the loaded base map when the client has them; otherwise any map can be loaded on top of any other map.
-- **Development-map restoration (partial)**: PM4 collision meshes are matched to museum object placements (persistent association ledger), minimap-only terrain is baked to vertex colour, and restored tiles are written as monolithic LK 3.3.5 ADTs. Objects on tiles adjacent to PM4-covered tiles are still missing — see [Spec 270](specs/270-pm4-object-association-ledger-and-placement/spec.md).
+- **Development-map restoration (partial)**: PM4 collision meshes are matched to museum object placements (persistent association ledger), minimap-only terrain is baked to vertex colour, and restored tiles are written as monolithic LK 3.3.5 ADTs. Objects on tiles adjacent to PM4-covered tiles are still missing; see the [restoration guide](docs/WoWViewer/development-map-restoration.md).
 - **DAT v26 Terrain (alpha)**: File → Open DAT v26 Terrain Folder renders the raw terrain project files that shipped in that build — heights (inches), normals, vertex colours, layers and `ACDO` objects — and File → Export Nearby Tiles as DAT v26 (experimental) writes them back ([format write-up](docs/architecture/adt-v26-format.md)).
 - **Terrain Streaming**: Bounded camera-centered tile streaming with directional lookahead and WDL low-detail horizon fallback.
 - **WMO Portals & Interiors**: Hierarchical culling with bounded portal traversal and group-level admission.
@@ -20,9 +20,9 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **Dynamic Lighting & Skies**: Native Alpha 0.5.3 2,880-unit world clock, Light DBC fallback, LIT profiles, and fog.
 - **Positional Audio**: OpenAL runtime with resident MCSE / MCNK positional emitters and `SoundEntries` preview.
 - **Camera Path Authoring**: Full timeline keyframing, roll control, JSON project save/load, and native `.m2` camera export.
-- **PM4 Reconciliation Workbench**: Spec 176 reconciliation panel for matching real PM4 geometry segments to ADT placements with guarded preview, hash verification, and undoable apply operations.
-- **Cartography Composition (Spec 232)**: multi-layer map composition — donor tiles, placement locks, rotation/mirror, Z transform, WDL edge-snap — with project save/load.
-- **Map Save & New Map Creator**: a New Map creator service exists; **saving composed/merged maps to Alpha 0.5.3 WDT / LK v18 ADT is not implemented yet** — tracked as item E-01 in [Epic 250](specs/250-epic-reconstruction-and-editor-platform/spec.md) (origin: archived Spec 234).
+- **PM4 Reconciliation Workbench**: Match real PM4 geometry segments to ADT placements with guarded preview, hash verification, and undoable apply operations.
+- **Cartography Composition**: Multi-layer map composition with donor tiles, placement locks, rotation/mirror, Z transform, WDL edge-snap, and project save/load.
+- **Map Save & New Map Creator**: A New Map creator service exists; **saving composed/merged maps to Alpha 0.5.3 WDT / LK v18 ADT is not implemented yet**.
 
 ### 2. Shared Core Libraries (`src/core`)
 - **`WowViewer.Core`**: Data contracts, vertex/index buffers, terrain tensor layouts, and coordinate transformations.
@@ -37,6 +37,10 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **`wowviewer-harvest` (`tools/harvest`)**: High-throughput extraction of terrain tensors (elevation, normals, alpha masks) into Zarr/NPZ archives and synthetic minimap images.
 - **`wowviewer-capture` (`tools/capture`) & `validation-capture`**: Automated headless camera renders and regression visual captures.
 
+## Pre-Alpha Restoration Project (PARP)
+
+PARP — the Pre-Alpha Restoration Project — works to recover World of Warcraft's pre-2003 game world from surviving files and historical evidence. Current development-map recovery combines museum-era base terrain and placements with PM4 collision data and minimap-derived colors; the restoration is partial, with known placement and terrain gaps. Longer-term reconstruction aims to use early-game screenshots and even minimaps printed in period magazines to recover lost geography, cross-checking those sources against surviving client and map data. See the [development-map restoration guide](docs/WoWViewer/development-map-restoration.md) for the current tooling workflow.
+
 ---
 
 ## Documentation Map
@@ -45,7 +49,7 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **[Desktop viewer](src/viewer/WoWViewer/README.md)**: App launch, UI surfaces, and viewer-specific proof gates.
 - **[CLI tooling](tools/README.md)**: Canonical single-document index for all command-line projects.
 - **[Desktop user guide](docs/WoWViewer/USERGUIDE.md)**: End-user controls and workflows.
-- **[Spec status router](specs/STATUS.md)**: Current SpecKit lanes, implementation state, and next bounded actions.
+- **[Development map restoration guide](docs/WoWViewer/development-map-restoration.md)**: Inputs, safe restore commands, validation, and viewer overlay setup.
 
 ---
 
@@ -96,7 +100,7 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.T
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  WoWViewer v0.6.0                                              [_][□][X]    │
+│  WoWViewer v0.6.1-dev                                           [_][□][X]    │
 ├──────────────┬───────────────────────────────────────────────┬──────────────┤
 │  NAVIGATOR   │                                               │  WORKBENCH   │
 │  (Left Bar)  │               3D VIEWPORT                     │  (Right Bar) │
@@ -139,18 +143,22 @@ See the **[CLI tooling README](tools/README.md)** for the canonical tool index, 
 
 ## Client Era Support Matrix
 
+Alpha 0.5.3–0.5.5 uses a distinct monolithic WDT map format; later clients use split map layouts.
+
 | Client Era | Version | Current State | Key Implemented Features / Notes |
 |---|---|---|---|
-| **Alpha** | 0.5.3 - 0.5.5 | **Implemented with active proof gates** | Monolithic WDTs, v14 WMO monoliths, MDX/MDL models, 2880-unit world clock, Alpha audio catalog; Rosetta minimap visual proof remains operator-owned |
-| **Early Beta** | 0.6.x - 0.10.x | **Partial / research** | Split ADT/WDT transition format, chunked early models, prototype map layouts |
-| **Classic** | 1.12.1 | **Implemented surfaces, proof-gated** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, 2004-era M2 structures, AreaTable routing |
-| **TBC** | 2.4.3 | **Implemented surfaces, proof-gated** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
-| **WotLK** | 3.3.5a | **Primary reference era** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
-| **WoW: Forever** | 1.60.1.69876 (`wow_classic_beta`, 12.0-based, CASC) | **Stable (v0.6.0)** | Local CASC + optional CDN fill + game-version picker; `MAID`/`MDID` terrain with up to 8 blended layers and 64-bit high-res holes, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO with modern materials/LOD, DB2 via WoWDBDefs; DAT v26 terrain project files (alpha); streamed/shared textures, GPU-instanced M2s, GPU skinning |
+| **Alpha** | 0.5.3 - 0.5.5 | **Implemented with active proof gates** | Distinct monolithic WDT map format, v14 WMO monoliths, MDX/MDL models, 2880-unit world clock, Alpha audio catalog; Rosetta minimap visual proof remains operator-owned |
+| **Early Beta** | 0.6.x - 0.11.x | **Supported** | Split ADT/WDT transition formats, early models, prototype map layouts |
+| **Classic** | 1.x (1.12.1 tested) | **Working** | Standard ADTs with MCCV/MCLY/MCAL, v17 WMOs, M2 structures, AreaTable routing |
+| **TBC** | 2.x (2.4.3 tested) | **Working** | Embedded skin profiles, expanded WMO materials, multi-layer liquid chunks |
+| **WotLK** | 3.x (3.3.5a reference) | **Working / primary reference** | Reference LK terrain format, separated M2 `.skin` files, PM4 analysis workflows, WDL terrain horizons |
+| **Cataclysm** | 4.x | **Working** | Later M2/WMO layouts and split terrain formats |
+| **Later legacy** | Through 5.0.1 | **5.0.1 tested; overall partial** | Format-family coverage varies across later legacy builds |
+| **Modern CASC** | WoW: Forever 1.60.1 (build 703xx+) | **Tested** | `wow_classic_beta` is 11.2.7-based; `MAID`/`MDID` terrain, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO, DB2, and DAT v26 terrain project files; 12.x M2 parsing uses Warcraft.NET |
 
-**Support summary (v0.6.0):** clients 0.5.3 – 0.11 complete; 0.12 – 5.x partial; WoW: Forever 1.60.1 stable.
+**Support summary (v0.6.1-dev):** 0.5.3–0.11 complete; client coverage works across 1.x–4.x; later 0.12–5.x is partial, with 5.0.1 tested; modern CASC tested on WoW: Forever 1.60.1 (11.2.7-based, build 703xx+).
 
-Other retail CASC builds are untested; the FileDataID-era readers are not yet validated beyond `wow_classic_beta` 1.60.1.
+The M2 reader path for 12.x data uses Warcraft.NET; per-format and per-build validation remains distinct from the tested 1.60.1 and 703xx+ builds.
 
 ---
 
@@ -159,7 +167,7 @@ Other retail CASC builds are untested; the FileDataID-era readers are not yet va
 1. **Library-First Architecture**: Format readers/writers (`WowViewer.Core.IO`), domain algorithms, and edit policies live strictly in `src/core/` and contain no UI or viewer dependencies.
 2. **Configuration vs Code**: Client paths are runtime configuration (`--game-path` or UI selections). Machine-local absolute paths are never hardcoded in source.
 3. **Non-Destructive Storage**: Placement modifications and conversions write to designated output paths (`output/projects/...`) with source-hash verification and JSON provenance sidecars.
-4. **Base Tooling Preservation**: New generators, probes, captures, and experiments layer above proven readers, writers, terrain loading, camera, and renderer paths unless an explicit spec reopens a base compatibility bug.
+4. **Base Tooling Preservation**: New generators, probes, captures, and experiments layer above proven readers, writers, terrain loading, camera, and renderer paths unless a separately reviewed compatibility fix is approved.
 
 ---
 

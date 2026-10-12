@@ -1,6 +1,83 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-11
+Last updated: 2026-10-12
+
+## 2026-10-12 — 1.60.1 Legacy M2 Textures: CreatureModelData/CreatureDisplayInfo FileDataID Gap
+
+- **Operator report:** older assets (taxi gryphon, `Troll.m2/mdx`) load geometry but show the error
+  texture on 1.60.1; suspected the auto-texture-replacer.
+- **Root cause (code + DBD evidence):** the 1.60.1 layouts identify assets by FileDataID, not name.
+  `CreatureModelData` (BUILD 1.60.1.69876) has `FileDataID<u32>` and no `ModelName` string;
+  `CreatureDisplayInfo` (same build) has `TextureVariationFileDataID<32>[4]` and no `TextureVariation`
+  string array. `ReplaceableTextureResolver.LoadCreatureModelData` read the id through
+  `TryGetString`, so the table was keyed on `"116912"` instead of a path and every `FindModelId`
+  lookup missed; `LoadCreatureDisplayInfo` read an absent string array, so every variation was empty.
+  Either alone sends the section to `M2Renderer.AcquireMissingTexture()` — the client's
+  `Textures\ShaneCube.blp` error texture, or a generated checkerboard.
+- **Fix:** `ReadModelName`/`ReadTextureVariations` now resolve FileDataIDs through
+  `FileDataIdPaths` (the same listfile bridge M2 TXID/SFID already uses). `BuildTexturePath` passes
+  `fdid:<id>` virtual paths through unchanged so FileDataID-aware data sources read them directly.
+  Row-shape interpretation was extracted into public seams taking a `Func<string, object?>` field
+  accessor, because the DBCD `dynamic` binder is unavailable in the test project.
+- **Verification:** `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~ReplaceableTextureFileDataIdRowTests|FullyQualifiedName~CinematicCameraOriginResolverTests|FullyQualifiedName~M2CameraPathTileFootprintSelectorTests|FullyQualifiedName~M2CameraPathTests" --artifacts-path wow-viewer/output/tmp/camera-origin-artifacts` (exit 0; 17/17 passed);
+  `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug` (exit 0; 0 errors).
+  Tests cover the row shapes only — no live DBCD read or visual proof. Operator must confirm the
+  gryphon/Troll now texture on `wow_classic_beta` 1.60.1.
+- **Not addressed:** the taxi gryphon's hardcoded `Creature\Gryphon\Gryphon.mdx` default candidate
+  list in `TaxiActorScene` still resolves by legacy path; if the 1.60.1 listfile lacks that exact
+  path the actor model itself will not load. Separate from the texture defect above.
+
+## 2026-10-12 — Client Coverage Matrix & M2 Camera Import Investigation
+
+- Bumped `eng/Version.props` to `0.6.1-dev`; the viewer title/About text reads the assembly's
+  informational version. Updated the README's current-version callouts and the status router's
+  release line. MSBuild evaluated `Version=0.6.1-dev`; viewer Debug build passed.
+- Coverage summary is presented in the native Markdown support matrix rather than a separate
+  graphic/generator; Alpha's row now explicitly identifies its distinct monolithic WDT map format.
+  The operator rejected a polished promo look and preferred simple Markdown.
+- README support matrix/PARP context now reflects the operator's corrections: 0.6–0.11 supported,
+  1.x–4.x working, 5.0.1 tested, WoW: Forever 1.60.1 is 11.2.7-based at build 703xx+, and 12.x
+  M2 parsing uses Warcraft.NET.
+- Camera import now routes through the shared MD21-unwrapping importer in client and standalone
+  flows; synthetic MD21 regression test passed (26 M2 foundation tests). **Not resolved against the
+  reported file:** screenshot magic `0x31324444` (`DD21`) is not MD21. Local Cata beta archive
+  `Cameras\\FlybyUndead.m2` inspected as MD20 v0x109 with one camera; this does not reproduce the
+  reported magic or prove camera playback. Exact asset bytes/source remain required before changing
+  the accepted magic.
+- Follow-up screenshot imported 512 keys but Warm Path selected no terrain tiles. Confirmed code root
+  cause: `BuildCameraPathPreloadTiles` passed `WoWConstants.TileSize` (8,533 world units, 16 ADTs)
+  where the 64×64 grid requires `WoWConstants.ChunkSize` (533.333 units per ADT). FlybyUndead's
+  documented origin `(1658.58, 1662.91)` maps to tile `(28,28)`; the wrong span projects it near
+  `(1,1)`. Corrected the span and added a regression test that admits only `(28,28)`. Verification:
+  `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "FullyQualifiedName~M2CameraPathTileFootprintSelectorTests"` (exit 0; 3/3 passed);
+  `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug` (exit 0; 0 errors).
+  This is separate from the unresolved `DD21` report; live client warmup/playback still needs operator
+  confirmation.
+- Follow-up diagnosis: modern 1.60.1 `CinematicCamera` rows identify camera assets by `FileDataID`,
+  not `Model`. The selected CASC asset ID now flows into the resolver, which matches modern IDs or
+  legacy model paths; listfile ID `116912` maps to `Cameras/FlybyUndead.M2`. Unresolved tracks remain
+  tile-local. Safety review found plain Play bypassed `ValidateCameraPathForPlayback`; Play now uses
+  that validation, and keyframe capture/warmup reject local coordinates too.
+- Added an end-to-end regression for local FlybyUndead coordinates → CinematicCamera origin → world
+  tile footprint `(28,28)`. Focused tests passed 12/12 with isolated artifacts at
+  `wow-viewer/output/tmp/camera-origin-artifacts`; the cross-platform viewer dependency compiled.
+  Phase composition stays unchanged: phase content is merged onto base-map target tiles and camera
+  binding uses the base map name. Operator must still validate the 1.60.1 DB2 row/origin and visual
+  playback with phase layers enabled; tests do not prove live DBCD resolution or viewer behavior.
+  The reported `DD21` magic remains unresolved pending exact bytes.
+
+## 2026-10-12 — Development Map Restoration Operator Guide
+
+- Added `docs/WoWViewer/development-map-restoration.md` with verified `restore-unauthored` inputs,
+  isolated PowerShell output paths, single-tile and full-corpus commands, summary/round-trip checks,
+  viewer loose-overlay launch, overwrite/purge warnings, and known limitations.
+- Replaced the incomplete USERGUIDE snippet; linked the runbook from public docs indexes; removed
+  stale release-note and SpecKit/worklog references from viewer-facing navigation and the USERGUIDE.
+  Added a Markdown client-era/map-format support summary to the project README (the SVG experiment
+  was removed in favor of the operator's requested simple Markdown).
+- Command flags and write behavior were checked against `Pm4RestoreUnauthoredSupport.cs`; no map
+  restoration run or visual acceptance was claimed. Operator requested a follow-up wiki-docs lane
+  for prototype ADT 0.5.5, WMO v14, MDX, Alpha WDT, and PM4/PD4.
 
 ## 2026-10-11 — Spec 270 Phase 5: Magnetic Collision Attachment Fix & Full Map Multi-Source Placement Convergence
 

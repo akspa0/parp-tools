@@ -86,6 +86,13 @@ Current Alpha Rosetta boundary:
 - Do not change the base map renderer, terrain adapter, scene loader, culling policy, or protected writer
   to fix a generated minimap artifact.
 
+### Restore the Development Map
+
+For the PM4-backed `development` map workflow, use the
+[Development Map Restoration guide](../docs/WoWViewer/development-map-restoration.md). It documents the
+required local corpora and ledger, safe output isolation, a one-tile smoke run, full-batch validation,
+and loading the output as a loose overlay.
+
 ### Convert Formats
 
 The converter contains current and older dataset commands. For terrain format conversion, use the

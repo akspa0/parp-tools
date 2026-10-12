@@ -27,7 +27,8 @@ public sealed class CinematicCameraOriginResolver
         string dbdDir,
         string build,
         string assetPath,
-        out CinematicCameraOrigin? result)
+        out CinematicCameraOrigin? result,
+        uint? assetFileDataId = null)
     {
         ArgumentNullException.ThrowIfNull(dbcProvider);
         ArgumentException.ThrowIfNullOrWhiteSpace(dbdDir);
@@ -53,9 +54,12 @@ public sealed class CinematicCameraOriginResolver
             foreach (var key in storage.Keys)
             {
                 dynamic row = storage[key];
-                string model = NormalizePath(TryGetString(row, "Model") ?? string.Empty);
-                if (string.IsNullOrWhiteSpace(model) || !PathsMatch(normalizedAssetPath, model))
+                string rowModel = NormalizePath(TryGetString(row, "Model") ?? string.Empty);
+                uint? rowFileDataId = TryGetUInt(row, "FileDataID");
+                if (!IsAssetMatch(normalizedAssetPath, rowModel, assetFileDataId, rowFileDataId))
                     continue;
+
+                string model = string.IsNullOrWhiteSpace(rowModel) ? normalizedAssetPath : rowModel;
 
                 if (!TryGetVector3(row, "Origin", out Vector3 origin))
                     continue;
@@ -89,6 +93,24 @@ public sealed class CinematicCameraOriginResolver
             ViewerLog.Trace($"[CinematicCamera] Could not load CinematicCamera.dbc for build {build}: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Matches legacy path-bearing rows and modern FileDataID-bearing rows. The modern
+    /// CinematicCamera layout no longer has a Model column.
+    /// </summary>
+    public static bool IsAssetMatch(
+        string assetPath,
+        string? modelPath,
+        uint? assetFileDataId,
+        uint? rowFileDataId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(assetPath);
+        if (assetFileDataId is uint assetId && assetId != 0 && rowFileDataId == assetId)
+            return true;
+
+        return !string.IsNullOrWhiteSpace(modelPath)
+            && PathsMatch(NormalizePath(assetPath), NormalizePath(modelPath));
     }
 
     private static bool PathsMatch(string assetPath, string modelPath)
@@ -143,6 +165,12 @@ public sealed class CinematicCameraOriginResolver
     private static int? TryGetInt(dynamic row, string fieldName)
     {
         try { return Convert.ToInt32(row[fieldName]); }
+        catch { return null; }
+    }
+
+    private static uint? TryGetUInt(dynamic row, string fieldName)
+    {
+        try { return Convert.ToUInt32(row[fieldName]); }
         catch { return null; }
     }
 

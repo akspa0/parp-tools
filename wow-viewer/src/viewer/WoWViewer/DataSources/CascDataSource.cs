@@ -126,8 +126,8 @@ public sealed class CascDataSource : IDataSource
             FileDataIdPaths.Resolver = null;
     }
 
-    /// <summary>Accepts <c>fdid:&lt;id&gt;</c> paths, registered aliases, then listfile paths.</summary>
-    private bool TryGetFileDataId(string virtualPath, out uint fileDataId) =>
+    /// <summary>Resolves explicit IDs, registered aliases, or a virtual path through the CASC listfile.</summary>
+    public bool TryGetFileDataId(string virtualPath, out uint fileDataId) =>
         FileDataIdPaths.TryParse(virtualPath, out fileDataId)
         || _aliases.TryGetValue(NormalizeAlias(virtualPath), out fileDataId)
         || _listfile.TryGetFileDataId(virtualPath, out fileDataId);

@@ -8,6 +8,7 @@ using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.PromoVideo;
+using WoWViewer.DataSources;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using Silk.NET.Input;
@@ -589,17 +590,8 @@ internal sealed partial class CameraPathsService
 
     private bool StartCameraPathPlayback()
     {
-        if (_cameraPath.Keyframes.Count < 2)
-        {
-            _statusMessage = "Camera path playback requires at least two keys.";
+        if (!ValidateCameraPathForPlayback())
             return false;
-        }
-
-        if (!TryBindCameraPathToCurrentMapForPlayback())
-        {
-            _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before playback.";
-            return false;
-        }
 
         // A plain Play request supersedes a previously queued Play + Video
         // warmup. Keep any resident tiles for progressive streaming, but do
@@ -679,6 +671,12 @@ internal sealed partial class CameraPathsService
         if (_cameraPath.Keyframes.Count < 2)
         {
             _statusMessage = "Camera path playback requires at least two keys.";
+            return false;
+        }
+
+        if (!_cameraPath.CoordinatesAreWorldSpace)
+        {
+            _statusMessage = "Cannot play a camera path with unresolved tile-local coordinates; resolve its CinematicCamera origin first.";
             return false;
         }
 
@@ -790,6 +788,12 @@ internal sealed partial class CameraPathsService
             return;
         }
 
+        if (!_cameraPath.CoordinatesAreWorldSpace)
+        {
+            _statusMessage = "Cannot capture a camera path with unresolved tile-local coordinates; resolve its CinematicCamera origin first.";
+            return;
+        }
+
         if (!TryBindCameraPathToCurrentMapForPlayback())
         {
             _statusMessage = $"Camera path is bound to {_cameraPath.MapName}/{_cameraPath.BuildVersion}; load that map/build before queuing captures.";
@@ -851,6 +855,12 @@ internal sealed partial class CameraPathsService
         if (_cameraPath.Keyframes.Count == 0)
         {
             _statusMessage = "Add at least one camera key before warming a path.";
+            return false;
+        }
+
+        if (!_cameraPath.CoordinatesAreWorldSpace)
+        {
+            _statusMessage = "Cannot warm a camera path with unresolved tile-local coordinates; resolve its CinematicCamera origin first.";
             return false;
         }
 
@@ -943,7 +953,9 @@ internal sealed partial class CameraPathsService
         return CameraPathTileFootprintSelector.GetTiles(
             _cameraPath,
             WoWConstants.MapOrigin,
-            WoWConstants.TileSize,
+            // The terrain loader's 64x64 grid is spaced by 533.333 world units.
+            // WoWConstants.TileSize spans 16 grid tiles and collapses this footprint.
+            WoWConstants.ChunkSize,
             WoWConstants.TilesPerMapEdge,
             Math.Max(100, _cameraPathPreloadSampleSpacingMs),
             _cameraPathPreloadTileRadius,
@@ -1094,8 +1106,7 @@ internal sealed partial class CameraPathsService
         try
         {
             using FileStream stream = File.OpenRead(path);
-            M2ModelDocument model = M2ModelReaderDispatcher.Read(stream, path);
-            M2CameraPathDocument imported = M2CameraPathImporter.Import(model);
+            M2CameraPathDocument imported = M2CameraPathImporter.Import(stream, path);
             string metadataPath = path + ".json";
             if (File.Exists(metadataPath))
             {
@@ -1156,8 +1167,12 @@ internal sealed partial class CameraPathsService
             if (extension == ".m2")
             {
                 using MemoryStream stream = new(bytes, writable: false);
-                M2ModelDocument model = M2ModelReaderDispatcher.Read(stream, assetPath);
-                imported = M2CameraPathImporter.Import(model, _cameraPathImportCameraIndex, _cameraPathImportSequenceIndex, _cameraPathImportSampleIntervalMs);
+                imported = M2CameraPathImporter.Import(
+                    stream,
+                    assetPath,
+                    _cameraPathImportCameraIndex,
+                    _cameraPathImportSequenceIndex,
+                    _cameraPathImportSampleIntervalMs);
             }
             else
             {
@@ -1184,8 +1199,7 @@ internal sealed partial class CameraPathsService
             }
             else
             {
-                imported.CoordinatesAreWorldSpace = true;
-                _statusMessage = $"Imported {extension.TrimStart('.').ToUpperInvariant()} camera without CinematicCamera.dbc origin; left track coordinates unchanged.";
+                _statusMessage = $"Imported {extension.TrimStart('.').ToUpperInvariant()} camera without a matching CinematicCamera origin; tracks remain tile-local and cannot be played or warmed safely.";
             }
             ApplyImportedCameraPath(imported, assetPath);
             _statusMessage += $" Imported client {extension.TrimStart('.').ToUpperInvariant()} camera '{Path.GetFileName(assetPath)}' as {imported.Keyframes.Count} keys.";
@@ -1231,8 +1245,15 @@ internal sealed partial class CameraPathsService
             || string.IsNullOrWhiteSpace(_dbcBuild))
             return null;
 
+        uint? assetFileDataId = null;
+        if (_dataSource is CascDataSource casc
+            && casc.TryGetFileDataId(assetPath, out uint resolvedFileDataId)
+            && resolvedFileDataId != 0)
+        {
+            assetFileDataId = resolvedFileDataId;
+        }
         var resolver = new CinematicCameraOriginResolver();
-        return resolver.TryResolve(_dbcProvider, _dbdDir, _dbcBuild, assetPath, out CinematicCameraOrigin? origin)
+        return resolver.TryResolve(_dbcProvider, _dbdDir, _dbcBuild, assetPath, out CinematicCameraOrigin? origin, assetFileDataId)
             ? origin
             : null;
     }

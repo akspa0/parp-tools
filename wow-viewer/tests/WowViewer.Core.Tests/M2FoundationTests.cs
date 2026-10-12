@@ -168,6 +168,29 @@ public sealed class M2FoundationTests
     }
 
     [Fact]
+    public void CameraPathImporter_ImportsCameraFromMd21WrappedMd20Payload()
+    {
+        byte[] md20 = CreateMd20BytesWithCamera(0x109u);
+        using MemoryStream container = new();
+        using (BinaryWriter writer = new(container, Encoding.ASCII, leaveOpen: true))
+        {
+            writer.Write(Encoding.ASCII.GetBytes("MD21"));
+            writer.Write((uint)md20.Length);
+            writer.Write(md20);
+        }
+
+        container.Position = 0;
+        M2CameraPathDocument imported = M2CameraPathImporter.Import(
+            container,
+            "Cameras\\Synthetic_md21.m2",
+            sampleIntervalMs: 500);
+
+        Assert.Equal(2, imported.Keyframes.Count);
+        Assert.Equal(new Vector3(100.0f, 200.0f, 300.0f), imported.Keyframes[0].Position);
+        Assert.Equal(new Vector3(110.0f, 220.0f, 295.0f), imported.Keyframes[0].Target);
+    }
+
+    [Fact]
     public void Read_CataMd20Camera_RejectsTruncatedModernRecord()
     {
         byte[] bytes = CreateMd20Bytes(

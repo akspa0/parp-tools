@@ -61,6 +61,7 @@ internal sealed partial class CameraPathsService
     private RecordingCoordinatorService _recordingCoordinator => _host.RecordingCoordinator;
     private ref Camera _camera => ref _host.Camera;
     private Queue<PendingCaptureRequest> _captureQueue => _host.CaptureQueue;
+    private ref IDataSource? _dataSource => ref _host.DataSource;
     private ref string? _dbcBuild => ref _host.DbcBuild;
     private ref DBCD.Providers.IDBCProvider? _dbcProvider => ref _host.DbcProvider;
     private ref string? _dbdDir => ref _host.DbdDir;

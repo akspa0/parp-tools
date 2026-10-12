@@ -187,7 +187,8 @@ internal sealed partial class StandaloneModelLoaderService
         // Detect era FIRST — 1.0.0 and 1.12.1 models have embedded geometry and don't
         // need a format profile or external .skin files. Only WotLK+ (264+) needs the
         // profile registry + external .skin companion path.
-        M2Era1121EraTag detectedEra = M2ModelReaderDispatcher.DetectEra(m2Bytes.AsSpan(), resolvedModelPath);
+        byte[] md20Payload = M2ChunkedFileIds.GetMd20Payload(m2Bytes);
+        M2Era1121EraTag detectedEra = M2ModelReaderDispatcher.DetectEra(md20Payload.AsSpan(), resolvedModelPath);
 
         if (TryLoadStandaloneCameraPathM2(m2Bytes, resolvedModelPath))
         {
@@ -386,13 +387,13 @@ internal sealed partial class StandaloneModelLoaderService
 
     private bool TryLoadStandaloneCameraPathM2(byte[] m2Bytes, string resolvedModelPath)
     {
-        if (!WarcraftNetM2Adapter.IsMd20(m2Bytes))
+        if (!WarcraftNetM2Adapter.IsM2FamilyContainer(m2Bytes))
             return false;
 
         try
         {
             using MemoryStream stream = new(m2Bytes, writable: false);
-            M2ModelDocument model = M2ModelReader.Read(stream, resolvedModelPath);
+            M2ModelDocument model = M2CameraPathImporter.ReadModel(stream, resolvedModelPath);
             if (!M2CameraPathOverlayBuilder.CanBuild(model))
                 return false;
 

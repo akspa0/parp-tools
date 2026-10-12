@@ -1,5 +1,7 @@
 using System.Numerics;
 using System.Text.Json;
+using WowViewer.Core.IO.M2;
+using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.M2;
 
 namespace WowViewer.Core.Runtime.M2;
@@ -224,6 +226,47 @@ public static class M2CameraPathEvaluator
 
 public static class M2CameraPathImporter
 {
+    public static M2ModelDocument ReadModel(Stream stream, string sourcePath = "<memory>")
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+
+        byte[] bytes;
+        if (stream.CanSeek)
+        {
+            long previousPosition = stream.Position;
+            try
+            {
+                stream.Position = 0;
+                using MemoryStream copy = new();
+                stream.CopyTo(copy);
+                bytes = copy.ToArray();
+            }
+            finally
+            {
+                stream.Position = previousPosition;
+            }
+        }
+        else
+        {
+            using MemoryStream copy = new();
+            stream.CopyTo(copy);
+            bytes = copy.ToArray();
+        }
+
+        byte[] md20Bytes = M2ChunkedFileIds.GetMd20Payload(bytes);
+        using MemoryStream modelStream = new(md20Bytes, writable: false);
+        return M2ModelReaderDispatcher.Read(modelStream, sourcePath);
+    }
+
+    public static M2CameraPathDocument Import(
+        Stream stream,
+        string sourcePath = "<memory>",
+        int cameraIndex = 0,
+        int sequenceIndex = 0,
+        int sampleIntervalMs = 125)
+        => Import(ReadModel(stream, sourcePath), cameraIndex, sequenceIndex, sampleIntervalMs);
+
     public static M2CameraPathDocument Import(M2ModelDocument model, int cameraIndex = 0, int sequenceIndex = 0, int sampleIntervalMs = 125)
     {
         ArgumentNullException.ThrowIfNull(model);

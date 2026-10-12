@@ -60,7 +60,7 @@ buttons).
 
 ## Release line
 
-`eng/Version.props` = `0.6.0` / `0.6.0` (released 2026-10-11, tag `v0.6.0` on `main`). Active development continues on branch `v0.6.1-dev`.
+`eng/Version.props` = `0.6.1` / `0.6.1-dev` (active development on `v0.6.1-dev`); the previous stable release is `v0.6.0` on `main` (2026-10-11).
 The v0.6 theme — modern data access + experimental terrain formats — maps to items F-01…F-12 (Epic 248)
 and R-01, R-02, R-10 (Epic 249). Release scope for v0.6.1 is set by Spec 271 Phase B and operator triage.
 
