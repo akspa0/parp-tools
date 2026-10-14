@@ -25,3 +25,10 @@ the agent. The triggering code delta is removed; the precise runtime failure mec
 | Restore baseline ground-effect renderer behavior | **PASS (source-level)** | Exact `git diff --exit-code` baseline comparison above. |
 | Viewer can load a real client/map after rollback | **NOT VERIFIED** | Operator report is recorded; agent did not perform real-client visual/runtime proof. Replacement build is pending; operator must verify a map loads. |
 | New MCCV/MCSH material tint | **REVERTED / OPEN** | No tint API or shader multiplication remains in current source. Track a new isolated design/fix separately. |
+
+## Replacement release outcome
+
+- Four-RID branch build run `38512662293` — success; the shared CLI-tools packaging and baseline viewer build pass on all targets.
+- Corrected `v0.6.0.1` tag points to `5ba5eb2a934b78dc46c31e7267cc67069c03a2f9`; release workflow run `38513490254` — success.
+- The broken release was deleted and replaced. The public release has four viewer ZIPs and four CLI-tools ZIPs; tool packaging is unchanged. The ground-effect tint code is absent from the replacement.
+- **Still unverified:** the operator must run the replacement viewer against the client/map that failed and confirm content loads. No client load is claimed from build/test/CI evidence.

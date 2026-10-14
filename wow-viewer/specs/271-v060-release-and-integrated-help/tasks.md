@@ -18,11 +18,12 @@ Receipts live in `evidence/`. A box is checked only with a §9.2 receipt.
 
 ## Phase C — Operator-directed corrective release v0.6.0.1 (2026-10-14)
 
-- [ ] **C1** Add all executable projects from `wow-viewer/tools/` to the solution and a separate CLI-tools
+- [x] **C1** Add all executable projects from `wow-viewer/tools/` to the solution and a separate CLI-tools
   archive per platform; compile all nine apphosts into one shared output directory with common runtime/data
+  files deduplicated and verify each tool's apphost/DLL/deps/runtimeconfig (receipt: `evidence/receipt-v0601-regression-replacement.md`).
 - [ ] **C2** Ground-effect MCCV/MCSH tint implementation is reverted after the viewer-load regression report.
   Keep AC-C3 open until a separate safe fix and focused verification pass.
-- [ ] **C3** Replace version `0.6.0.1` release with the safe baseline plus CLI packaging; tag/push and verify
-  the release workflow with eight archives (new receipt required; AC-C2).
+- [x] **C3** Replace version `0.6.0.1` release with the safe baseline plus CLI packaging; tag/push and verify
+  the release workflow with eight archives (receipt: `evidence/receipt-v0601-regression-replacement.md`; AC-C2).
 - [ ] **C4** Operator confirms the replacement v0.6.0.1 viewer opens the real client and loads a map; record client/build and failure/success evidence.
 - [ ] **C5** After a separately validated tint fix exists, operator visual smoke on terrain with MCCV/MCSH; this remains outside the current replacement release.

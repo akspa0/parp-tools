@@ -2,6 +2,21 @@
 
 Last updated: 2026-10-14
 
+## 2026-10-14 — Ground-Effect Regression Reverted; v0.6.0.1 Reissued
+
+- Operator reported the tint changes made the viewer unable to load anything. Removed the per-instance tint field, interface overload, MDX material multiplication, scene tint plumbing, and its new test assertions. The affected source/test files compare byte-for-byte with the pre-tint `b6f54a0b` baseline (`git diff --exit-code` passed).
+- Focused DetailDoodads tests pass 8/8; Debug solution build passes with 0 errors. These do not prove real-client/map loading; no crash log or stack trace was available.
+- Reissued `v0.6.0.1` at `5ba5eb2a` with the prior ground-effect render path and split/deduplicated CLI packages. Four-RID build `38512662293` and release workflow `38513490254` passed; eight assets are attached.
+- Operator still must verify the replacement viewer loads the previously failing client/map (Spec 271 C4). Ground-effect lighting remains deferred; do not reintroduce the tint change without root-cause diagnosis and isolated validation.
+
+## 2026-10-14 — v0.6.0.1 Reissued After Ground-Effect Load Regression
+
+- Reverted the six ground-effect tint/API source/test changes; `git diff --exit-code b6f54a0b -- <six files>` returned 0, proving those files match the pre-tint baseline. No crash log/reproduction was available, so root cause beyond that code delta remains unconfirmed.
+- Focused DetailDoodads tests passed 8/8; Debug solution build passed with 0 errors.
+- Four-RID baseline build run `38512662293` and replacement release run `38513490254` succeeded. Reissued `v0.6.0.1` still contains eight separate/deduplicated viewer/tools ZIPs.
+- **Operator proof still owed:** download/run the replacement viewer against the previously failing client/map and confirm loading succeeds (Spec 271 C4). No visual/runtime claim is made from build/test output.
+- `Version.props` is restored to `0.6.1-dev` on active branch `v0.6.1-dev`; release tag commit keeps `0.6.0.1`.
+
 ## 2026-10-14 — Ground-Effect Tint Reverted After Viewer Load Regression
 
 - **Operator report:** after the ground-effect doodad changes in v0.6.0.1, the viewer cannot load anything.

@@ -5,11 +5,11 @@
          also applies it to package versions. The
          .NET SDK appends "+<git-commit>" build metadata automatically. The viewer
          title bar and About box display this value with the build metadata trimmed,
-         so it must match the release tag (v0.6.0.1 -> 0.6.0.1). -->
-    <VersionPrefix>0.6.0.1</VersionPrefix>
-    <VersionSuffix></VersionSuffix>
-    <AssemblyVersion>0.6.0.1</AssemblyVersion>
-    <FileVersion>0.6.0.1</FileVersion>
-    <InformationalVersion>0.6.0.1</InformationalVersion>
+         so it must match the release tag (v0.6.1-dev -> 0.6.1-dev). -->
+    <VersionPrefix>0.6.1</VersionPrefix>
+    <VersionSuffix>dev</VersionSuffix>
+    <AssemblyVersion>0.6.1.0</AssemblyVersion>
+    <FileVersion>0.6.1.0</FileVersion>
+    <InformationalVersion>0.6.1-dev</InformationalVersion>
   </PropertyGroup>
 </Project>
