@@ -18,11 +18,11 @@ Receipts live in `evidence/`. A box is checked only with a §9.2 receipt.
 
 ## Phase C — Operator-directed corrective release v0.6.0.1 (2026-10-14)
 
-- [x] **C1** Add all executable projects from `wow-viewer/tools/` to the solution and a separate CLI-tools
+- [ ] **C1** Add all executable projects from `wow-viewer/tools/` to the solution and a separate CLI-tools
   archive per platform; compile all nine apphosts into one shared output directory with common runtime/data
-  files deduplicated, and verify each tool's apphost/DLL/deps/runtimeconfig. Receipt: `evidence/receipt-phase-c-v0601.md` (AC-C1).
-- [x] **C2** Apply per-instance terrain MCCV/MCSH tint when rendering ground-effect doodads; focused
-  unit tests cover the computed tint. Visual smoke remains C4 (receipt: `evidence/receipt-phase-c-v0601.md`).
-- [x] **C3** Prepare version `0.6.0.1`, release notes, tag/push, and successful release workflow run
-  with eight archives (receipt: `evidence/receipt-phase-c-v0601.md`; AC-C2).
-- [ ] **C4** Operator visual smoke of ground-effect doodads on real terrain with MCCV and MCSH; record client/build and capture evidence (AC-C3 visual portion).
+- [ ] **C2** Ground-effect MCCV/MCSH tint implementation is reverted after the viewer-load regression report.
+  Keep AC-C3 open until a separate safe fix and focused verification pass.
+- [ ] **C3** Replace version `0.6.0.1` release with the safe baseline plus CLI packaging; tag/push and verify
+  the release workflow with eight archives (new receipt required; AC-C2).
+- [ ] **C4** Operator confirms the replacement v0.6.0.1 viewer opens the real client and loads a map; record client/build and failure/success evidence.
+- [ ] **C5** After a separately validated tint fix exists, operator visual smoke on terrain with MCCV/MCSH; this remains outside the current replacement release.

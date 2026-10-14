@@ -85,7 +85,6 @@ public sealed class GroundEffectPlacementTests
 
         // Candidates should now be placed
         Assert.NotEmpty(gentleInstances);
-        Assert.Equal(Vector3.One, gentleInstances[0].RenderTint);
     }
 
     [Fact]
@@ -142,7 +141,6 @@ public sealed class GroundEffectPlacementTests
         // Green should be around 200 * 0.7 = 140
         byte g = (byte)((first.ColorBgra >> 8) & 0xFF);
         Assert.InRange(g, 130, 150);
-        Assert.InRange(first.RenderTint.Y, 1.0f, 1.12f);
 
         // Case 2: Flag 0x2 (IgnoreMCCV -> white, darkened by shadow = 255 * 0.7 = ~178)
         var doodadRecIgnoreMccv = new GroundEffectDoodadRecord(10, "plant.m2", 0, GroundEffectDoodadFlags.IgnoreMCCV, 1.0f, 1.0f);
@@ -160,9 +158,6 @@ public sealed class GroundEffectPlacementTests
         Assert.InRange(rw, 170, 185);
         Assert.InRange(gw, 170, 185);
         Assert.InRange(bw, 170, 185);
-        Assert.InRange(firstWhite.RenderTint.X, 0.66f, 0.74f);
-        Assert.InRange(firstWhite.RenderTint.Y, 0.66f, 0.74f);
-        Assert.InRange(firstWhite.RenderTint.Z, 0.66f, 0.74f);
     }
 
     [Fact]

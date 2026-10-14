@@ -2,6 +2,11 @@
 
 Date: 2026-10-14 · Tag: `v0.6.0.1` · Release: https://github.com/akspa0/parp-tools/releases/tag/v0.6.0.1
 
+> **Historical / superseded:** this receipt recorded the first split-archive release. After it shipped,
+> the operator reported that the ground-effect tint change made the viewer unable to load content. The
+> tint/API changes were reverted, and the release is being replaced with that baseline. Do not cite the
+> prior AC-C3 code claim as current or infer that the load regression's root cause is fully diagnosed.
+
 ## Files changed
 
 - `.github/workflows/wowviewer-build.yml`, `.github/workflows/wowviewer-release.yml`
@@ -34,6 +39,6 @@ Date: 2026-10-14 · Tag: `v0.6.0.1` · Release: https://github.com/akspa0/parp-t
 
 | Criterion | Result | Evidence |
 |---|---|---|
-| AC-C1 — four viewer ZIPs plus four CLI-tools ZIPs; all nine tools and shared dependencies | **PASS** | Release asset API listed all eight files. Downloaded Windows tools ZIP contains nine apphosts, one copy of `WowViewer.Core.dll`, and 1,342 DBD definitions; four-RID CI passed the same publish/count checks. |
-| AC-C2 — tag release workflow succeeds and publishes the downloads | **PASS** | Release workflow run `38508425730` completed successfully; release is public at the URL above with eight ZIP assets. |
-| AC-C3 — MCCV/MCSH tint reaches the rendered doodad material | **Code/test portion PASS; visual proof OPEN** | Focused tests verify neutral, MCCV-lit, and shadow-attenuated tint values; Debug solution build passes and the per-instance tint is passed into MDX material RGB. Real-client visual smoke remains operator-owned and is tracked as Spec 259 T015 / Spec 271 C4. |
+| AC-C1 — four viewer ZIPs plus four CLI-tools ZIPs; all nine tools and shared dependencies | **PASS for first split-artifact run; replacement pending** | First release asset API listed eight files. Downloaded Windows tools ZIP contained nine apphosts, one `WowViewer.Core.dll`, and 1,342 DBD definitions. Re-run/receipt required for the replacement tag build. |
+| AC-C2 — tag release workflow succeeds and publishes the downloads | **PASS for first run; replacement pending** | First release workflow run `38508425730` succeeded. Its release assets are being replaced after the viewer regression report. |
+| AC-C3 — MCCV/MCSH tint reaches the rendered doodad material | **REVERTED / OPEN** | The tint/API change was removed after the operator reported that the viewer could no longer load content. The prior synthetic tint tests/build do not establish the cause or prove current runtime behavior. Do not mark complete. |

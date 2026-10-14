@@ -241,11 +241,6 @@ public static class GroundEffectPlacementGenerator
                 byte bR = (byte)Math.Clamp((int)(colorVec.X * 255.0f), 0, 255);
                 byte bA = (byte)Math.Clamp((int)(colorVec.W * 255.0f), 0, 255);
                 uint bgra = (uint)(bB | (bG << 8) | (bR << 16) | (bA << 24));
-                float mccvScale = (doodadFlags & GroundEffectDoodadFlags.IgnoreMCCV) != 0 ? 1.0f : 2.0f;
-                Vector3 terrainLightingTint = Vector3.Clamp(
-                    new Vector3(colorVec.X, colorVec.Y, colorVec.Z) * mccvScale,
-                    Vector3.Zero,
-                    new Vector3(2.0f));
 
                 results.Add(new DetailDoodadInstance(
                     pos,
@@ -255,8 +250,7 @@ public static class GroundEffectPlacementGenerator
                     chosenDoodadId,
                     doodadRecord?.FileDataId,
                     doodadRecord?.ModelPath,
-                    doodadFlags,
-                    terrainLightingTint));
+                    doodadFlags));
             }
         }
 

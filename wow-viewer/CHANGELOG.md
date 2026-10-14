@@ -6,7 +6,8 @@ GitHub Release publishes. This file is the index and the short version.
 ## v0.6.0.1 — 2026-10-14
 
 Corrective release: all nine compiled CLI tools now ship in separate platform tool archives with common
-libraries, DBDs and listfiles emitted once; ground-effect doodads apply terrain MCCV and MCSH lighting tints.
+libraries, DBDs and listfiles emitted once. Ground-effect MCCV/MCSH tint propagation was deferred after
+the first tint change caused the viewer to fail to load content; the previous rendering path is restored.
 Also includes the 1.60.1 taxi mount FileDataID and legacy-path resolution fixes.
 
 Full notes: [`docs/releases/v0.6.0.1.md`](docs/releases/v0.6.0.1.md)

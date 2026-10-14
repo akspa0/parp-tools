@@ -968,13 +968,6 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
     /// Safe because all MdxRenderers share a single static shader program + uniform locations.
     /// </summary>
     public unsafe void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
-        => RenderInstance(modelMatrix, pass, fadeAlpha, instanceTint: null);
-
-    public unsafe void RenderInstance(
-        Matrix4x4 modelMatrix,
-        RenderPass pass,
-        float fadeAlpha,
-        Vector3? instanceTint)
     {
         if (GlobalOpacity <= 0.001f)
             return;
@@ -1000,7 +993,7 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
             _gl.Uniform1(_uHasBones, 0);
         }
 
-        RenderGeosets(pass, fadeAlpha, instanceTint);
+        RenderGeosets(pass, fadeAlpha);
 
         // NOTE: world-scene batch instancing currently does not propagate per-instance model
         // transforms into particle emitter simulation/rendering, which can produce camera-locked
@@ -1268,14 +1261,8 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
     }
 
     /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
-    private unsafe void RenderGeosets(
-        RenderPass pass,
-        float fadeAlpha,
-        Vector3? instanceTint = null,
-        bool forceBackdropState = false)
+    private unsafe void RenderGeosets(RenderPass pass, float fadeAlpha, bool forceBackdropState = false)
     {
-        Vector3 tint = instanceTint ?? Vector3.One;
-
         ProcessDeferredTextureLoads();
 
         // Set on every entry, not just when instancing. The shader program is static and shared
@@ -1529,12 +1516,7 @@ if (isAlphaCutout)
                     if (_geosetAlphaOverrides.TryGetValue(gb.GeosetIndex, out float geoAlpha))
                         alpha *= geoAlpha;
                     C3Color layerColor = EvaluateLayerColor(layer);
-                    _gl.Uniform4(
-                        _uColor,
-                        layerColor.R * tint.X,
-                        layerColor.G * tint.Y,
-                        layerColor.B * tint.Z,
-                        alpha);
+                    _gl.Uniform4(_uColor, layerColor.R, layerColor.G, layerColor.B, alpha);
 
                     _gl.BindVertexArray(gb.Vao);
                     if (_gpuInstanceDrawActive)
@@ -1571,12 +1553,7 @@ if (isAlphaCutout)
                 _gl.Uniform1(_uEmissiveGain, 0.0f);
                 _gl.Uniform1(_uUvSet, 0);
                 ResetLayerUvTransform();
-                _gl.Uniform4(
-                    _uColor,
-                    tint.X,
-                    tint.Y,
-                    tint.Z,
-                    1.0f);
+                _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
                 _gl.BindVertexArray(gb.Vao);
                 if (_gpuInstanceDrawActive)
                     _gl.DrawElementsInstanced(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null, _gpuInstanceCount);

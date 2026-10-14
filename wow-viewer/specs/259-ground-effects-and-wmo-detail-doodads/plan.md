@@ -72,11 +72,11 @@ The Ground Effect & Detail Doodad system operates in three decoupled layers:
 - **Solution Build**: `dotnet build wow-viewer/WowViewer.slnx -c Debug` (0 errors).
 - **Execution**: `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug`.
 
-## Operator amendment — lighting propagation (2026-10-14)
+## Operator amendment — lighting propagation (2026-10-14; deferred after regression)
 
-Carry a per-instance RGB tint with each terrain detail doodad. The placement generator computes the
-existing terrain-equivalent MCCV multiplier (`raw RGB * 2`, with neutral missing-MCCV input producing
-1.0), preserves `IgnoreMCCV` as white, and applies the existing MCSH attenuation before encoding the
-render tint. The ground-effect scene passes that tint through `IModelRenderer` to MDX material color;
-the normal ambient/directional shader lighting remains active. Unit tests validate neutral, MCCV, and
-shadow cases; operator visual confirmation on a real client remains a release proof gate.
+Requested behavior: carry a per-instance RGB tint with each terrain detail doodad. The first attempt
+computed the terrain-equivalent MCCV multiplier (`raw RGB * 2`, neutral missing-MCCV input 1.0),
+preserved `IgnoreMCCV` as white, applied MCSH attenuation, and forwarded that tint through
+`IModelRenderer` into MDX material color. The operator then reported that the viewer could not load
+content. That implementation is reverted. Do not reapply the renderer change without an isolated
+reproduction, root-cause diagnosis, and a safer opt-in implementation. AC-009 remains open.

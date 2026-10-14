@@ -35,6 +35,6 @@
 
 ## Operator amendment — ground-effect lighting propagation (2026-10-14)
 
-- [x] T014 [US1] Pass terrain MCCV tint and MCSH attenuation from generated instances through the MDX per-instance material color; add focused tint tests. AC-009 code/test portion. (receipt: `evidence/receipt-lighting-propagation-2026-10-14.md`)
-- [ ] T015 [US1] Operator visual smoke on real terrain containing MCCV and MCSH; verify neutral, tinted, and shadowed doodads and record client/build/output evidence. AC-009 visual proof.
+- [ ] T014 [US1] Re-design MCCV/MCSH ground-effect tint propagation after the 2026-10-14 viewer-load regression; the initial implementation and renderer API change were reverted. Do not check until a safe implementation builds and passes focused tests. AC-009 code/test portion.
+- [ ] T015 [US1] Operator visual smoke on real terrain containing MCCV and MCSH after a safe fix; verify neutral, tinted, and shadowed doodads and record client/build/output evidence. AC-009 visual proof.
 - [ ] T016 [code health] Open follow-up work to split the existing oversized `MdxRenderer` source file; keep this patch's change bounded to the ground-effect render path.

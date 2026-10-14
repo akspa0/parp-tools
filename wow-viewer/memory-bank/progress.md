@@ -2,6 +2,14 @@
 
 Last updated: 2026-10-14
 
+## 2026-10-14 — Ground-Effect Tint Reverted After Viewer Load Regression
+
+- **Operator report:** after the ground-effect doodad changes in v0.6.0.1, the viewer cannot load anything.
+- **Action:** removed the per-instance tint parameter/property, renderer API overload, shader material tint multiplication, and associated tests. Existing ground-effect placement/rendering code is restored to its pre-tint path; shared CLI packaging is untouched.
+- **Evidence limits:** no crash log, stack trace, or client reproduction was available. The code delta is the suspect, but the root cause is not independently established. Do not reintroduce the tint implementation.
+- **Verification:** focused DetailDoodads tests pass 8/8; full Debug solution build passes with 0 errors. These do not prove real-client load behavior.
+- **Next:** rebuild/reissue v0.6.0.1 with the tint code absent, then operator verifies that a real client/map loads. Track lighting separately under Spec 259 T014/T015.
+
 ## 2026-10-14 — v0.6.0.1 Tool Build/Release Correction + Ground-Effect Tint
 
 - **Root cause:** the release workflow published only the viewer project; none of the nine executable
@@ -11,8 +19,9 @@ Last updated: 2026-10-14
   under the platform build tree. Shared DBD definitions, listfiles, runtime DLLs and libraries are emitted
   once; the workflow verifies each apphost, project DLL, deps file, and runtimeconfig. The viewer and
   tools are separate ZIP artifacts per platform.
-- **Ground effects:** terrain doodads now carry MCCV RGB and MCSH attenuation into the MDX per-instance
-  material tint. Neutral/tinted/shadowed tint tests pass. Real-client visual smoke remains operator-owned.
+- **Ground effects (subsequently reverted):** the attempted terrain MCCV/MCSH → MDX per-instance tint
+  path was removed after the operator reported that the viewer could not load content. Its earlier tint
+  unit tests passed but did not detect the runtime regression; do not treat that attempt as delivered.
 - **Verification:** `dotnet build` passed (0 errors); focused DetailDoodads tests 8/8; the Inspector ran
   `--help`; four-RID CI run `38506799386` passed. Release run `38508425730` passed; replacement tag
   `v0.6.0.1` publishes eight assets. Downloaded Windows tools ZIP verified 9 apphosts, 1,342 DBD files,

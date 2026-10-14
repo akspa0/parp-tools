@@ -52,6 +52,10 @@ Operator request: include the `wow-viewer/tools/` tooling in compiled platform b
   model for rendering.
 - Include the already-committed 1.60.1 taxi mount lookup fixes present on the release commit.
 
+**Regression directive (2026-10-14):** the first ground-effect tint implementation was reported to prevent
+the viewer from loading content. It was reverted before replacing the release. Do not count AC-C3 as
+delivered; any new tint implementation requires separate diagnosis and safe validation.
+
 ### Corrective release acceptance criteria
 
 - AC-C1: the release publishes four viewer archives and four separate CLI-tools archives; each tools

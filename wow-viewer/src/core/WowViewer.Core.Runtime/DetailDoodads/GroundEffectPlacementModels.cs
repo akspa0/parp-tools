@@ -15,17 +15,10 @@ public readonly record struct DetailDoodadInstance(
     uint DoodadId,
     uint? FileDataId,
     string? ModelPath,
-    GroundEffectDoodadFlags Flags,
-    Vector3? TerrainLightingTint = null)
+    GroundEffectDoodadFlags Flags)
 {
     public bool AlignToNormal => (Flags & GroundEffectDoodadFlags.AlignToNormal) != 0;
     public bool IgnoreMccv => (Flags & GroundEffectDoodadFlags.IgnoreMCCV) != 0;
-
-    /// <summary>RGB multiplier to apply to the model's material while rendering this instance.</summary>
-    public Vector3 RenderTint => TerrainLightingTint ?? new Vector3(
-        ((ColorBgra >> 16) & 0xFF) / 255.0f,
-        ((ColorBgra >> 8) & 0xFF) / 255.0f,
-        (ColorBgra & 0xFF) / 255.0f);
 }
 
 /// <summary>

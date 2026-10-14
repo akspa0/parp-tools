@@ -1,10 +1,10 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-10-14 · **v0.6.0.1 corrective release published** (four viewer + four CLI-tools ZIPs); active branch `v0.6.1-dev` is restored to `0.6.1-dev`.
+Last updated: 2026-10-14 · **Operator reports v0.6.0.1 viewer cannot load content after ground-effect tint changes.** Tint implementation has been reverted locally; replacement release is in progress. Active branch version remains `0.6.1-dev`.
 
-**Immediate release fix:** the release workflow previously published only the viewer `.csproj`. All nine `wow-viewer/tools/**/*.csproj` projects now publish into one shared `publish/<rid>/tools/` directory inside the platform's main build tree; common DBDs, listfiles, runtime DLLs and libraries are emitted once. Viewer and CLI tools are separate ZIPs. `V22Enrich` and `WmoMinimap` are registered in `WowViewer.slnx`. Four-RID build run `38506799386` and replacement release run `38508425730` succeeded. The published v0.6.0.1 release has eight assets; downloaded Windows tools ZIP contains nine apphosts, 1,342 DBDs and one `WowViewer.Core.dll` (Inspector `--help` exit 0). Local merged tool output is 138.8 MiB raw / 55.8 MiB zipped.
+**Immediate release fix:** the release workflow previously published only the viewer `.csproj`. All nine `wow-viewer/tools/**/*.csproj` projects now publish into one shared `publish/<rid>/tools/` directory inside the platform's main build tree; common DBDs, listfiles, runtime DLLs and libraries are emitted once. Viewer and CLI tools are separate ZIPs. `V22Enrich` and `WmoMinimap` are registered in `WowViewer.slnx`. Four-RID build run `38506799386` passed. The release run `38508425730` created eight assets, but that build contained the ground-effect regression and is being replaced. Its Windows tools ZIP had nine apphosts, 1,342 DBDs, and one common `WowViewer.Core.dll` (Inspector `--help` exit 0).
 
-**Ground-effect lighting patch:** placement code already computed MCCV tint and MCSH attenuation but `GroundEffectSceneService` discarded it. Per-instance tint now reaches the MDX material RGB while preserving directional/ambient shader lighting; focused tests pass. Real-client visual smoke on MCCV/MCSH terrain remains operator-owned. Follow-up to split the oversized `MdxRenderer` source file is open.
+**Ground-effect regression response:** the per-instance tint/API changes were removed after the operator reported the viewer could no longer load anything. Root cause beyond that code delta has not been independently reproduced; do not reintroduce tint propagation until a separate diagnosed approach exists. Existing terrain/WMO doodad behavior is restored to its pre-v0.6.0.1 code path. A corrective release using the proven baseline is being built.
 
 **Immediate taxi mount issue (1.60.1):** the gryphon never loaded because
 [`TaxiPathLoader.LoadCreatureModelPaths`](wow-viewer/src/viewer/WoWViewer/Terrain/TaxiPathLoader.cs:231)
@@ -115,7 +115,7 @@ revert it before staging.
 
 ## Release state
 
-`eng/Version.props` is restored to `0.6.1` / `0.6.1-dev` for active development. Stable tags: `v0.6.0.1` (2026-10-14 corrective build) and `v0.6.0` (2026-10-11).
+`eng/Version.props` is restored to `0.6.1` / `0.6.1-dev` for active development. Tag `v0.6.0.1` is being replaced after the ground-effect load regression report; base stable tag: `v0.6.0` (2026-10-11).
 
 **Shipped unverified in alpha2** (operator verification, tracked as V-tasks in the epics): the M2
 texture-wrap fix (every M2 era); `LkAdtWriter` chunk-completeness fixes (17 call sites); no exported

@@ -38,3 +38,5 @@ This spec introduces comprehensive support for ground effects and detail doodads
 - **AC-007**: GPU rendering leverages instanced drawing so that thousands of detail doodads incur minimal draw-call overhead.
 - **AC-008**: Code respects god-class freeze (AGENTS.md §10), isolated in dedicated services (`GroundEffectPlacementService`, `WmoMddlReader`, `GroundEffectSceneService`).
 - **AC-009 (operator amendment, 2026-10-14)**: Terrain ground-effect doodad instances carry their MCCV RGB multiplier (neutral value remains 1.0) and MCSH shadow attenuation into the rendered model material tint; the doodad remains subject to the existing directional and ambient MDX lighting. Operator visual smoke is required before marking the criterion complete.
+
+**Regression note (2026-10-14):** the first tint-propagation implementation shipped in the initial `v0.6.0.1` attempt; the operator then reported that the viewer could no longer load content. That implementation has been reverted while the release is replaced. AC-009 is open and must not be treated as implemented until a separately validated fix is approved and proven.
