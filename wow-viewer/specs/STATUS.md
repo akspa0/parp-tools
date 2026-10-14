@@ -48,7 +48,7 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 | [267 Generative 3D Foundation Refinement & ComfyUI Nodes](267-trellis-pixel3d-comfyui-adt-refinement/spec.md) | Downstream 3D foundation model refinement (Microsoft Trellis.2 / Pixel3D); hard-Z metric WDL elevation anchor; semantic ADT aspect dissection; parp-tools ComfyUI custom node package (`http://127.0.0.1:8199`) | Proposed / Specified (2026-10-08); Spec Kit authored; Phase 1 discovery queued |
 | [269 v60 Classic Terrain Zarr Ingestion & Felwood Clean Elevation Training](269-v60-classic-terrain-ingestion-and-elevation-dataset/spec.md) | Ingest Wrath 3.0.1.8303 terrain (37 maps, 4,448 tiles) via C# harvest engine into `output/datasets/v60/`, train `TrestleElevationUNet` on authentic Felwood canyons/indentations (120 epochs, MAE 4.62 yds, $r=0.8842$), and carve $-96.13$ yd canyon into unauthored quilt tile `(17, 14)` | Complete (2026-10-10); receipt in `evidence/receipt-spec269.md` |
 | [270 PM4 Object Association Ledger & Unauthored Placement Pipeline](270-pm4-object-association-ledger-and-placement/spec.md) | Harvest PM4 $\leftrightarrow$ ADT ground-truth object associations across 399 intact development tiles into a persistent Rosetta Ledger (`pm4_object_association_ledger.json`), fingerprint multi-feature geometry, and synthesize authentic `_obj0.adt` placements on unauthored tiles | Complete (2026-10-11, shipped in v0.6.0); receipt in `evidence/receipt-spec270.md`; 616/616 tiles round-trip; **open gap**: objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing |
-| [271 v0.6.0 Release & Integrated Help / Image Guide](271-v060-release-and-integrated-help/spec.md) | Ship v0.6.0 (docs rewrite, BYO-data, support matrix, Archaeology phase maps) and build in-app help + image guide on `v0.6.1-dev` | Phase A v0.6.0 shipped; operator-directed Phase C corrective v0.6.0.1 release in progress (separate viewer/tools archives + ground-effect lighting); Phase B remains queued for `v0.6.1-dev` |
+| [271 v0.6.0 Release & Integrated Help / Image Guide](271-v060-release-and-integrated-help/spec.md) | Ship v0.6.0 (docs rewrite, BYO-data, support matrix, Archaeology phase maps) and build in-app help + image guide on `v0.6.1-dev` | Phase A v0.6.0 shipped; Phase C v0.6.0.1 shipped 2026-10-14 (separate viewer/tools archives + ground-effect tint code); operator visual smoke owed; Phase B remains queued for `v0.6.1-dev` |
 
 
 ## Operator verification owed on shipped code
@@ -60,7 +60,7 @@ buttons).
 
 ## Release line
 
-`eng/Version.props` is temporarily `0.6.0.1` for the corrective tag build; active branch remains `v0.6.1-dev` and its version metadata must be restored after tagging. Stable base: `v0.6.0` on `main` (2026-10-11).
+`eng/Version.props` = `0.6.1` / `0.6.1-dev` on the active `v0.6.1-dev` branch. Latest stable patch: `v0.6.0.1` (2026-10-14; four viewer ZIPs + four CLI-tools ZIPs); base stable: `v0.6.0` on `main` (2026-10-11).
 The v0.6 theme — modern data access + experimental terrain formats — maps to items F-01…F-12 (Epic 248)
 and R-01, R-02, R-10 (Epic 249). Release scope for v0.6.1 is set by Spec 271 Phase B and operator triage.
 

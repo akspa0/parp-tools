@@ -1,6 +1,25 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-12
+Last updated: 2026-10-14
+
+## 2026-10-14 — v0.6.0.1 Tool Build/Release Correction + Ground-Effect Tint
+
+- **Root cause:** the release workflow published only the viewer project; none of the nine executable
+  projects under `wow-viewer/tools/` were in platform release outputs. Two projects were also absent from
+  `WowViewer.slnx`.
+- **Build correction:** all nine CLI projects now publish into one shared `publish/<rid>/tools/` folder
+  under the platform build tree. Shared DBD definitions, listfiles, runtime DLLs and libraries are emitted
+  once; the workflow verifies each apphost, project DLL, deps file, and runtimeconfig. The viewer and
+  tools are separate ZIP artifacts per platform.
+- **Ground effects:** terrain doodads now carry MCCV RGB and MCSH attenuation into the MDX per-instance
+  material tint. Neutral/tinted/shadowed tint tests pass. Real-client visual smoke remains operator-owned.
+- **Verification:** `dotnet build` passed (0 errors); focused DetailDoodads tests 8/8; the Inspector ran
+  `--help`; four-RID CI run `38506799386` passed. Release run `38508425730` passed; replacement tag
+  `v0.6.0.1` publishes eight assets. Downloaded Windows tools ZIP verified 9 apphosts, 1,342 DBD files,
+  one common `WowViewer.Core.dll`, and Inspector `--help` exit 0. Receipts:
+  [Phase C release](../specs/271-v060-release-and-integrated-help/evidence/receipt-phase-c-v0601.md) ·
+  [ground-effect tint](../specs/259-ground-effects-and-wmo-detail-doodads/evidence/receipt-lighting-propagation-2026-10-14.md).
+- Restored `eng/Version.props` to `0.6.1-dev` after tagging. Existing dirty `imgui.ini` files were not staged.
 
 ## 2026-10-12 — WMO Interior Area Shows the Wrong Zone (open; no fix)
 

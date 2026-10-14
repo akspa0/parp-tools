@@ -1,8 +1,8 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-10-14 · **Operator-directed v0.6.0.1 corrective release in progress** on `v0.6.1-dev`; v0.6.0 remains the last published tag.
+Last updated: 2026-10-14 · **v0.6.0.1 corrective release published** (four viewer + four CLI-tools ZIPs); active branch `v0.6.1-dev` is restored to `0.6.1-dev`.
 
-**Immediate release fix:** the release workflow published only the viewer `.csproj`; its output omitted every CLI tool. It now discovers all nine `wow-viewer/tools/**/*.csproj` projects and self-contained-publishes them into one shared tools directory per RID, so common DBDs, listfiles, runtime DLLs, and libraries are emitted once instead of copied nine times. Viewer and tools artifacts/ZIPs are separate; the viewer archive stays small. Each apphost retains its own DLL/deps/runtimeconfig; CI verifies all nine, copies the tool README/scripts, and runs on `v0.6.1-dev`. `V22Enrich` and `WmoMinimap` are registered in `WowViewer.slnx`. Local shared Windows tools output is 138.8 MiB raw / 55.8 MiB zipped; all apphosts start. Four-RID CI and replacement release still need to run.
+**Immediate release fix:** the release workflow previously published only the viewer `.csproj`. All nine `wow-viewer/tools/**/*.csproj` projects now publish into one shared `publish/<rid>/tools/` directory inside the platform's main build tree; common DBDs, listfiles, runtime DLLs and libraries are emitted once. Viewer and CLI tools are separate ZIPs. `V22Enrich` and `WmoMinimap` are registered in `WowViewer.slnx`. Four-RID build run `38506799386` and replacement release run `38508425730` succeeded. The published v0.6.0.1 release has eight assets; downloaded Windows tools ZIP contains nine apphosts, 1,342 DBDs and one `WowViewer.Core.dll` (Inspector `--help` exit 0). Local merged tool output is 138.8 MiB raw / 55.8 MiB zipped.
 
 **Ground-effect lighting patch:** placement code already computed MCCV tint and MCSH attenuation but `GroundEffectSceneService` discarded it. Per-instance tint now reaches the MDX material RGB while preserving directional/ambient shader lighting; focused tests pass. Real-client visual smoke on MCCV/MCSH terrain remains operator-owned. Follow-up to split the oversized `MdxRenderer` source file is open.
 
@@ -115,8 +115,7 @@ revert it before staging.
 
 ## Release state
 
-`eng/Version.props` is temporarily `0.6.0.1` for tag preparation. Once the tag commit is pushed,
-restore active development metadata to `0.6.1-dev`. Previous stable: tag `v0.6.0` on `main`.
+`eng/Version.props` is restored to `0.6.1` / `0.6.1-dev` for active development. Stable tags: `v0.6.0.1` (2026-10-14 corrective build) and `v0.6.0` (2026-10-11).
 
 **Shipped unverified in alpha2** (operator verification, tracked as V-tasks in the epics): the M2
 texture-wrap fix (every M2 era); `LkAdtWriter` chunk-completeness fixes (17 call sites); no exported
