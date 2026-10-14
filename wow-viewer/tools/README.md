@@ -19,6 +19,14 @@ For tool-specific syntax, run:
 dotnet run --project I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- --help
 ```
 
+## Release Archives
+
+Each platform release archive includes the self-contained viewer and every compiled CLI project in
+`tools/<ProjectName>/`, plus this README and the helper scripts. No .NET runtime is required to run a
+published CLI executable. For example, run the Inspector with `tools/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.exe --help`
+on Windows, or `./tools/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect --help` on Linux/macOS. Keep the
+executable beside its project directory's `.dll`, `.deps.json`, and `.runtimeconfig.json` files.
+
 Client roots are runtime inputs. `H:\CLIENTS` is a known-good local library path in this workspace,
 but portable scripts and tests should take client roots as parameters.
 

@@ -39,6 +39,9 @@
   <Folder Name="/tools/harvest/">
     <Project Path="tools/harvest/WowViewer.Tool.Harvest/WowViewer.Tool.Harvest.csproj" />
   </Folder>
+  <Folder Name="/tools/enrich/">
+    <Project Path="tools/enrich/WowViewer.Tool.V22Enrich/WowViewer.Tool.V22Enrich.csproj" />
+  </Folder>
   <Folder Name="/tools/validation-capture/">
     <Project Path="tools/validation-capture/WowViewer.Tool.ValidationCapture/WowViewer.Tool.ValidationCapture.csproj" />
   </Folder>
@@ -50,5 +53,8 @@
   </Folder>
   <Folder Name="/tools/wdl-read/">
     <Project Path="tools/wdl-read/WowViewer.Tool.WdlRead/WowViewer.Tool.WdlRead.csproj" />
+  </Folder>
+  <Folder Name="/tools/wmo-minimap/">
+    <Project Path="tools/wmo-minimap/WowViewer.Tool.WmoMinimap/WowViewer.Tool.WmoMinimap.csproj" />
   </Folder>
 </Solution>

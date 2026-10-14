@@ -1,6 +1,10 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-10-12 · **v0.6.0 released from `main`** (tag `v0.6.0`); active branch `v0.6.1-dev`
+Last updated: 2026-10-14 · **Operator-directed v0.6.0.1 corrective release in progress** on `v0.6.1-dev`; v0.6.0 remains the last published tag.
+
+**Immediate release fix:** the release workflow published only the viewer `.csproj`; its output omitted every CLI tool. It now discovers and self-contained-publishes all nine `wow-viewer/tools/**/*.csproj` projects beside the viewer for each RID, verifies each DLL/runtimeconfig, copies the tool README/scripts, and triggers on `v0.6.1-dev`. Two projects (`V22Enrich`, `WmoMinimap`) were missing from `WowViewer.slnx` and are registered. Local Windows x64 publish built all nine; the Inspector apphost returned full `--help`; version metadata is `0.6.0.1`. Four-platform CI/release still needs to run.
+
+**Ground-effect lighting patch:** placement code already computed MCCV tint and MCSH attenuation but `GroundEffectSceneService` discarded it. Per-instance tint now reaches the MDX material RGB while preserving directional/ambient shader lighting; focused tests pass. Real-client visual smoke on MCCV/MCSH terrain remains operator-owned. Follow-up to split the oversized `MdxRenderer` source file is open.
 
 **Immediate taxi mount issue (1.60.1):** the gryphon never loaded because
 [`TaxiPathLoader.LoadCreatureModelPaths`](wow-viewer/src/viewer/WoWViewer/Terrain/TaxiPathLoader.cs:231)
@@ -111,8 +115,8 @@ revert it before staging.
 
 ## Release state
 
-`eng/Version.props` = `0.6.0` / `InformationalVersion 0.6.0-alpha4`, release 2026-10-01 (tag
-`v0.6.0-alpha4`, all four self-contained binaries). Notes: `docs/releases/v0.6.0-alpha4.md`.
+`eng/Version.props` is temporarily `0.6.0.1` for tag preparation. Once the tag commit is pushed,
+restore active development metadata to `0.6.1-dev`. Previous stable: tag `v0.6.0` on `main`.
 
 **Shipped unverified in alpha2** (operator verification, tracked as V-tasks in the epics): the M2
 texture-wrap fix (every M2 era); `LkAdtWriter` chunk-completeness fixes (17 call sites); no exported

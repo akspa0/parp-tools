@@ -3,6 +3,11 @@
 **Toolkit**: `wow-viewer/tools/`  
 **Execution Pattern**: `dotnet run --project wow-viewer/tools/<tool-dir>/<project>/<project>.csproj -c Debug -- <command> [options]`
 
+**Release packages**: platform archives include every compiled CLI tool under `tools/<ProjectName>/`.
+Run the platform apphost in that directory; the apphost, `.dll`, `.deps.json`, and `.runtimeconfig.json`
+must remain together. No .NET runtime is required. The archive includes [`tools/README.md`](../tools/README.md)
+with the current tool map and examples.
+
 > [!IMPORTANT]
 > The canonical current CLI entry point is [`../tools/README.md`](../tools/README.md). This file is the expanded historical command reference and can include older workflow notes; prefer the tooling README for current project paths, boundaries, and safety rules.
 

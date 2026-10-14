@@ -46,6 +46,10 @@ public interface IModelRenderer : ISceneRenderer
 
     void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f);
 
+    /// <summary>Render an instance with an additional RGB material tint.</summary>
+    void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha, Vector3? instanceTint)
+        => RenderInstance(modelMatrix, pass, fadeAlpha);
+
     void RenderWithTransform(
         Matrix4x4 modelMatrix,
         Matrix4x4 view,

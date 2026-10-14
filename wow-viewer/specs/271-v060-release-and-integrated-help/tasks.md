@@ -15,3 +15,13 @@ Receipts live in `evidence/`. A box is checked only with a §9.2 receipt.
 - [ ] **B2** Shot list for every workbench destination and sidebar (agent) → operator captures images → embed in USERGUIDE and in-app help.
 - [ ] **B3** Archaeology tab documentation: phase-map auto-detection from client DBC/DB2, and "any map on any map" loading, with walkthrough images.
 - [ ] **B4** UI inventory row registered (Spec 223 FR-9).
+
+## Phase C — Operator-directed corrective release v0.6.0.1 (2026-10-14)
+
+- [ ] **C1** Add all executable projects from `wow-viewer/tools/` to the solution and every platform
+  release archive; CI verifies each tool's DLL and runtimeconfig. Receipt required for the four
+  actual platform bundles (AC-C1).
+- [ ] **C2** Apply per-instance terrain MCCV/MCSH tint when rendering ground-effect doodads; focused
+  unit tests cover the computed tint. Operator visual smoke remains owed (AC-C3).
+- [ ] **C3** Prepare version `0.6.0.1`, release notes, tag/push, and successful release workflow run
+  with four archives (AC-C2).

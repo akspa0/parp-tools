@@ -2,7 +2,7 @@ name: WoWViewer build
 
 # wow-viewer/ is a .NET 10 solution inside this repo (the GitHub repo is akspa0/parp-tools,
 # not a submodule). Every push that touches the build inputs produces downloadable,
-# self-contained binaries for all four targets as workflow artifacts.
+# self-contained viewer plus every compiled CLI tool for all four targets as workflow artifacts.
 #
 # Releases live in wowviewer-release.yml, which calls this workflow via workflow_call and
 # then attaches the artifacts to a GitHub Release. The tag trigger deliberately does NOT
@@ -22,7 +22,7 @@ name: WoWViewer build
 
 on:
   push:
-    branches: [main, v0.5.0-prerelease, v0.5.4-dev]
+    branches: [main, v0.5.0-prerelease, v0.5.4-dev, v0.6.1-dev]
     paths:
       - 'wow-viewer/src/**'
       - 'wow-viewer/tools/**'
@@ -99,6 +99,33 @@ jobs:
           -c Release -r ${{ matrix.rid }} --self-contained true
           -p:PublishSingleFile=false
           -o publish/${{ matrix.rid }}
+      # Compile and bundle every executable project below tools/ beside the viewer build. Keep
+      # each tool isolated so project-specific dependencies cannot overwrite one another.
+      - name: Publish all CLI tools (${{ matrix.rid }})
+        shell: bash
+        run: |
+          set -euo pipefail
+          tool_count=0
+          while IFS= read -r project; do
+            [ -n "$project" ] || continue
+            tool_name="$(basename "$project" .csproj)"
+            tool_output="publish/${{ matrix.rid }}/tools/${tool_name}"
+            echo "Publishing ${project} -> ${tool_output}"
+            dotnet publish "$project" \
+              -c Release -r "${{ matrix.rid }}" --self-contained true \
+              -p:PublishSingleFile=false \
+              -o "$tool_output"
+            test -s "${tool_output}/${tool_name}.dll"
+            test -s "${tool_output}/${tool_name}.runtimeconfig.json"
+            tool_count=$((tool_count + 1))
+          done < <(find wow-viewer/tools -type f -name '*.csproj' -print | sort)
+          test "$tool_count" -eq 9
+          echo "Published and verified ${tool_count} CLI tools."
+          mkdir -p "publish/${{ matrix.rid }}/tools"
+          cp wow-viewer/tools/README.md "publish/${{ matrix.rid }}/tools/README.md"
+          if [ -d wow-viewer/tools/scripts ]; then
+            cp -R wow-viewer/tools/scripts "publish/${{ matrix.rid }}/tools/scripts"
+          fi
       # Notes are selected by tag when this runs for a release, and otherwise fall back to the
       # highest-versioned notes file. Never hardcode a version here — a stale filename ships the
       # wrong changelog inside every platform archive.
@@ -124,3 +151,4 @@ jobs:
           name: ParpToolsWoWViewer-${{ matrix.rid }}
           path: publish/${{ matrix.rid }}/
           if-no-files-found: error
+          retention-days: 1

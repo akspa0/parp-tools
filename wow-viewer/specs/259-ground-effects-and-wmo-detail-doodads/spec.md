@@ -37,3 +37,4 @@ This spec introduces comprehensive support for ground effects and detail doodads
 - **AC-006**: `WmoMddlReader` parses the WMO root `MDDL` chunk (`Layer detailDoodadLayers[]` and per-group RLE placement data), exposing detail doodad placements in `WmoRenderDocument`.
 - **AC-007**: GPU rendering leverages instanced drawing so that thousands of detail doodads incur minimal draw-call overhead.
 - **AC-008**: Code respects god-class freeze (AGENTS.md §10), isolated in dedicated services (`GroundEffectPlacementService`, `WmoMddlReader`, `GroundEffectSceneService`).
+- **AC-009 (operator amendment, 2026-10-14)**: Terrain ground-effect doodad instances carry their MCCV RGB multiplier (neutral value remains 1.0) and MCSH shadow attenuation into the rendered model material tint; the doodad remains subject to the existing directional and ambient MDX lighting. Operator visual smoke is required before marking the criterion complete.

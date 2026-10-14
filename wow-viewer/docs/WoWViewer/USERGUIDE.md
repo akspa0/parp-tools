@@ -1,6 +1,6 @@
 # WoWViewer Comprehensive User Guide
 
-**Application Version**: `v0.6.0`  
+**Application Version**: `v0.6.0.1`
 **Platform Support**: Windows x64, Linux x64, macOS (Apple Silicon arm64 / Intel x64)
 
 `WoWViewer` is an interactive 3D desktop application for inspecting, analyzing, rendering, and reconciling World of Warcraft client data.
@@ -40,6 +40,10 @@
 
 > [!NOTE]
 > Native OS open-file dialogs are supported on Windows. On Linux and macOS, launch content using the `--game-path`, `--build`, and `--world` CLI options.
+
+The same archive includes all nine compiled CLI tools under `tools/<ProjectName>/`; they are self-contained
+and can run without installing .NET. See the bundled [`tools/README.md`](../../tools/README.md) for the
+Inspector, converter, harvest, validation, capture, WDL, WMO and enrichment commands.
 
 ### Running from Source
 Ensure [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) is installed:

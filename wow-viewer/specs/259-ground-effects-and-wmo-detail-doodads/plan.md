@@ -71,3 +71,12 @@ The Ground Effect & Detail Doodad system operates in three decoupled layers:
   - MDDL chunk round-trip and decoding tests.
 - **Solution Build**: `dotnet build wow-viewer/WowViewer.slnx -c Debug` (0 errors).
 - **Execution**: `dotnet test wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug`.
+
+## Operator amendment — lighting propagation (2026-10-14)
+
+Carry a per-instance RGB tint with each terrain detail doodad. The placement generator computes the
+existing terrain-equivalent MCCV multiplier (`raw RGB * 2`, with neutral missing-MCCV input producing
+1.0), preserves `IgnoreMCCV` as white, and applies the existing MCSH attenuation before encoding the
+render tint. The ground-effect scene passes that tint through `IModelRenderer` to MDX material color;
+the normal ambient/directional shader lighting remains active. Unit tests validate neutral, MCCV, and
+shadow cases; operator visual confirmation on a real client remains a release proof gate.

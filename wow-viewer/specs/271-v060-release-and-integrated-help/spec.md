@@ -38,6 +38,27 @@
   and the "load any map over any map" flow, each with a captured walkthrough.
 - Phase B scope is the operator's wording above only; further help-system features need an amendment.
 
+## Operator amendment — corrective v0.6.0.1 release (2026-10-14)
+
+Operator request: include the `wow-viewer/tools/` tooling in compiled platform builds and ship it as
+`v0.6.0.1`; also apply lighting to ground-effect doodads. This corrective release is limited to:
+
+- Publish every executable C# project under `wow-viewer/tools/` into each of the four platform
+  archives, keep each project's output isolated, and include the tool README/helper scripts.
+- Register all tool projects in the solution and trigger build CI on the active `v0.6.1-dev` branch.
+- Preserve terrain ground-effect MCCV tint and MCSH shadow attenuation when submitting each doodad
+  model for rendering.
+- Include the already-committed 1.60.1 taxi mount lookup fixes present on the release commit.
+
+### Corrective release acceptance criteria
+
+- AC-C1: each of the four release archives contains the viewer and all nine tool apphosts, DLLs,
+  dependency manifests, and runtime configuration files under `tools/`.
+- AC-C2: the release job runs successfully from tag `v0.6.0.1` and creates the four downloadable archives.
+- AC-C3: terrain ground-effect model submissions preserve the interpolated MCCV RGB multiplier and
+  MCSH attenuation; focused tests cover neutral, lit, and shadowed tint values. Operator visual smoke
+  on client terrain with MCCV and MCSH remains a separate proof gate.
+
 ## Known limitations carried into v0.6.0 (documented, not hidden)
 
 - PM4 object restoration is partial: objects on tiles *adjacent* to PM4-covered tiles that exist in the

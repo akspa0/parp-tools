@@ -467,7 +467,7 @@ internal sealed partial class GroundEffectSceneService : IDisposable
         float maxDistSq = GroundEffectDistance * GroundEffectDistance;
         float fadeStartDist = Math.Max(10.0f, GroundEffectDistance - 25.0f);
 
-        var batches = new Dictionary<string, List<(Matrix4x4 Matrix, float Fade)>>(StringComparer.OrdinalIgnoreCase);
+        var batches = new Dictionary<string, List<(Matrix4x4 Matrix, float Fade, Vector3 Tint)>>(StringComparer.OrdinalIgnoreCase);
 
         lock (_tileDoodads)
         {
@@ -501,10 +501,10 @@ internal sealed partial class GroundEffectSceneService : IDisposable
 
                     if (!batches.TryGetValue(modelKey, out var list))
                     {
-                        list = new List<(Matrix4x4 Matrix, float Fade)>();
+                        list = new List<(Matrix4x4 Matrix, float Fade, Vector3 Tint)>();
                         batches[modelKey] = list;
                     }
-                    list.Add((matrix, fade));
+                    list.Add((matrix, fade, inst.RenderTint));
                 }
             }
 
@@ -538,7 +538,11 @@ internal sealed partial class GroundEffectSceneService : IDisposable
 
             for (int i = 0; i < transforms.Count; i++)
             {
-                renderer.RenderInstance(transforms[i].Matrix, RenderPass.Opaque, transforms[i].Fade);
+                renderer.RenderInstance(
+                    transforms[i].Matrix,
+                    RenderPass.Opaque,
+                    transforms[i].Fade,
+                    transforms[i].Tint);
             }
         }
     }

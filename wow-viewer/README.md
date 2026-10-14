@@ -36,6 +36,11 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **`wowviewer-converter` (`tools/converter`)**: Bidirectional converter between Alpha monolithic WDT maps and modern LK ADT/WDT directories.
 - **`wowviewer-harvest` (`tools/harvest`)**: High-throughput extraction of terrain tensors (elevation, normals, alpha masks) into Zarr/NPZ archives and synthetic minimap images.
 - **`wowviewer-capture` (`tools/capture`) & `validation-capture`**: Automated headless camera renders and regression visual captures.
+- **`mask-validate`, `wdl-read`, `wmo-minimap`, and `v22-enrich`**: ADT texture-mask validation, WDL read/synthesis, WMO/minimap data probes, and V18 asset enrichment.
+
+The four platform archives from GitHub Releases include all nine compiled CLI projects under
+`tools/<ProjectName>/`; each tool has its own self-contained output directory. See
+[`tools/README.md`](tools/README.md) for direct launch examples and the complete tool map.
 
 ## Pre-Alpha Restoration Project (PARP)
 

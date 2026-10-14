@@ -32,3 +32,9 @@
 - [x] T012 [US3] Integrate CASC / DB2 model loading for modern 1.60.1 data and legacy MPQ data.
 - [x] T013 [P] Build solution and run full test suite.
 - [x] Gate C: Final receipt authored in `specs/259-ground-effects-and-wmo-detail-doodads/evidence/receipt-spec259.md`.
+
+## Operator amendment — ground-effect lighting propagation (2026-10-14)
+
+- [ ] T014 [US1] Pass terrain MCCV tint and MCSH attenuation from generated instances through the MDX per-instance material color; add focused tint tests. AC-009 code/test portion.
+- [ ] T015 [US1] Operator visual smoke on real terrain containing MCCV and MCSH; verify neutral, tinted, and shadowed doodads and record client/build/output evidence. AC-009 visual proof.
+- [ ] T016 [code health] Open follow-up work to split the existing oversized `MdxRenderer` source file; keep this patch's change bounded to the ground-effect render path.
