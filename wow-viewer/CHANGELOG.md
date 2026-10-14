@@ -5,9 +5,9 @@ GitHub Release publishes. This file is the index and the short version.
 
 ## v0.6.0.1 — 2026-10-14
 
-Corrective release: all nine compiled CLI tools now ship inside each platform archive; ground-effect
-doodads apply terrain MCCV and MCSH lighting tints. Also includes the 1.60.1 taxi mount FileDataID and
-legacy-path resolution fixes.
+Corrective release: all nine compiled CLI tools now ship in separate platform tool archives with common
+libraries, DBDs and listfiles emitted once; ground-effect doodads apply terrain MCCV and MCSH lighting tints.
+Also includes the 1.60.1 taxi mount FileDataID and legacy-path resolution fixes.
 
 Full notes: [`docs/releases/v0.6.0.1.md`](docs/releases/v0.6.0.1.md)
 

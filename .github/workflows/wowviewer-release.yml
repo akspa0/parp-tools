@@ -1,7 +1,7 @@
 name: WoWViewer release
 
-# Cuts a permanent GitHub Release from a v* tag, with self-contained binaries for all four
-# targets attached.
+# Cuts a permanent GitHub Release from a v* tag, with separate self-contained viewer and CLI-tools
+# archives for all four targets attached.
 #
 # This is a separate workflow from wowviewer-build.yml on purpose. `on.push` applies its
 # `paths` filter to tag pushes as well, so keeping the tag trigger in the paths-filtered
@@ -41,8 +41,9 @@ jobs:
         with:
           pattern: ParpToolsWoWViewer-*
           path: dist
-      - name: Zip each platform build
-        # Each artifact downloaded into dist/ParpToolsWoWViewer-<rid>/ ; re-zip per platform.
+      - name: Zip each viewer and CLI-tools artifact
+        # Each artifact is downloaded into dist/<artifact-name>/; re-zip separately so the viewer
+        # downloads do not contain the larger CLI tool runtimes.
         # Runs on ubuntu, so `zip` is always available.
         run: |
           set -euo pipefail

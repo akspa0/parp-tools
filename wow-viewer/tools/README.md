@@ -21,11 +21,13 @@ dotnet run --project I:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.
 
 ## Release Archives
 
-Each platform release archive includes the self-contained viewer and every compiled CLI project in
-`tools/<ProjectName>/`, plus this README and the helper scripts. No .NET runtime is required to run a
-published CLI executable. For example, run the Inspector with `tools/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.exe --help`
-on Windows, or `./tools/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect --help` on Linux/macOS. Keep the
-executable beside its project directory's `.dll`, `.deps.json`, and `.runtimeconfig.json` files.
+Each platform has a separate self-contained viewer ZIP and CLI-tools ZIP. The CLI-tools ZIP contains
+all nine apphosts, project DLLs, dependency manifests, runtime configuration files, this README, and
+helper scripts at its root (scripts are in `scripts/`). Shared DBDs, listfiles, runtime libraries, and
+project dependencies are published once into the common tools output directory; there are no per-tool
+copies of those files. The viewer is not in the CLI-tools ZIP. No .NET runtime is required. From the
+extracted CLI-tools ZIP, run `WowViewer.Tool.Inspect.exe --help` on Windows or
+`./WowViewer.Tool.Inspect --help` on Linux/macOS.
 
 Client roots are runtime inputs. `H:\CLIENTS` is a known-good local library path in this workspace,
 but portable scripts and tests should take client roots as parameters.

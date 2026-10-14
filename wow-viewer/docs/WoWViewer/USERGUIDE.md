@@ -41,9 +41,11 @@
 > [!NOTE]
 > Native OS open-file dialogs are supported on Windows. On Linux and macOS, launch content using the `--game-path`, `--build`, and `--world` CLI options.
 
-The same archive includes all nine compiled CLI tools under `tools/<ProjectName>/`; they are self-contained
-and can run without installing .NET. See the bundled [`tools/README.md`](../../tools/README.md) for the
-Inspector, converter, harvest, validation, capture, WDL, WMO and enrichment commands.
+The matching `ParpToolsWoWViewer-tools-<rid>.zip` is a separate download containing all nine self-contained
+CLI apphosts and project manifests in one shared output directory; common libraries and data files are included
+once. They can run without installing .NET. See the bundled
+[`tools/README.md`](../../tools/README.md) for the Inspector, converter, harvest, validation, capture,
+WDL, WMO and enrichment commands.
 
 ### Running from Source
 Ensure [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) is installed:

@@ -18,10 +18,10 @@ Receipts live in `evidence/`. A box is checked only with a §9.2 receipt.
 
 ## Phase C — Operator-directed corrective release v0.6.0.1 (2026-10-14)
 
-- [ ] **C1** Add all executable projects from `wow-viewer/tools/` to the solution and every platform
-  release archive; CI verifies each tool's DLL and runtimeconfig. Receipt required for the four
-  actual platform bundles (AC-C1).
+- [ ] **C1** Add all executable projects from `wow-viewer/tools/` to the solution and a separate CLI-tools
+  archive per platform; compile all nine apphosts into one shared output directory with common runtime/data
+  files deduplicated, and verify each tool's apphost/DLL/deps/runtimeconfig. Receipt required for all eight assets (AC-C1).
 - [ ] **C2** Apply per-instance terrain MCCV/MCSH tint when rendering ground-effect doodads; focused
   unit tests cover the computed tint. Operator visual smoke remains owed (AC-C3).
 - [ ] **C3** Prepare version `0.6.0.1`, release notes, tag/push, and successful release workflow run
-  with four archives (AC-C2).
+  with eight archives (AC-C2).

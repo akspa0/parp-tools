@@ -38,8 +38,9 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **`wowviewer-capture` (`tools/capture`) & `validation-capture`**: Automated headless camera renders and regression visual captures.
 - **`mask-validate`, `wdl-read`, `wmo-minimap`, and `v22-enrich`**: ADT texture-mask validation, WDL read/synthesis, WMO/minimap data probes, and V18 asset enrichment.
 
-The four platform archives from GitHub Releases include all nine compiled CLI projects under
-`tools/<ProjectName>/`; each tool has its own self-contained output directory. See
+Each of the four platform releases has a separate CLI-tools ZIP containing all nine compiled apphosts
+and project manifests in one shared output directory; common libraries, DBDs and listfiles are emitted
+once. The viewer ZIP stays smaller and independent. See
 [`tools/README.md`](tools/README.md) for direct launch examples and the complete tool map.
 
 ## Pre-Alpha Restoration Project (PARP)
