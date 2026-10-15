@@ -2,6 +2,37 @@
 
 Last updated: 2026-10-14
 
+## 2026-10-15 UTC — Classic WC3 Model Alignment (4eb0da/war3-model) & Replaceable Texture Support
+
+- Based on classic `4eb0da/war3-model` specifications (non-Reforged):
+  - Fixed variable-length stream parsing for dynamic chunks in version 800 MDX (`LITE`, `BONE`, `HELP`, `PRE2`, `RIBB`) via `Wc3MdxAdapter.cs` so chunks without leading counts are correctly framed without corrupting stream offsets.
+  - Added safe per-entry error recovery to `MdxFile.cs` for lights, bones, and helpers to avoid single malformed entries aborting whole model loads.
+  - Added WC3 replaceable texture resolution in `ModelRenderer.cs` for IDs 1 (TeamColor), 2 (TeamGlow), 11 (Cliff), 21/32 (Water), and 31 (Lumber).
+  - Added synthetic fallback generation in `Wc3DataSource.cs` for unauthored replaceable textures (TeamColor00, TeamGlow00, Cliff0, Lumber) and relaxed archive candidate matching for models with textures in adjacent or root directories.
+  - All 194 Wc3 and MDX tests pass (100%).
+
+## 2026-10-14 local / 2026-10-15 UTC — WC3 Beta BLP0 and MDX Fixes
+
+- Operator screenshot proved the BLP0 placeholder was the actual blocker. Added WC3-only shared-header/external-mip JPEG/palette decoding and raw four-channel JPEG handling. Real Crown1 decoded at 128×32 and its mip 3 at 16×4, with input/output hashes recorded.
+- MDX files now use an isolated existing-renderer preview; real v800 material framing required an opt-in adapter above the unchanged reader. Adjacent model parses at 6 geosets / 90 vertices / 3 sequences. Viewer build and 86 focused tests pass; GPU appearance remains operator-owned. [Receipt](../specs/272-wc2-wc3-viewer-support/evidence/receipt-beta-blp0-and-mdx-2026-10-15.md).
+
+## 2026-10-14 — WC3 File Browser Code Landed
+
+- Implemented owned WC3 loose/MPQ file session, image/build-text preview, safe byte-preserving extraction and cancellation; wired **File Browser → WC3 files (loose / MPQ)** without changing shared readers or world rendering.
+- Solution build passed (0 errors); 77 focused WC3/MPQ/bootstrap/BLP tests passed. [Receipt](../specs/272-wc2-wc3-viewer-support/evidence/receipt-wc3-implementation.md). Real beta/UI proof remains operator-owned; BLP0/external-mip preview is unsupported, and shared 4-bit alpha limitations are visible.
+
+## 2026-10-14 — Operator Corrected Spec 272 to WC3 File Browser Support
+
+- [Current spec](../specs/272-wc2-wc3-viewer-support/spec.md) supersedes the initial WC2-first interpretation: WC3 tilesets and build text in the existing File Browser, select loose/installed data, and unpack selected files; no world-renderer work. Existing MPQ/listfile readers are the base, not a rewrite.
+- Authored [plan](../specs/272-wc2-wc3-viewer-support/plan.md), research, data model, local contracts, and quickstart. The extracted beta root is operator supplied but uninspected (inventory declined). Zezula's public listfile link was confirmed; both HTTPS ZIP retrievals failed certificate-name validation, with no bypass or verified package.
+- No runtime code/client decode/extraction/UI proof occurred. Next: receipt-gated tasks, permitted beta sample evidence, and local listfile import/acquisition. Prior GDS/WC1 and restoration inputs remain deferred history.
+
+## 2026-10-14 — WC2-First Warcraft Support Specified (No Runtime Implementation)
+
+- Created [Spec 272](../specs/272-wc2-wc3-viewer-support/spec.md) and its [operator addendum](../specs/272-wc2-wc3-viewer-support/operator-addendum.md): original DOS WC2 terrain/sprites first; classic WC3 viewing, texture comparison/synthesis, coordinate helpers, and terrain bridging later. Battle.net is not required; PlayStation source is reference-only. The operator identifies retained WC1 behavior in the shared GDS source: plan WC1 as a reuse-driven follow-on, with specific data variants validated separately.
+- [Bounded discovery](../specs/272-wc2-wc3-viewer-support/evidence/discovery-2026-10-14.md) read two archive headers/hashes, eight loose map chunk envelopes/hashes, and focused local source references. Real archive fields contradict the draft's constant-type assertion; coordinate scale claims also require reconciliation.
+- No viewer, format reader, source data, or runtime test changed. No terrain/sprite output or client proof exists. Next: bounded DOS WC2 Spec Kit plan, then receipt-gated tasks; future implementation is not scheduled into the release.
+
 ## 2026-10-14 — Ground-Effect Regression Reverted; v0.6.0.1 Reissued
 
 - Operator reported the tint changes made the viewer unable to load anything. Removed the per-instance tint field, interface overload, MDX material multiplication, scene tint plumbing, and its new test assertions. The affected source/test files compare byte-for-byte with the pre-tint `b6f54a0b` baseline (`git diff --exit-code` passed).

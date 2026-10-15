@@ -52,6 +52,7 @@ namespace WoWViewer;
 internal sealed partial class NavigatorPanelService
 {
     private readonly IViewerAppHost _host;
+    private readonly FileBrowserExtrasPanel _fileBrowserExtras = new();
 
     internal NavigatorPanelService(IViewerAppHost host)
     {

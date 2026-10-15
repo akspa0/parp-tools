@@ -28,6 +28,7 @@
     <PackageVersion Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.21.0" />
     <PackageVersion Include="Silk.NET.Windowing" Version="2.21.0" />
     <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageVersion Include="BitMiracle.LibJpeg.NET" Version="1.5.324" />
     <PackageVersion Include="SharpZipLib" Version="1.4.2" />
     <PackageVersion Include="SharpGLTF.Toolkit" Version="1.0.2" />
     <PackageVersion Include="Parquet.Net" Version="4.5.1" />

@@ -520,12 +520,17 @@ internal sealed partial class StandaloneModelLoaderService
                 // Use the legacy MDX renderer for .mdx files. The chunked MDX-to-M2
                 // runtime conversion path produces incorrect animation for converted
                 // MDX data (M2 CPU skinning doesn't properly handle Alpha-era models).
-                MdxRuntimeSharedInfo? sharedRuntimeInfo = TryReadSharedMdxRuntimeInfo(sourcePath, modelBytes);
+                MdxRuntimeSharedInfo? sharedRuntimeInfo = _dataSource is Wc3DataSource
+                    ? null
+                    : TryReadSharedMdxRuntimeInfo(sourcePath, modelBytes);
 
                 using (var ms = new MemoryStream(modelBytes))
                 using (var br = new BinaryReader(ms))
                 {
-                    var mdx = MdxFile.Load(br);
+                    // WC3 (v800) MDX framing differs from what the shared reader expects; the WC3-only adapter re-frames it.
+                    var mdx = _dataSource is Wc3DataSource
+                        ? WowViewer.Core.IO.Wc3.Wc3MdxAdapter.Read(modelBytes)
+                        : MdxFile.Load(br);
                     LoadMdxModel(mdx, dir, sourcePath, sharedRuntimeInfo: sharedRuntimeInfo,
                         explicitTextureVariations: explicitTextureVariations);
                 }
@@ -1147,6 +1152,12 @@ internal sealed partial class StandaloneModelLoaderService
 
         try
         {
+            if (!DataFileViewerService.IsHandledByModelLoader(ext))
+            {
+                LoadGenericFileFromDataSource(virtualPath);
+                return;
+            }
+
             if (ext is ".mdx" or ".mdl" or ".m2")
             {
                 resolvedVirtualPath = ResolveStandaloneCanonicalModelPath(virtualPath);
@@ -1215,6 +1226,25 @@ internal sealed partial class StandaloneModelLoaderService
             _statusMessage = $"Load failed: {BuildStatusExceptionSummary(ex)}";
             _modelInfo = "";
         }
+    }
+
+    /// <summary>Images, text and any other file: shown without the model/WMO/WDT loaders; never touches world data.</summary>
+    private void LoadGenericFileFromDataSource(string virtualPath)
+    {
+        DataFileView view = DataFileViewerService.Open(_dataSource!, virtualPath, _gl);
+        _renderer?.Dispose();
+        _renderer = null;
+        ExitToStandaloneView();
+        _loadedMdx = null;
+        _loadedWmo = null;
+        _loadedM2Runtime = null;
+        _renderer = view.Renderer;
+        _loadedFilePath = virtualPath;
+        _modelInfo = view.Info;
+        _statusMessage = view.Status;
+        if (view.Renderer == null)
+            _host.ShowModelInfo = true;
+        _window.Title = $"{ViewerProductName} - {_loadedFileName}";
     }
 
     private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false,

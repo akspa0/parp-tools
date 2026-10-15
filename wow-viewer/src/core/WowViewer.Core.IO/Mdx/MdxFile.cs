@@ -1817,71 +1817,79 @@ public class MdxFile
 
         for (uint i = 0; i < count && br.BaseStream.Position < chunkEnd; i++)
         {
-            long entryStart = br.BaseStream.Position;
-            if (chunkEnd - entryStart < 8)
-                throw new InvalidDataException($"LITE entry {i} is truncated.");
-
-            uint entrySize = br.ReadUInt32();
-            long entryEnd = checked(entryStart + entrySize);
-            if (entrySize < 4 || entryEnd > chunkEnd)
-                throw new InvalidDataException($"LITE entry {i} has invalid size 0x{entrySize:X}.");
-
-            var node = ReadNodeWithTracks(br);
-            if (entryEnd - br.BaseStream.Position < 44)
-                throw new InvalidDataException($"LITE entry {i} is missing its static light fields.");
-
-            uint typeValue = br.ReadUInt32();
-            if (typeValue > (uint)MdxLightType.Ambient)
-                throw new InvalidDataException($"LITE entry {i} has invalid light type {typeValue}.");
-
-            var light = new MdlLight
+            try
             {
-                Name = node.name,
-                ObjectId = node.objectId,
-                ParentId = node.parentId,
-                Flags = node.flags,
-                TranslationTrack = node.translation,
-                RotationTrack = node.rotation,
-                ScalingTrack = node.scaling,
-                Type = (int)typeValue,
-                AttenuationStart = br.ReadSingle(),
-                AttenuationEnd = br.ReadSingle(),
-                Color = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()),
-                Intensity = br.ReadSingle(),
-                AmbientColor = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()),
-                AmbientIntensity = br.ReadSingle()
-            };
+                long entryStart = br.BaseStream.Position;
+                if (chunkEnd - entryStart < 8)
+                    break;
 
-            if (light.ObjectId >= 0 && light.ObjectId < pivots.Count)
-                light.Pivot = pivots[light.ObjectId];
+                uint entrySize = br.ReadUInt32();
+                long entryEnd = checked(entryStart + entrySize);
+                if (entrySize < 4 || entryEnd > chunkEnd)
+                    break;
 
-            // Animated LITE fields are retained as a future animation concern. Consume their
-            // payloads so later entries remain correctly framed.
-            while (br.BaseStream.Position + 4 <= entryEnd)
-            {
-                string tag = ReadTag(br);
-                switch (tag)
+                var node = ReadNodeWithTracks(br);
+                if (entryEnd - br.BaseStream.Position < 44)
+                    break;
+
+                uint typeValue = br.ReadUInt32();
+                if (typeValue > (uint)MdxLightType.Ambient)
+                    break;
+
+                var light = new MdlLight
                 {
-                    case "KLAS":
-                    case "KLAE":
-                    case "KLAI":
-                    case "KLBI":
-                    case "KVIS":
-                    case "KATV":
-                        SkipAnimVector(br, 4);
-                        break;
-                    case "KLAC":
-                    case "KLBC":
-                        SkipAnimVector(br, 12);
-                        break;
-                    default:
-                        br.BaseStream.Position = entryEnd;
-                        break;
-                }
-            }
+                    Name = node.name,
+                    ObjectId = node.objectId,
+                    ParentId = node.parentId,
+                    Flags = node.flags,
+                    TranslationTrack = node.translation,
+                    RotationTrack = node.rotation,
+                    ScalingTrack = node.scaling,
+                    Type = (int)typeValue,
+                    AttenuationStart = br.ReadSingle(),
+                    AttenuationEnd = br.ReadSingle(),
+                    Color = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()),
+                    Intensity = br.ReadSingle(),
+                    AmbientColor = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()),
+                    AmbientIntensity = br.ReadSingle()
+                };
 
-            br.BaseStream.Position = entryEnd;
-            lights.Add(light);
+                if (light.ObjectId >= 0 && light.ObjectId < pivots.Count)
+                    light.Pivot = pivots[light.ObjectId];
+
+                // Animated LITE fields are retained as a future animation concern. Consume their
+                // payloads so later entries remain correctly framed.
+                while (br.BaseStream.Position + 4 <= entryEnd)
+                {
+                    string tag = ReadTag(br);
+                    switch (tag)
+                    {
+                        case "KLAS":
+                        case "KLAE":
+                        case "KLAI":
+                        case "KLBI":
+                        case "KVIS":
+                        case "KATV":
+                            SkipAnimVector(br, 4);
+                            break;
+                        case "KLAC":
+                        case "KLBC":
+                            SkipAnimVector(br, 12);
+                            break;
+                        default:
+                            br.BaseStream.Position = entryEnd;
+                            break;
+                    }
+                }
+
+                br.BaseStream.Position = entryEnd;
+                lights.Add(light);
+            }
+            catch (Exception ex)
+            {
+                if (Verbose) Console.WriteLine($"[LITE] Failed to parse light {i}: {ex.Message}");
+                break;
+            }
         }
 
         br.BaseStream.Position = chunkEnd;

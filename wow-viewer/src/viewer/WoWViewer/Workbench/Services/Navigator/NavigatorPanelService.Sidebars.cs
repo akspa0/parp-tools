@@ -336,9 +336,13 @@ internal sealed partial class NavigatorPanelService
 
     private void DrawFileBrowserContent(float reservedFooterHeight = 0f)
     {
+        _fileBrowserExtras.DrawOpenWc3(
+            (root, listfile) => _dataSourceSession.LoadWc3DataSource(root, listfile),
+            _dataSource is Wc3DataSource wc3Source ? wc3Source.Summary : null);
+
         if (_dataSource == null || !_dataSource.IsLoaded)
         {
-            ImGui.TextWrapped("No data source loaded.\nUse File > Open Game Folder to load MPQ archives.");
+            ImGui.TextWrapped("No data source loaded.\nUse File > Open Game Folder to load MPQ archives, or 'Open WC3 data' above.");
             return;
         }
 
@@ -349,6 +353,7 @@ internal sealed partial class NavigatorPanelService
         {
             (string value, string label)[] filters =
             {
+                (DataSourceSessionService.AllFilesFilter, "All files"),
                 (".mdx", ".mdx/.mdl"),
                 (".wmo", ".wmo"),
                 (".m2", ".m2"),
@@ -399,6 +404,10 @@ internal sealed partial class NavigatorPanelService
                 _dataSourceSession.ReturnToLastWorldScene();
         }
 
+        _fileBrowserExtras.DrawExport(_dataSource,
+            TryGetSelectedBrowserAssetPath(out string exportSelected) ? exportSelected : null,
+            _filteredFiles, message => _statusMessage = message);
+
         ImGui.Text($"{_filteredFiles.Count} files");
         ImGui.Separator();
 
@@ -414,21 +423,28 @@ internal sealed partial class NavigatorPanelService
             if (startIndex > 0)
                 ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
 
+            var mipCounts = _dataSourceSession.MipCounts;
             for (int i = startIndex; i < endIndex; i++)
             {
                 var file = _filteredFiles[i];
                 var displayName = Path.GetFileName(file);
+                if (mipCounts.TryGetValue(file, out int mips))
+                    displayName += $"  [{mips} mip{(mips == 1 ? "" : "s")}]";
                 bool selected = i == _selectedFileIndex;
 
+                ImGui.PushID(i);
                 if (ImGui.Selectable(displayName, selected, ImGuiSelectableFlags.AllowDoubleClick))
                 {
                     _selectedFileIndex = i;
                     if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                         _modelLoader.LoadFileFromDataSource(file);
+                    else if (_dataSource is Wc3DataSource && DataFileViewerService.IsImagePath(file))
+                        _modelLoader.LoadFileFromDataSource(file); // WC3 folders have no world to lose: preview on click.
                 }
 
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip(file);
+                ImGui.PopID();
             }
 
             if (endIndex < _filteredFiles.Count)
@@ -439,6 +455,9 @@ internal sealed partial class NavigatorPanelService
 
     private static string GetExtensionFilterLabel(string extensionFilter)
     {
+        if (extensionFilter == DataSourceSessionService.AllFilesFilter)
+            return "All files";
+
         return extensionFilter.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
             ? ".mdx/.mdl"
             : extensionFilter;

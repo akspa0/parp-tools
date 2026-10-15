@@ -3212,6 +3212,16 @@ void main()
         { 13, @"Textures\ReplaceableTextures\Monster\Monster01_03.blp" },
     };
 
+    private static readonly Dictionary<uint, string> Wc3DefaultReplaceableTextures = new()
+    {
+        { 1,  @"ReplaceableTextures\TeamColor\TeamColor00.blp" },
+        { 2,  @"ReplaceableTextures\TeamGlow\TeamGlow00.blp" },
+        { 11, @"ReplaceableTextures\Cliff\Cliff0.blp" },
+        { 21, @"ReplaceableTextures\Water\Water.blp" },
+        { 31, @"ReplaceableTextures\Lumber\Lumber.blp" },
+        { 32, @"ReplaceableTextures\Water\Water.blp" },
+    };
+
     private static readonly string[] CreatureVariantSuffixes = new[]
     {
         "Armored", "Armor", "Caster", "Overlord", "Rider", "Boss", "Ghost",
@@ -3266,6 +3276,17 @@ void main()
         string? explicitVariationPath = ResolveExplicitTextureVariation(replaceableId);
         if (explicitVariationPath != null)
             return explicitVariationPath;
+
+        bool isWc3 = (_dataSource is WoWViewer.DataSources.Wc3DataSource) || (_mdx != null && _mdx.Version <= 800);
+        if (isWc3 && Wc3DefaultReplaceableTextures.TryGetValue(replaceableId, out string? wc3Path))
+        {
+            string? found = FindExistingTextureCandidate(wc3Path);
+            if (found != null)
+                return found;
+
+            if (_dataSource is WoWViewer.DataSources.Wc3DataSource)
+                return wc3Path;
+        }
 
         // Strategy 1: DBCD-based resolver (creatures with DBC entries)
         if (_texResolver != null && _modelVirtualPath != null)
@@ -3344,6 +3365,19 @@ void main()
                 })
                 .OrderBy(f => f.Length)
                 .ToList();
+
+            if (dirCandidates.Count == 0 && (isWc3 || string.IsNullOrEmpty(modelDirLower)))
+            {
+                dirCandidates = files
+                    .Where(f =>
+                    {
+                        string fname = Path.GetFileNameWithoutExtension(f).ToLowerInvariant();
+                        return fname.Contains(modelBaseLower) || modelBaseLower.Contains(fname)
+                            || (!string.IsNullOrEmpty(strippedBaseLower) && (fname.Contains(strippedBaseLower) || strippedBaseLower.Contains(fname)));
+                    })
+                    .OrderBy(f => f.Length)
+                    .ToList();
+            }
 
             if (dirCandidates.Count > 0)
             {

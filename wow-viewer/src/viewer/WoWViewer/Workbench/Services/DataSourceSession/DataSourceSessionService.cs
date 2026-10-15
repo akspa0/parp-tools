@@ -111,6 +111,13 @@ internal sealed class DataSourceSessionService
     private int _pendingDataSourceReloadGeneration;
     private static readonly string[] EarlyModelBrowserExtensions = { ".mdx", ".mdl" };
 
+    /// <summary>Extension-filter value that lists every file in the active source.</summary>
+    internal const string AllFilesFilter = "*";
+    private const int BrowserListLimit = 100_000;
+    private Dictionary<string, int> _mipCounts = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Listed texture path (the .blp header) -> number of grouped .b00..bNN mip files.</summary>
+    internal IReadOnlyDictionary<string, int> MipCounts => _mipCounts;
 
     internal void RefreshFileList()
     {
@@ -122,25 +129,84 @@ internal sealed class DataSourceSessionService
             candidates = candidates.Where(f => f.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase));
 
         var filtered = new List<string>(capacity: 5000);
+        var mipCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (string file in candidates)
         {
             if (!_dataSource.FileExists(file))
                 continue;
 
+            // WC3 beta textures are split into <name>.blp (header) + <name>.b00 (full resolution) .. .bNN.
+            // Show them as ONE texture entry when the header exists; orphan mip files stay listed.
+            if (WowViewer.Core.IO.Wc3.Wc3Blp0Decoder.IsMipPath(file)
+                && _dataSource.FileExists(Path.ChangeExtension(file, ".blp")))
+                continue;
+
             filtered.Add(file);
-            if (filtered.Count >= 5000)
+            if (file.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+            {
+                int mips = 0;
+                while (mips < 16 && _dataSource.FileExists(Path.ChangeExtension(file, $".b{mips:D2}")))
+                    mips++;
+                if (mips > 0) mipCounts[file] = mips;
+            }
+            if (filtered.Count >= BrowserListLimit)
                 break;
         }
 
         _filteredFiles = filtered;
+        _mipCounts = mipCounts;
 
         _selectedFileIndex = -1;
+    }
+
+    /// <summary>Replaces the active data source with a Warcraft III folder (loose extracted data or MPQs).</summary>
+    internal void LoadWc3DataSource(string rootPath, string? listfilePath)
+    {
+        _pendingDataSourceReloadGeneration = ++_activeDataSourceReloadGeneration;
+        try
+        {
+            _statusMessage = $"Opening WC3 data from {rootPath}...";
+            var source = new Wc3DataSource(rootPath, listfilePath);
+
+            ISceneRenderer? previousRenderer = _renderer;
+            bool sceneOwnedRenderer = ReferenceEquals(previousRenderer, _worldScene)
+                || ReferenceEquals(previousRenderer, _terrainManager)
+                || ReferenceEquals(previousRenderer, _vlmTerrainManager);
+            ClearActiveSceneForDataSourceReload();
+            if (!sceneOwnedRenderer) previousRenderer?.Dispose();
+            _pendingDataSourceWorldReloadVirtualPath = null;
+            _pendingDataSourceWorldReloadLocalPath = null;
+            _pendingDataSourceWorldReloadCameraPosition = null;
+            _standaloneSkinPathCache.Clear();
+            _loggedStandaloneMissingSkinPaths.Clear();
+            _discoveredMaps.Clear();
+            _areaTableService = null;
+            _wdlPreview.ResetWdlPreviewSupport();
+            _dataSource?.Dispose();
+            _dataSource = source;
+            _texResolver = null;
+            _dbcProvider = null;
+            _dbdDir = null;
+            _dbcBuild = null;
+
+            _extensionFilter = AllFilesFilter;
+            _searchFilter = string.Empty;
+            RefreshFileList();
+            _statusMessage = $"Opened WC3 data: {source.GetFileList().Count:N0} files. Select a file in the browser.";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Failed to open WC3 data: {ex.GetBaseException().Message}";
+        }
     }
 
     private IReadOnlyList<string> GetFilesForBrowserFilter()
     {
         if (_dataSource == null)
             return Array.Empty<string>();
+
+        if (_extensionFilter == AllFilesFilter)
+            return _dataSource.GetFileList(null);
 
         if (!_extensionFilter.Equals(".mdx", StringComparison.OrdinalIgnoreCase))
             return _dataSource.GetFileList(_extensionFilter);

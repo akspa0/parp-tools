@@ -16,6 +16,7 @@
     <PackageReference Include="BCnEncoder.Net" />
     <PackageReference Include="Parquet.Net" />
     <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="BitMiracle.LibJpeg.NET" />
     <PackageReference Include="SharpZipLib" />
   </ItemGroup>
 
