@@ -75,7 +75,15 @@ internal sealed partial class TerrainInspectionPanelService
         meta.Row("MCNK (X, Y)", $"({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
         meta.Row("Area ID", $"{chunkData.AreaId}", isImportant: true);
         meta.Row("Area Name", ResolveTerrainAreaName(chunkData.AreaId), isImportant: true);
-        meta.Row("MCNK Flags", $"0x{unchecked((uint)chunkData.McnkFlags):X8} ({DescribeMcnkFlags(chunkData.McnkFlags)})");
+        meta.Row("MCNK Flags", $"0x{unchecked((uint)chunkData.McnkFlags):X8} ({WowViewer.Core.Runtime.World.FormatFlagsDescriber.DescribeMcnkFlags(chunkData.McnkFlags)})");
+        if (_terrainManager?.Adapter is ITerrainAdapter adapter)
+        {
+            if (adapter.MphdFlags != 0)
+                meta.Row("WDT MPHD Flags", $"0x{adapter.MphdFlags:X4} ({WowViewer.Core.Runtime.World.FormatFlagsDescriber.DescribeWdtMphdFlags(adapter.MphdFlags)})");
+            uint mainFlags = adapter.GetMainTileFlags(chunkInfo.TileX, chunkInfo.TileY);
+            if (mainFlags != 0)
+                meta.Row("WDT MAIN Flags", $"0x{mainFlags:X4} ({WowViewer.Core.Runtime.World.FormatFlagsDescriber.DescribeWdtMainFlags(mainFlags)})");
+        }
         meta.Row("Alpha Source Flags", $"0x{unchecked((uint)chunkData.AlphaSourceFlags):X8}");
         meta.Row("Holes Mask", chunkData.HoleMask64 != 0UL
             ? $"0x{chunkData.HoleMask64:X16} (high-res {System.Numerics.BitOperations.PopCount(chunkData.HoleMask64)}/64 cells)"

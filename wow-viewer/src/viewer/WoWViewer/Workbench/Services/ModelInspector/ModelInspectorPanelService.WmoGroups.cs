@@ -2,6 +2,7 @@ using System.Numerics;
 using ImGuiNET;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
+using WowViewer.Core.Runtime.World;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
@@ -52,6 +53,12 @@ internal sealed partial class ModelInspectorPanelService
         ImGui.TextWrapped(groupName);
         ImGui.TextDisabled($"Manual={manualVisible}  Runtime={runtimeVisible}  Effective={effectiveVisible}");
         ImGui.TextDisabled($"Bounds: ({boundsMin.X:F1}, {boundsMin.Y:F1}, {boundsMin.Z:F1}) -> ({boundsMax.X:F1}, {boundsMax.Y:F1}, {boundsMax.Z:F1})");
+        int groupIndex = wmoRenderer.GetRenderGroupId(inspectionGroup);
+        if (groupIndex >= 0 && groupIndex < wmoRenderer.WmoData.Groups.Count)
+        {
+            var grp = wmoRenderer.WmoData.Groups[groupIndex];
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), $"Group Flags: 0x{grp.Flags:X8} ({FormatFlagsDescriber.DescribeWmoGroupFlags(grp.Flags, grp.Name)})");
+        }
 
         if (ImGui.SmallButton(manualVisible ? "Hide Group" : "Show Group"))
             wmoRenderer.SetRenderGroupVisible(inspectionGroup, !manualVisible);

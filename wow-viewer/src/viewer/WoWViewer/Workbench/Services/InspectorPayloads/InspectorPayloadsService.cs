@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using WowViewer.Core.Runtime.World.Inspection;
+using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Wmo;
 using WoWViewer.Rendering;
 using WoWViewer.Terrain;
@@ -183,6 +184,7 @@ internal sealed partial class InspectorPayloadsService
         {
             var geo = builder.AddSection("WMO Geometry & Doodads");
             geo.Row("Group Count", $"{wmo.GroupRenderCount}", isImportant: true);
+            geo.Row("Root Flags", $"0x{wmo.WmoData.Flags:X4} ({FormatFlagsDescriber.DescribeWmoRootFlags(wmo.WmoData.Flags)})");
             geo.Row("Doodad Definitions", $"{wmo.DoodadDefCount}");
             geo.Row("Doodad Instances", $"{wmo.DoodadInstanceCount}");
             geo.Row("Active Doodad Set", $"{wmo.ActiveDoodadSet} ({wmo.GetDoodadSetName(wmo.ActiveDoodadSet)})", isImportant: true);
@@ -298,6 +300,11 @@ internal sealed partial class InspectorPayloadsService
             animSection.Row("Sequence Count", $"{seqCount}", isImportant: true);
             animSection.Row("Current Sequence", $"{currSeq} ({(isPlaying ? "Playing" : "Stopped")})");
             animSection.Row("Sub-Objects / Geosets", $"{modelRenderer.SubObjectCount}");
+            if (modelRenderer is M2Renderer m2 && m2.RuntimeModel != null)
+            {
+                uint modelFlags = m2.RuntimeModel.Model.Flags;
+                animSection.Row("Model Flags", $"0x{modelFlags:X4} ({FormatFlagsDescriber.DescribeM2ModelFlags(modelFlags)})");
+            }
         }
 
         builder.AddSection("Model Actions")
@@ -316,6 +323,7 @@ internal sealed partial class InspectorPayloadsService
 
             var info = builder.AddSection("WMO Information");
             info.Row("Asset Path", _loadedFilePath ?? "Unknown", isImportant: true);
+            info.Row("Root Flags", $"0x{standaloneWmo.WmoData.Flags:X4} ({FormatFlagsDescriber.DescribeWmoRootFlags(standaloneWmo.WmoData.Flags)})");
             info.Row("Groups", $"{standaloneWmo.GroupRenderCount}");
             info.Row("Doodad Definitions", $"{standaloneWmo.DoodadDefCount}");
             info.Row("Active Doodad Set", $"{standaloneWmo.ActiveDoodadSet} ({standaloneWmo.GetDoodadSetName(standaloneWmo.ActiveDoodadSet)})", isImportant: true);
@@ -346,6 +354,11 @@ internal sealed partial class InspectorPayloadsService
 
             var info = builder.AddSection("Model Information");
             info.Row("Asset Path", _loadedFilePath ?? "Unknown", isImportant: true);
+            if (standaloneModel is M2Renderer m2 && m2.RuntimeModel != null)
+            {
+                uint modelFlags = m2.RuntimeModel.Model.Flags;
+                info.Row("Model Flags", $"0x{modelFlags:X4} ({FormatFlagsDescriber.DescribeM2ModelFlags(modelFlags)})");
+            }
             int seqCount = standaloneModel.Animator?.Sequences.Count ?? 0;
             int currSeq = standaloneModel.Animator?.CurrentSequence ?? 0;
             bool isPlaying = standaloneModel.Animator?.IsPlaying ?? false;

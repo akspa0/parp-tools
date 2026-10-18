@@ -487,6 +487,7 @@ internal sealed partial class ModelInspectorPanelService
 
         ImGui.Separator();
         ImGui.Text("Selected WMO Controls");
+        ImGui.TextDisabled($"Root Flags: 0x{wmoRenderer.WmoData.Flags:X4} ({FormatFlagsDescriber.DescribeWmoRootFlags(wmoRenderer.WmoData.Flags)})");
         ImGui.TextDisabled("Changes apply to all loaded instances of this WMO model.");
 
         if (wmoRenderer.DoodadSetCount > 0)

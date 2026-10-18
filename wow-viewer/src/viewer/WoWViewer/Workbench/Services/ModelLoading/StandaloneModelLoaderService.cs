@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using WowViewer.Core.Runtime.World;
 using System.Numerics;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -1389,6 +1390,7 @@ internal sealed partial class StandaloneModelLoaderService
         _modelInfo = $"Path: {virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath}\n" +
                      $"Type: {runtimeTypeLabel}\n" +
                      $"Version: {runtimeModel.Model.Version}\n" +
+                     $"Flags: 0x{runtimeModel.Model.Flags:X4} ({FormatFlagsDescriber.DescribeM2ModelFlags(runtimeModel.Model.Flags)})\n" +
                      $"Name: {runtimeModel.Model.ModelName ?? Path.GetFileNameWithoutExtension(runtimeModel.Model.Identity.CanonicalModelPath)}\n\n" +
                      $"Sections: {sectionCount}\n" +
                      $"Transparent Sections: {transparentSectionCount}\n" +
@@ -1558,7 +1560,8 @@ internal sealed partial class StandaloneModelLoaderService
         _camera.Pitch = -10f;
 
         _modelInfo = $"Path: {_loadedFileName ?? "<unknown>"}\n" +
-                     $"Type: WMO v{wmo.Version}\n\n" +
+                     $"Type: WMO v{wmo.Version}\n" +
+                     $"Flags: 0x{wmo.Flags:X4} ({FormatFlagsDescriber.DescribeWmoRootFlags(wmo.Flags)})\n\n" +
                      $"Groups: {wmo.Groups.Count}\n" +
                      $"Vertices: {totalVerts:N0}\n" +
                      $"Triangles: {totalTris:N0}\n\n" +

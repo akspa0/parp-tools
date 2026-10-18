@@ -118,6 +118,18 @@ internal sealed partial class ViewerChromeService
         if (ImGui.Begin("##BottomBar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
+            if (ImGui.IsWindowHovered() && (io.MouseWheelH != 0f || (io.KeyShift && io.MouseWheel != 0f)))
+            {
+                float scrollDelta = io.MouseWheelH != 0f ? io.MouseWheelH : io.MouseWheel;
+                ImGui.SetScrollX(ImGui.GetScrollX() - scrollDelta * 40f);
+            }
+
+            float displayWidth = io.DisplaySize.X;
+            bool isCompactLayers = displayWidth < 1850f;
+            bool isCompactOverlays = displayWidth < 1200f;
+            bool isCompactLabels = displayWidth < 1400f;
+            bool showInlineOpacitySliders = displayWidth >= 1500f;
+
             TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
@@ -137,8 +149,8 @@ internal sealed partial class ViewerChromeService
                 ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
                 ImGui.SameLine();
 
-                // Layer visibility (single source of truth)
-                DrawTerrainLayerToggles(renderer);
+                // Layer visibility (single source of truth, compact popup on small screens)
+                DrawTerrainLayerToggles(renderer, compact: isCompactLayers);
                 ImGui.SameLine();
                 bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
                     ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
@@ -157,18 +169,25 @@ internal sealed partial class ViewerChromeService
                 ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
                 ImGui.SameLine();
 
-                // Surface overlays
-                bool alphaMask = renderer.ShowAlphaMask;
-                if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-                ImGui.SameLine();
-                bool shadowMap = renderer.ShowShadowMap;
-                if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-                ImGui.SameLine();
-                bool useMccv = renderer.UseMccv;
-                if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
-                ImGui.SameLine();
-                bool contours = renderer.ShowContours;
-                if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+                // Surface overlays (inline or compact popup)
+                if (isCompactOverlays)
+                {
+                    DrawOverlaysPopup(renderer);
+                }
+                else
+                {
+                    bool alphaMask = renderer.ShowAlphaMask;
+                    if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+                    ImGui.SameLine();
+                    bool shadowMap = renderer.ShowShadowMap;
+                    if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+                    ImGui.SameLine();
+                    bool useMccv = renderer.UseMccv;
+                    if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
+                    ImGui.SameLine();
+                    bool contours = renderer.ShowContours;
+                    if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+                }
 
                 if (liquidRenderer != null || _worldScene != null)
                 {
@@ -226,16 +245,29 @@ internal sealed partial class ViewerChromeService
                 ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
                 ImGui.SameLine();
 
+                // Object Transparency & Opacity (placed before wireframes for prominence & accessibility)
+                DrawObjectTransparencyControls("BottomBar", showInlineSliders: showInlineOpacitySliders);
+
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                ImGui.SameLine();
+
                 if (_worldScene != null)
                 {
                     bool terrainWireframe = _worldScene.TerrainWireframeEnabled;
-                    if (ImGui.Checkbox("Terrain WF", ref terrainWireframe))
+                    string twfLabel = isCompactLabels ? "T-WF" : "Terrain WF";
+                    if (ImGui.Checkbox(twfLabel, ref terrainWireframe))
                         _worldScene.SetTerrainWireframeEnabled(terrainWireframe);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Toggle terrain wireframe overlay.");
 
                     ImGui.SameLine();
                     bool objectWireframe = _worldScene.ObjectWireframeEnabled;
-                    if (ImGui.Checkbox("M2/WMO WF", ref objectWireframe))
+                    string owfLabel = isCompactLabels ? "Obj-WF" : "M2/WMO WF";
+                    if (ImGui.Checkbox(owfLabel, ref objectWireframe))
                         _worldScene.SetObjectWireframeEnabled(objectWireframe);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Toggle object wireframe overlay for M2 doodads and WMO buildings.");
 
                     ImGui.SameLine();
                     bool worldAnimations = _worldScene.WorldDoodadAnimationEnabled;
@@ -243,42 +275,6 @@ internal sealed partial class ViewerChromeService
                         _worldScene.WorldDoodadAnimationEnabled = worldAnimations;
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("Advance animations on world doodad MDX/M2 models.");
-                    ImGui.SameLine();
-                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-                    ImGui.SameLine();
-
-                    bool wmoTex = WmoRenderer.TexturesEnabled;
-                    if (ImGui.Checkbox("WMO Tex", ref wmoTex))
-                        WmoRenderer.TexturesEnabled = wmoTex;
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Toggle textures for WMO objects. Uncheck to render untextured geometry.");
-
-                    ImGui.SameLine();
-                    float wmoOpacity = WmoRenderer.GlobalOpacity * 100f;
-                    ImGui.SetNextItemWidth(65);
-                    if (ImGui.SliderFloat("WMO %", ref wmoOpacity, 0f, 100f, "%.0f%%"))
-                        WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Global WMO Opacity (0% - 100%, e.g. 75% for see-through). Right-click to type.");
-
-                    ImGui.SameLine();
-                    float m2Opacity = M2Renderer.GlobalOpacity * 100f;
-                    ImGui.SetNextItemWidth(65);
-                    if (ImGui.SliderFloat("M2 %", ref m2Opacity, 0f, 100f, "%.0f%%"))
-                    {
-                        M2Renderer.GlobalOpacity = Math.Clamp(m2Opacity / 100f, 0f, 1f);
-                        MdxRenderer.GlobalOpacity = M2Renderer.GlobalOpacity;
-                    }
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Global M2/MDX and particle opacity (0% - 100%). Right-click to type.");
-
-                    ImGui.SameLine();
-                    float wallOpacity = WmoRenderer.CollisionWallOpacity * 100f;
-                    ImGui.SetNextItemWidth(65);
-                    if (ImGui.SliderFloat("Walls %", ref wallOpacity, 0f, 100f, "%.0f%%"))
-                        WmoRenderer.CollisionWallOpacity = Math.Clamp(wallOpacity / 100f, 0f, 1f);
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Collision Wall Opacity (0% = hidden, 50% = translucent, 100% = solid). Right-click to type.");
                 }
                 else
                 {
@@ -297,15 +293,9 @@ internal sealed partial class ViewerChromeService
                 if (_renderer is not WmoRenderer)
                 {
                     ImGui.SameLine();
-                    float modelOpacity = MdxRenderer.GlobalOpacity * 100f;
-                    ImGui.SetNextItemWidth(65);
-                    if (ImGui.SliderFloat("Model %", ref modelOpacity, 0f, 100f, "%.0f%%"))
-                    {
-                        MdxRenderer.GlobalOpacity = Math.Clamp(modelOpacity / 100f, 0f, 1f);
-                        M2Renderer.GlobalOpacity = MdxRenderer.GlobalOpacity;
-                    }
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Model and particle opacity (0% - 100%). Right-click to type.");
+                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                    ImGui.SameLine();
+                    DrawObjectTransparencyControls("BottomBarStandaloneModel", showInlineSliders: showInlineOpacitySliders);
                 }
             }
 
@@ -322,14 +312,9 @@ internal sealed partial class ViewerChromeService
                 ImGui.SameLine();
                 ImGui.Checkbox("Group Names", ref _standaloneWmoGroupLabelsAllEnabled);
                 ImGui.SameLine();
-                bool wmoTex = WmoRenderer.TexturesEnabled;
-                if (ImGui.Checkbox("Tex", ref wmoTex))
-                    WmoRenderer.TexturesEnabled = wmoTex;
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
                 ImGui.SameLine();
-                float wmoOpacity = WmoRenderer.GlobalOpacity * 100f;
-                ImGui.SetNextItemWidth(65);
-                if (ImGui.SliderFloat("WMO %", ref wmoOpacity, 0f, 100f, "%.0f%%"))
-                    WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
+                DrawObjectTransparencyControls("BottomBarStandaloneWmo", showInlineSliders: showInlineOpacitySliders);
             }
 
             if (_sceneCursorRenderer != null)
@@ -417,6 +402,14 @@ internal sealed partial class ViewerChromeService
                     ImGui.Text(sceneLabel);
                 }
             }
+
+            if (_worldScene != null || _loadedWmo != null || _loadedMdx != null || _renderer != null)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                ImGui.SameLine();
+                DrawObjectTransparencyControls("TopToolbar", showInlineSliders: false);
+            }
         }
         ImGui.End();
         ImGui.PopStyleVar(2);
@@ -465,17 +458,335 @@ internal sealed partial class ViewerChromeService
     /// Base + L1..L3 always; L4..L7 appear once resident terrain has chunks with that many layers
     /// (modern maps carry up to 8 MCLY layers per chunk).
     /// </summary>
-    private static void DrawTerrainLayerToggles(TerrainRenderer renderer)
+    private static void DrawOverlaysPopup(TerrainRenderer renderer)
+    {
+        int activeCount = CountEnabled(renderer.ShowAlphaMask, renderer.ShowShadowMap, renderer.UseMccv, renderer.ShowContours);
+        string overlayLabel = activeCount > 0 ? $"Overlays ({activeCount})* \u25BC" : "Overlays \u25BC";
+        if (activeCount > 0)
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.45f, 0.65f, 0.8f));
+
+        if (ImGui.Button(overlayLabel))
+            ImGui.OpenPopup("##BottomBarOverlaysPopup");
+
+        if (activeCount > 0)
+            ImGui.PopStyleColor();
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Toggle surface overlays: Alpha mask, Shadow map, MCCV vertex colors, Elevation contours");
+
+        if (ImGui.BeginPopup("##BottomBarOverlaysPopup"))
+        {
+            ImGui.TextDisabled("Surface Overlays");
+            ImGui.Separator();
+            bool alphaMask = renderer.ShowAlphaMask;
+            if (ImGui.Checkbox("Alpha Mask##pop_alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+
+            bool shadowMap = renderer.ShowShadowMap;
+            if (ImGui.Checkbox("Shadow Map##pop_shadow", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+
+            bool useMccv = renderer.UseMccv;
+            if (ImGui.Checkbox("MCCV (Vertex Colors)##pop_mccv", ref useMccv)) renderer.UseMccv = useMccv;
+
+            bool contours = renderer.ShowContours;
+            if (ImGui.Checkbox("Elevation Contours##pop_contours", ref contours)) renderer.ShowContours = contours;
+
+            ImGui.EndPopup();
+        }
+    }
+
+    internal void DrawObjectTransparencyControls(string idSuffix, bool showInlineSliders)
+    {
+        bool hasWmo = _worldScene != null || _renderer is WmoRenderer || _loadedWmo != null;
+        bool hasM2 = _worldScene != null || (_renderer != null && _renderer is not WmoRenderer) || _loadedMdx != null;
+
+        if (!hasWmo && !hasM2)
+            return;
+
+        float wmoPct = WmoRenderer.GlobalOpacity * 100f;
+        float m2Pct = M2Renderer.GlobalOpacity * 100f;
+        float wallPct = WmoRenderer.CollisionWallOpacity * 100f;
+
+        bool isCustom = (hasWmo && (wmoPct < 99.9f || wallPct < 99.9f || !WmoRenderer.TexturesEnabled))
+                     || (hasM2 && m2Pct < 99.9f);
+
+        string buttonText;
+        if (!isCustom)
+        {
+            buttonText = $"Opacity \u25BC##btn_{idSuffix}";
+        }
+        else if (hasWmo && hasM2 && (wmoPct < 99.9f || m2Pct < 99.9f))
+        {
+            buttonText = $"Opacity (W:{(int)wmoPct}% M:{(int)m2Pct}%)* \u25BC##btn_{idSuffix}";
+        }
+        else if (hasWmo && wmoPct < 99.9f)
+        {
+            buttonText = $"Opacity (WMO {(int)wmoPct}%)* \u25BC##btn_{idSuffix}";
+        }
+        else if (hasM2 && m2Pct < 99.9f)
+        {
+            buttonText = $"Opacity (M2 {(int)m2Pct}%)* \u25BC##btn_{idSuffix}";
+        }
+        else if (hasWmo && wallPct < 99.9f)
+        {
+            buttonText = $"Opacity (Walls {(int)wallPct}%)* \u25BC##btn_{idSuffix}";
+        }
+        else
+        {
+            buttonText = $"Opacity* \u25BC##btn_{idSuffix}";
+        }
+
+        if (isCustom)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.45f, 0.65f, 0.85f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.25f, 0.55f, 0.75f, 1.0f));
+        }
+
+        if (ImGui.Button(buttonText))
+        {
+            ImGui.OpenPopup($"##ObjectOpacityPopup_{idSuffix}");
+        }
+
+        if (isCustom)
+        {
+            ImGui.PopStyleColor(2);
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Object transparency controls for WMO buildings, M2 doodads, and collision walls.\nClick for preset buttons and precise sliders.");
+        }
+
+        if (ImGui.BeginPopup($"##ObjectOpacityPopup_{idSuffix}"))
+        {
+            DrawObjectTransparencyPopupContent(idSuffix, hasWmo, hasM2, sliderWidth: 180f);
+            ImGui.EndPopup();
+        }
+
+        if (showInlineSliders)
+        {
+            if (hasWmo)
+            {
+                ImGui.SameLine();
+                bool wmoTex = WmoRenderer.TexturesEnabled;
+                if (ImGui.Checkbox($"WMO Tex##inline_{idSuffix}", ref wmoTex))
+                {
+                    WmoRenderer.TexturesEnabled = wmoTex;
+                    _settings.SaveViewerSettings();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle textures for WMO objects. Uncheck to render untextured geometry.");
+
+                ImGui.SameLine();
+                float inlineWmoOpacity = WmoRenderer.GlobalOpacity * 100f;
+                ImGui.SetNextItemWidth(55);
+                if (ImGui.SliderFloat($"WMO %##inline_{idSuffix}", ref inlineWmoOpacity, 0f, 100f, "%.0f%%"))
+                    WmoRenderer.GlobalOpacity = Math.Clamp(inlineWmoOpacity / 100f, 0f, 1f);
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                    _settings.SaveViewerSettings();
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Global WMO Opacity (0% - 100%, e.g. 75% for see-through). Right-click to type.");
+            }
+
+            if (hasM2)
+            {
+                ImGui.SameLine();
+                float inlineM2Opacity = M2Renderer.GlobalOpacity * 100f;
+                ImGui.SetNextItemWidth(55);
+                string m2Label = hasWmo ? $"M2 %##inline_{idSuffix}" : $"Model %##inline_{idSuffix}";
+                if (ImGui.SliderFloat(m2Label, ref inlineM2Opacity, 0f, 100f, "%.0f%%"))
+                {
+                    M2Renderer.GlobalOpacity = Math.Clamp(inlineM2Opacity / 100f, 0f, 1f);
+                    MdxRenderer.GlobalOpacity = M2Renderer.GlobalOpacity;
+                }
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                    _settings.SaveViewerSettings();
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Global M2/MDX and particle opacity (0% - 100%). Right-click to type.");
+            }
+
+            if (hasWmo)
+            {
+                ImGui.SameLine();
+                float inlineWallOpacity = WmoRenderer.CollisionWallOpacity * 100f;
+                ImGui.SetNextItemWidth(55);
+                if (ImGui.SliderFloat($"Walls %##inline_{idSuffix}", ref inlineWallOpacity, 0f, 100f, "%.0f%%"))
+                    WmoRenderer.CollisionWallOpacity = Math.Clamp(inlineWallOpacity / 100f, 0f, 1f);
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                    _settings.SaveViewerSettings();
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Collision Wall Opacity (0% = hidden, 50% = translucent, 100% = solid). Right-click to type.");
+            }
+        }
+    }
+
+    private void DrawObjectTransparencyPopupContent(string idSuffix, bool hasWmo, bool hasM2, float sliderWidth = 180f)
+    {
+        ImGui.TextDisabled("Object Transparency & Visibility");
+        ImGui.Separator();
+
+        if (hasWmo)
+        {
+            ImGui.Text("WMO Buildings & Structures");
+            bool wmoTex = WmoRenderer.TexturesEnabled;
+            if (ImGui.Checkbox($"Enable WMO Textures##pop_tex_{idSuffix}", ref wmoTex))
+            {
+                WmoRenderer.TexturesEnabled = wmoTex;
+                _settings.SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Toggle textures for WMO objects. Uncheck to render untextured clay geometry.");
+
+            float wmoOpacity = WmoRenderer.GlobalOpacity * 100f;
+            if (sliderWidth > 0f) ImGui.SetNextItemWidth(sliderWidth);
+            else ImGui.SetNextItemWidth(-1f);
+            if (ImGui.SliderFloat($"WMO Opacity##pop_wmo_{idSuffix}", ref wmoOpacity, 0f, 100f, "%.0f%%"))
+                WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                _settings.SaveViewerSettings();
+
+            if (ImGui.SmallButton($"0%##wmo0_{idSuffix}")) { WmoRenderer.GlobalOpacity = 0f; _settings.SaveViewerSettings(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Completely invisible WMOs");
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"25%##wmo25_{idSuffix}")) { WmoRenderer.GlobalOpacity = 0.25f; _settings.SaveViewerSettings(); }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"50%##wmo50_{idSuffix}")) { WmoRenderer.GlobalOpacity = 0.5f; _settings.SaveViewerSettings(); }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"75% See-Thru##wmo75_{idSuffix}")) { WmoRenderer.GlobalOpacity = 0.75f; _settings.SaveViewerSettings(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("See inside WMO buildings while preserving exterior cues");
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"100% Solid##wmo100_{idSuffix}")) { WmoRenderer.GlobalOpacity = 1f; _settings.SaveViewerSettings(); }
+
+            ImGui.Spacing();
+            ImGui.Text("Collision Walls");
+            float wallOpacity = WmoRenderer.CollisionWallOpacity * 100f;
+            if (sliderWidth > 0f) ImGui.SetNextItemWidth(sliderWidth);
+            else ImGui.SetNextItemWidth(-1f);
+            if (ImGui.SliderFloat($"Wall Opacity##pop_wall_{idSuffix}", ref wallOpacity, 0f, 100f, "%.0f%%"))
+                WmoRenderer.CollisionWallOpacity = Math.Clamp(wallOpacity / 100f, 0f, 1f);
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                _settings.SaveViewerSettings();
+
+            if (ImGui.SmallButton($"0% Hidden##wall0_{idSuffix}")) { WmoRenderer.CollisionWallOpacity = 0f; _settings.SaveViewerSettings(); }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"50% Translucent##wall50_{idSuffix}")) { WmoRenderer.CollisionWallOpacity = 0.5f; _settings.SaveViewerSettings(); }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"100% Solid##wall100_{idSuffix}")) { WmoRenderer.CollisionWallOpacity = 1f; _settings.SaveViewerSettings(); }
+
+            if (hasM2)
+                ImGui.Separator();
+        }
+
+        if (hasM2)
+        {
+            ImGui.Text("M2 & MDX Doodads / Models");
+            float m2Opacity = M2Renderer.GlobalOpacity * 100f;
+            if (sliderWidth > 0f) ImGui.SetNextItemWidth(sliderWidth);
+            else ImGui.SetNextItemWidth(-1f);
+            if (ImGui.SliderFloat($"M2 Opacity##pop_m2_{idSuffix}", ref m2Opacity, 0f, 100f, "%.0f%%"))
+            {
+                M2Renderer.GlobalOpacity = Math.Clamp(m2Opacity / 100f, 0f, 1f);
+                MdxRenderer.GlobalOpacity = M2Renderer.GlobalOpacity;
+            }
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                _settings.SaveViewerSettings();
+
+            if (ImGui.SmallButton($"0% Invisible##m2_0_{idSuffix}")) { M2Renderer.GlobalOpacity = 0f; MdxRenderer.GlobalOpacity = 0f; _settings.SaveViewerSettings(); }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"50% Translucent##m2_50_{idSuffix}")) { M2Renderer.GlobalOpacity = 0.5f; MdxRenderer.GlobalOpacity = 0.5f; _settings.SaveViewerSettings(); }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"75% See-Thru##m2_75_{idSuffix}")) { M2Renderer.GlobalOpacity = 0.75f; MdxRenderer.GlobalOpacity = 0.75f; _settings.SaveViewerSettings(); }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"100% Solid##m2_100_{idSuffix}")) { M2Renderer.GlobalOpacity = 1f; MdxRenderer.GlobalOpacity = 1f; _settings.SaveViewerSettings(); }
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button($"Reset All to Solid (100%)##reset_{idSuffix}"))
+        {
+            WmoRenderer.GlobalOpacity = 1f;
+            M2Renderer.GlobalOpacity = 1f;
+            MdxRenderer.GlobalOpacity = 1f;
+            WmoRenderer.CollisionWallOpacity = 1f;
+            WmoRenderer.TexturesEnabled = true;
+            _settings.SaveViewerSettings();
+        }
+    }
+
+    /// <summary>
+    /// Base + L1..L3 always; L4..L7 appear once resident terrain has chunks with that many layers
+    /// (modern maps carry up to 8 MCLY layers per chunk).
+    /// </summary>
+    private void DrawTerrainLayerToggles(TerrainRenderer renderer, bool compact = false)
     {
         int layerCount = Math.Clamp(renderer.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers);
-        for (int layer = 0; layer < layerCount; layer++)
-        {
-            if (layer > 0)
-                ImGui.SameLine();
 
-            bool visible = renderer.GetShowLayer(layer);
-            if (ImGui.Checkbox(layer == 0 ? "Base" : $"L{layer}", ref visible))
-                renderer.SetShowLayer(layer, visible);
+        if (!compact)
+        {
+            for (int layer = 0; layer < layerCount; layer++)
+            {
+                if (layer > 0)
+                    ImGui.SameLine();
+
+                bool visible = renderer.GetShowLayer(layer);
+                if (ImGui.Checkbox(layer == 0 ? "Base" : $"L{layer}", ref visible))
+                    renderer.SetShowLayer(layer, visible);
+            }
+            return;
+        }
+
+        int activeLayers = 0;
+        for (int i = 0; i < layerCount; i++)
+        {
+            if (renderer.GetShowLayer(i)) activeLayers++;
+        }
+
+        string layersButtonText = activeLayers == layerCount
+            ? $"Layers ({layerCount}) \u25BC"
+            : $"Layers ({activeLayers}/{layerCount})* \u25BC";
+
+        bool isCustomLayerVisibility = activeLayers != layerCount;
+        if (isCustomLayerVisibility)
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.45f, 0.65f, 0.8f));
+
+        if (ImGui.Button(layersButtonText))
+            ImGui.OpenPopup("##BottomBarLayersPopup");
+
+        if (isCustomLayerVisibility)
+            ImGui.PopStyleColor();
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"Terrain Layers ({activeLayers}/{layerCount} visible). Click to toggle individual layers or use presets.");
+
+        if (ImGui.BeginPopup("##BottomBarLayersPopup"))
+        {
+            ImGui.TextDisabled($"Terrain Texture Layers ({layerCount} resident)");
+            ImGui.Separator();
+
+            for (int layer = 0; layer < layerCount; layer++)
+            {
+                bool visible = renderer.GetShowLayer(layer);
+                string layerName = layer == 0 ? "Base Layer (L0)" : $"Layer {layer} (L{layer})";
+                if (ImGui.Checkbox($"{layerName}##bblayer_{layer}", ref visible))
+                    renderer.SetShowLayer(layer, visible);
+            }
+
+            ImGui.Separator();
+            if (ImGui.SmallButton("All Layers"))
+            {
+                for (int l = 0; l < layerCount; l++) renderer.SetShowLayer(l, true);
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Base Only"))
+            {
+                renderer.SetShowLayer(0, true);
+                for (int l = 1; l < layerCount; l++) renderer.SetShowLayer(l, false);
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Hide All"))
+            {
+                for (int l = 0; l < layerCount; l++) renderer.SetShowLayer(l, false);
+            }
+
+            ImGui.EndPopup();
         }
     }
 
@@ -487,7 +798,7 @@ internal sealed partial class ViewerChromeService
     private void DrawLayersGridsOverlaysContent(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
     {
         ImGui.TextDisabled("Terrain Layers");
-        DrawTerrainLayerToggles(renderer);
+        DrawTerrainLayerToggles(renderer, compact: false);
 
         bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
             ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
@@ -559,6 +870,10 @@ internal sealed partial class ViewerChromeService
             if (_worldScene.Pm4Overlay.IsPm4Loading)
                 ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "PM4 overlay is loading...");
         }
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Object Transparency & Visibility");
+        DrawObjectTransparencyPopupContent("Sidebar", hasWmo: true, hasM2: true, sliderWidth: -1f);
     }
 
     internal void DrawFixedSidebarWidthControl(string label, ref float width, bool isLeftSidebar, float displayWidth, string tooltip)
