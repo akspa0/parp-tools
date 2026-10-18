@@ -44,6 +44,27 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     public float GetEffectiveOpacity() => _isCollisionWall ? Math.Clamp(GlobalOpacity * CollisionWallOpacity, 0f, 1f) : Math.Clamp(GlobalOpacity, 0f, 1f);
     public bool AreTexturesEffective() => TexturesEnabled && (!_isCollisionWall || CollisionWallTexturesEnabled);
 
+    public bool IsGroupCollisionOrAntiportal(int groupIndex)
+    {
+        if (_isCollisionWall) return true;
+        if (groupIndex < 0 || groupIndex >= _wmo.Groups.Count) return false;
+        var group = _wmo.Groups[groupIndex];
+        return (group.Flags & 0x4000000) != 0 || (!string.IsNullOrWhiteSpace(group.Name) && (
+            group.Name.Contains("antiportal", StringComparison.OrdinalIgnoreCase) ||
+            group.Name.Contains("anti_portal", StringComparison.OrdinalIgnoreCase) ||
+            group.Name.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
+            group.Name.Contains("invis_wall", StringComparison.OrdinalIgnoreCase) ||
+            group.Name.Contains("invisible", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    public float GetGroupEffectiveOpacity(int groupIndex)
+        => IsGroupCollisionOrAntiportal(groupIndex)
+            ? Math.Clamp(GlobalOpacity * CollisionWallOpacity, 0f, 1f)
+            : Math.Clamp(GlobalOpacity, 0f, 1f);
+
+    public bool AreGroupTexturesEffective(int groupIndex)
+        => TexturesEnabled && (!IsGroupCollisionOrAntiportal(groupIndex) || CollisionWallTexturesEnabled);
+
     private readonly WmoLiquidRenderer _liquidRenderer;
     private readonly WmoMaterialManager _materialManager;
     private readonly WmoDoodadController _doodadController;
@@ -107,8 +128,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     private int _currentDoodadSubmissions;
     private int _currentVisibleGroupSubmissions;
     private int _currentVisibleLiquidMeshes;
-    private const int ExteriorPortalTraversalDepth = 1;
-    private const int InteriorPortalTraversalDepth = 4;
+    private const int ExteriorPortalTraversalDepth = 8;
+    private const int InteriorPortalTraversalDepth = 8;
 
     public int PendingDoodadModelLoadCount => _doodadController.PendingDoodadModelLoadsCount;
     public int PendingMaterialTextureLoadCount => _materialManager.PendingTextureLoadsCount;
@@ -130,7 +151,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     public bool SupportsGpuInstancedOpaque
         => !_wireframe
             && _groups.Count > 0
-            && _wmo.Portals.Count == 0
+            && (_wmo.Portals.Count == 0 || _portalVisibilityGroups.All(static group => group.IsExterior))
             && _groups.All(static group => group.ManualVisible)
             && GetEffectiveOpacity() >= 0.999f;
 
@@ -422,7 +443,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
 
         int groupIndex = _groups[renderGroupIndex].GroupIndex;
         string name = (groupIndex < _wmo.Groups.Count ? _wmo.Groups[groupIndex].Name : null) ?? $"Group {groupIndex}";
-        return $"[{groupIndex}] {name}";
+        string tag = IsGroupCollisionOrAntiportal(groupIndex) ? " [Antiportal/Wall]" : "";
+        return $"[{groupIndex}] {name}{tag}";
     }
 
     public bool GetRenderGroupManualVisible(int renderGroupIndex)
@@ -802,9 +824,23 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
             foreach (var gb in _groups)
             {
                 if (!gb.IsVisible) continue;
+                float groupEffectiveOpacity = GetGroupEffectiveOpacity(gb.GroupIndex);
+                if (groupEffectiveOpacity <= 0.001f) continue;
                 _currentVisibleGroupSubmissions++;
                 var group = _wmo.Groups[gb.GroupIndex];
                 _gl.BindVertexArray(gb.Vao);
+
+                bool customOpacity = Math.Abs(groupEffectiveOpacity - effectiveOpacity) > 0.001f;
+                if (customOpacity)
+                {
+                    _gl.Uniform1(_uOpacity, groupEffectiveOpacity);
+                    if (groupEffectiveOpacity < 1.0f)
+                    {
+                        _gl.Enable(EnableCap.Blend);
+                        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                        _gl.DepthMask(false);
+                    }
+                }
 
                 if (group.Batches.Count > 0)
                 {
@@ -818,16 +854,22 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
 
                         if (blendMode == EGxBlend.AlphaKey)
                         {
-                            if (!_wireframe && effectiveOpacity >= 1.0f) _gl.Disable(EnableCap.Blend);
-                            else if (effectiveOpacity < 1.0f) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
-                            _gl.DepthMask(effectiveOpacity >= 0.999f);
+                            if (!customOpacity)
+                            {
+                                if (!_wireframe && effectiveOpacity >= 1.0f) _gl.Disable(EnableCap.Blend);
+                                else if (effectiveOpacity < 1.0f) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
+                                _gl.DepthMask(effectiveOpacity >= 0.999f);
+                            }
                             _gl.Uniform1(_uAlphaTest, WoWConstants.AlphaKeyThreshold);
                         }
                         else
                         {
-                            if (!_wireframe && effectiveOpacity >= 1.0f) _gl.Disable(EnableCap.Blend);
-                            else if (effectiveOpacity < 1.0f) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
-                            _gl.DepthMask(effectiveOpacity >= 0.999f);
+                            if (!customOpacity)
+                            {
+                                if (!_wireframe && effectiveOpacity >= 1.0f) _gl.Disable(EnableCap.Blend);
+                                else if (effectiveOpacity < 1.0f) { _gl.Enable(EnableCap.Blend); _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha); }
+                                _gl.DepthMask(effectiveOpacity >= 0.999f);
+                            }
                             _gl.Uniform1(_uAlphaTest, 0.0f);
                         }
 
@@ -837,6 +879,16 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
                 else
                 {
                     DrawGroupFallback(gb);
+                }
+
+                if (customOpacity)
+                {
+                    _gl.Uniform1(_uOpacity, effectiveOpacity);
+                    if (effectiveOpacity >= 1.0f && !_wireframe)
+                    {
+                        _gl.Disable(EnableCap.Blend);
+                        _gl.DepthMask(true);
+                    }
                 }
                 _gl.BindVertexArray(0);
             }
@@ -1210,7 +1262,8 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         if (!TryBindGroupGeometry(gb, batch))
             return;
 
-        if (AreTexturesEffective() && _materialManager.TryGetTexture(matId, out uint glTex))
+        bool isWall = IsGroupCollisionOrAntiportal(gb.GroupIndex);
+        if (AreGroupTexturesEffective(gb.GroupIndex) && _materialManager.TryGetTexture(matId, out uint glTex))
         {
             _gl.ActiveTexture(TextureUnit.Texture0);
             _gl.BindTexture(TextureTarget.Texture2D, glTex);
@@ -1220,9 +1273,9 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         else
         {
             _gl.Uniform1(_uHasTexture, 0);
-            float r = _isCollisionWall ? 0.35f : ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-            float g = _isCollisionWall ? 0.65f : ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-            float b = _isCollisionWall ? 0.95f : ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+            float r = isWall ? 0.95f : _isCollisionWall ? 0.35f : ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+            float g = isWall ? 0.45f : _isCollisionWall ? 0.65f : ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+            float b = isWall ? 0.25f : _isCollisionWall ? 0.95f : ((gb.GroupIndex * 43 + 29) % 255) / 255f;
             _gl.Uniform4(_uColor, r, g, b, 1.0f);
         }
         _currentDrawCalls++;
@@ -1358,9 +1411,10 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     private unsafe void DrawGroupFallback(GroupBuffers gb)
     {
         _gl.Uniform1(_uHasTexture, 0);
-        float r = _isCollisionWall ? 0.35f : ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-        float g = _isCollisionWall ? 0.65f : ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-        float b = _isCollisionWall ? 0.95f : ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+        bool isWall = IsGroupCollisionOrAntiportal(gb.GroupIndex);
+        float r = isWall ? 0.95f : _isCollisionWall ? 0.35f : ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+        float g = isWall ? 0.45f : _isCollisionWall ? 0.65f : ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+        float b = isWall ? 0.25f : _isCollisionWall ? 0.95f : ((gb.GroupIndex * 43 + 29) % 255) / 255f;
         _gl.Uniform4(_uColor, r, g, b, 1.0f);
         _currentDrawCalls++;
         _currentGroupFallbackDrawCalls++;
@@ -1696,13 +1750,30 @@ void main() {
     }
 
     private WmoPortalVisibilityGroup[] BuildPortalVisibilityGroups()
-        => _wmo.Groups
+    {
+        var groupHasPortals = new bool[_wmo.Groups.Count];
+        for (int i = 0; i < _wmo.Groups.Count; i++)
+        {
+            if (_wmo.Groups[i].PortalCount > 0)
+                groupHasPortals[i] = true;
+        }
+
+        foreach (var portalRef in _wmo.PortalRefs)
+        {
+            if ((uint)portalRef.GroupIndex < (uint)groupHasPortals.Length)
+                groupHasPortals[portalRef.GroupIndex] = true;
+        }
+
+        return _wmo.Groups
             .Select((group, groupIndex) => new WmoPortalVisibilityGroup(
                 groupIndex,
                 group.Flags,
                 group.BoundsMin,
-                group.BoundsMax))
+                group.BoundsMax,
+                group.Name,
+                groupHasPortals[groupIndex]))
             .ToArray();
+    }
 
     private WmoPortalVisibilityPortal[] BuildPortalVisibilityPortals()
     {
@@ -1805,34 +1876,31 @@ void main() {
             }
         }
 
-        // Portal traversal is a conservative optimization, never the final
-        // correctness culler. A group whose transformed bounds are in the
-        // camera frustum must remain drawable even when portal winding,
-        // incomplete exterior flags, or an old-build portal edge disagrees.
-        // Connected groups admitted by the portal walk remain visible too.
+        // Portal traversal provides occlusion data, but frustum-intersecting groups
+        // remain fail-safe drawable so building interiors, floors, and multi-group structures
+        // never disappear or pop due to imperfect portal graphs or boundary transitions.
         for (int groupIndex = 0; groupIndex < _frustumVisibleScratch.Length; groupIndex++)
         {
-            if (!_frustumVisibleScratch[groupIndex])
-                continue;
-
-            _runtimeVisibleGroups[groupIndex] = true;
+            if (_frustumVisibleScratch[groupIndex])
+                _runtimeVisibleGroups[groupIndex] = true;
         }
 
-        // Accounting only — the decisions above are unchanged. A conservative fallback admits every
-        // group by construction, so it is recorded as its own rule instead of being credited to the
-        // portal walk that did not actually run.
         bool portalFallback = decision.Diagnostics.Mode == WmoPortalVisibilityMode.ConservativeFallback;
+
+        // Accounting — records which rule admitted each group.
         int admittedInPlacement = 0;
         for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
         {
+            bool isAdmitted = _runtimeVisibleGroups[groupIndex];
             bool byPortal = _portalVisibleScratch[groupIndex];
             bool byFrustum = _frustumVisibleScratch[groupIndex];
-            WmoGroupAdmissionRule rule = (portalFallback && byPortal, byPortal, byFrustum) switch
+            WmoGroupAdmissionRule rule = (!isAdmitted, portalFallback && byPortal, byPortal, byFrustum) switch
             {
-                (true, _, _) => WmoGroupAdmissionRule.PortalFallback,
-                (_, true, true) => WmoGroupAdmissionRule.PortalAndFrustum,
-                (_, true, false) => WmoGroupAdmissionRule.Portal,
-                (_, false, true) => WmoGroupAdmissionRule.Frustum,
+                (true, _, _, _) => WmoGroupAdmissionRule.None,
+                (_, true, _, _) => WmoGroupAdmissionRule.PortalFallback,
+                (_, _, true, true) => WmoGroupAdmissionRule.PortalAndFrustum,
+                (_, _, true, false) => WmoGroupAdmissionRule.Portal,
+                (_, _, false, true) => WmoGroupAdmissionRule.Frustum,
                 _ => WmoGroupAdmissionRule.None,
             };
 
@@ -1876,6 +1944,14 @@ void main() {
 
     private static void TransformAabb(Vector3 min, Vector3 max, Matrix4x4 transform, out Vector3 outMin, out Vector3 outMax)
         => WmoGeometryHelper.TransformAabb(min, max, transform, out outMin, out outMax);
+
+    private static bool ContainsStrict(Vector3 point, Vector3 min, Vector3 max)
+        => point.X >= MathF.Min(min.X, max.X)
+            && point.X <= MathF.Max(min.X, max.X)
+            && point.Y >= MathF.Min(min.Y, max.Y)
+            && point.Y <= MathF.Max(min.Y, max.Y)
+            && point.Z >= MathF.Min(min.Z, max.Z)
+            && point.Z <= MathF.Max(min.Z, max.Z);
 
     private unsafe void InitBuffers()
     {

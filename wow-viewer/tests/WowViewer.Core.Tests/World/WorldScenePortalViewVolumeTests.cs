@@ -22,7 +22,7 @@ public sealed class WorldScenePortalViewVolumeTests
 
         Assert.False(result.FallbackRequired);
         Assert.NotNull(result.Volume);
-        Assert.Equal(6, result.Volume!.Planes.Count);
+        Assert.Equal(5, result.Volume!.Planes.Count);
         Assert.True(result.Volume.ContainsPoint(new Vector3(10f, 0f, 0f)));
         Assert.False(result.Volume.ContainsPoint(new Vector3(10f, 4f, 0f)));
         Assert.True(result.Volume.IntersectsBounds(new Vector3(9f, -0.5f, -0.5f), new Vector3(11f, 0.5f, 0.5f)));

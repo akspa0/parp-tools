@@ -963,4 +963,285 @@ public sealed class TerrainHoleInvestigationTests
         }
 #endif
     }
+
+    [Fact]
+    public void InspectMushroomCave()
+    {
+        const string installDir = @"I:\wow12\World of Warcraft";
+        if (!Directory.Exists(installDir)) return;
+        var storage = CascStorage.OpenLocal(installDir, "wow_classic_beta", @"output\cache\casc", allowCdnFill: false);
+        byte[]? Read(uint id) => id != 0 && storage.TryReadFile(id, out byte[]? b) == CascReadStatus.Ok ? b : null;
+        byte[]? root = Read(111211);
+        Assert.NotNull(root);
+
+        // Find MOHD chunk
+        int mohdOffset = -1;
+        for (int i = 0; i + 8 <= root.Length; i++)
+        {
+            if (root[i] == 'D' && root[i + 1] == 'H' && root[i + 2] == 'O' && root[i + 3] == 'M')
+            {
+                mohdOffset = i;
+                break;
+            }
+        }
+        Assert.True(mohdOffset >= 0);
+        int p = mohdOffset + 8;
+        uint nMaterials = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(p, 4));
+        uint nGroups = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(p + 4, 4));
+        uint nPortals = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(p + 8, 4));
+        uint nLights = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(p + 12, 4));
+        uint nDoodadNames = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(p + 16, 4));
+        uint nDoodadDefs = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(p + 20, 4));
+        uint nDoodadSets = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(p + 24, 4));
+        uint mohdFlags = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(p + 56, 4));
+
+        _output.WriteLine($"MOHD: nGroups={nGroups}, nPortals={nPortals}, mohdFlags=0x{mohdFlags:X8}");
+
+        // Find MOGI chunk
+        int mogiOffset = -1;
+        for (int i = 0; i + 8 <= root.Length; i++)
+        {
+            if (root[i] == 'I' && root[i + 1] == 'G' && root[i + 2] == 'O' && root[i + 3] == 'M')
+            {
+                mogiOffset = i;
+                break;
+            }
+        }
+        if (mogiOffset >= 0)
+        {
+            int gp = mogiOffset + 8;
+            for (int g = 0; g < nGroups; g++)
+            {
+                uint gFlags = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(gp + g * 32, 4));
+                float minX = BitConverter.ToSingle(root, gp + g * 32 + 4);
+                float minY = BitConverter.ToSingle(root, gp + g * 32 + 8);
+                float minZ = BitConverter.ToSingle(root, gp + g * 32 + 12);
+                float maxX = BitConverter.ToSingle(root, gp + g * 32 + 16);
+                float maxY = BitConverter.ToSingle(root, gp + g * 32 + 20);
+                float maxZ = BitConverter.ToSingle(root, gp + g * 32 + 24);
+                _output.WriteLine($"Group {g}: flags=0x{gFlags:X8} (IsExt={(gFlags & 0x10008) != 0}) bounds=({minX:F1},{minY:F1},{minZ:F1}) to ({maxX:F1},{maxY:F1},{maxZ:F1})");
+            }
+        }
+
+        // Find MOPR chunk
+        int moprOffset = -1;
+        for (int i = 0; i + 8 <= root.Length; i++)
+        {
+            if (root[i] == 'R' && root[i + 1] == 'P' && root[i + 2] == 'O' && root[i + 3] == 'M')
+            {
+                moprOffset = i;
+                break;
+            }
+        }
+        if (moprOffset >= 0)
+        {
+            int moprSize = BinaryPrimitives.ReadInt32LittleEndian(root.AsSpan(moprOffset + 4, 4));
+            int refCount = moprSize / 8;
+            _output.WriteLine($"MOPR refCount={refCount}");
+        }
+
+        // Find MOPT chunk
+        int moptOffset = -1;
+        for (int i = 0; i + 8 <= root.Length; i++)
+        {
+            if (root[i] == 'T' && root[i + 1] == 'P' && root[i + 2] == 'O' && root[i + 3] == 'M')
+            {
+                moptOffset = i;
+                break;
+            }
+        }
+        // Find MOPV chunk
+        int mopvOffset = -1;
+        for (int i = 0; i + 8 <= root.Length; i++)
+        {
+            if (root[i] == 'V' && root[i + 1] == 'P' && root[i + 2] == 'O' && root[i + 3] == 'M')
+            {
+                mopvOffset = i;
+                break;
+            }
+        }
+        if (moptOffset >= 0 && mopvOffset >= 0)
+        {
+            int optP = moptOffset + 8;
+            for (int pIdx = 0; pIdx < nPortals; pIdx++)
+            {
+                ushort startVert = BinaryPrimitives.ReadUInt16LittleEndian(root.AsSpan(optP + pIdx * 20, 2));
+                ushort vertCount = BinaryPrimitives.ReadUInt16LittleEndian(root.AsSpan(optP + pIdx * 20 + 2, 2));
+                float nx = BitConverter.ToSingle(root, optP + pIdx * 20 + 4);
+                float ny = BitConverter.ToSingle(root, optP + pIdx * 20 + 8);
+                float nz = BitConverter.ToSingle(root, optP + pIdx * 20 + 12);
+                float d = BitConverter.ToSingle(root, optP + pIdx * 20 + 16);
+                _output.WriteLine($"Portal {pIdx}: startVert={startVert}, vertCount={vertCount}, normal=({nx:F3},{ny:F3},{nz:F3}), d={d:F3}");
+            }
+
+            // Camera in screenshot: (-10925, 2244, 101)
+            // Placement in screenshot: pos=(-10742.34, 2196.55, 19.53), rot=(0, 0, 341.6 deg)
+            Vector3 camWorld = new(-10925f, 2244f, 101f);
+            Vector3 wmoPos = new(-10742.34f, 2196.55f, 19.53f);
+            float rotZRad = 341.6f * MathF.PI / 180f;
+            Matrix4x4 modelMatrix = Matrix4x4.CreateRotationZ(rotZRad) * Matrix4x4.CreateTranslation(wmoPos);
+            Matrix4x4.Invert(modelMatrix, out Matrix4x4 invModel);
+            Vector3 camLocal = Vector3.Transform(camWorld, invModel);
+            _output.WriteLine($"CamWorld: {camWorld} -> CamLocal: {camLocal}");
+
+            // Portal 0 plane test
+            Vector3 n0 = new(-0.983f, 0.182f, 0.001f);
+            float d0 = -24.663f;
+            float signedDist = Vector3.Dot(n0, camLocal) + d0;
+            _output.WriteLine($"Portal 0 signedDist={signedDist} (IsOnPortalSide with side=1: {signedDist >= -1.0f})");
+
+            // Read portal 0 vertices from MOPV
+            int mopvP = mopvOffset + 8;
+            var v0 = new List<Vector3>();
+            for (int vi = 0; vi < 4; vi++)
+            {
+                float vx = BitConverter.ToSingle(root, mopvP + vi * 12);
+                float vy = BitConverter.ToSingle(root, mopvP + vi * 12 + 4);
+                float vz = BitConverter.ToSingle(root, mopvP + vi * 12 + 8);
+                v0.Add(new Vector3(vx, vy, vz));
+                _output.WriteLine($"  Vert {vi}: ({vx:F2},{vy:F2},{vz:F2})");
+            }
+
+            var groups = new List<WowViewer.Core.Runtime.World.WmoPortalVisibilityGroup>();
+            int gp = mogiOffset + 8;
+            for (int g = 0; g < nGroups; g++)
+            {
+                uint gFlags = BinaryPrimitives.ReadUInt32LittleEndian(root.AsSpan(gp + g * 32, 4));
+                float minX = BitConverter.ToSingle(root, gp + g * 32 + 4);
+                float minY = BitConverter.ToSingle(root, gp + g * 32 + 8);
+                float minZ = BitConverter.ToSingle(root, gp + g * 32 + 12);
+                float maxX = BitConverter.ToSingle(root, gp + g * 32 + 16);
+                float maxY = BitConverter.ToSingle(root, gp + g * 32 + 20);
+                float maxZ = BitConverter.ToSingle(root, gp + g * 32 + 24);
+                groups.Add(new(g, gFlags, new(minX, minY, minZ), new(maxX, maxY, maxZ)));
+            }
+
+            var portals = new List<WowViewer.Core.Runtime.World.WmoPortalVisibilityPortal>();
+            int optP2 = moptOffset + 8;
+            int mopvP2 = mopvOffset + 8;
+            int rp2 = moprOffset + 8;
+            int moprSize2 = BinaryPrimitives.ReadInt32LittleEndian(root.AsSpan(moprOffset + 4, 4));
+            int refCount2 = moprSize2 / 8;
+            for (int pIdx = 0; pIdx < nPortals; pIdx++)
+            {
+                ushort startVert = BinaryPrimitives.ReadUInt16LittleEndian(root.AsSpan(optP2 + pIdx * 20, 2));
+                ushort vertCount = BinaryPrimitives.ReadUInt16LittleEndian(root.AsSpan(optP2 + pIdx * 20 + 2, 2));
+                float nx = BitConverter.ToSingle(root, optP2 + pIdx * 20 + 4);
+                float ny = BitConverter.ToSingle(root, optP2 + pIdx * 20 + 8);
+                float nz = BitConverter.ToSingle(root, optP2 + pIdx * 20 + 12);
+                float d = BitConverter.ToSingle(root, optP2 + pIdx * 20 + 16);
+                var verts = new List<Vector3>();
+                for (int vi = 0; vi < vertCount; vi++)
+                {
+                    float vx = BitConverter.ToSingle(root, mopvP2 + (startVert + vi) * 12);
+                    float vy = BitConverter.ToSingle(root, mopvP2 + (startVert + vi) * 12 + 4);
+                    float vz = BitConverter.ToSingle(root, mopvP2 + (startVert + vi) * 12 + 8);
+                    verts.Add(new(vx, vy, vz));
+                }
+                var refs = new List<WowViewer.Core.Runtime.World.WmoPortalVisibilityReference>();
+                for (int r = 0; r < refCount2; r++)
+                {
+                    ushort pIndex = BinaryPrimitives.ReadUInt16LittleEndian(root.AsSpan(rp2 + r * 8, 2));
+                    ushort gIndex = BinaryPrimitives.ReadUInt16LittleEndian(root.AsSpan(rp2 + r * 8 + 2, 2));
+                    short side = BinaryPrimitives.ReadInt16LittleEndian(root.AsSpan(rp2 + r * 8 + 4, 2));
+                    if (pIndex == pIdx)
+                        refs.Add(new(gIndex, side));
+                }
+                portals.Add(new(pIdx, verts, new(nx, ny, nz), d, refs));
+            }
+
+            // BFS simulation matching client RenderThruPortals
+            var clientVisible = new HashSet<int> { 5 };
+            var bfsQueue = new Queue<(int grp, int depth)>();
+            bfsQueue.Enqueue((5, 0));
+            while (bfsQueue.Count > 0)
+            {
+                var (curGrp, d) = bfsQueue.Dequeue();
+                if (d >= 8) continue;
+                foreach (var ptl in portals)
+                {
+                    var rSrc = ptl.References.FirstOrDefault(r => r.GroupIndex == curGrp);
+                    if (rSrc.GroupIndex != curGrp) continue;
+                    foreach (var rDst in ptl.References)
+                    {
+                        if (rDst.GroupIndex == curGrp) continue;
+                        if (!clientVisible.Contains(rDst.GroupIndex))
+                        {
+                            clientVisible.Add(rDst.GroupIndex);
+                            bfsQueue.Enqueue((rDst.GroupIndex, d + 1));
+                        }
+                    }
+                }
+            }
+            _output.WriteLine($"Client Portal Reachability from Group 5: {string.Join(", ", clientVisible.OrderBy(x => x))}");
+
+            // Full BFS with edge planes only
+            var edgeQueue = new Queue<(int grp, List<WowViewer.Core.Runtime.World.SceneGraph.WorldScenePortalPlane> planes, int depth)>();
+            var edgeAdmitted = new HashSet<int> { 5 };
+            edgeQueue.Enqueue((5, new List<WowViewer.Core.Runtime.World.SceneGraph.WorldScenePortalPlane>(), 0));
+
+            while (edgeQueue.Count > 0)
+            {
+                var (curGrp, curPlanes, depth) = edgeQueue.Dequeue();
+                if (depth >= 8) continue;
+
+                foreach (var ptl in portals)
+                {
+                    var rSrc = ptl.References.FirstOrDefault(r => r.GroupIndex == curGrp);
+                    if (rSrc.GroupIndex != curGrp) continue;
+
+                    foreach (var rDst in ptl.References)
+                    {
+                        if (rDst.GroupIndex == curGrp) continue;
+                        int dstGrp = rDst.GroupIndex;
+
+                        // Build edge planes from camLocal through ptl vertices
+                        var nextPlanes = new List<WowViewer.Core.Runtime.World.SceneGraph.WorldScenePortalPlane>(curPlanes);
+                        Vector3 center = Vector3.Zero;
+                        foreach (var v in ptl.Vertices) center += v;
+                        center /= ptl.Vertices.Count;
+
+                        for (int i = 0; i < ptl.Vertices.Count; i++)
+                        {
+                            Vector3 first = ptl.Vertices[i];
+                            Vector3 second = ptl.Vertices[(i + 1) % ptl.Vertices.Count];
+                            Vector3 edge = second - first;
+                            Vector3 edgeNormal = Vector3.Normalize(Vector3.Cross(edge, camLocal - first));
+                            float edgeD = -Vector3.Dot(edgeNormal, camLocal);
+                            if (Vector3.Dot(edgeNormal, center) + edgeD < 0f) { edgeNormal = -edgeNormal; edgeD = -edgeD; }
+                            nextPlanes.Add(new(edgeNormal, edgeD));
+                        }
+
+                        // Check if dstGrp bounds intersects the edge frustum
+                        var dstBounds = groups[dstGrp];
+                        var vol = WowViewer.Core.Runtime.World.SceneGraph.WorldScenePortalViewVolume.CreateRoot(nextPlanes);
+                        bool touches = vol.IntersectsBounds(dstBounds.BoundsMin, dstBounds.BoundsMax);
+                        if (touches)
+                        {
+                            if (edgeAdmitted.Add(dstGrp))
+                            {
+                                edgeQueue.Enqueue((dstGrp, nextPlanes, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+            _output.WriteLine($"Edge Planes Only Traversal Admitted Groups: {string.Join(", ", edgeAdmitted.OrderBy(x => x))}");
+
+            var evaluatorDecision = WowViewer.Core.Runtime.World.WmoPortalVisibilityEvaluator.Evaluate(
+                groups,
+                portals,
+                camLocal,
+                _ => true,
+                interiorMaximumDepth: 8,
+                exteriorMaximumDepth: 8);
+            _output.WriteLine($"WmoPortalVisibilityEvaluator (depth 8) Result: Mode={evaluatorDecision.Diagnostics.Mode}, Visited={evaluatorDecision.Diagnostics.VisitedGroupCount}, Tested={evaluatorDecision.Diagnostics.TestedPortalCount}, Rejected={evaluatorDecision.Diagnostics.RejectedPortalCount}, FallbackReason={evaluatorDecision.Diagnostics.FallbackReason}, Visible={string.Join(", ", evaluatorDecision.VisibleGroupIndices)}");
+
+            Assert.Equal(WowViewer.Core.Runtime.World.WmoPortalVisibilityMode.Exterior, evaluatorDecision.Diagnostics.Mode);
+            Assert.Contains(4, evaluatorDecision.VisibleGroupIndices);
+            Assert.Contains(5, evaluatorDecision.VisibleGroupIndices);
+            Assert.Contains(8, evaluatorDecision.VisibleGroupIndices);
+        }
+    }
 }
+

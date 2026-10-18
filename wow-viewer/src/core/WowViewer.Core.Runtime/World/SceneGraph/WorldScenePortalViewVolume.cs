@@ -158,10 +158,6 @@ public static class WorldScenePortalViewVolumeBuilder
             return Fallback(parent, "camera_on_portal_plane");
 
         List<WorldScenePortalPlane> childPlanes = [.. parent.Planes];
-        float sideSign = destinationSide < 0 ? -1f : 1f;
-        childPlanes.Add(new WorldScenePortalPlane(
-            portalNormal * sideSign,
-            portal.PlaneDistance * sideSign));
 
         for (int index = 0; index < portal.Vertices.Count; index++)
         {

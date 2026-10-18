@@ -1,6 +1,56 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-14
+Last updated: 2026-10-18
+
+## 2026-10-18 — Spec 274 Shipped, Performance Features Committed, WMO Portal Occlusion Quarantined
+
+- **Spec 274 Committed (`e667ec6a`)**:
+  - Implemented headless clean dataset export across 37 Zarr v3 map revisions (`v60_batch_export_clean_pairs.py`), clean pair dataset loader, lightweight domain translation model (`domain_translation_model.py`), and DXT1 parity validation.
+  - All 228 pytest tests pass in `data-harvester`.
+- **4.3.4 Format Flags Inspection Committed (`00667224`)**:
+  - Added `FormatFlagsDescriber.cs` and integrated into Terrain, Object, Model, and Standalone inspection panels.
+  - Unit tests pass 7/7.
+- **Renderer Performance Committed (`0ab72a43`)**:
+  - Optimized spatial M2 lighting collection, terrain streaming MCNK FourCC fast-path, and asset path resolver negative caching.
+- **WMO Visibility Status & Quarantine**:
+  - Aggressive portal occlusion culling in `WmoRenderer.UpdateRuntimeVisibility` caused interior rooms and floors to disappear (e.g. `duskwoodabandoned_humantwostory.wmo` missing ground floor through doorways).
+  - Restored fail-safe frustum-visible admission loop in `WmoRenderer.cs` to ensure geometry never disappears during navigation.
+  - Quarantined WMO portal culling for dedicated audit against 3.3.5 `MapObj.cpp` in a fresh chat.
+
+## 2026-10-17 — 3.3.5 Stormwind WMO Group Premature Unloading & False Interior Culling Fix
+
+- **Root Cause Diagnosed**:
+  - `FindContainingInteriorGroups` in `WmoPortalVisibilityDecision.cs` used `BoundsPadding = 2.0f` (6 feet in every direction) on interior room AABBs and ignored exterior portals. In tight city environments like Stormwind where buildings have angled walls, archways, and narrow streets, walking down the street placed the camera inside the expanded AABBs of adjacent interior shops/rooms.
+  - This falsely switched the WMO into `WmoPortalVisibilityMode.Interior`. Because the camera was actually outdoors on the street, depth-0 portal checks (`!IsOnPortalSide`) failed to traverse from the inside of the room outwards.
+  - In `WmoRenderer.cs`, `Mode == Interior` with `reachedExterior == false` culled ALL exterior groups (`flags & 0x8`), causing exterior facades, streets, archway walls, and roofs to vanish while leaving isolated second-floor interior planks floating in mid-air and exposing bare terrain hills.
+- **Client Ground-Truth Alignment (`H:\wowdecomps\3.3.5a\wowdecomp-main`)**:
+  - `CWorldScene::LocateViewer3()` (`World.cpp:2901-2950`) & `CMap::LocateViewerMapObjs()` (`Map.cpp:4033-4130`): native client casts a vertical downward ray; if the hit triangle belongs to an exterior group (`flags & 0x8`) or terrain, `exterior = 1` and `s_viewerMapObjDef = nullptr`, declaring the camera OUTDOORS.
+  - When outdoors, `CMapObjDef::CullMapObjDefGroupFromExterior()` (`MapObj.cpp:2598`) renders all exterior groups in the camera frustum and traverses exterior portals inward.
+- **Implemented Fix**:
+  - In `WmoPortalVisibilityDecision.cs`:
+    - Reduced `BoundsPadding` from `2.0f` to `0.1f` to prevent interior AABB bleeding through exterior walls into streets.
+    - Updated `FindContainingInteriorGroups` to test candidate interior groups against their exterior-connecting portals. If the camera is on the exterior (street) side of an exterior portal (`!IsOnPortalSide(portal, cameraLocalPosition, edge.SourceSide)`), the candidate is rejected as a false positive, keeping `Mode = Exterior`.
+  - In `WmoRenderer.cs`:
+    - Added `ContainsStrict` helper and fail-safe exterior group admission (`admitExterior = reachedExterior || !isStrictlyInsideSource`). If the camera is not strictly enclosed inside the candidate interior group's tight bounds, exterior groups (`flags & 0x8`) in the frustum are never culled.
+  - Added 3 regression unit tests in `WmoPortalVisibilityDecisionTests.cs`: `CameraOutsideExteriorPortalDoesNotTriggerInteriorMode`, `CameraInsideAabbOfInteriorRoomFailsToExteriorWhenOnExteriorSideOfPortal`, and `CameraInsideInteriorRoomStillCorrectlyTriggersInteriorMode`.
+  - All 16 `WmoPortalVisibilityDecisionTests` pass (100%); all 181 WMO tests pass (100%); full solution builds with 0 errors.
+
+## 2026-10-17 — 4.3.4 Client Ground-Truth Format Flags & Viewer Inspection Surfaces
+
+- Audited WoW 4.3.4 (build 15595) decompilation (`H:\wowdecomps\4.3.4\wowdecomp15595-w15595`) against client engine sources (`MapLoad.cpp`, `WorldScene.cpp`, `MapChunk.cpp`, `WorldView.cpp`, `MapObjRead.cpp`, `MapObjGroup.cpp`, `M2Model.cpp`):
+  - **WDT MPHD Flags**: Clarified bit `0x4` (gates `shaderType = 2` specular/envmap modern shader mode; not merely uncompressed alpha), `0x1` (Global WMO map), `0x2` (Vertex format 2), `0x8` (Sorted doodads/cull exterior), `0x10` (Vertex normals format 16), `0x20` (Flip ground winding).
+  - **WDT MAIN Flags**: Audited `0x1` (HasAdt) and `0x2` (Infinite Ocean generation plane `0x20`).
+  - **WMO Root & Group Flags**: Confirmed group `0x4000000` + `0x80` (`0x4000080`) antiportal occluder semantics (bsp cleared, zero render batches, excluded from rendering and collision, feeds occluder quads).
+  - **M2 Flags**: Confirmed `0x1` (Tilt normal), `0x3` (Surface basis), `0x80` (Cast shadows), and M2 material flags (`0x1` Unlit, `0x2` Unfogged, `0x4` TwoSided, `0x10` DepthWriteDisabled, `0x20` HitTestTransparent, `0x40` DisableShadowCasting, etc.).
+  - **MCNK Flags**: Decoded `0x40` (HasMccv) and `0x8000` (FixedAlpha uncompressed).
+- Created durable documentation: [`flags-ground-truth.md`](../test_data/native-research/4.3.4-decomp/flags-ground-truth.md).
+- Implemented `FormatFlagsDescriber.cs` in `WowViewer.Core.Runtime.World` providing clean bitmask decoders for all formats.
+- Surfaced decoded ground truth flags throughout the viewer UI:
+  - **Terrain Inspector**: Added WDT MPHD Flags, WDT MAIN tile flags, and MCNK chunk flags.
+  - **Object Inspector (`InspectorPayloadsService.cs`)**: Added WMO Root Flags and M2 Model Flags.
+  - **Model Inspector (`ModelInspectorPanelService.WmoGroups.cs` & `Sidebars.cs`)**: Added Group Flags to standalone WMO group controls, Root Flags to Selected WMO controls.
+  - **Standalone Model Loader (`StandaloneModelLoaderService.cs`)**: Added Root Flags and Model Flags to loaded model info strings.
+- Added comprehensive unit tests in `FormatFlagsDescriberTests.cs` (7/7 passed). Solution builds with 0 errors.
 
 ## 2026-10-15 UTC — Classic WC3 Model Alignment (4eb0da/war3-model) & Replaceable Texture Support
 

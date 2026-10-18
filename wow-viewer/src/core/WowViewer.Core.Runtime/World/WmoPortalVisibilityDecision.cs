@@ -14,7 +14,32 @@ public readonly record struct WmoPortalVisibilityGroup(
     int GroupIndex,
     uint Flags,
     Vector3 BoundsMin,
-    Vector3 BoundsMax);
+    Vector3 BoundsMax,
+    string? Name = null,
+    bool HasPortals = true)
+{
+    public const uint ExteriorFlag = 0x8;
+    public const uint UsesExteriorLightingFlag = 0x40;
+    public const uint IndoorFlag = 0x2000;
+    public const uint AlwaysVisibleFlag = 0x10000;
+    public const uint ShowSkyboxFlag = 0x40000;
+    public const uint AntiportalFlag = 0x4000080;
+    public const uint OccluderFlag = 0x4000000;
+
+    public bool IsAntiportal => (Flags & OccluderFlag) != 0
+        || (!string.IsNullOrEmpty(Name) && (
+            Name.Contains("antiportal", StringComparison.OrdinalIgnoreCase) ||
+            Name.Contains("anti_portal", StringComparison.OrdinalIgnoreCase) ||
+            Name.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
+            Name.Contains("invis_wall", StringComparison.OrdinalIgnoreCase) ||
+            Name.Contains("invisible", StringComparison.OrdinalIgnoreCase)));
+
+    public bool IsExterior => !IsAntiportal && (
+        (Flags & (ExteriorFlag | UsesExteriorLightingFlag | AlwaysVisibleFlag | ShowSkyboxFlag)) != 0
+        || (!HasPortals && (Flags & IndoorFlag) == 0));
+
+    public bool IsInterior => !IsExterior && !IsAntiportal;
+}
 
 public readonly record struct WmoPortalVisibilityReference(
     int GroupIndex,
@@ -68,7 +93,7 @@ public static class WmoPortalVisibilityEvaluator
 {
     private const uint ExteriorGroupFlag = 0x8;
     private const uint AlwaysVisibleGroupFlag = 0x10000;
-    private const float BoundsPadding = 32f;
+    private const float BoundsPadding = 0.1f;
     private const int DefaultMaxVisitsPerGroup = 4;
 
     public static WmoPortalVisibilityDecision Evaluate(
@@ -120,39 +145,54 @@ public static class WmoPortalVisibilityEvaluator
             BuildAdjacency(portalMap);
         if (adjacency.Count == 0)
             return Fallback(allGroups, diagnostics, "portal_edges_absent");
-        int sourceGroupIndex = FindContainingGroup(groupMap.Values, cameraLocalPosition);
-        bool isInterior = sourceGroupIndex >= 0;
+        List<int> containingInteriorGroups = FindContainingInteriorGroups(groupMap, portalMap, adjacency, cameraLocalPosition);
+        bool isInterior = containingInteriorGroups.Count > 0;
+        int sourceGroupIndex = isInterior ? containingInteriorGroups[0] : -1;
         diagnostics.Mode = isInterior ? WmoPortalVisibilityMode.Interior : WmoPortalVisibilityMode.Exterior;
         diagnostics.SourceGroupIndex = sourceGroupIndex;
 
         var visible = new HashSet<int>();
-        var queue = new Queue<(int GroupIndex, WorldScenePortalViewVolume Volume, int Depth)>();
+        var queue = new Queue<(int GroupIndex, int FromGroupIndex, WorldScenePortalViewVolume Volume, int Depth)>();
         var visits = new Dictionary<int, int>();
 
         WorldScenePortalViewVolume rootVolume = WorldScenePortalViewVolume.CreateRoot();
         if (isInterior)
         {
-            Enqueue(sourceGroupIndex, rootVolume, 0);
+            foreach (int groupIndex in containingInteriorGroups)
+            {
+                Enqueue(groupIndex, -1, rootVolume, 0);
+            }
         }
         else
         {
+            bool hasExteriorGroups = false;
             foreach (WmoPortalVisibilityGroup group in groupMap.Values.OrderBy(static group => group.GroupIndex))
             {
-                bool alwaysVisible = (group.Flags & AlwaysVisibleGroupFlag) != 0;
-                bool exterior = (group.Flags & ExteriorGroupFlag) != 0;
-                bool frustumVisible = isFrustumVisible?.Invoke(group.GroupIndex) ?? true;
-                if ((alwaysVisible || exterior) && (alwaysVisible || frustumVisible))
-                    Enqueue(group.GroupIndex, rootVolume, 0);
+                if (group.IsExterior)
+                {
+                    hasExteriorGroups = true;
+                    bool frustumVisible = isFrustumVisible?.Invoke(group.GroupIndex) ?? true;
+                    if (frustumVisible || (group.Flags & WmoPortalVisibilityGroup.AlwaysVisibleFlag) != 0)
+                        Enqueue(group.GroupIndex, -1, rootVolume, 0);
+                }
             }
 
             if (queue.Count == 0)
+            {
+                if (hasExteriorGroups)
+                {
+                    // Exterior groups exist, but none intersect the camera frustum.
+                    return new WmoPortalVisibilityDecision(Array.Empty<int>(), diagnostics with { AdmittedGroupCount = 0 });
+                }
+
                 return Fallback(allGroups, diagnostics, "exterior_seed_group_unknown");
+            }
         }
 
         int maximumDepth = isInterior ? interiorMaximumDepth : exteriorMaximumDepth;
         while (queue.Count > 0)
         {
-            (int groupIndex, WorldScenePortalViewVolume volume, int depth) = queue.Dequeue();
+            (int groupIndex, int fromGroupIndex, WorldScenePortalViewVolume volume, int depth) = queue.Dequeue();
             diagnostics.VisitedGroupCount++;
             diagnostics.MaxDepthReached = Math.Max(diagnostics.MaxDepthReached, depth);
             visible.Add(groupIndex);
@@ -164,6 +204,10 @@ public static class WmoPortalVisibilityEvaluator
 
             foreach ((int portalIndex, int destinationGroup, short sourceSide, short destinationSide) in edges)
             {
+                // Native 3.3.5 MapObj::RRenderThruPortals: skip portal if destination is fromGroupIdx (do not backtrack).
+                if (destinationGroup == fromGroupIndex)
+                    continue;
+
                 if (!portalMap.TryGetValue(portalIndex, out WmoPortalVisibilityPortal? portal)
                     || !groupMap.ContainsKey(destinationGroup))
                 {
@@ -211,8 +255,7 @@ public static class WmoPortalVisibilityEvaluator
                     return Fallback(allGroups, diagnostics, "portal_visit_capacity_reached");
                 }
 
-                visits[destinationGroup] = visits.GetValueOrDefault(destinationGroup) + 1;
-                Enqueue(destinationGroup, child.Volume, depth + 1);
+                Enqueue(destinationGroup, groupIndex, child.Volume, depth + 1);
             }
         }
 
@@ -220,7 +263,7 @@ public static class WmoPortalVisibilityEvaluator
             visible.OrderBy(static groupIndex => groupIndex).ToArray(),
             diagnostics with { AdmittedGroupCount = visible.Count });
 
-        void Enqueue(int groupIndex, WorldScenePortalViewVolume volume, int depth)
+        void Enqueue(int groupIndex, int fromGroupIndex, WorldScenePortalViewVolume volume, int depth)
         {
             if (!groupMap.ContainsKey(groupIndex))
                 return;
@@ -230,7 +273,7 @@ public static class WmoPortalVisibilityEvaluator
                 return;
 
             visits[groupIndex] = visitCount + 1;
-            queue.Enqueue((groupIndex, volume, depth));
+            queue.Enqueue((groupIndex, fromGroupIndex, volume, depth));
         }
     }
 
@@ -271,19 +314,57 @@ public static class WmoPortalVisibilityEvaluator
         short side)
     {
         float signedDistance = Vector3.Dot(portal.Normal, cameraPosition) + portal.PlaneDistance;
-        return side > 0 ? signedDistance >= -0.0001f : signedDistance <= 0.0001f;
+        return side > 0 ? signedDistance >= -1.0f : signedDistance <= 1.0f;
     }
 
-    private static int FindContainingGroup(
-        IEnumerable<WmoPortalVisibilityGroup> groups,
+    private static List<int> FindContainingInteriorGroups(
+        IReadOnlyDictionary<int, WmoPortalVisibilityGroup> groupMap,
+        IReadOnlyDictionary<int, WmoPortalVisibilityPortal> portalMap,
+        IReadOnlyDictionary<int, List<(int PortalIndex, int DestinationGroup, short SourceSide, short DestinationSide)>> adjacency,
         Vector3 cameraLocalPosition)
     {
-        return groups
-            .Where(group => ContainsExpanded(cameraLocalPosition, group.BoundsMin, group.BoundsMax))
-            .OrderBy(group => DistanceSquaredPointToAabb(cameraLocalPosition, group.BoundsMin, group.BoundsMax))
-            .ThenBy(static group => group.GroupIndex)
-            .Select(static group => group.GroupIndex)
-            .FirstOrDefault(-1);
+        var candidates = new List<int>();
+        foreach (WmoPortalVisibilityGroup group in groupMap.Values)
+        {
+            if (!group.IsInterior)
+                continue;
+
+            if (!ContainsExpanded(cameraLocalPosition, group.BoundsMin, group.BoundsMax))
+                continue;
+
+            // If this interior group connects to exterior groups via portals, verify that the
+            // camera is actually on the interior side of the portal. If the camera is on the
+            // exterior side of an exterior-facing portal, it is outdoors (e.g. standing in the
+            // street outside a shop window/door), not inside this room.
+            if (adjacency.TryGetValue(group.GroupIndex, out var edges))
+            {
+                bool isOutsideExteriorPortal = false;
+                foreach (var edge in edges)
+                {
+                    if (groupMap.TryGetValue(edge.DestinationGroup, out var destGroup) && destGroup.IsExterior)
+                    {
+                        if (portalMap.TryGetValue(edge.PortalIndex, out var portal))
+                        {
+                            if (!IsOnPortalSide(portal, cameraLocalPosition, edge.SourceSide))
+                            {
+                                isOutsideExteriorPortal = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (isOutsideExteriorPortal)
+                    continue;
+            }
+
+            candidates.Add(group.GroupIndex);
+        }
+
+        return candidates
+            .OrderBy(groupIndex => DistanceSquaredPointToAabb(cameraLocalPosition, groupMap[groupIndex].BoundsMin, groupMap[groupIndex].BoundsMax))
+            .ThenBy(static groupIndex => groupIndex)
+            .ToList();
     }
 
     private static bool TryBuildGroupMap(
