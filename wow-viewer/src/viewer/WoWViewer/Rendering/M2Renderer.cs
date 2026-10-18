@@ -164,6 +164,8 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
 
     public Vector3 BoundsMax => _runtimeModel?.BoundsMax ?? _legacyRenderer?.BoundsMax ?? Vector3.Zero;
 
+    public M2StaticRenderModel? RuntimeModel => _runtimeModel;
+
     public static float GlobalOpacity { get; set; } = 1.0f;
 
     public bool HasTransparentWorldPass

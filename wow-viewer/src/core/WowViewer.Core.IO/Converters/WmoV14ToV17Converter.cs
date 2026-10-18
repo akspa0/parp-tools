@@ -437,14 +437,29 @@ public class WmoV14ToV17Converter
         // 0x1 = has_bsp_tree (MOBN/MOBR) - We always generate BSP
         fixedFlags |= 0x1u; 
         
-        // INTERIOR heuristic: If NOT pure Exterior (0x8), then set Interior (0x2000)
-        // v14 often lacks 0x2000/0x8 explicitly set for what we consider "interior"
         bool isExterior = (fixedFlags & 0x8) != 0;
-        bool isInterior = !isExterior;
-        
-        if (isInterior)
+
+        bool isAntiportal = (fixedFlags & 0x4000000) != 0
+            || (!string.IsNullOrEmpty(group.Name) && (
+                group.Name.Contains("antiportal", StringComparison.OrdinalIgnoreCase) ||
+                group.Name.Contains("anti_portal", StringComparison.OrdinalIgnoreCase)));
+
+        if (isAntiportal)
         {
-            fixedFlags |= 0x2000u; // Set Interior flag
+            // Native 4.3.4 MapObjRead.cpp: antiportal groups receive 0x4000080 and are occluders, NOT interior rooms
+            fixedFlags |= 0x4000080u;
+            fixedFlags &= ~0x2000u;
+        }
+        else
+        {
+            // INTERIOR heuristic: If NOT pure Exterior (0x8), then set Interior (0x2000)
+            // v14 often lacks 0x2000/0x8 explicitly set for what we consider "interior"
+            bool isInterior = !isExterior;
+            
+            if (isInterior)
+            {
+                fixedFlags |= 0x2000u; // Set Interior flag
+            }
         }
         
         // MOCV - Set for ALL groups that have vertex colors

@@ -10,7 +10,7 @@ public sealed class WorldFramePassCoordinatorTests
         List<string> stages = new();
 
         bool continued = WorldFramePassCoordinator.Execute(
-            new WorldFramePassOptions(objectsVisible: true, wmosVisible: true, doodadsVisible: true),
+            new WorldFramePassOptions(objectsVisible: true, wmosVisible: true, doodadsVisible: true, wdlVisible: true),
             CreatePasses(stages));
 
         Assert.True(continued);
@@ -37,7 +37,7 @@ public sealed class WorldFramePassCoordinatorTests
         List<string> stages = new();
 
         bool continued = WorldFramePassCoordinator.Execute(
-            new WorldFramePassOptions(objectsVisible: false, wmosVisible: true, doodadsVisible: true),
+            new WorldFramePassOptions(objectsVisible: false, wmosVisible: true, doodadsVisible: true, wdlVisible: true),
             CreatePasses(stages));
 
         Assert.False(continued);
@@ -80,7 +80,7 @@ public sealed class WorldFramePassCoordinatorTests
         List<string> stages = new();
 
         bool continued = WorldFramePassCoordinator.Execute(
-            new WorldFramePassOptions(objectsVisible: true, wmosVisible: false, doodadsVisible: false),
+            new WorldFramePassOptions(objectsVisible: true, wmosVisible: false, doodadsVisible: false, wdlVisible: true),
             CreatePasses(stages));
 
         Assert.True(continued);

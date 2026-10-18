@@ -61,7 +61,9 @@ public sealed class SceneLightManagerTests
         Span<SceneLight> destination = new SceneLight[SceneLightManager.MaxShaderLights];
         Assert.Equal(0, manager.QueryAffecting(new Vector3(-5, -5, 0), new Vector3(5, 5, 10), destination));
         Assert.False(manager.AnyAffecting(new Vector3(-5, -5, 0), new Vector3(5, 5, 10)));
+        Assert.False(manager.IntersectsBounds(new Vector3(-5, -5, 0), new Vector3(5, 5, 10)));
         Assert.Equal(1, manager.QueryAffecting(new Vector3(-5, -5, 470), new Vector3(5, 5, 490), destination));
+        Assert.True(manager.IntersectsBounds(new Vector3(-5, -5, 470), new Vector3(5, 5, 490)));
     }
 
     [Fact]

@@ -30,7 +30,13 @@ internal sealed class WorldAssetPathResolver
     public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
 
     public bool TryGetCachedResolvedPath(string key, out string? cachedResolvedPath)
-        => _resolvedReadPathCache.TryGetValue(key, out cachedResolvedPath);
+    {
+        if (_resolvedReadPathCache.TryGetValue(key, out cachedResolvedPath))
+            return !string.IsNullOrEmpty(cachedResolvedPath);
+
+        cachedResolvedPath = null;
+        return false;
+    }
 
     public byte[]? ResolveAndReadFile(string key, out string? resolvedPath)
     {
@@ -40,6 +46,12 @@ internal sealed class WorldAssetPathResolver
         if (_resolvedReadPathCache.TryGetValue(key, out string? cachedResolvedPath))
         {
             _resolvedPathCacheHits++;
+            if (string.IsNullOrEmpty(cachedResolvedPath))
+            {
+                // Previously probed and verified to not exist
+                return null;
+            }
+
             data = TryReadCandidate(cachedResolvedPath, out resolvedPath);
         }
 
@@ -57,9 +69,14 @@ internal sealed class WorldAssetPathResolver
         }
 
         if (data != null && !string.IsNullOrWhiteSpace(resolvedPath))
+        {
             _resolvedReadPathCache[key] = NormalizeKey(resolvedPath);
+        }
         else if (data == null)
+        {
+            _resolvedReadPathCache[key] = string.Empty;
             _pathProbeMisses++;
+        }
 
         return data;
     }

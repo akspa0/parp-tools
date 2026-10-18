@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Numerics;
 using WowViewer.Core.Runtime.World.Terrain.Stratigraphy;
@@ -26,6 +27,7 @@ namespace WoWViewer.Terrain;
 public class StandardTerrainAdapter : ITerrainAdapter
 {
     private const uint WdtUsesGlobalMapObjFlag = 0x0001u;
+    private const uint McnkFourCc = (uint)('K' | ('N' << 8) | ('C' << 16) | ('M' << 24)); // "KNCM" little-endian
 
     private readonly Mcnk.ParseOptions _mcnkParseOptions;
     private readonly IDataSource _dataSource;
@@ -34,6 +36,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly List<int> _existingTiles;
     private readonly HashSet<int> _existingTileSet;
     private readonly uint _mphdFlags;
+    private readonly Dictionary<int, uint> _mainChunkTileFlags;
     private readonly bool _useBigAlpha;
     private readonly string? _buildVersion;
     private readonly AdtProfile _adtProfile;
@@ -116,7 +119,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Parse MPHD
         _mphdFlags = ReadMphdFlags(wdtBytes);
 
-        // Parse MAIN chunk to enumerate tiles
+        // Parse MAIN chunk to enumerate tiles and store tile flags
+        _mainChunkTileFlags = ReadMainChunkFlags(wdtBytes);
         _existingTiles = ResolveExistingTiles(wdtBytes);
         _existingTileSet = new HashSet<int>(_existingTiles);
         RegisterMaidTileAliases(wdtBytes);
@@ -178,6 +182,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 ViewerLog.Trace($"[Terrain] Tile[{di}]: rawIdx={idx}, tx={tx}(row), ty={ty}(col), file={fn}, exists={exists}");
         }
     }
+
+    public uint MphdFlags => _mphdFlags;
+
+    public uint GetMainTileFlags(int tileX, int tileY)
+        => _mainChunkTileFlags.TryGetValue(tileX * 64 + tileY, out uint f) ? f : 0;
 
     /// <summary>
     /// Spec 239: FileDataID-era WDTs name each tile's files in MAID (8 uint32 per MAIN slot: root, obj0,
@@ -1308,8 +1317,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 return textures;
             }
 
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"MCIN offset zero in ADT ({tileX},{tileY}); using top-level MCNK scan fallback with {mcnkOffsets.Count} chunks");
+            if (ViewerLog.Verbose)
+            {
+                ViewerLog.Trace(
+                    $"[Terrain] MCIN offset zero in ADT ({tileX},{tileY}); using top-level MCNK scan fallback with {mcnkOffsets.Count} chunks");
+            }
         }
         else
         {
@@ -1389,8 +1401,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     continue;
                 }
 
-                string sig = Encoding.ASCII.GetString(adtBytes, off, 4);
-                if (sig != "KNCM") // MCNK reversed
+                uint sig = BinaryPrimitives.ReadUInt32LittleEndian(adtBytes.AsSpan(off, 4));
+                if (sig != McnkFourCc) // "KNCM" in little-endian
                 {
                     invalidSignatureCount++;
                     continue;
@@ -1744,8 +1756,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             if (off <= 0 || off + 8 > adtBytes.Length)
                 continue;
 
-            string sig = Encoding.ASCII.GetString(adtBytes, off, 4);
-            if (sig != "KNCM")
+            uint sig = BinaryPrimitives.ReadUInt32LittleEndian(adtBytes.AsSpan(off, 4));
+            if (sig != McnkFourCc)
                 continue;
 
             int mcnkSize = BitConverter.ToInt32(adtBytes, off + 4);
@@ -1783,7 +1795,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         while (position + 8 <= adtBytes.Length)
         {
-            string signature = Encoding.ASCII.GetString(adtBytes, position, 4);
+            uint signature = BinaryPrimitives.ReadUInt32LittleEndian(adtBytes.AsSpan(position, 4));
             int size = BitConverter.ToInt32(adtBytes, position + 4);
             if (size < 0)
             {
@@ -1791,7 +1803,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 break;
             }
 
-            if (signature == "KNCM")
+            if (signature == McnkFourCc)
                 offsets.Add(position);
 
             // Native 5.0.1 walks chunks as next = payload + size with no alignment padding
@@ -3438,6 +3450,31 @@ public class StandardTerrainAdapter : ITerrainAdapter
             }
         }
         return tiles;
+    }
+
+    private static Dictionary<int, uint> ReadMainChunkFlags(byte[] wdtBytes)
+    {
+        var map = new Dictionary<int, uint>();
+        int mainOff = FindChunk(wdtBytes, "MAIN");
+        if (mainOff < 0) return map;
+
+        int mainSize = BitConverter.ToInt32(wdtBytes, mainOff + 4);
+        int mainData = mainOff + 8;
+
+        if (mainSize < 64 * 64 * 8) return map;
+
+        for (int i = 0; i < 64 * 64; i++)
+        {
+            int entryOff = mainData + (i * 8);
+            if (entryOff + 8 > wdtBytes.Length) break;
+
+            uint flags = BitConverter.ToUInt32(wdtBytes, entryOff);
+            if (flags != 0)
+            {
+                map[i] = flags;
+            }
+        }
+        return map;
     }
 
     /// <summary>

@@ -2296,7 +2296,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         return _hideTerrainOccludedMdx && _terrainQueries.IsMdxFullyOccludedByTerrain(inst);
     }
 
-    private void RebuildSceneLights(WorldRenderFrame frame)
+    private void RebuildSceneLights(WorldRenderFrame frame, Vector3 cameraPos, float fogEnd)
     {
         _sceneLightManager.Clear();
         _sceneLightCollectScratch.Clear();
@@ -2313,17 +2313,70 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
             renderer?.CollectSceneLights(visible.Instance.Transform, _sceneLightCollectScratch, visible.Instance.ModelKey);
         }
 
-        for (int i = 0; i < _mdxInstances.Count; i++)
+        float maxLightDistance = fogEnd + SceneLightManager.FrustumCullMargin;
+        float maxLightDistanceSq = maxLightDistance * maxLightDistance;
+
+        if (_tileMdxInstances.Count > 0)
         {
-            ObjectInstance instance = _mdxInstances[i];
-            if (ShouldHideVisibleMdxInstance(instance))
-                continue;
+            foreach (var pair in _tileMdxInstances)
+            {
+                if (!IsActiveObjectTile(pair.Key))
+                    continue;
 
-            IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, instance.ModelKey);
-            if (renderer is not ISceneLightEmitter emitter)
-                continue;
+                List<ObjectInstance> tileInstances = pair.Value;
+                for (int i = 0; i < tileInstances.Count; i++)
+                {
+                    ObjectInstance instance = tileInstances[i];
+                    if (ShouldHideVisibleMdxInstance(instance))
+                        continue;
 
-            emitter.CollectSceneLights(instance.Transform, _sceneLightCollectScratch, instance.ModelKey);
+                    Vector3 instPos = instance.Transform.Translation;
+                    if (Vector3.DistanceSquared(instPos, cameraPos) > maxLightDistanceSq)
+                        continue;
+
+                    IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, instance.ModelKey);
+                    if (renderer is not ISceneLightEmitter emitter)
+                        continue;
+
+                    emitter.CollectSceneLights(instance.Transform, _sceneLightCollectScratch, instance.ModelKey);
+                }
+            }
+
+            for (int i = 0; i < _externalMdxInstances.Count; i++)
+            {
+                ObjectInstance instance = _externalMdxInstances[i];
+                if (ShouldHideVisibleMdxInstance(instance))
+                    continue;
+
+                Vector3 instPos = instance.Transform.Translation;
+                if (Vector3.DistanceSquared(instPos, cameraPos) > maxLightDistanceSq)
+                    continue;
+
+                IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, instance.ModelKey);
+                if (renderer is not ISceneLightEmitter emitter)
+                    continue;
+
+                emitter.CollectSceneLights(instance.Transform, _sceneLightCollectScratch, instance.ModelKey);
+            }
+        }
+        else
+        {
+            for (int i = 0; i < _mdxInstances.Count; i++)
+            {
+                ObjectInstance instance = _mdxInstances[i];
+                if (ShouldHideVisibleMdxInstance(instance))
+                    continue;
+
+                Vector3 instPos = instance.Transform.Translation;
+                if (Vector3.DistanceSquared(instPos, cameraPos) > maxLightDistanceSq)
+                    continue;
+
+                IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, instance.ModelKey);
+                if (renderer is not ISceneLightEmitter emitter)
+                    continue;
+
+                emitter.CollectSceneLights(instance.Transform, _sceneLightCollectScratch, instance.ModelKey);
+            }
         }
 
         // Epic 249 R-10c: a light whose sphere lies wholly outside the view (side + near planes)
@@ -3144,7 +3197,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                 {
                     frame.WmoVisibilityMs = MeasureDurationMs(() => CollectVisibleWmoInstances(frame, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians));
                     FlushPendingVisibleWmoLoads();
-                    RebuildSceneLights(frame);
+                    RebuildSceneLights(frame, cameraPos, fogEnd);
 
                     // State is constant for this pass; set once to reduce per-instance churn and
                     // keep WMO submission running through one explicit visible-instance bucket.
@@ -3168,16 +3221,14 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                                 _worldFrameWmoRenderers.Add(renderer);
 
                             // Local scene lights are selected against each placement's world bounds.
-                            // Keep WMO shell instancing disabled while any scene light is active rather
-                            // than uploading one approximated light set for every placement in a batch.
-                            // Epic 249 R-10 amendment 2026-09-27: the per-placement gate (R-10b) was
-                            // reverted after the operator reported modern-data FPS below 1; the
-                            // instanced shell skips group culling and draws every doodad in range, so
-                            // it is not a win for unlit placements. reachedByLight stays false.
-                            bool canBatch = _sceneLightManager.Count == 0
-                                && renderer is IGpuInstancedWmoRenderer gpuRenderer
+                            // Placements reached by a local scene light fall back to individual unbatched
+                            // draws so they receive their unique local point lights. Placements not touched
+                            // by any scene light are GPU instanced as long as the renderer supports it.
+                            bool canBatch = renderer is IGpuInstancedWmoRenderer gpuRenderer
                                 && gpuRenderer.SupportsGpuInstancedOpaque;
-                            bool reachedByLight = false;
+                            bool reachedByLight = canBatch && _sceneLightManager.IntersectsBounds(
+                                visible.Instance.BoundsMin,
+                                visible.Instance.BoundsMax);
 
                             wmoBatchCandidates.Add(new(
                                 visible.Instance.ModelKey,

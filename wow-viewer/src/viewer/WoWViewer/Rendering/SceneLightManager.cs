@@ -204,6 +204,11 @@ public sealed class SceneLightManager
         return false;
     }
 
+    /// <summary>
+    /// Whether any active scene light intersects the specified bounds (Spec 273 / T010).
+    /// </summary>
+    public bool IntersectsBounds(Vector3 boundsMin, Vector3 boundsMax) => AnyAffecting(boundsMin, boundsMax);
+
     // Cached so the per-query sort does not allocate a delegate.
     private static readonly Comparison<(int Index, float DistanceSq)> NearestThenInsertionOrderComparison = NearestThenInsertionOrder;
 

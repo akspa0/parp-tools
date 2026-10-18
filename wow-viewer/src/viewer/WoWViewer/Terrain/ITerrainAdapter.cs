@@ -46,6 +46,12 @@ public interface ITerrainAdapter
     /// <summary>Chunk world positions for diagnostics.</summary>
     List<Vector3> LastLoadedChunkPositions { get; }
 
+    /// <summary>WDT MPHD header flags (SMMapHeader.m_flags).</summary>
+    uint MphdFlags => 0;
+
+    /// <summary>WDT MAIN tile chunk flags (SMAreaInfo.m_flags: 0x1=HasAdt, 0x2=InfiniteOcean).</summary>
+    uint GetMainTileFlags(int tileX, int tileY) => 0;
+
     /// <summary>
     /// Optional secondary overlay map name for phased terrain.
     /// </summary>
