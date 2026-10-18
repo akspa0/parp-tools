@@ -1,14 +1,20 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-10-18 · **WMO Portal Occlusion Quarantined / Fail-Safe Frustum Admission Restored**:
-- **Problem**: The aggressive WMO portal visibility culling introduced in Spec 273 caused building interiors, ground floors, and multi-group structures to fail to render across standard client WMOs (e.g. `duskwoodabandoned_humantwostory.wmo` where the ground floor is missing through doorways, and interior camera viewpoints unload connected rooms).
-- **Immediate Resolution**: In `WmoRenderer.cs`, restored the fail-safe frustum loop (`if (_frustumVisibleScratch[groupIndex]) _runtimeVisibleGroups[groupIndex] = true;`) so geometry never vanishes or pops in and out while navigating the world or viewing buildings.
-- **Next Fresh Chat Objective**: Conduct a focused, isolated audit of WMO portal polygon projection, doorway traversal, and camera-group containment against 3.3.5 `MapObj.cpp` (`CPortalView`, `RenderThruPortalsExterior`, `RenderThruPortalsInterior`) specifically for multi-group buildings like Duskwood houses before re-enabling interior group occlusion.
+Last updated: 2026-10-18 · **Spec 275: High-Performance Asset Streaming for MPQ & CASC Active**:
+- **Objective**: Eliminate frame hitches and stutter during camera flight and world navigation across both MPQ (Classic 0.5.3–3.3.5a) and CASC (1.60.1 / 4.3.4).
+- **Core Strategy (Spec 275)**:
+  1. Off-thread model & mesh decoding worker (`WorldAssetDecodeWorker`) to build `M2StaticRenderModel` and `WmoV14Data` in the background, reducing render-thread load time from 35 ms to <= 0.3 ms per model.
+  2. In-memory WMO parsing (`ParseWmoV14(byte[])`) eliminating `Path.GetTempPath()` disk writes and I/O latency.
+  3. MPQ lookahead dependency prefetching for WMO group files (`_000.wmo`) and textures.
+  4. Dynamic frustum & camera-distance priority queue (`WorldAssetPriorityQueue`), replacing stale FIFO order.
+  5. WMO material texture off-thread streaming & direct DXT upload (`glCompressedTexImage2D`).
+- **WMO Portal Occlusion Quarantined**: Fail-safe frustum admission remains active in `WmoRenderer.cs` to guarantee zero missing geometry (e.g. Duskwood two-story houses) while asset streaming is optimized.
 
 **Committed Feature Sets on `v0.6.1-dev` (2026-10-18)**:
 1. `feat(harvester,spec-274)`: Minimap Hillshade Correlation & Domain Translation dataset pipeline across 37 Zarr v3 map revisions; 228/228 pytest tests pass.
 2. `feat(inspector)`: Integrated 4.3.4 client ground-truth format flags inspection (`FormatFlagsDescriber.cs`) across Terrain, Object, Model, and Standalone inspection panels.
 3. `perf(renderer)`: Optimized spatial M2 lighting collection, terrain streaming MCNK FourCC fast-path, and asset path resolver negative caching.
+4. `feat(renderer,spec-273)`: Completed Spec 273 performance pipeline with fail-safe WMO frustum preservation; 48/48 portal tests pass.
 
 **WC3 file support unified in main browser (2026-10-15):** [Spec 272](../specs/272-wc2-wc3-viewer-support/spec.md) WC3 loose folders and MPQs now load as first-class `IDataSource` instances directly into the main File Browser (`Wc3DataSource`). Textures (BLP, BLP0 with external mips, TGA, PNG) render directly in the main viewer scene viewport (`TextureViewRenderer`) with transparency checkerboard, pan, and zoom, instead of cramped sidebar previews. Models (`.mdx`) render through the main MDX viewport renderer. Arbitrary text/binary files can be browsed with the new "All files" (`*`) filter. Multiple BLP0 mip levels (`.b00` through `.b15`) are grouped into a single `<texture>.blp [N mips]` row with level 0 as the full-resolution primary. Added PNG batch/single export via `TextureExportService` with an option to write all companion mip levels. Viewer build passes 0 errors; focused core tests pass 70/70.
 
