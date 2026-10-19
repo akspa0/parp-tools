@@ -154,7 +154,13 @@ public sealed class ExternalSpawnLayer
                     * Matrix4x4.CreateTranslation(pos);
 
                 Vector3 localMin, localMax, worldMin, worldMax;
-                if (_assets.TryGetWmoPlacementBounds(key, out localMin, out localMax))
+                if (_assets.TryGetCachedWmoMeshSummary(key, out var summary))
+                {
+                    localMin = summary.BoundsMin;
+                    localMax = summary.BoundsMax;
+                    TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
+                }
+                else if (_assets.TryGetWmoBounds(key, out localMin, out localMax))
                 {
                     TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
                 }

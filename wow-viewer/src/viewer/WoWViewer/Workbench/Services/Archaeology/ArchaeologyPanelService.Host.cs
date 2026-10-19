@@ -82,6 +82,7 @@ internal sealed partial class ArchaeologyPanelService
     private DataSourceSessionService _dataSourceSession => _host.DataSourceSession;
     private ref string? _dbcBuild => ref _host.DbcBuild;
     private ref DBCD.Providers.IDBCProvider? _dbcProvider => ref _host.DbcProvider;
+    private ref int _currentMapId => ref _host.CurrentMapId;
     private ref string? _dbdDir => ref _host.DbdDir;
     private ref List<MapDefinition> _discoveredMaps => ref _host.DiscoveredMaps;
     private ref EditorSession? _editorSession => ref _host.EditorSession;

@@ -418,7 +418,7 @@ public class WorldAssetManager : IDisposable
     {
         normalizedKey = NormalizeKey(normalizedKey);
 
-        if (TryGetWmoMeshSummary(normalizedKey, out var summary))
+        if (TryGetCachedWmoMeshSummary(normalizedKey, out var summary))
         {
             boundsMin = summary.BoundsMin;
             boundsMax = summary.BoundsMax;

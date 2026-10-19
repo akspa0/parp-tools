@@ -11,6 +11,7 @@ using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.Passes;
 using WowViewer.Core.Runtime.World.Visibility;
 using WoWViewer.Population;
+using WowViewer.Core.Archaeology;
 using WoWViewer.UI;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using static WoWViewer.ViewerApp;
@@ -108,6 +109,91 @@ internal sealed partial class ArchaeologyPanelService
             int visibleMax = configuredMax >= minUniqueId ? Math.Max(configuredMin, configuredMax) : maxUniqueId;
 
             bool changed = false;
+
+            // 1. Interactive Time Machine Chronological Scrubber
+            ImGui.SeparatorText("Chronological Time Machine");
+            float currentPct = maxUniqueId > minUniqueId
+                ? (float)(visibleMax - minUniqueId) / (maxUniqueId - minUniqueId) * 100f
+                : 100f;
+
+            if (ImGui.SliderFloat("Scrubber (%)", ref currentPct, 0f, 100f, "%.1f%%"))
+            {
+                visibleMax = (int)Math.Round(minUniqueId + (maxUniqueId - minUniqueId) * (currentPct / 100f));
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
+                if (_archeologyPlaybackActive)
+                    StopArcheologyPlayback(restoreRange: false);
+                changed = true;
+            }
+
+            // 2. Active Map Stratigraphy Profile & Era Determination
+            string currentMapName = _dataSourceSession.GetCurrentSessionMapName() ?? "Map";
+            MapStratigraphyProfile profile = _worldScene.ObjectFilters.GetMapStratigraphyProfile(_currentMapId, currentMapName);
+
+            string activeEra = "Foundation / Early Placements";
+            for (int i = 0; i < profile.Layers.Count; i++)
+            {
+                var layer = profile.Layers[i];
+                if (visibleMax >= layer.StartId && visibleMax <= layer.EndId)
+                {
+                    activeEra = $"Era #{layer.LayerNumber}: UIDs {layer.StartId}..{layer.EndId} ({layer.TotalCount} items, {layer.EraLabel ?? "Work Pass"})";
+                    break;
+                }
+            }
+            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), $"Active Era: {activeEra}");
+
+            // 3. Quantile Milestones
+            ImGui.TextDisabled($"Milestones: p10={(int)profile.P10} | p25={(int)profile.P25} | Median={(int)profile.Median} | p75={(int)profile.P75} | p90={(int)profile.P90} | Max={maxUniqueId}");
+            if (ImGui.SmallButton($"p10 ({(int)profile.P10})"))
+            {
+                visibleMax = (int)profile.P10;
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
+                changed = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"p25 ({(int)profile.P25})"))
+            {
+                visibleMax = (int)profile.P25;
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
+                changed = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"Median ({(int)profile.Median})"))
+            {
+                visibleMax = (int)profile.Median;
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
+                changed = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"p75 ({(int)profile.P75})"))
+            {
+                visibleMax = (int)profile.P75;
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
+                changed = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"p90 ({(int)profile.P90})"))
+            {
+                visibleMax = (int)profile.P90;
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
+                changed = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("100%"))
+            {
+                visibleMax = maxUniqueId;
+                _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
+                _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
+                changed = true;
+            }
+
+            // 4. Manual range sliders
+            ImGui.Spacing();
             if (ImGui.SliderInt("Visible Range Start", ref visibleMin, minUniqueId, maxUniqueId))
             {
                 _worldScene.ObjectFilters.SetUniqueIdFilterRange(visibleMin, visibleMax);
@@ -137,6 +223,24 @@ internal sealed partial class ArchaeologyPanelService
                 ? $"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Visible range: {visibleMin}..{visibleMax}"
                 : $"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Selected visible range: {visibleMin}..{visibleMax} (filter off)";
             ImGui.TextDisabled(status);
+
+            // 5. Divergence Status for known overworld forks (e.g. Map 451 development)
+            if (_currentMapId == 451 || string.Equals(currentMapName, "development", StringComparison.OrdinalIgnoreCase))
+            {
+                ImGui.Spacing();
+                ImGui.SeparatorText("Overworld Fork Analysis (Map 451 / development)");
+                const int devDivergenceCutoff = 2950;
+                if (visibleMax <= devDivergenceCutoff)
+                {
+                    ImGui.TextColored(new Vector4(0.4f, 0.9f, 0.4f, 1f), $"State: Inherited Overworld Foundation (UID <= {devDivergenceCutoff})");
+                    ImGui.TextDisabled("Placements in this range were copied directly from Map 0 (Azeroth) alpha tiles.");
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.75f, 0.2f, 1f), $"State: Post-Fork Development Content (UID > {devDivergenceCutoff})");
+                    ImGui.TextDisabled("Placements in this range were authored after branching into the testing grounds.");
+                }
+            }
         }
         else
         {
@@ -157,35 +261,56 @@ internal sealed partial class ArchaeologyPanelService
         ImGui.TextDisabled("Detected layers (consecutive gap analysis of uniqueId sequence).");
         ImGui.Spacing();
 
-        IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene!.ObjectFilters.GetUniqueIdArchaeologyLayers();
-        if (detectedLayers.Count == 0)
+        if (_worldScene == null)
+            return;
+
+        string currentMapName = _dataSourceSession.GetCurrentSessionMapName() ?? "Map";
+        MapStratigraphyProfile profile = _worldScene.ObjectFilters.GetMapStratigraphyProfile(_currentMapId, currentMapName);
+
+        if (profile.Layers.Count == 0)
         {
             ImGui.TextDisabled("No UniqueId data available for the current scope.");
             return;
         }
 
-        if (ImGui.BeginTable("##UniqueIdArcheologyLayers", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollX))
+        ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), $"Stratigraphy: {profile.DistinctUniqueIds} distinct IDs across {profile.Layers.Count} detected layers");
+        ImGui.TextDisabled($"Quantiles: p10={profile.P10:F0} | p25={profile.P25:F0} | Median={profile.Median:F0} | p75={profile.P75:F0} | p90={profile.P90:F0}");
+        ImGui.Spacing();
+
+        if (ImGui.BeginTable("##UniqueIdArcheologyLayers", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollX))
         {
-            ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthFixed, 64f);
-            ImGui.TableSetupColumn("Range", ImGuiTableColumnFlags.WidthFixed, 180f);
+            ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthFixed, 60f);
+            ImGui.TableSetupColumn("Range", ImGuiTableColumnFlags.WidthFixed, 150f);
             ImGui.TableSetupColumn("Summary", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 80f);
+            ImGui.TableSetupColumn("Era", ImGuiTableColumnFlags.WidthFixed, 100f);
+            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 140f);
             ImGui.TableHeadersRow();
 
-            for (int i = 0; i < detectedLayers.Count; i++)
+            for (int i = 0; i < profile.Layers.Count; i++)
             {
-                UniqueIdArchaeologyLayer layer = detectedLayers[i];
+                UniqueIdLayerSummary layer = profile.Layers[i];
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted($"#{layer.LayerNumber}");
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted($"{layer.MinUniqueId}..{layer.MaxUniqueId}");
+                ImGui.TextUnformatted($"{layer.StartId}..{layer.EndId}");
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted($"{layer.PlacementCount} placements ({layer.WmoCount} WMO, {layer.MdxCount} M2)");
+                string details = layer.CreatureCount > 0 || layer.GameObjectCount > 0
+                    ? $"{layer.TotalCount} (WMO:{layer.WmoCount}, M2:{layer.M2Count}, NPC:{layer.CreatureCount}, GO:{layer.GameObjectCount})"
+                    : $"{layer.TotalCount} placements ({layer.WmoCount} WMO, {layer.M2Count} M2)";
+                ImGui.TextUnformatted(details);
                 ImGui.TableNextColumn();
-                if (ImGui.SmallButton($"Show##uid_layer_{i}"))
+                ImGui.TextUnformatted(layer.EraLabel ?? "Work Pass");
+                ImGui.TableNextColumn();
+                if (ImGui.SmallButton($"Solo##layer_{i}"))
                 {
-                    _worldScene.ObjectFilters.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
+                    _worldScene.ObjectFilters.SetUniqueIdFilterRange(layer.StartId, layer.EndId);
+                    _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
+                }
+                ImGui.SameLine();
+                if (ImGui.SmallButton($"Scrub To##layer_{i}"))
+                {
+                    _worldScene.ObjectFilters.SetUniqueIdFilterRange(profile.MinUniqueId, layer.EndId);
                     _worldScene.ObjectFilters.UniqueIdFilterEnabled = true;
                 }
             }

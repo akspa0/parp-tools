@@ -9,6 +9,7 @@ using WoWViewer.Population;
 using WoWViewer.Rendering;
 using WoWViewer.Audio;
 using WowViewer.Core.Audio;
+using WowViewer.Core.Archaeology;
 using WowViewer.Core.Maps;
 using Silk.NET.OpenGL;
 using CorePm4AxisConvention = WowViewer.Core.PM4.Models.Pm4AxisConvention;
@@ -249,6 +250,58 @@ public sealed class SceneObjectFilters
             layers.Add(new UniqueIdArchaeologyLayer(layerNumber, layerStart, layerEnd, placementCount, wmoCount, mdxCount));
 
         return layers;
+    }
+
+    public IReadOnlyList<UniqueIdRecord> GetScopedUniqueIdRecords(int mapId = 0)
+    {
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        var records = new List<UniqueIdRecord>(_mdxInstances.Count + _wmoInstances.Count);
+        AccumulateUniqueIdRecords(_wmoInstances, PlacementOriginKind.Wmo, mapId, records);
+        AccumulateUniqueIdRecords(_mdxInstances, PlacementOriginKind.M2, mapId, records);
+        return records;
+    }
+
+    public MapStratigraphyProfile GetMapStratigraphyProfile(int mapId, string mapName)
+    {
+        var records = GetScopedUniqueIdRecords(mapId);
+        return UniqueIdStratigraphyEngine.ComputeProfile(mapId, mapName, records, null, UniqueIdLayerGapThreshold);
+    }
+
+    private void AccumulateUniqueIdRecords(
+        IReadOnlyList<ObjectInstance> instances,
+        PlacementOriginKind defaultKind,
+        int mapId,
+        List<UniqueIdRecord> records)
+    {
+        for (int i = 0; i < instances.Count; i++)
+        {
+            ObjectInstance inst = instances[i];
+            if (inst.UniqueId <= 0 || !MatchesUniqueIdFilterScope(inst))
+                continue;
+
+            PlacementOriginKind kind = defaultKind;
+            if (string.Equals(inst.AssetKind, "Creature", StringComparison.OrdinalIgnoreCase))
+                kind = PlacementOriginKind.Creature;
+            else if (string.Equals(inst.AssetKind, "GameObject", StringComparison.OrdinalIgnoreCase))
+                kind = PlacementOriginKind.GameObject;
+
+            records.Add(new UniqueIdRecord
+            {
+                UniqueId = inst.UniqueId,
+                ModelPath = inst.ModelPath ?? inst.ModelName ?? "",
+                DisplayName = inst.DisplayName,
+                Position = inst.PlacementPosition,
+                Rotation = inst.PlacementRotation,
+                Scale = inst.PlacementScale,
+                Kind = kind,
+                MapId = mapId,
+                TileX = inst.TileX,
+                TileY = inst.TileY,
+                HasTileCoordinates = inst.HasTileCoordinate
+            });
+        }
     }
 
     private void AccumulateUniqueIdFilterRange(

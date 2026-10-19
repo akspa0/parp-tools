@@ -171,7 +171,8 @@ internal sealed class WorldAssetPathResolver
     {
         string extension = Path.GetExtension(path);
         return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
-            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase);
+            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".m2", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsModelRequest(string path)
@@ -184,6 +185,14 @@ internal sealed class WorldAssetPathResolver
 
     private static IEnumerable<string> EnumeratePreferredClassicModelPaths(string normalizedPath)
     {
+        if (normalizedPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return normalizedPath[..^3] + ".mdx";
+            yield return normalizedPath[..^3] + ".mdl";
+            yield return normalizedPath;
+            yield break;
+        }
+
         yield return normalizedPath;
 
         foreach (string alt in GetAlternateModelPathsStatic(normalizedPath))

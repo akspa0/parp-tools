@@ -17,7 +17,7 @@ public sealed class WorldSpawnRecord
 
     public string Name { get; init; } = "";
     public string? Subname { get; init; }
-    public string? ModelPath { get; init; }
+    public string? ModelPath { get; set; }
 
     public float Scale { get; init; } = 1.0f;
     public float DisplayScale { get; init; } = 1.0f;

@@ -83,7 +83,7 @@ internal sealed class SqlSpawnStreamingService
 
     private PopulationDatasetMode _datasetMode = PopulationDatasetMode.Auto;
     private string _activeVersionDetected = "3.3.5a";
-    private bool _sqlAutoLoadOnMapChange = true;
+    private bool _sqlAutoLoadOnMapChange = false;
     private string _sqlAlphaCoreRoot = "";
     private bool _sqlIncludeCreatures = true;
     private bool _sqlIncludeGameObjects = true;
@@ -97,6 +97,8 @@ internal sealed class SqlSpawnStreamingService
     private List<WorldSpawnRecord>? _sqlMapSpawnsCache;
     private int _sqlMapSpawnsCacheMapId = -1;
     private (int tileX, int tileY)? _sqlLastCameraTile;
+    private bool _isLoadingSpawns;
+    private readonly HashSet<int> _lastAppliedSpawnIds = new();
 
     internal string DetectActiveClientVersion()
     {
@@ -333,6 +335,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
         _sqlMapSpawnsCacheMapId = -1;
         _sqlLastCameraTile = null;
         _sqlForceStreamRefresh = false;
+        _lastAppliedSpawnIds.Clear();
         if (clearSceneSpawns && _worldScene != null)
             _worldScene.ExternalSpawns.ClearExternalSpawns();
     }
@@ -357,44 +360,72 @@ var seq = animator.Sequences[animator.CurrentSequence];
             return;
         }
 
-        try
+        if (_isLoadingSpawns)
+            return;
+
+        int targetMapId = _currentMapId;
+        string root = _sqlAlphaCoreRoot;
+        int requestedMax = (_sqlUseAoiFilter || _sqlStreamWithCamera) ? 0 : _sqlMaxSpawns;
+        bool incCreatures = _sqlIncludeCreatures;
+        bool incGos = _sqlIncludeGameObjects;
+
+        _isLoadingSpawns = true;
+        _sqlSpawnStatus = $"Loading population partition for map {targetMapId} in background...";
+
+        Task.Run(async () =>
         {
-            if (_sqlPopulationService == null ||
-                !string.Equals(_sqlServiceRoot, _sqlAlphaCoreRoot, StringComparison.OrdinalIgnoreCase))
+            try
             {
-                _sqlPopulationService?.Dispose();
-                _sqlPopulationService = new SqlWorldPopulationService(_sqlAlphaCoreRoot);
-                _sqlServiceRoot = _sqlAlphaCoreRoot;
-            }
+                if (_sqlPopulationService == null ||
+                    !string.Equals(_sqlServiceRoot, root, StringComparison.OrdinalIgnoreCase))
+                {
+                    _sqlPopulationService?.Dispose();
+                    _sqlPopulationService = new SqlWorldPopulationService(root);
+                    _sqlServiceRoot = root;
+                }
 
-            var (ok, message) = _sqlPopulationService.Validate();
-            if (!ok)
+                var (ok, message) = _sqlPopulationService.Validate();
+                if (!ok)
+                {
+                    _sqlSpawnStatus = message;
+                    _isLoadingSpawns = false;
+                    return;
+                }
+
+                var mapSpawns = await _sqlPopulationService
+                    .LoadMapSpawnsAsync(targetMapId, requestedMax, incCreatures, incGos)
+                    .ConfigureAwait(false);
+
+                var spawnList = mapSpawns.ToList();
+
+                // If active client is 0.5.3 Alpha, normalize any .m2 model paths to .mdx directly
+                string clientVer = DetectActiveClientVersion();
+                if (string.Equals(clientVer, "0.5.3", StringComparison.OrdinalIgnoreCase))
+                {
+                    for (int i = 0; i < spawnList.Count; i++)
+                    {
+                        var sp = spawnList[i];
+                        if (!string.IsNullOrEmpty(sp.ModelPath) && sp.ModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                        {
+                            sp.ModelPath = sp.ModelPath[..^3] + ".mdx";
+                        }
+                    }
+                }
+
+                _sqlMapSpawnsCache = spawnList;
+                _sqlMapSpawnsCacheMapId = targetMapId;
+                _sqlLastCameraTile = null;
+                _sqlForceStreamRefresh = true;
+                _isLoadingSpawns = false;
+            }
+            catch (Exception ex)
             {
-                _sqlSpawnStatus = message;
-                return;
+                _sqlSpawnStatus = $"Error: {ex.Message}";
+                _sqlMapSpawnsCache = new List<WorldSpawnRecord>();
+                _sqlMapSpawnsCacheMapId = targetMapId;
+                _isLoadingSpawns = false;
             }
-
-            _sqlSpawnStatus = "Loading map population partition...";
-
-            int requestedMax = (_sqlUseAoiFilter || _sqlStreamWithCamera) ? 0 : _sqlMaxSpawns;
-            var mapSpawns = _sqlPopulationService
-                .LoadMapSpawnsAsync(_currentMapId, requestedMax, _sqlIncludeCreatures, _sqlIncludeGameObjects)
-                .GetAwaiter()
-                .GetResult();
-
-            _sqlMapSpawnsCache = mapSpawns.ToList();
-            _sqlMapSpawnsCacheMapId = _currentMapId;
-            _sqlLastCameraTile = null;
-            _sqlForceStreamRefresh = true;
-
-            ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
-        }
-        catch (Exception ex)
-        {
-            _sqlSpawnStatus = $"Error: {ex.Message}";
-            _sqlMapSpawnsCache = new List<WorldSpawnRecord>();
-            _sqlMapSpawnsCacheMapId = _currentMapId;
-        }
+        });
     }
 
     private void ApplySqlSpawnsToScene(IReadOnlyList<WorldSpawnRecord> mapSpawns, bool updateStatus)
@@ -410,7 +441,28 @@ var seq = animator.Sequences[animator.CurrentSequence];
         else if (_sqlMaxSpawns > 0 && mapSpawns.Count > _sqlMaxSpawns)
             finalSpawns = mapSpawns.Take(_sqlMaxSpawns).ToList();
 
-        _worldScene.ExternalSpawns.SetExternalSpawns(finalSpawns);
+        // Avoid re-dirtying scene graph and instance lists if spawn set has not changed
+        bool changed = finalSpawns.Count != _lastAppliedSpawnIds.Count;
+        if (!changed)
+        {
+            for (int i = 0; i < finalSpawns.Count; i++)
+            {
+                if (!_lastAppliedSpawnIds.Contains(finalSpawns[i].SpawnId))
+                {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        if (changed)
+        {
+            _lastAppliedSpawnIds.Clear();
+            for (int i = 0; i < finalSpawns.Count; i++)
+                _lastAppliedSpawnIds.Add(finalSpawns[i].SpawnId);
+
+            _worldScene.ExternalSpawns.SetExternalSpawns(finalSpawns);
+        }
 
         if (updateStatus)
         {

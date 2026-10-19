@@ -1601,6 +1601,9 @@ static void RunMap(string[] args)
 		case "patch-blank":
 			RunMapPatchBlank(tail);
 			break;
+		case "stratigraphy":
+			WowViewer.Tool.Inspect.MapStratigraphySupport.Run(tail);
+			break;
 		default:
 			Console.Error.WriteLine($"Unknown map command '{command}'.");
 			ShowMapUsage();
@@ -10970,6 +10973,8 @@ static void ShowMapUsage()
 	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--input <second-source> ...] [--build <label>] [--output <report.json>]");
 	Console.WriteLine("  map generate-blank --tile-x <n> --tile-y <n> [--map-name <name>] [--format lk|alpha] [--texture <path>] [--output-dir <dir>]");
 	Console.WriteLine("  map patch-blank --placements <obj0.adt> --tile-x <n> --tile-y <n> [--map-name <name>] [--texture <path>] [--output-dir <dir>]");
+	Console.WriteLine("  map stratigraphy [--input <path>] [--population <dir>] [--output <report.json>]");
+	Console.WriteLine("  map stratigraphy --population <dir> --divergence --target <mapId> --ref <refMapId> [--output <report.json>]");
 }
 
 static void ShowPm4Usage()
