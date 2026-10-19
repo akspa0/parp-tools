@@ -141,4 +141,55 @@ public sealed class WmoContainerFallThroughFilterTests
 
         Assert.Equal([1, 2], result.Select(static candidate => candidate.Id));
     }
+
+    [Fact]
+    public void ApplyFallThrough_PreservesWmo_WhenCameraIsOutsideWmo()
+    {
+        var wmo = new WmoContainerFallThroughFilter.CandidateObject(
+            Id: 1,
+            IsWmo: true,
+            BoundsMin: new Vector3(0, 0, 0),
+            BoundsMax: new Vector3(50, 50, 20),
+            SelectionPoint: new Vector3(25, 25, 10));
+
+        var interiorProp = new WmoContainerFallThroughFilter.CandidateObject(
+            Id: 2,
+            IsWmo: false,
+            BoundsMin: new Vector3(20, 20, 0),
+            BoundsMax: new Vector3(24, 24, 4),
+            SelectionPoint: new Vector3(22, 22, 2));
+
+        var cameraOutside = new Vector3(100, 100, 50);
+        var result = WmoContainerFallThroughFilter.ApplyFallThrough([wmo, interiorProp], cameraOutside);
+
+        // When camera is outside the WMO, the WMO must not be dropped as an enclosing container
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, c => c.Id == 1 && c.IsWmo);
+        Assert.Contains(result, c => c.Id == 2 && !c.IsWmo);
+    }
+
+    [Fact]
+    public void ApplyFallThrough_RemovesEnclosingWmo_WhenCameraIsInsideWmo()
+    {
+        var wmo = new WmoContainerFallThroughFilter.CandidateObject(
+            Id: 1,
+            IsWmo: true,
+            BoundsMin: new Vector3(0, 0, 0),
+            BoundsMax: new Vector3(50, 50, 20),
+            SelectionPoint: new Vector3(25, 25, 10));
+
+        var interiorProp = new WmoContainerFallThroughFilter.CandidateObject(
+            Id: 2,
+            IsWmo: false,
+            BoundsMin: new Vector3(20, 20, 0),
+            BoundsMax: new Vector3(24, 24, 4),
+            SelectionPoint: new Vector3(22, 22, 2));
+
+        var cameraInside = new Vector3(25, 25, 10);
+        var result = WmoContainerFallThroughFilter.ApplyFallThrough([wmo, interiorProp], cameraInside);
+
+        // When camera is inside the WMO, the enclosing WMO is dropped so interior props take priority
+        Assert.Single(result);
+        Assert.Equal(2, result[0].Id);
+    }
 }

@@ -14,9 +14,12 @@ public sealed class SqlWorldPopulationService : IDisposable
 
     private readonly string _rootPath;
     private readonly bool _isJsonDataset;
+    private readonly WorldEventRegistry _eventRegistry = new();
     private AlphaCoreDbReader? _reader;
     private List<AssetCatalogEntry>? _cachedEntries;
     private readonly Dictionary<int, List<WorldSpawnRecord>> _cachedJsonMapSpawns = new();
+
+    public WorldEventRegistry EventRegistry => _eventRegistry;
 
     public SqlWorldPopulationService(string rootPath)
     {
@@ -148,15 +151,29 @@ public sealed class SqlWorldPopulationService : IDisposable
             if (mapData == null || mapData.Spawns.Count == 0)
                 return Array.Empty<WorldSpawnRecord>();
 
+            if (!_eventRegistry.IsLoaded)
+            {
+                await _eventRegistry.LoadAsync(_rootPath, cancellationToken).ConfigureAwait(false);
+            }
+
             allMapSpawns = new List<WorldSpawnRecord>(mapData.Spawns.Count);
             foreach (var s in mapData.Spawns)
             {
+                var spawnType = s.SpawnType == PopulationSpawnType.Creature ? WorldSpawnType.Creature : WorldSpawnType.GameObject;
+                int evId = 0;
+                string? evName = null;
+                if (_eventRegistry.TryGetSpawnEvent(s.SpawnId, spawnType, out int foundEvId, out string? foundEvName))
+                {
+                    evId = foundEvId;
+                    evName = foundEvName;
+                }
+
                 allMapSpawns.Add(new WorldSpawnRecord
                 {
                     EntryId = s.EntryId,
                     SpawnId = s.SpawnId,
                     MapId = s.MapId,
-                    SpawnType = s.SpawnType == PopulationSpawnType.Creature ? WorldSpawnType.Creature : WorldSpawnType.GameObject,
+                    SpawnType = spawnType,
                     Name = s.Name,
                     Subname = s.Subname,
                     ModelPath = s.ModelPath,
@@ -167,7 +184,9 @@ public sealed class SqlWorldPopulationService : IDisposable
                     OrientationWowRadians = s.Orientation,
                     Faction = s.Faction,
                     NpcFlags = s.Flags,
-                    GameObjectType = s.GameObjectType
+                    GameObjectType = s.GameObjectType,
+                    EventId = evId,
+                    EventName = evName
                 });
             }
 

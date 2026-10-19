@@ -973,6 +973,19 @@ internal sealed partial class WorkbenchPanelsService
             if (ImGui.Checkbox("World Bounding Boxes", ref showBoundingBoxes))
                 _worldScene.ShowBoundingBoxes = showBoundingBoxes;
 
+            bool colorSpawns = _worldScene.ExternalSpawns.ColorSpawnBoundingBoxes;
+            if (ImGui.Checkbox("Color NPC/GO BBs", ref colorSpawns))
+                _worldScene.ExternalSpawns.ColorSpawnBoundingBoxes = colorSpawns;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Colors NPC spawn bounding boxes lime green and GameObject spawns warm amber.");
+
+            ImGui.SameLine();
+            bool spawnsOnly = _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly;
+            if (ImGui.Checkbox("Spawn BBs Only", ref spawnsOnly))
+                _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Only render bounding boxes for SQL-spawned NPCs and GameObjects, hiding static MDDF/MODF boxes.");
+
             bool showPm4Overlay = _worldScene.Pm4Overlay.ShowPm4Overlay;
             if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
                 _worldScene.Pm4Overlay.ShowPm4Overlay = showPm4Overlay;

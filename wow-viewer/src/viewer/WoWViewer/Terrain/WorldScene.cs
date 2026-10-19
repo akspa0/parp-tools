@@ -2097,28 +2097,34 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         for (int i = 0; i < instances.Count; i++)
         {
             var inst = instances[i];
-            if (inst.BoundsResolved)
+            if (inst.BoundsResolved && inst.SelectionBoundsResolved)
                 continue;
 
-            if (!_assets.TryGetMdxBounds(inst.ModelKey, out var localMin, out var localMax))
-                continue;
+            if (!inst.BoundsResolved)
+            {
+                if (!_assets.TryGetMdxBounds(inst.ModelKey, out var localMin, out var localMax))
+                    continue;
 
-            TransformBounds(localMin, localMax, inst.Transform, out var worldMin, out var worldMax);
-            inst.LocalBoundsMin = localMin;
-            inst.LocalBoundsMax = localMax;
-            inst.BoundsMin = worldMin;
-            inst.BoundsMax = worldMax;
-            inst.BoundsResolved = true;
+                TransformBounds(localMin, localMax, inst.Transform, out var worldMin, out var worldMax);
+                inst.LocalBoundsMin = localMin;
+                inst.LocalBoundsMax = localMax;
+                inst.BoundsMin = worldMin;
+                inst.BoundsMax = worldMax;
+                inst.BoundsResolved = true;
+            }
 
-            // Selection and picking use the tight geometry bounds; culling above keeps the
-            // conservative ones. For M2 the two differ substantially because the declared header
-            // extent is an animation/collision volume, not the mesh.
-            ResolveMdxSelectionBounds(
-                inst.ModelKey, localMin, localMax, fallbackResolved: true,
-                out Vector3 selectionMin, out Vector3 selectionMax, out bool selectionResolved);
-            inst.SelectionLocalBoundsMin = selectionMin;
-            inst.SelectionLocalBoundsMax = selectionMax;
-            inst.SelectionBoundsResolved = selectionResolved;
+            if (!inst.SelectionBoundsResolved)
+            {
+                // Selection and picking use the tight geometry bounds; culling above keeps the
+                // conservative ones. For M2 the two differ substantially because the declared header
+                // extent is an animation/collision volume, not the mesh.
+                ResolveMdxSelectionBounds(
+                    inst.ModelKey, inst.LocalBoundsMin, inst.LocalBoundsMax, fallbackResolved: inst.BoundsResolved,
+                    out Vector3 selectionMin, out Vector3 selectionMax, out bool selectionResolved);
+                inst.SelectionLocalBoundsMin = selectionMin;
+                inst.SelectionLocalBoundsMax = selectionMax;
+                inst.SelectionBoundsResolved = selectionResolved;
+            }
 
             instances[i] = inst;
             UpdateSceneGraphPlacementBounds(tileKey, WorldSceneNodeKind.M2Placement, i, inst, isSkybox, isExternal);
@@ -2139,25 +2145,31 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         for (int i = 0; i < instances.Count; i++)
         {
             var inst = instances[i];
-            if (inst.BoundsResolved)
+            if (inst.BoundsResolved && inst.SelectionBoundsResolved)
                 continue;
 
-            if (!_assets.TryGetWmoPlacementBounds(inst.ModelKey, out var localMin, out var localMax))
-                continue;
+            if (!inst.BoundsResolved)
+            {
+                if (!_assets.TryGetWmoPlacementBounds(inst.ModelKey, out var localMin, out var localMax))
+                    continue;
 
-            TransformBounds(localMin, localMax, inst.Transform, out var worldMin, out var worldMax);
-            inst.LocalBoundsMin = localMin;
-            inst.LocalBoundsMax = localMax;
-            inst.BoundsMin = worldMin;
-            inst.BoundsMax = worldMax;
-            inst.BoundsResolved = true;
+                TransformBounds(localMin, localMax, inst.Transform, out var worldMin, out var worldMax);
+                inst.LocalBoundsMin = localMin;
+                inst.LocalBoundsMax = localMax;
+                inst.BoundsMin = worldMin;
+                inst.BoundsMax = worldMax;
+                inst.BoundsResolved = true;
+            }
 
-            // A WMO's placement bounds already describe the building itself, so there is no tighter
-            // source to switch to. It still benefits from being drawn oriented rather than re-fitted
-            // to the world axes.
-            inst.SelectionLocalBoundsMin = localMin;
-            inst.SelectionLocalBoundsMax = localMax;
-            inst.SelectionBoundsResolved = true;
+            if (!inst.SelectionBoundsResolved && inst.BoundsResolved)
+            {
+                // A WMO's placement bounds already describe the building itself, so there is no tighter
+                // source to switch to. It still benefits from being drawn oriented rather than re-fitted
+                // to the world axes.
+                inst.SelectionLocalBoundsMin = inst.LocalBoundsMin;
+                inst.SelectionLocalBoundsMax = inst.LocalBoundsMax;
+                inst.SelectionBoundsResolved = true;
+            }
 
             instances[i] = inst;
             UpdateSceneGraphPlacementBounds(tileKey, WorldSceneNodeKind.WmoPlacement, i, inst, isSkybox, isExternal);
@@ -3706,7 +3718,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         // never produce a box. On full-map scenes that scan was the dominant
                         // overlay cost. Keep selected bounds independent, but consume the
                         // visibility frame for the global debug boxes.
-                        if ((_showSelectedObjectBounds || _showBoundingBoxes || _pm4Overlay._showPm4ObjectBounds) && _bbRenderer != null)
+                        if ((_showSelectedObjectBounds || _showBoundingBoxes || _externalSpawns.ShowSpawnBoundingBoxesOnly || _pm4Overlay._showPm4ObjectBounds) && _bbRenderer != null)
                         {
                 // Depth test ON so boxes behind terrain/objects are hidden,
                 // depth write OFF so box lines don't occlude models
@@ -3897,24 +3909,75 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         }
                     }
 
-                    if (_showBoundingBoxes)
+                    if (_showBoundingBoxes || _externalSpawns.ShowSpawnBoundingBoxesOnly)
                     {
                         var adapter = _terrainManager.Adapter;
                         if (!_renderDiagPrinted)
                             ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
 
-                        // MDDF bounding boxes (light pastel magenta)
+                        bool spawnOnly = _externalSpawns.ShowSpawnBoundingBoxesOnly;
+                        bool colorSpawns = _externalSpawns.ColorSpawnBoundingBoxes;
+
+                        // MDDF bounding boxes
                         foreach (VisibleMdxInstance visible in frame.Visibility.VisibleMdx)
                         {
                             ObjectInstance inst = visible.Instance;
-                            _bbRenderer.BatchBoxMinMax(inst.BoundsMin, inst.BoundsMax, Pm4ColorMddfBounds);
+                            bool isSpawn = ExternalSpawnLayer.IsSpawn(in inst);
+                            if (spawnOnly && !isSpawn)
+                                continue;
+
+                            Vector3 color;
+                            if (isSpawn && colorSpawns)
+                            {
+                                color = ExternalSpawnLayer.IsNpcSpawn(in inst)
+                                    ? ExternalSpawnLayer.ColorNpcSpawnBounds
+                                    : ExternalSpawnLayer.ColorGameObjectSpawnBounds;
+                            }
+                            else
+                            {
+                                color = Pm4ColorMddfBounds;
+                            }
+
+                            if (isSpawn && inst.SelectionBoundsResolved)
+                            {
+                                TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out Vector3 tightMin, out Vector3 tightMax);
+                                _bbRenderer.BatchBoxMinMax(tightMin, tightMax, color);
+                            }
+                            else
+                            {
+                                _bbRenderer.BatchBoxMinMax(inst.BoundsMin, inst.BoundsMax, color);
+                            }
                             selectionBoundsPreparedCount++;
                         }
-                        // MODF bounding boxes (light pastel cyan)
+                        // MODF bounding boxes
                         foreach (VisibleWmoInstance visible in frame.Visibility.VisibleWmos)
                         {
                             ObjectInstance inst = visible.Instance;
-                            _bbRenderer.BatchBoxMinMax(inst.BoundsMin, inst.BoundsMax, Pm4ColorModfBounds);
+                            bool isSpawn = ExternalSpawnLayer.IsSpawn(in inst);
+                            if (spawnOnly && !isSpawn)
+                                continue;
+
+                            Vector3 color;
+                            if (isSpawn && colorSpawns)
+                            {
+                                color = ExternalSpawnLayer.IsNpcSpawn(in inst)
+                                    ? ExternalSpawnLayer.ColorNpcSpawnBounds
+                                    : ExternalSpawnLayer.ColorGameObjectSpawnBounds;
+                            }
+                            else
+                            {
+                                color = Pm4ColorModfBounds;
+                            }
+
+                            if (isSpawn && inst.SelectionBoundsResolved)
+                            {
+                                TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out Vector3 tightMin, out Vector3 tightMax);
+                                _bbRenderer.BatchBoxMinMax(tightMin, tightMax, color);
+                            }
+                            else
+                            {
+                                _bbRenderer.BatchBoxMinMax(inst.BoundsMin, inst.BoundsMax, color);
+                            }
                             selectionBoundsPreparedCount++;
                         }
                     }
@@ -4637,10 +4700,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.SelectionBounds,
                         selectionBoundsMs,
-                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes),
+                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes || _externalSpawns.ShowSpawnBoundingBoxesOnly),
                         selectionBoundsPreparedCount,
                         selectionBoundsPreparedCount,
-                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes) ? "not_cached" : "disabled");
+                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes || _externalSpawns.ShowSpawnBoundingBoxesOnly) ? "not_cached" : "disabled");
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.Pm4Bounds,
                         pm4BoundsMs,

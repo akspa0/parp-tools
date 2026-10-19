@@ -396,7 +396,7 @@ public sealed class SceneHoverPickController
         // selection service (Spec 228; Epic 251 U-01 E4).
         WorldSceneHoverRayResult hover = WorldSceneSelectionAdapter.ResolveHoverRay(
             sceneHits,
-            new WorldSceneSelectionPolicy(_limitHoveredAssetRange, ComputeEffectiveHoveredAssetMaxDistance(), Vector3.Zero),
+            new WorldSceneSelectionPolicy(_limitHoveredAssetRange, ComputeEffectiveHoveredAssetMaxDistance(), rayOrigin),
             _wmosVisible,
             _doodadsVisible,
             liquidTargets);
@@ -555,7 +555,7 @@ public sealed class SceneHoverPickController
         WorldSceneSelectionAdapter.RankClickHits(
             hits,
             clickedChunkKey.HasValue,
-            new WorldSceneSelectionPolicy(_limitHoveredAssetRange, ComputeEffectiveHoveredAssetMaxDistance(), Vector3.Zero));
+            new WorldSceneSelectionPolicy(_limitHoveredAssetRange, ComputeEffectiveHoveredAssetMaxDistance(), rayOrigin));
 
         if (!logHits || hits.Count == 0)
             return;

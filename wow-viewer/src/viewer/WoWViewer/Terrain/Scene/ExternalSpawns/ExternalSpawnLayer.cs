@@ -116,6 +116,27 @@ public sealed class ExternalSpawnLayer
     public int ExternalSpawnInstanceCount => ExternalSpawnMdxCount + ExternalSpawnWmoCount;
     public float SqlGameObjectMdxScaleMultiplier { get; set; } = 1.0f;
 
+    /// <summary>Toggle whether NPC and GameObject bounding boxes render in distinct colors instead of standard MDDF/MODF pastel colors.</summary>
+    public bool ColorSpawnBoundingBoxes { get; set; } = true;
+
+    /// <summary>Toggle whether to show bounding boxes exclusively for NPC and GameObject spawns, suppressing general world doodad boxes.</summary>
+    public bool ShowSpawnBoundingBoxesOnly { get; set; } = false;
+
+    /// <summary>Vibrant lime green for NPC spawn bounding boxes.</summary>
+    public static readonly Vector3 ColorNpcSpawnBounds = new(0.25f, 0.95f, 0.35f);
+
+    /// <summary>Vibrant warm amber for GameObject spawn bounding boxes.</summary>
+    public static readonly Vector3 ColorGameObjectSpawnBounds = new(1.00f, 0.65f, 0.15f);
+
+    public static bool IsNpcSpawn(in ObjectInstance inst) =>
+        string.Equals(inst.AssetKind, "NPC Spawn", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsGameObjectSpawn(in ObjectInstance inst) =>
+        string.Equals(inst.AssetKind, "GameObject Spawn", StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsSpawn(in ObjectInstance inst) =>
+        inst.SpawnEntryId.HasValue || !string.IsNullOrEmpty(inst.AssetKind);
+
     public void ClearExternalSpawns()
     {
         _externalMdxInstances.Clear();
@@ -174,6 +195,7 @@ public sealed class ExternalSpawnLayer
                     worldMax = pos + new Vector3(2f);
                 }
 
+                bool wmoResolved = localMin != Vector3.Zero || localMax != Vector3.Zero;
                 _externalWmoInstances.Add(new ObjectInstance
                 {
                     ModelKey = key,
@@ -182,7 +204,10 @@ public sealed class ExternalSpawnLayer
                     BoundsMax = worldMax,
                     LocalBoundsMin = localMin,
                     LocalBoundsMax = localMax,
-                    BoundsResolved = localMin != Vector3.Zero || localMax != Vector3.Zero,
+                    BoundsResolved = wmoResolved,
+                    SelectionLocalBoundsMin = localMin,
+                    SelectionLocalBoundsMax = localMax,
+                    SelectionBoundsResolved = wmoResolved,
                     ModelName = Path.GetFileName(modelPath),
                     ModelPath = modelPath,
                     DisplayName = spawn.Name,
@@ -222,6 +247,20 @@ public sealed class ExternalSpawnLayer
                     bbMax = pos + new Vector3(2f);
                 }
 
+                Vector3 selMin = localMin;
+                Vector3 selMax = localMax;
+                bool selResolved = false;
+                if (_assets.TryGetMdxSelectionBounds(key, out var sMin, out var sMax))
+                {
+                    selMin = sMin;
+                    selMax = sMax;
+                    selResolved = true;
+                }
+                else if (boundsResolved)
+                {
+                    selResolved = true;
+                }
+
                 var instance = new ObjectInstance
                 {
                     ModelKey = key,
@@ -231,6 +270,9 @@ public sealed class ExternalSpawnLayer
                     LocalBoundsMin = localMin,
                     LocalBoundsMax = localMax,
                     BoundsResolved = boundsResolved,
+                    SelectionLocalBoundsMin = selMin,
+                    SelectionLocalBoundsMax = selMax,
+                    SelectionBoundsResolved = selResolved,
                     ModelName = Path.GetFileName(modelPath),
                     ModelPath = modelPath,
                     DisplayName = spawn.Name,

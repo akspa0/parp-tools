@@ -34,9 +34,14 @@ public static class WmoContainerFallThroughFilter
     /// Filters candidate objects along a ray: if any candidate's selection point is inside
     /// a WMO candidate's bounding box, the enclosing WMO is deemed a container and removed
     /// so the interior object takes priority.
+    /// When <paramref name="cameraPosition"/> is provided, an enclosing WMO is only removed if
+    /// the camera is inside its bounding box, ensuring exterior facades are never discarded when
+    /// viewed from outside.
     /// If all candidates are removed or no interior objects exist, the original list is preserved.
     /// </summary>
-    public static IReadOnlyList<CandidateObject> ApplyFallThrough(IReadOnlyList<CandidateObject> candidates)
+    public static IReadOnlyList<CandidateObject> ApplyFallThrough(
+        IReadOnlyList<CandidateObject> candidates,
+        Vector3? cameraPosition = null)
     {
         if (candidates == null || candidates.Count <= 1)
             return candidates ?? [];
@@ -46,6 +51,11 @@ public static class WmoContainerFallThroughFilter
         {
             var wmo = candidates[i];
             if (!wmo.IsWmo)
+                continue;
+
+            // When camera position is known, an exterior WMO must not be treated as an enclosing container
+            // to fall through. Only buildings containing the camera should fall through to interior objects.
+            if (cameraPosition.HasValue && !IsPointInsideAabb(cameraPosition.Value, wmo.BoundsMin, wmo.BoundsMax))
                 continue;
 
             for (int j = 0; j < candidates.Count; j++)

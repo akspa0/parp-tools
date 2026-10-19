@@ -43,6 +43,8 @@ using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.Passes;
 using WoWViewer.UI;
+using WoWViewer.Workbench.Services.Dialogue;
+using WowViewer.Core.Population;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
@@ -73,6 +75,17 @@ internal sealed class SqlSpawnStreamingService
     private void DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent) => _host.DrawToolbarPopupButton(label, summary, popupId, drawContent);
     private void ExportAnimationStateJson(IAnimationController animator, int currentSeq, string currentSeqName, float seqStart, float seqEnd) => _host.ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
     private (int tileX, int tileY) GetCameraTile() => _host.GetCameraTile();
+
+    private readonly WorldDialogueService _dialogueService = new();
+    private readonly FakeChatWindowService _chatWindow = new();
+    private readonly WorldEventRegistry _eventRegistry = new();
+    private int _selectedEventId = 0; // 0 = Base World Only, -1 = Show All, >0 = specific holiday event
+    private int _lastSelectedSpawnId = -1;
+    private bool _showChatOverlay = true;
+
+    internal WorldDialogueService DialogueService => _dialogueService;
+    internal FakeChatWindowService ChatWindow => _chatWindow;
+    internal WorldEventRegistry EventRegistry => _eventRegistry;
 
     public enum PopulationDatasetMode
     {
@@ -215,6 +228,28 @@ internal sealed class SqlSpawnStreamingService
         if (spawn == null)
             return;
 
+        // Auto-activate dialogue / gossip / quests into chat once when selecting a new entity
+        if (_lastSelectedSpawnId != spawn.SpawnId)
+        {
+            _lastSelectedSpawnId = spawn.SpawnId;
+            if (spawn.SpawnType == WorldSpawnType.Creature)
+            {
+                var gossip = _dialogueService.GetGossipForCreature(spawn.EntryId);
+                if (gossip.Count > 0)
+                    _chatWindow.PostNpcBark(spawn.Name, gossip[0], DialogueChatType.Say);
+
+                var quests = _dialogueService.GetQuestsForCreature(spawn.EntryId);
+                if (quests.Count > 0)
+                    _chatWindow.PostSystemMessage($"[{spawn.Name}] offers {quests.Count} quest(s): {string.Join(", ", quests.Take(3).Select(q => q.Title))}");
+            }
+            else if (spawn.SpawnType == WorldSpawnType.GameObject)
+            {
+                var goQuests = _dialogueService.GetQuestsForGameObject(spawn.EntryId);
+                if (goQuests.Count > 0)
+                    _chatWindow.PostSystemMessage($"[{spawn.Name}] contains {goQuests.Count} quest(s): {string.Join(", ", goQuests.Take(3).Select(q => q.Title))}");
+            }
+        }
+
         var mdxRenderer = _worldScene.Assets.GetMdx(inst.ModelKey);
         var animator = mdxRenderer?.Animator;
 
@@ -228,81 +263,146 @@ internal sealed class SqlSpawnStreamingService
             : $"SpawnId: {spawn.SpawnId}  Entry: {spawn.EntryId}  Type: {spawn.GameObjectType}";
         ImGui.TextDisabled(typeDetail);
 
-        if (animator == null || !animator.HasAnimation || animator.Sequences.Count == 0)
+        if (spawn.EventId > 0 && !string.IsNullOrEmpty(spawn.EventName))
         {
-            ImGui.TextDisabled("This model has no animation sequences.");
-            return;
+            ImGui.TextColored(new Vector4(1f, 0.72f, 0.2f, 1f), $"Holiday Event: {spawn.EventName} (ID {spawn.EventId})");
         }
 
-        int currentSeq = animator.CurrentSequence;
-        string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count
-            ? animator.Sequences[currentSeq].Name
-            : "None";
-        if (string.IsNullOrWhiteSpace(currentSeqName))
-            currentSeqName = $"Sequence {currentSeq}";
-
-        if (ImGui.BeginCombo("##sqlgo_anim_seq", currentSeqName))
+        // --- Animations Section ---
+        if (animator != null && animator.HasAnimation && animator.Sequences.Count > 0)
         {
-            for (int s = 0; s < animator.Sequences.Count; s++)
+            int currentSeq = animator.CurrentSequence;
+            string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count
+                ? animator.Sequences[currentSeq].Name
+                : "None";
+            if (string.IsNullOrWhiteSpace(currentSeqName))
+                currentSeqName = $"Sequence {currentSeq}";
+
+            if (ImGui.BeginCombo("##sqlgo_anim_seq", currentSeqName))
             {
-                bool selected = s == currentSeq;
-                string seqName = animator.Sequences[s].Name;
-                if (string.IsNullOrWhiteSpace(seqName))
-                    seqName = $"Sequence {s}";
-                if (ImGui.Selectable(seqName, selected))
-                    animator.SetSequence(s);
-                if (selected) ImGui.SetItemDefaultFocus();
+                for (int s = 0; s < animator.Sequences.Count; s++)
+                {
+                    bool selected = s == currentSeq;
+                    string seqName = animator.Sequences[s].Name;
+                    if (string.IsNullOrWhiteSpace(seqName))
+                        seqName = $"Sequence {s}";
+                    if (ImGui.Selectable(seqName, selected))
+                        animator.SetSequence(s);
+                    if (selected) ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
             }
-            ImGui.EndCombo();
+
+            var seq = animator.Sequences[animator.CurrentSequence];
+            float seqStart = seq.Time.Start;
+            float seqEnd = seq.Time.End;
+
+            bool isPlaying = animator.IsPlaying;
+            string animTag = spawn.SpawnType == WorldSpawnType.Creature ? "NPC" : "GO";
+            if (ImGui.Button(isPlaying ? $"Pause {animTag} Anim" : $"Play {animTag} Anim"))
+                animator.IsPlaying = !isPlaying;
+
+            ImGui.SameLine();
+            if (ImGui.Button($"Stop {animTag} Anim"))
+            {
+                animator.IsPlaying = false;
+                animator.CurrentFrame = seqStart;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Prev Key"))
+            {
+                animator.IsPlaying = false;
+                animator.StepToPrevKeyframe();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Next Key"))
+            {
+                animator.IsPlaying = false;
+                animator.StepToNextKeyframe();
+            }
+
+            float currentFrame = Math.Clamp(animator.CurrentFrame, seqStart, seqEnd);
+            if (ImGui.SliderFloat("GO Frame", ref currentFrame, seqStart, seqEnd, "%.0f"))
+            {
+                animator.IsPlaying = false;
+                animator.CurrentFrame = currentFrame;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Export JSON##GO"))
+                ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
         }
 
-var seq = animator.Sequences[animator.CurrentSequence];
-        float seqStart = seq.Time.Start;
-        float seqEnd = seq.Time.End;
-
-        bool isPlaying = animator.IsPlaying;
-        string animTag = spawn.SpawnType == WorldSpawnType.Creature ? "NPC" : "GO";
-        if (ImGui.Button(isPlaying ? $"Pause {animTag} Anim" : $"Play {animTag} Anim"))
-            animator.IsPlaying = !isPlaying;
-
-        ImGui.SameLine();
-        if (ImGui.Button($"Stop {animTag} Anim"))
+        // --- Gossip & Dialogue Section ---
+        if (spawn.SpawnType == WorldSpawnType.Creature)
         {
-            animator.IsPlaying = false;
-            animator.CurrentFrame = seqStart;
+            var gossipList = _dialogueService.GetGossipForCreature(spawn.EntryId);
+            if (gossipList.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextColored(new Vector4(1f, 0.85f, 0.45f, 1f), "NPC Gossip & Dialogue:");
+                for (int i = 0; i < gossipList.Count; i++)
+                {
+                    string text = gossipList[i];
+                    ImGui.TextWrapped($"\"{text}\"");
+                    if (ImGui.SmallButton($"Speak in Chat##gossip_{i}"))
+                        _chatWindow.PostNpcBark(spawn.Name, text, DialogueChatType.Say);
+                }
+            }
+
+            var barks = _dialogueService.GetBarksForCreature(spawn.EntryId);
+            if (barks.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), $"Ambient Barks ({barks.Count}):");
+                for (int i = 0; i < Math.Min(barks.Count, 5); i++)
+                {
+                    var b = barks[i];
+                    ImGui.TextWrapped($"[{b.Type}] \"{b.Text}\"");
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"Bark##bark_{i}"))
+                        _chatWindow.PostNpcBark(spawn.Name, b.Text, b.Type);
+                }
+            }
         }
 
-        ImGui.SameLine();
-        if (ImGui.Button("Prev Key"))
+        // --- Quests Section ---
+        var offeredQuests = spawn.SpawnType == WorldSpawnType.Creature
+            ? _dialogueService.GetQuestsForCreature(spawn.EntryId)
+            : _dialogueService.GetQuestsForGameObject(spawn.EntryId);
+        if (offeredQuests.Count > 0)
         {
-            animator.IsPlaying = false;
-            animator.StepToPrevKeyframe();
+            ImGui.Separator();
+            ImGui.TextColored(new Vector4(1f, 0.82f, 0.2f, 1f), $"Offered Quests ({offeredQuests.Count}):");
+            for (int i = 0; i < offeredQuests.Count; i++)
+            {
+                var q = offeredQuests[i];
+                ImGui.BulletText($"[{q.QuestLevel}] {q.Title}");
+                if (!string.IsNullOrEmpty(q.Objectives))
+                    ImGui.TextDisabled($"   Objectives: {q.Objectives}");
+                if (!string.IsNullOrEmpty(q.Details))
+                {
+                    if (ImGui.SmallButton($"Post Quest Text##q_{q.QuestId}"))
+                        _chatWindow.PostSystemMessage($"Quest [{q.QuestLevel}] {q.Title}: {q.Details}");
+                }
+            }
         }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Next Key"))
-        {
-            animator.IsPlaying = false;
-            animator.StepToNextKeyframe();
-        }
-
-        float currentFrame = Math.Clamp(animator.CurrentFrame, seqStart, seqEnd);
-        if (ImGui.SliderFloat("GO Frame", ref currentFrame, seqStart, seqEnd, "%.0f"))
-        {
-            animator.IsPlaying = false;
-            animator.CurrentFrame = currentFrame;
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export JSON##GO"))
-            ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
-
-        ImGui.TextDisabled("Note: this affects all visible instances using the same MDX model renderer.");
     }
 
     internal void UpdateSqlSpawnStreaming()
     {
-        if (_worldScene == null || !_sqlStreamWithCamera || !_sqlUseAoiFilter)
+        if (_worldScene == null)
+            return;
+
+        // Proximity ambient barks for camera near NPCs
+        if (_sqlMapSpawnsCache != null && _sqlMapSpawnsCacheMapId == _currentMapId)
+        {
+            _dialogueService.UpdateProximityBarks(_camera.Position, _sqlMapSpawnsCache, _chatWindow);
+        }
+
+        if (!_sqlStreamWithCamera || !_sqlUseAoiFilter)
             return;
 
         if (_currentMapId < 0)
@@ -328,6 +428,14 @@ var seq = animator.Sequences[animator.CurrentSequence];
             ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: false);
             _sqlForceStreamRefresh = false;
         }
+    }
+
+    internal void DrawChatOverlay(Vector2 viewportSize)
+    {
+        if (!_showChatOverlay)
+            return;
+
+        _chatWindow.Draw(viewportSize);
     }
 
     internal void ResetSqlSpawnStreamingState(bool clearSceneSpawns)
@@ -396,6 +504,13 @@ var seq = animator.Sequences[animator.CurrentSequence];
                     return;
                 }
 
+                // Load events registry for holiday filtering
+                await _eventRegistry.LoadAsync(root).ConfigureAwait(false);
+
+                // Load dialogue & flavor dataset
+                string clientVer = DetectActiveClientVersion();
+                await _dialogueService.LoadFlavorDataAsync(clientVer, root).ConfigureAwait(false);
+
                 var mapSpawns = await _sqlPopulationService
                     .LoadMapSpawnsAsync(targetMapId, requestedMax, incCreatures, incGos)
                     .ConfigureAwait(false);
@@ -403,7 +518,6 @@ var seq = animator.Sequences[animator.CurrentSequence];
                 var spawnList = mapSpawns.ToList();
 
                 // If active client is 0.5.3 Alpha, normalize any .m2 model paths to .mdx directly
-                string clientVer = DetectActiveClientVersion();
                 if (string.Equals(clientVer, "0.5.3", StringComparison.OrdinalIgnoreCase))
                 {
                     for (int i = 0; i < spawnList.Count; i++)
@@ -439,11 +553,18 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
         _worldScene.ExternalSpawns.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
 
-        IReadOnlyList<WorldSpawnRecord> finalSpawns = mapSpawns;
+        // Apply holiday / event filter
+        IReadOnlyList<WorldSpawnRecord> eventFilteredSpawns = mapSpawns;
+        if (_eventRegistry.IsLoaded && _selectedEventId != -1)
+        {
+            eventFilteredSpawns = mapSpawns.Where(s => _eventRegistry.IsSpawnActive(s.SpawnId, s.SpawnType, _selectedEventId)).ToList();
+        }
+
+        IReadOnlyList<WorldSpawnRecord> finalSpawns = eventFilteredSpawns;
         if (_sqlUseAoiFilter)
-            finalSpawns = FilterSpawnsToCameraAoi(mapSpawns, _sqlAoiTileRadius, _sqlMaxSpawns);
-        else if (_sqlMaxSpawns > 0 && mapSpawns.Count > _sqlMaxSpawns)
-            finalSpawns = mapSpawns.Take(_sqlMaxSpawns).ToList();
+            finalSpawns = FilterSpawnsToCameraAoi(eventFilteredSpawns, _sqlAoiTileRadius, _sqlMaxSpawns);
+        else if (_sqlMaxSpawns > 0 && eventFilteredSpawns.Count > _sqlMaxSpawns)
+            finalSpawns = eventFilteredSpawns.Take(_sqlMaxSpawns).ToList();
 
         // Avoid re-dirtying scene graph and instance lists if spawn set has not changed
         bool changed = finalSpawns.Count != _lastAppliedSpawnIds.Count;
@@ -640,6 +761,76 @@ var seq = animator.Sequences[animator.CurrentSequence];
             ResetSqlSpawnStreamingState(clearSceneSpawns: true);
             LoadSqlSpawnsForCurrentMap();
         }
+
+        bool colorSpawns = _worldScene.ExternalSpawns.ColorSpawnBoundingBoxes;
+        if (ImGui.Checkbox("Color Spawn BBs", ref colorSpawns))
+            _worldScene.ExternalSpawns.ColorSpawnBoundingBoxes = colorSpawns;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Colors NPC spawn bounding boxes lime green and GameObject spawns warm amber.");
+
+        ImGui.SameLine();
+        bool spawnsOnly = _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly;
+        if (ImGui.Checkbox("Show Spawn BBs Only", ref spawnsOnly))
+            _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Only render bounding boxes for SQL-spawned NPCs and GameObjects, hiding static MDDF/MODF boxes.");
+
+        // Holiday / Event filter combo
+        string currentEventLabel = _selectedEventId switch
+        {
+            0 => "Base World Only (No Holidays)",
+            -1 => "Show All (All Holidays Overlaid)",
+            _ => _eventRegistry.Events.FirstOrDefault(e => e.EventId == _selectedEventId)?.DisplayName ?? $"Event {_selectedEventId}"
+        };
+
+        if (ImGui.BeginCombo("Active Holiday / Event", currentEventLabel))
+        {
+            if (ImGui.Selectable("Base World Only (No Holidays)", _selectedEventId == 0))
+            {
+                _selectedEventId = 0;
+                _sqlForceStreamRefresh = true;
+                if (_sqlMapSpawnsCache != null)
+                    ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
+            }
+            if (ImGui.Selectable("Show All (All Holidays Overlaid)", _selectedEventId == -1))
+            {
+                _selectedEventId = -1;
+                _sqlForceStreamRefresh = true;
+                if (_sqlMapSpawnsCache != null)
+                    ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
+            }
+
+            if (_eventRegistry.Events.Count > 0)
+            {
+                ImGui.Separator();
+                foreach (var ev in _eventRegistry.Events)
+                {
+                    bool isSelected = _selectedEventId == ev.EventId;
+                    if (ImGui.Selectable(ev.DisplayName, isSelected))
+                    {
+                        _selectedEventId = ev.EventId;
+                        _sqlForceStreamRefresh = true;
+                        if (_sqlMapSpawnsCache != null)
+                            ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
+                    }
+                    if (isSelected)
+                        ImGui.SetItemDefaultFocus();
+                }
+            }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Filter out overlapping holiday decorations (Winter Veil, Hallow's End, Brewfest, etc.). Default: Base World Only.");
+
+        // Dialogue & Chat Overlay controls
+        ImGui.Checkbox("WoW Chat Overlay", ref _showChatOverlay);
+        ImGui.SameLine();
+        bool barksEnabled = _dialogueService.BarksEnabled;
+        if (ImGui.Checkbox("NPC Proximity Barks", ref barksEnabled))
+            _dialogueService.BarksEnabled = barksEnabled;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Ambient dialogue and yells automatically posted to the chat window when the camera approaches NPCs.");
+
         settingsChanged |= ImGui.Checkbox("AOI Tile Filter", ref _sqlUseAoiFilter);
         if (_sqlUseAoiFilter)
             settingsChanged |= ImGui.SliderInt("AOI Tile Radius", ref _sqlAoiTileRadius, 1, 16);

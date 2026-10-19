@@ -149,14 +149,12 @@ internal sealed partial class SceneHoverAndPickService
                     }
 
                     bool cameraInside = isCameraInsideWmo(hit);
+                    if (!cameraInside)
+                        continue;
+
                     bool hasInteriorHit = validHits.Any(other =>
                     {
                         if (other.ObjectType == ObjectType.Wmo && other.ObjectIndex == hit.ObjectIndex)
-                            return false;
-
-                        // When camera is outside the WMO and the ray hits the WMO before the interior object,
-                        // the WMO is the front-facing exterior surface and must NOT be dropped.
-                        if (!cameraInside && other.Distance >= hit.Distance)
                             return false;
 
                         return other.SelectionPoint.X >= hit.BoundsMin.X - 0.5f && other.SelectionPoint.X <= hit.BoundsMax.X + 0.5f

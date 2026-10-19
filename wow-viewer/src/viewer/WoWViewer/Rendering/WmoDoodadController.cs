@@ -318,7 +318,7 @@ internal sealed class WmoDoodadController : IDisposable
             Matrix4x4 doodadWorld = doodad.Transform * modelMatrix;
             if (doodad.Renderer is IModelRenderer modelRenderer)
             {
-                WmoGeometryHelper.TransformAabb(modelRenderer.BoundsMin, modelRenderer.BoundsMax, doodadWorld, out boundsMin, out boundsMax);
+                WmoGeometryHelper.TransformAabb(modelRenderer.SelectionBoundsMin, modelRenderer.SelectionBoundsMax, doodadWorld, out boundsMin, out boundsMax);
                 boundsResolved = true;
                 return true;
             }
@@ -352,8 +352,8 @@ internal sealed class WmoDoodadController : IDisposable
         if (index >= 0 && index < _doodadInstances.Count
             && _doodadInstances[index].Renderer is IModelRenderer modelRenderer)
         {
-            boundsMin = modelRenderer.BoundsMin;
-            boundsMax = modelRenderer.BoundsMax;
+            boundsMin = modelRenderer.SelectionBoundsMin;
+            boundsMax = modelRenderer.SelectionBoundsMax;
             return true;
         }
 

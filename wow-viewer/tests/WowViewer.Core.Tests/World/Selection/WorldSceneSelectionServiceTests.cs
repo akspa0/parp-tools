@@ -91,6 +91,36 @@ public sealed class WorldSceneSelectionServiceTests
     }
 
     [Fact]
+    public void HoverRay_WhenCameraOutsideWmo_SelectsNearestWmoExterior_OverInteriorObjects()
+    {
+        var shell = Hit(0, distance: 10f, kind: WorldSceneSelectionKind.Wmo, point: new Vector3(0, 0, 0), min: new Vector3(-20f), max: new Vector3(20f));
+        var insideProp = Hit(1, distance: 25f, kind: WorldSceneSelectionKind.Mdx, point: new Vector3(0, 0, 0));
+        var snapshot = new WorldSceneSelectionSnapshot([shell, insideProp]);
+
+        var cameraOutside = new Vector3(0, 0, 100);
+        var policy = new WorldSceneSelectionPolicy(false, float.MaxValue, cameraOutside);
+        var result = WorldSceneSelectionService.Select(new WorldSceneSelectionRequest(WorldSceneSelectionMode.HoverRay, policy), snapshot);
+
+        // Exterior WMO is retained and selected as the nearest ray hit
+        Assert.Equal(0, result.BestId);
+    }
+
+    [Fact]
+    public void HoverRay_WhenCameraInsideWmo_FallsThroughToInteriorObjects()
+    {
+        var shell = Hit(0, distance: 1f, kind: WorldSceneSelectionKind.Wmo, point: new Vector3(0, 0, 0), min: new Vector3(-20f), max: new Vector3(20f));
+        var insideProp = Hit(1, distance: 5f, kind: WorldSceneSelectionKind.Mdx, point: new Vector3(2, 2, 0));
+        var snapshot = new WorldSceneSelectionSnapshot([shell, insideProp]);
+
+        var cameraInside = new Vector3(0, 0, 0);
+        var policy = new WorldSceneSelectionPolicy(false, float.MaxValue, cameraInside);
+        var result = WorldSceneSelectionService.Select(new WorldSceneSelectionRequest(WorldSceneSelectionMode.HoverRay, policy), snapshot);
+
+        // When camera is inside, enclosing WMO falls through to the interior prop
+        Assert.Equal(1, result.BestId);
+    }
+
+    [Fact]
     public void HoverRay_NearestFirst_IsStableForEqualDistances()
     {
         var snapshot = new WorldSceneSelectionSnapshot([Hit(4, 7f), Hit(2, 3f), Hit(9, 3f), Hit(1, 5f)]);
@@ -249,7 +279,7 @@ public sealed class WorldSceneSelectionServiceTests
             }).ToList();
             var fall = WmoContainerFallThroughFilter.ApplyFallThrough(visible
                 .Select((hit, index) => new WmoContainerFallThroughFilter.CandidateObject(index, hit.Kind == WorldSceneSelectionKind.Wmo, hit.BoundsMin, hit.BoundsMax, hit.SelectionPoint))
-                .ToList());
+                .ToList(), policy.CameraPosition);
             IEnumerable<WorldSceneSelectionCandidate> filtered = fall.Count == visible.Count ? visible : fall.Select(f => visible[f.Id]);
             int? referenceBest = filtered.Where(hit => !limit || hit.RayDistance <= maxDistance)
                 .OrderBy(static hit => hit.RayDistance)

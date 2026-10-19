@@ -1505,6 +1505,7 @@ void main() {
         _sceneHoverPick.DrawSceneHoverAssetOverlay();
         _sceneHoverPick.DrawClickSelectionOverlay();
         _sceneHoverPick.DrawSelectedEntityNameplate();
+        _sqlSpawnStreaming.DrawChatOverlay(ImGui.GetIO().DisplaySize);
 
         _autoOpenWorldMapsPanel = false;
     }

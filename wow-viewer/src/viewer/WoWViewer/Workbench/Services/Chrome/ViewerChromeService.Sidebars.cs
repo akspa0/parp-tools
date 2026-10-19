@@ -867,6 +867,19 @@ internal sealed partial class ViewerChromeService
             if (ImGui.Checkbox("PM4 Overlay", ref showPm4))
                 _worldScene.Pm4Overlay.ShowPm4Overlay = showPm4;
 
+            bool colorSpawns = _worldScene.ExternalSpawns.ColorSpawnBoundingBoxes;
+            if (ImGui.Checkbox("Color Spawns", ref colorSpawns))
+                _worldScene.ExternalSpawns.ColorSpawnBoundingBoxes = colorSpawns;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Colors NPC spawn bounding boxes lime green and GameObject spawns warm amber.");
+
+            ImGui.SameLine();
+            bool spawnsOnly = _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly;
+            if (ImGui.Checkbox("Spawn BBs Only", ref spawnsOnly))
+                _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Only render bounding boxes for SQL-spawned NPCs and GameObjects, hiding static MDDF/MODF boxes.");
+
             if (_worldScene.Pm4Overlay.IsPm4Loading)
                 ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "PM4 overlay is loading...");
         }

@@ -433,9 +433,6 @@ public class ReplaceableTextureResolver
 
     private void TryLoadAlphaCoreCreatureDisplayFallback(string build)
     {
-        if (!build.StartsWith("0.5.3", StringComparison.OrdinalIgnoreCase))
-            return;
-
         string? alphaCoreRoot = ResolveAlphaCoreRoot();
         if (string.IsNullOrWhiteSpace(alphaCoreRoot))
             return;
@@ -727,8 +724,24 @@ public class ReplaceableTextureResolver
         if (_dataSource == null || TextureExistsInDataSource(candidate))
             return candidate;
 
+        // If the model path was under Creature\, probe the canonical Character\<Race>\<Gender>\ candidate path
+        if (modelPath.StartsWith("creature\\", StringComparison.OrdinalIgnoreCase)
+            && TryParseCharacterModelPath(modelPath, out int raceId, out int sexId))
+        {
+            string? raceName = CharacterRaceIds.FirstOrDefault(kvp => kvp.Value == raceId).Key;
+            if (raceName != null)
+            {
+                string sexName = sexId == 1 ? "Female" : "Male";
+                string charCandidate = Path.Combine("Character", Capitalize(raceName), sexName, Path.GetFileName(candidate)).Replace('/', '\\');
+                if (TextureExistsInDataSource(charCandidate))
+                    return charCandidate;
+            }
+        }
+
         return null;
     }
+
+    private static string Capitalize(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..].ToLowerInvariant();
 
     private string? TryInferCharacterSkinExtraTexture(string modelPath, string baseTextureName)
     {
@@ -743,6 +756,19 @@ public class ReplaceableTextureResolver
         string inferred = Path.ChangeExtension(basePath, null) + "_Extra" + extension;
         if (_dataSource == null || TextureExistsInDataSource(inferred))
             return inferred;
+
+        if (modelPath.StartsWith("creature\\", StringComparison.OrdinalIgnoreCase)
+            && TryParseCharacterModelPath(modelPath, out int raceId, out int sexId))
+        {
+            string? raceName = CharacterRaceIds.FirstOrDefault(kvp => kvp.Value == raceId).Key;
+            if (raceName != null)
+            {
+                string sexName = sexId == 1 ? "Female" : "Male";
+                string charInferred = Path.Combine("Character", Capitalize(raceName), sexName, Path.GetFileName(inferred)).Replace('/', '\\');
+                if (TextureExistsInDataSource(charInferred))
+                    return charInferred;
+            }
+        }
 
         return null;
     }
@@ -1120,17 +1146,47 @@ public class ReplaceableTextureResolver
         sexId = 0;
 
         string[] segments = modelPath.Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (segments.Length < 3 || !segments[0].Equals("character", StringComparison.OrdinalIgnoreCase))
+        if (segments.Length < 2)
             return false;
 
-        if (!CharacterRaceIds.TryGetValue(segments[1], out raceId))
+        bool isCharRoot = segments[0].Equals("character", StringComparison.OrdinalIgnoreCase);
+        bool isCreatureRoot = segments[0].Equals("creature", StringComparison.OrdinalIgnoreCase);
+
+        if (!isCharRoot && !isCreatureRoot)
             return false;
 
-        sexId = segments[2].Equals("female", StringComparison.OrdinalIgnoreCase) ? 1
-            : segments[2].Equals("male", StringComparison.OrdinalIgnoreCase) ? 0
-            : -1;
+        // Pattern 1: {root}\{race}\{sex}\...
+        if (segments.Length >= 3 && CharacterRaceIds.TryGetValue(segments[1], out raceId))
+        {
+            sexId = segments[2].StartsWith("female", StringComparison.OrdinalIgnoreCase) ? 1
+                : segments[2].StartsWith("male", StringComparison.OrdinalIgnoreCase) ? 0
+                : -1;
 
-        return sexId >= 0;
+            if (sexId >= 0)
+                return true;
+        }
+
+        // Pattern 2: {root}\{RaceGenderSuffix}\... e.g. Creature\HumanMaleKid\... or Creature\HumanMale\...
+        string sub = segments[1].ToLowerInvariant();
+        foreach (var (raceName, id) in CharacterRaceIds)
+        {
+            if (sub.StartsWith(raceName))
+            {
+                raceId = id;
+                string rem = sub[raceName.Length..];
+                if (rem.StartsWith("female"))
+                    sexId = 1;
+                else if (rem.StartsWith("male"))
+                    sexId = 0;
+                else
+                    sexId = -1;
+
+                if (sexId >= 0)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1494,6 +1550,27 @@ public class ReplaceableTextureResolver
             return modelId;
         if (_modelPathToId.TryGetValue(withoutExt + ".mdx", out modelId))
             return modelId;
+
+        // Fallback: trailing-digit extraction (e.g. humanmale0128 -> 128)
+        var digitMatch = System.Text.RegularExpressions.Regex.Match(fileName, @"^(?<base>.*?)(?<digits>\d+)$");
+        if (digitMatch.Success)
+        {
+            string digitsStr = digitMatch.Groups["digits"].Value;
+            if (int.TryParse(digitsStr, out int parsedId) && parsedId > 0)
+            {
+                if (_displayVariations.ContainsKey(parsedId) || _modelIdToPath.ContainsKey(parsedId))
+                    return parsedId;
+            }
+
+            string baseName = digitMatch.Groups["base"].Value;
+            if (!string.IsNullOrEmpty(baseName))
+            {
+                if (_modelFileNameToId.TryGetValue(baseName, out modelId))
+                    return modelId;
+                if (_modelPathToId.TryGetValue(baseName, out modelId))
+                    return modelId;
+            }
+        }
 
         // Fallback: match by folder name (e.g. DragonSpawn for DragonSpawnArmored)
         string modelDir = Path.GetDirectoryName(normalized) ?? string.Empty;

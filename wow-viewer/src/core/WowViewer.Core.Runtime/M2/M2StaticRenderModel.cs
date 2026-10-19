@@ -26,6 +26,54 @@ public sealed class M2StaticRenderModel
         UsesCompatibilityFallback = usesCompatibilityFallback;
         Textures = textures ?? [];
         TextureLookup = textureLookup ?? [];
+
+        Vector3 min = new(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 max = new(float.MinValue, float.MinValue, float.MinValue);
+        bool hasVertices = false;
+
+        for (int i = 0; i < sections.Count; i++)
+        {
+            var verts = sections[i].Vertices;
+            for (int v = 0; v < verts.Count; v++)
+            {
+                Vector3 pos = verts[v].Position;
+                if (float.IsFinite(pos.X) && float.IsFinite(pos.Y) && float.IsFinite(pos.Z))
+                {
+                    min = Vector3.Min(min, pos);
+                    max = Vector3.Max(max, pos);
+                    hasVertices = true;
+                }
+            }
+        }
+
+        if (!hasVertices)
+        {
+            for (int i = 0; i < structuredSections.Count; i++)
+            {
+                var verts = structuredSections[i].Vertices;
+                for (int v = 0; v < verts.Count; v++)
+                {
+                    Vector3 pos = verts[v].Position;
+                    if (float.IsFinite(pos.X) && float.IsFinite(pos.Y) && float.IsFinite(pos.Z))
+                    {
+                        min = Vector3.Min(min, pos);
+                        max = Vector3.Max(max, pos);
+                        hasVertices = true;
+                    }
+                }
+            }
+        }
+
+        if (hasVertices && min.X <= max.X && min.Y <= max.Y && min.Z <= max.Z)
+        {
+            SelectionBoundsMin = min;
+            SelectionBoundsMax = max;
+        }
+        else
+        {
+            SelectionBoundsMin = model.BoundsMin;
+            SelectionBoundsMax = model.BoundsMax;
+        }
     }
 
     public M2ModelDocument Model { get; }
@@ -45,6 +93,10 @@ public sealed class M2StaticRenderModel
     public Vector3 BoundsMin => Model.BoundsMin;
 
     public Vector3 BoundsMax => Model.BoundsMax;
+
+    public Vector3 SelectionBoundsMin { get; }
+
+    public Vector3 SelectionBoundsMax { get; }
 }
 
 public sealed class M2StaticRenderSection

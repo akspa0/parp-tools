@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace WowViewer.Core.Runtime.World.Selection;
 
 /// <summary>
@@ -82,7 +84,7 @@ public static class WorldSceneSelectionService
             })
             .ToList();
 
-        IReadOnlyList<WorldSceneSelectionCandidate> fallThrough = ApplyWmoContainerFallThrough(visible);
+        IReadOnlyList<WorldSceneSelectionCandidate> fallThrough = ApplyWmoContainerFallThrough(visible, request.Policy.CameraPosition);
         WorldSceneSelectionPolicy policy = request.Policy;
         List<WorldSceneSelectionCandidate> ordered = fallThrough
             .Where(hit => policy.IsDistanceAllowed(hit.RayDistance))
@@ -91,7 +93,9 @@ public static class WorldSceneSelectionService
         return ToResult(ordered);
     }
 
-    private static IReadOnlyList<WorldSceneSelectionCandidate> ApplyWmoContainerFallThrough(IReadOnlyList<WorldSceneSelectionCandidate> hits)
+    private static IReadOnlyList<WorldSceneSelectionCandidate> ApplyWmoContainerFallThrough(
+        IReadOnlyList<WorldSceneSelectionCandidate> hits,
+        Vector3? cameraPosition)
     {
         if (hits.Count <= 1)
             return hits;
@@ -108,7 +112,7 @@ public static class WorldSceneSelectionService
                 hit.SelectionPoint);
         }
 
-        IReadOnlyList<WmoContainerFallThroughFilter.CandidateObject> filtered = WmoContainerFallThroughFilter.ApplyFallThrough(candidates);
+        IReadOnlyList<WmoContainerFallThroughFilter.CandidateObject> filtered = WmoContainerFallThroughFilter.ApplyFallThrough(candidates, cameraPosition);
         if (filtered.Count == hits.Count)
             return hits;
 

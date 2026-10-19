@@ -33,21 +33,21 @@ public enum WorldSceneSelectionStatus
 /// <see cref="MaxDistance"/> of the ray origin (or of <see cref="CameraPosition"/> for screen-space
 /// hits) are eligible. With the limit off every hit is eligible, including non-finite distances.
 /// </summary>
-public readonly record struct WorldSceneSelectionPolicy(bool LimitRange, float MaxDistance, Vector3 CameraPosition)
+public readonly record struct WorldSceneSelectionPolicy(bool LimitRange, float MaxDistance, Vector3? CameraPosition = null)
 {
-    public static WorldSceneSelectionPolicy Unlimited { get; } = new(false, float.MaxValue, Vector3.Zero);
+    public static WorldSceneSelectionPolicy Unlimited { get; } = new(false, float.MaxValue, null);
 
     /// <summary>A limited policy needs a non-negative, non-NaN range.</summary>
     public bool IsValid => !LimitRange || (!float.IsNaN(MaxDistance) && MaxDistance >= 0f);
 
     /// <summary>Screen-space checks also need a finite camera position when the range is limited.</summary>
     public bool IsValidForPositions => IsValid
-        && (!LimitRange || (float.IsFinite(CameraPosition.X) && float.IsFinite(CameraPosition.Y) && float.IsFinite(CameraPosition.Z)));
+        && (!LimitRange || (CameraPosition.HasValue && float.IsFinite(CameraPosition.Value.X) && float.IsFinite(CameraPosition.Value.Y) && float.IsFinite(CameraPosition.Value.Z)));
 
     public bool IsDistanceAllowed(float distance) => !LimitRange || distance <= MaxDistance;
 
     public bool IsPositionAllowed(Vector3 worldPosition)
-        => !LimitRange || Vector3.Distance(CameraPosition, worldPosition) <= MaxDistance;
+        => !LimitRange || (CameraPosition.HasValue && Vector3.Distance(CameraPosition.Value, worldPosition) <= MaxDistance);
 }
 
 /// <summary>One ray-hit scene object. Values and a snapshot-unique identifier only.</summary>

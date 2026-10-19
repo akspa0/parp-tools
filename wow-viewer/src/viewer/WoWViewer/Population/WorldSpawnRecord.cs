@@ -29,4 +29,6 @@ public sealed class WorldSpawnRecord
     public int Faction { get; init; }
     public int NpcFlags { get; init; }
     public int GameObjectType { get; init; }
+    public int EventId { get; set; }
+    public string? EventName { get; set; }
 }

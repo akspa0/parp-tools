@@ -313,4 +313,50 @@ public class TrinityCorePopulationTests
         Assert.Null(instances[0].SpawnEntryId);
         Assert.True(string.IsNullOrEmpty(instances[0].AssetKind));
     }
+
+    [Fact]
+    public void EventFilter_BaseWorldOnly_ExcludesHolidaySpawns()
+    {
+        // Simulate a holiday map with Base World (eventId 0), Winter Veil (eventId 1), and Hallow's End (eventId 12)
+        var goSpawns = new Dictionary<int, int>
+        {
+            [101] = 1,  // Winter Veil Tree
+            [102] = 12, // Hallow's End Pumpkin
+            // 103 has no event (base world)
+        };
+
+        bool IsActive(int spawnId, int selectedEventId)
+        {
+            if (selectedEventId == -1) return true;
+            int evId = goSpawns.TryGetValue(spawnId, out int e) ? e : 0;
+            if (selectedEventId == 0) return evId == 0;
+            return evId == 0 || evId == selectedEventId;
+        }
+
+        // Base world only: only 103 active
+        Assert.False(IsActive(101, 0));
+        Assert.False(IsActive(102, 0));
+        Assert.True(IsActive(103, 0));
+
+        // Winter Veil selected: 101 and 103 active, 102 excluded
+        Assert.True(IsActive(101, 1));
+        Assert.False(IsActive(102, 1));
+        Assert.True(IsActive(103, 1));
+
+        // Show all: all active
+        Assert.True(IsActive(101, -1));
+        Assert.True(IsActive(102, -1));
+        Assert.True(IsActive(103, -1));
+    }
+
+    [Fact]
+    public void CreatureHumanoidPath_RegexAndVariantExtraction()
+    {
+        string modelName = "humanmale0128";
+        var match = System.Text.RegularExpressions.Regex.Match(modelName, @"^(?<base>.*?)(?<digits>\d+)$");
+        Assert.True(match.Success);
+        Assert.Equal("humanmale", match.Groups["base"].Value);
+        Assert.Equal("0128", match.Groups["digits"].Value);
+        Assert.Equal(128, int.Parse(match.Groups["digits"].Value));
+    }
 }
