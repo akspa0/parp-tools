@@ -1,0 +1,80 @@
+{
+  "mapId": 572,
+  "mapName": "Map_572",
+  "clientVersion": "3.3.5a",
+  "exportedUtc": "2026-10-18T23:35:40.3677162Z",
+  "spawns": [
+    {
+      "spawnId": 1551,
+      "entryId": 23193,
+      "mapId": 572,
+      "spawnType": 0,
+      "name": "Lordaeron Citizen (Jesse)",
+      "subname": null,
+      "modelPath": null,
+      "scale": 15,
+      "displayScale": 1,
+      "effectiveScale": 15,
+      "position": {
+        "x": 1317.99,
+        "y": 1684.16,
+        "z": 37.0655
+      },
+      "orientation": 0.591864,
+      "rotation": null,
+      "faction": 0,
+      "flags": 7,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 1820,
+      "entryId": 23193,
+      "mapId": 572,
+      "spawnType": 0,
+      "name": "Lordaeron Citizen (Jesse)",
+      "subname": null,
+      "modelPath": null,
+      "scale": 15,
+      "displayScale": 1,
+      "effectiveScale": 15,
+      "position": {
+        "x": 1309.41,
+        "y": 1663.58,
+        "z": 36.4243
+      },
+      "orientation": 3.30149,
+      "rotation": null,
+      "faction": 0,
+      "flags": 7,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 1822,
+      "entryId": 23193,
+      "mapId": 572,
+      "spawnType": 0,
+      "name": "Lordaeron Citizen (Jesse)",
+      "subname": null,
+      "modelPath": null,
+      "scale": 15,
+      "displayScale": 1,
+      "effectiveScale": 15,
+      "position": {
+        "x": 1335.04,
+        "y": 1676.09,
+        "z": 36.2882
+      },
+      "orientation": 5.67732,
+      "rotation": null,
+      "faction": 0,
+      "flags": 7,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

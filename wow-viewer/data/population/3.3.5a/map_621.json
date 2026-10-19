@@ -1,0 +1,56 @@
+{
+  "mapId": 621,
+  "mapName": "Map_621",
+  "clientVersion": "3.3.5a",
+  "exportedUtc": "2026-10-18T23:35:40.4557259Z",
+  "spawns": [
+    {
+      "spawnId": 62741,
+      "entryId": 31804,
+      "mapId": 621,
+      "spawnType": 0,
+      "name": "Qatiichii",
+      "subname": "Green Island",
+      "modelPath": null,
+      "scale": 65,
+      "displayScale": 1,
+      "effectiveScale": 65,
+      "position": {
+        "x": 14.0833,
+        "y": 1.95972,
+        "z": 18.8097
+      },
+      "orientation": 3.735,
+      "rotation": null,
+      "faction": 0,
+      "flags": 1950,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 120543,
+      "entryId": 31806,
+      "mapId": 621,
+      "spawnType": 0,
+      "name": "Oomailiq",
+      "subname": "Green Island",
+      "modelPath": null,
+      "scale": 65,
+      "displayScale": 1,
+      "effectiveScale": 65,
+      "position": {
+        "x": -19.2136,
+        "y": -0.001574,
+        "z": 17.5273
+      },
+      "orientation": 3.19088,
+      "rotation": null,
+      "faction": 0,
+      "flags": 1950,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

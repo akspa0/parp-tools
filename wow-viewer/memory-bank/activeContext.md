@@ -11,10 +11,11 @@ Last updated: 2026-10-18 · **Spec 275: High-Performance Asset Streaming for MPQ
 - **WMO Portal Occlusion Quarantined**: Fail-safe frustum admission remains active in `WmoRenderer.cs` to guarantee zero missing geometry (e.g. Duskwood two-story houses) while asset streaming is optimized.
 
 **Committed Feature Sets on `v0.6.1-dev` (2026-10-18)**:
-1. `feat(harvester,spec-274)`: Minimap Hillshade Correlation & Domain Translation dataset pipeline across 37 Zarr v3 map revisions; 228/228 pytest tests pass.
-2. `feat(inspector)`: Integrated 4.3.4 client ground-truth format flags inspection (`FormatFlagsDescriber.cs`) across Terrain, Object, Model, and Standalone inspection panels.
-3. `perf(renderer)`: Optimized spatial M2 lighting collection, terrain streaming MCNK FourCC fast-path, and asset path resolver negative caching.
-4. `feat(renderer,spec-273)`: Completed Spec 273 performance pipeline with fail-safe WMO frustum preservation; 48/48 portal tests pass.
+1. `feat(population,spec-276)`: TrinityCore multi-version SQL population extraction pipeline, full multi-map streaming (all 113 maps in 3.3.5a, all 31 maps in 0.5.3), automatic client-version detection & map loading, Map 451 developer test spawns + alpha-core corner dev transposition, authentic NPC/GameObject nameplates and Info tab inspector display, default Stand/Idle animation selection, and ground-truth 4.3.4 detail doodad alpha blending. 12/12 focused tests pass.
+2. `feat(harvester,spec-274)`: Minimap Hillshade Correlation & Domain Translation dataset pipeline across 37 Zarr v3 map revisions; 228/228 pytest tests pass.
+3. `feat(inspector)`: Integrated 4.3.4 client ground-truth format flags inspection (`FormatFlagsDescriber.cs`) across Terrain, Object, Model, and Standalone inspection panels.
+4. `perf(renderer)`: Optimized spatial M2 lighting collection, terrain streaming MCNK FourCC fast-path, and asset path resolver negative caching.
+5. `feat(renderer,spec-273)`: Completed Spec 273 performance pipeline with fail-safe WMO frustum preservation; 48/48 portal tests pass.
 
 **WC3 file support unified in main browser (2026-10-15):** [Spec 272](../specs/272-wc2-wc3-viewer-support/spec.md) WC3 loose folders and MPQs now load as first-class `IDataSource` instances directly into the main File Browser (`Wc3DataSource`). Textures (BLP, BLP0 with external mips, TGA, PNG) render directly in the main viewer scene viewport (`TextureViewRenderer`) with transparency checkerboard, pan, and zoom, instead of cramped sidebar previews. Models (`.mdx`) render through the main MDX viewport renderer. Arbitrary text/binary files can be browsed with the new "All files" (`*`) filter. Multiple BLP0 mip levels (`.b00` through `.b15`) are grouped into a single `<texture>.blp [N mips]` row with level 0 as the full-resolution primary. Added PNG batch/single export via `TextureExportService` with an option to write all companion mip levels. Viewer build passes 0 errors; focused core tests pass 70/70.
 

@@ -1504,6 +1504,7 @@ void main() {
 
         _sceneHoverPick.DrawSceneHoverAssetOverlay();
         _sceneHoverPick.DrawClickSelectionOverlay();
+        _sceneHoverPick.DrawSelectedEntityNameplate();
 
         _autoOpenWorldMapsPanel = false;
     }
@@ -1584,7 +1585,16 @@ void main() {
             ? $"Doodad def: {inst.PlacementEntryIndex} (MODD index, WMO-local; MODD has no uniqueId)\n"
             : $"UniqueId: {inst.UniqueId}\n";
 
-        _selectedObjectInfo = $"{type} [{idx}] {inst.ModelName}\n" +
+        string entityHeader = "";
+        if (!string.IsNullOrEmpty(inst.DisplayName))
+        {
+            string sub = !string.IsNullOrEmpty(inst.Subname) ? $" <{inst.Subname}>" : "";
+            string entry = inst.SpawnEntryId.HasValue ? $" [Entry {inst.SpawnEntryId.Value}]" : "";
+            entityHeader = $"Entity: {inst.DisplayName}{sub}{entry}\n";
+        }
+
+        _selectedObjectInfo = entityHeader +
+            $"{type} [{idx}] {inst.ModelName}\n" +
             $"Path: {inst.ModelPath}\n" +
             identityLine +
             $"Local: ({inst.PlacementPosition.X:F1}, {inst.PlacementPosition.Y:F1}, {inst.PlacementPosition.Z:F1})\n" +

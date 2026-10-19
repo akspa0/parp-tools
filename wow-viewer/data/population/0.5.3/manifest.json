@@ -1,0 +1,225 @@
+{
+  "version": "0.5.3",
+  "generatedUtc": "2026-10-18T23:35:57.2929742Z",
+  "totalCreatures": 57073,
+  "totalGameObjects": 35182,
+  "maps": [
+    {
+      "mapId": 0,
+      "mapName": "Eastern Kingdoms",
+      "creatureCount": 23205,
+      "gameObjectCount": 17986,
+      "relativeFilePath": "map_0.json"
+    },
+    {
+      "mapId": 1,
+      "mapName": "Kalimdor",
+      "creatureCount": 26986,
+      "gameObjectCount": 14769,
+      "relativeFilePath": "map_1.json"
+    },
+    {
+      "mapId": 13,
+      "mapName": "Map_13",
+      "creatureCount": 0,
+      "gameObjectCount": 2,
+      "relativeFilePath": "map_13.json"
+    },
+    {
+      "mapId": 30,
+      "mapName": "Map_30",
+      "creatureCount": 6,
+      "gameObjectCount": 0,
+      "relativeFilePath": "map_30.json"
+    },
+    {
+      "mapId": 33,
+      "mapName": "Map_33",
+      "creatureCount": 147,
+      "gameObjectCount": 41,
+      "relativeFilePath": "map_33.json"
+    },
+    {
+      "mapId": 34,
+      "mapName": "Map_34",
+      "creatureCount": 93,
+      "gameObjectCount": 2,
+      "relativeFilePath": "map_34.json"
+    },
+    {
+      "mapId": 36,
+      "mapName": "Map_36",
+      "creatureCount": 205,
+      "gameObjectCount": 52,
+      "relativeFilePath": "map_36.json"
+    },
+    {
+      "mapId": 37,
+      "mapName": "Map_37",
+      "creatureCount": 2,
+      "gameObjectCount": 0,
+      "relativeFilePath": "map_37.json"
+    },
+    {
+      "mapId": 43,
+      "mapName": "Map_43",
+      "creatureCount": 319,
+      "gameObjectCount": 136,
+      "relativeFilePath": "map_43.json"
+    },
+    {
+      "mapId": 44,
+      "mapName": "Map_44",
+      "creatureCount": 131,
+      "gameObjectCount": 9,
+      "relativeFilePath": "map_44.json"
+    },
+    {
+      "mapId": 47,
+      "mapName": "Map_47",
+      "creatureCount": 186,
+      "gameObjectCount": 156,
+      "relativeFilePath": "map_47.json"
+    },
+    {
+      "mapId": 48,
+      "mapName": "Map_48",
+      "creatureCount": 211,
+      "gameObjectCount": 43,
+      "relativeFilePath": "map_48.json"
+    },
+    {
+      "mapId": 70,
+      "mapName": "Map_70",
+      "creatureCount": 327,
+      "gameObjectCount": 239,
+      "relativeFilePath": "map_70.json"
+    },
+    {
+      "mapId": 90,
+      "mapName": "Map_90",
+      "creatureCount": 403,
+      "gameObjectCount": 90,
+      "relativeFilePath": "map_90.json"
+    },
+    {
+      "mapId": 109,
+      "mapName": "Map_109",
+      "creatureCount": 315,
+      "gameObjectCount": 77,
+      "relativeFilePath": "map_109.json"
+    },
+    {
+      "mapId": 129,
+      "mapName": "Map_129",
+      "creatureCount": 262,
+      "gameObjectCount": 71,
+      "relativeFilePath": "map_129.json"
+    },
+    {
+      "mapId": 189,
+      "mapName": "Map_189",
+      "creatureCount": 354,
+      "gameObjectCount": 95,
+      "relativeFilePath": "map_189.json"
+    },
+    {
+      "mapId": 209,
+      "mapName": "Map_209",
+      "creatureCount": 274,
+      "gameObjectCount": 87,
+      "relativeFilePath": "map_209.json"
+    },
+    {
+      "mapId": 229,
+      "mapName": "Map_229",
+      "creatureCount": 594,
+      "gameObjectCount": 195,
+      "relativeFilePath": "map_229.json"
+    },
+    {
+      "mapId": 230,
+      "mapName": "Map_230",
+      "creatureCount": 1096,
+      "gameObjectCount": 460,
+      "relativeFilePath": "map_230.json"
+    },
+    {
+      "mapId": 249,
+      "mapName": "Map_249",
+      "creatureCount": 6,
+      "gameObjectCount": 147,
+      "relativeFilePath": "map_249.json"
+    },
+    {
+      "mapId": 269,
+      "mapName": "Map_269",
+      "creatureCount": 68,
+      "gameObjectCount": 0,
+      "relativeFilePath": "map_269.json"
+    },
+    {
+      "mapId": 289,
+      "mapName": "Map_289",
+      "creatureCount": 403,
+      "gameObjectCount": 68,
+      "relativeFilePath": "map_289.json"
+    },
+    {
+      "mapId": 329,
+      "mapName": "Map_329",
+      "creatureCount": 462,
+      "gameObjectCount": 228,
+      "relativeFilePath": "map_329.json"
+    },
+    {
+      "mapId": 349,
+      "mapName": "Map_349",
+      "creatureCount": 624,
+      "gameObjectCount": 39,
+      "relativeFilePath": "map_349.json"
+    },
+    {
+      "mapId": 369,
+      "mapName": "Map_369",
+      "creatureCount": 22,
+      "gameObjectCount": 104,
+      "relativeFilePath": "map_369.json"
+    },
+    {
+      "mapId": 389,
+      "mapName": "Map_389",
+      "creatureCount": 132,
+      "gameObjectCount": 13,
+      "relativeFilePath": "map_389.json"
+    },
+    {
+      "mapId": 409,
+      "mapName": "Map_409",
+      "creatureCount": 232,
+      "gameObjectCount": 57,
+      "relativeFilePath": "map_409.json"
+    },
+    {
+      "mapId": 449,
+      "mapName": "Map_449",
+      "creatureCount": 0,
+      "gameObjectCount": 14,
+      "relativeFilePath": "map_449.json"
+    },
+    {
+      "mapId": 450,
+      "mapName": "Map_450",
+      "creatureCount": 0,
+      "gameObjectCount": 2,
+      "relativeFilePath": "map_450.json"
+    },
+    {
+      "mapId": 451,
+      "mapName": "development",
+      "creatureCount": 8,
+      "gameObjectCount": 0,
+      "relativeFilePath": "map_451.json"
+    }
+  ]
+}

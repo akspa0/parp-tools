@@ -1,0 +1,1088 @@
+{
+  "mapId": 566,
+  "mapName": "Map_566",
+  "clientVersion": "3.3.5a",
+  "exportedUtc": "2026-10-18T23:35:40.0342525Z",
+  "spawns": [
+    {
+      "spawnId": 21510,
+      "entryId": 184876,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair04",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2267.59,
+        "y": 1746.29,
+        "z": 1224.29
+      },
+      "orientation": 0.855211,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.414693,
+        "w": 0.909961
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21512,
+      "entryId": 184878,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair06",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2298.64,
+        "y": 1747.62,
+        "z": 1224.29
+      },
+      "orientation": 2.42601,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.936673,
+        "w": 0.350206
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21513,
+      "entryId": 184899,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair29",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2273.81,
+        "y": 1748.2,
+        "z": 1215.42
+      },
+      "orientation": 1.09956,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.5225,
+        "w": 0.852639
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21514,
+      "entryId": 184902,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair32",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2291.23,
+        "y": 1748.2,
+        "z": 1215.42
+      },
+      "orientation": 2.06821,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.859405,
+        "w": 0.511295
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21515,
+      "entryId": 184873,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair01",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2283.71,
+        "y": 1749.25,
+        "z": 1200.12
+      },
+      "orientation": 1.74533,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.766045,
+        "w": 0.642787
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21516,
+      "entryId": 184877,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair05",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2268.95,
+        "y": 1745.03,
+        "z": 1224.29
+      },
+      "orientation": 0.855211,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.414693,
+        "w": 0.909961
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21517,
+      "entryId": 184879,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair07",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2299.9,
+        "y": 1748.98,
+        "z": 1224.29
+      },
+      "orientation": 2.42601,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.936673,
+        "w": 0.350206
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21518,
+      "entryId": 184903,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair33",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2296.72,
+        "y": 1753.84,
+        "z": 1215.42
+      },
+      "orientation": 2.67035,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.972369,
+        "w": 0.233447
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21519,
+      "entryId": 184898,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair28",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2268.17,
+        "y": 1753.7,
+        "z": 1215.42
+      },
+      "orientation": 0.49742,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.246154,
+        "w": 0.969231
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21520,
+      "entryId": 184900,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair30",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2278.57,
+        "y": 1746.17,
+        "z": 1215.42
+      },
+      "orientation": 1.28282,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.598326,
+        "w": 0.801253
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21521,
+      "entryId": 184901,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair31",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2286.44,
+        "y": 1746.28,
+        "z": 1215.42
+      },
+      "orientation": 1.88496,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.809018,
+        "w": 0.587783
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21522,
+      "entryId": 184082,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Human Tower Cap Pt",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2282.12,
+        "y": 1760.01,
+        "z": 1189.71
+      },
+      "orientation": 1.91986,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.819151,
+        "w": 0.573577
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 29,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21523,
+      "entryId": 184881,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair09",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2265,
+        "y": 1775.98,
+        "z": 1224.29
+      },
+      "orientation": -0.715584,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.350207,
+        "w": 0.936672
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21528,
+      "entryId": 184884,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair12",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2264.05,
+        "y": 1760.16,
+        "z": 1224.24
+      },
+      "orientation": 0.052359,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.0261765,
+        "w": 0.999657
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21529,
+      "entryId": 184897,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair27",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2266.25,
+        "y": 1758.49,
+        "z": 1215.42
+      },
+      "orientation": 0.31416,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.156435,
+        "w": 0.987688
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21530,
+      "entryId": 184883,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair11",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2264.01,
+        "y": 1762.01,
+        "z": 1224.24
+      },
+      "orientation": 0.052359,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.0261765,
+        "w": 0.999657
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21531,
+      "entryId": 184880,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair08",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2266.26,
+        "y": 1777.34,
+        "z": 1224.29
+      },
+      "orientation": -0.715584,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.350207,
+        "w": 0.936672
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21532,
+      "entryId": 184891,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair19",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2298.65,
+        "y": 1766.46,
+        "z": 1215.42
+      },
+      "orientation": -2.82743,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.987688,
+        "w": 0.156436
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21533,
+      "entryId": 184886,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair14",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2282.66,
+        "y": 1781.07,
+        "z": 1224.27
+      },
+      "orientation": -1.65806,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.737276,
+        "w": 0.675591
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21534,
+      "entryId": 184894,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair22",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2286.33,
+        "y": 1778.78,
+        "z": 1215.42
+      },
+      "orientation": -1.85878,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.801255,
+        "w": 0.598323
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21535,
+      "entryId": 184885,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair13",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2278.97,
+        "y": 1780.7,
+        "z": 1224.27
+      },
+      "orientation": -1.40499,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.646124,
+        "w": 0.763232
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21536,
+      "entryId": 184887,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair15",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2279.09,
+        "y": 1754.72,
+        "z": 1224.17
+      },
+      "orientation": 2.74017,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.979925,
+        "w": 0.199366
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21537,
+      "entryId": 184888,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair16",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2276.12,
+        "y": 1759.02,
+        "z": 1224.14
+      },
+      "orientation": -2.70526,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.976296,
+        "w": 0.21644
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21538,
+      "entryId": 184889,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair17",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2278.66,
+        "y": 1770.81,
+        "z": 1224.17
+      },
+      "orientation": -2.70526,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.976296,
+        "w": 0.21644
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21539,
+      "entryId": 184890,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair18",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2277.24,
+        "y": 1764.29,
+        "z": 1224.13
+      },
+      "orientation": 2.94961,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.995396,
+        "w": 0.095844
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21540,
+      "entryId": 184893,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair21",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2291.09,
+        "y": 1776.75,
+        "z": 1215.42
+      },
+      "orientation": -2.04203,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.852639,
+        "w": 0.522501
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21541,
+      "entryId": 184874,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair02",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2295.95,
+        "y": 1779.92,
+        "z": 1224.29
+      },
+      "orientation": -2.28638,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.909961,
+        "w": 0.414694
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21542,
+      "entryId": 184875,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair03",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2297.31,
+        "y": 1778.67,
+        "z": 1224.29
+      },
+      "orientation": -2.28638,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.909961,
+        "w": 0.414694
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21543,
+      "entryId": 184904,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair34",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2298.75,
+        "y": 1758.59,
+        "z": 1215.42
+      },
+      "orientation": 2.85361,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.989651,
+        "w": 0.143494
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21544,
+      "entryId": 184882,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair10",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2300.44,
+        "y": 1765.92,
+        "z": 1224.24
+      },
+      "orientation": -2.28638,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.909961,
+        "w": 0.414694
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21545,
+      "entryId": 184895,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair23",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2278.46,
+        "y": 1778.68,
+        "z": 1215.42
+      },
+      "orientation": -1.25664,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.587786,
+        "w": 0.809016
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21546,
+      "entryId": 184896,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair24",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2273.67,
+        "y": 1776.75,
+        "z": 1215.42
+      },
+      "orientation": -1.07338,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.511294,
+        "w": 0.859406
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21547,
+      "entryId": 184892,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Doodad_GeneralMedChair20",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2296.73,
+        "y": 1771.26,
+        "z": 1215.42
+      },
+      "orientation": -2.64417,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.96923,
+        "w": 0.246155
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21548,
+      "entryId": 184083,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Draenei Tower Cap Pt",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2301.01,
+        "y": 1386.93,
+        "z": 1197.18
+      },
+      "orientation": 1.5708,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.707108,
+        "w": 0.707106
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 29,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21549,
+      "entryId": 184080,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "BE Tower Cap Pt",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2050.49,
+        "y": 1372.24,
+        "z": 1194.56
+      },
+      "orientation": 1.71042,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.754709,
+        "w": 0.65606
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 29,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 21550,
+      "entryId": 184081,
+      "mapId": 566,
+      "spawnType": 1,
+      "name": "Fel Reaver Cap Pt",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 2024.6,
+        "y": 1742.82,
+        "z": 1195.16
+      },
+      "orientation": 2.44346,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.939692,
+        "w": 0.342021
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 29,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

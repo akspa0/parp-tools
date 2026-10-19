@@ -1,0 +1,152 @@
+{
+  "mapId": 30,
+  "mapName": "Map_30",
+  "clientVersion": "0.5.3",
+  "exportedUtc": "2026-10-18T23:35:57.2265526Z",
+  "spawns": [
+    {
+      "spawnId": 301855,
+      "entryId": 12047,
+      "mapId": 30,
+      "spawnType": 0,
+      "name": "Stormpike Mountaineer",
+      "subname": "NULL",
+      "modelPath": null,
+      "scale": 55,
+      "displayScale": 1,
+      "effectiveScale": 55,
+      "position": {
+        "x": 117.518,
+        "y": -351.286,
+        "z": 42.5994
+      },
+      "orientation": 2.0538,
+      "rotation": null,
+      "faction": 4718592,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 301856,
+      "entryId": 12047,
+      "mapId": 30,
+      "spawnType": 0,
+      "name": "Stormpike Mountaineer",
+      "subname": "NULL",
+      "modelPath": null,
+      "scale": 55,
+      "displayScale": 1,
+      "effectiveScale": 55,
+      "position": {
+        "x": 119.151,
+        "y": -348.721,
+        "z": 42.4768
+      },
+      "orientation": 2.07735,
+      "rotation": null,
+      "faction": 4718592,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 301857,
+      "entryId": 12047,
+      "mapId": 30,
+      "spawnType": 0,
+      "name": "Stormpike Mountaineer",
+      "subname": "NULL",
+      "modelPath": null,
+      "scale": 55,
+      "displayScale": 1,
+      "effectiveScale": 55,
+      "position": {
+        "x": 96.6503,
+        "y": -388.538,
+        "z": 45.0836
+      },
+      "orientation": 3.09051,
+      "rotation": null,
+      "faction": 4718592,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 301858,
+      "entryId": 12047,
+      "mapId": 30,
+      "spawnType": 0,
+      "name": "Stormpike Mountaineer",
+      "subname": "NULL",
+      "modelPath": null,
+      "scale": 55,
+      "displayScale": 1,
+      "effectiveScale": 55,
+      "position": {
+        "x": 96.3628,
+        "y": -392.038,
+        "z": 45.1643
+      },
+      "orientation": 3.09051,
+      "rotation": null,
+      "faction": 4718592,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 301859,
+      "entryId": 12047,
+      "mapId": 30,
+      "spawnType": 0,
+      "name": "Stormpike Mountaineer",
+      "subname": "NULL",
+      "modelPath": null,
+      "scale": 55,
+      "displayScale": 1,
+      "effectiveScale": 55,
+      "position": {
+        "x": -113.728,
+        "y": -261.44,
+        "z": 6.52533
+      },
+      "orientation": 0.416244,
+      "rotation": null,
+      "faction": 4718592,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 301860,
+      "entryId": 12047,
+      "mapId": 30,
+      "spawnType": 0,
+      "name": "Stormpike Mountaineer",
+      "subname": "NULL",
+      "modelPath": null,
+      "scale": 55,
+      "displayScale": 1,
+      "effectiveScale": 55,
+      "position": {
+        "x": -111.521,
+        "y": -265.192,
+        "z": 6.52475
+      },
+      "orientation": 0.424098,
+      "rotation": null,
+      "faction": 4718592,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

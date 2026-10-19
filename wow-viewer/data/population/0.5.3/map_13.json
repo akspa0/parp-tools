@@ -1,0 +1,56 @@
+{
+  "mapId": 13,
+  "mapName": "Map_13",
+  "clientVersion": "0.5.3",
+  "exportedUtc": "2026-10-18T23:35:57.2257241Z",
+  "spawns": [
+    {
+      "spawnId": 3998046,
+      "entryId": 180365,
+      "mapId": 13,
+      "spawnType": 1,
+      "name": "Renataki, of the Thousand Blades",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -9.18787,
+        "y": 6.77919,
+        "z": -144.709
+      },
+      "orientation": 2.49844,
+      "rotation": null,
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 2,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 3998047,
+      "entryId": 987656,
+      "mapId": 13,
+      "spawnType": 1,
+      "name": "Renataki, of the Thousand Blades",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -2.00917,
+        "y": 12.3056,
+        "z": -144.709
+      },
+      "orientation": 2.49845,
+      "rotation": null,
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 2,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

@@ -303,9 +303,13 @@ public class MdxAnimator : IAnimationController
         for (int i = 0; i < _boneMatrices.Length; i++)
             _boneMatrices[i] = Matrix4x4.Identity;
 
-        // Set first sequence if available
+        // Set default idle sequence if available (prioritizing Stand/Idle over Walk/Run)
         if (mdx.Sequences.Count > 0)
-            SetSequence(0);
+        {
+            var names = mdx.Sequences.Select(static s => s.Name ?? string.Empty).ToList();
+            int idleSeq = WowViewer.Core.M2.M2AnimationNameResolver.FindDefaultIdleSequenceIndex(names);
+            SetSequence(idleSeq >= 0 ? idleSeq : 0);
+        }
     }
 
     /// <summary>Set the active animation sequence</summary>

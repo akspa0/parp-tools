@@ -1,0 +1,368 @@
+{
+  "mapId": 30,
+  "mapName": "Map_30",
+  "clientVersion": "3.3.5a",
+  "exportedUtc": "2026-10-18T23:35:39.6243034Z",
+  "spawns": [
+    {
+      "spawnId": 11765,
+      "entryId": 2413,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Wooden Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 41.1652,
+        "y": -426.866,
+        "z": 44.686
+      },
+      "orientation": 2.7838,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.984041,
+        "w": 0.177944
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 11766,
+      "entryId": 2413,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Wooden Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 39.0968,
+        "y": -425.746,
+        "z": 44.6912
+      },
+      "orientation": -0.619592,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.304864,
+        "w": 0.952396
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 11767,
+      "entryId": 2413,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Wooden Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 25.758,
+        "y": -425.837,
+        "z": 47.6369
+      },
+      "orientation": -1.98095,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.836286,
+        "w": 0.548293
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 11768,
+      "entryId": 2413,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Wooden Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 27.6786,
+        "y": -427.69,
+        "z": 47.6369
+      },
+      "orientation": -2.67908,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.973379,
+        "w": 0.229201
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 11769,
+      "entryId": 2413,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Wooden Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 25.2482,
+        "y": -433.104,
+        "z": 47.6369
+      },
+      "orientation": 2.38237,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.928809,
+        "w": 0.370559
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 15388,
+      "entryId": 112192,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -155.405,
+        "y": -440.24,
+        "z": 33.2862
+      },
+      "orientation": 2.34747,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.922201,
+        "w": 0.38671
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 15389,
+      "entryId": 112192,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -150.787,
+        "y": -459.829,
+        "z": 26.4163
+      },
+      "orientation": 0.558507,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.275638,
+        "w": 0.961261
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 15390,
+      "entryId": 112192,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -153.748,
+        "y": -438.639,
+        "z": 33.2862
+      },
+      "orientation": -2.88852,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.992005,
+        "w": 0.126199
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 15391,
+      "entryId": 112192,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -149.057,
+        "y": -461.089,
+        "z": 26.4163
+      },
+      "orientation": 1.38754,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": 0.63944,
+        "w": 0.768841
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 15392,
+      "entryId": 112192,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -168.342,
+        "y": -458.4,
+        "z": 33.2862
+      },
+      "orientation": -0.445059,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.220697,
+        "w": 0.975342
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 15393,
+      "entryId": 112192,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -142.968,
+        "y": -444.076,
+        "z": 26.4163
+      },
+      "orientation": -2.23402,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.898794,
+        "w": 0.438372
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 15394,
+      "entryId": 112192,
+      "mapId": 30,
+      "spawnType": 1,
+      "name": "Chair",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -145.341,
+        "y": -444.846,
+        "z": 26.4163
+      },
+      "orientation": -0.05236,
+      "rotation": {
+        "isIdentity": false,
+        "x": 0,
+        "y": 0,
+        "z": -0.026177,
+        "w": 0.999657
+      },
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 7,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

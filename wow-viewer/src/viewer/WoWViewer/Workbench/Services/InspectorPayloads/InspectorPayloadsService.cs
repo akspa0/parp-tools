@@ -163,8 +163,26 @@ internal sealed partial class InspectorPayloadsService
 
     private void BuildWmoInspector(InspectorContentBuilder builder, ObjectInstance inst)
     {
-        builder.ObjectType = "WMO";
-        builder.Headline = $"WMO '{Path.GetFileName(inst.ModelPath)}' (Index {inst.PlacementEntryIndex})";
+        builder.ObjectType = !string.IsNullOrEmpty(inst.AssetKind) ? inst.AssetKind : "WMO";
+        if (!string.IsNullOrEmpty(inst.DisplayName))
+        {
+            string sub = !string.IsNullOrEmpty(inst.Subname) ? $" <{inst.Subname}>" : "";
+            builder.Headline = $"{inst.DisplayName}{sub} (WMO)";
+
+            var entity = builder.AddSection("Entity Identity");
+            entity.Row("Name", inst.DisplayName, isImportant: true);
+            if (!string.IsNullOrEmpty(inst.Subname))
+                entity.Row("Title / Subname", $"<{inst.Subname}>", isImportant: true);
+            if (inst.SpawnEntryId.HasValue)
+                entity.Row("Template Entry", $"{inst.SpawnEntryId.Value}", isImportant: true);
+            if (!string.IsNullOrEmpty(inst.AssetKind))
+                entity.Row("Entity Kind", inst.AssetKind);
+            entity.Row("Spawn ID", $"{inst.UniqueId}");
+        }
+        else
+        {
+            builder.Headline = $"WMO '{Path.GetFileName(inst.ModelPath)}' (Index {inst.PlacementEntryIndex})";
+        }
 
         var placement = builder.AddSection("Placement");
         placement.Row("Asset", inst.ModelPath, isImportant: true);
@@ -274,8 +292,26 @@ internal sealed partial class InspectorPayloadsService
     private void BuildMdxInspector(InspectorContentBuilder builder, ObjectInstance inst)
     {
         string kind = inst.ModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) ? "M2" : "MDX";
-        builder.ObjectType = kind;
-        builder.Headline = $"{kind} '{Path.GetFileName(inst.ModelPath)}' (Index {inst.PlacementEntryIndex})";
+        builder.ObjectType = !string.IsNullOrEmpty(inst.AssetKind) ? inst.AssetKind : kind;
+        if (!string.IsNullOrEmpty(inst.DisplayName))
+        {
+            string sub = !string.IsNullOrEmpty(inst.Subname) ? $" <{inst.Subname}>" : "";
+            builder.Headline = $"{inst.DisplayName}{sub} ({kind})";
+
+            var entity = builder.AddSection("Entity Identity");
+            entity.Row("Name", inst.DisplayName, isImportant: true);
+            if (!string.IsNullOrEmpty(inst.Subname))
+                entity.Row("Title / Subname", $"<{inst.Subname}>", isImportant: true);
+            if (inst.SpawnEntryId.HasValue)
+                entity.Row("Template Entry", $"{inst.SpawnEntryId.Value}", isImportant: true);
+            if (!string.IsNullOrEmpty(inst.AssetKind))
+                entity.Row("Entity Kind", inst.AssetKind);
+            entity.Row("Spawn ID", $"{inst.UniqueId}");
+        }
+        else
+        {
+            builder.Headline = $"{kind} '{Path.GetFileName(inst.ModelPath)}' (Index {inst.PlacementEntryIndex})";
+        }
 
         var placement = builder.AddSection("Placement");
         placement.Row("Asset", inst.ModelPath, isImportant: true);

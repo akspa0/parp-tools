@@ -1,0 +1,56 @@
+{
+  "mapId": 37,
+  "mapName": "Map_37",
+  "clientVersion": "0.5.3",
+  "exportedUtc": "2026-10-18T23:35:57.2308825Z",
+  "spawns": [
+    {
+      "spawnId": 400468,
+      "entryId": 2281,
+      "mapId": 37,
+      "spawnType": 0,
+      "name": "Baelish Frostbane",
+      "subname": "Binder",
+      "modelPath": null,
+      "scale": 45,
+      "displayScale": 1,
+      "effectiveScale": 45,
+      "position": {
+        "x": -445.944,
+        "y": -1023.48,
+        "z": 430.9
+      },
+      "orientation": 0.937,
+      "rotation": null,
+      "faction": 110,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 400469,
+      "entryId": 2282,
+      "mapId": 37,
+      "spawnType": 0,
+      "name": "Orgrun Iceflow",
+      "subname": "Binder",
+      "modelPath": null,
+      "scale": 45,
+      "displayScale": 1,
+      "effectiveScale": 45,
+      "position": {
+        "x": -663.799,
+        "y": -487.706,
+        "z": 385.853
+      },
+      "orientation": 5.782,
+      "rotation": null,
+      "faction": 110,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

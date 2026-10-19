@@ -580,4 +580,63 @@ internal sealed partial class SceneHoverAndPickService
         if (objectMatch.Candidates.Count > shownCount)
             ImGui.TextColored(new Vector4(0.78f, 0.73f, 0.57f, 1.0f), $"+{objectMatch.Candidates.Count - shownCount} more in the inspector");
     }
+
+    internal void DrawSelectedEntityNameplate()
+    {
+        if (_worldScene?.Selection.SelectedInstance is not { } inst)
+            return;
+        if (string.IsNullOrEmpty(inst.DisplayName))
+            return;
+        if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
+            return;
+
+        var view = _camera.GetViewMatrix();
+        float aspect = vpW / Math.Max(vpH, 1f);
+        var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, GetSceneFarPlane());
+
+        Vector3 headPos = inst.BoundsResolved
+            ? new Vector3((inst.BoundsMin.X + inst.BoundsMax.X) * 0.5f, (inst.BoundsMin.Y + inst.BoundsMax.Y) * 0.5f, inst.BoundsMax.Z + 0.35f)
+            : new Vector3(inst.PlacementPosition.X, inst.PlacementPosition.Y, inst.PlacementPosition.Z + 2.0f);
+
+        if (!SceneViewportMath.TryProjectWorldToViewport(headPos, view, proj, vpW, vpH, out Vector2 projected))
+            return;
+
+        if (projected.X < 20f || projected.X > vpW - 20f || projected.Y < 20f || projected.Y > vpH - 20f)
+            return;
+
+        var drawList = ImGui.GetForegroundDrawList();
+        float screenX = vpX + projected.X;
+        float screenY = vpY + projected.Y;
+
+        string name = inst.DisplayName;
+        string? title = !string.IsNullOrEmpty(inst.Subname) ? $"<{inst.Subname}>" : null;
+        bool isNpc = string.Equals(inst.AssetKind, "NPC Spawn", StringComparison.OrdinalIgnoreCase);
+
+        Vector2 nameSize = ImGui.CalcTextSize(name);
+        Vector2 titleSize = title != null ? ImGui.CalcTextSize(title) : Vector2.Zero;
+        float totalWidth = Math.Max(nameSize.X, titleSize.X);
+        float totalHeight = nameSize.Y + (title != null ? titleSize.Y + 2f : 0f);
+
+        Vector2 rectMin = new(screenX - totalWidth * 0.5f - 8f, screenY - totalHeight - 6f);
+        Vector2 rectMax = new(screenX + totalWidth * 0.5f + 8f, screenY + 4f);
+
+        // Dark pill background with WoW-style border
+        uint bgColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.04f, 0.05f, 0.09f, 0.85f));
+        uint borderColor = ImGui.ColorConvertFloat4ToU32(isNpc ? new Vector4(1f, 0.82f, 0.2f, 0.85f) : new Vector4(0.4f, 0.85f, 1f, 0.85f));
+        drawList.AddRectFilled(rectMin, rectMax, bgColor, 4f);
+        drawList.AddRect(rectMin, rectMax, borderColor, 4f, ImDrawFlags.None, 1.2f);
+
+        // Name text
+        uint nameColor = ImGui.ColorConvertFloat4ToU32(isNpc ? new Vector4(1f, 0.88f, 0.15f, 1f) : new Vector4(0.45f, 0.9f, 1f, 1f));
+        Vector2 namePos = new(screenX - nameSize.X * 0.5f, rectMin.Y + 3f);
+        drawList.AddText(namePos, nameColor, name);
+
+        // Title text if present
+        if (title != null)
+        {
+            uint titleColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.95f, 0.82f, 0.4f, 0.95f));
+            Vector2 titlePos = new(screenX - titleSize.X * 0.5f, namePos.Y + nameSize.Y + 2f);
+            drawList.AddText(titlePos, titleColor, title);
+        }
+    }
 }

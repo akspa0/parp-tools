@@ -1,0 +1,152 @@
+{
+  "mapId": 614,
+  "mapName": "Map_614",
+  "clientVersion": "3.3.5a",
+  "exportedUtc": "2026-10-18T23:35:40.4491587Z",
+  "spawns": [
+    {
+      "spawnId": 142843,
+      "entryId": 31788,
+      "mapId": 614,
+      "spawnType": 0,
+      "name": "Captain Constance",
+      "subname": "The Kraken",
+      "modelPath": null,
+      "scale": 80,
+      "displayScale": 1,
+      "effectiveScale": 80,
+      "position": {
+        "x": 27.5951,
+        "y": -2.34424,
+        "z": 19.3281
+      },
+      "orientation": 3.22886,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142844,
+      "entryId": 31789,
+      "mapId": 614,
+      "spawnType": 0,
+      "name": "First Mate Fitzgerald",
+      "subname": "The Kraken",
+      "modelPath": null,
+      "scale": 76,
+      "displayScale": 1,
+      "effectiveScale": 76,
+      "position": {
+        "x": 28.0998,
+        "y": 5.9939,
+        "z": 19.328
+      },
+      "orientation": 3.64774,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142845,
+      "entryId": 31790,
+      "mapId": 614,
+      "spawnType": 0,
+      "name": "Navigator Meyer",
+      "subname": "The Kraken",
+      "modelPath": null,
+      "scale": 74,
+      "displayScale": 1,
+      "effectiveScale": 74,
+      "position": {
+        "x": 34.2236,
+        "y": 0.067648,
+        "z": 19.7627
+      },
+      "orientation": 3.07178,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142846,
+      "entryId": 31791,
+      "mapId": 614,
+      "spawnType": 0,
+      "name": "Sailor Dawning",
+      "subname": "The Kraken",
+      "modelPath": null,
+      "scale": 72,
+      "displayScale": 1,
+      "effectiveScale": 72,
+      "position": {
+        "x": 0.919363,
+        "y": 8.75723,
+        "z": 9.43661
+      },
+      "orientation": 1.25664,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142847,
+      "entryId": 31792,
+      "mapId": 614,
+      "spawnType": 0,
+      "name": "Sailor Picardo",
+      "subname": "The Kraken",
+      "modelPath": null,
+      "scale": 72,
+      "displayScale": 1,
+      "effectiveScale": 72,
+      "position": {
+        "x": -4.76611,
+        "y": 0.0998535,
+        "z": 9.36669
+      },
+      "orientation": 4.83456,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142848,
+      "entryId": 31793,
+      "mapId": 614,
+      "spawnType": 0,
+      "name": "Sailor Phillips",
+      "subname": "The Kraken",
+      "modelPath": null,
+      "scale": 72,
+      "displayScale": 1,
+      "effectiveScale": 72,
+      "position": {
+        "x": 17.146,
+        "y": -3.92139,
+        "z": 9.81305
+      },
+      "orientation": 5.49708,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

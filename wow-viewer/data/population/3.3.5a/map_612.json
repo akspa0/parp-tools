@@ -1,0 +1,152 @@
+{
+  "mapId": 612,
+  "mapName": "Map_612",
+  "clientVersion": "3.3.5a",
+  "exportedUtc": "2026-10-18T23:35:40.4474338Z",
+  "spawns": [
+    {
+      "spawnId": 142830,
+      "entryId": 31759,
+      "mapId": 612,
+      "spawnType": 0,
+      "name": "Sailor Jansen",
+      "subname": "Northspear",
+      "modelPath": null,
+      "scale": 72,
+      "displayScale": 1,
+      "effectiveScale": 72,
+      "position": {
+        "x": -9.17065,
+        "y": -9.22241,
+        "z": 9.44523
+      },
+      "orientation": 4.33964,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142831,
+      "entryId": 31760,
+      "mapId": 612,
+      "spawnType": 0,
+      "name": "Sailor Berg",
+      "subname": "Northspear",
+      "modelPath": null,
+      "scale": 72,
+      "displayScale": 1,
+      "effectiveScale": 72,
+      "position": {
+        "x": -24.342,
+        "y": -1.4956,
+        "z": 11.7907
+      },
+      "orientation": 4.53119,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142832,
+      "entryId": 31761,
+      "mapId": 612,
+      "spawnType": 0,
+      "name": "Sailor Davies",
+      "subname": "Northspear",
+      "modelPath": null,
+      "scale": 72,
+      "displayScale": 1,
+      "effectiveScale": 72,
+      "position": {
+        "x": 17.25,
+        "y": 3.98267,
+        "z": 9.8274
+      },
+      "orientation": 1.12707,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142833,
+      "entryId": 31762,
+      "mapId": 612,
+      "spawnType": 0,
+      "name": "Navigator Marcus",
+      "subname": "Northspear",
+      "modelPath": null,
+      "scale": 74,
+      "displayScale": 1,
+      "effectiveScale": 74,
+      "position": {
+        "x": 34.0835,
+        "y": -0.002845,
+        "z": 19.7971
+      },
+      "orientation": 3.12414,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142834,
+      "entryId": 31763,
+      "mapId": 612,
+      "spawnType": 0,
+      "name": "Captain John Brookman",
+      "subname": "Northspear",
+      "modelPath": null,
+      "scale": 80,
+      "displayScale": 1,
+      "effectiveScale": 80,
+      "position": {
+        "x": 30.1151,
+        "y": -5.08848,
+        "z": 19.3282
+      },
+      "orientation": 3.08923,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 142835,
+      "entryId": 31764,
+      "mapId": 612,
+      "spawnType": 0,
+      "name": "First Mate Kacy Dishon",
+      "subname": "Northspear",
+      "modelPath": null,
+      "scale": 76,
+      "displayScale": 1,
+      "effectiveScale": 76,
+      "position": {
+        "x": 26.0707,
+        "y": 2.05775,
+        "z": 19.328
+      },
+      "orientation": 3.00197,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1733,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

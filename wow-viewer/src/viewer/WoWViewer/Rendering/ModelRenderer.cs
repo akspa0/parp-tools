@@ -1408,15 +1408,28 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
 
 if (isAlphaCutout)
                     {
-                        // Alpha-tested cutout: opaque pass, depth writes ON, threshold at 0.15f to preserve
-                        // antialiased foliage edges and needle canopies for both native MDX and adapted M2 models.
-                        float alphaCutoutThreshold = 0.15f;
-                        _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(!forceBackdropState);
-                        _gl.Uniform1(_uAlphaTest, 1);
-                        _gl.Uniform1(_uUseTextureAlpha, 1);
-                        _gl.Uniform1(_uAlphaThreshold, alphaCutoutThreshold);
-                        _gl.Uniform1(_uPremultiplyAlpha, 0);
+                        // Alpha-tested cutout: opaque pass, depth writes ON, threshold at 0.50f (128/255)
+                        // matching client decomp ground-truth World::detailDoodadAlphaRef = 128 (DetailDoodad.cpp).
+                        float alphaCutoutThreshold = 0.50f;
+                        if (fadeAlpha < 0.999f)
+                        {
+                            _gl.Enable(EnableCap.Blend);
+                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                            _gl.DepthMask(false);
+                            _gl.Uniform1(_uAlphaTest, 1);
+                            _gl.Uniform1(_uUseTextureAlpha, 1);
+                            _gl.Uniform1(_uAlphaThreshold, 0.05f);
+                            _gl.Uniform1(_uPremultiplyAlpha, 0);
+                        }
+                        else
+                        {
+                            _gl.Disable(EnableCap.Blend);
+                            _gl.DepthMask(!forceBackdropState);
+                            _gl.Uniform1(_uAlphaTest, 1);
+                            _gl.Uniform1(_uUseTextureAlpha, 1);
+                            _gl.Uniform1(_uAlphaThreshold, alphaCutoutThreshold);
+                            _gl.Uniform1(_uPremultiplyAlpha, 0);
+                        }
                     }
                     else if (needsBlend)
                     {

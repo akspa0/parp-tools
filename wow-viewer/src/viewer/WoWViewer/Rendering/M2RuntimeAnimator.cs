@@ -31,7 +31,12 @@ internal sealed class M2RuntimeAnimator : IAnimationController
                 new AnimationTimeRange(0.0f, sequence.Duration)))
             .ToArray();
 
-        if (_sequences.Length > 0 && !TryActivateSequence(0, logFailure: false))
+        int defaultIdleSeq = _sequences.Length > 0
+            ? M2AnimationNameResolver.FindDefaultIdleSequenceIndex(_sequences.Select(static s => s.Name).ToList())
+            : -1;
+        int initialSeq = defaultIdleSeq >= 0 ? defaultIdleSeq : 0;
+
+        if (_sequences.Length > 0 && !TryActivateSequence(initialSeq, logFailure: false))
             TryActivateFallbackSequence(excludingSequenceIndex: null, fallbackReason: "Default animation sequence is invalid.");
     }
 

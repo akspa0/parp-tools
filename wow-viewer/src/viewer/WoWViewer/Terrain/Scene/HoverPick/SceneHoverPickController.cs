@@ -420,11 +420,19 @@ public sealed class SceneHoverPickController
 
     private static HoveredAssetInfo BuildHoveredScenePickHitInfo(in SceneObjectPickHit hit)
     {
+        string assetKind = !string.IsNullOrEmpty(hit.DisplayName) ? "Spawn" : hit.KindLabel;
+        string displayName = !string.IsNullOrEmpty(hit.DisplayName)
+            ? $"{hit.DisplayName}{(string.IsNullOrEmpty(hit.Subname) ? "" : $" <{hit.Subname}>")}"
+            : hit.ModelName;
+        string detail = !string.IsNullOrEmpty(hit.DisplayName)
+            ? $"Model: {hit.ModelName}  UniqueId: {hit.UniqueId}"
+            : $"UniqueId: {hit.UniqueId}";
+
         return new HoveredAssetInfo(
-            hit.KindLabel,
-            hit.ModelName,
+            assetKind,
+            displayName,
             hit.ModelPath,
-            $"UniqueId: {hit.UniqueId}",
+            detail,
             hit.PlacementPosition,
             0,
             null,
@@ -609,7 +617,10 @@ public sealed class SceneHoverPickController
                 selectionPoint,
                 selectionPointDistanceSq,
                 sharesClickedChunk,
-                chunkGridDistance));
+                chunkGridDistance,
+                -1,
+                instance.DisplayName,
+                instance.Subname));
         }
     }
 
@@ -822,17 +833,25 @@ public sealed class SceneHoverPickController
 
     private static HoveredAssetInfo BuildHoveredObjectInfo(string assetKind, in ObjectInstance inst, ObjectType objectType, int objectIndex)
     {
+        string effectiveKind = !string.IsNullOrEmpty(inst.AssetKind) ? inst.AssetKind : assetKind;
+        string displayName = !string.IsNullOrEmpty(inst.DisplayName)
+            ? $"{inst.DisplayName}{(string.IsNullOrEmpty(inst.Subname) ? "" : $" <{inst.Subname}>")}"
+            : inst.ModelName;
+        string detail = !string.IsNullOrEmpty(inst.DisplayName)
+            ? $"Model: {inst.ModelName}  UniqueId: {inst.UniqueId}"
+            : $"UniqueId: {inst.UniqueId}";
+
         return new HoveredAssetInfo(
-            assetKind,
-            inst.ModelName,
+            effectiveKind,
+            displayName,
             inst.ModelPath,
-            $"UniqueId: {inst.UniqueId}",
+            detail,
             inst.PlacementPosition,
             0,
             null,
             objectType,
-                objectIndex,
-                null);
+            objectIndex,
+            null);
     }
 
     private static HoveredAssetInfo BuildHoveredWlLiquidInfo(WlLiquidBody body)

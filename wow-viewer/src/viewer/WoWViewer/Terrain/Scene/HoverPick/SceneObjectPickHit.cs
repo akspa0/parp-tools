@@ -16,7 +16,9 @@ public readonly record struct SceneObjectPickHit(
     float SelectionPointDistanceSq,
     bool SharesClickedChunk,
     int ChunkGridDistance,
-    int ParentWmoIndex = -1)
+    int ParentWmoIndex = -1,
+    string? DisplayName = null,
+    string? Subname = null)
 {
     public string KindLabel => ObjectType switch
     {

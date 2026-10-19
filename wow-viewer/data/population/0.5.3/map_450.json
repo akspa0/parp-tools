@@ -1,0 +1,56 @@
+{
+  "mapId": 450,
+  "mapName": "Map_450",
+  "clientVersion": "0.5.3",
+  "exportedUtc": "2026-10-18T23:35:57.2909837Z",
+  "spawns": [
+    {
+      "spawnId": 1296,
+      "entryId": 176563,
+      "mapId": 450,
+      "spawnType": 1,
+      "name": "Mighty Blaze",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": -40.4125,
+        "y": 16.3463,
+        "z": -5.14558
+      },
+      "orientation": 3.45576,
+      "rotation": null,
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 8,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 1297,
+      "entryId": 176566,
+      "mapId": 450,
+      "spawnType": 1,
+      "name": "Officer\u0027s Door",
+      "subname": null,
+      "modelPath": null,
+      "scale": 1,
+      "displayScale": 1,
+      "effectiveScale": 1,
+      "position": {
+        "x": 206.649,
+        "y": 66.0756,
+        "z": 25.4049
+      },
+      "orientation": 3.60411,
+      "rotation": null,
+      "faction": 0,
+      "flags": 0,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}

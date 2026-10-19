@@ -262,4 +262,53 @@ public static class M2AnimationNameResolver
             ? baseName
             : $"{baseName}_{variationIndex:D2}";
     }
+
+    /// <summary>
+    /// Finds the best default idle sequence index, prioritizing Stand / Idle animations
+    /// and avoiding Walk / Run movement animations for stationary models and spawns.
+    /// </summary>
+    public static int FindDefaultIdleSequenceIndex(IReadOnlyList<string> sequenceNames)
+    {
+        if (sequenceNames == null || sequenceNames.Count == 0)
+            return -1;
+
+        // 1. Exact match for Stand or Idle
+        for (int i = 0; i < sequenceNames.Count; i++)
+        {
+            string name = sequenceNames[i];
+            if (string.Equals(name, "Stand", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "Idle", StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        // 2. Sequence containing Stand or Idle (e.g. Stand_01, StandWound, SwimIdle)
+        for (int i = 0; i < sequenceNames.Count; i++)
+        {
+            string name = sequenceNames[i];
+            if (name.Contains("Stand", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("Idle", StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        // 3. First sequence that is NOT movement, combat, or death
+        for (int i = 0; i < sequenceNames.Count; i++)
+        {
+            string name = sequenceNames[i];
+            if (!name.Contains("Walk", StringComparison.OrdinalIgnoreCase) &&
+                !name.Contains("Run", StringComparison.OrdinalIgnoreCase) &&
+                !name.Contains("Death", StringComparison.OrdinalIgnoreCase) &&
+                !name.Contains("Dead", StringComparison.OrdinalIgnoreCase) &&
+                !name.Contains("Attack", StringComparison.OrdinalIgnoreCase) &&
+                !name.Contains("Decay", StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
 }

@@ -27,6 +27,9 @@ public struct WorldObjectInstance
     public Vector3 PlacementRotation;
     public float PlacementScale;
     public string ModelPath;
+    public string? DisplayName;
+    public string? Subname;
+    public int? SpawnEntryId;
     public int UniqueId;
     public int PlacementEntryIndex;
     public int TileX;

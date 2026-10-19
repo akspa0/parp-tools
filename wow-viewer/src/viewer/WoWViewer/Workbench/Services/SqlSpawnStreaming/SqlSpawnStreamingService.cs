@@ -67,10 +67,23 @@ internal sealed class SqlSpawnStreamingService
     private ref bool _sqlForceStreamRefresh => ref _host.SqlForceStreamRefresh;
     private ref SqlWorldPopulationService? _sqlPopulationService => ref _host.SqlPopulationService;
     private ref WorldScene? _worldScene => ref _host.WorldScene;
+    private ref string? _dbcBuild => ref _host.DbcBuild;
+    private ref IDataSource? _dataSource => ref _host.DataSource;
     private void DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent) => _host.DrawToolbarPopupButton(label, summary, popupId, drawContent);
     private void ExportAnimationStateJson(IAnimationController animator, int currentSeq, string currentSeqName, float seqStart, float seqEnd) => _host.ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
     private (int tileX, int tileY) GetCameraTile() => _host.GetCameraTile();
 
+    public enum PopulationDatasetMode
+    {
+        Auto = 0,
+        Wrath335a = 1,
+        Alpha053 = 2,
+        Custom = 3
+    }
+
+    private PopulationDatasetMode _datasetMode = PopulationDatasetMode.Auto;
+    private string _activeVersionDetected = "3.3.5a";
+    private bool _sqlAutoLoadOnMapChange = true;
     private string _sqlAlphaCoreRoot = "";
     private bool _sqlIncludeCreatures = true;
     private bool _sqlIncludeGameObjects = true;
@@ -85,16 +98,89 @@ internal sealed class SqlSpawnStreamingService
     private int _sqlMapSpawnsCacheMapId = -1;
     private (int tileX, int tileY)? _sqlLastCameraTile;
 
+    internal string DetectActiveClientVersion()
+    {
+        string dbcBuild = _dbcBuild ?? _host.GetCurrentCaptureBuildVersion() ?? "";
+        string dsPath = _dataSource?.Name ?? "";
+
+        if (dbcBuild.Contains("0.5.3", StringComparison.OrdinalIgnoreCase) ||
+            dbcBuild.Contains("0.5.4", StringComparison.OrdinalIgnoreCase) ||
+            dbcBuild.Contains("0.5.5", StringComparison.OrdinalIgnoreCase) ||
+            dbcBuild.Contains("3368", StringComparison.OrdinalIgnoreCase) ||
+            dbcBuild.Contains("alpha", StringComparison.OrdinalIgnoreCase) ||
+            dsPath.Contains("alpha", StringComparison.OrdinalIgnoreCase) ||
+            dsPath.Contains("0.5.3", StringComparison.OrdinalIgnoreCase))
+        {
+            return "0.5.3";
+        }
+
+        return "3.3.5a";
+    }
+
+    internal static string? ResolveDatasetPathForVersion(string version)
+    {
+        string[] candidates =
+        {
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "data", "population", version)),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "data", "population", version)),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "data", "population", version)),
+            $@"I:\parp\parp-tools\wow-viewer\data\population\{version}"
+        };
+
+        foreach (var c in candidates)
+        {
+            if (Directory.Exists(c) && SqlWorldPopulationService.DetectIsJsonDataset(c))
+                return c;
+        }
+
+        return null;
+    }
+
+    internal void EnsureDatasetRootConfigured()
+    {
+        if (_datasetMode == PopulationDatasetMode.Custom)
+        {
+            if (string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
+                TryAutoPopulateAlphaCoreRoot();
+            return;
+        }
+
+        string targetVersion = _datasetMode switch
+        {
+            PopulationDatasetMode.Alpha053 => "0.5.3",
+            PopulationDatasetMode.Wrath335a => "3.3.5a",
+            _ => DetectActiveClientVersion()
+        };
+
+        _activeVersionDetected = targetVersion;
+        string? resolved = ResolveDatasetPathForVersion(targetVersion);
+        if (resolved != null)
+        {
+            if (!string.Equals(_sqlAlphaCoreRoot, resolved, StringComparison.OrdinalIgnoreCase))
+            {
+                _sqlAlphaCoreRoot = resolved;
+                _sqlSpawnStatus = $"Active population dataset: {targetVersion} ({resolved})";
+            }
+        }
+        else if (string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
+        {
+            TryAutoPopulateAlphaCoreRoot();
+        }
+    }
+
     internal void TryAutoPopulateAlphaCoreRoot()
     {
+        EnsureDatasetRootConfigured();
         if (!string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
             return;
 
+        // Fallback to alpha-core SQL roots
         string[] candidates =
         {
             Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core")),
             Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "external", "alpha-core")),
-            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "external", "alpha-core"))
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "external", "alpha-core")),
+            @"I:\parp\parp-tools\wow-viewer\libs\alpha-core"
         };
 
         foreach (var candidate in candidates)
@@ -121,7 +207,6 @@ internal sealed class SqlSpawnStreamingService
 
         var inst = _worldScene.Selection.SelectedInstance.Value;
         var spawn = _sqlMapSpawnsCache.FirstOrDefault(s =>
-            s.SpawnType == WorldSpawnType.GameObject &&
             s.SpawnId == inst.UniqueId &&
             (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
         if (spawn == null)
@@ -131,12 +216,18 @@ internal sealed class SqlSpawnStreamingService
         var animator = mdxRenderer?.Animator;
 
         ImGui.Separator();
-        ImGui.TextColored(new Vector4(0.85f, 1f, 0.85f, 1f), "SQL GameObject Animation");
-        ImGui.TextDisabled($"SpawnId: {spawn.SpawnId}  Entry: {spawn.EntryId}  Type: {spawn.GameObjectType}");
+        string headerTitle = spawn.SpawnType == WorldSpawnType.Creature
+            ? $"SQL NPC: {spawn.Name}" + (!string.IsNullOrEmpty(spawn.Subname) ? $" <{spawn.Subname}>" : "")
+            : $"SQL GameObject: {spawn.Name}";
+        ImGui.TextColored(new Vector4(0.85f, 1f, 0.85f, 1f), headerTitle);
+        string typeDetail = spawn.SpawnType == WorldSpawnType.Creature
+            ? $"SpawnId: {spawn.SpawnId}  Entry: {spawn.EntryId}  Type: NPC"
+            : $"SpawnId: {spawn.SpawnId}  Entry: {spawn.EntryId}  Type: {spawn.GameObjectType}";
+        ImGui.TextDisabled(typeDetail);
 
         if (animator == null || !animator.HasAnimation || animator.Sequences.Count == 0)
         {
-            ImGui.TextDisabled("This gameobject model has no animation sequences.");
+            ImGui.TextDisabled("This model has no animation sequences.");
             return;
         }
 
@@ -167,11 +258,12 @@ var seq = animator.Sequences[animator.CurrentSequence];
         float seqEnd = seq.Time.End;
 
         bool isPlaying = animator.IsPlaying;
-        if (ImGui.Button(isPlaying ? "Pause GO Anim" : "Play GO Anim"))
+        string animTag = spawn.SpawnType == WorldSpawnType.Creature ? "NPC" : "GO";
+        if (ImGui.Button(isPlaying ? $"Pause {animTag} Anim" : $"Play {animTag} Anim"))
             animator.IsPlaying = !isPlaying;
 
         ImGui.SameLine();
-        if (ImGui.Button("Stop GO Anim"))
+        if (ImGui.Button($"Stop {animTag} Anim"))
         {
             animator.IsPlaying = false;
             animator.CurrentFrame = seqStart;
@@ -209,6 +301,19 @@ var seq = animator.Sequences[animator.CurrentSequence];
     {
         if (_worldScene == null || !_sqlStreamWithCamera || !_sqlUseAoiFilter)
             return;
+
+        if (_currentMapId < 0)
+            return;
+
+        // Auto-stream population when loading any map or switching maps
+        if (_sqlAutoLoadOnMapChange && (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId))
+        {
+            EnsureDatasetRootConfigured();
+            if (!string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
+            {
+                LoadSqlSpawnsForCurrentMap();
+            }
+        }
 
         if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
             return;
@@ -248,7 +353,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
         if (string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
         {
-            _sqlSpawnStatus = "Enter alpha-core root path first.";
+            _sqlSpawnStatus = "Enter population dataset root path first.";
             return;
         }
 
@@ -269,7 +374,7 @@ var seq = animator.Sequences[animator.CurrentSequence];
                 return;
             }
 
-            _sqlSpawnStatus = "Parsing SQL and building spawn list...";
+            _sqlSpawnStatus = "Loading map population partition...";
 
             int requestedMax = (_sqlUseAoiFilter || _sqlStreamWithCamera) ? 0 : _sqlMaxSpawns;
             var mapSpawns = _sqlPopulationService
@@ -287,6 +392,8 @@ var seq = animator.Sequences[animator.CurrentSequence];
         catch (Exception ex)
         {
             _sqlSpawnStatus = $"Error: {ex.Message}";
+            _sqlMapSpawnsCache = new List<WorldSpawnRecord>();
+            _sqlMapSpawnsCacheMapId = _currentMapId;
         }
     }
 
@@ -308,8 +415,8 @@ var seq = animator.Sequences[animator.CurrentSequence];
         if (updateStatus)
         {
             _sqlSpawnStatus = _sqlUseAoiFilter
-                ? $"Loaded {finalSpawns.Count}/{mapSpawns.Count} SQL spawns for map {_currentMapId} (AOI radius {_sqlAoiTileRadius} tiles{(_sqlStreamWithCamera ? ", streaming" : "")})."
-                : $"Loaded {finalSpawns.Count} SQL spawns for map {_currentMapId}.";
+                ? $"Loaded {finalSpawns.Count}/{mapSpawns.Count} spawns for map {_currentMapId} (AOI radius {_sqlAoiTileRadius} tiles{(_sqlStreamWithCamera ? ", streaming" : "")})."
+                : $"Loaded {finalSpawns.Count} spawns for map {_currentMapId}.";
         }
     }
 
@@ -357,11 +464,9 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
         var inst = _worldScene.Selection.SelectedInstance.Value;
         return _sqlMapSpawnsCache.Any(s =>
-            s.SpawnType == WorldSpawnType.GameObject &&
             s.SpawnId == inst.UniqueId &&
             (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
     }
-
 
     internal void DrawPopulationSubTabContent()
     {
@@ -371,43 +476,111 @@ var seq = animator.Sequences[animator.CurrentSequence];
             return;
         }
 
-        ImGui.TextDisabled("Optional alpha-core SQL population. This is separate from ADT/WMO/MDX placement data.");
-        ImGui.InputTextWithHint("##populationSqlRoot", "Path to alpha-core root (example: external/alpha-core)", ref _sqlAlphaCoreRoot, 1024);
+        ImGui.TextDisabled("Authentic SQL world population (NPCs & Game Objects).");
+
+        // Version / Dataset selector
+        string currentModeLabel = _datasetMode switch
+        {
+            PopulationDatasetMode.Auto => $"Auto (Detected: {_activeVersionDetected})",
+            PopulationDatasetMode.Wrath335a => "3.3.5a (TrinityCore Full World)",
+            PopulationDatasetMode.Alpha053 => "0.5.3 (Alpha-Core)",
+            PopulationDatasetMode.Custom => "Custom Path",
+            _ => "Auto"
+        };
+
+        if (ImGui.BeginCombo("Dataset Version", currentModeLabel))
+        {
+            if (ImGui.Selectable($"Auto (Detect Active Client: {_activeVersionDetected})", _datasetMode == PopulationDatasetMode.Auto))
+            {
+                _datasetMode = PopulationDatasetMode.Auto;
+                EnsureDatasetRootConfigured();
+                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+                LoadSqlSpawnsForCurrentMap();
+            }
+            if (ImGui.Selectable("3.3.5a (TrinityCore Full World - 113 Maps, 246k Spawns)", _datasetMode == PopulationDatasetMode.Wrath335a))
+            {
+                _datasetMode = PopulationDatasetMode.Wrath335a;
+                EnsureDatasetRootConfigured();
+                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+                LoadSqlSpawnsForCurrentMap();
+            }
+            if (ImGui.Selectable("0.5.3 (Alpha-Core - 31 Maps, 92k Spawns)", _datasetMode == PopulationDatasetMode.Alpha053))
+            {
+                _datasetMode = PopulationDatasetMode.Alpha053;
+                EnsureDatasetRootConfigured();
+                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+                LoadSqlSpawnsForCurrentMap();
+            }
+            if (ImGui.Selectable("Custom Path / Alpha-Core SQL", _datasetMode == PopulationDatasetMode.Custom))
+            {
+                _datasetMode = PopulationDatasetMode.Custom;
+            }
+            ImGui.EndCombo();
+        }
+
+        if (_datasetMode == PopulationDatasetMode.Custom)
+        {
+            ImGui.InputTextWithHint("##populationSqlRoot", "Path to dataset or alpha-core root", ref _sqlAlphaCoreRoot, 1024);
+        }
+        else
+        {
+            ImGui.TextDisabled($"Active Dataset Root: {_sqlAlphaCoreRoot}");
+        }
+
+        ImGui.Checkbox("Auto-Stream Spawns On Map Load", ref _sqlAutoLoadOnMapChange);
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("WoWViewer reads NPC/GameObject spawns from alpha-core SQL dumps (etc/databases/world + dbc).");
+            ImGui.SetTooltip("Automatically loads and streams population data whenever a map is loaded or switched.");
 
         DrawToolbarPopupButton("SQL Actions", string.Empty, "##PopulationSqlActionsPopup", () =>
         {
-            if (ImGui.Button("Use Submodule Path"))
+            if (ImGui.Button("Reload Spawns (Current Map)"))
             {
-                string candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core"));
-                _sqlAlphaCoreRoot = candidate;
-                ImGui.CloseCurrentPopup();
-            }
-
-            bool canLoadSql = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
-            if (!canLoadSql)
-                ImGui.BeginDisabled();
-            if (ImGui.Button("Load SQL Spawns (Current Map)"))
-            {
+                _sqlAutoLoadOnMapChange = true;
+                EnsureDatasetRootConfigured();
+                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
                 LoadSqlSpawnsForCurrentMap();
                 ImGui.CloseCurrentPopup();
             }
-            if (!canLoadSql)
-                ImGui.EndDisabled();
+
+            if (ImGui.Button("Use 3.3.5a Dataset"))
+            {
+                _datasetMode = PopulationDatasetMode.Wrath335a;
+                EnsureDatasetRootConfigured();
+                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+                LoadSqlSpawnsForCurrentMap();
+                ImGui.CloseCurrentPopup();
+            }
+
+            if (ImGui.Button("Use 0.5.3 Alpha Dataset"))
+            {
+                _datasetMode = PopulationDatasetMode.Alpha053;
+                EnsureDatasetRootConfigured();
+                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+                LoadSqlSpawnsForCurrentMap();
+                ImGui.CloseCurrentPopup();
+            }
 
             if (ImGui.Button("Clear SQL Spawns"))
             {
+                _sqlAutoLoadOnMapChange = false;
                 ResetSqlSpawnStreamingState(clearSceneSpawns: true);
-                _sqlSpawnStatus = "Cleared SQL spawns.";
+                _sqlSpawnStatus = "Cleared SQL spawns. Auto-load paused until next map.";
                 ImGui.CloseCurrentPopup();
             }
         });
 
         bool settingsChanged = false;
-        settingsChanged |= ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures);
+        if (ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures))
+        {
+            ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+            LoadSqlSpawnsForCurrentMap();
+        }
         ImGui.SameLine();
-        settingsChanged |= ImGui.Checkbox("GameObject Spawns", ref _sqlIncludeGameObjects);
+        if (ImGui.Checkbox("GameObject Spawns", ref _sqlIncludeGameObjects))
+        {
+            ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+            LoadSqlSpawnsForCurrentMap();
+        }
         settingsChanged |= ImGui.Checkbox("AOI Tile Filter", ref _sqlUseAoiFilter);
         if (_sqlUseAoiFilter)
             settingsChanged |= ImGui.SliderInt("AOI Tile Radius", ref _sqlAoiTileRadius, 1, 16);

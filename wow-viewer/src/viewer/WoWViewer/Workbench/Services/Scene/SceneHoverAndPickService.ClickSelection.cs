@@ -448,11 +448,15 @@ internal sealed partial class SceneHoverAndPickService
             ? $"in WMO [{hit.ParentWmoIndex}]  {position}"
             : $"UniqueId: {hit.UniqueId}  {position}";
 
+        string title = !string.IsNullOrEmpty(hit.DisplayName)
+            ? $"{hit.DisplayName}{(string.IsNullOrEmpty(hit.Subname) ? "" : $" <{hit.Subname}>")} ({hit.KindLabel})"
+            : $"{hit.KindLabel} {hit.ModelName}";
+
         TryAddClickSelectionCandidate(
             addedKeys,
             new ClickSelectionCandidate(
                 dedupKey,
-                $"{hit.KindLabel} {hit.ModelName}",
+                title,
                 detail,
                 hit.ModelPath,
                 hit.Distance,

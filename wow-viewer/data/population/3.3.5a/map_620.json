@@ -1,0 +1,56 @@
+{
+  "mapId": 620,
+  "mapName": "Map_620",
+  "clientVersion": "3.3.5a",
+  "exportedUtc": "2026-10-18T23:35:40.4550471Z",
+  "spawns": [
+    {
+      "spawnId": 62739,
+      "entryId": 31807,
+      "mapId": 620,
+      "spawnType": 0,
+      "name": "Aumanil",
+      "subname": "Walker of Waves",
+      "modelPath": null,
+      "scale": 68,
+      "displayScale": 1,
+      "effectiveScale": 68,
+      "position": {
+        "x": -19.8763,
+        "y": -0.049722,
+        "z": 17.6106
+      },
+      "orientation": 2.86234,
+      "rotation": null,
+      "faction": 2,
+      "flags": 1950,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    },
+    {
+      "spawnId": 62740,
+      "entryId": 31805,
+      "mapId": 620,
+      "spawnType": 0,
+      "name": "Nagojut",
+      "subname": "Walker of Waves",
+      "modelPath": null,
+      "scale": 65,
+      "displayScale": 1,
+      "effectiveScale": 65,
+      "position": {
+        "x": 8.10938,
+        "y": -1.96228,
+        "z": 15.8348
+      },
+      "orientation": 3.22434,
+      "rotation": null,
+      "faction": 0,
+      "flags": 1950,
+      "gameObjectType": 0,
+      "isTransposed": false,
+      "sourceNote": null
+    }
+  ]
+}
