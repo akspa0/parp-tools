@@ -1110,7 +1110,27 @@ internal sealed partial class WorkbenchPanelsService
                 break;
         }
 
+        DrawQuickPopulationSection();
         DrawQuickUtilitiesSection();
+    }
+
+    private bool _quickPopulationExpanded = true;
+
+    private void DrawQuickPopulationSection()
+    {
+        if (SharedUiWidgets.SectionHeader(
+                "World Population & Spawns",
+                "Stream authentic NPCs, creatures, and game objects from TrinityCore (3.3.5a) and Alpha-Core (0.5.3).",
+                defaultOpen: _quickPopulationExpanded,
+                id: "QuickWorldPopulation"))
+        {
+            _quickPopulationExpanded = true;
+            _sqlSpawnStreaming.DrawPopulationSubTabContent();
+        }
+        else
+        {
+            _quickPopulationExpanded = false;
+        }
     }
 
     /// <summary>

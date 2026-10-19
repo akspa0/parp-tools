@@ -108,8 +108,11 @@ public sealed class ExternalSpawnLayer
     private static void TransformBounds(Vector3 boundsMin, Vector3 boundsMax, in Matrix4x4 transform, out Vector3 transformedMin, out Vector3 transformedMax) => WorldScene.TransformBounds(boundsMin, boundsMax, in transform, out transformedMin, out transformedMax);
     private static void TransformBounds(Vector3 min, Vector3 max, Matrix4x4 m, out Vector3 outMin, out Vector3 outMax) => WorldScene.TransformBounds(min, max, m, out outMin, out outMax);
 
+    private static bool IsMapRootWmo(in ObjectInstance inst) =>
+        !inst.SpawnEntryId.HasValue && string.IsNullOrEmpty(inst.AssetKind);
+
     public int ExternalSpawnMdxCount => _externalMdxInstances.Count;
-    public int ExternalSpawnWmoCount => _externalWmoInstances.Count;
+    public int ExternalSpawnWmoCount => _externalWmoInstances.Count(static inst => !IsMapRootWmo(in inst));
     public int ExternalSpawnInstanceCount => ExternalSpawnMdxCount + ExternalSpawnWmoCount;
     public float SqlGameObjectMdxScaleMultiplier { get; set; } = 1.0f;
 
@@ -117,7 +120,7 @@ public sealed class ExternalSpawnLayer
     {
         _externalMdxInstances.Clear();
         _externalSkyboxInstances.Clear();
-        _externalWmoInstances.Clear();
+        _externalWmoInstances.RemoveAll(static inst => !IsMapRootWmo(in inst));
         _instancesDirty = true;
     }
 
@@ -125,7 +128,7 @@ public sealed class ExternalSpawnLayer
     {
         _externalMdxInstances.Clear();
         _externalSkyboxInstances.Clear();
-        _externalWmoInstances.Clear();
+        _externalWmoInstances.RemoveAll(static inst => !IsMapRootWmo(in inst));
 
         foreach (var spawn in spawns)
         {

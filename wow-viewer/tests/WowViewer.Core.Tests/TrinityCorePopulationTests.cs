@@ -265,4 +265,52 @@ public class TrinityCorePopulationTests
             Assert.True(resolver335.GameObjectDisplayCount > 3000, $"Expected >3000 gameobjects in 3.3.5, got {resolver335.GameObjectDisplayCount}");
         }
     }
+
+    [Fact]
+    public void WmoOnlyMap_MapRootWmoPreservation_NeverRemovedByPopulationClearing()
+    {
+        // Simulate a WMO-only map root placement (e.g. Map 229 Blackrock Spire)
+        var rootWmo = new WowViewer.Core.Runtime.World.WorldObjectInstance
+        {
+            ModelPath = @"world\wmo\dungeon\blackrock\blackrock.wmo",
+            ModelName = "blackrock.wmo",
+            ModelKey = @"world\wmo\dungeon\blackrock\blackrock.wmo",
+            UniqueId = 1,
+            PlacementEntryIndex = -1,
+            TileX = -1,
+            TileY = -1,
+            HasTileCoordinate = false,
+            SpawnEntryId = null,
+            AssetKind = null
+        };
+
+        // Simulate an external spawn WMO
+        var spawnWmo = new WowViewer.Core.Runtime.World.WorldObjectInstance
+        {
+            ModelPath = @"world\wmo\dungeon\some_prop.wmo",
+            ModelName = "some_prop.wmo",
+            ModelKey = @"world\wmo\dungeon\some_prop.wmo",
+            UniqueId = 5001,
+            PlacementEntryIndex = -1,
+            TileX = 32,
+            TileY = 48,
+            HasTileCoordinate = true,
+            SpawnEntryId = 12345,
+            AssetKind = "GameObject Spawn"
+        };
+
+        var instances = new List<WowViewer.Core.Runtime.World.WorldObjectInstance> { rootWmo, spawnWmo };
+
+        // Predicate used by ExternalSpawnLayer
+        static bool IsMapRootWmo(in WowViewer.Core.Runtime.World.WorldObjectInstance inst) =>
+            !inst.SpawnEntryId.HasValue && string.IsNullOrEmpty(inst.AssetKind);
+
+        // Clearing external spawns must remove spawn WMO but preserve map root WMO
+        instances.RemoveAll(static inst => !IsMapRootWmo(in inst));
+
+        Assert.Single(instances);
+        Assert.Equal("blackrock.wmo", instances[0].ModelName);
+        Assert.Null(instances[0].SpawnEntryId);
+        Assert.True(string.IsNullOrEmpty(instances[0].AssetKind));
+    }
 }
