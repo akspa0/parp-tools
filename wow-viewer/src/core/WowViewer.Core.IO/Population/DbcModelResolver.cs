@@ -11,9 +11,25 @@ public sealed class DbcModelResolver : IDbcModelResolver
 {
     private readonly Dictionary<int, (string modelPath, float scale)> _creatureDisplays = new();
     private readonly Dictionary<int, (string modelPath, float scale)> _gameObjectDisplays = new();
+    private readonly Dictionary<int, string> _mapNames = new();
 
     public int CreatureDisplayCount => _creatureDisplays.Count;
     public int GameObjectDisplayCount => _gameObjectDisplays.Count;
+    public int MapCount => _mapNames.Count;
+
+    public string GetMapName(int mapId)
+    {
+        if (_mapNames.TryGetValue(mapId, out string? name))
+            return name;
+
+        return PopulationMapNames.GetMapName(mapId);
+    }
+
+    public void RegisterMap(int mapId, string mapName)
+    {
+        if (mapId >= 0 && !string.IsNullOrWhiteSpace(mapName))
+            _mapNames[mapId] = mapName;
+    }
 
     public bool TryResolveCreature(int displayId, out string? modelPath, out float displayScale)
     {
@@ -69,6 +85,10 @@ public sealed class DbcModelResolver : IDbcModelResolver
         {
             _gameObjectDisplays[id] = entry;
         }
+        foreach (var (id, name) in other._mapNames)
+        {
+            _mapNames[id] = name;
+        }
     }
 
     /// <summary>
@@ -113,6 +133,7 @@ public sealed class DbcModelResolver : IDbcModelResolver
         string cdi = Path.Combine(directory, "CreatureDisplayInfo.dbc");
         string cmd = Path.Combine(directory, "CreatureModelData.dbc");
         string gdi = Path.Combine(directory, "GameObjectDisplayInfo.dbc");
+        string map = Path.Combine(directory, "Map.dbc");
 
         if (!File.Exists(cdi))
             cdi = Path.Combine(directory, "DBFilesClient", "CreatureDisplayInfo.dbc");
@@ -120,14 +141,17 @@ public sealed class DbcModelResolver : IDbcModelResolver
             cmd = Path.Combine(directory, "DBFilesClient", "CreatureModelData.dbc");
         if (!File.Exists(gdi))
             gdi = Path.Combine(directory, "DBFilesClient", "GameObjectDisplayInfo.dbc");
+        if (!File.Exists(map))
+            map = Path.Combine(directory, "DBFilesClient", "Map.dbc");
 
         byte[]? cdiBytes = File.Exists(cdi) ? File.ReadAllBytes(cdi) : null;
         byte[]? cmdBytes = File.Exists(cmd) ? File.ReadAllBytes(cmd) : null;
         byte[]? gdiBytes = File.Exists(gdi) ? File.ReadAllBytes(gdi) : null;
+        byte[]? mapBytes = File.Exists(map) ? File.ReadAllBytes(map) : null;
 
-        if (cdiBytes != null || cmdBytes != null || gdiBytes != null)
+        if (cdiBytes != null || cmdBytes != null || gdiBytes != null || mapBytes != null)
         {
-            resolver.LoadData(cdiBytes, cmdBytes, gdiBytes);
+            resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes);
             return resolver;
         }
 
@@ -159,12 +183,15 @@ public sealed class DbcModelResolver : IDbcModelResolver
         byte[]? gdiBytes = catalog.ReadFile("DBFilesClient\\GameObjectDisplayInfo.dbc")
             ?? catalog.ReadFile("DBFilesClient/GameObjectDisplayInfo.dbc")
             ?? catalog.ReadFile("GameObjectDisplayInfo.dbc");
+        byte[]? mapBytes = catalog.ReadFile("DBFilesClient\\Map.dbc")
+            ?? catalog.ReadFile("DBFilesClient/Map.dbc")
+            ?? catalog.ReadFile("Map.dbc");
 
-        resolver.LoadData(cdiBytes, cmdBytes, gdiBytes);
+        resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes);
         return resolver;
     }
 
-    public void LoadData(byte[]? cdiBytes, byte[]? cmdBytes, byte[]? gdiBytes)
+    public void LoadData(byte[]? cdiBytes, byte[]? cmdBytes, byte[]? gdiBytes, byte[]? mapBytes = null)
     {
         // 1. CreatureModelData: ID(0) -> ModelPath(2)
         var modelDataPaths = new Dictionary<int, string>();
@@ -220,6 +247,33 @@ public sealed class DbcModelResolver : IDbcModelResolver
                 {
                     RegisterGameObject(id, path, 1.0f);
                 }
+            }
+        }
+
+        // 4. Map: ID(0) -> Directory(1), MapName_lang(5 in 3.3.5a, 4 in 0.5.3)
+        if (mapBytes != null && mapBytes.Length > 0)
+        {
+            var map = DbcReader.Load(mapBytes);
+            for (int r = 0; r < map.Rows.Count; r++)
+            {
+                int id = map.GetInt(r, 0);
+                string dir = map.GetString(map.GetUInt(r, 1));
+                string name = dir;
+                if (map.Header.FieldCount > 5)
+                {
+                    string localized = map.GetString(map.GetUInt(r, 5));
+                    if (!string.IsNullOrWhiteSpace(localized))
+                        name = localized;
+                }
+                else if (map.Header.FieldCount > 4)
+                {
+                    string localized = map.GetString(map.GetUInt(r, 4));
+                    if (!string.IsNullOrWhiteSpace(localized))
+                        name = localized;
+                }
+                if (id == 451) name = "development";
+                if (!string.IsNullOrWhiteSpace(name))
+                    RegisterMap(id, name);
             }
         }
     }

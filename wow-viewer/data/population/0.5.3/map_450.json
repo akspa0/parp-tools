@@ -1,8 +1,8 @@
 {
   "mapId": 450,
-  "mapName": "Map_450",
+  "mapName": "Horde PVP Barracks",
   "clientVersion": "0.5.3",
-  "exportedUtc": "2026-10-19T03:45:54.8287792Z",
+  "exportedUtc": "2026-10-19T16:06:52.9291166Z",
   "spawns": [
     {
       "spawnId": 1296,
@@ -12,9 +12,9 @@
       "name": "Mighty Blaze",
       "subname": null,
       "modelPath": "WORLD\\GENERIC\\ORC\\PASSIVE DOODADS\\BRAZIERS\\MEDIUMBRAZIERNOOMNI01.MDX",
-      "scale": 1,
+      "scale": 1.27,
       "displayScale": 1,
-      "effectiveScale": 1,
+      "effectiveScale": 1.27,
       "position": {
         "x": -40.4125,
         "y": 16.3463,
@@ -33,7 +33,7 @@
       "entryId": 176566,
       "mapId": 450,
       "spawnType": 1,
-      "name": "Officer\u0027s Door",
+      "name": "Officer's Door",
       "subname": null,
       "modelPath": null,
       "scale": 1,

@@ -41,6 +41,68 @@ public class TrinityCorePopulationTests
     }
 
     [Fact]
+    public async Task ExtractAllMapsAsync_ParsesCorrectScalesForBothTrinityCoreAndAlphaCore()
+    {
+        string tcSql = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllLinesAsync(tcSql, new[]
+            {
+                // TC creature: level 80, scale 1.25
+                "INSERT INTO `creature` VALUES (1001, 14337, 451, 0, 0, 1, 1, 0, 0, 100.0, 200.0, 30.0, 1.5);",
+                "INSERT INTO `creature_template` VALUES (14337, 0, 0, 0, 0, 0, 14379, 0, 0, 0, 'Field Repair Bot 74A', NULL, 0, 0, 80, 80, 0, 35, 1, 1.0, 1.0, 1.25);",
+                // TC gameobject: size 0.63 (col 7)
+                "INSERT INTO `gameobject` VALUES (2001, 31, 451, 0, 0, 1, 1, 150.0, 250.0, 35.0, 3.14, 0, 0, 0, 1);",
+                "INSERT INTO `gameobject_template` VALUES (31, 2, 6, 'Old Lion Statue', '', '', '', 0.63, 43, 73, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '', '', NULL, 12340);"
+            });
+
+            var reader = new TrinityCoreSqlReader();
+            var result = await reader.ExtractAllMapsAsync(tcSql);
+
+            Assert.True(result.SpawnsByMap.ContainsKey(451));
+            var spawns = result.SpawnsByMap[451];
+            var creature = Assert.Single(spawns, s => s.SpawnType == PopulationSpawnType.Creature);
+            Assert.Equal(1.25f, creature.Scale); // Must NOT be level 80!
+
+            var go = Assert.Single(spawns, s => s.SpawnType == PopulationSpawnType.GameObject);
+            Assert.Equal(0.63f, go.Scale); // Must NOT be 1.0f or col 4!
+        }
+        finally
+        {
+            if (File.Exists(tcSql)) File.Delete(tcSql);
+        }
+
+        string alphaSql = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllLinesAsync(alphaSql, new[]
+            {
+                // AlphaCore creature: level 60, scale 1.5
+                "INSERT INTO `spawns_creatures` VALUES (1002, 2051, 0, 0, 0, 451, 100.0, 200.0, 30.0, 1.5);",
+                "INSERT INTO `creature_template` VALUES (2051, 907, 0, 0, 0, 0, 'Twain The Tester', NULL, 0, 0, 60, 60, 35, 1, 1.0, 1.0, 1.5);",
+                // AlphaCore gameobject: faction 84 (col 4), size 0.75 (col 6)
+                "INSERT INTO `spawns_gameobjects` VALUES (2002, 1719, 451, 150.0, 250.0, 35.0, 3.14);",
+                "INSERT INTO `gameobject_template` VALUES (1719, 6, 273, 'Anvil', 84, 0, 0.75, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '');"
+            });
+
+            var reader = new TrinityCoreSqlReader();
+            var result = await reader.ExtractAllMapsAsync(alphaSql);
+
+            Assert.True(result.SpawnsByMap.ContainsKey(451));
+            var spawns = result.SpawnsByMap[451];
+            var creature = Assert.Single(spawns, s => s.SpawnType == PopulationSpawnType.Creature);
+            Assert.Equal(1.5f, creature.Scale); // Must NOT be level 60!
+
+            var go = Assert.Single(spawns, s => s.SpawnType == PopulationSpawnType.GameObject);
+            Assert.Equal(0.75f, go.Scale); // Must NOT be faction 84!
+        }
+        finally
+        {
+            if (File.Exists(alphaSql)) File.Delete(alphaSql);
+        }
+    }
+
+    [Fact]
     public void AlphaCoreCornerTransposer_CorrectlyIdentifiesDevCornerFixtures()
     {
         // Tile (0, 0) - Upper left corner test fixture (e.g. Twain The Tester, Jesse The Tester)
@@ -131,6 +193,13 @@ public class TrinityCorePopulationTests
             Assert.Contains(manifest.Maps, m => m.MapId == 530); // Outland
             Assert.Contains(manifest.Maps, m => m.MapId == 571); // Northrend
             Assert.Contains(manifest.Maps, m => m.MapId == 451); // Development
+
+            // Verify canonical map names are populated instead of placeholder Map_XX
+            var map546 = Assert.Single(manifest.Maps, m => m.MapId == 546);
+            Assert.Equal("Coilfang: The Underbog", map546.MapName);
+
+            var map33 = Assert.Single(manifest.Maps, m => m.MapId == 33);
+            Assert.Equal("Shadowfang Keep", map33.MapName);
         }
 
         if (File.Exists(manifest053))
@@ -140,11 +209,29 @@ public class TrinityCorePopulationTests
             Assert.NotNull(manifest);
             Assert.Equal("0.5.3", manifest.Version);
             Assert.True(manifest.Maps.Count >= 30, $"Expected >= 30 maps in 0.5.3 manifest, found {manifest.Maps.Count}");
-            Assert.Contains(manifest.Maps, m => m.MapId == 0);   // Azeroth
+            Assert.Contains(manifest.Maps, m => m.MapId == 0);   // Eastern Kingdoms
             Assert.Contains(manifest.Maps, m => m.MapId == 1);   // Kalimdor
-            Assert.Contains(manifest.Maps, m => m.MapId == 30);  // UnderIsland
+            Assert.Contains(manifest.Maps, m => m.MapId == 30);  // Alterac Valley
             Assert.Contains(manifest.Maps, m => m.MapId == 451); // Development
+
+            var map33Alpha = Assert.Single(manifest.Maps, m => m.MapId == 33);
+            Assert.Equal("Shadowfang Keep", map33Alpha.MapName);
         }
+    }
+
+    [Theory]
+    [InlineData(0, "Eastern Kingdoms")]
+    [InlineData(1, "Kalimdor")]
+    [InlineData(30, "Alterac Valley")]
+    [InlineData(33, "Shadowfang Keep")]
+    [InlineData(451, "development")]
+    [InlineData(530, "Outland")]
+    [InlineData(546, "Coilfang: The Underbog")]
+    [InlineData(571, "Northrend")]
+    [InlineData(9999, "Map_9999")]
+    public void PopulationMapNames_ResolvesCanonicalNames(int mapId, string expected)
+    {
+        Assert.Equal(expected, PopulationMapNames.GetMapName(mapId));
     }
 
     [Fact]

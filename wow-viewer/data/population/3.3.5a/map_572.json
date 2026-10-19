@@ -1,8 +1,8 @@
 {
   "mapId": 572,
-  "mapName": "Map_572",
+  "mapName": "Ruins of Lordaeron",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-19T03:50:33.4972966Z",
+  "exportedUtc": "2026-10-19T08:25:37.2697939Z",
   "spawns": [
     {
       "spawnId": 1551,
@@ -12,9 +12,9 @@
       "name": "Lordaeron Citizen (Jesse)",
       "subname": null,
       "modelPath": "Creature\\Ghost\\Ghost.mdx",
-      "scale": 15,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 15,
+      "effectiveScale": 1,
       "position": {
         "x": 1317.99,
         "y": 1684.16,
@@ -22,8 +22,8 @@
       },
       "orientation": 0.591864,
       "rotation": null,
-      "faction": 0,
-      "flags": 7,
+      "faction": 7,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -36,9 +36,9 @@
       "name": "Lordaeron Citizen (Jesse)",
       "subname": null,
       "modelPath": "Creature\\Ghost\\Ghost.mdx",
-      "scale": 15,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 15,
+      "effectiveScale": 1,
       "position": {
         "x": 1309.41,
         "y": 1663.58,
@@ -46,8 +46,8 @@
       },
       "orientation": 3.30149,
       "rotation": null,
-      "faction": 0,
-      "flags": 7,
+      "faction": 7,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -60,9 +60,9 @@
       "name": "Lordaeron Citizen (Jesse)",
       "subname": null,
       "modelPath": "Creature\\Ghost\\Ghost.mdx",
-      "scale": 15,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 15,
+      "effectiveScale": 1,
       "position": {
         "x": 1335.04,
         "y": 1676.09,
@@ -70,8 +70,8 @@
       },
       "orientation": 5.67732,
       "rotation": null,
-      "faction": 0,
-      "flags": 7,
+      "faction": 7,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null

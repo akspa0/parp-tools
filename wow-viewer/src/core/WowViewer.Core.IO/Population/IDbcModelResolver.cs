@@ -14,4 +14,9 @@ public interface IDbcModelResolver
     /// Resolves a gameobject display ID to its model path (.mdx/.m2) and scale.
     /// </summary>
     bool TryResolveGameObject(int displayId, out string? modelPath, out float displayScale);
+
+    /// <summary>
+    /// Resolves a map ID to its canonical human-readable name.
+    /// </summary>
+    string GetMapName(int mapId);
 }

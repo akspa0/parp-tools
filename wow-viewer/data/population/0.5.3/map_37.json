@@ -1,8 +1,8 @@
 {
   "mapId": 37,
-  "mapName": "Map_37",
+  "mapName": "Azshara Crater",
   "clientVersion": "0.5.3",
-  "exportedUtc": "2026-10-19T03:45:54.7787631Z",
+  "exportedUtc": "2026-10-19T16:06:52.8701151Z",
   "spawns": [
     {
       "spawnId": 400468,
@@ -12,9 +12,9 @@
       "name": "Baelish Frostbane",
       "subname": "Binder",
       "modelPath": "Character\\Human\\Male\\HumanMale.mdx",
-      "scale": 45,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 45,
+      "effectiveScale": 1,
       "position": {
         "x": -445.944,
         "y": -1023.48,
@@ -22,8 +22,8 @@
       },
       "orientation": 0.937,
       "rotation": null,
-      "faction": 110,
-      "flags": 0,
+      "faction": 35,
+      "flags": 16,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -36,9 +36,9 @@
       "name": "Orgrun Iceflow",
       "subname": "Binder",
       "modelPath": "Creature\\OrcMaleWarriorLight\\OrcMaleWarriorLight.mdx",
-      "scale": 45,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 45,
+      "effectiveScale": 1,
       "position": {
         "x": -663.799,
         "y": -487.706,
@@ -46,8 +46,8 @@
       },
       "orientation": 5.782,
       "rotation": null,
-      "faction": 110,
-      "flags": 0,
+      "faction": 35,
+      "flags": 16,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null

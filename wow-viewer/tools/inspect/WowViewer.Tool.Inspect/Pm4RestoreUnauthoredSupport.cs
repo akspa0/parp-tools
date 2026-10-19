@@ -24,10 +24,12 @@ internal static class Pm4RestoreUnauthoredSupport
     private const string DefaultOutputPath = @"I:\parp\parp-tools\wow-viewer\output\restored_development\World\Maps\development";
     private const string DefaultLedgerPath = @"I:\parp\parp-tools\wow-viewer\output\datasets\pm4_object_association_ledger.json";
     private const string DefaultMinimapPath = @"I:\parp\parp-tools\wow-viewer\test_data\development\World\Textures\Minimap";
+    private const string DefaultRefinedTerrainPath = @"I:\parp\parp-tools\wow-viewer\output\development_reconstructed_lk";
 
     public static void Run(string[] args)
     {
         string baseAdtDir = DefaultBaseAdtPath;
+        string refinedTerrainDir = DefaultRefinedTerrainPath;
         string pm4Dir = DefaultPm4Path;
         string outputDir = DefaultOutputPath;
         string? targetTilesFilter = null;
@@ -48,6 +50,10 @@ internal static class Pm4RestoreUnauthoredSupport
                 case "--base":
                 case "--adt":
                     if (i + 1 < args.Length) baseAdtDir = args[++i];
+                    break;
+                case "--refined":
+                case "--refined-terrain":
+                    if (i + 1 < args.Length) refinedTerrainDir = args[++i];
                     break;
                 case "--pm4":
                 case "--map":
@@ -99,6 +105,11 @@ internal static class Pm4RestoreUnauthoredSupport
         if (Directory.Exists(nestedBase))
             resolvedBaseAdtDir = nestedBase;
 
+        string resolvedRefinedDir = Pm4CoordinateService.ResolveMapDirectory(refinedTerrainDir);
+        string nestedRefined = Path.Combine(resolvedRefinedDir, "World", "Maps", "development");
+        if (Directory.Exists(nestedRefined))
+            resolvedRefinedDir = nestedRefined;
+
         string resolvedPm4Dir = Pm4CoordinateService.ResolveMapDirectory(pm4Dir);
         string nestedPm4 = Path.Combine(resolvedPm4Dir, "World", "Maps", "development");
         if (Directory.Exists(nestedPm4))
@@ -121,12 +132,13 @@ internal static class Pm4RestoreUnauthoredSupport
         Console.WriteLine("=================================================================");
         Console.WriteLine(" Spec 270: PM4 Object Association & Multi-Source Convergence");
         Console.WriteLine("=================================================================");
-        Console.WriteLine($"Base ADT Directory: {resolvedBaseAdtDir}");
-        Console.WriteLine($"PM4 Directory:      {resolvedPm4Dir}");
-        Console.WriteLine($"Minimap Directory:  {minimapDir}");
-        Console.WriteLine($"Output Directory:   {outputDir}");
-        Console.WriteLine($"Bake Minimap MCCV:  {bakeMccv}");
-        Console.WriteLine($"Converge Objects:   {converge}");
+        Console.WriteLine($"Base ADT Directory:    {resolvedBaseAdtDir}");
+        Console.WriteLine($"Refined Terrain Dir:   {resolvedRefinedDir} (Exists: {Directory.Exists(resolvedRefinedDir)})");
+        Console.WriteLine($"PM4 Directory:         {resolvedPm4Dir}");
+        Console.WriteLine($"Minimap Directory:     {minimapDir}");
+        Console.WriteLine($"Output Directory:      {outputDir}");
+        Console.WriteLine($"Bake Minimap MCCV:     {bakeMccv}");
+        Console.WriteLine($"Converge Objects:      {converge}");
 
         // Build shape library and exact Z ledger lookup from persistent ledger and authored tiles
         var (shapeLibrary, ledgerLookup) = LoadLibraries(resolvedBaseAdtDir, ledgerPath);
@@ -146,6 +158,15 @@ internal static class Pm4RestoreUnauthoredSupport
             if (Directory.Exists(resolvedBaseAdtDir))
             {
                 foreach (string adtPath in Directory.EnumerateFiles(resolvedBaseAdtDir, "*.adt", SearchOption.TopDirectoryOnly))
+                {
+                    if (Pm4CoordinateService.TryParseTileCoordinates(adtPath, out int tx, out int ty))
+                        candidateTiles.Add((tx, ty));
+                }
+            }
+
+            if (Directory.Exists(resolvedRefinedDir))
+            {
+                foreach (string adtPath in Directory.EnumerateFiles(resolvedRefinedDir, "*.adt", SearchOption.TopDirectoryOnly))
                 {
                     if (Pm4CoordinateService.TryParseTileCoordinates(adtPath, out int tx, out int ty))
                         candidateTiles.Add((tx, ty));
@@ -215,6 +236,11 @@ internal static class Pm4RestoreUnauthoredSupport
             string? baseAdtPath = candidateBaseAdtNames
                 .Select(name => Path.Combine(resolvedBaseAdtDir, name))
                 .FirstOrDefault(File.Exists);
+
+            // 2b. Probe candidate refined terrain ADT files from WDL neural reconstruction
+            string? refinedAdtPath = (baseAdtPath == null && Directory.Exists(resolvedRefinedDir))
+                ? candidateBaseAdtNames.Select(name => Path.Combine(resolvedRefinedDir, name)).FirstOrDefault(File.Exists)
+                : null;
 
             // 3. Probe candidate companion _obj0 in original_development
             string[] candidateOrigObj0Names = [
@@ -291,11 +317,12 @@ internal static class Pm4RestoreUnauthoredSupport
             // Ingest and prepare base terrain
             LkAdtData baseTerrainAdt;
             bool bakedMccvOnThisTile = false;
-            if (baseAdtPath != null && File.Exists(baseAdtPath))
+            string? sourceTerrainPath = baseAdtPath ?? refinedAdtPath;
+            if (sourceTerrainPath != null && File.Exists(sourceTerrainPath))
             {
                 try
                 {
-                    byte[] baseBytes = EnsureValidMcnkIndices(File.ReadAllBytes(baseAdtPath));
+                    byte[] baseBytes = EnsureValidMcnkIndices(File.ReadAllBytes(sourceTerrainPath));
                     LkAdtData rawBase = LkAdtReader.Read(baseBytes, null, null, tileX, tileY);
                     if (rawBase.Chunks.Count == 256)
                     {

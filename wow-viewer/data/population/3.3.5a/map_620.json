@@ -1,8 +1,8 @@
 {
   "mapId": 620,
-  "mapName": "Map_620",
+  "mapName": "Transport: Moa'ki to Unu'pe",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-19T03:50:33.5840866Z",
+  "exportedUtc": "2026-10-19T08:25:37.3513884Z",
   "spawns": [
     {
       "spawnId": 62739,
@@ -12,9 +12,9 @@
       "name": "Aumanil",
       "subname": "Walker of Waves",
       "modelPath": "Character\\Tuskarr\\Male\\TuskarrMale.mdx",
-      "scale": 68,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 68,
+      "effectiveScale": 1,
       "position": {
         "x": -19.8763,
         "y": -0.049722,
@@ -22,8 +22,8 @@
       },
       "orientation": 2.86234,
       "rotation": null,
-      "faction": 2,
-      "flags": 1950,
+      "faction": 1950,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -36,9 +36,9 @@
       "name": "Nagojut",
       "subname": "Walker of Waves",
       "modelPath": null,
-      "scale": 65,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 65,
+      "effectiveScale": 1,
       "position": {
         "x": 8.10938,
         "y": -1.96228,
@@ -46,8 +46,8 @@
       },
       "orientation": 3.22434,
       "rotation": null,
-      "faction": 0,
-      "flags": 1950,
+      "faction": 1950,
+      "flags": 4736,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null

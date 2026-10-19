@@ -1250,8 +1250,7 @@ void main()
             return null;
 
         uint[] replaceableIds = runtimeModel.Sections
-            .SelectMany(static section => section.Material.TextureBindings)
-            .Select(static binding => binding.ReplaceableId)
+            .SelectMany(static section => section.Material.TextureBindings.Select(static b => b.ReplaceableId).Concat(new[] { section.Material.ReplaceableId }))
             .Where(static replaceableId => replaceableId != 0)
             .Distinct()
             .ToArray();

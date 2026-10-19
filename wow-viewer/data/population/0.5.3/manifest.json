@@ -1,6 +1,6 @@
 {
   "version": "0.5.3",
-  "generatedUtc": "2026-10-19T03:45:54.8300962Z",
+  "generatedUtc": "2026-10-19T16:06:52.9302175Z",
   "totalCreatures": 57073,
   "totalGameObjects": 35182,
   "maps": [
@@ -20,196 +20,196 @@
     },
     {
       "mapId": 13,
-      "mapName": "Map_13",
+      "mapName": "Testing",
       "creatureCount": 0,
       "gameObjectCount": 2,
       "relativeFilePath": "map_13.json"
     },
     {
       "mapId": 30,
-      "mapName": "Map_30",
+      "mapName": "Alterac Valley",
       "creatureCount": 6,
       "gameObjectCount": 0,
       "relativeFilePath": "map_30.json"
     },
     {
       "mapId": 33,
-      "mapName": "Map_33",
+      "mapName": "Shadowfang Keep",
       "creatureCount": 147,
       "gameObjectCount": 41,
       "relativeFilePath": "map_33.json"
     },
     {
       "mapId": 34,
-      "mapName": "Map_34",
+      "mapName": "Stormwind Stockade",
       "creatureCount": 93,
       "gameObjectCount": 2,
       "relativeFilePath": "map_34.json"
     },
     {
       "mapId": 36,
-      "mapName": "Map_36",
+      "mapName": "Deadmines",
       "creatureCount": 205,
       "gameObjectCount": 52,
       "relativeFilePath": "map_36.json"
     },
     {
       "mapId": 37,
-      "mapName": "Map_37",
+      "mapName": "Azshara Crater",
       "creatureCount": 2,
       "gameObjectCount": 0,
       "relativeFilePath": "map_37.json"
     },
     {
       "mapId": 43,
-      "mapName": "Map_43",
+      "mapName": "Wailing Caverns",
       "creatureCount": 319,
       "gameObjectCount": 136,
       "relativeFilePath": "map_43.json"
     },
     {
       "mapId": 44,
-      "mapName": "Map_44",
+      "mapName": "Monastery",
       "creatureCount": 131,
       "gameObjectCount": 9,
       "relativeFilePath": "map_44.json"
     },
     {
       "mapId": 47,
-      "mapName": "Map_47",
+      "mapName": "Razorfen Kraul",
       "creatureCount": 186,
       "gameObjectCount": 156,
       "relativeFilePath": "map_47.json"
     },
     {
       "mapId": 48,
-      "mapName": "Map_48",
+      "mapName": "Blackfathom Deeps",
       "creatureCount": 211,
       "gameObjectCount": 43,
       "relativeFilePath": "map_48.json"
     },
     {
       "mapId": 70,
-      "mapName": "Map_70",
+      "mapName": "Uldaman",
       "creatureCount": 327,
       "gameObjectCount": 239,
       "relativeFilePath": "map_70.json"
     },
     {
       "mapId": 90,
-      "mapName": "Map_90",
+      "mapName": "Gnomeregan",
       "creatureCount": 403,
       "gameObjectCount": 90,
       "relativeFilePath": "map_90.json"
     },
     {
       "mapId": 109,
-      "mapName": "Map_109",
+      "mapName": "Sunken Temple",
       "creatureCount": 315,
       "gameObjectCount": 77,
       "relativeFilePath": "map_109.json"
     },
     {
       "mapId": 129,
-      "mapName": "Map_129",
+      "mapName": "Razorfen Downs",
       "creatureCount": 262,
       "gameObjectCount": 71,
       "relativeFilePath": "map_129.json"
     },
     {
       "mapId": 189,
-      "mapName": "Map_189",
+      "mapName": "Scarlet Monastery",
       "creatureCount": 354,
       "gameObjectCount": 95,
       "relativeFilePath": "map_189.json"
     },
     {
       "mapId": 209,
-      "mapName": "Map_209",
+      "mapName": "Zul'Farrak",
       "creatureCount": 274,
       "gameObjectCount": 87,
       "relativeFilePath": "map_209.json"
     },
     {
       "mapId": 229,
-      "mapName": "Map_229",
+      "mapName": "Blackrock Spire",
       "creatureCount": 594,
       "gameObjectCount": 195,
       "relativeFilePath": "map_229.json"
     },
     {
       "mapId": 230,
-      "mapName": "Map_230",
+      "mapName": "Blackrock Depths",
       "creatureCount": 1096,
       "gameObjectCount": 460,
       "relativeFilePath": "map_230.json"
     },
     {
       "mapId": 249,
-      "mapName": "Map_249",
+      "mapName": "Onyxia's Lair",
       "creatureCount": 6,
       "gameObjectCount": 147,
       "relativeFilePath": "map_249.json"
     },
     {
       "mapId": 269,
-      "mapName": "Map_269",
+      "mapName": "Opening of the Dark Portal",
       "creatureCount": 68,
       "gameObjectCount": 0,
       "relativeFilePath": "map_269.json"
     },
     {
       "mapId": 289,
-      "mapName": "Map_289",
+      "mapName": "Scholomance",
       "creatureCount": 403,
       "gameObjectCount": 68,
       "relativeFilePath": "map_289.json"
     },
     {
       "mapId": 329,
-      "mapName": "Map_329",
+      "mapName": "Stratholme",
       "creatureCount": 462,
       "gameObjectCount": 228,
       "relativeFilePath": "map_329.json"
     },
     {
       "mapId": 349,
-      "mapName": "Map_349",
+      "mapName": "Maraudon",
       "creatureCount": 624,
       "gameObjectCount": 39,
       "relativeFilePath": "map_349.json"
     },
     {
       "mapId": 369,
-      "mapName": "Map_369",
+      "mapName": "Deeprun Tram",
       "creatureCount": 22,
       "gameObjectCount": 104,
       "relativeFilePath": "map_369.json"
     },
     {
       "mapId": 389,
-      "mapName": "Map_389",
+      "mapName": "Ragefire Chasm",
       "creatureCount": 132,
       "gameObjectCount": 13,
       "relativeFilePath": "map_389.json"
     },
     {
       "mapId": 409,
-      "mapName": "Map_409",
+      "mapName": "Molten Core",
       "creatureCount": 232,
       "gameObjectCount": 57,
       "relativeFilePath": "map_409.json"
     },
     {
       "mapId": 449,
-      "mapName": "Map_449",
+      "mapName": "Alliance PVP Barracks",
       "creatureCount": 0,
       "gameObjectCount": 14,
       "relativeFilePath": "map_449.json"
     },
     {
       "mapId": 450,
-      "mapName": "Map_450",
+      "mapName": "Horde PVP Barracks",
       "creatureCount": 0,
       "gameObjectCount": 2,
       "relativeFilePath": "map_450.json"

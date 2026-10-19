@@ -1,6 +1,6 @@
 {
   "version": "3.3.5a",
-  "generatedUtc": "2026-10-19T03:50:33.6131903Z",
+  "generatedUtc": "2026-10-19T08:25:37.3891297Z",
   "totalCreatures": 151823,
   "totalGameObjects": 94992,
   "maps": [
@@ -20,189 +20,189 @@
     },
     {
       "mapId": 30,
-      "mapName": "Map_30",
+      "mapName": "Alterac Valley",
       "creatureCount": 0,
       "gameObjectCount": 12,
       "relativeFilePath": "map_30.json"
     },
     {
       "mapId": 33,
-      "mapName": "Map_33",
+      "mapName": "Shadowfang Keep",
       "creatureCount": 215,
       "gameObjectCount": 126,
       "relativeFilePath": "map_33.json"
     },
     {
       "mapId": 34,
-      "mapName": "Map_34",
+      "mapName": "Stormwind Stockade",
       "creatureCount": 93,
       "gameObjectCount": 33,
       "relativeFilePath": "map_34.json"
     },
     {
       "mapId": 36,
-      "mapName": "Map_36",
+      "mapName": "Deadmines",
       "creatureCount": 213,
       "gameObjectCount": 46,
       "relativeFilePath": "map_36.json"
     },
     {
       "mapId": 43,
-      "mapName": "Map_43",
+      "mapName": "Wailing Caverns",
       "creatureCount": 312,
       "gameObjectCount": 57,
       "relativeFilePath": "map_43.json"
     },
     {
       "mapId": 47,
-      "mapName": "Map_47",
+      "mapName": "Razorfen Kraul",
       "creatureCount": 192,
       "gameObjectCount": 53,
       "relativeFilePath": "map_47.json"
     },
     {
       "mapId": 48,
-      "mapName": "Map_48",
+      "mapName": "Blackfathom Deeps",
       "creatureCount": 212,
       "gameObjectCount": 33,
       "relativeFilePath": "map_48.json"
     },
     {
       "mapId": 70,
-      "mapName": "Map_70",
+      "mapName": "Uldaman",
       "creatureCount": 318,
       "gameObjectCount": 154,
       "relativeFilePath": "map_70.json"
     },
     {
       "mapId": 90,
-      "mapName": "Map_90",
+      "mapName": "Gnomeregan",
       "creatureCount": 410,
       "gameObjectCount": 87,
       "relativeFilePath": "map_90.json"
     },
     {
       "mapId": 109,
-      "mapName": "Map_109",
+      "mapName": "Sunken Temple",
       "creatureCount": 345,
       "gameObjectCount": 33,
       "relativeFilePath": "map_109.json"
     },
     {
       "mapId": 129,
-      "mapName": "Map_129",
+      "mapName": "Razorfen Downs",
       "creatureCount": 261,
       "gameObjectCount": 47,
       "relativeFilePath": "map_129.json"
     },
     {
       "mapId": 189,
-      "mapName": "Map_189",
+      "mapName": "Scarlet Monastery",
       "creatureCount": 343,
       "gameObjectCount": 156,
       "relativeFilePath": "map_189.json"
     },
     {
       "mapId": 209,
-      "mapName": "Map_209",
+      "mapName": "Zul'Farrak",
       "creatureCount": 268,
       "gameObjectCount": 92,
       "relativeFilePath": "map_209.json"
     },
     {
       "mapId": 229,
-      "mapName": "Map_229",
+      "mapName": "Blackrock Spire",
       "creatureCount": 580,
       "gameObjectCount": 390,
       "relativeFilePath": "map_229.json"
     },
     {
       "mapId": 230,
-      "mapName": "Map_230",
+      "mapName": "Blackrock Depths",
       "creatureCount": 1103,
       "gameObjectCount": 643,
       "relativeFilePath": "map_230.json"
     },
     {
       "mapId": 249,
-      "mapName": "Map_249",
+      "mapName": "Onyxia's Lair",
       "creatureCount": 9,
       "gameObjectCount": 251,
       "relativeFilePath": "map_249.json"
     },
     {
       "mapId": 269,
-      "mapName": "Map_269",
+      "mapName": "Opening of the Dark Portal",
       "creatureCount": 261,
       "gameObjectCount": 0,
       "relativeFilePath": "map_269.json"
     },
     {
       "mapId": 289,
-      "mapName": "Map_289",
+      "mapName": "Scholomance",
       "creatureCount": 403,
       "gameObjectCount": 61,
       "relativeFilePath": "map_289.json"
     },
     {
       "mapId": 309,
-      "mapName": "Map_309",
+      "mapName": "Zul'Gurub",
       "creatureCount": 807,
       "gameObjectCount": 176,
       "relativeFilePath": "map_309.json"
     },
     {
       "mapId": 329,
-      "mapName": "Map_329",
+      "mapName": "Stratholme",
       "creatureCount": 469,
       "gameObjectCount": 434,
       "relativeFilePath": "map_329.json"
     },
     {
       "mapId": 349,
-      "mapName": "Map_349",
+      "mapName": "Maraudon",
       "creatureCount": 610,
       "gameObjectCount": 60,
       "relativeFilePath": "map_349.json"
     },
     {
       "mapId": 369,
-      "mapName": "Map_369",
+      "mapName": "Deeprun Tram",
       "creatureCount": 28,
       "gameObjectCount": 106,
       "relativeFilePath": "map_369.json"
     },
     {
       "mapId": 389,
-      "mapName": "Map_389",
+      "mapName": "Ragefire Chasm",
       "creatureCount": 132,
       "gameObjectCount": 14,
       "relativeFilePath": "map_389.json"
     },
     {
       "mapId": 409,
-      "mapName": "Map_409",
+      "mapName": "Molten Core",
       "creatureCount": 244,
       "gameObjectCount": 23,
       "relativeFilePath": "map_409.json"
     },
     {
       "mapId": 429,
-      "mapName": "Map_429",
+      "mapName": "Dire Maul",
       "creatureCount": 942,
       "gameObjectCount": 338,
       "relativeFilePath": "map_429.json"
     },
     {
       "mapId": 449,
-      "mapName": "Map_449",
+      "mapName": "Alliance PVP Barracks",
       "creatureCount": 10,
       "gameObjectCount": 21,
       "relativeFilePath": "map_449.json"
     },
     {
       "mapId": 450,
-      "mapName": "Map_450",
+      "mapName": "Horde PVP Barracks",
       "creatureCount": 11,
       "gameObjectCount": 12,
       "relativeFilePath": "map_450.json"
@@ -216,14 +216,14 @@
     },
     {
       "mapId": 469,
-      "mapName": "Map_469",
+      "mapName": "Blackwing Lair",
       "creatureCount": 348,
       "gameObjectCount": 100,
       "relativeFilePath": "map_469.json"
     },
     {
       "mapId": 509,
-      "mapName": "Map_509",
+      "mapName": "Ruins of Ahn'Qiraj",
       "creatureCount": 372,
       "gameObjectCount": 10,
       "relativeFilePath": "map_509.json"
@@ -237,175 +237,175 @@
     },
     {
       "mapId": 531,
-      "mapName": "Map_531",
+      "mapName": "Ahn'Qiraj Temple",
       "creatureCount": 574,
       "gameObjectCount": 17,
       "relativeFilePath": "map_531.json"
     },
     {
       "mapId": 532,
-      "mapName": "Map_532",
+      "mapName": "Karazhan",
       "creatureCount": 889,
       "gameObjectCount": 315,
       "relativeFilePath": "map_532.json"
     },
     {
       "mapId": 533,
-      "mapName": "Map_533",
+      "mapName": "Naxxramas",
       "creatureCount": 927,
       "gameObjectCount": 209,
       "relativeFilePath": "map_533.json"
     },
     {
       "mapId": 534,
-      "mapName": "Map_534",
+      "mapName": "The Battle for Mount Hyjal",
       "creatureCount": 141,
       "gameObjectCount": 2,
       "relativeFilePath": "map_534.json"
     },
     {
       "mapId": 540,
-      "mapName": "Map_540",
+      "mapName": "Hellfire Citadel: The Shattered Halls",
       "creatureCount": 287,
       "gameObjectCount": 18,
       "relativeFilePath": "map_540.json"
     },
     {
       "mapId": 542,
-      "mapName": "Map_542",
+      "mapName": "Hellfire Citadel: The Blood Furnace",
       "creatureCount": 210,
       "gameObjectCount": 29,
       "relativeFilePath": "map_542.json"
     },
     {
       "mapId": 543,
-      "mapName": "Map_543",
+      "mapName": "Hellfire Citadel: Ramparts",
       "creatureCount": 101,
       "gameObjectCount": 5,
       "relativeFilePath": "map_543.json"
     },
     {
       "mapId": 544,
-      "mapName": "Map_544",
+      "mapName": "Magtheridon's Lair",
       "creatureCount": 33,
       "gameObjectCount": 13,
       "relativeFilePath": "map_544.json"
     },
     {
       "mapId": 545,
-      "mapName": "Map_545",
+      "mapName": "Coilfang: The Steamvault",
       "creatureCount": 162,
       "gameObjectCount": 35,
       "relativeFilePath": "map_545.json"
     },
     {
       "mapId": 546,
-      "mapName": "Map_546",
+      "mapName": "Coilfang: The Underbog",
       "creatureCount": 221,
       "gameObjectCount": 37,
       "relativeFilePath": "map_546.json"
     },
     {
       "mapId": 547,
-      "mapName": "Map_547",
+      "mapName": "Coilfang: The Slave Pens",
       "creatureCount": 231,
       "gameObjectCount": 40,
       "relativeFilePath": "map_547.json"
     },
     {
       "mapId": 548,
-      "mapName": "Map_548",
+      "mapName": "Coilfang: Serpentshrine Cavern",
       "creatureCount": 256,
       "gameObjectCount": 35,
       "relativeFilePath": "map_548.json"
     },
     {
       "mapId": 550,
-      "mapName": "Map_550",
+      "mapName": "Tempest Keep",
       "creatureCount": 223,
       "gameObjectCount": 9,
       "relativeFilePath": "map_550.json"
     },
     {
       "mapId": 552,
-      "mapName": "Map_552",
+      "mapName": "Tempest Keep: The Arcatraz",
       "creatureCount": 167,
       "gameObjectCount": 13,
       "relativeFilePath": "map_552.json"
     },
     {
       "mapId": 553,
-      "mapName": "Map_553",
+      "mapName": "Tempest Keep: The Botanica",
       "creatureCount": 188,
       "gameObjectCount": 4,
       "relativeFilePath": "map_553.json"
     },
     {
       "mapId": 554,
-      "mapName": "Map_554",
+      "mapName": "Tempest Keep: The Mechanar",
       "creatureCount": 82,
       "gameObjectCount": 14,
       "relativeFilePath": "map_554.json"
     },
     {
       "mapId": 555,
-      "mapName": "Map_555",
+      "mapName": "Auchindoun: Shadow Labyrinth",
       "creatureCount": 243,
       "gameObjectCount": 56,
       "relativeFilePath": "map_555.json"
     },
     {
       "mapId": 556,
-      "mapName": "Map_556",
+      "mapName": "Auchindoun: Sethekk Halls",
       "creatureCount": 197,
       "gameObjectCount": 17,
       "relativeFilePath": "map_556.json"
     },
     {
       "mapId": 557,
-      "mapName": "Map_557",
+      "mapName": "Auchindoun: Mana-Tombs",
       "creatureCount": 170,
       "gameObjectCount": 22,
       "relativeFilePath": "map_557.json"
     },
     {
       "mapId": 558,
-      "mapName": "Map_558",
+      "mapName": "Auchindoun: Auchenai Crypts",
       "creatureCount": 194,
       "gameObjectCount": 10,
       "relativeFilePath": "map_558.json"
     },
     {
       "mapId": 560,
-      "mapName": "Map_560",
+      "mapName": "The Escape From Durnholde",
       "creatureCount": 634,
       "gameObjectCount": 237,
       "relativeFilePath": "map_560.json"
     },
     {
       "mapId": 564,
-      "mapName": "Map_564",
+      "mapName": "Black Temple",
       "creatureCount": 756,
       "gameObjectCount": 26,
       "relativeFilePath": "map_564.json"
     },
     {
       "mapId": 565,
-      "mapName": "Map_565",
+      "mapName": "Gruul's Lair",
       "creatureCount": 18,
       "gameObjectCount": 2,
       "relativeFilePath": "map_565.json"
     },
     {
       "mapId": 566,
-      "mapName": "Map_566",
+      "mapName": "Eye of the Storm",
       "creatureCount": 0,
       "gameObjectCount": 36,
       "relativeFilePath": "map_566.json"
     },
     {
       "mapId": 568,
-      "mapName": "Map_568",
+      "mapName": "Zul'Aman",
       "creatureCount": 427,
       "gameObjectCount": 93,
       "relativeFilePath": "map_568.json"
@@ -419,378 +419,378 @@
     },
     {
       "mapId": 572,
-      "mapName": "Map_572",
+      "mapName": "Ruins of Lordaeron",
       "creatureCount": 3,
       "gameObjectCount": 0,
       "relativeFilePath": "map_572.json"
     },
     {
       "mapId": 574,
-      "mapName": "Map_574",
+      "mapName": "Utgarde Keep",
       "creatureCount": 166,
       "gameObjectCount": 58,
       "relativeFilePath": "map_574.json"
     },
     {
       "mapId": 575,
-      "mapName": "Map_575",
+      "mapName": "Utgarde Pinnacle",
       "creatureCount": 201,
       "gameObjectCount": 91,
       "relativeFilePath": "map_575.json"
     },
     {
       "mapId": 576,
-      "mapName": "Map_576",
+      "mapName": "The Nexus",
       "creatureCount": 262,
       "gameObjectCount": 28,
       "relativeFilePath": "map_576.json"
     },
     {
       "mapId": 578,
-      "mapName": "Map_578",
+      "mapName": "The Oculus",
       "creatureCount": 150,
       "gameObjectCount": 18,
       "relativeFilePath": "map_578.json"
     },
     {
       "mapId": 580,
-      "mapName": "Map_580",
+      "mapName": "The Sunwell",
       "creatureCount": 435,
       "gameObjectCount": 39,
       "relativeFilePath": "map_580.json"
     },
     {
       "mapId": 582,
-      "mapName": "Map_582",
+      "mapName": "Transport: Rut'theran to Auberdine",
       "creatureCount": 8,
       "gameObjectCount": 0,
       "relativeFilePath": "map_582.json"
     },
     {
       "mapId": 584,
-      "mapName": "Map_584",
+      "mapName": "Transport: Menethil to Theramore",
       "creatureCount": 11,
       "gameObjectCount": 0,
       "relativeFilePath": "map_584.json"
     },
     {
       "mapId": 585,
-      "mapName": "Map_585",
+      "mapName": "Magister's Terrace",
       "creatureCount": 210,
       "gameObjectCount": 20,
       "relativeFilePath": "map_585.json"
     },
     {
       "mapId": 586,
-      "mapName": "Map_586",
+      "mapName": "Transport: Exodar to Auberdine",
       "creatureCount": 8,
       "gameObjectCount": 0,
       "relativeFilePath": "map_586.json"
     },
     {
       "mapId": 587,
-      "mapName": "Map_587",
+      "mapName": "Transport: Feathermoon Ferry",
       "creatureCount": 9,
       "gameObjectCount": 0,
       "relativeFilePath": "map_587.json"
     },
     {
       "mapId": 588,
-      "mapName": "Map_588",
+      "mapName": "Transport: Menethil to Auberdine",
       "creatureCount": 10,
       "gameObjectCount": 0,
       "relativeFilePath": "map_588.json"
     },
     {
       "mapId": 589,
-      "mapName": "Map_589",
+      "mapName": "Transport: Orgrimmar to Grom'Gol",
       "creatureCount": 11,
       "gameObjectCount": 0,
       "relativeFilePath": "map_589.json"
     },
     {
       "mapId": 590,
-      "mapName": "Map_590",
+      "mapName": "Transport: Grom'Gol to Undercity",
       "creatureCount": 11,
       "gameObjectCount": 0,
       "relativeFilePath": "map_590.json"
     },
     {
       "mapId": 591,
-      "mapName": "Map_591",
+      "mapName": "Transport: Undercity to Orgrimmar",
       "creatureCount": 21,
       "gameObjectCount": 0,
       "relativeFilePath": "map_591.json"
     },
     {
       "mapId": 593,
-      "mapName": "Map_593",
+      "mapName": "Transport: Booty Bay to Ratchet",
       "creatureCount": 10,
       "gameObjectCount": 9,
       "relativeFilePath": "map_593.json"
     },
     {
       "mapId": 594,
-      "mapName": "Map_594",
+      "mapName": "Transport: Howling Fjord Sister Mercy (Quest)",
       "creatureCount": 68,
       "gameObjectCount": 0,
       "relativeFilePath": "map_594.json"
     },
     {
       "mapId": 595,
-      "mapName": "Map_595",
+      "mapName": "The Culling of Stratholme",
       "creatureCount": 424,
       "gameObjectCount": 430,
       "relativeFilePath": "map_595.json"
     },
     {
       "mapId": 599,
-      "mapName": "Map_599",
+      "mapName": "Halls of Stone",
       "creatureCount": 147,
       "gameObjectCount": 20,
       "relativeFilePath": "map_599.json"
     },
     {
       "mapId": 600,
-      "mapName": "Map_600",
+      "mapName": "Drak'Tharon Keep",
       "creatureCount": 183,
       "gameObjectCount": 15,
       "relativeFilePath": "map_600.json"
     },
     {
       "mapId": 601,
-      "mapName": "Map_601",
+      "mapName": "Azjol-Nerub",
       "creatureCount": 120,
       "gameObjectCount": 76,
       "relativeFilePath": "map_601.json"
     },
     {
       "mapId": 602,
-      "mapName": "Map_602",
+      "mapName": "Halls of Lightning",
       "creatureCount": 189,
       "gameObjectCount": 11,
       "relativeFilePath": "map_602.json"
     },
     {
       "mapId": 603,
-      "mapName": "Map_603",
+      "mapName": "Ulduar",
       "creatureCount": 1430,
       "gameObjectCount": 172,
       "relativeFilePath": "map_603.json"
     },
     {
       "mapId": 604,
-      "mapName": "Map_604",
+      "mapName": "Gundrak",
       "creatureCount": 230,
       "gameObjectCount": 54,
       "relativeFilePath": "map_604.json"
     },
     {
       "mapId": 607,
-      "mapName": "Map_607",
+      "mapName": "Strand of the Ancients",
       "creatureCount": 12,
       "gameObjectCount": 0,
       "relativeFilePath": "map_607.json"
     },
     {
       "mapId": 608,
-      "mapName": "Map_608",
+      "mapName": "Violet Hold",
       "creatureCount": 44,
       "gameObjectCount": 21,
       "relativeFilePath": "map_608.json"
     },
     {
       "mapId": 609,
-      "mapName": "Map_609",
+      "mapName": "Ebon Hold",
       "creatureCount": 1941,
       "gameObjectCount": 490,
       "relativeFilePath": "map_609.json"
     },
     {
       "mapId": 610,
-      "mapName": "Map_610",
+      "mapName": "Transport: Tirisfal to Vengeance Landing",
       "creatureCount": 7,
       "gameObjectCount": 0,
       "relativeFilePath": "map_610.json"
     },
     {
       "mapId": 612,
-      "mapName": "Map_612",
+      "mapName": "Transport: Menethil to Valgarde",
       "creatureCount": 6,
       "gameObjectCount": 0,
       "relativeFilePath": "map_612.json"
     },
     {
       "mapId": 613,
-      "mapName": "Map_613",
+      "mapName": "Transport: Orgrimmar to Warsong Hold",
       "creatureCount": 7,
       "gameObjectCount": 0,
       "relativeFilePath": "map_613.json"
     },
     {
       "mapId": 614,
-      "mapName": "Map_614",
+      "mapName": "Transport: Stormwind to Valiance Keep",
       "creatureCount": 6,
       "gameObjectCount": 0,
       "relativeFilePath": "map_614.json"
     },
     {
       "mapId": 615,
-      "mapName": "Map_615",
+      "mapName": "The Obsidian Sanctum",
       "creatureCount": 162,
       "gameObjectCount": 6,
       "relativeFilePath": "map_615.json"
     },
     {
       "mapId": 616,
-      "mapName": "Map_616",
+      "mapName": "The Eye of Eternity",
       "creatureCount": 14,
       "gameObjectCount": 4,
       "relativeFilePath": "map_616.json"
     },
     {
       "mapId": 619,
-      "mapName": "Map_619",
+      "mapName": "Ahn'kahet: The Old Kingdom",
       "creatureCount": 216,
       "gameObjectCount": 13,
       "relativeFilePath": "map_619.json"
     },
     {
       "mapId": 620,
-      "mapName": "Map_620",
+      "mapName": "Transport: Moa'ki to Unu'pe",
       "creatureCount": 2,
       "gameObjectCount": 0,
       "relativeFilePath": "map_620.json"
     },
     {
       "mapId": 621,
-      "mapName": "Map_621",
+      "mapName": "Transport: Moa'ki to Kamagua",
       "creatureCount": 2,
       "gameObjectCount": 0,
       "relativeFilePath": "map_621.json"
     },
     {
       "mapId": 622,
-      "mapName": "Map_622",
+      "mapName": "Transport: Orgrim's Hammer",
       "creatureCount": 74,
       "gameObjectCount": 0,
       "relativeFilePath": "map_622.json"
     },
     {
       "mapId": 623,
-      "mapName": "Map_623",
+      "mapName": "Transport: The Skybreaker",
       "creatureCount": 81,
       "gameObjectCount": 0,
       "relativeFilePath": "map_623.json"
     },
     {
       "mapId": 624,
-      "mapName": "Map_624",
+      "mapName": "Vault of Archavon",
       "creatureCount": 18,
       "gameObjectCount": 2,
       "relativeFilePath": "map_624.json"
     },
     {
       "mapId": 628,
-      "mapName": "Map_628",
+      "mapName": "Isle of Conquest",
       "creatureCount": 14,
       "gameObjectCount": 0,
       "relativeFilePath": "map_628.json"
     },
     {
       "mapId": 631,
-      "mapName": "Map_631",
+      "mapName": "Icecrown Citadel",
       "creatureCount": 672,
       "gameObjectCount": 109,
       "relativeFilePath": "map_631.json"
     },
     {
       "mapId": 632,
-      "mapName": "Map_632",
+      "mapName": "The Forge of Souls",
       "creatureCount": 122,
       "gameObjectCount": 5,
       "relativeFilePath": "map_632.json"
     },
     {
       "mapId": 641,
-      "mapName": "Map_641",
+      "mapName": "Transport: Alliance Airship BG",
       "creatureCount": 18,
       "gameObjectCount": 2,
       "relativeFilePath": "map_641.json"
     },
     {
       "mapId": 642,
-      "mapName": "Map_642",
+      "mapName": "Transport: HordeAirshipBG",
       "creatureCount": 18,
       "gameObjectCount": 2,
       "relativeFilePath": "map_642.json"
     },
     {
       "mapId": 647,
-      "mapName": "Map_647",
+      "mapName": "Transport: Orgrimmar to Thunder Bluff",
       "creatureCount": 12,
       "gameObjectCount": 0,
       "relativeFilePath": "map_647.json"
     },
     {
       "mapId": 649,
-      "mapName": "Map_649",
+      "mapName": "Trial of the Crusader",
       "creatureCount": 155,
       "gameObjectCount": 24,
       "relativeFilePath": "map_649.json"
     },
     {
       "mapId": 650,
-      "mapName": "Map_650",
+      "mapName": "Trial of the Champion",
       "creatureCount": 135,
       "gameObjectCount": 21,
       "relativeFilePath": "map_650.json"
     },
     {
       "mapId": 658,
-      "mapName": "Map_658",
+      "mapName": "Pit of Saron",
       "creatureCount": 380,
       "gameObjectCount": 72,
       "relativeFilePath": "map_658.json"
     },
     {
       "mapId": 668,
-      "mapName": "Map_668",
+      "mapName": "Halls of Reflection",
       "creatureCount": 38,
       "gameObjectCount": 15,
       "relativeFilePath": "map_668.json"
     },
     {
       "mapId": 672,
-      "mapName": "Map_672",
+      "mapName": "Transport: The Skybreaker (Icecrown Citadel Raid)",
       "creatureCount": 30,
       "gameObjectCount": 4,
       "relativeFilePath": "map_672.json"
     },
     {
       "mapId": 673,
-      "mapName": "Map_673",
+      "mapName": "Transport: Orgrim's Hammer (Icecrown Citadel Raid)",
       "creatureCount": 29,
       "gameObjectCount": 4,
       "relativeFilePath": "map_673.json"
     },
     {
       "mapId": 712,
-      "mapName": "Map_712",
+      "mapName": "Transport: The Skybreaker (IC Dungeon)",
       "creatureCount": 28,
       "gameObjectCount": 3,
       "relativeFilePath": "map_712.json"
     },
     {
       "mapId": 713,
-      "mapName": "Map_713",
+      "mapName": "Transport: Orgrim's Hammer (IC Dungeon)",
       "creatureCount": 55,
       "gameObjectCount": 4,
       "relativeFilePath": "map_713.json"
     },
     {
       "mapId": 724,
-      "mapName": "Map_724",
+      "mapName": "The Ruby Sanctum",
       "creatureCount": 50,
       "gameObjectCount": 28,
       "relativeFilePath": "map_724.json"

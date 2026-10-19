@@ -352,13 +352,17 @@ public sealed class TrinityCoreSqlReader
 
             foreach (var tuple in ParseTuples(trimmed))
             {
-                // TrinityCore: entry(0), type(1), displayId(2), name(3), IconName(4), castBarCaption(5), unk1(6), data0..23, size(31)...
+                // TrinityCore: entry(0), type(1), displayId(2), name(3), IconName(4), castBarCaption(5), unk1(6), size(7), data0..23...
+                // Alpha-Core:  entry(0), type(1), displayId(2), name(3), faction(4), flags(5), size(6), data0..9...
                 if (tuple.Count < 4) continue;
                 int entry = ParseInt(tuple[0]);
                 int type = ParseInt(tuple[1]);
                 int displayId = ParseInt(tuple[2]);
                 string name = tuple[3];
-                float size = tuple.Count > 31 ? ParseFloat(tuple[31]) : 1.0f;
+                bool isTrinityCore = tuple.Count >= 25 || (tuple.Count > 4 && !int.TryParse(CleanToken(tuple[4]), NumberStyles.Integer, CultureInfo.InvariantCulture, out _));
+                float size = isTrinityCore
+                    ? (tuple.Count > 7 ? ParseFloat(tuple[7]) : 1.0f)
+                    : (tuple.Count > 6 ? ParseFloat(tuple[6]) : 1.0f);
                 if (size <= 0) size = 1.0f;
 
                 templates[entry] = new RawGameObjectTemplate(entry, displayId, name, size, type);
@@ -608,14 +612,14 @@ public sealed class TrinityCoreSqlReader
                             if (isAlpha)
                             {
                                 m1 = ParseInt(tuple[1]);
-                                m2 = ParseInt(tuple[2]);
-                                m3 = ParseInt(tuple[3]);
-                                m4 = ParseInt(tuple[4]);
+                                m2 = tuple.Count > 2 ? ParseInt(tuple[2]) : 0;
+                                m3 = tuple.Count > 3 ? ParseInt(tuple[3]) : 0;
+                                m4 = tuple.Count > 4 ? ParseInt(tuple[4]) : 0;
                                 name = CleanToken(tuple[6]);
                                 subname = tuple.Count > 7 ? CleanToken(tuple[7]) : null;
-                                faction = tuple.Count > 8 ? ParseInt(tuple[8]) : 0;
-                                npcFlags = tuple.Count > 9 ? ParseInt(tuple[9]) : 0;
-                                scale = tuple.Count > 10 ? ParseFloat(tuple[10]) : 1.0f;
+                                faction = tuple.Count > 12 ? ParseInt(tuple[12]) : 0;
+                                npcFlags = tuple.Count > 13 ? ParseInt(tuple[13]) : 0;
+                                scale = tuple.Count > 16 ? ParseFloat(tuple[16]) : 1.0f;
                             }
                             else
                             {
@@ -625,9 +629,9 @@ public sealed class TrinityCoreSqlReader
                                 m4 = tuple.Count > 9 ? ParseInt(tuple[9]) : 0;
                                 name = tuple.Count > 10 ? CleanToken(tuple[10]) : $"Creature #{entry}";
                                 subname = tuple.Count > 11 ? CleanToken(tuple[11]) : null;
-                                scale = tuple.Count > 15 ? ParseFloat(tuple[15]) : 1.0f;
-                                faction = tuple.Count > 16 ? ParseInt(tuple[16]) : 0;
-                                npcFlags = tuple.Count > 17 ? ParseInt(tuple[17]) : 0;
+                                faction = tuple.Count > 17 ? ParseInt(tuple[17]) : 0;
+                                npcFlags = tuple.Count > 18 ? ParseInt(tuple[18]) : 0;
+                                scale = tuple.Count > 21 ? ParseFloat(tuple[21]) : 1.0f;
                             }
 
                             if (scale <= 0f) scale = 1.0f;
@@ -689,13 +693,16 @@ public sealed class TrinityCoreSqlReader
                         break;
 
                     case 6: // gameobject_template
-                        if (tuple.Count >= 5)
+                        if (tuple.Count >= 4)
                         {
                             int entry = ParseInt(tuple[0]);
                             int type = ParseInt(tuple[1]);
                             int displayId = ParseInt(tuple[2]);
                             string name = CleanToken(tuple[3]);
-                            float size = ParseFloat(tuple[4]);
+                            bool isTrinityCore = tuple.Count >= 25 || (tuple.Count > 4 && !int.TryParse(CleanToken(tuple[4]), NumberStyles.Integer, CultureInfo.InvariantCulture, out _));
+                            float size = isTrinityCore
+                                ? (tuple.Count > 7 ? ParseFloat(tuple[7]) : 1.0f)
+                                : (tuple.Count > 6 ? ParseFloat(tuple[6]) : 1.0f);
                             if (size <= 0f) size = 1.0f;
                             goTemplates[entry] = new RawGameObjectTemplate(entry, displayId, name, size, type);
                         }

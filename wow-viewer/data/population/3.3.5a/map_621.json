@@ -1,8 +1,8 @@
 {
   "mapId": 621,
-  "mapName": "Map_621",
+  "mapName": "Transport: Moa'ki to Kamagua",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-19T03:50:33.5845083Z",
+  "exportedUtc": "2026-10-19T08:25:37.3518085Z",
   "spawns": [
     {
       "spawnId": 62741,
@@ -12,9 +12,9 @@
       "name": "Qatiichii",
       "subname": "Green Island",
       "modelPath": null,
-      "scale": 65,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 65,
+      "effectiveScale": 1,
       "position": {
         "x": 14.0833,
         "y": 1.95972,
@@ -22,8 +22,8 @@
       },
       "orientation": 3.735,
       "rotation": null,
-      "faction": 0,
-      "flags": 1950,
+      "faction": 1950,
+      "flags": 4736,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -36,9 +36,9 @@
       "name": "Oomailiq",
       "subname": "Green Island",
       "modelPath": "Character\\Tuskarr\\Male\\TuskarrMale.mdx",
-      "scale": 65,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 65,
+      "effectiveScale": 1,
       "position": {
         "x": -19.2136,
         "y": -0.001574,
@@ -46,8 +46,8 @@
       },
       "orientation": 3.19088,
       "rotation": null,
-      "faction": 0,
-      "flags": 1950,
+      "faction": 1950,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null

@@ -1,8 +1,8 @@
 {
   "mapId": 369,
-  "mapName": "Map_369",
+  "mapName": "Deeprun Tram",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-19T03:50:32.6215107Z",
+  "exportedUtc": "2026-10-19T08:25:36.4107475Z",
   "spawns": [
     {
       "spawnId": 34119,
@@ -12,9 +12,9 @@
       "name": "Basking Shark",
       "subname": "NULL",
       "modelPath": "Creature\\Shark\\Shark.mdx",
-      "scale": 42,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 42,
+      "effectiveScale": 1,
       "position": {
         "x": -109.512,
         "y": 1157.29,
@@ -22,8 +22,8 @@
       },
       "orientation": 2.16872,
       "rotation": null,
-      "faction": 0,
-      "flags": 16,
+      "faction": 16,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -36,9 +36,9 @@
       "name": "Basking Shark",
       "subname": "NULL",
       "modelPath": "Creature\\Shark\\Shark.mdx",
-      "scale": 42,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 42,
+      "effectiveScale": 1,
       "position": {
         "x": 73.0577,
         "y": 1354.6,
@@ -46,8 +46,8 @@
       },
       "orientation": 4.69576,
       "rotation": null,
-      "faction": 0,
-      "flags": 16,
+      "faction": 16,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -60,9 +60,9 @@
       "name": "Basking Shark",
       "subname": "NULL",
       "modelPath": "Creature\\Shark\\Shark.mdx",
-      "scale": 42,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 42,
+      "effectiveScale": 1,
       "position": {
         "x": 92.8132,
         "y": 1057.44,
@@ -70,8 +70,8 @@
       },
       "orientation": 1.42365,
       "rotation": null,
-      "faction": 0,
-      "flags": 16,
+      "faction": 16,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -84,9 +84,9 @@
       "name": "Basking Shark",
       "subname": "NULL",
       "modelPath": "Creature\\Shark\\Shark.mdx",
-      "scale": 42,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 42,
+      "effectiveScale": 1,
       "position": {
         "x": -148.53,
         "y": 1268.89,
@@ -94,8 +94,8 @@
       },
       "orientation": 1.87383,
       "rotation": null,
-      "faction": 0,
-      "flags": 16,
+      "faction": 16,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -108,9 +108,9 @@
       "name": "Nessy",
       "subname": "NULL",
       "modelPath": "Creature\\threshadon\\Threshadon.mdx",
-      "scale": 62,
+      "scale": 1,
       "displayScale": 5,
-      "effectiveScale": 310,
+      "effectiveScale": 5,
       "position": {
         "x": -93.361,
         "y": 1246.15,
@@ -118,8 +118,8 @@
       },
       "orientation": 0.685659,
       "rotation": null,
-      "faction": 0,
-      "flags": 7,
+      "faction": 7,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -132,9 +132,9 @@
       "name": "Naga Siren",
       "subname": "NULL",
       "modelPath": "Creature\\NagaFemale\\Siren.mdx",
-      "scale": 57,
+      "scale": 1,
       "displayScale": 1.5,
-      "effectiveScale": 85.5,
+      "effectiveScale": 1.5,
       "position": {
         "x": 51.5322,
         "y": 1190.49,
@@ -142,8 +142,8 @@
       },
       "orientation": 5.06493,
       "rotation": null,
-      "faction": 0,
-      "flags": 7,
+      "faction": 7,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -156,9 +156,9 @@
       "name": "Monty",
       "subname": "Rat Extermination Specialist",
       "modelPath": "Character\\Gnome\\Male\\GnomeMale.mdx",
-      "scale": 12,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 12,
+      "effectiveScale": 1,
       "position": {
         "x": -19.6312,
         "y": 40.0752,
@@ -166,8 +166,8 @@
       },
       "orientation": 4.79965,
       "rotation": null,
-      "faction": 0,
-      "flags": 55,
+      "faction": 55,
+      "flags": 3,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -190,8 +190,8 @@
       },
       "orientation": 0.139822,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -214,8 +214,8 @@
       },
       "orientation": 1.58004,
       "rotation": null,
-      "faction": 0,
-      "flags": 35,
+      "faction": 35,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -228,9 +228,9 @@
       "name": "Nipsy",
       "subname": "NULL",
       "modelPath": null,
-      "scale": 12,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 12,
+      "effectiveScale": 1,
       "position": {
         "x": -20.9837,
         "y": 2459.93,
@@ -238,8 +238,8 @@
       },
       "orientation": 1.57042,
       "rotation": null,
-      "faction": 0,
-      "flags": 55,
+      "faction": 55,
+      "flags": 131,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -252,9 +252,9 @@
       "name": "Haggle",
       "subname": "NULL",
       "modelPath": "Character\\Gnome\\Male\\GnomeMale.mdx",
-      "scale": 20,
+      "scale": 1,
       "displayScale": 1,
-      "effectiveScale": 20,
+      "effectiveScale": 1,
       "position": {
         "x": -18.4973,
         "y": -17.03,
@@ -262,8 +262,8 @@
       },
       "orientation": 1.46808,
       "rotation": null,
-      "faction": 0,
-      "flags": 55,
+      "faction": 55,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -276,9 +276,9 @@
       "name": "Deeprun Diver",
       "subname": "NULL",
       "modelPath": "Character\\Gnome\\Male\\GnomeMale.mdx",
-      "scale": 20,
+      "scale": 1,
       "displayScale": 1.5,
-      "effectiveScale": 30,
+      "effectiveScale": 1.5,
       "position": {
         "x": 95.8035,
         "y": 1375.94,
@@ -286,8 +286,8 @@
       },
       "orientation": 1.47555,
       "rotation": null,
-      "faction": 0,
-      "flags": 55,
+      "faction": 55,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -300,9 +300,9 @@
       "name": "Deeprun Diver",
       "subname": "NULL",
       "modelPath": "Character\\Gnome\\Male\\GnomeMale.mdx",
-      "scale": 20,
+      "scale": 1,
       "displayScale": 1.5,
-      "effectiveScale": 30,
+      "effectiveScale": 1.5,
       "position": {
         "x": 49.3074,
         "y": 1205.64,
@@ -310,8 +310,8 @@
       },
       "orientation": 3.01425,
       "rotation": null,
-      "faction": 0,
-      "flags": 55,
+      "faction": 55,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -324,9 +324,9 @@
       "name": "Deeprun Diver",
       "subname": "NULL",
       "modelPath": "Character\\Gnome\\Male\\GnomeMale.mdx",
-      "scale": 20,
+      "scale": 1,
       "displayScale": 1.5,
-      "effectiveScale": 30,
+      "effectiveScale": 1.5,
       "position": {
         "x": 53.5573,
         "y": 1303.29,
@@ -334,8 +334,8 @@
       },
       "orientation": 1.21121,
       "rotation": null,
-      "faction": 0,
-      "flags": 55,
+      "faction": 55,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -358,8 +358,8 @@
       },
       "orientation": 1.45299,
       "rotation": null,
-      "faction": 0,
-      "flags": 35,
+      "faction": 35,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -382,8 +382,8 @@
       },
       "orientation": 1.72643,
       "rotation": null,
-      "faction": 0,
-      "flags": 35,
+      "faction": 35,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -406,8 +406,8 @@
       },
       "orientation": 1.48675,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -430,8 +430,8 @@
       },
       "orientation": 4.79662,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -454,8 +454,8 @@
       },
       "orientation": 1.87101,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -478,8 +478,8 @@
       },
       "orientation": 2.55038,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -502,8 +502,8 @@
       },
       "orientation": 1.57099,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -526,8 +526,8 @@
       },
       "orientation": 2.53387,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -550,8 +550,8 @@
       },
       "orientation": 3.14963,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -574,8 +574,8 @@
       },
       "orientation": 1.85529,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -598,8 +598,8 @@
       },
       "orientation": 6.01711,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -622,8 +622,8 @@
       },
       "orientation": 1.77597,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -646,8 +646,8 @@
       },
       "orientation": 4.30648,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -670,8 +670,8 @@
       },
       "orientation": 5.5639,
       "rotation": null,
-      "faction": 0,
-      "flags": 31,
+      "faction": 31,
+      "flags": 0,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -804,9 +804,9 @@
       "name": "Doodad_GnomeSign_Engineer01",
       "subname": null,
       "modelPath": "WORLD\\GENERIC\\DWARF\\PASSIVE DOODADS\\SIGNS\\GNOMESIGN_ENGINEER.MDX",
-      "scale": 1,
+      "scale": 0.88,
       "displayScale": 1,
-      "effectiveScale": 1,
+      "effectiveScale": 0.88,
       "position": {
         "x": 146.94,
         "y": -6,
@@ -908,7 +908,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -938,7 +938,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -968,7 +968,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1028,7 +1028,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1058,7 +1058,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1478,7 +1478,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1598,7 +1598,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1628,7 +1628,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1688,7 +1688,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1718,7 +1718,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1838,7 +1838,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2018,7 +2018,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2078,7 +2078,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2138,7 +2138,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2198,7 +2198,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2438,7 +2438,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2468,7 +2468,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2528,7 +2528,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2558,7 +2558,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2648,7 +2648,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -2858,7 +2858,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -3128,7 +3128,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -3398,7 +3398,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -3518,7 +3518,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -3711,7 +3711,7 @@
       "entryId": 178304,
       "mapId": 369,
       "spawnType": 1,
-      "name": "Box o\u0027 Squirrels",
+      "name": "Box o' Squirrels",
       "subname": null,
       "modelPath": "World\\Goober\\G_CrateAnimal.mdx",
       "scale": 1,
@@ -3741,7 +3741,7 @@
       "entryId": 178304,
       "mapId": 369,
       "spawnType": 1,
-      "name": "Box o\u0027 Squirrels",
+      "name": "Box o' Squirrels",
       "subname": null,
       "modelPath": "World\\Goober\\G_CrateAnimal.mdx",
       "scale": 1,
@@ -3771,7 +3771,7 @@
       "entryId": 178304,
       "mapId": 369,
       "spawnType": 1,
-      "name": "Box o\u0027 Squirrels",
+      "name": "Box o' Squirrels",
       "subname": null,
       "modelPath": "World\\Goober\\G_CrateAnimal.mdx",
       "scale": 1,
@@ -3804,9 +3804,9 @@
       "name": "Giant Clam",
       "subname": null,
       "modelPath": "World\\Generic\\ActiveDoodads\\Clam\\GiantClamActive.mdx",
-      "scale": 1,
+      "scale": 2,
       "displayScale": 1,
-      "effectiveScale": 1,
+      "effectiveScale": 2,
       "position": {
         "x": -79,
         "y": 1211.73,
@@ -3834,9 +3834,9 @@
       "name": "Giant Clam",
       "subname": null,
       "modelPath": "World\\Generic\\ActiveDoodads\\Clam\\GiantClamActive.mdx",
-      "scale": 1,
+      "scale": 2,
       "displayScale": 1,
-      "effectiveScale": 1,
+      "effectiveScale": 2,
       "position": {
         "x": 37.434,
         "y": 1316.43,

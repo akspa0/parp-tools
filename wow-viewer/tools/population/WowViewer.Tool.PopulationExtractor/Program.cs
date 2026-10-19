@@ -237,7 +237,7 @@ internal static class Program
             var mapData = new PopulationMapData
             {
                 MapId = mapId,
-                MapName = GetMapName(mapId),
+                MapName = dbcResolver.GetMapName(mapId),
                 ClientVersion = version,
                 ExportedUtc = DateTime.UtcNow,
                 Spawns = mapRecords
@@ -257,7 +257,7 @@ internal static class Program
             grandTotalCreatures += creatureCount;
             grandTotalGameObjects += goCount;
 
-            Console.WriteLine($"  Wrote {mapFilePath} ({creatureCount} creatures, {goCount} gameobjects).");
+            Console.WriteLine($"  Wrote {mapFilePath} ({creatureCount} creatures, {goCount} gameobjects, name: '{mapData.MapName}').");
         }
 
         // Step 4: Write Manifest
@@ -277,16 +277,6 @@ internal static class Program
         Console.WriteLine($"Total across {mapSummaries.Count} maps: {grandTotalCreatures} creatures, {grandTotalGameObjects} gameobjects.");
         return 0;
     }
-
-    private static string GetMapName(int mapId) => mapId switch
-    {
-        0 => "Eastern Kingdoms",
-        1 => "Kalimdor",
-        451 => "development",
-        530 => "Outland",
-        571 => "Northrend",
-        _ => $"Map_{mapId}"
-    };
 
     private static void RegisterBuiltInDevModelFallbacks(DbcModelResolver resolver)
     {

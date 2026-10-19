@@ -321,15 +321,14 @@ public class ReplaceableTextureResolver
 
         string withoutExt = normalizedModelName;
         if (normalizedModelName.EndsWith(".mdx") || normalizedModelName.EndsWith(".mdl"))
-        {
             withoutExt = normalizedModelName[..^4];
-            yield return withoutExt;
-        }
-        else
-        {
-            yield return normalizedModelName + ".mdx";
-            yield return normalizedModelName + ".mdl";
-        }
+        else if (normalizedModelName.EndsWith(".m2"))
+            withoutExt = normalizedModelName[..^3];
+
+        yield return withoutExt;
+        yield return withoutExt + ".m2";
+        yield return withoutExt + ".mdx";
+        yield return withoutExt + ".mdl";
 
         bool hasDirectory = normalizedModelName.Contains('\\') || normalizedModelName.Contains('/');
         if (hasDirectory)
@@ -340,6 +339,7 @@ public class ReplaceableTextureResolver
             yield break;
 
         yield return $"creature\\{modelName}\\{modelName}";
+        yield return $"creature\\{modelName}\\{modelName}.m2";
         yield return $"creature\\{modelName}\\{modelName}.mdx";
         yield return $"creature\\{modelName}\\{modelName}.mdl";
     }
@@ -1252,10 +1252,11 @@ public class ReplaceableTextureResolver
             }
         }
 
-        // Don't return unvalidated DBC candidates — let caller fall through to directory scan
+        // Fall back to first non-empty DBC candidate so texture loader can attempt reading it
         if (firstCandidate != null)
         {
-            ViewerLog.Debug(ViewerLog.Category.Dbc, $"DBC: no validated texture for ModelID={modelId} ({Path.GetFileName(modelPath)}), replId={replaceableId}, {variants.Count} variants tried");
+            ViewerLog.Debug(ViewerLog.Category.Dbc, $"DBC: using fallback unverified candidate for ModelID={modelId} ({Path.GetFileName(modelPath)}), replId={replaceableId}: {firstCandidate}");
+            return firstCandidate;
         }
         return null;
     }
@@ -1480,19 +1481,19 @@ public class ReplaceableTextureResolver
         if (_modelFileNameToId.TryGetValue(fileName, out modelId))
             return modelId;
 
-        // Try without extension (DBC ModelName often omits .mdx)
+        // Try without extension and with standard extensions (.m2, .mdx, .mdl)
         string withoutExt = normalized;
         if (withoutExt.EndsWith(".mdx") || withoutExt.EndsWith(".mdl"))
             withoutExt = withoutExt[..^4];
+        else if (withoutExt.EndsWith(".m2"))
+            withoutExt = withoutExt[..^3];
+
         if (_modelPathToId.TryGetValue(withoutExt, out modelId))
             return modelId;
-
-        // Try with .mdx appended (DBC ModelName sometimes includes extension)
-        if (!normalized.EndsWith(".mdx"))
-        {
-            if (_modelPathToId.TryGetValue(normalized + ".mdx", out modelId))
-                return modelId;
-        }
+        if (_modelPathToId.TryGetValue(withoutExt + ".m2", out modelId))
+            return modelId;
+        if (_modelPathToId.TryGetValue(withoutExt + ".mdx", out modelId))
+            return modelId;
 
         // Fallback: match by folder name (e.g. DragonSpawn for DragonSpawnArmored)
         string modelDir = Path.GetDirectoryName(normalized) ?? string.Empty;

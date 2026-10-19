@@ -27,6 +27,7 @@ using WoWViewer.Terrain.Vlm;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.M2Chunked;
 using WowViewer.Core.IO.M2Era1121;
+using WowViewer.Core.IO.Population;
 using WowViewer.Core.M2;
 using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Runtime.PromoVideo;
@@ -369,8 +370,11 @@ var seq = animator.Sequences[animator.CurrentSequence];
         bool incCreatures = _sqlIncludeCreatures;
         bool incGos = _sqlIncludeGameObjects;
 
+        string mapLabel = PopulationMapNames.TryGetMapName(targetMapId, out string? mName)
+            ? $"{mName} ({targetMapId})"
+            : $"map {targetMapId}";
         _isLoadingSpawns = true;
-        _sqlSpawnStatus = $"Loading population partition for map {targetMapId} in background...";
+        _sqlSpawnStatus = $"Loading population partition for {mapLabel} in background...";
 
         Task.Run(async () =>
         {
@@ -466,9 +470,12 @@ var seq = animator.Sequences[animator.CurrentSequence];
 
         if (updateStatus)
         {
+            string mapLabel = PopulationMapNames.TryGetMapName(_currentMapId, out string? mName)
+                ? $"{mName} ({_currentMapId})"
+                : $"map {_currentMapId}";
             _sqlSpawnStatus = _sqlUseAoiFilter
-                ? $"Loaded {finalSpawns.Count}/{mapSpawns.Count} spawns for map {_currentMapId} (AOI radius {_sqlAoiTileRadius} tiles{(_sqlStreamWithCamera ? ", streaming" : "")})."
-                : $"Loaded {finalSpawns.Count} spawns for map {_currentMapId}.";
+                ? $"Loaded {finalSpawns.Count}/{mapSpawns.Count} spawns for {mapLabel} (AOI radius {_sqlAoiTileRadius} tiles{(_sqlStreamWithCamera ? ", streaming" : "")})."
+                : $"Loaded {finalSpawns.Count} spawns for {mapLabel}.";
         }
     }
 

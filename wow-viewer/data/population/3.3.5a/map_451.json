@@ -2,7 +2,7 @@
   "mapId": 451,
   "mapName": "development",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-19T03:50:32.637647Z",
+  "exportedUtc": "2026-10-19T08:25:36.4233592Z",
   "spawns": [
     {
       "spawnId": 53940,
@@ -12,9 +12,9 @@
       "name": "Field Repair Bot 74A",
       "subname": "NULL",
       "modelPath": "Creature\\GNOMESPIDERTANK\\GnomeBot.mdx",
-      "scale": 50,
+      "scale": 1,
       "displayScale": 0.5,
-      "effectiveScale": 25,
+      "effectiveScale": 0.5,
       "position": {
         "x": 16397.2,
         "y": -16136,
@@ -22,8 +22,8 @@
       },
       "orientation": 4.31874,
       "rotation": null,
-      "faction": 0,
-      "flags": 190,
+      "faction": 190,
+      "flags": 4226,
       "gameObjectType": 0,
       "isTransposed": false,
       "sourceNote": null
@@ -50,7 +50,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -63,12 +63,12 @@
       "entryId": 3221,
       "mapId": 451,
       "spawnType": 1,
-      "name": "Scott\u0027s Placed Cannon",
+      "name": "Scott's Placed Cannon",
       "subname": null,
       "modelPath": "World\\Goober\\G_Cannon01.mdx",
-      "scale": 1,
+      "scale": 1.04,
       "displayScale": 1,
-      "effectiveScale": 1,
+      "effectiveScale": 1.04,
       "position": {
         "x": 16793.2,
         "y": -15833.5,
@@ -110,7 +110,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -140,7 +140,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -170,7 +170,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -200,7 +200,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -230,7 +230,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -260,7 +260,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -290,7 +290,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -320,7 +320,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -380,7 +380,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -410,7 +410,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -440,7 +440,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -470,7 +470,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -500,7 +500,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -530,7 +530,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -830,7 +830,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -860,7 +860,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -890,7 +890,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -906,9 +906,9 @@
       "name": "Moonwell",
       "subname": null,
       "modelPath": "World\\wmo\\Kalimdor\\Buildings\\NightElfMoonWell\\DSNightElfMoonWellOrnate.wmo",
-      "scale": 1,
+      "scale": 0.3,
       "displayScale": 1,
-      "effectiveScale": 1,
+      "effectiveScale": 0.3,
       "position": {
         "x": 16359.6,
         "y": -16153.9,
@@ -980,7 +980,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1010,7 +1010,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1040,7 +1040,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1053,7 +1053,7 @@
       "entryId": 186715,
       "mapId": 451,
       "spawnType": 1,
-      "name": "Craig\u0027s Chair",
+      "name": "Craig's Chair",
       "subname": null,
       "modelPath": "World\\Generic\\Human\\Passive Doodads\\Benches\\DuskwoodBench.mdx",
       "scale": 1,
@@ -1083,7 +1083,7 @@
       "entryId": 186716,
       "mapId": 451,
       "spawnType": 1,
-      "name": "Craig\u0027s Solo Bench",
+      "name": "Craig's Solo Bench",
       "subname": null,
       "modelPath": "World\\Generic\\Human\\Passive Doodads\\Benches\\DuskwoodBench.mdx",
       "scale": 1,
@@ -1130,7 +1130,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1203,7 +1203,7 @@
       "entryId": 187347,
       "mapId": 451,
       "spawnType": 1,
-      "name": "Craig\u0027s Chest",
+      "name": "Craig's Chest",
       "subname": null,
       "modelPath": "World\\Generic\\ActiveDoodads\\Chest01\\Chest01.mdx",
       "scale": 1,
@@ -1220,7 +1220,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1280,7 +1280,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1310,7 +1310,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1340,7 +1340,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1446,9 +1446,9 @@
       "name": "Clayton_Test_Active_Doodad",
       "subname": null,
       "modelPath": "World\\Generic\\PassiveDoodads\\Fruits\\Fruit_Apple.mdx",
-      "scale": 1,
+      "scale": 15.46,
       "displayScale": 1,
-      "effectiveScale": 1,
+      "effectiveScale": 15.46,
       "position": {
         "x": 4520.27,
         "y": -190.178,
@@ -1460,7 +1460,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1476,9 +1476,9 @@
       "name": "clay_test_yep_451_oh_yeah",
       "subname": null,
       "modelPath": "world\\expansion01\\doodads\\silvermoon\\flowers\\silvermoonflower01.mdx",
-      "scale": 1,
+      "scale": 13.34,
       "displayScale": 1,
-      "effectiveScale": 1,
+      "effectiveScale": 13.34,
       "position": {
         "x": 4503.77,
         "y": -196.116,
@@ -1490,7 +1490,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1503,7 +1503,7 @@
       "entryId": 194984,
       "mapId": 451,
       "spawnType": 1,
-      "name": "TEST - Craig\u0027s test active doodad",
+      "name": "TEST - Craig's test active doodad",
       "subname": null,
       "modelPath": "World\\Scale\\100x100.mdx",
       "scale": 1,
@@ -1512,7 +1512,7 @@
       "position": {
         "x": -15345.1,
         "y": -10695.5,
-        "z": -4E-06
+        "z": -4e-06
       },
       "orientation": 3.14159,
       "rotation": {
@@ -1520,7 +1520,7 @@
         "x": 0,
         "y": 0,
         "z": 1,
-        "w": 1.26759E-06
+        "w": 1.26759e-06
       },
       "faction": 0,
       "flags": 0,
@@ -1629,7 +1629,7 @@
       "entryId": 631,
       "mapId": 451,
       "spawnType": 0,
-      "name": "pnagle\u0027s test dude",
+      "name": "pnagle's test dude",
       "subname": "NULL",
       "modelPath": "Creature\\HumanMaleKid\\HumanMaleKid.mdx",
       "scale": 1,
@@ -1653,7 +1653,7 @@
       "entryId": 631,
       "mapId": 451,
       "spawnType": 0,
-      "name": "pnagle\u0027s test dude",
+      "name": "pnagle's test dude",
       "subname": "NULL",
       "modelPath": "Creature\\HumanMaleKid\\HumanMaleKid.mdx",
       "scale": 1,
@@ -1677,7 +1677,7 @@
       "entryId": 631,
       "mapId": 451,
       "spawnType": 0,
-      "name": "pnagle\u0027s test dude",
+      "name": "pnagle's test dude",
       "subname": "NULL",
       "modelPath": "Creature\\HumanMaleKid\\HumanMaleKid.mdx",
       "scale": 1,
