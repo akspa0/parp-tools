@@ -2,7 +2,7 @@
   "mapId": 621,
   "mapName": "Map_621",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-18T23:35:40.4557259Z",
+  "exportedUtc": "2026-10-19T03:50:33.5845083Z",
   "spawns": [
     {
       "spawnId": 62741,
@@ -35,7 +35,7 @@
       "spawnType": 0,
       "name": "Oomailiq",
       "subname": "Green Island",
-      "modelPath": null,
+      "modelPath": "Character\\Tuskarr\\Male\\TuskarrMale.mdx",
       "scale": 65,
       "displayScale": 1,
       "effectiveScale": 65,

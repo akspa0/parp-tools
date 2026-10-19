@@ -2,7 +2,7 @@
   "mapId": 588,
   "mapName": "Map_588",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-18T23:35:40.3874465Z",
+  "exportedUtc": "2026-10-19T03:50:33.519459Z",
   "spawns": [
     {
       "spawnId": 142738,
@@ -155,7 +155,7 @@
       "spawnType": 0,
       "name": "Navigator Landerson",
       "subname": "The Bravery",
-      "modelPath": null,
+      "modelPath": "Character\\Human\\Male\\HumanMale.mdx",
       "scale": 28,
       "displayScale": 1,
       "effectiveScale": 28,

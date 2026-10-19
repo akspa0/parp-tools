@@ -1,4 +1,5 @@
 using System.Numerics;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Population;
 using WowViewer.Core.Population;
 using Xunit;
@@ -143,6 +144,38 @@ public class TrinityCorePopulationTests
             Assert.Contains(manifest.Maps, m => m.MapId == 1);   // Kalimdor
             Assert.Contains(manifest.Maps, m => m.MapId == 30);  // UnderIsland
             Assert.Contains(manifest.Maps, m => m.MapId == 451); // Development
+        }
+    }
+
+    [Fact]
+    public void RealClientDbcLoading_Loads053And335Correctly()
+    {
+        string dir053 = @"H:\CLIENTS\Vanilla\0.x\0_5_3_3368\World of Warcraft\Data";
+        if (Directory.Exists(dir053))
+        {
+            using var catalog053 = new MpqArchiveCatalog();
+            catalog053.LoadArchives([dir053]);
+            var resolver053 = DbcModelResolver.LoadFromArchive(catalog053);
+            Assert.True(resolver053.CreatureDisplayCount > 1000, $"Expected >1000 creatures in 0.5.3, got {resolver053.CreatureDisplayCount}");
+            Assert.True(resolver053.GameObjectDisplayCount > 300, $"Expected >300 gameobjects in 0.5.3, got {resolver053.GameObjectDisplayCount}");
+
+            // Verify DisplayID 251 (Pat Nagle's test dude)
+            Assert.True(resolver053.TryResolveCreature(251, out string? path251, out float scale251));
+            Assert.Equal(@"Creature\HumanMaleKid\HumanMaleKid.mdx", path251);
+
+            // Verify DisplayID 907 (Twain)
+            Assert.True(resolver053.TryResolveCreature(907, out string? path907, out float scale907));
+            Assert.Equal(@"Character\Human\Male\HumanMale.mdx", path907);
+        }
+
+        string dir335 = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
+        if (Directory.Exists(dir335))
+        {
+            using var catalog335 = new MpqArchiveCatalog();
+            catalog335.LoadArchives([dir335]);
+            var resolver335 = DbcModelResolver.LoadFromArchive(catalog335);
+            Assert.True(resolver335.CreatureDisplayCount > 10000, $"Expected >10000 creatures in 3.3.5, got {resolver335.CreatureDisplayCount}");
+            Assert.True(resolver335.GameObjectDisplayCount > 3000, $"Expected >3000 gameobjects in 3.3.5, got {resolver335.GameObjectDisplayCount}");
         }
     }
 }

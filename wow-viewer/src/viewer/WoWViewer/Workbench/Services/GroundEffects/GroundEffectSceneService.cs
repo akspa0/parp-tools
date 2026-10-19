@@ -541,5 +541,20 @@ internal sealed partial class GroundEffectSceneService : IDisposable
                 renderer.RenderInstance(transforms[i].Matrix, RenderPass.Opaque, transforms[i].Fade);
             }
         }
+
+        var gl = _host.Gl;
+        if (gl != null)
+        {
+            gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+            gl.Disable(EnableCap.Blend);
+            gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            gl.DepthMask(true);
+            gl.Enable(EnableCap.DepthTest);
+            gl.DepthFunc(DepthFunction.Lequal);
+            gl.Enable(EnableCap.CullFace);
+            gl.BindVertexArray(0);
+            gl.ActiveTexture(TextureUnit.Texture0);
+            gl.BindTexture(TextureTarget.Texture2D, 0);
+        }
     }
 }

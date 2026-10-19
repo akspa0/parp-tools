@@ -933,6 +933,17 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         // not precede the opaque instances it may sit in front of.
         DrawGpuInstanceSet(_gpuInstanceData, fadedPass: false);
         DrawGpuInstanceSet(_gpuInstanceFadedData, fadedPass: true);
+
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.Enable(EnableCap.CullFace);
+        _gl.BindVertexArray(0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
     }
 
     private unsafe void DrawGpuInstanceSet(List<GpuInstanceData> instances, bool fadedPass)
@@ -994,6 +1005,17 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         }
 
         RenderGeosets(pass, fadeAlpha);
+
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.Enable(EnableCap.CullFace);
+        _gl.BindVertexArray(0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
 
         // NOTE: world-scene batch instancing currently does not propagate per-instance model
         // transforms into particle emitter simulation/rendering, which can produce camera-locked
@@ -1099,6 +1121,15 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.Enable(EnableCap.CullFace);
+        _gl.BindVertexArray(0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
     }
 
     /// <summary>
@@ -1153,6 +1184,12 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
+        _gl.Enable(EnableCap.CullFace);
+        _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.BindVertexArray(0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
     }
 
     /// <summary>
@@ -1506,18 +1543,22 @@ if (isAlphaCutout)
                         _gl.Uniform1(_uHasTexture, 0);
                         if (ShouldSkipLayerWhenTextureIsMissing(l, needsBlend))
                         {
-                            if (needsBlend)
-                            {
-                                _gl.Disable(EnableCap.Blend);
-                                _gl.DepthMask(!forceBackdropState);
-                            }
-                            else if (noDepthWrite)
-                            {
-                                _gl.DepthMask(!forceBackdropState);
-                            }
+                            _gl.Disable(EnableCap.Blend);
+                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                            _gl.DepthMask(!forceBackdropState);
 
                             if (!forceBackdropState && geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
                                 _gl.Enable(EnableCap.DepthTest);
+
+                            _gl.Uniform1(_uAlphaTest, 0);
+                            _gl.Uniform1(_uUseTextureAlpha, 0);
+                            _gl.Uniform1(_uPremultiplyAlpha, 0);
+                            _gl.Uniform1(_uAlphaThreshold, 0.0f);
+                            _gl.Uniform1(_uUnshaded, 0);
+                            _gl.Uniform1(_uEmissiveGain, 0.0f);
+                            _gl.Uniform1(_uSphereEnvMap, 0);
+                            _gl.Uniform1(_uUvSet, 0);
+                            ResetLayerUvTransform();
                             continue;
                         }
                     }
@@ -1541,17 +1582,21 @@ if (isAlphaCutout)
                     anyLayerRendered = true;
 
                     // Restore state after this layer
-                    if (needsBlend)
-                    {
-                        _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(!forceBackdropState);
-                    }
-                    else if (noDepthWrite)
-                    {
-                        _gl.DepthMask(!forceBackdropState);
-                    }
+                    _gl.Disable(EnableCap.Blend);
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    _gl.DepthMask(!forceBackdropState);
                     if (!forceBackdropState && geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
                         _gl.Enable(EnableCap.DepthTest);
+
+                    _gl.Uniform1(_uAlphaTest, 0);
+                    _gl.Uniform1(_uUseTextureAlpha, 0);
+                    _gl.Uniform1(_uPremultiplyAlpha, 0);
+                    _gl.Uniform1(_uAlphaThreshold, 0.0f);
+                    _gl.Uniform1(_uUnshaded, 0);
+                    _gl.Uniform1(_uEmissiveGain, 0.0f);
+                    _gl.Uniform1(_uSphereEnvMap, 0);
+                    _gl.Uniform1(_uUvSet, 0);
+                    ResetLayerUvTransform();
                 }
             }
 
@@ -1576,7 +1621,28 @@ if (isAlphaCutout)
                 _gl.BindVertexArray(0);
             }
         }
+
+        _gl.Uniform1(_uAlphaTest, 0);
+        _gl.Uniform1(_uUseTextureAlpha, 0);
+        _gl.Uniform1(_uPremultiplyAlpha, 0);
+        _gl.Uniform1(_uAlphaThreshold, 0.0f);
+        _gl.Uniform1(_uUnshaded, 0);
+        _gl.Uniform1(_uEmissiveGain, 0.0f);
+        _gl.Uniform1(_uSphereEnvMap, 0);
+        _gl.Uniform1(_uUvSet, 0);
+        ResetLayerUvTransform();
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        if (!forceBackdropState)
+        {
+            _gl.DepthMask(true);
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Lequal);
+        }
+        _gl.BindVertexArray(0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
     }
 
     /// <summary>

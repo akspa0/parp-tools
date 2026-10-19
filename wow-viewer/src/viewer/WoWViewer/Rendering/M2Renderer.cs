@@ -935,12 +935,15 @@ public void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlp
         }
 
         _gl.LineWidth(1.0f);
+        _gl.ActiveTexture(TextureUnit.Texture0);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.BindVertexArray(0);
         _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.DepthMask(true);
+        _gl.Enable(EnableCap.CullFace);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
 

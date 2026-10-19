@@ -106,15 +106,16 @@ internal static class Program
         Console.WriteLine($"Transpose Corners:{transposeCorners}");
         Console.WriteLine();
 
-        // Step 1: Initialize DBC Resolver with built-in fallbacks and loose files if provided
+        // Step 1: Initialize DBC Resolver with built-in fallbacks and client DBCs if provided
         var dbcResolver = new DbcModelResolver();
         RegisterBuiltInDevModelFallbacks(dbcResolver);
 
-        if (!string.IsNullOrWhiteSpace(dbcDir) && Directory.Exists(dbcDir))
+        if (!string.IsNullOrWhiteSpace(dbcDir))
         {
             Console.WriteLine($"Loading client DBCs from {dbcDir}...");
-            var looseResolver = DbcModelResolver.LoadFromDirectory(dbcDir);
-            Console.WriteLine($"Loaded {looseResolver.CreatureDisplayCount} creature displays, {looseResolver.GameObjectDisplayCount} gameobject displays.");
+            var loadedResolver = DbcModelResolver.LoadFromPath(dbcDir);
+            dbcResolver.MergeFrom(loadedResolver);
+            Console.WriteLine($"Loaded {loadedResolver.CreatureDisplayCount} creature displays, {loadedResolver.GameObjectDisplayCount} gameobject displays.");
         }
 
         // Step 2: Read SQL and extract map populations in a single high-throughput pass
@@ -169,7 +170,48 @@ internal static class Program
                 }
             }
 
-            Console.WriteLine($"  Transposed {cornerRecords.Count} authentic corner test fixtures (Twain, Jesse, pnagle, CHOW Guard).");
+            var alphaCornerGoSpawns = await reader.ReadGameObjectSpawnsAsync(alphaSqlPath, targetMapId: 0);
+            var alphaGoTemplates = await reader.ReadGameObjectTemplatesAsync(alphaSqlPath);
+
+            foreach (var g in alphaCornerGoSpawns)
+            {
+                if (AlphaCoreCornerTransposer.IsCornerTestFixture(g.MapId, g.Position.X, g.Position.Y))
+                {
+                    alphaGoTemplates.TryGetValue(g.Entry, out var tmpl);
+                    string name = tmpl?.Name ?? $"GameObject #{g.Entry}";
+                    float scale = tmpl?.Size ?? 1.0f;
+                    int displayId = tmpl?.DisplayId ?? 0;
+                    int goType = tmpl?.Type ?? 0;
+
+                    dbcResolver.TryResolveGameObject(displayId, out string? modelPath, out float displayScale);
+
+                    var orig = new PopulationRecord
+                    {
+                        SpawnId = g.Guid,
+                        EntryId = g.Entry,
+                        MapId = g.MapId,
+                        SpawnType = PopulationSpawnType.GameObject,
+                        Name = name,
+                        Subname = null,
+                        ModelPath = modelPath,
+                        Scale = scale,
+                        DisplayScale = displayScale,
+                        EffectiveScale = scale * displayScale,
+                        Position = g.Position,
+                        Orientation = g.Orientation,
+                        Rotation = g.Rotation,
+                        Faction = 0,
+                        Flags = 0,
+                        GameObjectType = goType,
+                        IsTransposed = false,
+                        SourceNote = null
+                    };
+
+                    cornerRecords.Add(AlphaCoreCornerTransposer.TransposeToMap451(orig));
+                }
+            }
+
+            Console.WriteLine($"  Transposed {cornerRecords.Count} authentic corner test fixtures (Twain, Jesse, pnagle, CHOW Guard, Forges, Anvils, Signposts).");
             if (!extraction.SpawnsByMap.TryGetValue(451, out var map451List))
             {
                 map451List = new List<PopulationRecord>();
@@ -251,10 +293,10 @@ internal static class Program
         // 3.3.5a Map 451 Creature Models
         resolver.RegisterCreature(14379, @"Creature\FieldRepairBot\FieldRepairBot.m2", 1.25f);
 
-        // Alpha-Core Corner Prototype Test Fixtures
-        resolver.RegisterCreature(907, @"Creature\Human\HumanMale.m2", 1.0f);   // Twain The Tester & Jesse The Tester
-        resolver.RegisterCreature(251, @"Creature\Murloc\Murloc.mdx", 1.0f);     // pnagle's test dude
-        resolver.RegisterCreature(2688, @"Creature\Human\HumanMale.m2", 1.0f);  // CHOW Guard
+        // Alpha-Core Corner Prototype Test Fixtures (authentic 0.5.3 models)
+        resolver.RegisterCreature(907, @"Character\Human\Male\HumanMale.mdx", 1.0f);   // Twain The Tester & Jesse The Tester
+        resolver.RegisterCreature(251, @"Creature\HumanMaleKid\HumanMaleKid.mdx", 1.0f); // pnagle's test dude
+        resolver.RegisterCreature(2688, @"Character\Human\Male\HumanMale.mdx", 1.0f);  // CHOW Guard
 
         // 3.3.5a Map 451 GameObject Models
         resolver.RegisterGameObject(399, @"World\Generic\Active\Anvil\Anvil.mdx", 1.0f);          // TEST BRONZE/MARBLE/STONE/SILVER

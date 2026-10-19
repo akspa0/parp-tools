@@ -2,7 +2,7 @@
   "mapId": 612,
   "mapName": "Map_612",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-18T23:35:40.4474338Z",
+  "exportedUtc": "2026-10-19T03:50:33.5784869Z",
   "spawns": [
     {
       "spawnId": 142830,
@@ -83,7 +83,7 @@
       "spawnType": 0,
       "name": "Navigator Marcus",
       "subname": "Northspear",
-      "modelPath": null,
+      "modelPath": "Character\\Human\\Female\\HumanFemale.mdx",
       "scale": 74,
       "displayScale": 1,
       "effectiveScale": 74,

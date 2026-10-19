@@ -3536,6 +3536,17 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             // Recorded next to the instanced count so the gap between them is
                             // readable without a second flight.
                             frame.OpaqueModelSubmission.DistinctModelCount = frame.OpaqueSubmittedModelKeyScratch.Count;
+
+                            _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+                            _gl.Disable(EnableCap.Blend);
+                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                            _gl.DepthMask(true);
+                            _gl.Enable(EnableCap.DepthTest);
+                            _gl.DepthFunc(DepthFunction.Lequal);
+                            _gl.Enable(EnableCap.CullFace);
+                            _gl.BindVertexArray(0);
+                            _gl.ActiveTexture(TextureUnit.Texture0);
+                            _gl.BindTexture(TextureTarget.Texture2D, 0);
                         }
                     });
 
@@ -3643,6 +3654,17 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         foreach (WmoRenderer renderer in _worldFrameWmoRenderers)
                             renderer.EndWorldFrame();
                         _worldFrameWmoRenderers.Clear();
+
+                        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+                        _gl.Disable(EnableCap.Blend);
+                        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                        _gl.DepthMask(true);
+                        _gl.Enable(EnableCap.DepthTest);
+                        _gl.DepthFunc(DepthFunction.Lequal);
+                        _gl.Enable(EnableCap.CullFace);
+                        _gl.BindVertexArray(0);
+                        _gl.ActiveTexture(TextureUnit.Texture0);
+                        _gl.BindTexture(TextureTarget.Texture2D, 0);
                     });
                     if (!_renderDiagPrinted) _renderDiagPrinted = true;
                 },
@@ -4681,6 +4703,18 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
 
         // Boundary probe: the coordinator has returned, so anything after this is epilogue.
         double postCoordinatorMs = frameTimer.Elapsed.TotalMilliseconds;
+
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.Enable(EnableCap.CullFace);
+        _gl.UseProgram(0);
+        _gl.BindVertexArray(0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
 
         if (!continuedPastTerrain)
         {

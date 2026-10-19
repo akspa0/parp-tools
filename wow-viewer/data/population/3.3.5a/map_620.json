@@ -2,7 +2,7 @@
   "mapId": 620,
   "mapName": "Map_620",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-18T23:35:40.4550471Z",
+  "exportedUtc": "2026-10-19T03:50:33.5840866Z",
   "spawns": [
     {
       "spawnId": 62739,
@@ -11,7 +11,7 @@
       "spawnType": 0,
       "name": "Aumanil",
       "subname": "Walker of Waves",
-      "modelPath": null,
+      "modelPath": "Character\\Tuskarr\\Male\\TuskarrMale.mdx",
       "scale": 68,
       "displayScale": 1,
       "effectiveScale": 68,

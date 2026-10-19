@@ -321,10 +321,14 @@ void main()
         }
 
         _gl.BindVertexArray(0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
 
         // Restore state
         _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.Enable(EnableCap.CullFace);
     }
 
     /// <summary>
@@ -444,8 +448,12 @@ void main()
         }
 
         _gl.BindVertexArray(0);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.Enable(EnableCap.CullFace);
     }
 
     private void CheckShaderCompile(uint shader, string type)

@@ -532,6 +532,11 @@ public class TerrainRenderer : IDisposable
 
         ApplySurfaceCulling();
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.Disable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
+        _gl.DepthFunc(DepthFunction.Lequal);
 
         _shader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
         _shader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);

@@ -2,7 +2,7 @@
   "mapId": 37,
   "mapName": "Map_37",
   "clientVersion": "0.5.3",
-  "exportedUtc": "2026-10-18T23:35:57.2308825Z",
+  "exportedUtc": "2026-10-19T03:45:54.7787631Z",
   "spawns": [
     {
       "spawnId": 400468,
@@ -11,7 +11,7 @@
       "spawnType": 0,
       "name": "Baelish Frostbane",
       "subname": "Binder",
-      "modelPath": null,
+      "modelPath": "Character\\Human\\Male\\HumanMale.mdx",
       "scale": 45,
       "displayScale": 1,
       "effectiveScale": 45,
@@ -35,7 +35,7 @@
       "spawnType": 0,
       "name": "Orgrun Iceflow",
       "subname": "Binder",
-      "modelPath": null,
+      "modelPath": "Creature\\OrcMaleWarriorLight\\OrcMaleWarriorLight.mdx",
       "scale": 45,
       "displayScale": 1,
       "effectiveScale": 45,

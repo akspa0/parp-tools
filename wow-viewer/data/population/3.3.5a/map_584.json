@@ -2,7 +2,7 @@
   "mapId": 584,
   "mapName": "Map_584",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-18T23:35:40.3831944Z",
+  "exportedUtc": "2026-10-19T03:50:33.5158262Z",
   "spawns": [
     {
       "spawnId": 52011,
@@ -83,7 +83,7 @@
       "spawnType": 0,
       "name": "Abe the Cabin Boy",
       "subname": "The Lady Mehley",
-      "modelPath": null,
+      "modelPath": "Creature\\HumanMaleKid\\HumanMaleKid.mdx",
       "scale": 12,
       "displayScale": 1,
       "effectiveScale": 12,
@@ -107,7 +107,7 @@
       "spawnType": 0,
       "name": "Navigator Mehran",
       "subname": "The Lady Mehley",
-      "modelPath": null,
+      "modelPath": "Character\\Human\\Male\\HumanMale.mdx",
       "scale": 28,
       "displayScale": 1,
       "effectiveScale": 28,

@@ -190,11 +190,15 @@ public sealed partial class M2Renderer
         }
 
         gl.Uniform1(_uInstanced, 0);
+        gl.ActiveTexture(TextureUnit.Texture0);
         gl.BindTexture(TextureTarget.Texture2D, 0);
         gl.BindVertexArray(0);
         gl.Disable(EnableCap.Blend);
+        gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         gl.Enable(EnableCap.DepthTest);
         gl.DepthFunc(DepthFunction.Lequal);
         gl.DepthMask(true);
+        gl.Enable(EnableCap.CullFace);
+        gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
 }

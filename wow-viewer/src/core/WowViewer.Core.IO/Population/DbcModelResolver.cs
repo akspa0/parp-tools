@@ -56,7 +56,53 @@ public sealed class DbcModelResolver : IDbcModelResolver
     }
 
     /// <summary>
-    /// Loads DBC files from loose files in a directory (e.g. DBFilesClient/).
+    /// Merges entries from another resolver into this resolver.
+    /// </summary>
+    public void MergeFrom(DbcModelResolver other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        foreach (var (id, entry) in other._creatureDisplays)
+        {
+            _creatureDisplays[id] = entry;
+        }
+        foreach (var (id, entry) in other._gameObjectDisplays)
+        {
+            _gameObjectDisplays[id] = entry;
+        }
+    }
+
+    /// <summary>
+    /// Loads DBC files from a path, which can be a directory (loose DBCs or MPQs) or a single MPQ archive.
+    /// </summary>
+    public static DbcModelResolver LoadFromPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return new DbcModelResolver();
+
+        if (File.Exists(path) && path.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var catalog = new MpqArchiveCatalog();
+                catalog.LoadArchives([Path.GetDirectoryName(path) ?? path]);
+                return LoadFromArchive(catalog);
+            }
+            catch
+            {
+                return new DbcModelResolver();
+            }
+        }
+
+        if (Directory.Exists(path))
+        {
+            return LoadFromDirectory(path);
+        }
+
+        return new DbcModelResolver();
+    }
+
+    /// <summary>
+    /// Loads DBC files from loose files in a directory (e.g. DBFilesClient/) or MPQs within the directory.
     /// </summary>
     public static DbcModelResolver LoadFromDirectory(string directory)
     {
@@ -68,12 +114,34 @@ public sealed class DbcModelResolver : IDbcModelResolver
         string cmd = Path.Combine(directory, "CreatureModelData.dbc");
         string gdi = Path.Combine(directory, "GameObjectDisplayInfo.dbc");
 
+        if (!File.Exists(cdi))
+            cdi = Path.Combine(directory, "DBFilesClient", "CreatureDisplayInfo.dbc");
+        if (!File.Exists(cmd))
+            cmd = Path.Combine(directory, "DBFilesClient", "CreatureModelData.dbc");
+        if (!File.Exists(gdi))
+            gdi = Path.Combine(directory, "DBFilesClient", "GameObjectDisplayInfo.dbc");
+
         byte[]? cdiBytes = File.Exists(cdi) ? File.ReadAllBytes(cdi) : null;
         byte[]? cmdBytes = File.Exists(cmd) ? File.ReadAllBytes(cmd) : null;
         byte[]? gdiBytes = File.Exists(gdi) ? File.ReadAllBytes(gdi) : null;
 
-        resolver.LoadData(cdiBytes, cmdBytes, gdiBytes);
-        return resolver;
+        if (cdiBytes != null || cmdBytes != null || gdiBytes != null)
+        {
+            resolver.LoadData(cdiBytes, cmdBytes, gdiBytes);
+            return resolver;
+        }
+
+        // If no loose DBCs exist, try loading via MPQs located in the directory or its client hierarchy
+        try
+        {
+            using var catalog = new MpqArchiveCatalog();
+            catalog.LoadArchives([directory]);
+            return LoadFromArchive(catalog);
+        }
+        catch
+        {
+            return resolver;
+        }
     }
 
     /// <summary>
@@ -83,11 +151,14 @@ public sealed class DbcModelResolver : IDbcModelResolver
     {
         var resolver = new DbcModelResolver();
         byte[]? cdiBytes = catalog.ReadFile("DBFilesClient\\CreatureDisplayInfo.dbc")
-            ?? catalog.ReadFile("DBFilesClient/CreatureDisplayInfo.dbc");
+            ?? catalog.ReadFile("DBFilesClient/CreatureDisplayInfo.dbc")
+            ?? catalog.ReadFile("CreatureDisplayInfo.dbc");
         byte[]? cmdBytes = catalog.ReadFile("DBFilesClient\\CreatureModelData.dbc")
-            ?? catalog.ReadFile("DBFilesClient/CreatureModelData.dbc");
+            ?? catalog.ReadFile("DBFilesClient/CreatureModelData.dbc")
+            ?? catalog.ReadFile("CreatureModelData.dbc");
         byte[]? gdiBytes = catalog.ReadFile("DBFilesClient\\GameObjectDisplayInfo.dbc")
-            ?? catalog.ReadFile("DBFilesClient/GameObjectDisplayInfo.dbc");
+            ?? catalog.ReadFile("DBFilesClient/GameObjectDisplayInfo.dbc")
+            ?? catalog.ReadFile("GameObjectDisplayInfo.dbc");
 
         resolver.LoadData(cdiBytes, cmdBytes, gdiBytes);
         return resolver;
@@ -161,7 +232,9 @@ public sealed class DbcModelResolver : IDbcModelResolver
             p += ".m2";
         }
 
-        if (!p.StartsWith("Creature\\", StringComparison.OrdinalIgnoreCase) && !p.Contains('\\'))
+        if (!p.StartsWith("Creature\\", StringComparison.OrdinalIgnoreCase) &&
+            !p.StartsWith("Character\\", StringComparison.OrdinalIgnoreCase) &&
+            !p.Contains('\\'))
         {
             string name = Path.GetFileNameWithoutExtension(p);
             p = $"Creature\\{name}\\{p}";
@@ -173,7 +246,9 @@ public sealed class DbcModelResolver : IDbcModelResolver
     public static string NormalizeGameObjectPath(string path)
     {
         string p = path.Trim().Replace('/', '\\');
-        if (!p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) && !p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+        if (!p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) &&
+            !p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) &&
+            !p.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
         {
             p += ".mdx";
         }

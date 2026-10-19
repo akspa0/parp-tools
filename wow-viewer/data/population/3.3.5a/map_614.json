@@ -2,7 +2,7 @@
   "mapId": 614,
   "mapName": "Map_614",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-18T23:35:40.4491587Z",
+  "exportedUtc": "2026-10-19T03:50:33.5794908Z",
   "spawns": [
     {
       "spawnId": 142843,
@@ -59,7 +59,7 @@
       "spawnType": 0,
       "name": "Navigator Meyer",
       "subname": "The Kraken",
-      "modelPath": null,
+      "modelPath": "Character\\Human\\Male\\HumanMale.mdx",
       "scale": 74,
       "displayScale": 1,
       "effectiveScale": 74,

@@ -2,7 +2,7 @@
   "mapId": 586,
   "mapName": "Map_586",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-18T23:35:40.3862084Z",
+  "exportedUtc": "2026-10-19T03:50:33.51841Z",
   "spawns": [
     {
       "spawnId": 62014,
@@ -11,7 +11,7 @@
       "spawnType": 0,
       "name": "Wisp",
       "subname": "NULL",
-      "modelPath": null,
+      "modelPath": "Creature\\Wisp\\Wisp.mdx",
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,
@@ -59,7 +59,7 @@
       "spawnType": 0,
       "name": "Captain Galind Windsword",
       "subname": "Elune\u0027s Blessing",
-      "modelPath": null,
+      "modelPath": "Character\\NightElf\\Male\\NightElfMale.mdx",
       "scale": 70,
       "displayScale": 1,
       "effectiveScale": 70,
