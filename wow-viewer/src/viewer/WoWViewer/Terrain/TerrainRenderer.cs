@@ -1670,13 +1670,11 @@ void main() {
         else if (uAlphaDebugChannel == 2) alphaDbg = (uShowLayer2 == 1) ? a2Raw : 0.0;
         else if (uAlphaDebugChannel == 3) alphaDbg = (uShowLayer3 == 1) ? a3Raw : 0.0;
         else {
-            float sum = 0.0;
-            int count = 0;
-            if (uShowLayer1 == 1) { sum += a1Raw; count++; }
-            if (uShowLayer2 == 1) { sum += a2Raw; count++; }
-            if (uShowLayer3 == 1) { sum += a3Raw; count++; }
-            if (count > 0) alphaDbg = sum / float(count);
-            else alphaDbg = 0.0;
+            float inv = 1.0;
+            if (uShowLayer1 == 1) inv *= (1.0 - clamp(a1Raw, 0.0, 1.0));
+            if (uShowLayer2 == 1) inv *= (1.0 - clamp(a2Raw, 0.0, 1.0));
+            if (uShowLayer3 == 1) inv *= (1.0 - clamp(a3Raw, 0.0, 1.0));
+            alphaDbg = 1.0 - inv;
         }
     }
 
@@ -1700,32 +1698,57 @@ void main() {
             * localDiffuse;
     }
     vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility + localLight;
-    float w1 = (uShowLayer1 == 1 && uHasTex1 == 1) ? a1 : 0.0;
-    float w2 = (uShowLayer2 == 1 && uHasTex2 == 1) ? a2 : 0.0;
-    float w3 = (uShowLayer3 == 1 && uHasTex3 == 1) ? a3 : 0.0;
-    float overlaySum = w1 + w2 + w3;
-    float w0 = (uShowLayer0 == 1 && uHasTex0 == 1) ? clamp(1.0 - overlaySum, 0.0, 1.0) : 0.0;
-    float totalWeight = w0 + overlaySum;
+    bool has0 = (uShowLayer0 == 1 && uHasTex0 == 1);
+    bool has1 = (uShowLayer1 == 1 && uHasTex1 == 1);
+    bool has2 = (uShowLayer2 == 1 && uHasTex2 == 1);
+    bool has3 = (uShowLayer3 == 1 && uHasTex3 == 1);
 
     vec3 result = vec3(0.0);
-    if (totalWeight > 0.0001) {
-        if (w0 > 0.0) {
-            vec4 c0 = SampleDiffuse(uHasTex0, uDiffuse0, diffuseUV);
-            result += c0.rgb * w0;
+    bool hasBase = false;
+    float accumulatedAlpha = 0.0;
+
+    if (has0) {
+        vec4 c0 = SampleDiffuse(uHasTex0, uDiffuse0, diffuseUV);
+        result = c0.rgb;
+        hasBase = true;
+        accumulatedAlpha = 1.0;
+    }
+    if (has1 && a1 > 0.0) {
+        vec4 c1 = texture(uDiffuse1, diffuseUV);
+        if (hasBase) {
+            result = mix(result, c1.rgb, a1);
+            accumulatedAlpha = accumulatedAlpha + a1 * (1.0 - accumulatedAlpha);
+        } else {
+            result = c1.rgb;
+            hasBase = true;
+            accumulatedAlpha = a1;
         }
-        if (w1 > 0.0) {
-            vec4 c1 = texture(uDiffuse1, diffuseUV);
-            result += c1.rgb * w1;
+    }
+    if (has2 && a2 > 0.0) {
+        vec4 c2 = texture(uDiffuse2, diffuseUV);
+        if (hasBase) {
+            result = mix(result, c2.rgb, a2);
+            accumulatedAlpha = accumulatedAlpha + a2 * (1.0 - accumulatedAlpha);
+        } else {
+            result = c2.rgb;
+            hasBase = true;
+            accumulatedAlpha = a2;
         }
-        if (w2 > 0.0) {
-            vec4 c2 = texture(uDiffuse2, diffuseUV);
-            result += c2.rgb * w2;
+    }
+    if (has3 && a3 > 0.0) {
+        vec4 c3 = texture(uDiffuse3, diffuseUV);
+        if (hasBase) {
+            result = mix(result, c3.rgb, a3);
+            accumulatedAlpha = accumulatedAlpha + a3 * (1.0 - accumulatedAlpha);
+        } else {
+            result = c3.rgb;
+            hasBase = true;
+            accumulatedAlpha = a3;
         }
-        if (w3 > 0.0) {
-            vec4 c3 = texture(uDiffuse3, diffuseUV);
-            result += c3.rgb * w3;
-        }
-        result = (result / totalWeight) * lighting;
+    }
+
+    if (hasBase) {
+        result = result * lighting;
     } else {
         // Whiteplate fallback: untextured terrain diffuse is pure white lit by scene lighting.
         result = vec3(1.0) * lighting;
@@ -1824,7 +1847,7 @@ void main() {
 
     float outAlpha = 1.0;
     if (uShowLayer0 == 0) {
-        outAlpha = clamp(overlaySum, 0.0, 1.0);
+        outAlpha = clamp(accumulatedAlpha, 0.0, 1.0);
     }
 
     FragColor = vec4(finalColor, outAlpha * uOpacity);
@@ -1901,6 +1924,7 @@ uniform sampler2DArray uAlphaShadowArray;
 uniform sampler2DArray uAlphaExtArray;
 uniform int uHasAlphaExt;
 uniform int uDiffuseLayerCount;
+uniform float uOpacity;
 uniform int uUseWorldUV;
 uniform int uUseMccv;
 uniform int uAlphaDebugChannel;
@@ -1961,12 +1985,13 @@ void main() {
         if (uAlphaDebugChannel >= 1 && uAlphaDebugChannel <= 7) {
             alphaDbg = visible[uAlphaDebugChannel] ? alphaRaw[uAlphaDebugChannel] : 0.0;
         } else {
-            float sum = 0.0;
-            int count = 0;
+            float inv = 1.0;
             for (int i = 1; i < 8; i++) {
-                if (visible[i]) { sum += alphaRaw[i]; count++; }
+                if (visible[i]) {
+                    inv *= (1.0 - clamp(alphaRaw[i], 0.0, 1.0));
+                }
             }
-            alphaDbg = (count > 0) ? sum / float(count) : 0.0;
+            alphaDbg = 1.0 - inv;
         }
     }
 
@@ -1990,28 +2015,35 @@ void main() {
             * localDiffuse;
     }
     vec3 lighting = uAmbientColor + uLightColor * vDiffuse * shadowVisibility + localLight;
-    float weights[8];
-    float overlaySum = 0.0;
+    vec3 result = vec3(0.0);
+    bool hasBase = false;
+    float accumulatedAlpha = 0.0;
+
+    if (visible[0]) {
+        result = texture(uDiffuseArray, vec3(diffuseUV, float(texIdx[0]))).rgb;
+        hasBase = true;
+        accumulatedAlpha = 1.0;
+    }
+
     for (int i = 1; i < 8; i++) {
         if (visible[i]) {
-            weights[i] = alphaRaw[i];
-            overlaySum += weights[i];
-        } else {
-            weights[i] = 0.0;
-        }
-    }
-    weights[0] = visible[0] ? clamp(1.0 - overlaySum, 0.0, 1.0) : 0.0;
-    float totalWeight = weights[0] + overlaySum;
-
-    vec3 result = vec3(0.0);
-    if (totalWeight > 0.0001) {
-        for (int i = 0; i < 8; i++) {
-            if (weights[i] > 0.0) {
+            float a = alphaRaw[i];
+            if (a > 0.0) {
                 vec4 layerColor = texture(uDiffuseArray, vec3(diffuseUV, float(texIdx[i])));
-                result += layerColor.rgb * weights[i];
+                if (hasBase) {
+                    result = mix(result, layerColor.rgb, a);
+                    accumulatedAlpha = accumulatedAlpha + a * (1.0 - accumulatedAlpha);
+                } else {
+                    result = layerColor.rgb;
+                    hasBase = true;
+                    accumulatedAlpha = a;
+                }
             }
         }
-        result = (result / totalWeight) * lighting;
+    }
+
+    if (hasBase) {
+        result = result * lighting;
     } else {
         // Whiteplate fallback: untextured terrain diffuse is pure white lit by scene lighting.
         result = vec3(1.0) * lighting;
@@ -2111,10 +2143,10 @@ void main() {
 
     float outAlpha = 1.0;
     if (!baseLayerShown) {
-        outAlpha = clamp(overlaySum, 0.0, 1.0);
+        outAlpha = clamp(accumulatedAlpha, 0.0, 1.0);
     }
 
-    FragColor = vec4(finalColor, outAlpha);
+    FragColor = vec4(finalColor, outAlpha * uOpacity);
 }
 ";
 

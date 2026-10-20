@@ -102,11 +102,8 @@ public sealed class WorldDialogueService
             if (spawn.SpawnType != WorldSpawnType.Creature)
                 continue;
 
-            // Check if creature has registered barks or gossip
-            bool hasBarks = _flavorData.CreatureBarks.TryGetValue(spawn.EntryId, out var barks) && barks.Count > 0;
-            bool hasGossip = _flavorData.CreatureGossip.TryGetValue(spawn.EntryId, out var gossip) && gossip.Count > 0;
-
-            if (!hasBarks && !hasGossip)
+            // Check if creature has registered ambient barks (from authentic creature_text)
+            if (!_flavorData.CreatureBarks.TryGetValue(spawn.EntryId, out var barks) || barks.Count == 0)
                 continue;
 
             // Check per-creature cooldown
@@ -126,21 +123,10 @@ public sealed class WorldDialogueService
             if (distSq > maxDistSq)
                 continue;
 
-            // Pick line
-            string lineText;
-            DialogueChatType chatType;
-
-            if (hasBarks)
-            {
-                var bark = barks![Random.Shared.Next(barks.Count)];
-                lineText = bark.Text;
-                chatType = bark.Type;
-            }
-            else
-            {
-                lineText = gossip![Random.Shared.Next(gossip.Count)];
-                chatType = DialogueChatType.Say;
-            }
+            // Pick line from authentic creature barks
+            var bark = barks[Random.Shared.Next(barks.Count)];
+            string lineText = bark.Text;
+            DialogueChatType chatType = bark.Type;
 
             // Dispatch bark
             chatWindow.PostNpcBark(spawn.Name, lineText, chatType);

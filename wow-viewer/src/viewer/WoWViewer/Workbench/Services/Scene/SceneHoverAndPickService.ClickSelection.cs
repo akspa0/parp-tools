@@ -119,26 +119,41 @@ internal sealed partial class SceneHoverAndPickService
                     validHits.Add(hit);
                 }
 
-                // 2. WMO Container Fall-Through:
+                // 2. Concrete Object Preference:
+                // If real concrete objects (NPCs, doodads, structures) were hit along with collision walls,
+                // boundary walls, or facades, prefer the real concrete objects so invisible/boundary walls
+                // and facades never block selection of objects behind/inside them.
+                bool hasConcreteHits = validHits.Any(h =>
+                    !h.ModelName.Contains("collision", StringComparison.OrdinalIgnoreCase)
+                    && !h.ModelPath.Contains("collision", StringComparison.OrdinalIgnoreCase)
+                    && !h.ModelPath.Contains("invis", StringComparison.OrdinalIgnoreCase)
+                    && !h.ModelName.Contains("facade", StringComparison.OrdinalIgnoreCase)
+                    && !h.ModelPath.Contains("facade", StringComparison.OrdinalIgnoreCase));
+
+                if (hasConcreteHits)
+                {
+                    var filteredConcrete = validHits.Where(h =>
+                        !h.ModelName.Contains("collision", StringComparison.OrdinalIgnoreCase)
+                        && !h.ModelPath.Contains("collision", StringComparison.OrdinalIgnoreCase)
+                        && !h.ModelPath.Contains("invis", StringComparison.OrdinalIgnoreCase)
+                        && !h.ModelName.Contains("facade", StringComparison.OrdinalIgnoreCase)
+                        && !h.ModelPath.Contains("facade", StringComparison.OrdinalIgnoreCase)).ToList();
+
+                    if (filteredConcrete.Count > 0)
+                        validHits = filteredConcrete;
+                }
+
+                // 3. WMO Container Fall-Through:
                 // When clicking within the confines of a WMO's bounding box, clicks must fall through
                 // to interior MDX/M2 objects, WMO doodads, or nested smaller WMOs.
                 // If an interior object is hit along the ray inside a WMO's bounding box,
                 // the enclosing WMO must not occlude or capture the click.
                 var containerWmoIndices = new HashSet<int>();
-                bool isCameraInsideWmo(in SceneObjectPickHit hit) =>
-                    WmoContainerFallThroughFilter.IsPointInsideAabb(rayOrigin, hit.BoundsMin, hit.BoundsMax);
 
                 foreach (var hit in validHits)
                 {
                     if (hit.ObjectType != ObjectType.Wmo)
                         continue;
-
-                    // Do not treat collision walls or invisible boundary WMOs as room containers
-                    if (hit.ModelName.Contains("collision", StringComparison.OrdinalIgnoreCase)
-                        || hit.ModelPath.Contains("collision", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
 
                     // If the user explicitly hovered over this WMO, do not treat it as an occluding container to drop
                     if (hoveredInfo is { HasSceneObject: true } h
@@ -147,10 +162,6 @@ internal sealed partial class SceneHoverAndPickService
                     {
                         continue;
                     }
-
-                    bool cameraInside = isCameraInsideWmo(hit);
-                    if (!cameraInside)
-                        continue;
 
                     bool hasInteriorHit = validHits.Any(other =>
                     {
@@ -177,28 +188,35 @@ internal sealed partial class SceneHoverAndPickService
                 {
                     // Sort candidate hits strictly by ray distance to camera
                     validHits.Sort(static (a, b) => a.Distance.CompareTo(b.Distance));
-                    float minHitDist = validHits[0].Distance;
 
-                    // Spatial proximity threshold: only cluster objects if literally on top of each other (<= 2.0 yards)
-                    const float clusterThreshold = 2.0f;
-                    var clusteredHits = new List<SceneObjectPickHit>();
-                    for (int i = 0; i < validHits.Count; i++)
+                    // Prioritize the currently hovered object to the front if present
+                    if (hoveredInfo is { HasSceneObject: true } hoveredObj)
                     {
-                        if (validHits[i].Distance <= minHitDist + clusterThreshold)
-                            clusteredHits.Add(validHits[i]);
+                        int hoveredIndex = validHits.FindIndex(h =>
+                            h.ObjectType == hoveredObj.SceneObjectType
+                            && h.ObjectIndex == hoveredObj.SceneObjectIndex
+                            && (hoveredObj.SceneObjectType != ObjectType.WmoDoodad || h.ParentWmoIndex == hoveredObj.ParentWmoIndex));
+
+                        if (hoveredIndex > 0)
+                        {
+                            var hItem = validHits[hoveredIndex];
+                            validHits.RemoveAt(hoveredIndex);
+                            validHits.Insert(0, hItem);
+                        }
                     }
 
-                    int sceneHitCount = Math.Min(clusteredHits.Count, MaxSceneClickSelectionHits);
-                    _clickSelectionSceneHitOverflowCount = Math.Max(0, clusteredHits.Count - sceneHitCount);
+                    int sceneHitCount = Math.Min(validHits.Count, MaxSceneClickSelectionHits);
+                    _clickSelectionSceneHitOverflowCount = Math.Max(0, validHits.Count - sceneHitCount);
 
                     for (int i = 0; i < sceneHitCount; i++)
-                        AddSceneObjectClickSelectionCandidate(addedKeys, clusteredHits[i]);
+                        AddSceneObjectClickSelectionCandidate(addedKeys, validHits[i]);
                 }
             }
         }
 
         // Global cluster proximity filter:
-        // If multiple candidates were added, cull any candidate that is far behind the closest candidate
+        // If multiple candidates were added, cull candidates that are excessively distant along the ray (> 50 yards),
+        // but preserve objects within the interaction volume so the user can select objects inside/behind large bounding boxes
         if (_clickSelectionCandidates.Count > 1)
         {
             float minDistance = float.MaxValue;
@@ -210,7 +228,7 @@ internal sealed partial class SceneHoverAndPickService
 
             if (minDistance < float.MaxValue)
             {
-                const float globalClusterThreshold = 2.0f;
+                const float globalClusterThreshold = 50.0f;
                 string? hoveredDedupKey = hoveredInfo is { HasSceneObject: true } hObj
                     ? (hObj.SceneObjectType == ObjectType.WmoDoodad
                         ? $"scene:{hObj.SceneObjectType}:{hObj.ParentWmoIndex}:{hObj.SceneObjectIndex}"

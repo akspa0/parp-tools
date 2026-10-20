@@ -1,6 +1,32 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-18
+Last updated: 2026-10-20
+
+## 2026-10-20 — MCNK Subchunk Desync Fix, 3.3.5 Format Profile Auto-Detection, Terrain Blending Restoration & PM4 Surface Correlation
+
+- **MCNK Subchunk Walking Desynchronization Fix (`Mcnk.cs`)**:
+  - **Issue 1 (MCSH overrun)**: In `Mcnk.cs`, `ComputeConsumedSize` for MCSH computed `Header.SizeMcsh - 8` = `512 - 8 = 504`. But `Header.SizeMcsh` in WoW MCNK is the raw payload size (512 bytes), not payload + 8. Advancing by 504 bytes landed 8 bytes early, directly into shadow data, corrupting the subsequent MCAL subchunk token on all 71 chunks with shadows.
+    - *Fix*: `fromHeader = _parseOptions.UseHeaderShadowSize ? Header.SizeMcsh : 0;` (without `- 8`).
+  - **Issue 2 (MCAL declared size mismatch)**: In WotLK ADTs, Blizzard tools wrote the subchunk MCAL size as 0, 4, or 512, while the true payload size was stored in `Header.SizeMcal - 8`. In chunks 11 and 34, `fromHeader` was 472 and 470, while declared subchunk size was 512. Previously `Math.Max(size, fromHeader)` took 512 and overshot the end of the chunk by 32 bytes, causing an overrun break and leaving `McalRawData = null`.
+    - *Fix*: Prioritized `fromHeader` (`Header.SizeMcal - 8`) whenever valid (`fromHeader > 0 && fromHeader <= dataLength - dataStart`).
+  - **Issue 3 (Subchunk loop boundary)**: In `Mcnk.cs`, `while (remaining > 8)` skipped the final 8-byte subchunk (such as `MCSE` with declared size 0), leaving `remaining = 8` and `SubchunkWalkConsumedExactly = false`.
+    - *Fix*: Changed to `while (remaining >= 8)` and checked `consumedSize > (uint)remaining - 8`.
+  - **Issue 4 (DeclaredSize fallback)**: Added safety check so that even under `DeclaredSize`, if MCAL declares size 0 or 4 and `Header.SizeMcal >= 8`, it consumes `fromHeader`.
+  - Added unit tests in `McnkSubchunkWalkTests.cs` (`Scan_McalWithZeroDeclaredSize_ConsumesFromHeaderWhenConfigured`, `Scan_McalWithOverDeclaredSize_ConsumesHeaderSizeWithoutOverrunning`). All 6/6 tests pass.
+- **Format Profile Resolution & Auto-Detection**:
+  - In `FormatProfileRegistry.cs` and `AdtFormatProfile.cs`, mapped all 3.x clients (`major == 3`) to `AdtProfile33512340` (and `WmoProfile33512340` / `M2Profile33512340`) instead of incorrectly falling through to `AdtProfile060070Baseline`.
+  - Relaxed `TryParseBuild` to accept 2, 3, or 4 component version strings.
+  - Added `TryDetectLichKingAdt` to `StandardTerrainAdapter.cs`: even when client version is null/unresolved, tiles with `MH2O`, `ofsMcnr == 0x520`, or `sizeMcal > 0` are automatically promoted to `AdtProfile33512340`.
+- **Terrain Shader Blending Restoration (`TerrainRenderer.cs`)**:
+  - Restored authentic sequential `mix()` blending for layers 0..7 with accumulated alpha tracking.
+  - Preserved base layer visibility toggle and strict ASCII encoding.
+- **Verification on Real Client Data**:
+  - Verified on real Wrath 3.3.5 client ADT `Northrend_23_18.adt` (`H:/CLIENTS/WoW335/modernwow`): 256 of 256 chunks now parse 100% of their alpha payload with 0 failed chunks (previously failed on dozens of chunks, causing checkerboarding and black slopes).
+- **PM4 M2 Surface Correlation & Unauthored Placement**:
+  - Implemented `Pm4SurfaceCorrelationContracts.cs`, `Pm4SurfaceCorrelationExtractor.cs`, and `Pm4SurfaceCorrelationMatcher.cs`.
+  - Extracted collision mesh and attachment geometry in `M2ModelReader.cs` and `M2ModelDocument.cs`.
+  - Integrated unauthored placement resolver (`Pm4UnauthoredPlacementResolver.cs`), WMO fall-through filtering (`WmoContainerFallThroughFilter.cs`), and spawn streaming services.
+  - Added test suite `Pm4M2SurfaceCorrelationTests.cs` (7/7 tests pass).
 
 ## 2026-10-18 — Spec 274 Shipped, Performance Features Committed, WMO Portal Occlusion Quarantined
 

@@ -15,6 +15,7 @@ public enum Pm4PlacementResolutionMethod
     LedgerExactZ,
     NeighborThematic,
     ShapeScore,
+    SurfaceCorrelation,
     UnknownFallback,
 }
 
@@ -88,7 +89,8 @@ public static class Pm4UnauthoredPlacementResolver
         Func<string, AdtPlacementCatalog>? neighborCatalogReader = null,
         IReadOnlyDictionary<string, List<Vector3>>? shapeLibrary = null,
         int uniqueIdOffset = 0,
-        IReadOnlyDictionary<uint, Pm4LedgerPlacementRecord>? ledgerLookup = null)
+        IReadOnlyDictionary<uint, Pm4LedgerPlacementRecord>? ledgerLookup = null,
+        SurfaceCorrelationDatabase? surfaceCorrelationDb = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pm4Path);
         ArgumentException.ThrowIfNullOrWhiteSpace(mapDirectory);
@@ -120,7 +122,7 @@ public static class Pm4UnauthoredPlacementResolver
 
         foreach (Pm4RawObjectGroup group in wmoGroups)
         {
-            Pm4ResolvedObjectRecord resolved = ResolveWmo(group, neighborCatalogs, shapeLibrary, ledgerLookup);
+            Pm4ResolvedObjectRecord resolved = ResolveWmo(group, neighborCatalogs, shapeLibrary, ledgerLookup, surfaceCorrelationDb, chunks);
             resolvedWmos.Add(resolved);
 
             // Honor spanned PM4 objects: only take the placement that can exist in the tile itself in ADT space.
@@ -164,7 +166,7 @@ public static class Pm4UnauthoredPlacementResolver
                 Scale: 1024));
         }
 
-        // 3. Extract M2 doodad components from CK24 == 0 remainder
+        // 3. Extract M2 doodad components from CK24 == 0 remainder and explicit M2 groups
         List<Pm4RawObjectGroup> doodadGroups = ExtractDoodadComponents(chunks);
         var resolvedDoodads = new List<Pm4ResolvedObjectRecord>();
         var mddfPlacements = new List<AdtModelPlacement>();
@@ -172,7 +174,7 @@ public static class Pm4UnauthoredPlacementResolver
 
         foreach (Pm4RawObjectGroup group in doodadGroups)
         {
-            Pm4ResolvedObjectRecord? resolved = ResolveDoodad(group, neighborCatalogs, shapeLibrary);
+            Pm4ResolvedObjectRecord? resolved = ResolveDoodad(group, neighborCatalogs, shapeLibrary, surfaceCorrelationDb, chunks);
             if (resolved is null)
                 continue;
 
@@ -222,14 +224,54 @@ public static class Pm4UnauthoredPlacementResolver
         Pm4RawObjectGroup group,
         Dictionary<string, AdtPlacementCatalog> neighborCatalogs,
         IReadOnlyDictionary<string, List<Vector3>>? shapeLibrary,
-        IReadOnlyDictionary<uint, Pm4LedgerPlacementRecord>? ledgerLookup = null)
+        IReadOnlyDictionary<uint, Pm4LedgerPlacementRecord>? ledgerLookup = null,
+        SurfaceCorrelationDatabase? surfaceCorrelationDb = null,
+        Pm4KnownChunkSet? chunks = null)
     {
         float zFloat = group.PlacementZ;
         Vector3 shape = ShapeOf(group.BoundsMin, group.BoundsMax);
         float footprintYaw = ComputeFootprintYawDegrees(group.Vertices);
         Vector3 defaultRotation = new(0f, 0f, footprintYaw);
 
-        // Strategy 0: Check persistent Rosetta ledger for bit-exact Z key
+        // Strategy 0: Surface Correlation Matching (Exact 3D footprint & surface normal histogram)
+        if (surfaceCorrelationDb != null && group.Surfaces is { Count: > 0 } && chunks != null)
+        {
+            var fp = Pm4SurfaceCorrelationExtractor.ExtractFromPm4Group(
+                chunks.Msvt,
+                chunks.Msvi,
+                group.Surfaces,
+                group.Key,
+                (byte)(group.Key >> 24),
+                $"wmo_{group.Key:X8}",
+                $"wmo_{group.Key:X8}",
+                "wmo");
+
+            if (fp != null)
+            {
+                var match = Pm4SurfaceCorrelationMatcher.MatchOne(fp, surfaceCorrelationDb);
+                if (match.Status == "Matched" && match.TopCandidate != null && match.TopScore >= 0.70)
+                {
+                    string candidatePath = match.TopCandidate.AssetPath;
+                    return new Pm4ResolvedObjectRecord(
+                        candidatePath,
+                        "WMO",
+                        group.Key,
+                        zFloat,
+                        group.SurfaceCount,
+                        group.VertexCount,
+                        group.Centroid,
+                        defaultRotation,
+                        group.BoundsMin,
+                        group.BoundsMax,
+                        shape,
+                        Pm4PlacementResolutionMethod.SurfaceCorrelation,
+                        match.TopScore,
+                        $"Surface correlation match {candidatePath} with score {match.TopScore:F3}");
+                }
+            }
+        }
+
+        // Strategy 1: Check persistent Rosetta ledger for bit-exact Z key
         if (ledgerLookup != null && group.Key != 0 && ledgerLookup.TryGetValue(group.Key, out Pm4LedgerPlacementRecord? ledgerRec))
         {
             if (!string.IsNullOrWhiteSpace(ledgerRec.AssetPath) && !ledgerRec.AssetPath.Contains("OILPLATFORM", StringComparison.OrdinalIgnoreCase))
@@ -435,7 +477,9 @@ public static class Pm4UnauthoredPlacementResolver
     private static Pm4ResolvedObjectRecord? ResolveDoodad(
         Pm4RawObjectGroup group,
         Dictionary<string, AdtPlacementCatalog> neighborCatalogs,
-        IReadOnlyDictionary<string, List<Vector3>>? shapeLibrary = null)
+        IReadOnlyDictionary<string, List<Vector3>>? shapeLibrary = null,
+        SurfaceCorrelationDatabase? surfaceCorrelationDb = null,
+        Pm4KnownChunkSet? chunks = null)
     {
         // Only components with sufficient surfaces/vertices are physical doodads (filter trivial terrain remnants)
         if (group.SurfaceCount < 1 || group.VertexCount < 3)
@@ -444,6 +488,48 @@ public static class Pm4UnauthoredPlacementResolver
         Vector2 planar = new(group.Centroid.X, group.Centroid.Y);
         float doodadYaw = ComputeFootprintYawDegrees(group.Vertices);
         Vector3 defaultRotation = new(0f, 0f, doodadYaw);
+
+        // Strategy 0: Surface Correlation Matching (against M2 collision top surfaces in surfaceCorrelationDb)
+        if (surfaceCorrelationDb != null && group.Surfaces is { Count: > 0 } && chunks != null)
+        {
+            byte ck24Type = (byte)(group.Key >> 24);
+            if (ck24Type == 0)
+                ck24Type = 0x40; // Default M2 navmesh type
+
+            var fp = Pm4SurfaceCorrelationExtractor.ExtractFromPm4Group(
+                chunks.Msvt,
+                chunks.Msvi,
+                group.Surfaces,
+                group.Key,
+                ck24Type,
+                $"m2_{group.Key:X8}",
+                $"m2_{group.Key:X8}",
+                "m2");
+
+            if (fp != null)
+            {
+                var match = Pm4SurfaceCorrelationMatcher.MatchOne(fp, surfaceCorrelationDb);
+                if (match.Status == "Matched" && match.TopCandidate != null && match.TopScore >= 0.60)
+                {
+                    string candidatePath = match.TopCandidate.AssetPath;
+                    return new Pm4ResolvedObjectRecord(
+                        candidatePath,
+                        "M2",
+                        group.Key,
+                        group.Centroid.Z,
+                        group.SurfaceCount,
+                        group.VertexCount,
+                        group.Centroid,
+                        defaultRotation,
+                        group.BoundsMin,
+                        group.BoundsMax,
+                        ShapeOf(group.BoundsMin, group.BoundsMax),
+                        Pm4PlacementResolutionMethod.SurfaceCorrelation,
+                        match.TopScore,
+                        $"M2 surface correlation match {candidatePath} with score {match.TopScore:F3}");
+                }
+            }
+        }
 
         // Strategy 1: Check neighbor M2 placements for spatial coincidence (r <= 35.0 yds)
         AdtModelPlacement? bestNeighbor = null;
@@ -547,6 +633,10 @@ public static class Pm4UnauthoredPlacementResolver
             if (key == 0u)
                 continue;
 
+            byte ck24Type = chunks.Msur[i].Ck24Type;
+            if (ck24Type is 0x40 or 0x41)
+                continue; // M2 doodad surfaces handled in ExtractDoodadComponents
+
             if (!byKey.TryGetValue(key, out List<int>? list))
             {
                 list = [];
@@ -584,7 +674,8 @@ public static class Pm4UnauthoredPlacementResolver
                 min,
                 max,
                 centroid,
-                placedVerts));
+                placedVerts,
+                surfaces));
         }
 
         return groups;
@@ -596,17 +687,64 @@ public static class Pm4UnauthoredPlacementResolver
         if (chunks.Msur.Count == 0 || chunks.Msvt.Count == 0 || chunks.Msvi.Count == 0)
             return groups;
 
+        // 1. Explicitly keyed M2 doodad surfaces (CK24 type 0x40 or 0x41)
+        var m2ByKey = new Dictionary<uint, List<int>>();
         List<int> zeroIndices = [];
+
         for (int i = 0; i < chunks.Msur.Count; i++)
         {
-            if (chunks.Msur[i].PackedParams == 0u)
+            byte ck24Type = chunks.Msur[i].Ck24Type;
+            if (ck24Type is 0x40 or 0x41)
+            {
+                uint key = chunks.Msur[i].PackedParams;
+                if (!m2ByKey.TryGetValue(key, out List<int>? list))
+                {
+                    list = [];
+                    m2ByKey[key] = list;
+                }
+                list.Add(i);
+            }
+            else if (chunks.Msur[i].PackedParams == 0u)
+            {
                 zeroIndices.Add(i);
+            }
+        }
+
+        foreach (var (key, surfaceIndices) in m2ByKey)
+        {
+            List<Pm4MsurEntry> surfaces = [.. surfaceIndices.Select(idx => chunks.Msur[idx])];
+            List<Vector3> verts = Pm4PlacementMath.CollectSurfaceVertices(chunks.Msvt, chunks.Msvi, surfaces);
+            if (verts.Count < 3)
+                continue;
+
+            List<Vector3> placedVerts = new(verts.Count);
+            Vector3 min = new(float.MaxValue), max = new(float.MinValue), sum = Vector3.Zero;
+            foreach (Vector3 v in verts)
+            {
+                Vector3 p = Pm4CoordinateService.Pm4LocalToAdtPlacement(v);
+                placedVerts.Add(p);
+                min = Vector3.Min(min, p);
+                max = Vector3.Max(max, p);
+                sum += p;
+            }
+
+            Vector3 centroid = sum / verts.Count;
+            groups.Add(new Pm4RawObjectGroup(
+                key,
+                centroid.Z,
+                surfaceIndices.Count,
+                verts.Count,
+                min,
+                max,
+                centroid,
+                placedVerts,
+                surfaces));
         }
 
         if (zeroIndices.Count == 0)
             return groups;
 
-        // Disjoint-set spatial clustering of zero-bucket surfaces at epsilon 0.25
+        // 2. Disjoint-set spatial clustering of zero-bucket surfaces at epsilon 0.25
         Dictionary<(int, int, int), List<int>> cellMap = [];
         foreach (int sIdx in zeroIndices)
         {
@@ -707,7 +845,8 @@ public static class Pm4UnauthoredPlacementResolver
                 min,
                 max,
                 centroid,
-                placedVerts));
+                placedVerts,
+                surfaces));
         }
 
         return groups;
@@ -896,5 +1035,6 @@ public static class Pm4UnauthoredPlacementResolver
         Vector3 BoundsMin,
         Vector3 BoundsMax,
         Vector3 Centroid,
-        List<Vector3> Vertices);
+        List<Vector3> Vertices,
+        List<Pm4MsurEntry>? Surfaces = null);
 }

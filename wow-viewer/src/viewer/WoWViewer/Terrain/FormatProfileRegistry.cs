@@ -571,8 +571,8 @@ public static class FormatProfileRegistry
             if (major == 0 && minor == 9)
                 return AdtProfile090xUnknown;
 
-            if (major == 3 && minor == 0)
-                return AdtProfile30xUnknown;
+            if (major == 3)
+                return AdtProfile33512340;
 
             if (major == 4)
                 return AdtProfile40xUnknown;
@@ -618,8 +618,8 @@ public static class FormatProfileRegistry
             if (major == 0 && minor == 9)
                 return WmoProfile090xUnknown;
 
-            if (major == 3 && minor == 0)
-                return WmoProfile30xUnknown;
+            if (major == 3)
+                return WmoProfile33512340;
 
             if (major == 0 && minor == 8)
                 return WmoProfile080xUnknown;
@@ -676,8 +676,8 @@ public static class FormatProfileRegistry
             if (major == 2)
                 return M2Profile20xUnknown;
 
-            if (major == 3 && minor == 0)
-                return M2Profile30xUnknown;
+            if (major == 3)
+                return M2Profile33512340;
 
             if (major == 4 && minor == 0)
                 return M2Profile40xUnknown;
@@ -705,12 +705,12 @@ public static class FormatProfileRegistry
             return false;
 
         string[] parts = buildVersion.Split('.');
-        if (parts.Length < 4)
+        if (parts.Length < 2)
             return false;
 
-        return int.TryParse(parts[0], out major)
-            && int.TryParse(parts[1], out minor)
-            && int.TryParse(parts[2], out patch)
-            && int.TryParse(parts[3], out build);
+        bool ok = int.TryParse(parts[0], out major) && int.TryParse(parts[1], out minor);
+        if (parts.Length >= 3) int.TryParse(parts[2], out patch);
+        if (parts.Length >= 4) int.TryParse(parts[3], out build);
+        return ok;
     }
 }

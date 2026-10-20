@@ -113,6 +113,9 @@ internal sealed class SqlSpawnStreamingService
     private (int tileX, int tileY)? _sqlLastCameraTile;
     private bool _isLoadingSpawns;
     private readonly HashSet<int> _lastAppliedSpawnIds = new();
+    private IReadOnlyList<WorldSpawnRecord>? _lastAppliedSpawns;
+    private string _spawnFilterText = string.Empty;
+    private int _selectedSpawnListIndex = -1;
 
     internal string DetectActiveClientVersion()
     {
@@ -397,9 +400,9 @@ internal sealed class SqlSpawnStreamingService
             return;
 
         // Proximity ambient barks for camera near NPCs
-        if (_sqlMapSpawnsCache != null && _sqlMapSpawnsCacheMapId == _currentMapId)
+        if (_lastAppliedSpawns != null && _lastAppliedSpawns.Count > 0 && _sqlMapSpawnsCacheMapId == _currentMapId)
         {
-            _dialogueService.UpdateProximityBarks(_camera.Position, _sqlMapSpawnsCache, _chatWindow);
+            _dialogueService.UpdateProximityBarks(_camera.Position, _lastAppliedSpawns, _chatWindow);
         }
 
         if (!_sqlStreamWithCamera || !_sqlUseAoiFilter)
@@ -444,6 +447,7 @@ internal sealed class SqlSpawnStreamingService
         _sqlMapSpawnsCacheMapId = -1;
         _sqlLastCameraTile = null;
         _sqlForceStreamRefresh = false;
+        _lastAppliedSpawns = null;
         _lastAppliedSpawnIds.Clear();
         if (clearSceneSpawns && _worldScene != null)
             _worldScene.ExternalSpawns.ClearExternalSpawns();
@@ -565,6 +569,8 @@ internal sealed class SqlSpawnStreamingService
             finalSpawns = FilterSpawnsToCameraAoi(eventFilteredSpawns, _sqlAoiTileRadius, _sqlMaxSpawns);
         else if (_sqlMaxSpawns > 0 && eventFilteredSpawns.Count > _sqlMaxSpawns)
             finalSpawns = eventFilteredSpawns.Take(_sqlMaxSpawns).ToList();
+
+        _lastAppliedSpawns = finalSpawns;
 
         // Avoid re-dirtying scene graph and instance lists if spawn set has not changed
         bool changed = finalSpawns.Count != _lastAppliedSpawnIds.Count;
@@ -847,5 +853,89 @@ internal sealed class SqlSpawnStreamingService
 
         ImGui.TextDisabled($"Status: {_sqlSpawnStatus}");
         ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawns.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawns.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawns.ExternalSpawnWmoCount} WMO)");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        if (ImGui.CollapsingHeader("Population Directory", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            var displaySpawns = _lastAppliedSpawns ?? _sqlMapSpawnsCache;
+            if (displaySpawns == null || displaySpawns.Count == 0)
+            {
+                ImGui.TextDisabled("No spawns loaded for the current map/AOI.");
+            }
+            else
+            {
+                ImGui.InputTextWithHint("##searchSpawns", "Filter by name, ID or model...", ref _spawnFilterText, 128);
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Clear##clearFilter"))
+                    _spawnFilterText = string.Empty;
+
+                ImGui.TextDisabled($"Showing spawns ({displaySpawns.Count} available). Double-click or click Goto to teleport camera.");
+
+                if (ImGui.BeginTable("##SpawnsTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Resizable, new Vector2(0f, 220f)))
+                {
+                    ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 45f);
+                    ImGui.TableSetupColumn("Entry", ImGuiTableColumnFlags.WidthFixed, 55f);
+                    ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableSetupColumn("Coords (WoW)", ImGuiTableColumnFlags.WidthFixed, 140f);
+                    ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 50f);
+                    ImGui.TableHeadersRow();
+
+                    string filter = _spawnFilterText.Trim();
+                    int visibleCount = 0;
+
+                    for (int i = 0; i < displaySpawns.Count && visibleCount < 300; i++)
+                    {
+                        var sp = displaySpawns[i];
+                        if (!string.IsNullOrEmpty(filter))
+                        {
+                            bool matches = sp.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                                || sp.EntryId.ToString().Contains(filter, StringComparison.OrdinalIgnoreCase)
+                                || (!string.IsNullOrEmpty(sp.ModelPath) && sp.ModelPath.Contains(filter, StringComparison.OrdinalIgnoreCase));
+                            if (!matches)
+                                continue;
+                        }
+
+                        visibleCount++;
+                        ImGui.TableNextRow();
+
+                        ImGui.TableSetColumnIndex(0);
+                        ImGui.TextUnformatted(sp.SpawnType == WorldSpawnType.Creature ? "NPC" : "GO");
+
+                        ImGui.TableSetColumnIndex(1);
+                        ImGui.TextUnformatted(sp.EntryId.ToString());
+
+                        ImGui.TableSetColumnIndex(2);
+                        bool isSelected = _selectedSpawnListIndex == sp.SpawnId;
+                        if (ImGui.Selectable($"{sp.Name}##sp_{sp.SpawnId}", isSelected, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowDoubleClick))
+                        {
+                            _selectedSpawnListIndex = sp.SpawnId;
+                            if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                            {
+                                TeleportCameraToSpawn(sp);
+                            }
+                        }
+
+                        ImGui.TableSetColumnIndex(3);
+                        ImGui.TextUnformatted($"{sp.PositionWow.X:F1}, {sp.PositionWow.Y:F1}, {sp.PositionWow.Z:F1}");
+
+                        ImGui.TableSetColumnIndex(4);
+                        if (ImGui.SmallButton($"Goto##btn_{sp.SpawnId}"))
+                        {
+                            TeleportCameraToSpawn(sp);
+                        }
+                    }
+
+                    ImGui.EndTable();
+                }
+            }
+        }
+    }
+
+    private void TeleportCameraToSpawn(WorldSpawnRecord sp)
+    {
+        var renderPos = SqlSpawnCoordinateConverter.ToRendererPosition(sp.PositionWow);
+        _camera.Position = renderPos + new Vector3(-4f, 0f, 3f);
+        _sqlForceStreamRefresh = true;
     }
 }

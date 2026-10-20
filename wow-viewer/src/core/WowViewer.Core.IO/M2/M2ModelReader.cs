@@ -31,6 +31,14 @@ public static class M2ModelReader
     private const int TextureTransformOffsetOffset = 0x64;
     private const int BoundsOffset = 0xA0;
     private const int BoundsRadiusOffset = 0xB8;
+    private const int CollisionBoundsOffset = 0xBC;
+    private const int CollisionBoundsRadiusOffset = 0xD4;
+    private const int CollisionTrianglesCountOffset = 0xD8;
+    private const int CollisionTrianglesOffsetOffset = 0xDC;
+    private const int CollisionVerticesCountOffset = 0xE0;
+    private const int CollisionVerticesOffsetOffset = 0xE4;
+    private const int CollisionNormalsCountOffset = 0xE8;
+    private const int CollisionNormalsOffsetOffset = 0xEC;
     private const int LightCountOffset = 0x108;
     private const int LightOffsetOffset = 0x10C;
     private const int CameraCountOffset = 0x110;
@@ -103,6 +111,62 @@ public static class M2ModelReader
         Vector3 boundsMax = ReadFiniteVector3At(data, BoundsOffset + 0x0C, sourcePath, "boundsMax");
         float boundsRadius = ReadFiniteSingleAt(data, BoundsRadiusOffset, sourcePath, "boundsRadius");
 
+        Vector3 collisionBoundsMin = Vector3.Zero;
+        Vector3 collisionBoundsMax = Vector3.Zero;
+        float collisionRadius = 0f;
+        List<Vector3> collisionVertices = [];
+        List<ushort> collisionTriangles = [];
+        List<Vector3> collisionNormals = [];
+
+        if (data.Length >= CollisionNormalsOffsetOffset + sizeof(uint))
+        {
+            if (TryReadFiniteVector3At(data, CollisionBoundsOffset, out Vector3 cMin))
+                collisionBoundsMin = cMin;
+            if (TryReadFiniteVector3At(data, CollisionBoundsOffset + 0x0C, out Vector3 cMax))
+                collisionBoundsMax = cMax;
+            if (CollisionBoundsRadiusOffset + sizeof(float) <= data.Length)
+            {
+                float cr = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(CollisionBoundsRadiusOffset, sizeof(float))));
+                if (float.IsFinite(cr))
+                    collisionRadius = cr;
+            }
+
+            uint colTriCount = ReadUInt32At(dataStream, CollisionTrianglesCountOffset);
+            uint colTriOffset = ReadUInt32At(dataStream, CollisionTrianglesOffsetOffset);
+            if (colTriCount > 0 && colTriOffset > 0 && colTriOffset + (colTriCount * sizeof(ushort)) <= (uint)data.Length)
+            {
+                collisionTriangles = new List<ushort>((int)colTriCount);
+                for (int i = 0; i < colTriCount; i++)
+                {
+                    collisionTriangles.Add(BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan((int)colTriOffset + (i * sizeof(ushort)), sizeof(ushort))));
+                }
+            }
+
+            uint colVertCount = ReadUInt32At(dataStream, CollisionVerticesCountOffset);
+            uint colVertOffset = ReadUInt32At(dataStream, CollisionVerticesOffsetOffset);
+            if (colVertCount > 0 && colVertOffset > 0 && colVertOffset + (colVertCount * 12) <= (uint)data.Length)
+            {
+                collisionVertices = new List<Vector3>((int)colVertCount);
+                for (int i = 0; i < colVertCount; i++)
+                {
+                    if (TryReadFiniteVector3At(data, (int)colVertOffset + (i * 12), out Vector3 cv))
+                        collisionVertices.Add(cv);
+                }
+            }
+
+            uint colNormCount = ReadUInt32At(dataStream, CollisionNormalsCountOffset);
+            uint colNormOffset = ReadUInt32At(dataStream, CollisionNormalsOffsetOffset);
+            if (colNormCount > 0 && colNormOffset > 0 && colNormOffset + (colNormCount * 12) <= (uint)data.Length)
+            {
+                collisionNormals = new List<Vector3>((int)colNormCount);
+                for (int i = 0; i < colNormCount; i++)
+                {
+                    if (TryReadFiniteVector3At(data, (int)colNormOffset + (i * 12), out Vector3 cn))
+                        collisionNormals.Add(cn);
+                }
+            }
+        }
+
         return new M2ModelDocument(
             identity,
             data,
@@ -126,7 +190,13 @@ public static class M2ModelReader
             embeddedSkinProfileOffset: 0,
             bones,
             ribbons,
-            particles);
+            particles,
+            collisionBoundsMin: collisionBoundsMin,
+            collisionBoundsMax: collisionBoundsMax,
+            collisionRadius: collisionRadius,
+            collisionVertices: collisionVertices,
+            collisionTriangles: collisionTriangles,
+            collisionNormals: collisionNormals);
     }
 
     private static string? TryReadName(Stream stream, string sourcePath)
@@ -280,6 +350,27 @@ public static class M2ModelReader
             ReadFiniteSingleAt(data, offset + 0x00, sourcePath, $"{label}.x"),
             ReadFiniteSingleAt(data, offset + 0x04, sourcePath, $"{label}.y"),
             ReadFiniteSingleAt(data, offset + 0x08, sourcePath, $"{label}.z"));
+    }
+
+    private static bool TryReadFiniteVector3At(byte[] data, int offset, out Vector3 vector)
+    {
+        if (offset + 12 > data.Length)
+        {
+            vector = Vector3.Zero;
+            return false;
+        }
+
+        float x = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset, 4)));
+        float y = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset + 4, 4)));
+        float z = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset + 8, 4)));
+        if (float.IsFinite(x) && float.IsFinite(y) && float.IsFinite(z))
+        {
+            vector = new Vector3(x, y, z);
+            return true;
+        }
+
+        vector = Vector3.Zero;
+        return false;
     }
 
     private static Quaternion ReadFiniteQuaternionAt(byte[] data, int offset, string sourcePath, string label)

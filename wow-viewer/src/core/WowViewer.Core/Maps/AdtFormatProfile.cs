@@ -199,7 +199,7 @@ public static class AdtFormatProfiles
             if (key.Major == 0 && key.Minor == 9)
                 return AdtProfile0903807;
 
-            if (key.Major == 3 && key.Minor == 3 && key.Patch == 5)
+            if (key.Major == 3)
                 return AdtProfile33512340;
 
             if (key.Major == 4)

@@ -103,7 +103,11 @@ public sealed record SurfaceCorrelationDatabase(
     float AreaBinSize,
     float NormalAlignmentBinSize,
     float PlanarOffsetBinSize,
-    IReadOnlyList<SurfaceCorrelationFingerprint> Records);
+    IReadOnlyList<SurfaceCorrelationFingerprint> Records)
+{
+    public int M2Count { get; init; } = 0;
+    public int TotalAssetCount => WmoCount + M2Count;
+}
 
 public sealed record SurfaceMatchCandidate(
     SurfaceCorrelationFingerprint Candidate,
@@ -116,7 +120,14 @@ public sealed record SurfaceMatchCandidate(
     double WmoCoverage,
     double SymmetricScore,
     string Status,
-    IReadOnlyList<string> Rationale);
+    IReadOnlyList<string> Rationale)
+{
+    public string AssetPath => Candidate.AssetPath;
+    public string AssetId => Candidate.AssetId;
+    public int CandidateTrianglesMatched => WmoTrianglesMatched;
+    public int CandidateTriangleTotal => WmoTriangleTotal;
+    public double CandidateCoverage => WmoCoverage;
+}
 
 public sealed record SurfaceMatchResult(
     string Pm4FingerprintId,
@@ -128,7 +139,11 @@ public sealed record SurfaceMatchResult(
     string Status,
     bool ReviewRequired,
     IReadOnlyList<string> Rationale,
-    IReadOnlyList<SurfaceMatchCandidate> Candidates);
+    IReadOnlyList<SurfaceMatchCandidate> Candidates)
+{
+    public SurfaceMatchCandidate? TopCandidate => Candidates.Count > 0 ? Candidates[0] : null;
+    public double TopScore => TopCandidate?.SymmetricScore ?? 0.0;
+}
 
 public sealed record SurfaceMatchOptions(
     double MinScore = 0.50,

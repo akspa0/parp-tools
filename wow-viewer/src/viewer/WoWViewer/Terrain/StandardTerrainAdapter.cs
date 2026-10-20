@@ -233,13 +233,76 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 StringComparison.OrdinalIgnoreCase))
             return resolvedProfile;
 
-        if (!TryDetectSplitAdtCompanion(existingTiles, out bool hasTexCompanion, out bool hasObjCompanion, out string? detectedTileBasePath))
-            return resolvedProfile;
+        if (TryDetectSplitAdtCompanion(existingTiles, out bool hasTexCompanion, out bool hasObjCompanion, out string? detectedTileBasePath))
+        {
+            var splitProfile = FormatProfileRegistry.AdtProfile40xUnknown;
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"Split ADT companions detected for map '{_mapName}' at '{detectedTileBasePath}' (texture={hasTexCompanion}, object={hasObjCompanion}); promoting terrain profile from {resolvedProfile.ProfileId} to {splitProfile.ProfileId} while keeping build={buildVersion ?? "unknown"} for non-terrain systems.");
+            return splitProfile;
+        }
 
-        var splitProfile = FormatProfileRegistry.AdtProfile40xUnknown;
-        ViewerLog.Important(ViewerLog.Category.Terrain,
-            $"Split ADT companions detected for map '{_mapName}' at '{detectedTileBasePath}' (texture={hasTexCompanion}, object={hasObjCompanion}); promoting terrain profile from {resolvedProfile.ProfileId} to {splitProfile.ProfileId} while keeping build={buildVersion ?? "unknown"} for non-terrain systems.");
-        return splitProfile;
+        if (string.Equals(resolvedProfile.ProfileId, FormatProfileRegistry.AdtProfile060070Baseline.ProfileId, StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryDetectLichKingAdt(existingTiles))
+            {
+                var lkProfile = FormatProfileRegistry.AdtProfile33512340;
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"Lich King ADT signatures detected for map '{_mapName}'; promoting terrain profile from {resolvedProfile.ProfileId} to {lkProfile.ProfileId}.");
+                return lkProfile;
+            }
+        }
+
+        return resolvedProfile;
+    }
+
+    private bool TryDetectLichKingAdt(IReadOnlyList<int> existingTiles)
+    {
+        if (_useBigAlpha)
+            return true;
+
+        foreach (int idx in existingTiles)
+        {
+            int tileRow = idx / 64;
+            int tileColumn = idx % 64;
+            string tilePath = $"{_mapDir}\\{_mapName}_{tileColumn}_{tileRow}.adt";
+
+            byte[]? headerBytes = _dataSource.ReadFile(tilePath);
+            if (headerBytes == null || headerBytes.Length < 0x200)
+                continue;
+
+            // Search for MH2O chunk in the ADT: MH2O only exists in Lich King (3.0.1+) and later
+            for (int i = 0; i + 8 <= Math.Min(headerBytes.Length, 0x1000); )
+            {
+                uint fcc = BitConverter.ToUInt32(headerBytes, i);
+                int sz = BitConverter.ToInt32(headerBytes, i + 4);
+                if (fcc == 0x4F32484Du) // "MH2O"
+                    return true;
+                if (sz <= 0 || i + 8 + sz > headerBytes.Length)
+                    break;
+                i += 8 + sz;
+            }
+
+            // Also check MCNK header: if ofsMcnr is 0x520 (MCCV present between MCVT and MCNR) or sizeMcal > 0
+            for (int i = 0; i + 0x88 <= headerBytes.Length; i++)
+            {
+                uint fcc = BitConverter.ToUInt32(headerBytes, i);
+                if (fcc == 0x4B4E434Du || fcc == 0x4D434E4Bu) // "MCNK" or "KNCM"
+                {
+                    int mcnkDataStart = i + 8;
+                    if (mcnkDataStart + 0x30 <= headerBytes.Length)
+                    {
+                        uint ofsMcnr = BitConverter.ToUInt32(headerBytes, mcnkDataStart + 0x18);
+                        uint sizeMcal = BitConverter.ToUInt32(headerBytes, mcnkDataStart + 0x28);
+                        if (ofsMcnr == 0x520 || sizeMcal > 0)
+                            return true;
+                    }
+                    break;
+                }
+            }
+            break;
+        }
+
+        return false;
     }
 
     private bool TryDetectSplitAdtCompanion(IReadOnlyList<int> existingTiles, out bool hasTextureCompanion, out bool hasObjectCompanion, out string? detectedTileBasePath)

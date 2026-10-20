@@ -102,6 +102,57 @@ public sealed class McnkSubchunkWalkTests
         Assert.Contains("MCZZ", mcnk.UnknownSubchunks);
     }
 
+    [Fact]
+    public void Scan_McalWithZeroDeclaredSize_ConsumesFromHeaderWhenConfigured()
+    {
+        // 3.3.5 shape: Blizzard ADT exporter set MCAL subchunk size to 0, but Header.SizeMcal is 2056 (8 + 2048).
+        byte[] header = new byte[128];
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x28), 2056); // SizeMcal = 8 + 2048
+
+        byte[] mcalSubchunk = new byte[8 + 2048];
+        Encoding.ASCII.GetBytes("MCAL").CopyTo(mcalSubchunk, 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(mcalSubchunk.AsSpan(4), 0); // Declared size = 0!
+        mcalSubchunk.AsSpan(8).Fill(0x55);
+
+        byte[] payload =
+        [
+            .. header,
+            .. mcalSubchunk,
+            .. Subchunk("MCSE", []),
+        ];
+
+        Mcnk mcnk = new(payload, new Mcnk.ParseOptions { UseHeaderAlphaSize = true });
+
+        Assert.True(mcnk.SubchunkWalkConsumedExactly);
+        Assert.NotNull(mcnk.McalRawData);
+        Assert.Equal(2048, mcnk.McalRawData!.Length);
+    }
+
+    [Fact]
+    public void Scan_McalWithOverDeclaredSize_ConsumesHeaderSizeWithoutOverrunning()
+    {
+        // 3.3.5 shape (chunks with compressed alpha): Subchunk header declares 512 bytes, but Header.SizeMcal is 480 (8 + 472).
+        byte[] header = new byte[128];
+        BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(0x28), 480); // SizeMcal = 8 + 472
+
+        byte[] mcalSubchunk = new byte[8 + 472];
+        Encoding.ASCII.GetBytes("MCAL").CopyTo(mcalSubchunk, 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(mcalSubchunk.AsSpan(4), 512); // Declared size = 512!
+
+        byte[] payload =
+        [
+            .. header,
+            .. mcalSubchunk,
+            .. Subchunk("MCSE", []),
+        ];
+
+        Mcnk mcnk = new(payload, new Mcnk.ParseOptions { UseHeaderAlphaSize = true });
+
+        Assert.True(mcnk.SubchunkWalkConsumedExactly);
+        Assert.NotNull(mcnk.McalRawData);
+        Assert.Equal(472, mcnk.McalRawData!.Length);
+    }
+
     private static byte[] Subchunk(string token, byte[] payload)
     {
         byte[] bytes = new byte[8 + payload.Length];

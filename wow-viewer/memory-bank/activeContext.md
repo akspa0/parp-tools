@@ -1,23 +1,26 @@
 # Active Context — wow-viewer
 
-Last updated: 2026-10-18 · **Spec 275: High-Performance Asset Streaming for MPQ & CASC Active**:
-- **Objective**: Eliminate frame hitches and stutter during camera flight and world navigation across both MPQ (Classic 0.5.3–3.3.5a) and CASC (1.60.1 / 4.3.4).
-- **Core Strategy (Spec 275)**:
-  1. Off-thread model & mesh decoding worker (`WorldAssetDecodeWorker`) to build `M2StaticRenderModel` and `WmoV14Data` in the background, reducing render-thread load time from 35 ms to <= 0.3 ms per model.
-  2. In-memory WMO parsing (`ParseWmoV14(byte[])`) eliminating `Path.GetTempPath()` disk writes and I/O latency.
-  3. MPQ lookahead dependency prefetching for WMO group files (`_000.wmo`) and textures.
-  4. Dynamic frustum & camera-distance priority queue (`WorldAssetPriorityQueue`), replacing stale FIFO order.
-  5. WMO material texture off-thread streaming & direct DXT upload (`glCompressedTexImage2D`).
-- **WMO Portal Occlusion Quarantined**: Fail-safe frustum admission remains active in `WmoRenderer.cs` to guarantee zero missing geometry (e.g. Duskwood two-story houses) while asset streaming is optimized.
+Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlation**:
+- **Terrain Texture & Blending Fix (WoW 3.3.5 / Modern ADTs)**:
+  - Completely resolved chunk-level checkerboarding, pitch black/dark green slopes, and corrupting layer textures across 3.3.5 maps (Dark Portal, Crystalsong, Dragonblight, Valgarde 18_23).
+  - Fixed MCNK subchunk scanning desync in `Mcnk.cs`: `Header.SizeMcsh` is the raw payload (512 bytes), removed erroneous `- 8` which caused an 8-byte advance overrun into shadow data on 71 chunks; prioritized `Header.SizeMcal - 8` when declared size is 0, 4, or 512 to prevent overruns; adjusted walk loop to `while (remaining >= 8)` so 0-payload chunks (`MCSE`) don't break exact walk tracking.
+  - Fixed format profile resolution: `FormatProfileRegistry.cs` now routes all `major == 3` clients to `AdtProfile33512340`; relaxed `TryParseBuild` for 2-4 parts; added `TryDetectLichKingAdt` to `StandardTerrainAdapter.cs` checking `MH2O`, `ofsMcnr == 0x520`, or `sizeMcal > 0`.
+  - Restored sequential `mix()` layer blending with accumulated alpha tracking in `TerrainRenderer.cs` (strict ASCII).
+  - Real-client validation on `Northrend_23_18.adt`: 256/256 chunks parsed with 0 errors; 6/6 `McnkSubchunkWalkTests` pass.
+- **PM4 M2 Surface Correlation & Unauthored Placement**:
+  - Added PM4 collision surface and M2 mesh correlation services (`Pm4SurfaceCorrelationExtractor.cs`, `Pm4SurfaceCorrelationMatcher.cs`, `Pm4UnauthoredPlacementResolver.cs`).
+  - Added M2 collision and attachment metadata extraction in `M2ModelReader.cs` and `M2ModelDocument.cs`.
+  - Integrated world dialogue and spawn streaming refinements.
 
-**Committed Feature Sets on `v0.6.1-dev` (2026-10-18)**:
-1. `feat(archaeology,spec-277)`: UniqueId Stratigraphy & Cross-Map Chronological Fork Analysis. Unified `UniqueIdRecord` contract, quantile calculation ($p_{10}..p_{90}$), adaptive layer clustering, spatial hash twin placement matching, divergence boundary ($UID_{div}$) detection, CLI profiler (`map stratigraphy`), and interactive in-viewer Archaeology Time Machine slider. 5/5 focused unit tests pass; CLI divergence report verified on Map 451 vs Map 0 ($UID_{div} = 400111$, 100% matched overworld branch).
-2. `perf(population,viewer)`: Resolved 0.5.3 MDX/WMO loading regression. Made SQL spawn auto-streaming opt-in (`_sqlAutoLoadOnMapChange = false`), switched partition loading to non-blocking background `Task.Run`, deduplicated applied spawn sets to avoid spurious scene-graph invalidations on camera movement, replaced synchronous WMO disk parsing with cached mesh summary / MOHD bounds in `ExternalSpawnLayer` and `WorldAssetManager.TryGetWmoPlacementBounds`, and added immediate `.mdx`/`.mdl` priority resolution for classic clients in `WorldAssetPathResolver`.
-3. `feat(population,spec-276)`: TrinityCore multi-version SQL population extraction pipeline, full multi-map streaming (all 113 maps in 3.3.5a, all 31 maps in 0.5.3), automatic client-version detection & map loading, Map 451 developer test spawns + alpha-core corner dev transposition, authentic NPC/GameObject nameplates and Info tab inspector display, default Stand/Idle animation selection, and ground-truth 4.3.4 detail doodad alpha blending. 12/12 focused tests pass.
-4. `feat(harvester,spec-274)`: Minimap Hillshade Correlation & Domain Translation dataset pipeline across 37 Zarr v3 map revisions; 228/228 pytest tests pass.
-5. `feat(inspector)`: Integrated 4.3.4 client ground-truth format flags inspection (`FormatFlagsDescriber.cs`) across Terrain, Object, Model, and Standalone inspection panels.
-6. `perf(renderer)`: Optimized spatial M2 lighting collection, terrain streaming MCNK FourCC fast-path, and asset path resolver negative caching.
-7. `feat(renderer,spec-273)`: Completed Spec 273 performance pipeline with fail-safe WMO frustum preservation; 48/48 portal tests pass.
+**Committed Feature Sets on `v0.6.1-dev` (2026-10-20)**:
+1. `fix(terrain,pm4)`: Resolved MCNK MCAL/MCSH subchunk parsing desynchronization, 3.3.5 ADT format profile auto-detection, authentic sequential mix terrain blending, and PM4 M2 surface correlation pipeline.
+2. `feat(archaeology,spec-277)`: UniqueId Stratigraphy & Cross-Map Chronological Fork Analysis. Unified `UniqueIdRecord` contract, quantile calculation ($p_{10}..p_{90}$), adaptive layer clustering, spatial hash twin placement matching, divergence boundary ($UID_{div}$) detection, CLI profiler (`map stratigraphy`), and interactive in-viewer Archaeology Time Machine slider. 5/5 focused unit tests pass; CLI divergence report verified on Map 451 vs Map 0 ($UID_{div} = 400111$, 100% matched overworld branch).
+3. `perf(population,viewer)`: Resolved 0.5.3 MDX/WMO loading regression. Made SQL spawn auto-streaming opt-in (`_sqlAutoLoadOnMapChange = false`), switched partition loading to non-blocking background `Task.Run`, deduplicated applied spawn sets to avoid spurious scene-graph invalidations on camera movement, replaced synchronous WMO disk parsing with cached mesh summary / MOHD bounds in `ExternalSpawnLayer` and `WorldAssetManager.TryGetWmoPlacementBounds`, and added immediate `.mdx`/`.mdl` priority resolution for classic clients in `WorldAssetPathResolver`.
+4. `feat(population,spec-276)`: TrinityCore multi-version SQL population extraction pipeline, full multi-map streaming (all 113 maps in 3.3.5a, all 31 maps in 0.5.3), automatic client-version detection & map loading, Map 451 developer test spawns + alpha-core corner dev transposition, authentic NPC/GameObject nameplates and Info tab inspector display, default Stand/Idle animation selection, and ground-truth 4.3.4 detail doodad alpha blending. 12/12 focused tests pass.
+5. `feat(harvester,spec-274)`: Minimap Hillshade Correlation & Domain Translation dataset pipeline across 37 Zarr v3 map revisions; 228/228 pytest tests pass.
+6. `feat(inspector)`: Integrated 4.3.4 client ground-truth format flags inspection (`FormatFlagsDescriber.cs`) across Terrain, Object, Model, and Standalone inspection panels.
+7. `perf(renderer)`: Optimized spatial M2 lighting collection, terrain streaming MCNK FourCC fast-path, and asset path resolver negative caching.
+8. `feat(renderer,spec-273)`: Completed Spec 273 performance pipeline with fail-safe WMO frustum preservation; 48/48 portal tests pass.
 
 **WC3 file support unified in main browser (2026-10-15):** [Spec 272](../specs/272-wc2-wc3-viewer-support/spec.md) WC3 loose folders and MPQs now load as first-class `IDataSource` instances directly into the main File Browser (`Wc3DataSource`). Textures (BLP, BLP0 with external mips, TGA, PNG) render directly in the main viewer scene viewport (`TextureViewRenderer`) with transparency checkerboard, pan, and zoom, instead of cramped sidebar previews. Models (`.mdx`) render through the main MDX viewport renderer. Arbitrary text/binary files can be browsed with the new "All files" (`*`) filter. Multiple BLP0 mip levels (`.b00` through `.b15`) are grouped into a single `<texture>.blp [N mips]` row with level 0 as the full-resolution primary. Added PNG batch/single export via `TextureExportService` with an option to write all companion mip levels. Viewer build passes 0 errors; focused core tests pass 70/70.
 
@@ -62,14 +65,15 @@ the path. Operator must verify the actual client DB2 row/origin and visual playb
 still unexplained; exact bytes remain unavailable, so do not widen the reader based on that report.
 
 **Next on `v0.6.1-dev` (fresh chat start here):**
-1. Operator runs the viewer on 1.60.1 inside `MD_CryptOneRm.wmo` and provides `[WMOAreaLookup]` diagnostics; do not implement a key/fallback change before reading the matching row IDs.
-2. Operator confirms character M2s render again after the `ReplaceableTextureResolver` rollback; FileDataID texture support remains unresolved.
-3. Operator verifies the actual 1.60.1 `CinematicCamera` row for FileDataID 116912 and plays/warmups FlybyUndead on base Azeroth with intended phase layers; record whether origin/facing and tile `(28,28)` agree.
-4. Operator-requested public format docs: prepare wowdev.wiki-style articles for the 0.5.5 prototype ADT, WMO v14, MDX, Alpha WDT, and a substantial PM4/PD4 refresh. Ground each in repo evidence; distinguish verified facts from open interpretations.
-5. Spec 271 Phase B — integrated Help + image guide (operator captures screenshots; agent prepares shot list and `HelpGuideService`).
-6. Spec 270 open gap — objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing from restored tiles (operator report 2026-10-11).
-7. Separate spec needed: `LkAdtReader` adds 8 bytes to MCAL/MCSH offsets (restore tool repairs locally in `RepairAlphaAndShadow`).
-8. Operator smoke owed on regenerated `output/restored_development` (alpha masks, no orange tint, 63_5 huts flush).
+1. **PM4 Surface Correlation & Placement Investigation**: Investigate PM4 collision surfaces, M2 mesh surface correlation, and unauthored development placement resolution using the new extraction and matching pipeline.
+2. Operator runs the viewer on 1.60.1 inside `MD_CryptOneRm.wmo` and provides `[WMOAreaLookup]` diagnostics; do not implement a key/fallback change before reading the matching row IDs.
+3. Operator confirms character M2s render again after the `ReplaceableTextureResolver` rollback; FileDataID texture support remains unresolved.
+4. Operator verifies the actual 1.60.1 `CinematicCamera` row for FileDataID 116912 and plays/warmups FlybyUndead on base Azeroth with intended phase layers; record whether origin/facing and tile `(28,28)` agree.
+5. Operator-requested public format docs: prepare wowdev.wiki-style articles for the 0.5.5 prototype ADT, WMO v14, MDX, Alpha WDT, and a substantial PM4/PD4 refresh. Ground each in repo evidence; distinguish verified facts from open interpretations.
+6. Spec 271 Phase B — integrated Help + image guide (operator captures screenshots; agent prepares shot list and `HelpGuideService`).
+7. Spec 270 open gap — objects on tiles adjacent to PM4-covered tiles that exist in museum data are still missing from restored tiles (operator report 2026-10-11).
+8. Resolved: `Mcnk.cs` subchunk scanner desync fixed (MCSH raw size 512, MCAL header size fallback, and loop boundary). Alpha/shadow offsets now parse 100% cleanly without tool-local offset repairs.
+9. Operator smoke owed on regenerated `output/restored_development` (alpha masks, no orange tint, 63_5 huts flush).
 
 The repeatable procedure is now documented in [Development Map Restoration](../docs/WoWViewer/development-map-restoration.md);
 that guide does not close the operator visual smoke item above. The README uses its native Markdown support matrix

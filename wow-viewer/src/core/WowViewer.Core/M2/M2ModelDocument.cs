@@ -27,7 +27,13 @@ public sealed class M2ModelDocument
         uint embeddedSkinProfileOffset,
         IReadOnlyList<M2BoneDefinition>? bones = null,
         IReadOnlyList<M2RibbonDefinition>? ribbons = null,
-        IReadOnlyList<M2ParticleDefinition>? particles = null)
+        IReadOnlyList<M2ParticleDefinition>? particles = null,
+        Vector3? collisionBoundsMin = null,
+        Vector3? collisionBoundsMax = null,
+        float collisionRadius = 0f,
+        IReadOnlyList<Vector3>? collisionVertices = null,
+        IReadOnlyList<ushort>? collisionTriangles = null,
+        IReadOnlyList<Vector3>? collisionNormals = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(rawBytes);
@@ -63,6 +69,12 @@ public sealed class M2ModelDocument
         BoundsRadius = boundsRadius;
         EmbeddedSkinProfileCount = embeddedSkinProfileCount;
         EmbeddedSkinProfileOffset = embeddedSkinProfileOffset;
+        CollisionBoundsMin = collisionBoundsMin ?? Vector3.Zero;
+        CollisionBoundsMax = collisionBoundsMax ?? Vector3.Zero;
+        CollisionRadius = collisionRadius;
+        CollisionVertices = collisionVertices ?? [];
+        CollisionTriangles = collisionTriangles ?? [];
+        CollisionNormals = collisionNormals ?? [];
         InlineEra1121Geometry = null;
     }
 
@@ -107,6 +119,20 @@ public sealed class M2ModelDocument
     public Vector3 BoundsMax { get; }
 
     public float BoundsRadius { get; }
+
+    public Vector3 CollisionBoundsMin { get; }
+
+    public Vector3 CollisionBoundsMax { get; }
+
+    public float CollisionRadius { get; }
+
+    public IReadOnlyList<Vector3> CollisionVertices { get; }
+
+    public IReadOnlyList<ushort> CollisionTriangles { get; }
+
+    public IReadOnlyList<Vector3> CollisionNormals { get; }
+
+    public bool HasCollisionMesh => CollisionVertices.Count > 0 && CollisionTriangles.Count > 0;
 
     public uint EmbeddedSkinProfileCount { get; }
 

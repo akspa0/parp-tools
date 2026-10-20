@@ -115,6 +115,7 @@ public sealed class FakeChatWindowService
                 }
                 else
                 {
+                    ImGui.PushTextWrapPos(0.0f);
                     for (int i = 0; i < _messages.Count; i++)
                     {
                         var msg = _messages[i];
@@ -142,6 +143,7 @@ public sealed class FakeChatWindowService
                                 break;
                         }
                     }
+                    ImGui.PopTextWrapPos();
                 }
 
                 if (_scrollToBottom && AutoScroll)

@@ -6,18 +6,18 @@ public static class Pm4SurfaceCorrelationMatcher
 {
     public static IReadOnlyList<SurfaceMatchResult> Match(
         IReadOnlyList<SurfaceCorrelationFingerprint> pm4Fingerprints,
-        SurfaceCorrelationDatabase wmoDatabase,
+        SurfaceCorrelationDatabase database,
         SurfaceMatchOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(pm4Fingerprints);
-        ArgumentNullException.ThrowIfNull(wmoDatabase);
+        ArgumentNullException.ThrowIfNull(database);
 
         SurfaceMatchOptions opts = options ?? SurfaceMatchOptions.Default;
         List<SurfaceMatchResult> results = new(pm4Fingerprints.Count);
 
         foreach (SurfaceCorrelationFingerprint pm4 in pm4Fingerprints)
         {
-            SurfaceMatchResult result = MatchOne(pm4, wmoDatabase.Records, opts);
+            SurfaceMatchResult result = MatchOne(pm4, database.Records, opts);
             results.Add(result);
         }
 
@@ -26,11 +26,25 @@ public static class Pm4SurfaceCorrelationMatcher
 
     public static SurfaceMatchResult MatchOne(
         SurfaceCorrelationFingerprint pm4,
-        IReadOnlyList<SurfaceCorrelationFingerprint> wmoRecords,
+        SurfaceCorrelationDatabase database,
+        SurfaceMatchOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        SurfaceMatchOptions opts = options ?? new SurfaceMatchOptions(
+            EdgeBinSize: database.EdgeBinSize,
+            AreaBinSize: database.AreaBinSize,
+            NormalAlignmentBinSize: database.NormalAlignmentBinSize,
+            PlanarOffsetBinSize: database.PlanarOffsetBinSize);
+        return MatchOne(pm4, database.Records, opts);
+    }
+
+    public static SurfaceMatchResult MatchOne(
+        SurfaceCorrelationFingerprint pm4,
+        IReadOnlyList<SurfaceCorrelationFingerprint> referenceRecords,
         SurfaceMatchOptions options)
     {
         ArgumentNullException.ThrowIfNull(pm4);
-        ArgumentNullException.ThrowIfNull(wmoRecords);
+        ArgumentNullException.ThrowIfNull(referenceRecords);
         ArgumentNullException.ThrowIfNull(options);
 
         List<string> rationale = new(4)
@@ -45,18 +59,27 @@ public static class Pm4SurfaceCorrelationMatcher
             return BuildResult(pm4, "Ineligible", true, rationale, []);
         }
 
-        if (!string.Equals(expectedKind, "wmo", StringComparison.OrdinalIgnoreCase))
+        bool hasMatchingKind = false;
+        List<CandidateEvaluation> evaluations = new(referenceRecords.Count);
+        for (int i = 0; i < referenceRecords.Count; i++)
         {
-            rationale.Add($"ck24Type 0x{pm4.Ck24Type:X2} maps to '{expectedKind}' — M2 surface DB not yet built.");
-            return BuildResult(pm4, "Ineligible", true, rationale, []);
-        }
+            SurfaceCorrelationFingerprint candidate = referenceRecords[i];
+            if (!string.IsNullOrEmpty(expectedKind) &&
+                !string.Equals(candidate.AssetKind, expectedKind, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
 
-        List<CandidateEvaluation> evaluations = new(wmoRecords.Count);
-        for (int i = 0; i < wmoRecords.Count; i++)
-        {
-            CandidateEvaluation? eval = EvaluateCandidate(pm4, wmoRecords[i], options);
+            hasMatchingKind = true;
+            CandidateEvaluation? eval = EvaluateCandidate(pm4, candidate, options);
             if (eval is not null)
                 evaluations.Add(eval.Value);
+        }
+
+        if (!hasMatchingKind)
+        {
+            rationale.Add($"ck24Type 0x{pm4.Ck24Type:X2} maps to '{expectedKind}' — no '{expectedKind}' reference records found in database.");
+            return BuildResult(pm4, "Ineligible", true, rationale, []);
         }
 
         evaluations.Sort(static (a, b) => b.SymmetricScore.CompareTo(a.SymmetricScore));
@@ -79,7 +102,7 @@ public static class Pm4SurfaceCorrelationMatcher
         else
         {
             status = "Matched";
-            rationale.Add($"top candidate '{evaluations[0].Candidate.AssetPath}' score={topScore:F3} pm4Coverage={evaluations[0].Pm4Coverage:F2} wmoCoverage={evaluations[0].WmoCoverage:F2}.");
+            rationale.Add($"top candidate '{evaluations[0].Candidate.AssetPath}' score={topScore:F3} pm4Coverage={evaluations[0].Pm4Coverage:F2} candidateCoverage={evaluations[0].CandidateCoverage:F2}.");
         }
 
         List<SurfaceMatchCandidate> candidates = new(Math.Min(evaluations.Count, maxCandidates));
@@ -92,10 +115,10 @@ public static class Pm4SurfaceCorrelationMatcher
                 i + 1,
                 eval.Pm4TrianglesMatched,
                 eval.Pm4TriangleTotal,
-                eval.WmoTrianglesMatched,
-                eval.WmoTriangleTotal,
+                eval.CandidateTrianglesMatched,
+                eval.CandidateTriangleTotal,
                 eval.Pm4Coverage,
-                eval.WmoCoverage,
+                eval.CandidateCoverage,
                 eval.SymmetricScore,
                 candidateStatus,
                 eval.Rationale));
@@ -107,44 +130,44 @@ public static class Pm4SurfaceCorrelationMatcher
 
     private static CandidateEvaluation? EvaluateCandidate(
         SurfaceCorrelationFingerprint pm4,
-        SurfaceCorrelationFingerprint wmo,
+        SurfaceCorrelationFingerprint candidate,
         SurfaceMatchOptions options)
     {
-        if (pm4.TriangleHistogram.Count == 0 || wmo.TriangleHistogram.Count == 0)
+        if (pm4.TriangleHistogram.Count == 0 || candidate.TriangleHistogram.Count == 0)
             return null;
 
-        if (pm4.TriangleCount < 3 || wmo.TriangleCount < 3)
+        if (pm4.TriangleCount < 1 || candidate.TriangleCount < 1)
             return null;
 
         int pm4Matched = 0;
         int pm4Total = pm4.TriangleCount;
-        int wmoMatched = 0;
-        int wmoTotal = wmo.TriangleCount;
+        int candidateMatched = 0;
+        int candidateTotal = candidate.TriangleCount;
 
         foreach (var kv in pm4.TriangleHistogram)
         {
-            if (wmo.TriangleHistogram.TryGetValue(kv.Key, out int wmoCount))
+            if (candidate.TriangleHistogram.TryGetValue(kv.Key, out int candidateCount))
             {
-                int matched = Math.Min(kv.Value, wmoCount);
+                int matched = Math.Min(kv.Value, candidateCount);
                 pm4Matched += matched;
-                wmoMatched += matched;
+                candidateMatched += matched;
             }
         }
 
         double pm4Coverage = (double)pm4Matched / pm4Total;
-        double wmoCoverage = (double)wmoMatched / wmoTotal;
-        double symmetricScore = pm4Coverage * wmoCoverage > 0
-            ? 2.0 * pm4Coverage * wmoCoverage / (pm4Coverage + wmoCoverage)
+        double candidateCoverage = (double)candidateMatched / candidateTotal;
+        double symmetricScore = pm4Coverage * candidateCoverage > 0
+            ? 2.0 * pm4Coverage * candidateCoverage / (pm4Coverage + candidateCoverage)
             : 0;
 
         List<string> rationale =
         [
             $"pm4Coverage={pm4Coverage:F3} ({pm4Matched}/{pm4Total} triangles matched)",
-            $"wmoCoverage={wmoCoverage:F3} ({wmoMatched}/{wmoTotal} triangles matched)",
+            $"{candidate.AssetKind}Coverage={candidateCoverage:F3} ({candidateMatched}/{candidateTotal} triangles matched)",
             $"symmetricF1={symmetricScore:F3}",
         ];
 
-        return new CandidateEvaluation(wmo, pm4Matched, pm4Total, wmoMatched, wmoTotal, pm4Coverage, wmoCoverage, symmetricScore, rationale);
+        return new CandidateEvaluation(candidate, pm4Matched, pm4Total, candidateMatched, candidateTotal, pm4Coverage, candidateCoverage, symmetricScore, rationale);
     }
 
     private static string ResolveExpectedAssetKind(byte ck24Type)
@@ -197,10 +220,10 @@ public static class Pm4SurfaceCorrelationMatcher
         SurfaceCorrelationFingerprint Candidate,
         int Pm4TrianglesMatched,
         int Pm4TriangleTotal,
-        int WmoTrianglesMatched,
-        int WmoTriangleTotal,
+        int CandidateTrianglesMatched,
+        int CandidateTriangleTotal,
         double Pm4Coverage,
-        double WmoCoverage,
+        double CandidateCoverage,
         double SymmetricScore,
         IReadOnlyList<string> Rationale);
 }

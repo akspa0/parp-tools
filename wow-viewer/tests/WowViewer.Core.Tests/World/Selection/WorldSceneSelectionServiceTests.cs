@@ -91,7 +91,7 @@ public sealed class WorldSceneSelectionServiceTests
     }
 
     [Fact]
-    public void HoverRay_WhenCameraOutsideWmo_SelectsNearestWmoExterior_OverInteriorObjects()
+    public void HoverRay_FallsThroughToInteriorObjects_EvenWhenCameraOutside()
     {
         var shell = Hit(0, distance: 10f, kind: WorldSceneSelectionKind.Wmo, point: new Vector3(0, 0, 0), min: new Vector3(-20f), max: new Vector3(20f));
         var insideProp = Hit(1, distance: 25f, kind: WorldSceneSelectionKind.Mdx, point: new Vector3(0, 0, 0));
@@ -101,8 +101,8 @@ public sealed class WorldSceneSelectionServiceTests
         var policy = new WorldSceneSelectionPolicy(false, float.MaxValue, cameraOutside);
         var result = WorldSceneSelectionService.Select(new WorldSceneSelectionRequest(WorldSceneSelectionMode.HoverRay, policy), snapshot);
 
-        // Exterior WMO is retained and selected as the nearest ray hit
-        Assert.Equal(0, result.BestId);
+        // Enclosing WMO falls through so the interior object can be hovered/selected through large bounding boxes
+        Assert.Equal(1, result.BestId);
     }
 
     [Fact]

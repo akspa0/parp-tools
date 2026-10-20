@@ -54,7 +54,10 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
             group.Name.Contains("anti_portal", StringComparison.OrdinalIgnoreCase) ||
             group.Name.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
             group.Name.Contains("invis_wall", StringComparison.OrdinalIgnoreCase) ||
-            group.Name.Contains("invisible", StringComparison.OrdinalIgnoreCase)));
+            group.Name.Contains("invisible", StringComparison.OrdinalIgnoreCase) ||
+            group.Name.Contains("exteriorfacade", StringComparison.OrdinalIgnoreCase) ||
+            group.Name.Contains("exterior_facade", StringComparison.OrdinalIgnoreCase) ||
+            group.Name.Contains("facade", StringComparison.OrdinalIgnoreCase)));
     }
 
     public float GetGroupEffectiveOpacity(int groupIndex)
@@ -186,7 +189,10 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
             text.Contains("cam_collision", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("camcollision", StringComparison.OrdinalIgnoreCase) ||
             text.Contains("collwall", StringComparison.OrdinalIgnoreCase) ||
-            text.Contains("coll_wall", StringComparison.OrdinalIgnoreCase))
+            text.Contains("coll_wall", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("exteriorfacade", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("exterior_facade", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("facade", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -199,7 +205,9 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
                 fileName.EndsWith("_invis", StringComparison.OrdinalIgnoreCase) ||
                 fileName.StartsWith("invis_", StringComparison.OrdinalIgnoreCase) ||
                 fileName.StartsWith("invisible_", StringComparison.OrdinalIgnoreCase) ||
-                fileName.StartsWith("collision_", StringComparison.OrdinalIgnoreCase))
+                fileName.StartsWith("collision_", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Contains("facade", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Contains("exteriorfacade", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -209,13 +217,24 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
         {
             bool anyCollision = false;
             bool allCollision = true;
+            bool anyFacade = false;
             foreach (var group in wmo.Groups)
             {
-                if (!string.IsNullOrWhiteSpace(group.Name) &&
+                bool isFacade = !string.IsNullOrWhiteSpace(group.Name) &&
+                    (group.Name.Contains("exteriorfacade", StringComparison.OrdinalIgnoreCase) ||
+                     group.Name.Contains("exterior_facade", StringComparison.OrdinalIgnoreCase) ||
+                     group.Name.Contains("facade", StringComparison.OrdinalIgnoreCase));
+
+                if (isFacade)
+                {
+                    anyFacade = true;
+                }
+
+                if (isFacade || (!string.IsNullOrWhiteSpace(group.Name) &&
                     (group.Name.Contains("collision", StringComparison.OrdinalIgnoreCase) ||
                      group.Name.Contains("invisible", StringComparison.OrdinalIgnoreCase) ||
                      group.Name.Contains("invis_wall", StringComparison.OrdinalIgnoreCase) ||
-                     group.Name.Contains("inviswall", StringComparison.OrdinalIgnoreCase)))
+                     group.Name.Contains("inviswall", StringComparison.OrdinalIgnoreCase))))
                 {
                     anyCollision = true;
                 }
@@ -225,7 +244,7 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
                 }
             }
 
-            if (anyCollision && (allCollision || wmo.Groups.Count <= 2))
+            if (anyFacade || (anyCollision && (allCollision || wmo.Groups.Count <= 2)))
                 return true;
         }
 

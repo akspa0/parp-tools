@@ -143,7 +143,7 @@ public sealed class WmoContainerFallThroughFilterTests
     }
 
     [Fact]
-    public void ApplyFallThrough_PreservesWmo_WhenCameraIsOutsideWmo()
+    public void ApplyFallThrough_RemovesEnclosingWmo_WhenInteriorPropHit()
     {
         var wmo = new WmoContainerFallThroughFilter.CandidateObject(
             Id: 1,
@@ -162,10 +162,9 @@ public sealed class WmoContainerFallThroughFilterTests
         var cameraOutside = new Vector3(100, 100, 50);
         var result = WmoContainerFallThroughFilter.ApplyFallThrough([wmo, interiorProp], cameraOutside);
 
-        // When camera is outside the WMO, the WMO must not be dropped as an enclosing container
-        Assert.Equal(2, result.Count);
-        Assert.Contains(result, c => c.Id == 1 && c.IsWmo);
-        Assert.Contains(result, c => c.Id == 2 && !c.IsWmo);
+        // When interior prop is inside the WMO bounds, enclosing WMO drops so interior props take priority
+        Assert.Single(result);
+        Assert.Equal(2, result[0].Id);
     }
 
     [Fact]

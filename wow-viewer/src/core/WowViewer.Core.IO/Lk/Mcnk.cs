@@ -210,10 +210,11 @@ namespace WowViewer.Core.IO.Lk
                 uint size = BitConverter.ToUInt32(data, pos + 4);
                 int dataStart = pos + 8;
 
-                if (size > (uint)(data.Length - dataStart))
+                uint consumedSize = ComputeConsumedSize(fourcc, size, dataStart, data.Length, rule);
+                if (consumedSize > (uint)(data.Length - dataStart))
                     return false;
 
-                int next = dataStart + (int)ComputeConsumedSize(fourcc, size, dataStart, data.Length, rule);
+                int next = dataStart + (int)consumedSize;
                 if (next <= pos || next > data.Length)
                     return false;
 
@@ -231,7 +232,15 @@ namespace WowViewer.Core.IO.Lk
         private uint ComputeConsumedSize(uint fourcc, uint size, int dataStart, int dataLength, SubchunkAdvanceRule rule)
         {
             if (rule == SubchunkAdvanceRule.DeclaredSize)
+            {
+                if ((fourcc is 0x4D43414C or 0x4C41434D) && (size == 0 || size == 4) && Header.SizeMcal >= 8)
+                {
+                    uint fromHeader = Header.SizeMcal - 8;
+                    if (fromHeader <= (uint)(dataLength - dataStart))
+                        return fromHeader;
+                }
                 return size;
+            }
 
             switch (fourcc)
             {
@@ -242,22 +251,21 @@ namespace WowViewer.Core.IO.Lk
                 case 0x4D43414C: // MCAL
                 case 0x4C41434D:
                 {
-                    uint fromHeader = _parseOptions.UseHeaderAlphaSize && Header.SizeMcal >= 8
-                        ? Header.SizeMcal - 8
-                        : 0;
-                    return fromHeader > 0 && fromHeader <= (uint)(dataLength - dataStart)
-                        ? Math.Max(size, fromHeader)
-                        : size;
+                    uint fromHeader = Header.SizeMcal >= 8 ? Header.SizeMcal - 8 : 0;
+                    if (_parseOptions.UseHeaderAlphaSize || (fromHeader > 0 && (size == 0 || size == 4)))
+                    {
+                        if (fromHeader > 0 && fromHeader <= (uint)(dataLength - dataStart))
+                            return fromHeader;
+                    }
+                    return size;
                 }
 
                 case 0x4D435348: // MCSH
                 case 0x4853434D:
                 {
-                    uint fromHeader = _parseOptions.UseHeaderShadowSize && Header.SizeMcsh >= 8
-                        ? Header.SizeMcsh - 8
-                        : 0;
+                    uint fromHeader = _parseOptions.UseHeaderShadowSize ? Header.SizeMcsh : 0;
                     return fromHeader > 0 && fromHeader <= (uint)(dataLength - dataStart)
-                        ? Math.Max(size, fromHeader)
+                        ? fromHeader
                         : size;
                 }
 
@@ -279,7 +287,7 @@ namespace WowViewer.Core.IO.Lk
             var dl = diag ? new System.Collections.Generic.List<string>() : null;
             if (diag && dl != null) dl.Add($"--- MCNK #{_diagCount - 1} flags=0x{rawFlags:X} hasLiquid={hasLiquidFlags} dataLen={data.Length} ---");
 
-            while (remaining > 8)
+            while (remaining >= 8)
             {
                 uint fourcc = BitConverter.ToUInt32(data, pos);
                 uint size = BitConverter.ToUInt32(data, pos + 4);
@@ -292,9 +300,9 @@ namespace WowViewer.Core.IO.Lk
                     dl.Add($"pos=0x{pos:X} fcc='{f}' (0x{fourcc:X8}) size={size} rem={remaining}");
                 }
 
-                if (size > (uint)remaining - 8)
+                if (consumedSize > (uint)remaining - 8)
                 {
-                    if (diag) dl.Add($"BREAK: size={size} > rem-8={(uint)remaining - 8}");
+                    if (diag) dl.Add($"BREAK: consumedSize={consumedSize} > rem-8={(uint)remaining - 8}");
                     break;
                 }
 
