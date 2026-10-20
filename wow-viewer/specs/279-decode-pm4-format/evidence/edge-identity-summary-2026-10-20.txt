@@ -1,0 +1,17 @@
+MAP: d6460882861d2ffa0e13db323a8ddf9a8e52705ce8d3c23e74fa1e6a86b8d709
+{"Files":616,"Links":1273335,"UniqueReversePairs":1271518,"MultipleReverseLinks":0,"NoReverseLinks":1817}
+BY STRATUM
+{"Stratum":"no-reverse","Links":1817.0,"Unique":0.0,"Multiple":0.0,"NoReverse":1817.0,"SameValue":0.0,"DiffValue":0.0,"NextSame":0.0,"NextDiff":1810.0,"ReusedLinks":0.0,"ReusedEdges":0.0}
+{"Stratum":"reused-value","Links":0.0,"Unique":0.0,"Multiple":0.0,"NoReverse":0.0,"SameValue":0.0,"DiffValue":0.0,"NextSame":0.0,"NextDiff":0.0,"ReusedLinks":889594.0,"ReusedEdges":885143.0}
+{"Stratum":"unique-reverse","Links":1271518.0,"Unique":1271518.0,"Multiple":0.0,"NoReverse":0.0,"SameValue":879456.0,"DiffValue":392062.0,"NextSame":36326.0,"NextDiff":1234894.0,"ReusedLinks":0.0,"ReusedEdges":0.0}
+UNIQUE REVERSE BY RAW TYPE
+{"RawType":"1","Unique":669935.0,"Same":662710.0,"Diff":7225.0,"Pct":98.92}
+{"RawType":"2","Unique":450390.0,"Same":211009.0,"Diff":239381.0,"Pct":46.85}
+{"RawType":"4","Unique":54417.0,"Same":817.0,"Diff":53600.0,"Pct":1.5}
+{"RawType":"10","Unique":64026.0,"Same":46.0,"Diff":63980.0,"Pct":0.07}
+{"RawType":"12","Unique":23292.0,"Same":0.0,"Diff":23292.0,"Pct":0.0}
+{"RawType":"17","Unique":3954.0,"Same":3954.0,"Diff":0.0,"Pct":100.0}
+{"RawType":"18","Unique":4087.0,"Same":920.0,"Diff":3167.0,"Pct":22.51}
+{"RawType":"20","Unique":393.0,"Same":0.0,"Diff":393.0,"Pct":0.0}
+{"RawType":"26","Unique":836.0,"Same":0.0,"Diff":836.0,"Pct":0.0}
+{"RawType":"28","Unique":188.0,"Same":0.0,"Diff":188.0,"Pct":0.0}

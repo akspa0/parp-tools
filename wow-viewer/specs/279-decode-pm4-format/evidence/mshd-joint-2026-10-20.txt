@@ -1,0 +1,128 @@
+NONEMPTY FILES: 309
+FIELD00 vs FIELD08 PAIRS
+{"Pair":"534, 534","Count":85,"AvgSurfaces":2661.0,"AvgLinks":6379.4,"AvgMsvt":5906.6}
+{"Pair":"448, 534","Count":3,"AvgSurfaces":5838.3,"AvgLinks":14615.0,"AvgMsvt":12315.0}
+{"Pair":"534, 517","Count":2,"AvgSurfaces":1006.0,"AvgLinks":2179.5,"AvgMsvt":2081.0}
+{"Pair":"534, 485","Count":2,"AvgSurfaces":2476.0,"AvgLinks":6894.5,"AvgMsvt":5162.5}
+{"Pair":"534, 480","Count":2,"AvgSurfaces":2208.0,"AvgLinks":5811.5,"AvgMsvt":3964.5}
+{"Pair":"534, 418","Count":2,"AvgSurfaces":341.0,"AvgLinks":489.5,"AvgMsvt":790.5}
+{"Pair":"534, 390","Count":2,"AvgSurfaces":484.0,"AvgLinks":1035.0,"AvgMsvt":1207.5}
+{"Pair":"528, 534","Count":2,"AvgSurfaces":4314.5,"AvgLinks":11522.5,"AvgMsvt":9514.5}
+{"Pair":"519, 534","Count":2,"AvgSurfaces":4350.0,"AvgLinks":11648.5,"AvgMsvt":7697.5}
+{"Pair":"450, 534","Count":2,"AvgSurfaces":50.5,"AvgLinks":91.0,"AvgMsvt":127.0}
+{"Pair":"375, 449","Count":2,"AvgSurfaces":455.5,"AvgLinks":1038.0,"AvgMsvt":709.0}
+{"Pair":"354, 523","Count":2,"AvgSurfaces":1718.0,"AvgLinks":4631.5,"AvgMsvt":4366.0}
+FIELD04 TOP
+{"Field04":"3262","Count":13,"AvgSurfaces":2101.2}
+{"Field04":"378","Count":5,"AvgSurfaces":5095.2}
+{"Field04":"2497","Count":5,"AvgSurfaces":1413.4}
+{"Field04":"288","Count":5,"AvgSurfaces":2994.0}
+{"Field04":"249","Count":5,"AvgSurfaces":4502.6}
+{"Field04":"387","Count":4,"AvgSurfaces":449.8}
+{"Field04":"295","Count":4,"AvgSurfaces":740.2}
+{"Field04":"974","Count":4,"AvgSurfaces":399.5}
+{"Field04":"3814","Count":3,"AvgSurfaces":1091.0}
+{"Field04":"3589","Count":3,"AvgSurfaces":1596.0}
+SAMPLE ROWS
+[
+  {
+    "File": "development_00_00.pm4",
+    "TileX": 0,
+    "TileY": 0,
+    "Field00": 422,
+    "Field04": 146,
+    "Field08": 357,
+    "Surfaces": 4110,
+    "Links": 12820,
+    "Msvt": 6318,
+    "Msvi": 15602,
+    "Mspv": 8778,
+    "Mspi": 26458,
+    "Mscn": 9990,
+    "Mprl": 2493,
+    "Mprr": 81936,
+    "Mdbh": 1,
+    "Mdos": 25,
+    "Mdsf": 2684
+  },
+  {
+    "File": "development_00_01.pm4",
+    "TileX": 0,
+    "TileY": 1,
+    "Field00": 333,
+    "Field04": 119,
+    "Field08": 294,
+    "Surfaces": 230,
+    "Links": 525,
+    "Msvt": 532,
+    "Msvi": 897,
+    "Mspv": 413,
+    "Mspi": 648,
+    "Mscn": 568,
+    "Mprl": 171,
+    "Mprr": 55872,
+    "Mdbh": 1,
+    "Mdos": 1,
+    "Mdsf": 0
+  },
+  {
+    "File": "development_00_02.pm4",
+    "TileX": 0,
+    "TileY": 2,
+    "Field00": 366,
+    "Field04": 136,
+    "Field08": 441,
+    "Surfaces": 3035,
+    "Links": 9086,
+    "Msvt": 5211,
+    "Msvi": 11180,
+    "Mspv": 6864,
+    "Mspi": 12368,
+    "Mscn": 8812,
+    "Mprl": 404,
+    "Mprr": 32448,
+    "Mdbh": 1,
+    "Mdos": 1,
+    "Mdsf": 0
+  },
+  {
+    "File": "development_01_00.pm4",
+    "TileX": 1,
+    "TileY": 0,
+    "Field00": 14,
+    "Field04": 6,
+    "Field08": 17,
+    "Surfaces": 6,
+    "Links": 6,
+    "Msvt": 15,
+    "Msvi": 21,
+    "Mspv": 0,
+    "Mspi": 0,
+    "Mscn": 9,
+    "Mprl": 0,
+    "Mprr": 15696,
+    "Mdbh": 1,
+    "Mdos": 1,
+    "Mdsf": 0
+  },
+  {
+    "File": "development_01_01.pm4",
+    "TileX": 1,
+    "TileY": 1,
+    "Field00": 534,
+    "Field04": 155,
+    "Field08": 484,
+    "Surfaces": 189,
+    "Links": 528,
+    "Msvt": 352,
+    "Msvi": 719,
+    "Mspv": 459,
+    "Mspi": 534,
+    "Mscn": 520,
+    "Mprl": 39,
+    "Mprr": 26768,
+    "Mdbh": 1,
+    "Mdos": 1,
+    "Mdsf": 0
+  }
+]

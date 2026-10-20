@@ -1,0 +1,35 @@
+MAP: d6460882861d2ffa0e13db323a8ddf9a8e52705ce8d3c23e74fa1e6a86b8d709
+WORD STATS
+{"Word":"Field00","Files":616,"Distinct":156,"Zero":114,"Max":0,"Min":0,"MaxV":534,"Mean":352.95,"Median":512,"Top":"534x289,0x114,209x5"}
+{"Word":"Field04","Files":616,"Distinct":228,"Zero":114,"Max":0,"Min":0,"MaxV":3814,"Mean":407.8,"Median":152,"Top":"1x140,0x114,974x13"}
+{"Word":"Field08","Files":616,"Distinct":153,"Zero":114,"Max":0,"Min":0,"MaxV":534,"Mean":360.95,"Median":509,"Top":"534x292,0x114,1x6"}
+{"Word":"Field0C","Files":616,"Distinct":1,"Zero":616,"Max":0,"Min":0,"MaxV":0,"Mean":0.0,"Median":0,"Top":"0x616"}
+{"Word":"Field10","Files":616,"Distinct":1,"Zero":616,"Max":0,"Min":0,"MaxV":0,"Mean":0.0,"Median":0,"Top":"0x616"}
+{"Word":"Field14","Files":616,"Distinct":1,"Zero":616,"Max":0,"Min":0,"MaxV":0,"Mean":0.0,"Median":0,"Top":"0x616"}
+{"Word":"Field18","Files":616,"Distinct":1,"Zero":616,"Max":0,"Min":0,"MaxV":0,"Mean":0.0,"Median":0,"Top":"0x616"}
+{"Word":"Field1C","Files":616,"Distinct":1,"Zero":616,"Max":0,"Min":0,"MaxV":0,"Mean":0.0,"Median":0,"Top":"0x616"}
+TOP CORRELATIONS
+{"Word":"Field08","Metric":"Mdbh","Pearson":0.7946}
+{"Word":"Field00","Metric":"Mdbh","Pearson":0.7623}
+{"Word":"Field00","Metric":"Mprr","Pearson":0.433}
+{"Word":"Field08","Metric":"Mprr","Pearson":0.4171}
+{"Word":"Field08","Metric":"TileY","Pearson":-0.4017}
+{"Word":"Field00","Metric":"TileY","Pearson":-0.3914}
+{"Word":"Field04","Metric":"Mprr","Pearson":0.3412}
+{"Word":"Field00","Metric":"Bytes","Pearson":0.2945}
+{"Word":"Field00","Metric":"Mdos","Pearson":0.2941}
+{"Word":"Field08","Metric":"Mdos","Pearson":0.2937}
+{"Word":"Field08","Metric":"Bytes","Pearson":0.2788}
+{"Word":"Field04","Metric":"Mdbh","Pearson":0.2495}
+{"Word":"Field00","Metric":"Mprl","Pearson":0.248}
+{"Word":"Field00","Metric":"Links","Pearson":0.2447}
+{"Word":"Field08","Metric":"Links","Pearson":0.2322}
+{"Word":"Field00","Metric":"Mscn","Pearson":0.2289}
+{"Word":"Field08","Metric":"Mprl","Pearson":0.2258}
+{"Word":"Field08","Metric":"Mscn","Pearson":0.2166}
+{"Word":"Field00","Metric":"Mspv","Pearson":0.2132}
+{"Word":"Field00","Metric":"Mspi","Pearson":0.2122}
+{"Word":"Field00","Metric":"Surfaces","Pearson":0.2031}
+{"Word":"Field00","Metric":"Msvi","Pearson":0.1995}
+{"Word":"Field08","Metric":"Mspv","Pearson":0.1973}
+{"Word":"Field04","Metric":"Bytes","Pearson":0.1971}

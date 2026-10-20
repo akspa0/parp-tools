@@ -1,0 +1,67 @@
+I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\WowViewer.Core.PM4.Tests.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-gwg2-r3hj-4w44
+I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\WowViewer.Core.PM4.Tests.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j3p4-wp97-rph4
+I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\WowViewer.Core.PM4.Tests.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j9gm-c75j-xc9q
+I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\WowViewer.Core.PM4.Tests.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-jjfr-hcj7-qf5w
+I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\WowViewer.Core.PM4.Tests.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-wmxv-xphr-5c9g
+I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\WowViewer.Core.PM4.Tests.csproj : warning NU1903: Package 'Snappier' 1.0.0 has a known high severity vulnerability, https://github.com/advisories/GHSA-pggp-6c3x-2xmx
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-gwg2-r3hj-4w44
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j3p4-wp97-rph4
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j9gm-c75j-xc9q
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-jjfr-hcj7-qf5w
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-wmxv-xphr-5c9g
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj : warning NU1903: Package 'Snappier' 1.0.0 has a known high severity vulnerability, https://github.com/advisories/GHSA-pggp-6c3x-2xmx
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-gwg2-r3hj-4w44
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j3p4-wp97-rph4
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j9gm-c75j-xc9q
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-jjfr-hcj7-qf5w
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-wmxv-xphr-5c9g
+I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj : warning NU1903: Package 'Snappier' 1.0.0 has a known high severity vulnerability, https://github.com/advisories/GHSA-pggp-6c3x-2xmx
+I:\parp\parp-tools\wow-viewer\libs\wowdev\TACTSharp\TACTSharp\TACTSharp.csproj : warning NU1902: Package 'Microsoft.Build.Tasks.Git' 8.0.0 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-23fw-v26w-5fgq
+I:\parp\parp-tools\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-gwg2-r3hj-4w44
+I:\parp\parp-tools\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j3p4-wp97-rph4
+I:\parp\parp-tools\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j9gm-c75j-xc9q
+I:\parp\parp-tools\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-jjfr-hcj7-qf5w
+I:\parp\parp-tools\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-wmxv-xphr-5c9g
+I:\parp\parp-tools\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj : warning NU1903: Package 'Snappier' 1.0.0 has a known high severity vulnerability, https://github.com/advisories/GHSA-pggp-6c3x-2xmx
+  TACTSharp -> I:\parp\parp-tools\wow-viewer\libs\wowdev\TACTSharp\TACTSharp\bin\Debug\net10.0\TACTSharp.dll
+  WowViewer.Core -> I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core\bin\Debug\net10.0\WowViewer.Core.dll
+  WowViewer.Tools.Shared -> I:\parp\parp-tools\wow-viewer\src\tools-shared\WowViewer.Tools.Shared\bin\Debug\net10.0\WowViewer.Tools.Shared.dll
+  WowViewer.Core.PM4 -> I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.PM4\bin\Debug\net10.0\WowViewer.Core.PM4.dll
+I:\parp\parp-tools\wow-viewer\libs\wowdev\DBCD\DBCD.IO\DBCD.IO.csproj : warning NU1902: Package 'Microsoft.Build.Tasks.Git' 8.0.0 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-23fw-v26w-5fgq [TargetFramework=net10.0]
+  DBCD.IO -> I:\parp\parp-tools\wow-viewer\libs\wowdev\DBCD\DBCD.IO\bin\Debug\net10.0\DBCD.IO.dll
+I:\parp\parp-tools\wow-viewer\libs\wowdev\DBCD\DBCD\DBCD.csproj : warning NU1902: Package 'Microsoft.Build.Tasks.Git' 8.0.0 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-23fw-v26w-5fgq [TargetFramework=net10.0]
+  DBCD -> I:\parp\parp-tools\wow-viewer\libs\wowdev\DBCD\DBCD\bin\Debug\net10.0\DBCD.dll
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 2.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-gwg2-r3hj-4w44 [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 2.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j3p4-wp97-rph4 [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 2.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j9gm-c75j-xc9q [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 2.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-jjfr-hcj7-qf5w [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 2.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-wmxv-xphr-5c9g [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-gwg2-r3hj-4w44 [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j3p4-wp97-rph4 [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-j9gm-c75j-xc9q [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1903: Package 'SixLabors.ImageSharp' 3.1.12 has a known high severity vulnerability, https://github.com/advisories/GHSA-jjfr-hcj7-qf5w [TargetFramework=net9.0]
+I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj : warning NU1902: Package 'SixLabors.ImageSharp' 3.1.12 has a known moderate severity vulnerability, https://github.com/advisories/GHSA-wmxv-xphr-5c9g [TargetFramework=net9.0]
+  SereniaBLPLib -> I:\parp\parp-tools\wow-viewer\libs\WoW-Tools\SereniaBLPLib\SereniaBLPLib\bin\Debug\net9.0\SereniaBLPLib.dll
+  WowViewer.Core.IO -> I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.IO\bin\Debug\net10.0\WowViewer.Core.IO.dll
+  WowViewer.Core.Runtime -> I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.Runtime\bin\Debug\net10.0\WowViewer.Core.Runtime.dll
+  WowViewer.Tool.Inspect -> I:\parp\parp-tools\wow-viewer\tools\inspect\WowViewer.Tool.Inspect\bin\Debug\net10.0\WowViewer.Tool.Inspect.dll
+I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\Pm4PerFileCacheServiceTests.cs(98,80): warning CS8625: Cannot convert null literal to non-nullable reference type. [I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\WowViewer.Core.PM4.Tests.csproj]
+I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\Pm4PerFileCacheServiceTests.cs(50,9): warning xUnit2013: Do not use Assert.Equal() to check for collection size. Use Assert.Single instead. (https://xunit.net/xunit.analyzers/rules/xUnit2013) [I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\WowViewer.Core.PM4.Tests.csproj]
+  WowViewer.Core.PM4.Tests -> I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\bin\Debug\net10.0\WowViewer.Core.PM4.Tests.dll
+Test run for I:\parp\parp-tools\wow-viewer\tests\WowViewer.Core.PM4.Tests\bin\Debug\net10.0\WowViewer.Core.PM4.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.13)
+[xUnit.net 00:00:00.07]   Discovering: WowViewer.Core.PM4.Tests
+[xUnit.net 00:00:00.12]   Discovered:  WowViewer.Core.PM4.Tests
+[xUnit.net 00:00:00.14]   Starting:    WowViewer.Core.PM4.Tests
+[xUnit.net 00:00:00.21]   Finished:    WowViewer.Core.PM4.Tests
+  Passed WowViewer.Core.PM4.Tests.Pm4EdgeIdentityProbeTests.UniqueReciprocalRecordsWithSameValueAreCountedAsEdgeIdentityEvidence [33 ms]
+  Passed WowViewer.Core.PM4.Tests.Pm4EdgeIdentityProbeTests.DifferentValuesOnReciprocalRecordsAreRetainedAsCounterevidence [< 1 ms]
+  Passed WowViewer.Core.PM4.Tests.Pm4EdgeIdentityProbeTests.DuplicateLinksFromSameSurfaceToSameTargetAreMultipleReverse [< 1 ms]
+  Passed WowViewer.Core.PM4.Tests.Pm4EdgeIdentityProbeTests.ReusedValueAcrossDistinctEdgesIsNotPromotedToIdentity [< 1 ms]
+  Passed WowViewer.Core.PM4.Tests.Pm4EdgeIdentityProbeTests.MissingTargetIsNoReverseRatherThanSilentlyLocal [< 1 ms]
+
+Test Run Successful.
+Total tests: 5
+     Passed: 5
+ Total time: 0.6935 Seconds

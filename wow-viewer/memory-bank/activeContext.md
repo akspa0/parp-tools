@@ -4,10 +4,18 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
 - **Spec 279 (operator: full PM4 comprehension + readable writeup, Spec Kit):**
   [Current PM4 reference](../docs/research/pm4-format-reference.md) covers 16 parsed chunks,
   raw fields/evidence levels and 17 unresolved question groups. Spec/plan/tasks/checklist on
-  `279-decode-pm4-format`; **2A validates raw MSLK +0x01 as source-edge ordinal**: 100% in-range,
-  674,013 boundary matches vs shifted control 137. [Receipt](../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md).
-  Direct +0x04 point-index tests fail to identify a role. Next: 2B independent reciprocal-edge/value
-  reuse test; +0x04 meaning, editor-node identity and M2 ownership remain unknown. Operator wants checkpoints committed.
+  `279-decode-pm4-format`. **2A:** raw MSLK +0x01 is a source-edge ordinal (674,013 boundary matches
+  vs shifted control 137). **2B:** +0x04 is not a unique edge ID (889,594 reused values); type-1
+  reciprocal records share it 98.92%, type 17 100%. **MSHD:** five of eight words always zero;
+  Field00/08 correlate with Mdbh ~0.76–0.79. **M2 partition found:** authored `_obj0.adt` placements
+  show `Ck24Type == 0` / `GroupKey == 3` selects 14,489 M2-only surfaces vs 57 WMO-only; WMO is
+  64–67 / 16–19. The zero bucket is the M2 class, not a per-object identity (only 12.8% of zero
+  surfaces cover an authored M2 origin). Receipts: [2A](../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md),
+  [2B](../specs/279-decode-pm4-format/evidence/phase-2b-edge-identity-2026-10-20.md),
+  [MSHD](../specs/279-decode-pm4-format/evidence/phase-3-mshd-2026-10-20.md),
+  [placements](../specs/279-decode-pm4-format/evidence/phase-3-placement-ground-truth-2026-10-20.md).
+  Next: split the M2 bucket into individual placed objects; editor-node identity remains unknown.
+  Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
   MSUR→MSLK start/count windows; packed link target is tile X=low byte, Y=next byte + surface index.
   **Not universally file-local:** 15,773 cross-tile links; 14,659 resolve. Same-tile addressed links

@@ -2,13 +2,29 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 M2/WMO partition from authored placements
+
+- New read-only `Pm4PlacementGroundTruthProbe` reads companion `_obj0.adt` MDDF/MODF placements
+  (the earlier ASCII `MDDF` scan was a false negative; on-disk signatures are reversed) and tests
+  each placement origin against every surface's projected polygon.
+- Whole map: 616 files, 411 with placements, 308,892 surfaces. M2 covered 12,147/59,544 (20.4%);
+  WMO covered 883/1,116 (79.1%).
+- **Partition:** `Ck24Type == 0` / `GroupKey == 3` selects 14,489 of 16,338 M2-only surfaces (88.7%)
+  vs 57 of 1,961 WMO-only (2.9%). WMO is `Ck24Type` 64–67 / `GroupKey` 16–19. Link types 17/18/20/26/28
+  are WMO-exclusive; 1/2/4/12 are M2-leaning. The zero bucket is the M2 class, not a per-object ID.
+- 4 new probe tests pass. [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-placement-ground-truth-2026-10-20.md).
+
 ## 2026-10-20 — Spec 279 PM4 reference and continuing research
 
 - [Current reference](../docs/research/pm4-format-reference.md): 16 parsed signatures, raw layouts,
   evidence levels and 17 unknown groups; old wiki draft explicitly superseded.
 - Spec Kit reference gate passed; all-map +0x04 test rejects a general reverse pointer, meaning
   still unknown. **2A:** raw +0x01 selects source edges (674,013 matches vs shifted control 137);
-  point-index alternatives unconfirmed. Next: 2B reciprocal-edge values. [Receipt](../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md).
+  point-index alternatives unconfirmed. **2B:** +0x04 is not a unique edge ID (889,594 reused
+  values); type-1 reciprocal records share it 98.92%. **MSHD:** five of eight words always zero;
+  Field00/08 correlate with Mdbh ~0.76–0.79. [2A receipt](../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md),
+  [2B receipt](../specs/279-decode-pm4-format/evidence/phase-2b-edge-identity-2026-10-20.md),
+  [MSHD receipt](../specs/279-decode-pm4-format/evidence/phase-3-mshd-2026-10-20.md).
 
 ## 2026-10-20 — PM4 target-tile references validated across the whole map
 

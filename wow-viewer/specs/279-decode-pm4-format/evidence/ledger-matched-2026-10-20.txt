@@ -1,0 +1,49 @@
+MATCHED: 904
+BY KIND
+{"Kind":"WMO","Count":904,"AvgSurfaces":193.3,"MinSurfaces":2.0,"MaxSurfaces":4267.0,"AvgIndex":734.3}
+M2 SAMPLE
+WMO SAMPLE
+[
+  {
+    "Pm4File": "development_00_00.pm4",
+    "AssetPath": "WORLD\\WMO\\NORTHREND\\WINTERGRASP\\WG_WALL03.WMO",
+    "SurfaceCount": 129,
+    "IndexCount": 493,
+    "MinX": 16760.133,
+    "MinY": 16977.496,
+    "MinZ": 3.2149377,
+    "MaxX": 16788.592,
+    "MaxY": 16988.533,
+    "MaxZ": 27.676048,
+    "PlacementZ": 3.986427,
+    "MatchDelta": 0
+  },
+  {
+    "Pm4File": "development_00_00.pm4",
+    "AssetPath": "WORLD\\WMO\\NORTHREND\\BUILDINGS\\HUMAN\\ND_HUMAN_WALL\\ND_HUMAN_WALL_END.WMO",
+    "SurfaceCount": 48,
+    "IndexCount": 200,
+    "MinX": 16657.885,
+    "MinY": 16969.018,
+    "MinZ": 14.371269,
+    "MaxX": 16676.229,
+    "MaxY": 16987.51,
+    "MaxZ": 46.42081,
+    "PlacementZ": 4.257758,
+    "MatchDelta": 0
+  },
+  {
+    "Pm4File": "development_00_00.pm4",
+    "AssetPath": "World\\wmo\\Northrend\\Wintergrasp\\WG_Wall01.wmo",
+    "SurfaceCount": 189,
+    "IndexCount": 679,
+    "MinX": 16703.84,
+    "MinY": 16977.018,
+    "MinZ": 4.580035,
+    "MaxX": 16732.29,
+    "MaxY": 16988.12,
+    "MaxZ": 29.117565,
+    "PlacementZ": 4.951889,
+    "MatchDelta": 0
+  }
+]

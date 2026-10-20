@@ -71,6 +71,7 @@ Evidence keys used throughout this reference:
 | **E-POOLS** | [Operator pools/WL hint tooling receipt](../../specs/270-pm4-object-association-ledger-and-placement/evidence/map-context-instrument-2026-10-20.md) |
 | **E-04** | [Raw +0x04 domain/reverse-link report](../../specs/279-decode-pm4-format/evidence/raw-04-domain-2026-10-20.json), [summary](../../specs/279-decode-pm4-format/evidence/raw-04-summary-2026-10-20.txt) |
 | **E-EDGE** | [Source-edge ordinal/spatial receipt](../../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/edge-ordinal-geometry-2026-10-20.json) |
+| **E-PLACE** | [Authored-placement ground-truth receipt](../../specs/279-decode-pm4-format/evidence/phase-3-placement-ground-truth-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/placement-ground-truth-2026-10-20.json) |
 
 These are corpus-scoped measurements. A source comment, unit test or similarly named field in a
 different format does not establish the same meaning for every PM4/PD4 build.
@@ -180,6 +181,44 @@ This gives a source-boundary address, not a generic object subtype or M2 group. 
 equal heights, movement direction, jump/drop/portal meaning or authored path-node identity.
 Source: **E-EDGE**. The current code alias is retained for compatibility, not silently renamed.
 
+### 3.5 Authored placements separate the M2 and WMO surface classes — M
+
+Working backwards from the authored `_obj0.adt` placements of the same tile (MDDF = M2, MODF =
+WMO), a surface is counted as covering a placement when the placement origin lies inside the
+surface's projected polygon or within 0.05 of its boundary. Over the complete map:
+
+| Measure | M2 (MDDF) | WMO (MODF) |
+|---|---|---|
+| Authored placements | 59,544 | 1,116 |
+| Covered by at least one surface | 12,147 (20.4%) | 883 (79.1%) |
+| Covered by exactly one surface | 7,781 | 215 |
+| Covered by more than one surface | 4,366 | 668 |
+
+Of the 308,892 surfaces, 16,338 cover an M2 origin only, 1,961 cover a WMO origin only, 218 cover
+both, and 290,375 cover neither. The feature split is decisive:
+
+| Surface class | Surfaces | `Ck24Type == 0` | `GroupKey == 3` | Dominant `Ck24Type` | Dominant `GroupKey` |
+|---|---|---|---|---|---|
+| M2-only | 16,338 | 14,489 (88.7%) | 14,489 (88.7%) | 0 | 3 |
+| WMO-only | 1,961 | 57 (2.9%) | 51 (2.6%) | 64–67 | 16–19 |
+| Both | 218 | 110 | 110 | mixed | mixed |
+| Neither | 290,375 | 98,162 (33.8%) | 96,516 (33.3%) | 66/67 | 18 |
+
+`Ck24Type == 0` and `GroupKey == 3` select the same 14,489 M2-only surfaces, so they are redundant
+encodings of one partition. The reverse direction is weaker: only 12.8% of all `Ck24Type == 0`
+surfaces cover an authored M2 origin, because the zero bucket is a superset that also holds M2
+geometry whose placement origin falls outside the surface (rings, composites, and decorative
+doodads with no pathfinding mesh). The bucket is therefore the **M2 class**, not a per-object
+identity.
+
+Connection kinds also separate: `MSLK.TypeFlags` 17, 18, 20, 26 and 28 occur on WMO-only surfaces
+and on **zero** M2-only surfaces, while kinds 1, 2, 4 and 12 are M2-leaning. `AttributeMask` 0 is
+M2-leaning (2,369 M2-only vs 8 WMO-only); masks 9 and 10 are WMO-leaning.
+
+**Conclusion:** the M2/WMO partition the operator suspected is real and is carried by
+`MSUR.GroupKey` / `Ck24Type` (3 / 0 for M2, 16–19 / 64–67 for WMO). It does not yet split the M2
+bucket into individual placed objects. Source: **E-PLACE**.
+
 ## 4. Binary envelope and parser contract
 
 PM4 is read as consecutive chunks:
@@ -258,7 +297,7 @@ not proof that the word is an empty-tile flag or a complete explanation of heade
 
 | Offset | Type | Current alias | Meaning / confidence |
 |---|---|---|---|
-| 0x00 | u8 | GroupKey | U: group/class-like raw value, not a confirmed object class |
+| 0x00 | u8 | GroupKey | M: 3 selects the M2 surface class, 16–19 the WMO class (see §3.5); finer meaning U |
 | 0x01 | u8 | IndexCount | M: surface's MSVI window length |
 | 0x02 | u8 | AttributeMask / attrMask | M: MSLK window length in this corpus |
 | 0x03 | u8 | Padding | U: preserved raw byte; name does not prove unused padding |
@@ -266,7 +305,7 @@ not proof that the word is an empty-tile flag or a complete explanation of heade
 | 0x10 | f32 | Height / PlaneDistance | U: plane/height-like scalar; sign/equation not closed here |
 | 0x14 | u32 | MsviFirstIndex | M: start of the surface's MSVI window |
 | 0x18 | u32 | _0x18 / MscnIndex alias | M: start of its MSLK window; MSCN alias is not current authority |
-| 0x1C | u32 raw bits | PackedParams | Float-Z correlation is H with local support; universal meaning/ownership unresolved |
+| 0x1C | u32 raw bits | PackedParams | M: top byte (`Ck24Type`) is 0 for the M2 class and 64–67 for WMO (see §3.5); float-Z correlation is H |
 
 Polygon vertices are obtained by reading the MSVI window and looking up those indices in MSVT.
 Current extractors triangulate these windows as fans. This is a tooling convention; the present
@@ -289,7 +328,11 @@ height-correlation fractions used different subsets and are not interchangeable 
 
 The current whole-map census observes **186,060** surfaces in derived CK24 zero, all also raw-word
 zero. The two predicates are not identical by bit definition; retain the distinction in new data.
-The zero bucket is not one object and is not established to be exclusively M2 geometry.
+
+The zero bucket is **not one object**, but it is now measured to be the **M2 surface class**: of
+16,338 surfaces covering an authored M2 placement origin, 14,489 (88.7%) are `Ck24Type == 0` /
+`GroupKey == 3`, against 57 of 1,961 WMO-only surfaces (2.9%). It is a superset of M2 geometry, not
+a per-object identity — see §3.5 and **E-PLACE**.
 
 ### MSLK — 20 bytes
 

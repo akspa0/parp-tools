@@ -47,8 +47,10 @@ so meaning remains unknown. Phase 2 is planned, not certified or started by this
   controls, defined in plan.md. Completing 2A does not check all point-layer questions or Gate R2.
 - [x] T021A [US2] Complete source-edge ordinal/point-candidate sub-step 2A with full-map spatial
   controls and auxiliary-geometry follow-up. [Receipt](evidence/phase-2a-edge-ordinal-2026-10-20.md).
-- [ ] T021B [US2] Test +0x04 reciprocal-edge value/reuse alternatives in selected sub-step 2B,
+- [x] T021B [US2] Test +0x04 reciprocal-edge value/reuse alternatives in selected sub-step 2B,
   independently resolving reverse records and retaining ambiguous/missing targets; see plan.md.
+  [Receipt](evidence/phase-2b-edge-identity-2026-10-20.md): not a unique edge ID (889,594 reused
+  values); type-1 reciprocal records share the value 98.92%, type 17 100%.
 - [ ] T022 [US2] Test MPRR record/run relationships in a separately validated sub-step.
 - [ ] T023 [US2] Operator supplies/locates the relevant editor screenshots; verify any proposed
   authored-node correspondence, or leave that visual criterion explicitly unresolved.
@@ -58,8 +60,15 @@ so meaning remains unknown. Phase 2 is planned, not certified or started by this
 
 - [ ] T030 [US2] Select remaining header/plane/raw-word/auxiliary-state questions individually and
   define discriminating tests using the reference unknown register.
+- [x] T030A [US2] Analyze all eight MSHD words across the complete map.
+  [Receipt](evidence/phase-3-mshd-2026-10-20.md): five words always zero; Field00/08 correlate with
+  Mdbh at ~0.76–0.79; exact meaning remains U.
 - [ ] T031 [US2] Test proposed M2 ownership separators against independently authored Museum
   copies/transforms/scales, including merged/equal-value counterexamples and false controls.
+- [x] T031A [US2] Test the M2/WMO surface partition against authored `_obj0.adt` placements
+  (MDDF/MODF) across the complete map. [Receipt](evidence/phase-3-placement-ground-truth-2026-10-20.md):
+  `Ck24Type == 0` / `GroupKey == 3` selects 14,489 M2-only surfaces vs 57 WMO-only; the zero bucket
+  is the M2 class, not a per-object identity.
 - [ ] T032 [US2] Record source-build/subset limits, failures and supported relationships; no field
   is called a global object ID without independent identity evidence.
 

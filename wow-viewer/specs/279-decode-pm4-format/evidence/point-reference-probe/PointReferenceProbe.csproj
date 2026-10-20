@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../../src/core/WowViewer.Core.PM4/WowViewer.Core.PM4.csproj" />
+    <ProjectReference Include="../../../../src/core/WowViewer.Core.IO/WowViewer.Core.IO.csproj" />
   </ItemGroup>
 </Project>
