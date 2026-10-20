@@ -1,6 +1,15 @@
 # Active Context — wow-viewer
 
 Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlation**:
+- **Spec 280 UI audit complete (2026-10-20, operator-directed):** the full nesting map is in
+  [audit.md](../specs/280-ui-audit-refactor/audit.md). File menu 18 entries/3 levels; View 15/8
+  duplicates; Tools 36/5 levels; Editor 4 pages/13 sections (3 host archaeology-named content);
+  Archaeology 6 pages with **four parallel navigation systems** (destination strip, legacy 5-tab
+  strip, floating UniqueId window, Quick launchers) and a 4-level Cartography tree; 12 Tools >
+  Panels floating windows duplicate destination pages. Recommended sequence: bottom bar →
+  Options sub-menu → destination separation → archaeology dedupe → editor section rename →
+  floating-window dedupe → styling → WC3 Beta naming → dead-control sweep. No code changed in this
+  pass; the audit is the implementation contract for the next pass.
 - **Known bugs to fix (operator-reported 2026-10-20, not yet fixed):**
   1. **Sky / skyboxes** — no proper skybox support. Use the wowdecomp 3.3.5 / 4.3.4 sky code. Add
      Quick-tab controls with a list of known-good settings from DBC/DB2 plus the current blank-sky

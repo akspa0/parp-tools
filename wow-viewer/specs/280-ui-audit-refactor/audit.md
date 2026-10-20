@@ -192,7 +192,132 @@ Help
   Chat.
 - **The right sidebar keeps only the current destination's inspector.**
 
-### 0.8 Audit status
+### 0.8 Editor destination tree
+
+The Editor destination is a 4-page strip (`GetEditorWorkbenchLabels`), and each page is a stack of
+collapsing sections that call back into the shell through `IEditorPageHost`. Depth is
+destination → page → section → content, and the content itself opens further tabs.
+
+| Path | Depth | Notes |
+|---|---|---|
+| Editor > Placement & Objects | 2 | `EditorPlacementObjectsPage` |
+| Editor > Placement & Objects > Tasks & Workspace | 3 | Default open; `DrawArchaeologyEditorTasksSubTab` |
+| Editor > Placement & Objects > PM4 Placement Tools | 3 | Collapsed; one button to the PM4 Workbench |
+| Editor > Placement & Objects > 3D Object Library | 3 | Collapsed; `DrawRosettaObjectLibrarySubTab` |
+| Editor > Placement & Objects > Population | 3 | Collapsed; `DrawPopulationSubTabContent` |
+| Editor > Terrain Tools | 2 | `EditorTerrainToolsPage` |
+| Editor > Terrain Tools > Terrain Lab | 3 | Default open; `DrawTerrainLabSubTab` |
+| Editor > Data I/O | 2 | `EditorDataIoPage` |
+| Editor > Data I/O > PM4 Exports | 3 | Collapsed; `DrawPm4ExportCommandSet` |
+| Editor > Data I/O > New Map Creator | 3 | Default open; `NewMapCreatorService.Draw` |
+| Editor > Data I/O > Imports & Exports | 3 | Default open; `DrawArchaeologyEditorImportsSubTab` |
+| Editor > Converters | 2 | `EditorConvertersPage` |
+| Editor > Converters > Converters | 3 | Default open; `DrawConvertersSubTabContent` |
+
+**Issues**:
+- The page names are clean, but the section names are not: "Tasks & Workspace" is the archaeology
+  editor task list, "3D Object Library" is the Rosetta library, and "Imports & Exports" is the
+  archaeology import surface. Three of the four Editor pages host archaeology-named content.
+- "PM4 Placement Tools" is a section whose entire body is one navigation button. It is a menu entry
+  wearing a section header.
+- "PM4 Exports" is a second PM4 export home; the PM4 Workbench also exposes export commands. This is
+  the same duplicate-home defect as the Tools menu.
+- `EditorWorkbenchPages.MigrateLegacyEditorPageIndex` still maps six legacy page indices onto four
+  pages, so saved layouts silently land on a different page than the user left.
+- The Editor destination has no visible relationship to the Editor menu entries in the top menu bar;
+  the two are separate navigation systems for the same work.
+
+### 0.9 Archaeology destination tree
+
+The Archaeology destination is a 6-page strip (`GetArchaeologyWorkbenchLabels`). It is the deepest
+surface in the application because it carries **four parallel navigation systems** for the same
+content.
+
+| Path | Depth | Notes |
+|---|---|---|
+| Archaeology > Weak Signal & Stratigraphy | 2 | `DrawTerrainControlsAdjustmentWeakSignalContent` |
+| Archaeology > UniqueId Timeline | 2 | `DrawArcheologyRangeSubTab` |
+| Archaeology > Layers & Provenance | 2 | `DrawArcheologyLayersSubTab` |
+| Archaeology > Playback & Capture | 2 | `DrawArcheologyPlaybackSubTab` + `DrawArcheologyCaptureSubTab` |
+| Archaeology > Playback & Capture > Camera Paths & Video Capture | 3 | `DrawCapturePanelContent` |
+| Archaeology > PM4 Analysis | 2 | Redirect button to the PM4 Workbench |
+| Archaeology > Cartography | 2 | `DrawArchaeologyCartographyContent` |
+| Archaeology > Cartography > Layers | 3 | `DrawCartographyLayersSubTab` |
+| Archaeology > Cartography > Layers > Layer stack | 4 | Per-layer expand: channels, offsets, rotation, mirror, Z, edge-snap |
+| Archaeology > Cartography > Layers > DBC phase discovery | 4 | `Map.dbc` child maps |
+| Archaeology > Cartography > Layers > Add phase map | 4 | Combo + manual directory + DAT folder |
+| Archaeology > Cartography > Layers > Donor Tile Grid Picker | 4 | Collapsing header; donor/target tile inputs |
+| Archaeology > Cartography > Synthesized Minimap | 3 | `DrawSynthesizedMinimapExportContent` |
+| Archaeology > Cartography > Save Merged Output | 3 | `DrawCartographySaveMergedSubTab` |
+
+**Parallel navigation systems for the same content**:
+
+| System | Entry point | Pages | Status |
+|---|---|---|---|
+| Destination strip | `GetArchaeologyWorkbenchLabels` | 6 | Canonical |
+| Legacy sub-tab strip | `DrawArcheologySubTabContent` + `GetArcheologyBottomTabLabels` | 5 (Range, Layers, Playback, Capture, Stratigraphy) | `duplicate` |
+| Floating window | `DrawUniqueIdArchaeologyWindow` | Stacks Range + Layers + Playback vertically | `duplicate` |
+| Quick section | `DrawArchaeologyQuickSection` | Launchers into pages 1, 2, 5 | `duplicate` |
+
+**Issues**:
+- The 6-page destination and the 5-tab legacy strip cover the same five concepts with different
+  names ("UniqueId Timeline" vs "Range", "Layers & Provenance" vs "Layers", "Playback & Capture" vs
+  "Playback" + "Capture"). A user cannot tell which one is authoritative.
+- The floating "UniqueId Archaeology" window stacks three of the same sub-tabs vertically, so the
+  same controls can be on screen twice.
+- The Quick section's "Archaeological Launchers" is a fourth entry point into the same pages.
+- Cartography is a 3-level tree inside a 2-level destination, and its "Layers" page is itself a
+  stack of four independent tools (layer stack, DBC discovery, add controls, donor picker).
+- `DrawNestedSubTabStrip` exists only to let a nested section select its own index; the comment in
+  the source says the parent strip "only covers the first level". That is the nesting defect stated
+  in the code itself.
+
+### 0.10 Popup and floating-window tree
+
+| Path | Depth | Notes |
+|---|---|---|
+| View > Log Console... | 2 | Floating window; duplicates Tools > Panels > Log Viewer |
+| View > Performance & Profiling... | 2 | Floating window; duplicates Tools > Panels > Perf |
+| View > Lighting Diagnostics... | 2 | Floating window |
+| View > PM4 Workbench | 2 | Focuses the right sidebar PM4 tab |
+| Tools > Panels > Model Info | 3 | Floating window |
+| Tools > Panels > Log Viewer | 3 | Floating window |
+| Tools > Panels > Perf | 3 | Floating window |
+| Tools > Panels > Settings... | 3 | Floating window; duplicates File > Settings |
+| Tools > Panels > Asset Catalog | 3 | Floating window |
+| Tools > Panels > Capture Automation | 3 | Floating window |
+| Tools > Panels > Camera Path | 3 | Floating window |
+| Tools > Panels > Taxi | 3 | Floating window |
+| Tools > Panels > Weak Signal & Stratigraphy | 3 | Floating window; duplicates Archaeology page 0 |
+| Tools > Panels > UniqueId Archaeology | 3 | Floating window; duplicates Archaeology pages 1–3 |
+| Tools > Panels > PM4 Analysis | 3 | Redirect to the PM4 Workbench |
+| Tools > Panels > Cartography | 3 | Floating window; duplicates Archaeology page 5 |
+| Tools > Panels > Editor Workbench | 3 | Redirect to the Editor destination |
+| Tools > Export > Synthesized Terrain Minimap... | 3 | Dialog |
+| Tools > Converters > Map Converter... | 3 | Dialog |
+| Tools > Converters > WMO Converter... | 3 | Dialog |
+| Bottom bar > Overlays | 2 | Popup |
+| Bottom bar > Layers | 2 | Popup |
+| Bottom bar > Transparency | 2 | Popup |
+| PM4 Actions popup | 2 | `WorldObjectsPanelService`; PM4 Workbench + Reload PM4 |
+| File > Open File... | 2 | Bespoke text-path popup |
+| File > Settings... | 2 | Dialog |
+| File > DAT Terrain > Export Loaded DAT Map... | 3 | Dialog |
+| File > DAT Terrain > Export Nearby Tiles as DAT v26 | 3 | Dialog |
+| VLM export dialog | 2 | `PrepareVlmExportDialogInputs` |
+| Terrain texture transfer dialog | 2 | `PrepareTerrainTextureTransferDialogInputs` |
+| Synthesized minimap export dialog | 2 | `PrepareSynthesizedMinimapExportDialogInputs` |
+
+**Issues**:
+- 12 of the 17 Tools > Panels entries are floating windows that duplicate a destination page or a
+  sidebar section. They are a second, invisible navigation system: the user can open the same
+  content as a docked page or as a floating window, with different state.
+- The bottom bar's three popups (Overlays, Layers, Transparency) are the only render controls that
+  are not in a destination; they belong in the Options sub-menu.
+- The PM4 Actions popup is a third PM4 entry point beside the right sidebar tab and the Tools menu.
+- Four separate export dialogs are launched from three different menus.
+
+### 0.11 Audit status
 
 | Area | Status |
 |---|---|
@@ -204,9 +329,9 @@ Help
 | Bottom bar | audited; options toolbar to move |
 | Status bar | audited; keep |
 | Chat bar | audited; keep, add Options anchor |
-| Editor pages | partially audited; needs a per-page control pass |
-| Archaeology pages | partially audited; needs a per-page control pass |
-| Popups | partially audited; overlays/layers/PM4 actions identified |
+| Editor pages | audited; 4 pages, 13 sections, archaeology-named content |
+| Archaeology pages | audited; 6 pages, 4 parallel navigation systems, 4-level Cartography tree |
+| Popups | audited; 12 duplicate floating windows, 3 bottom-bar popups, 4 export dialogs |
 
 ## 1. Surface inventory
 
@@ -220,8 +345,13 @@ Help
 | Workbench tabs | `WorkbenchTab` + `WorkbenchNavigator` | Quick, Inspect, Scene, Utilities, Experimental, Editor, Archaeology; `Canonicalize` redirects Scene→Inspect, Utilities→Quick, Experimental→Editor | `misplaced` | Replace with three destinations: Viewer, Editor, Archaeology |
 | PM4 workbench | `Pm4WorkbenchService` | Overlay, Selection, Correlation, Info, Reconcile, Alignment, Outliner, Object Groups | `works` | Keep; it is the model for a destination-specific surface |
 | Chat bar | `FakeChatWindowService` | Chat log, Auto-Scroll, Hide, Auto-Stream, Spawn BBs Only | `works` | Keep; anchor the Options sub-menu to it |
-| Editor pages | `EditorPlacementObjectsPage` and siblings | Placement & Objects, Terrain Tools, Data I/O, Converters | `works` | Keep; remove viewer-only inspection surfaces |
-| Archaeology pages | `ArchaeologyPanelService` | Weak Signal & Stratigraphy, UniqueId Timeline, Layers & Provenance, Playback & Capture, PM4 Analysis (redirect), Cartography | `works` | Keep; remove unrelated editor/viewer tools |
+| Editor pages | `EditorPlacementObjectsPage` and siblings | Placement & Objects, Terrain Tools, Data I/O, Converters; 13 sections, 3 of which host archaeology-named content | `misplaced` | Keep the 4 pages; rename the sections to their real owners; delete the one-button "PM4 Placement Tools" section |
+| Archaeology pages | `ArchaeologyPanelService` | Weak Signal & Stratigraphy, UniqueId Timeline, Layers & Provenance, Playback & Capture, PM4 Analysis (redirect), Cartography | `duplicate` | Keep the 6-page strip; delete the legacy 5-tab strip, the floating UniqueId window, and the Quick launchers |
+| Archaeology legacy strip | `DrawArcheologySubTabContent` | Range, Layers, Playback, Capture, Stratigraphy | `duplicate` | Delete; the 6-page destination is authoritative |
+| UniqueId Archaeology window | `DrawUniqueIdArchaeologyWindow` | Stacks Range + Layers + Playback vertically | `duplicate` | Delete; it is a second copy of three destination pages |
+| Archaeology Quick launchers | `DrawArchaeologyQuickSection` | Buttons into pages 1, 2, 5 | `duplicate` | Delete; the destination strip is the only navigation |
+| Cartography tree | `DrawArchaeologyCartographyContent` | Layers, Synthesized Minimap, Save Merged Output; Layers is a 4-tool stack | `misplaced` | Keep as a page; split the Layers stack into named sections |
+| Floating tool windows | `MainMenuBarService` + `ViewerApp` | 12 Tools > Panels windows duplicating destination pages | `duplicate` | Delete the duplicates; keep only genuinely global windows (Log, Perf) |
 | Overlays popup | `ViewerChromeService` | Overlay toggles | `duplicate` | Move into Options sub-menu |
 | Layers popup | `ViewerChromeService` | Layer toggles | `duplicate` | Move into Options sub-menu |
 | PM4 Actions popup | `WorldObjectsPanelService` | PM4 Workbench, Reload PM4 | `duplicate` | Keep one entry point in the PM4 workbench |
@@ -278,10 +408,18 @@ Help
 3. **Options sub-menu**: move the render toggles, overlays, layers, and transparency into it.
 4. **Destination separation**: make the left and right sidebars destination-aware; remove
    cross-destination controls.
-5. **Styling pass**: route every section through `SharedUiWidgets`; remove local colors and
+5. **Archaeology dedupe**: delete the legacy 5-tab strip, the floating UniqueId window, and the
+   Quick launchers; the 6-page destination strip becomes the only navigation. Split the Cartography
+   "Layers" page into named sections.
+6. **Editor section rename**: rename "Tasks & Workspace", "3D Object Library", and "Imports &
+   Exports" to their real owners; delete the one-button "PM4 Placement Tools" section; remove the
+   second PM4 export home.
+7. **Floating-window dedupe**: delete the 12 Tools > Panels windows that duplicate destination
+   pages; keep only Log and Perf as global windows.
+8. **Styling pass**: route every section through `SharedUiWidgets`; remove local colors and
    bespoke headers.
-6. **Naming**: rename WC3 data support to "WC3 Beta" in the UI and documentation.
-7. **Dead-control sweep**: remove or wire every remaining `dead` row.
+9. **Naming**: rename WC3 data support to "WC3 Beta" in the UI and documentation.
+10. **Dead-control sweep**: remove or wire every remaining `dead` row.
 
 ## 6. Open questions for the operator
 
