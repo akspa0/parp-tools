@@ -181,6 +181,23 @@ Across all 616 files the MPRL fields form a region → object → point hierarch
 So `Unk00` is the region/zone parent, `Unk04` is the object group, and `Unk14`/`Unk16` are per-point
 node type/flags. This is the containment hierarchy the operator suspected.
 
+## Follow-up: object groups join to authored models (whole map, 2026-10-20)
+
+Joining each `Unk04` group to the ADT placements whose origin lies on the ground surfaces containing
+the group's points (411 files with placements, 29,164 groups):
+
+| Result | Groups |
+|---|---|
+| Exactly one model | 4,496 (15.4%) |
+| Multiple models | 1,750 (6.0%) |
+| No model | 22,770 (78.1%) |
+| No containing surface | 148 (0.5%) |
+
+The one-model matches are meaningful: in `development_00_00.pm4`, groups 1346, 1347, 1348 and 1357
+all map to `WORLD\WMO\NORTHREND\WINTERGRASP\WG_WALL02D.WMO` — separate wall segments of one WMO. The
+high no-model rate is a limitation of the containment test (the placement origin is the model base,
+which is often above the ground surface), not a failure of the hierarchy.
+
 ## Files changed
 
 - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4PathNodeProbe.cs` (new)

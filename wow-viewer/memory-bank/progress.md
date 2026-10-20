@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 object groups join to authored models
+
+- New `Pm4ObjectModelProbe` joins each `Unk04` group to the ADT placements whose origin lies on the
+  ground surfaces containing the group's points. 411 files with placements, 29,164 groups: 4,496
+  map to exactly one model, 1,750 to multiple, 22,770 to none, 148 have no containing surface.
+- The one-model matches are meaningful: `development_00_00.pm4` groups 1346/1347/1348/1357 all map
+  to `WG_WALL02D.WMO` (separate wall segments of one WMO). The high no-model rate is a containment
+  limitation (the placement origin is the model base, often above the ground surface).
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 MPRL scene-graph hierarchy
 
 - Whole-map (616 files): `Unk00` (region) 265 distinct values; `Unk04` (object) 42,092 distinct

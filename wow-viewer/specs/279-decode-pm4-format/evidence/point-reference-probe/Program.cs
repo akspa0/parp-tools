@@ -14,6 +14,7 @@ bool mshd = args.Length == 3 && args[0] == "--mshd";
 bool placements = args.Length == 3 && args[0] == "--placements";
 bool m2Partition = args.Length == 3 && args[0] == "--m2-partition";
 bool pathNodes = args.Length == 3 && args[0] == "--path-nodes";
+bool objectModels = args.Length == 3 && args[0] == "--object-models";
 if (args.Length == 3 && args[0] == "--mprr-dump")
 {
     var dumpDoc = Pm4ResearchReader.ReadFile(args[1]);
@@ -80,7 +81,7 @@ if (args.Length == 3 && args[0] == "--mprr-runs")
     Flush();
     return;
 }
-if (edgesOnly || edgeIdentity || mshd || placements || m2Partition || pathNodes) args = args[1..];
+if (edgesOnly || edgeIdentity || mshd || placements || m2Partition || pathNodes || objectModels) args = args[1..];
 if (args.Length != 2) throw new ArgumentException("Usage: [--edges-only|--edge-identity|--mshd|--placements|--m2-partition|--path-nodes|--mprr-dump <file> <count>] <complete-map-pm4-directory> <new-report.json>");
 if (File.Exists(args[1])) throw new IOException("Report exists; refusing overwrite.");
 var timer = Stopwatch.StartNew();
@@ -102,7 +103,7 @@ foreach (string path in Directory.GetFiles(args[0], "*.pm4").Order(StringCompare
     sizes[name] = bytes.Length;
     hashes.Add(new { File = name, Bytes = bytes.Length, Sha256 = hash });
 
-    if (placements || m2Partition)
+    if (placements || m2Partition || objectModels)
     {
         AdtPlacementCatalog? catalog = null;
         string? adtPath = Pm4CoordinateService.TryGetObj0PathForPm4(path);
@@ -160,6 +161,20 @@ if (pathNodes)
     }, new JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"Path-node probe: {pathReport.Files} files, MPRL {pathReport.MprlCount}, MPRR {pathReport.MprrCount}, " +
         $"inside mesh {pathReport.MprlInsideMesh}/{pathReport.MprlWithFinitePosition}, {timer.Elapsed.TotalSeconds:F3}s.");
+    return;
+}
+if (objectModels)
+{
+    var objectReport = Pm4ObjectModelProbe.Analyze(placementInputs);
+    File.WriteAllText(args[1], JsonSerializer.Serialize(new
+    {
+        Warning = "MPRL Unk04 groups joined to ADT placements via ground-surface containment. Correlation is not identity.",
+        MapSha256 = mapHash, AdtRead = adtRead, AdtMissing = adtMissing, AdtFailed = adtFailed,
+        Result = objectReport, Inputs = hashes, ElapsedSeconds = timer.Elapsed.TotalSeconds,
+    }, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"Object-model probe: {objectReport.FilesWithPlacements} files with placements, {objectReport.Groups} groups, " +
+        $"one/multi/no model = {objectReport.GroupsWithOneModel}/{objectReport.GroupsWithMultipleModels}/{objectReport.GroupsWithNoModel}, " +
+        $"no surface = {objectReport.GroupsWithNoSurface}, {timer.Elapsed.TotalSeconds:F3}s.");
     return;
 }
 if (m2Partition)
