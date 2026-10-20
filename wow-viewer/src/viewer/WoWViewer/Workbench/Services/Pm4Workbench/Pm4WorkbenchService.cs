@@ -1298,6 +1298,27 @@ internal sealed partial class Pm4WorkbenchService
             TrySavePm4ObjectMatch(_pm4MatchModelPath.Trim(), name, "manual");
         }
 
+        if (ImGui.Button("Suggest nearest model"))
+        {
+            if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug)
+                && _worldScene.Pm4Overlay.GetSelectedPm4SourcePath() is { } sourcePath)
+            {
+                var groups = _worldScene.Pm4Overlay.BuildPm4ObjectGroups(sourcePath);
+                var group = groups.FirstOrDefault(g => g.GroupObjectId == debug.LinkGroupObjectId);
+                if (group?.NearestModel is { Length: > 0 } suggestion)
+                {
+                    _pm4MatchModelPath = suggestion;
+                    _statusMessage = $"Suggested {System.IO.Path.GetFileName(suggestion)} at {group.NearestDistance:F1} units.";
+                }
+                else
+                {
+                    _statusMessage = "No nearest model suggestion for this object group.";
+                }
+            }
+        }
+        ImGui.SameLine();
+        ImGui.TextDisabled("Uses the measured object-group → nearest-placement join.");
+
         string currentKey = Pm4ObjectMatchStore.BuildKey(mapName, key.tileX, key.tileY, key.ck24, key.objectPart);
         if (_pm4ObjectMatchEntries.TryGetValue(currentKey, out var current))
         {
