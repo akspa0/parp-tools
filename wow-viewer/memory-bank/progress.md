@@ -2,6 +2,15 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 nearest-placement object-to-model join
+
+- Added a nearest-placement join (group centroid -> nearest authored placement) to
+  `Pm4ObjectModelProbe`. Whole map: 518 groups within 1 unit, 9,402 within 5, 8,019 within 10,
+  7,415 within 25, 3,662 beyond 25. 85.1% within 25 units.
+- Matches are coherent: `development_00_00.pm4` groups 572/573/577/490 all map to
+  `ND_IRONDWARF_LARGEBUILDING.WMO`; group 1319 maps to `WG_WALL02D.WMO` at 10.55 units.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 object groups join to authored models
 
 - New `Pm4ObjectModelProbe` joins each `Unk04` group to the ADT placements whose origin lies on the

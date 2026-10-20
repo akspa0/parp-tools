@@ -11,7 +11,9 @@ public sealed record Pm4ObjectModelRow(
     int Points,
     int Surfaces,
     int Placements,
-    string ModelPaths);
+    string ModelPaths,
+    string NearestModel,
+    float NearestDistance);
 
 public sealed record Pm4ObjectModelReport(
     int Files,
@@ -21,6 +23,12 @@ public sealed record Pm4ObjectModelReport(
     long GroupsWithMultipleModels,
     long GroupsWithNoModel,
     long GroupsWithNoSurface,
+    long GroupsWithNearestWithin1,
+    long GroupsWithNearestWithin5,
+    long GroupsWithNearestWithin10,
+    long GroupsWithNearestWithin25,
+    long GroupsWithNearestBeyond25,
+    long GroupsWithNoPlacements,
     IReadOnlyList<Pm4ObjectModelRow> Samples);
 
 /// <summary>
@@ -39,6 +47,7 @@ public static class Pm4ObjectModelProbe
         ArgumentNullException.ThrowIfNull(input);
 
         long groups = 0, oneModel = 0, multipleModels = 0, noModel = 0, noSurface = 0;
+        long nearest1 = 0, nearest5 = 0, nearest10 = 0, nearest25 = 0, nearestBeyond = 0, noPlacements = 0;
         int filesWithPlacements = 0;
         var samples = new List<Pm4ObjectModelRow>();
 
@@ -102,18 +111,44 @@ public static class Pm4ObjectModelProbe
                 else if (models.Count == 1) oneModel++;
                 else multipleModels++;
 
+                // Nearest-placement join: group centroid -> nearest authored placement.
+                Vector3 centroid = Vector3.Zero;
+                foreach (var point in group)
+                    centroid += Pm4CoordinateService.MprlToAdtPlacement(point.Position);
+                centroid /= group.Count();
+                string nearestModel = string.Empty;
+                float nearestDistance = float.PositiveInfinity;
+                foreach (var placement in placements)
+                {
+                    float d = Vector3.Distance(placement.Position, centroid);
+                    if (d < nearestDistance)
+                    {
+                        nearestDistance = d;
+                        nearestModel = placement.Model;
+                    }
+                }
+                if (placements.Length == 0) noPlacements++;
+                else if (nearestDistance <= 1) nearest1++;
+                else if (nearestDistance <= 5) nearest5++;
+                else if (nearestDistance <= 10) nearest10++;
+                else if (nearestDistance <= 25) nearest25++;
+                else nearestBeyond++;
+
                 if (samples.Count < 60)
                 {
                     samples.Add(new Pm4ObjectModelRow(
                         file.FileId, group.Key, group.Count(), surfaces.Count, models.Count,
-                        string.Join('|', models.Order(StringComparer.OrdinalIgnoreCase))));
+                        string.Join('|', models.Order(StringComparer.OrdinalIgnoreCase)),
+                        nearestModel, nearestDistance));
                 }
             }
         }
 
         return new Pm4ObjectModelReport(
             input.Count, filesWithPlacements, groups,
-            oneModel, multipleModels, noModel, noSurface, samples);
+            oneModel, multipleModels, noModel, noSurface,
+            nearest1, nearest5, nearest10, nearest25, nearestBeyond, noPlacements,
+            samples);
     }
 
     private static List<Vector3[]> BuildPolygons(Pm4KnownChunkSet chunks)

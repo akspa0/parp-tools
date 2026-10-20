@@ -356,7 +356,22 @@ groups):
 The one-model matches are meaningful: in `development_00_00.pm4`, groups 1346, 1347, 1348 and 1357
 all map to `WORLD\WMO\NORTHREND\WINTERGRASP\WG_WALL02D.WMO` — separate wall segments of one WMO. The
 high no-model rate is a limitation of the containment test (the placement origin is the model base,
-which is often above the ground surface), not a failure of the hierarchy. Source: **E-PATH**.
+which is often above the ground surface), not a failure of the hierarchy.
+
+A **nearest-placement** join (group centroid → nearest authored placement) covers every group:
+
+| Nearest placement distance | Groups |
+|---|---|
+| ≤ 1 | 518 (1.8%) |
+| ≤ 5 | 9,402 (32.2%) |
+| ≤ 10 | 8,019 (27.5%) |
+| ≤ 25 | 7,415 (25.4%) |
+| > 25 | 3,662 (12.6%) |
+
+So 85.1% of groups have a nearest authored placement within 25 units. The matches are coherent:
+`development_00_00.pm4` groups 572, 573, 577 and 490 all map to
+`ND_IRONDWARF_LARGEBUILDING.WMO`, and group 1319 maps to `WG_WALL02D.WMO` at 10.55 units. This is
+the usable object-to-asset join. Source: **E-PATH**.
 
 ## 4. Binary envelope and parser contract
 
