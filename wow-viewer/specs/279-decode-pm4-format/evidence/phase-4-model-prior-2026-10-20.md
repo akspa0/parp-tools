@@ -3,7 +3,9 @@
 > **Follow-up (same day, operator-directed):** the reference was re-issued using the current
 > wowdev.wiki field names (`PM4`, `PD4`) as primary names. All commentary about earlier names was
 > removed. Proposed names now live only in §9, marked as suggestions for the wiki editor. The
-> document is written to stand alone as a reader/renderer specification.
+> document is written to stand alone as a reader/renderer specification, and the measured field
+> notes from the earlier draft (MSHD spans, MSCN chain, MSLK bitfield/tile address, MSUR classes,
+> MPRL permutation and flags, MPRR run quantisation, terrain/placement recovery) were folded in.
 
 ## Question
 
@@ -39,7 +41,8 @@ Two operator-directed deliverables:
 
 ## Result
 
-- Reference is now ~475 lines, one document, one unknown register (U01–U17).
+- Reference is now ~650 lines, one document, one open-question register (Q01–Q20), wiki field names
+  as primary names.
 - Prior is opt-in and additive; it can only promote a candidate that the geometry scorer already
   considered, and only by at most 0.10.
 - New test `ScoreSegment_ModelPriorBreaksTieOnlyWhenSupplied` proves:

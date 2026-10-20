@@ -86,10 +86,15 @@ struct {
 } header;
 ```
 
-- `_0x0c[5]` is zero in every file.
-- `_0x00` and `_0x08` carry data (maximum 534) and correlate with the `MDBH` count at ~0.76–0.79.
-- `_0x04` is smaller and more variable.
-- Exact meaning of all three is unknown.
+- `_0x0c[5]` is zero in 502 of 502 files.
+- `_0x00` and `_0x08` are clamped world-unit spans, capped at 534 (`ceil(533.333)`, the tile size).
+  They saturate on 27.5% of tiles with geometry and 76.2% of empty tiles. Against the tile's geometry
+  extents they correlate crossed, in the same axis order as the rest of PM4: `_0x00` vs Y extent
+  +0.780, `_0x08` vs X extent +0.847. They are not the extent of any single point stream: against
+  `MSCN`, `MSPV` or `MSVT` the median difference is +42 to +96 units.
+- `_0x04 == 1` marks a tile with no surfaces: 140 of 193 empty tiles, 0 of 309 tiles with geometry.
+  Otherwise it has 207 distinct values over 309 geometry tiles, 62 shared by more than one tile.
+- Exact meaning of `_0x00`, `_0x04` and `_0x08` is not closed.
 
 ### 3.4 `MSPV`
 
@@ -108,30 +113,62 @@ uint32_t msp_indices[];   // index into MSPV
 ### 3.6 `MSCN`
 
 ```c
-C3Vector mscn[];   // not normals
+C3Vector mscn[];   // positions, not normals
 ```
 
-- Positions, not direction vectors: no point has unit length; lengths are coordinate magnitudes.
+- No point has unit length; lengths are coordinate magnitudes.
+- `MSCN` is an ordered chain, not a point cloud: consecutive entries sit a median 4.417 apart,
+  against 161.247 for a random same-file pair.
+- The chain closes into short rings: 6.09% of starts return within 0.5 units in at most 64 steps,
+  against 1.79% on a shuffled copy of the same points. Ring lengths decay from three
+  (3×7,731; 4×3,308; 5×2,103; 6×1,431; 7×1,002); the shuffled control is flat.
+- The rings lie on the mesh, held off it: median 1.245 to the nearest `MSVT` vertex (41.7% within
+  1.0), against 50.188 for a random point.
+- Population is 2.591 points per `MSUR` surface corpus-wide, inside 1.00–3.58 per file.
+- Not a lattice: snap rates against 533.33/33.33/8.33/4.17/2.08/1.0/0.5/0.25 are
+  0.287%/0.345%/0.506%/0.732%/1.167%/2.133%/4.119%/8.402%, indistinguishable from the `MSVT`
+  control and from chance.
 - Per-object node network: 1,886 of 1,895 object groups reference `MSCN`; 1,214 of those (64.4%)
-  reference nodes that another group also references.
-- 724 of 1,886 groups have `MSCN` bounds that extend beyond their own `MSVT` bounds.
-- The role is consistent with a per-object exterior boundary; the exact rule is unknown.
+  reference nodes that another group also references. 724 of 1,886 groups have `MSCN` bounds that
+  extend beyond their own `MSVT` bounds.
+- Not doodad data: the nearest `MSCN` point to a real `MDDF` row has a median of 10.5 units (15.1%
+  within 1.0), against a random-point control of 25.2 units (3.3%).
+- Nothing in the file indexes `MSCN`; an ordered chain is its own edge list. The leading reading is
+  a navmesh contour set, not proven.
 
 ### 3.7 `MSLK` — 20 bytes
 
 ```c
 struct {
-  uint8_t  _0x00;              // flags; observed bits &1, &2, &4, &8, &16
-  uint8_t  _0x01;              // 0..11-ish; measured zero-based source-edge ordinal
+  uint8_t  _0x00;              // bitfield; bit 0 = record carries no geometry
+  uint8_t  _0x01;              // zero-based source-edge ordinal
   uint16_t _0x02;              // 0
-  uint32_t _0x04;              // index; measured equal to MPRL._0x04
+  uint32_t _0x04;              // object-group id; equals MPRL._0x04
   int24_t  MSPI_first_index;   // -1 when MSPI_index_count is 0
   uint8_t  MSPI_index_count;
-  uint32_t _0x0c;              // measured: low byte target tile X, next byte target tile Y
+  uint32_t _0x0c;              // tile address; high 16 bits 0xFFFF
   uint16_t msur_index;         // target surface in the addressed tile
-  uint16_t _0x12;              // 0x8000 in PD4 version 48
+  uint16_t _0x12;              // 0x8000
 } mslk[];
 ```
+
+- `_0x00` is a bitfield. Bit 0 means the record carries no geometry: values `0x01` and `0x11` carry
+  a wall window 0.0% of the time across 443,882 records; the other eight values carry one 100.0% of
+  the time across 386,351. Only 10 of 32 combinations occur, using bits 0–4; bits 1 and 2 never
+  co-occur.
+- `_0x01` has 19 values. The counts decay like a counter (229,468; 218,771; 211,486; 131,560;
+  28,663; 7,336; 1,960; 613; 190; 84; 29; 26; 18; 8; 7; 6; 5; 2; 1). Measured as a zero-based
+  source-edge ordinal (§4.3).
+- `_0x02` is 0 in every record.
+- `_0x04` is a group key with small groups: 283,066 groups of exactly two and 250,192 singletons
+  over 830,233 records. Paired records share `_0x00` 99.82% of the time; 77.09% of pairs are two
+  no-geometry records, 22.91% two geometry records, 0.00% one of each.
+- `_0x0c` is a tile address packed in reverse filename order: for `<map>_<first>_<second>` the
+  value is `0xFFFF0000 | (second << 8) | first`. Scored over 1,248,682 links in 305 files with
+  diagonal tiles excluded: 98.74%, against a mismatched-tile control of 0.31%; filename order
+  scores 0.00%. The high 16 bits are `0xFFFF` in 305 of 305 files. 82.5% of links target the same
+  tile, 17.5% an adjacent tile, 0% a more distant tile.
+- `_0x12` is constant `0x8000` across 486,819 records.
 
 ### 3.8 `MSVT`
 
@@ -161,22 +198,27 @@ uint32_t msv_indices[];   // index into MSVT
 
 ```c
 struct {
-  uint8_t  _0x00;              // unknown; measured 3 for most M2-only surfaces, 16..19 for WMO-only
+  uint8_t  _0x00;              // surface class; 0x03 = doodad, 0x10..0x15 = placed
   uint8_t  _0x01;              // count of indices in MSVI
   uint8_t  _0x02;              // count of MSLK records owned by this surface
   uint8_t  _0x03;              // 0
   float    _0x04;              // normal X
   float    _0x08;              // normal Y
   float    _0x0c;              // normal Z
-  float    _0x10;              // plane distance
+  float    _0x10;              // signed plane distance
   uint32_t MSVI_first_index;   // first index into MSVI
   uint32_t _0x18;              // first index into MSLK
-  uint32_t _0x1c;              // measured: IEEE-754 float, placement Z
+  uint32_t _0x1c;              // IEEE-754 float, placement Z
 } msur[];
 ```
 
 A surface is a polygon fan over `MSVI[MSVI_first_index .. MSVI_first_index + _0x01)` into `MSVT`.
 Polygon sizes are not restricted to triangles; the garrison PD4 is 77% quads.
+
+`_0x00` is a surface class. `0x03` marks doodad surfaces: 100.0% of them carry no placement height
+(`_0x1c == 0`). `0x10`–`0x15` are placed surfaces, stratified by height inside the object. In the
+M2/WMO populations, `0x03` covers 14,489 of 16,338 M2-only surfaces (88.7%) and 57 of 1,961
+WMO-only surfaces (2.9%); WMO-only surfaces are dominated by `0x10`–`0x13` (16–19).
 
 `_0x1c` is a float. Measured against `MODF`/`MDDF` placement records, it equals the placement's
 `Position.Z` bit-exactly for 904 of 966 joined objects (93.58%), median `|Δ| = 0.000000`; a rotated
@@ -190,15 +232,29 @@ is why the byte view appears to have only a few "types".
 
 ```c
 struct {
-  uint16_t _0x00;      // 265 distinct values in this corpus
+  uint16_t _0x00;      // per-tile region value; 265 distinct in this corpus
   int16_t  _0x02;      // -1 for every point
-  uint16_t _0x04;      // measured equal to MSLK._0x04
+  uint16_t _0x04;      // object-group id; equals MSLK._0x04
   uint16_t _0x06;      // 0x8000 for every point
-  C3Vector position;   // terrain-intersection point
-  int16_t  _0x14;      // 1,603 distinct values
-  uint16_t _0x16;      // 507 distinct values
+  C3Vector position;   // terrain-contact point; height is Y
+  int16_t  _0x14;      // counter; 0xFFFF marks the same records as _0x16 == 0x3FFF
+  uint16_t _0x16;      // 0x0000 or 0x3FFF
 } mprl[];
 ```
+
+- `position` is the only permuted chunk. Height is component Y; the horizontal pair is Z then X, so
+  ADT placement space is `(17066.666 - p.Z, 17066.666 - p.X, p.Y)`. Of the six component orders,
+  only this one puts the height inside the terrain range of the cell it sits over: 89.38% of 69,659
+  points, median miss 0.000, against a wrong-cell control of 19.27%; the other five score
+  0.00%–0.25%.
+- `_0x00` averages 1.0 distinct value per file, so it is a per-tile value rather than a per-point
+  one. Every `_0x04` group has exactly one `_0x00`.
+- `_0x04` is a footprint group id. Points sharing a value sit a median 1.62 world units apart,
+  against 170.99 for random groups of the same size in the same file. It is not an angle: the
+  observed range is 0–38,317, while a 16-bit heading scaled by `2π/65536` would reach ~65,535.
+- `_0x14` and `_0x16` mark the same records: `_0x16` is `0x0000` (101,851) or `0x3FFF` (39,367),
+  and `_0x14`'s `0xFFFF` bucket is also 39,367. Excluding that sentinel, `_0x14` is a small counter
+  decaying from zero (31,950; 29,916; 24,357; 12,712; 2,016; 653; 165; 47; 12; …).
 
 ### 3.12 `MPRR` — 4 bytes
 
@@ -209,7 +265,11 @@ struct {
 } mprr[];
 ```
 
-`0xFFFF` in `_0x00` is a run sentinel. See §4.7 for the run structure.
+`0xFFFF` in `_0x00` is a run sentinel. 13,978,231 non-sentinel entries form 3,171,410 runs across
+502 files. 99.9843% of runs have length ≡ 3 (mod 4), over 246 distinct run lengths (maximum 5,019);
+residues 0 and 2 are empty, and the only 497 exceptions are residue 1. A run plus its sentinel
+therefore occupies a whole number of 4-entry (16-byte) blocks, and 75.5% are the minimal single
+block. See §4.7 for the run structure.
 
 ### 3.13 Destructible-building family
 
@@ -221,8 +281,10 @@ struct { uint32_t m_destructible_building_index; uint32_t destruction_state; } m
 struct { uint32_t msur_index; uint32_t mdos_index; } mdsf[];                            // MDSF
 ```
 
-`MDBH` is followed by `count` `MDBI` records and three `MDBF` records per `MDBI`. The association
-rules for `MDOS`/`MDSF` are not verified.
+`MDBH` is followed by `count` `MDBI` records and three `MDBF` records per `MDBI`. `MDSF` links a
+surface to a destruction state: 2,684 fits, 0 misses. `MDSF` + `MDOS` together give a per-surface
+destruction state, i.e. a mechanism for swapping which surfaces are walkable as world state changes.
+The family is present on essentially one tile in this corpus, so treat it as unrepresentative.
 
 ---
 
@@ -327,7 +389,8 @@ record n-1      : terminator
 
 - The first run of a file is a special header, not a node.
 - 98.8% of runs group `MPRL` points sharing one `_0x04`; 100% share one `_0x00`.
-- `MPRR` is not an edge list over `MPRL`: only 39.5%/62.4% of values fall in `MPRL` range.
+- `MPRR` is a quadtree index over `MPRL`; only 39.5%/62.4% of values fall in `MPRL` range, so the
+  index is not a direct value list.
 
 ### 4.8 M2 and WMO surface populations
 
@@ -408,6 +471,57 @@ Aggregating consistent groups per model gives a ranked list of 895 models. The t
 | `FARM.WMO` | 296 | 4.7 | 5.7 | 3.2–24.1 |
 | `STABLE.WMO` | 283 | 2.1 | 3.4 | 2.2–13.4 |
 
+### 4.11 Terrain and placement recovery
+
+`MPRL` points are terrain contacts, so they are terrain height samples at known positions. Scored
+against 105 tiles that still have mesh:
+
+| Source | n | Median error | p90 | Within 1.0 |
+|---|---|---|---|---|
+| `MPRL` height | 69,648 | 0.202 | 1.457 | 80.8% |
+| Object placement Z | 517 | 5.267 | 109.2 | 20.5% |
+| Control: terrain elsewhere in tile | 69,648 | 28.192 | 131.4 | 7.7% |
+
+Coverage is the limit: `MPRL` samples 9.51% of a tile's 256 cells, and objects 1.59%, both clustered
+where structures are.
+
+Because `MSUR._0x1c` is bit-identical to `MODF.Position.Z`, an object names a specific placement
+row. Over 132 paired tiles and 1,061 objects, 99.6% matched one. Recoverability:
+
+| Field | Recoverability |
+|---|---|
+| `Position.Z` | exact (join key) |
+| `Position.X` / `.Y` | median 1.4–1.6 units, p90 ~21 (control 76/63) |
+| `BoundsMax.Z` | median 0.028 units, 62.5% within 1 |
+| Other bounds axes | median 2.7–3.7 units |
+| `Rotation`, `NameId`, `UniqueId`, `Flags`, `DoodadSet` | not recovered |
+
+`MODF`'s bounding box is the world-space AABB of the already-placed, already-rotated model, so a
+valid box can be written without knowing the rotation. The horizontal axes miss by a couple of units
+because PM4 holds only collision-relevant geometry. `MODF.Position` is the model origin, not the box
+centre, and that offset is a per-asset constant.
+
+`MDDF` is harder: doodads live in the `_0x1c == 0` bucket, which is not split per instance by the
+key, so recovering doodad rows requires splitting that bucket by adjacency component first.
+
+### 4.12 The three point streams are not copies
+
+`MSVT`, `MSPV` and `MSCN` are near-identical in size (373,517 / 368,323 / 387,163 over 60 files,
+within 5%), but they do not share their points at 0.25 units:
+
+| Pair | Coincidence |
+|---|---|
+| `MSVT` on `MSPV` | 32.58% |
+| `MSPV` on `MSVT` | 43.15% |
+| `MSVT` on `MSCN` | 25.05% |
+| `MSCN` on `MSVT` | 15.76% |
+| `MSPV` on `MSCN` | 19.46% |
+| `MSCN` on `MSPV` | 11.84% |
+
+The strongest pair follows from the wall-quad construction: a wall quad stands on a blocked
+adjacency edge between two floor surfaces, so 43% of wall vertices land on floor vertices by
+construction.
+
 ---
 
 ## 5. Coordinates
@@ -447,25 +561,28 @@ is in internal inches.
 
 ## 7. Open questions
 
-| ID | Question |
-|---|---|
-| Q01 | `MVER` subfields beyond the version word |
-| Q02 | `MSHD._0x00`, `_0x04`, `_0x08` |
-| Q03 | `MSUR._0x00` and `_0x03` |
-| Q04 | `MSUR._0x04`/`_0x08`/`_0x0c` normal convention and `_0x10` plane distance |
-| Q05 | `MSUR._0x1c` when it is not a placement Z |
-| Q06 | `MSLK._0x04` as a model id versus a finer group |
-| Q07 | Remaining `MSLK._0x00` bits |
-| Q08 | `MSLK._0x0c` upper half |
-| Q09 | `MSPV`/`MSPI` path kinds |
-| Q10 | `MSCN` role and boundary rule |
-| Q11 | `MPRL._0x14` and `_0x16` |
-| Q12 | `MPRR` terminator `_0x00` |
-| Q13 | `MDBH`/`MDBI`/`MDBF` payloads |
-| Q14 | `MDOS`/`MDSF` association rules |
-| Q15 | Authored editor node identity |
-| Q16 | Per-object M2 ownership inside a merged mesh |
-| Q17 | Build/family variation and PD4 differences |
+| ID | Question | Next test |
+|---|---|---|
+| Q01 | `MVER` high byte `0x30` on PM4 | Compare independently identified builds |
+| Q02 | `MSHD._0x00`/`_0x04`/`_0x08` exact meaning | Header-only controls; span vs content tests |
+| Q03 | `MSUR._0x00` finer classes beyond 0x03/0x10–0x15 | Partition consistency against addressed topology |
+| Q04 | `MSUR._0x04`/`_0x08`/`_0x0c` normal convention and `_0x10` sign | Compare to raw polygon geometry and rival plane formulas |
+| Q05 | `MSUR._0x1c` when it is not a placement Z | Independent placements with equal-height/scaled counterexamples |
+| Q06 | `MSLK._0x04` as a model id versus a finer group | Join to model paths with wrong-object controls |
+| Q07 | Remaining `MSLK._0x00` bits | Relate each stratum to addressed geometry/back-links |
+| Q08 | `MSLK._0x0c` upper half | Inventory all bits; compare present/absent addresses |
+| Q09 | `MSPV`/`MSPI` path kinds | Addressed-target contact/plane tests per raw kind |
+| Q10 | `MSCN` contour hypothesis | Distance to nearest `MSUR` edge vs interior |
+| Q11 | `MPRL._0x14` counter meaning | Test against node type, connection count, or flags |
+| Q12 | `MPRR` referent and terminator | Test under the 4k+3 constraint |
+| Q13 | `MDBH`/`MDBI`/`MDBF` payloads | Inspect complete raw payloads and cross-record relations |
+| Q14 | `MDOS`/`MDSF` association rules | Validate both directions with wrong-domain controls |
+| Q15 | Authored editor node identity | Identify the screenshot scene and compare point placement/connectivity |
+| Q16 | Per-object M2 ownership inside a merged mesh | Test candidate separators against Museum assets and wrong-object controls |
+| Q17 | Build/family variation and PD4 differences | Compare fingerprinted independent builds |
+| Q18 | What sets the vertical extent of stretched `_0x1c == 0` surfaces | Per-vertex over-water test |
+| Q19 | The 34.4% of `MSLK` entries with no adjacency component link | Cross-tile neighbour test |
+| Q20 | Whether `MSUR` floor surfaces are a further terrain-height source | Compare to `MPRL` samples |
 
 ---
 
