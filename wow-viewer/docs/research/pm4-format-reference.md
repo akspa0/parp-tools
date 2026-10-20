@@ -384,7 +384,24 @@ model's `.M2`/`.WMO` class) gives a precision figure:
 The consistent matches are clean: WMO ground groups map to `WG_WALL02D.WMO` at 5–11 units. The
 inconsistent ones are mostly WMO ground groups whose nearest placement is an M2 doodad
 (`BURNEDGYPSYWAGON01.M2` at 17–23 units) — likely false matches. This is the usable
-object-to-asset join with a precision estimate. Source: **E-PATH**.
+object-to-asset join with a precision estimate.
+
+Aggregating the consistent groups per model gives a **ranked matcher** (895 models). The top models
+by group count:
+
+| Model | Groups | Mean points | Mean surfaces | Distance range |
+|---|---|---|---|---|
+| `WINTERSPRINGROCK01.M2` | 931 | 3.1 | 2.2 | 0.4–19.3 |
+| `SHADOWMOON_OVERHANGROCK_SMALL_02.M2` | 753 | 5.2 | 3.1 | 2.8–25.0 |
+| `STONETREELOG02.M2` | 618 | 2.7 | 6.8 | 0.6–15.6 |
+| `OM_BONES_02.M2` | 567 | 3.0 | 3.0 | 1.4–21.1 |
+| `BONEWALL_01.M2` | 479 | 2.4 | 2.1 | 3.9–24.1 |
+| `HUMANTWOSTORY.WMO` | 394 | 4.3 | 4.7 | 0.8–24.4 |
+| `FARM.WMO` | 296 | 4.7 | 5.7 | 3.2–24.1 |
+| `STABLE.WMO` | 283 | 2.1 | 3.4 | 2.2–13.4 |
+
+The ranking recovers the map's common objects (rocks, trees, bushes, buildings) and gives a
+per-model confidence from the group count and mean point/surface footprint. Source: **E-PATH**.
 
 ## 4. Binary envelope and parser contract
 

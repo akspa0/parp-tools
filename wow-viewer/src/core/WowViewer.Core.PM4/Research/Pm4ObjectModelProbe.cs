@@ -5,6 +5,17 @@ using WowViewer.Core.PM4.Services;
 
 namespace WowViewer.Core.PM4.Research;
 
+/// <summary>Per-model confidence derived from the consistent object groups that map to it.</summary>
+public sealed record Pm4ModelConfidence(
+    string ModelPath,
+    int Groups,
+    int TotalPoints,
+    int TotalSurfaces,
+    double MeanPoints,
+    double MeanSurfaces,
+    float MinDistance,
+    float MaxDistance);
+
 public sealed record Pm4ObjectModelRow(
     string FileId,
     uint GroupObjectId,
@@ -35,6 +46,7 @@ public sealed record Pm4ObjectModelReport(
     long GroupsWithConsistentMatch,
     long GroupsWithInconsistentMatch,
     long GroupsWithNoMatchWithin25,
+    IReadOnlyList<Pm4ModelConfidence> Models,
     IReadOnlyList<Pm4ObjectModelRow> Samples);
 
 /// <summary>
@@ -57,6 +69,7 @@ public static class Pm4ObjectModelProbe
         long consistent = 0, inconsistent = 0, noMatchWithin25 = 0;
         int filesWithPlacements = 0;
         var samples = new List<Pm4ObjectModelRow>();
+        var modelStats = new Dictionary<string, ModelAccumulator>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var file in input)
         {
@@ -157,6 +170,13 @@ public static class Pm4ObjectModelProbe
                 else if (isConsistent) consistent++;
                 else inconsistent++;
 
+                if (isConsistent && nearestModel is not null)
+                {
+                    if (!modelStats.TryGetValue(nearestModel, out var acc))
+                        modelStats[nearestModel] = acc = new ModelAccumulator();
+                    acc.Add(group.Count(), surfaces.Count, nearestDistance);
+                }
+
                 if (samples.Count < 60)
                 {
                     samples.Add(new Pm4ObjectModelRow(
@@ -172,7 +192,33 @@ public static class Pm4ObjectModelProbe
             oneModel, multipleModels, noModel, noSurface,
             nearest1, nearest5, nearest10, nearest25, nearestBeyond, noPlacements,
             consistent, inconsistent, noMatchWithin25,
+            modelStats
+                .Select(p => p.Value.ToResult(p.Key))
+                .OrderByDescending(m => m.Groups)
+                .ThenBy(m => m.ModelPath, StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
             samples);
+    }
+
+    private sealed class ModelAccumulator
+    {
+        private int _groups, _points, _surfaces;
+        private float _min = float.PositiveInfinity, _max = float.NegativeInfinity;
+
+        public void Add(int points, int surfaces, float distance)
+        {
+            _groups++;
+            _points += points;
+            _surfaces += surfaces;
+            _min = Math.Min(_min, distance);
+            _max = Math.Max(_max, distance);
+        }
+
+        public Pm4ModelConfidence ToResult(string model) => new(
+            model, _groups, _points, _surfaces,
+            _groups == 0 ? 0 : (double)_points / _groups,
+            _groups == 0 ? 0 : (double)_surfaces / _groups,
+            _min, _max);
     }
 
     private static List<Vector3[]> BuildPolygons(Pm4KnownChunkSet chunks)

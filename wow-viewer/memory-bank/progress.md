@@ -2,6 +2,17 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 object groups exposed in the viewer + ranked matcher
+
+- New `Pm4ObjectGroupCatalog` (per-tile `Unk04` groups with point/surface counts, ground-surface
+  class, nearest authored model and consistency) and a new Experimental > PM4 > Object Groups tab.
+  The tab lists the selected tile's groups, supports filter and consistent-only, and focuses the
+  camera on a group's bounds. 3 new catalog tests; 164/164 PM4 tests pass; viewer builds 0 errors.
+- Per-model confidence: 895 models. Top by group count: `WINTERSPRINGROCK01.M2` (931 groups, mean
+  3.1 pts / 2.2 surf), `SHADOWMOON_OVERHANGROCK_SMALL_02.M2` (753), `STONETREELOG02.M2` (618),
+  `OM_BONES_02.M2` (567), `BONEWALL_01.M2` (479), `HUMANTWOSTORY.WMO` (394).
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 object-to-model class-consistency precision
 
 - Added a class-consistency check to `Pm4ObjectModelProbe`: the group's ground-surface class must

@@ -32,8 +32,11 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   nearest-placement join covers every group — 32.2% within 5 units, 59.7% within 10, 85.1% within
   25. **Class-consistency precision:** 19,991 groups (68.5%) have a consistent match (≤25 units and
   model class matches ground-surface class), 5,363 (18.4%) are class-mismatched, 3,662 (12.6%) have
-  no match within 25. **MPRL points are not MSPV path vertices:** only 0.8% within 0.1 and 13.1%
-  within 1.0; the path geometry is the separate MSPV/MSPI stream.
+  no match within 25. **Ranked matcher:** 895 models; top are `WINTERSPRINGROCK01.M2` (931 groups),
+  `SHADOWMOON_OVERHANGROCK_SMALL_02.M2` (753), `STONETREELOG02.M2` (618). **Viewer:** new
+  Experimental > PM4 > Object Groups tab lists the selected tile's groups with filter,
+  consistent-only and camera focus. **MPRL points are not MSPV path vertices:** only 0.8% within 0.1
+  and 13.1% within 1.0; the path geometry is the separate MSPV/MSPI stream.
   [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md). Editor-node
   identity remains unknown. Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
