@@ -24,6 +24,7 @@ public sealed record Pm4OpenQuestionFollowupReport(
     long MprlCounterMatchesNodeLevel,
     long MprlCounterMatchesGroupSize,
     long MprlCounterMatchesLinkCount,
+    long MprlCounterMatchesRunLength,
     long MprlCounterOther,
     long MprrRuns,
     long MprrFirstTwoAreSpatialBounds,
@@ -60,7 +61,7 @@ public static class Pm4OpenQuestionFollowupProbe
         var planeWorldErrors = new List<double>();
         var planeNegatedErrors = new List<double>();
         long nonzeroPlacementZ = 0, nonzeroPlacementZGlobalMatched = 0;
-        long counterRunIndex = 0, counterNodeLevel = 0, counterGroupSize = 0, counterLinkCount = 0, counterOther = 0;
+        long counterRunIndex = 0, counterNodeLevel = 0, counterGroupSize = 0, counterLinkCount = 0, counterRunLength = 0, counterOther = 0;
         long mprrRuns = 0, mprrFirstTwoBounds = 0, mprrLastTerminator = 0;
         long mprrMiddleInside = 0, mprrMiddleTotal = 0;
         var nodeSizes = new Dictionary<(int W, int H), int>();
@@ -118,6 +119,7 @@ public static class Pm4OpenQuestionFollowupProbe
             mprrMiddleTotal += mprr.MiddleTotal;
             counterRunIndex += mprr.CounterRunIndex;
             counterNodeLevel += mprr.CounterNodeLevel;
+            counterRunLength += mprr.CounterRunLength;
             counterOther += mprr.CounterOther;
 
             var groupSizes = chunks.Mprl.GroupBy(p => p.Unk04).ToDictionary(g => g.Key, g => g.Count());
@@ -147,6 +149,7 @@ public static class Pm4OpenQuestionFollowupProbe
             counterNodeLevel,
             counterGroupSize,
             counterLinkCount,
+            counterRunLength,
             counterOther,
             mprrRuns,
             mprrFirstTwoBounds,
@@ -158,12 +161,12 @@ public static class Pm4OpenQuestionFollowupProbe
     }
 
     private static (long Runs, long FirstTwoBounds, long LastTerminator, long MiddleInside, long MiddleTotal,
-        long CounterRunIndex, long CounterNodeLevel, long CounterOther) AnalyzeMprr(
+        long CounterRunIndex, long CounterNodeLevel, long CounterRunLength, long CounterOther) AnalyzeMprr(
         Pm4KnownChunkSet chunks,
         Dictionary<(int W, int H), int> nodeSizes)
     {
         long runs = 0, firstTwoBounds = 0, lastTerminator = 0, middleInside = 0, middleTotal = 0;
-        long counterRunIndex = 0, counterNodeLevel = 0, counterOther = 0;
+        long counterRunIndex = 0, counterNodeLevel = 0, counterRunLength = 0, counterOther = 0;
         var current = new List<Pm4MprrEntry>();
         void Flush()
         {
@@ -200,6 +203,7 @@ public static class Pm4OpenQuestionFollowupProbe
                     short value = chunks.Mprl[index].Unk14;
                     if (value == i - 2) counterRunIndex++;
                     else if (value == level) counterNodeLevel++;
+                    else if (value == current.Count - 3) counterRunLength++;
                     else counterOther++;
                 }
             }
@@ -212,7 +216,7 @@ public static class Pm4OpenQuestionFollowupProbe
         }
         Flush();
         return (runs, firstTwoBounds, lastTerminator, middleInside, middleTotal,
-            counterRunIndex, counterNodeLevel, counterOther);
+            counterRunIndex, counterNodeLevel, counterRunLength, counterOther);
     }
 
     private static Vector3[][] BuildPolygons(Pm4KnownChunkSet chunks)
