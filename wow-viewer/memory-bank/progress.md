@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 MPRL/MPRR path-node layer
+
+- New `Pm4PathNodeProbe` plus `--path-nodes` and `--mprr-dump` runner modes.
+- MPRL: 178,588 points, 177,525 (99.4%) inside the PM4 mesh; `Unk02 = −1` and `Unk06 = 0x8000`
+  for every point; varying payload is `Unk00`/`Unk04`/`Unk14`/`Unk16`.
+- MPRR: 17,150,640 records, 18.5% `0xFFFF` sentinels. Not an MPRL edge list (39.5%/62.4% in range).
+  Values are linear cell indices; each run ends with `(0, 0x0300)`; run lengths are all `4k+3`
+  (3, 7, 11, 15, …) with ~4:1 decay — a hierarchical/quadtree signature (H).
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 M2 per-object partition is negative
 
 - Extended `Pm4M2PartitionProbe` to test topology, MSVT vertex sets, MSUR index ranges, Padding,

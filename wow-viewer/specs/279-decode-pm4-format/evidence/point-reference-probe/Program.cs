@@ -13,8 +13,31 @@ bool edgeIdentity = args.Length == 3 && args[0] == "--edge-identity";
 bool mshd = args.Length == 3 && args[0] == "--mshd";
 bool placements = args.Length == 3 && args[0] == "--placements";
 bool m2Partition = args.Length == 3 && args[0] == "--m2-partition";
-if (edgesOnly || edgeIdentity || mshd || placements || m2Partition) args = args[1..];
-if (args.Length != 2) throw new ArgumentException("Usage: [--edges-only|--edge-identity|--mshd|--placements|--m2-partition] <complete-map-pm4-directory> <new-report.json>");
+bool pathNodes = args.Length == 3 && args[0] == "--path-nodes";
+if (args.Length == 3 && args[0] == "--mprr-dump")
+{
+    var dumpDoc = Pm4ResearchReader.ReadFile(args[1]);
+    int count = int.Parse(args[2]);
+    Console.WriteLine($"MPRR records: {dumpDoc.KnownChunks.Mprr.Count}; MPRL: {dumpDoc.KnownChunks.Mprl.Count}; MSCN: {dumpDoc.KnownChunks.Mscn.Count}");
+    int run = 0;
+    for (int i = 0; i < Math.Min(count, dumpDoc.KnownChunks.Mprr.Count); i++)
+    {
+        var r = dumpDoc.KnownChunks.Mprr[i];
+        if (r.IsSentinel)
+        {
+            Console.WriteLine($"  [{i}] SENTINEL run={run}");
+            run = 0;
+        }
+        else
+        {
+            run++;
+            Console.WriteLine($"  [{i}] v1={r.Value1} (0x{r.Value1:X4}) v2={r.Value2} (0x{r.Value2:X4})");
+        }
+    }
+    return;
+}
+if (edgesOnly || edgeIdentity || mshd || placements || m2Partition || pathNodes) args = args[1..];
+if (args.Length != 2) throw new ArgumentException("Usage: [--edges-only|--edge-identity|--mshd|--placements|--m2-partition|--path-nodes|--mprr-dump <file> <count>] <complete-map-pm4-directory> <new-report.json>");
 if (File.Exists(args[1])) throw new IOException("Report exists; refusing overwrite.");
 var timer = Stopwatch.StartNew();
 var files = new List<Pm4MapAuditInput>();
@@ -81,6 +104,18 @@ if (mshd)
         MapSha256 = mapHash, Result = mshdReport, Inputs = hashes, ElapsedSeconds = timer.Elapsed.TotalSeconds,
     }, new JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"MSHD probe: {files.Count} files, {mshdReport.Words.Count} words, {timer.Elapsed.TotalSeconds:F3}s. No field meaning asserted.");
+    return;
+}
+if (pathNodes)
+{
+    var pathReport = Pm4PathNodeProbe.Analyze(files);
+    File.WriteAllText(args[1], JsonSerializer.Serialize(new
+    {
+        Warning = "MPRL/MPRR range and containment tests. In-range values are candidate indices, not proven edges; sentinel retained.",
+        MapSha256 = mapHash, Result = pathReport, Inputs = hashes, ElapsedSeconds = timer.Elapsed.TotalSeconds,
+    }, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"Path-node probe: {pathReport.Files} files, MPRL {pathReport.MprlCount}, MPRR {pathReport.MprrCount}, " +
+        $"inside mesh {pathReport.MprlInsideMesh}/{pathReport.MprlWithFinitePosition}, {timer.Elapsed.TotalSeconds:F3}s.");
     return;
 }
 if (m2Partition)

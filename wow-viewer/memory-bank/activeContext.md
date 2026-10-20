@@ -18,7 +18,11 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   Height and GroupObjectId all interleave objects (2,000 mixed-model components; 6,576 placements
   share vertices; 9,570 overlapping MSUR ranges; Padding always 0; 7,315 placements multi-GroupObjectId).
   [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-m2-partition-2026-10-20.md). Per-object M2
-  ownership remains U; editor-node identity remains unknown. Operator wants checkpoints committed.
+  ownership remains U. **Path layer:** MPRL 178,588 points, 99.4% inside the mesh, `Unk02 = −1` and
+  `Unk06 = 0x8000` constant; MPRR 17,150,640 records is a spatial grid, not an MPRL edge list
+  (39.5%/62.4% in range), with `4k+3` run lengths and a `(0, 0x0300)` terminator.
+  [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md). Editor-node
+  identity remains unknown. Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
   MSUR→MSLK start/count windows; packed link target is tile X=low byte, Y=next byte + surface index.
   **Not universally file-local:** 15,773 cross-tile links; 14,659 resolve. Same-tile addressed links

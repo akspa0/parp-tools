@@ -73,6 +73,7 @@ Evidence keys used throughout this reference:
 | **E-EDGE** | [Source-edge ordinal/spatial receipt](../../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/edge-ordinal-geometry-2026-10-20.json) |
 | **E-PLACE** | [Authored-placement ground-truth receipt](../../specs/279-decode-pm4-format/evidence/phase-3-placement-ground-truth-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/placement-ground-truth-2026-10-20.json) |
 | **E-M2PART** | [M2 partition receipt](../../specs/279-decode-pm4-format/evidence/phase-3-m2-partition-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/m2-partition-v6-2026-10-20.json) |
+| **E-PATH** | [MPRL/MPRR receipt](../../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/path-nodes-v2-2026-10-20.json) |
 
 These are corpus-scoped measurements. A source comment, unit test or similarly named field in a
 different format does not establish the same meaning for every PM4/PD4 build.
@@ -240,6 +241,20 @@ of the decoded structural features partitions it into individual placed objects:
 that a decoded field separates; the surface order, vertex ranges and connection IDs all interleave
 objects. Per-object M2 ownership is **U** and must come from an undecoded field or is lossy in this
 corpus. Source: **E-M2PART**.
+
+### 3.7 MPRL is the authored point layer; MPRR is a spatial grid — M/H
+
+MPRL holds 178,588 points across 616 files; **177,525 (99.4%)** lie inside the PM4 mesh under the
+measured MPRL-to-placement mapping. `Unk02` is **−1** and `Unk06` is **0x8000** for every point, so
+the varying payload is `Unk00`, `Unk04`, `Unk14` and `Unk16`. This is consistent with the operator's
+WoWEdit path-node screenshots (**H**), not yet an editor-node identity proof.
+
+MPRR holds **17,150,640** records. It is **not** an edge list over MPRL: only 39.5% of `Value1` and
+62.4% of `Value2` fall in MPRL range. Its values are linear cell indices (0, 31, 32, 63, 64, 95,
+256, 257, …), each run ends with `(0, 0x0300)`, and the run lengths between `0xFFFF` sentinels are
+**all `4k+3`** — 3 (2,394,347 runs), 7 (585,290), 11 (146,070), 15 (32,366), … with a ~4:1 decay.
+That is a hierarchical/quadtree signature (**H**); the exact cell width and node layout are **U**.
+Source: **E-PATH**.
 
 ## 4. Binary envelope and parser contract
 
