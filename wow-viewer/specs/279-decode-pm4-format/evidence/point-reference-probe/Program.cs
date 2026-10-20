@@ -47,6 +47,39 @@ if (args.Length == 3 && args[0] == "--mprr-dump")
     }
     return;
 }
+if (args.Length == 3 && args[0] == "--mprr-runs")
+{
+    var runDoc = Pm4ResearchReader.ReadFile(args[1]);
+    int count = int.Parse(args[2]);
+    var chunks = runDoc.KnownChunks;
+    Console.WriteLine($"MPRR records: {chunks.Mprr.Count}; MPRL: {chunks.Mprl.Count}; MSUR: {chunks.Msur.Count}; MSLK: {chunks.Mslk.Count}");
+    var current = new List<Pm4MprrEntry>();
+    int printed = 0;
+    void Flush()
+    {
+        if (current.Count == 0 || printed >= count) { current.Clear(); return; }
+        var first = current[0];
+        var second = current.Count > 1 ? current[1] : first;
+        var last = current[^1];
+        var unk04 = new SortedSet<ushort>();
+        var unk00 = new SortedSet<ushort>();
+        for (int i = 2; i < current.Count; i++)
+        {
+            if (current[i].Value1 >= chunks.Mprl.Count) continue;
+            unk04.Add(chunks.Mprl[current[i].Value1].Unk04);
+            unk00.Add(chunks.Mprl[current[i].Value1].Unk00);
+        }
+        Console.WriteLine($"  run[{printed}] len={current.Count} first=({first.Value1},{first.Value2}) second=({second.Value1},{second.Value2}) last=({last.Value1},{last.Value2}) unk04=[{string.Join(',', unk04)}] unk00=[{string.Join(',', unk00)}]");
+        printed++;
+        current.Clear();
+    }
+    foreach (var r in chunks.Mprr)
+    {
+        if (r.IsSentinel) Flush(); else current.Add(r);
+    }
+    Flush();
+    return;
+}
 if (edgesOnly || edgeIdentity || mshd || placements || m2Partition || pathNodes) args = args[1..];
 if (args.Length != 2) throw new ArgumentException("Usage: [--edges-only|--edge-identity|--mshd|--placements|--m2-partition|--path-nodes|--mprr-dump <file> <count>] <complete-map-pm4-directory> <new-report.json>");
 if (File.Exists(args[1])) throw new IOException("Report exists; refusing overwrite.");

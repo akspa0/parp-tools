@@ -2,6 +2,14 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 MPRR is a quadtree spatial index
+
+- Whole-map (616 files) node width/height distribution: 2 (1,205,258), 1 (872,798), 4 (740,137),
+  8 (216,751), 32 (75,101), 16 (61,482) — powers of two. Each run is a quadtree node: first two
+  records = bounds, middle = MPRL indices, last = terminator. The 32×32-only reading was a
+  single-tile artifact.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 MPRL ground-surface containment
 
 - The direct group→surface link is not containment: only 724 of 176,748 points (0.4%) lie inside a

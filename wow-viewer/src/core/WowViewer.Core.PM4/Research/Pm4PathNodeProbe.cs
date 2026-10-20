@@ -71,7 +71,9 @@ public sealed record Pm4PathNodeReport(
     IReadOnlyList<Pm4PathNodeValueCount> MprrValue1LowBytes,
     IReadOnlyList<Pm4PathNodeValueCount> MprrValue2HighBytes,
     IReadOnlyList<Pm4PathNodeValueCount> MprrValue2LowBytes,
-    IReadOnlyList<Pm4PathNodeValueCount> MprrRunLengths);
+    IReadOnlyList<Pm4PathNodeValueCount> MprrRunLengths,
+    IReadOnlyList<Pm4PathNodeValueCount> MprrChunkWidths,
+    IReadOnlyList<Pm4PathNodeValueCount> MprrChunkHeights);
 
 /// <summary>
 /// Tests whether MPRL positions and MPRR records form the authored path-node layer: are MPRL
@@ -112,6 +114,8 @@ public static class Pm4PathNodeProbe
         var v2High = new Dictionary<string, long>(StringComparer.Ordinal);
         var v2Low = new Dictionary<string, long>(StringComparer.Ordinal);
         var runLengths = new Dictionary<string, long>(StringComparer.Ordinal);
+        var chunkWidths = new Dictionary<string, long>(StringComparer.Ordinal);
+        var chunkHeights = new Dictionary<string, long>(StringComparer.Ordinal);
 
         foreach (var file in input)
         {
@@ -200,6 +204,11 @@ public static class Pm4PathNodeProbe
                         ref bounds32, ref aligned32, ref middleInChunk, ref middleOutChunk, ref middleZeroV2, ref middleNonZeroV2,
                         chunks, ref validMsurRange, ref validMprlIndices, ref zeroMiddleV2, ref msurWidthSum, ref msurOverlaps,
                         ref singleUnk04, ref multipleUnk04, ref singleUnk00, ref multipleUnk00);
+                    if (current.Count >= 2)
+                    {
+                        Increment(chunkWidths, (current[1].Value1 - current[0].Value1 + 1).ToString());
+                        Increment(chunkHeights, (current[1].Value2 - current[0].Value2 + 1).ToString());
+                    }
                     current.Clear();
                     run = 0;
                 }
@@ -232,6 +241,11 @@ public static class Pm4PathNodeProbe
                     ref bounds32, ref aligned32, ref middleInChunk, ref middleOutChunk, ref middleZeroV2, ref middleNonZeroV2,
                     chunks, ref validMsurRange, ref validMprlIndices, ref zeroMiddleV2, ref msurWidthSum, ref msurOverlaps,
                     ref singleUnk04, ref multipleUnk04, ref singleUnk00, ref multipleUnk00);
+                if (current.Count >= 2)
+                {
+                    Increment(chunkWidths, (current[1].Value1 - current[0].Value1 + 1).ToString());
+                    Increment(chunkHeights, (current[1].Value2 - current[0].Value2 + 1).ToString());
+                }
             }
         }
 
@@ -250,7 +264,8 @@ public static class Pm4PathNodeProbe
             inside, outside, finite,
             Rows(unk00), Rows(unk02), Rows(unk04), Rows(unk06), Rows(unk14), Rows(unk16),
             Rows(value1), Rows(value2),
-            Rows(v1High), Rows(v1Low), Rows(v2High), Rows(v2Low), Rows(runLengths));
+            Rows(v1High), Rows(v1Low), Rows(v2High), Rows(v2Low), Rows(runLengths),
+            Rows(chunkWidths), Rows(chunkHeights));
     }
 
     private static void AnalyzeRun(

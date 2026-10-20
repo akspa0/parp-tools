@@ -142,6 +142,25 @@ surfaces that actually contain the points split as:
 So the object partition is: `GroupObjectId` → MPRL terrain-intersection points + MSLK connection
 records; the ground surfaces are the MSUR surfaces that contain those points.
 
+## Follow-up: MPRR is a quadtree spatial index (whole map, 2026-10-20)
+
+Each MPRR run is a quadtree node: the first two records are the node's `(min, max)` bounds, the
+middle records are the MPRL indices inside the node, and the last record is a terminator. Across
+all 616 files the node width and height are **powers of two**:
+
+| Node width/height | Runs |
+|---|---|
+| 2 | 1,205,258 |
+| 1 | 872,798 |
+| 4 | 740,137 |
+| 8 | 216,751 |
+| 32 | 75,101 |
+| 16 | 61,482 |
+
+The `4k+3` run lengths and the ~4:1 decay are the quadtree hierarchy. The 32×32-only reading was a
+single-tile artifact; the whole-map distribution is 1/2/4/8/16/32. The first run of a file is a
+special header (e.g. `(0, 2304)` then `(0, 0)`), not a node.
+
 ## Files changed
 
 - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4PathNodeProbe.cs` (new)

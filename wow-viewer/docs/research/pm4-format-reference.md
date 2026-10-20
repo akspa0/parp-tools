@@ -254,6 +254,23 @@ an edge list over MPRL: only 39.5% of `Value1` and 62.4% of `Value2` fall in MPR
 ends with `(0, 0x0300)`, and the run lengths between `0xFFFF` sentinels are **all `4k+3`** — 3
 (2,394,347 runs), 7 (585,290), 11 (146,070), 15 (32,366), … with a ~4:1 decay.
 
+**MPRR is a quadtree spatial index of the MPRL points.** Each run is a node: the first two records
+are the node's `(min, max)` bounds, the middle records are the MPRL indices inside the node, and the
+last record is a terminator. Across all 616 files the node width and height are **powers of two**:
+
+| Node width/height | Runs |
+|---|---|
+| 2 | 1,205,258 |
+| 1 | 872,798 |
+| 4 | 740,137 |
+| 8 | 216,751 |
+| 32 | 75,101 |
+| 16 | 61,482 |
+
+The `4k+3` run lengths and the ~4:1 decay are the quadtree hierarchy. The 32×32-only reading was a
+single-tile artifact; the whole-map distribution is 1/2/4/8/16/32. The first run of a file is a
+special header (e.g. `(0, 2304)` then `(0, 0)`), not a node. Source: **E-PATH**.
+
 The operator's "range records" description is supported by the byte structure, but the first
 candidate range interpretation is refuted:
 
