@@ -7,9 +7,8 @@ open. Field names follow the current wowdev.wiki articles (`PM4`, `PD4`); propos
 collected separately in §9.
 
 **Corpus:** 616 PM4 files (309 non-empty) from the 4.x-era `development` map, plus 2 PD4 files
-(`6or_garrison_workshop_v3_snow`, 6.0.1). All figures below were measured on that corpus with the
-repository reader. A similarly named field in another format or build does not carry the same
-meaning.
+(`6or_garrison_workshop_v3_snow`, 6.0.1). All figures below were measured on that corpus. A
+similarly named field in another format or build does not carry the same meaning.
 
 ---
 
@@ -594,7 +593,7 @@ is in internal inches.
 - `MDBF` retains one string plus raw length; further strings are not decoded.
 - Duplicate scalar chunks use the last value; list chunks append.
 - An overrun stops the walk; trailing bytes and parse failures are diagnostics, not exceptions.
-- Cross-chunk address/domain validation belongs to the research layer, not the raw reader.
+- Cross-chunk address/domain validation belongs to a validation layer, not the raw reader.
 - PD4 has a separate reader; similar names do not transfer this corpus's semantics.
 
 ---
