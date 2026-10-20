@@ -12,8 +12,9 @@ bool edgesOnly = args.Length == 3 && args[0] == "--edges-only";
 bool edgeIdentity = args.Length == 3 && args[0] == "--edge-identity";
 bool mshd = args.Length == 3 && args[0] == "--mshd";
 bool placements = args.Length == 3 && args[0] == "--placements";
-if (edgesOnly || edgeIdentity || mshd || placements) args = args[1..];
-if (args.Length != 2) throw new ArgumentException("Usage: [--edges-only|--edge-identity|--mshd|--placements] <complete-map-pm4-directory> <new-report.json>");
+bool m2Partition = args.Length == 3 && args[0] == "--m2-partition";
+if (edgesOnly || edgeIdentity || mshd || placements || m2Partition) args = args[1..];
+if (args.Length != 2) throw new ArgumentException("Usage: [--edges-only|--edge-identity|--mshd|--placements|--m2-partition] <complete-map-pm4-directory> <new-report.json>");
 if (File.Exists(args[1])) throw new IOException("Report exists; refusing overwrite.");
 var timer = Stopwatch.StartNew();
 var files = new List<Pm4MapAuditInput>();
@@ -34,7 +35,7 @@ foreach (string path in Directory.GetFiles(args[0], "*.pm4").Order(StringCompare
     sizes[name] = bytes.Length;
     hashes.Add(new { File = name, Bytes = bytes.Length, Sha256 = hash });
 
-    if (placements)
+    if (placements || m2Partition)
     {
         AdtPlacementCatalog? catalog = null;
         string? adtPath = Pm4CoordinateService.TryGetObj0PathForPm4(path);
@@ -80,6 +81,20 @@ if (mshd)
         MapSha256 = mapHash, Result = mshdReport, Inputs = hashes, ElapsedSeconds = timer.Elapsed.TotalSeconds,
     }, new JsonSerializerOptions { WriteIndented = true }));
     Console.WriteLine($"MSHD probe: {files.Count} files, {mshdReport.Words.Count} words, {timer.Elapsed.TotalSeconds:F3}s. No field meaning asserted.");
+    return;
+}
+if (m2Partition)
+{
+    var partitionReport = Pm4M2PartitionProbe.Analyze(placementInputs);
+    File.WriteAllText(args[1], JsonSerializer.Serialize(new
+    {
+        Warning = "Topological components of Ck24Type==0 surfaces vs authored M2 origins. Component coverage is not object identity.",
+        MapSha256 = mapHash, AdtRead = adtRead, AdtMissing = adtMissing, AdtFailed = adtFailed,
+        Result = partitionReport, Inputs = hashes, ElapsedSeconds = timer.Elapsed.TotalSeconds,
+    }, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"M2 partition probe: {partitionReport.FilesWithM2} files with M2, {partitionReport.M2Surfaces} surfaces, " +
+        $"{partitionReport.Components} components, 0/1/2+ placements = {partitionReport.ComponentsWithZeroPlacements}/" +
+        $"{partitionReport.ComponentsWithOnePlacement}/{partitionReport.ComponentsWithMultiplePlacements}, {timer.Elapsed.TotalSeconds:F3}s.");
     return;
 }
 if (placements)

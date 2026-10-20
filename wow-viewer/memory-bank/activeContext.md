@@ -14,8 +14,11 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   [2B](../specs/279-decode-pm4-format/evidence/phase-2b-edge-identity-2026-10-20.md),
   [MSHD](../specs/279-decode-pm4-format/evidence/phase-3-mshd-2026-10-20.md),
   [placements](../specs/279-decode-pm4-format/evidence/phase-3-placement-ground-truth-2026-10-20.md).
-  Next: split the M2 bucket into individual placed objects; editor-node identity remains unknown.
-  Operator wants checkpoints committed.
+  **M2 per-object split is negative:** topology, vertex ranges, MSUR order, Padding, +0x18, Normal,
+  Height and GroupObjectId all interleave objects (2,000 mixed-model components; 6,576 placements
+  share vertices; 9,570 overlapping MSUR ranges; Padding always 0; 7,315 placements multi-GroupObjectId).
+  [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-m2-partition-2026-10-20.md). Per-object M2
+  ownership remains U; editor-node identity remains unknown. Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
   MSUR→MSLK start/count windows; packed link target is tile X=low byte, Y=next byte + surface index.
   **Not universally file-local:** 15,773 cross-tile links; 14,659 resolve. Same-tile addressed links

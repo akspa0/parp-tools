@@ -69,6 +69,11 @@ so meaning remains unknown. Phase 2 is planned, not certified or started by this
   (MDDF/MODF) across the complete map. [Receipt](evidence/phase-3-placement-ground-truth-2026-10-20.md):
   `Ck24Type == 0` / `GroupKey == 3` selects 14,489 M2-only surfaces vs 57 WMO-only; the zero bucket
   is the M2 class, not a per-object identity.
+- [x] T031B [US2] Test whether the M2 bucket splits into per-object pieces by topology, vertex
+  ranges, MSUR order, Padding, +0x18, Normal, Height or GroupObjectId.
+  [Receipt](evidence/phase-3-m2-partition-2026-10-20.md): **negative** — 2,000 mixed-model
+  components, 6,576 placements share vertices, 9,570 overlapping MSUR ranges, Padding always 0,
+  7,315 placements multi-GroupObjectId. Per-object M2 ownership remains U.
 - [ ] T032 [US2] Record source-build/subset limits, failures and supported relationships; no field
   is called a global object ID without independent identity evidence.
 

@@ -72,6 +72,7 @@ Evidence keys used throughout this reference:
 | **E-04** | [Raw +0x04 domain/reverse-link report](../../specs/279-decode-pm4-format/evidence/raw-04-domain-2026-10-20.json), [summary](../../specs/279-decode-pm4-format/evidence/raw-04-summary-2026-10-20.txt) |
 | **E-EDGE** | [Source-edge ordinal/spatial receipt](../../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/edge-ordinal-geometry-2026-10-20.json) |
 | **E-PLACE** | [Authored-placement ground-truth receipt](../../specs/279-decode-pm4-format/evidence/phase-3-placement-ground-truth-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/placement-ground-truth-2026-10-20.json) |
+| **E-M2PART** | [M2 partition receipt](../../specs/279-decode-pm4-format/evidence/phase-3-m2-partition-2026-10-20.md), [full-map report](../../specs/279-decode-pm4-format/evidence/m2-partition-v6-2026-10-20.json) |
 
 These are corpus-scoped measurements. A source comment, unit test or similarly named field in a
 different format does not establish the same meaning for every PM4/PD4 build.
@@ -218,6 +219,27 @@ M2-leaning (2,369 M2-only vs 8 WMO-only); masks 9 and 10 are WMO-leaning.
 **Conclusion:** the M2/WMO partition the operator suspected is real and is carried by
 `MSUR.GroupKey` / `Ck24Type` (3 / 0 for M2, 16–19 / 64–67 for WMO). It does not yet split the M2
 bucket into individual placed objects. Source: **E-PLACE**.
+
+### 3.6 The merged M2 mesh is not separable by the decoded fields — M (negative)
+
+The M2 bucket contains 112,818 surfaces in 170 tiles. Tested against the authored M2 origins, none
+of the decoded structural features partitions it into individual placed objects:
+
+| Test | Result |
+|---|---|
+| Topological components (shared MSVT vertex) | 22,286 components; 14,777 cover 0 origins, 4,775 cover 1, 2,734 cover 2+ |
+| Multi-origin components | 734 same-model (scaled copies), **2,000 mixed-model** |
+| Largest component | 1,023 surfaces, 133 origins, 7 model paths |
+| MSVT vertex sets | 4,289 placements disjoint, **6,576 share vertices** |
+| MSUR index ranges | 1,295 disjoint, **9,570 overlap** |
+| `MSUR.Padding` (+0x03) | **0 for all 112,818 M2 surfaces** |
+| `MSUR._0x18` / Normal / Height | ~89% single-valued, but dominated by single-surface coverage |
+| `MSLK.GroupObjectId` (+0x04) | 1,895 placements single-valued, **7,315 multi-valued**; 4,739 IDs map to multiple models |
+
+**Conclusion:** the merge is genuine. The M2 pathfinding mesh is not a set of per-object islands
+that a decoded field separates; the surface order, vertex ranges and connection IDs all interleave
+objects. Per-object M2 ownership is **U** and must come from an undecoded field or is lossy in this
+corpus. Source: **E-M2PART**.
 
 ## 4. Binary envelope and parser contract
 

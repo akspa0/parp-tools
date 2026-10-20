@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 M2 per-object partition is negative
+
+- Extended `Pm4M2PartitionProbe` to test topology, MSVT vertex sets, MSUR index ranges, Padding,
+  +0x18, Normal, Height and MSLK GroupObjectId against authored M2 origins.
+- 170 tiles, 112,818 M2 surfaces, 22,286 components. 2,000 components mix different models; the
+  largest covers 133 origins across 7 model paths. 6,576 placements share vertices; 9,570 have
+  overlapping MSUR ranges; Padding is 0 for every M2 surface; 7,315 placements carry multiple
+  GroupObjectIds. The merge is genuine; per-object M2 ownership remains U.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-m2-partition-2026-10-20.md).
+
 ## 2026-10-20 — PM4 M2/WMO partition from authored placements
 
 - New read-only `Pm4PlacementGroundTruthProbe` reads companion `_obj0.adt` MDDF/MODF placements
