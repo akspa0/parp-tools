@@ -511,6 +511,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private int _hoveredPm4ObjectMatchCacheMaxMatches = -1;
     private int _pm4ObjectMatchMaxMatchesPerObject = 5;
     private readonly Dictionary<string, SavedPm4ObjectMatchSelection> _savedPm4ObjectMatches = new(StringComparer.OrdinalIgnoreCase);
+    private Pm4ObjectMatchStore? _pm4ObjectMatchStore;
+    private Dictionary<string, Pm4ObjectMatchEntry> _pm4ObjectMatchEntries = new(StringComparer.OrdinalIgnoreCase);
     private Pm4WmoMatchStore? _pm4WmoMatchStore;
     private Dictionary<string, Pm4WmoMatchEntry> _pm4WmoMatchEntries = new(StringComparer.OrdinalIgnoreCase);
     private bool _showCaptureAutomationWindow = false;

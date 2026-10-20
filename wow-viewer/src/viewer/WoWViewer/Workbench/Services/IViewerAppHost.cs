@@ -341,7 +341,10 @@ internal interface IViewerAppHost
     ref Vector3 Pm4SavedOverlayTranslation { get; }
     ref Dictionary<string, Pm4WmoMatchEntry> Pm4WmoMatchEntries { get; }
     ref Pm4WmoMatchStore? Pm4WmoMatchStore { get; }
+    ref Pm4ObjectMatchStore? Pm4ObjectMatchStore { get; }
+    ref Dictionary<string, Pm4ObjectMatchEntry> Pm4ObjectMatchEntries { get; }
     Dictionary<string, SavedPm4ObjectMatchSelection> SavedPm4ObjectMatches { get; }
+    bool TrySavePm4ObjectMatch(string modelPath, string modelName, string source);
     ref int SelectedBuildOptionIndex { get; }
     ref string SelectedDatasetVersionRoot { get; }
     ref TextureFilteringMode TextureFilteringMode { get; }

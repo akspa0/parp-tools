@@ -1018,6 +1018,15 @@ internal sealed partial class EditorPanelsService
                     _rosettaActivePlacementModelPath = _rosettaSelectedAsset.AssetPath;
                     _statusMessage = $"Active placement model set: {_rosettaSelectedAsset.AssetPath}";
                 }
+                ImGui.SameLine();
+                if (ImGui.Button("Match to selected PM4 object"))
+                {
+                    string modelName = Path.GetFileName(_rosettaSelectedAsset.AssetPath);
+                    if (_host.TrySavePm4ObjectMatch(_rosettaSelectedAsset.AssetPath, modelName, "rosetta-library"))
+                        _statusMessage = $"Saved PM4 match: {modelName}";
+                    else
+                        _statusMessage = "Select a PM4 object first, then match a library model to it.";
+                }
 
                 if (!string.IsNullOrEmpty(_rosettaActivePlacementModelPath))
                 {

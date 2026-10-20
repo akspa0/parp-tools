@@ -67,6 +67,8 @@ internal sealed partial class Pm4WorkbenchService
     private ref Vector3 _pm4SavedOverlayTranslation => ref _host.Pm4SavedOverlayTranslation;
     private ref Dictionary<string, Pm4WmoMatchEntry> _pm4WmoMatchEntries => ref _host.Pm4WmoMatchEntries;
     private ref Pm4WmoMatchStore? _pm4WmoMatchStore => ref _host.Pm4WmoMatchStore;
+    private ref Pm4ObjectMatchStore? _pm4ObjectMatchStore => ref _host.Pm4ObjectMatchStore;
+    private ref Dictionary<string, Pm4ObjectMatchEntry> _pm4ObjectMatchEntries => ref _host.Pm4ObjectMatchEntries;
     private Dictionary<string, SavedPm4ObjectMatchSelection> _savedPm4ObjectMatches => _host.SavedPm4ObjectMatches;
     private ViewerSettingsService _settings => _host.Settings;
     private ShellLayoutService _shellLayout => _host.ShellLayout;

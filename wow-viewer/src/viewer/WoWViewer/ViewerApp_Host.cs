@@ -334,7 +334,11 @@ public partial class ViewerApp
     ref Vector3 IViewerAppHost.Pm4SavedOverlayTranslation => ref _pm4SavedOverlayTranslation;
     ref Dictionary<string, Pm4WmoMatchEntry> IViewerAppHost.Pm4WmoMatchEntries => ref _pm4WmoMatchEntries;
     ref Pm4WmoMatchStore? IViewerAppHost.Pm4WmoMatchStore => ref _pm4WmoMatchStore;
+    ref Pm4ObjectMatchStore? IViewerAppHost.Pm4ObjectMatchStore => ref _pm4ObjectMatchStore;
+    ref Dictionary<string, Pm4ObjectMatchEntry> IViewerAppHost.Pm4ObjectMatchEntries => ref _pm4ObjectMatchEntries;
     Dictionary<string, SavedPm4ObjectMatchSelection> IViewerAppHost.SavedPm4ObjectMatches => _savedPm4ObjectMatches;
+    bool IViewerAppHost.TrySavePm4ObjectMatch(string modelPath, string modelName, string source)
+        => _pm4Workbench.TrySavePm4ObjectMatch(modelPath, modelName, source);
     ref int IViewerAppHost.SelectedBuildOptionIndex => ref _selectedBuildOptionIndex;
     ref string IViewerAppHost.SelectedDatasetVersionRoot => ref _datasetCatalog._selectedDatasetVersionRoot;
     ref TextureFilteringMode IViewerAppHost.TextureFilteringMode => ref _renderQuality._textureFilteringMode;

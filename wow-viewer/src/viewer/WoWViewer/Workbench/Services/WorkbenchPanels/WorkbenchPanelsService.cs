@@ -72,6 +72,9 @@ internal sealed partial class WorkbenchPanelsService
 
     private int _activeInspectorTab;
 
+    /// <summary>Selects an Inspector tab by index (0 = Inspector, 4 = PM4).</summary>
+    internal void FocusInspectorTab(int index) => _activeInspectorTab = Math.Max(0, index);
+
     // T604: utility pages have one dispatcher and one active page index. The
     // Quick destination hosts the page bodies in dedicated collapsible
     // sections; the legacy UI uses the nullable route below as an in-sidebar
@@ -95,7 +98,7 @@ internal sealed partial class WorkbenchPanelsService
     {
         if (_worldScene != null)
         {
-            string[] tabs = ["Inspector", "World", "Model", "Settings"];
+            string[] tabs = ["Inspector", "World", "Model", "Settings", "PM4"];
             int current = _activeInspectorTab;
             if (current < 0 || current >= tabs.Length)
                 current = 0;
@@ -113,6 +116,7 @@ internal sealed partial class WorkbenchPanelsService
                             case 1: _worldObjectsPanel.DrawWorldObjectsPanelContent(); break;
                             case 2: _modelInspector.DrawModelInfoPanelContent(); break;
                             case 3: DrawUnifiedViewerSettingsSidebarContent(); break;
+                            case 4: _pm4Workbench.DrawPm4WorkbenchInspector(); break;
                         }
                         ImGui.EndTabItem();
                     }

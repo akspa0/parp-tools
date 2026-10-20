@@ -99,6 +99,8 @@ internal sealed class ViewerSettingsService
     private ref Vector3 _pm4SavedOverlayTranslation => ref _host.Pm4SavedOverlayTranslation;
     private ref Dictionary<string, Pm4WmoMatchEntry> _pm4WmoMatchEntries => ref _host.Pm4WmoMatchEntries;
     private ref Pm4WmoMatchStore? _pm4WmoMatchStore => ref _host.Pm4WmoMatchStore;
+    private ref Pm4ObjectMatchStore? _pm4ObjectMatchStore => ref _host.Pm4ObjectMatchStore;
+    private ref Dictionary<string, Pm4ObjectMatchEntry> _pm4ObjectMatchEntries => ref _host.Pm4ObjectMatchEntries;
     private ref SceneCursorRenderer? _sceneCursorRenderer => ref _host.SceneCursorRenderer;
     private ref float _rightSidebarWidth => ref _host.RightSidebarWidth;
     private ref int _savedDetailedAdtTileCountOverride => ref _host.SavedDetailedAdtTileCountOverride;
@@ -358,6 +360,10 @@ internal sealed class ViewerSettingsService
             // Load PM4 WMO match store
             _pm4WmoMatchStore = new Pm4WmoMatchStore(AppContext.BaseDirectory);
             _pm4WmoMatchEntries = _pm4WmoMatchStore.Load();
+
+            // Load the human-curated PM4 object → model match store
+            _pm4ObjectMatchStore = new Pm4ObjectMatchStore(AppContext.BaseDirectory);
+            _pm4ObjectMatchEntries = _pm4ObjectMatchStore.Load();
 
                         _savedTaxiActorModelOverridesByMap.Clear();
                         if (settings.TaxiActorModelOverrides != null)

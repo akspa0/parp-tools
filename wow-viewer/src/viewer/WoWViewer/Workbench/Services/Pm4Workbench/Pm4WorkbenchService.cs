@@ -33,7 +33,9 @@ internal sealed partial class Pm4WorkbenchService
 
     internal void OpenPm4Workbench(Pm4WorkbenchTab tab)
     {
-        _shellLayout.FocusShellPanel(ShellPanelId.Pm4Workbench);
+        // PM4 lives in the Inspector window like the other inspection surfaces.
+        _shellLayout.FocusShellPanel(ShellPanelId.Inspector);
+        _host.WorkbenchPanels.FocusInspectorTab(4);
         _pendingPm4WorkbenchTab = tab;
         _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
         _pendingRightSidebarSection = FixedBottomDrawerTab.Pm4;
@@ -633,6 +635,7 @@ internal sealed partial class Pm4WorkbenchService
             }
         }
 
+        DrawPm4MatchCuration();
         DrawSelectedPm4RegionSummary("WorkbenchSelectedRegion");
 
         if (ImGui.CollapsingHeader("Match details"))
@@ -1228,5 +1231,106 @@ internal sealed partial class Pm4WorkbenchService
         }
 
         ImGui.EndChild();
+    }
+
+    /// <summary>
+    /// Saves the current PM4 selection as a human-curated object → model match. Called from the
+    /// object library and from the PM4 Selection tab.
+    /// </summary>
+    internal bool TrySavePm4ObjectMatch(string modelPath, string modelName, string source)
+    {
+        if (_worldScene == null || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
+            return false;
+
+        string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(mapName))
+            return false;
+
+        var key = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
+        if (_pm4ObjectMatchStore == null)
+            _pm4ObjectMatchStore = new Pm4ObjectMatchStore(AppContext.BaseDirectory);
+        if (_pm4ObjectMatchEntries.Count == 0)
+            _pm4ObjectMatchEntries = _pm4ObjectMatchStore.Load();
+
+        string storeKey = Pm4ObjectMatchStore.BuildKey(mapName, key.tileX, key.tileY, key.ck24, key.objectPart);
+        _pm4ObjectMatchEntries[storeKey] = new Pm4ObjectMatchEntry
+        {
+            MapName = mapName,
+            TileX = key.tileX,
+            TileY = key.tileY,
+            Ck24 = key.ck24,
+            ObjectPartId = key.objectPart,
+            ModelPath = modelPath,
+            ModelName = modelName,
+            Source = source,
+            SavedAtUtc = DateTime.UtcNow.ToString("O"),
+        };
+        _pm4ObjectMatchStore.Save(_pm4ObjectMatchEntries);
+        _statusMessage = $"Saved PM4 match: {modelName}";
+        return true;
+    }
+
+    private void DrawPm4MatchCuration()
+    {
+        if (_worldScene == null || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
+            return;
+
+        var key = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
+        string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(mapName))
+            return;
+
+        if (_pm4ObjectMatchStore == null)
+            _pm4ObjectMatchStore = new Pm4ObjectMatchStore(AppContext.BaseDirectory);
+        if (_pm4ObjectMatchEntries.Count == 0)
+            _pm4ObjectMatchEntries = _pm4ObjectMatchStore.Load();
+
+        ImGui.Separator();
+        ImGui.TextColored(new Vector4(0.55f, 0.85f, 0.55f, 1f), "Match this object");
+        ImGui.TextDisabled("Pick a model in the Object Library and use 'Match to selected PM4 object', or paste a path here.");
+
+        ImGui.SetNextItemWidth(-90f);
+        ImGui.InputText("##Pm4MatchModelPath", ref _pm4MatchModelPath, 512);
+        ImGui.SameLine();
+        if (ImGui.Button("Save match") && !string.IsNullOrWhiteSpace(_pm4MatchModelPath))
+        {
+            string name = System.IO.Path.GetFileName(_pm4MatchModelPath);
+            TrySavePm4ObjectMatch(_pm4MatchModelPath.Trim(), name, "manual");
+        }
+
+        string currentKey = Pm4ObjectMatchStore.BuildKey(mapName, key.tileX, key.tileY, key.ck24, key.objectPart);
+        if (_pm4ObjectMatchEntries.TryGetValue(currentKey, out var current))
+        {
+            ImGui.TextColored(new Vector4(0.95f, 0.85f, 0.35f, 1f), $"Saved: {current.ModelName}");
+            ImGui.TextDisabled(current.ModelPath);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Clear##Pm4MatchClear"))
+            {
+                _pm4ObjectMatchEntries.Remove(currentKey);
+                _pm4ObjectMatchStore.Save(_pm4ObjectMatchEntries);
+            }
+        }
+
+        if (ImGui.CollapsingHeader($"Saved matches ({_pm4ObjectMatchEntries.Count})##Pm4MatchList"))
+        {
+            ImGui.SetNextItemWidth(220f);
+            ImGui.InputText("Filter##Pm4MatchFilter", ref _pm4MatchFilter, 128);
+            string filter = _pm4MatchFilter.Trim();
+            foreach (var pair in _pm4ObjectMatchEntries
+                .Where(p => string.Equals(p.Value.MapName, mapName, StringComparison.OrdinalIgnoreCase))
+                .Where(p => filter.Length == 0 || p.Value.ModelName.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(p => p.Value.TileX).ThenBy(p => p.Value.TileY).ThenBy(p => p.Value.Ck24))
+            {
+                var entry = pair.Value;
+                string label = $"{entry.ModelName}  [{entry.TileX},{entry.TileY}] 0x{entry.Ck24:X6} part {entry.ObjectPartId}";
+                if (ImGui.Selectable($"{label}##{pair.Key}"))
+                {
+                    _worldScene.Pm4Overlay.SelectPm4Object((entry.TileX, entry.TileY, entry.Ck24, entry.ObjectPartId));
+                    _pm4MatchModelPath = entry.ModelPath;
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"{entry.ModelPath}\n{entry.Source}  {entry.SavedAtUtc}");
+            }
+        }
     }
 }
