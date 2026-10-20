@@ -2,6 +2,17 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 MPRL ground-surface containment
+
+- The direct group→surface link is not containment: only 724 of 176,748 points (0.4%) lie inside a
+  surface whose MSLK window references their group id. The linked surfaces are the object's
+  connection/wall surfaces; the points are on the ground.
+- The ground surfaces that contain the points: M2 (`Ck24Type == 0`) 119,191 (66.7%), WMO
+  (`Ck24Type` 64–67) 51,821 (29.0%), other 11,968 (6.7%).
+- Object partition: `GroupObjectId` → MPRL points + MSLK connection records; ground surfaces are the
+  MSUR surfaces that contain those points.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 MPRL.Unk04 is MSLK.GroupObjectId
 
 - 176,748 of 178,588 MPRL points (98.97%) carry an `Unk04` that appears as an `MSLK.GroupObjectId`

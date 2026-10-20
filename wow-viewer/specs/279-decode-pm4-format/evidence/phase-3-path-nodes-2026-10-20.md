@@ -126,6 +126,22 @@ This closes the loop: the terrain-intersection points, the connection records an
 be joined on one object-group id. The id is a **group/model id, not a unique placement id** — it is
 reused across placements, which is why earlier tests found 4,739 ids mapping to multiple models.
 
+## Follow-up: ground-surface containment (2026-10-20)
+
+The direct group→surface link is **not** a containment link: only 724 of 176,748 points (0.4%) lie
+inside a surface whose MSLK window references their group id. That is expected if the linked
+surfaces are the object's connection/wall surfaces while the points are on the ground. The ground
+surfaces that actually contain the points split as:
+
+| Containing surface class | MPRL points |
+|---|---|
+| M2 (`Ck24Type == 0`) | 119,191 (66.7%) |
+| WMO (`Ck24Type` 64–67) | 51,821 (29.0%) |
+| Other | 11,968 (6.7%) |
+
+So the object partition is: `GroupObjectId` → MPRL terrain-intersection points + MSLK connection
+records; the ground surfaces are the MSUR surfaces that contain those points.
+
 ## Files changed
 
 - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4PathNodeProbe.cs` (new)

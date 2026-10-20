@@ -22,10 +22,12 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   `Unk06 = 0x8000` constant; MPRR 17,150,640 records at 4 bytes each, `4k+3` run lengths and a
   `(0, 0x0300)` terminator. **Object partition found:** `MPRL.Unk04` is `MSLK.GroupObjectId` (+0x04)
   for 176,748/178,588 points (98.97%), and 98.8% of MPRR runs group MPRL points sharing one `Unk04`
-  (100% share one `Unk00`). The id is a group/model id, not a unique placement id. The 32×32-chunk
-  and MSUR-range interpretations are refuted (2.4% and 22× overlap). The first two records of a run
-  remain U. [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
-  Editor-node identity remains unknown. Operator wants checkpoints committed.
+  (100% share one `Unk00`). The id is a group/model id, not a unique placement id. The direct
+  group→surface link is not containment (0.4%); the points sit on M2 surfaces (66.7%), WMO surfaces
+  (29.0%) and other surfaces (6.7%). The 32×32-chunk and MSUR-range interpretations are refuted
+  (2.4% and 22× overlap). The first two records of a run remain U.
+  [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md). Editor-node
+  identity remains unknown. Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
   MSUR→MSLK start/count windows; packed link target is tile X=low byte, Y=next byte + surface index.
   **Not universally file-local:** 15,773 cross-tile links; 14,659 resolve. Same-tile addressed links

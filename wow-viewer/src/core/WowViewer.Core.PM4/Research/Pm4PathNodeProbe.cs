@@ -50,6 +50,12 @@ public sealed record Pm4PathNodeReport(
     long MprlUnk04MatchesMsurCk24ObjectId,
     long MprlUnk04MatchesMsurGroupKey,
     long MprlUnk04MatchesMscnIndex,
+    long MprlPointsWithGroupSurfaces,
+    long MprlPointsInsideGroupSurfaces,
+    long MprlPointsOutsideGroupSurfaces,
+    long MprlPointsInsideM2Surfaces,
+    long MprlPointsInsideWmoSurfaces,
+    long MprlPointsInsideOtherSurfaces,
     long MprlInsideMesh,
     long MprlOutsideMesh,
     long MprlWithFinitePosition,
@@ -90,6 +96,8 @@ public static class Pm4PathNodeProbe
         long validMsurRange = 0, validMprlIndices = 0, zeroMiddleV2 = 0, msurWidthSum = 0, msurOverlaps = 0;
         long singleUnk04 = 0, multipleUnk04 = 0, singleUnk00 = 0, multipleUnk00 = 0;
         long unk04Mslk = 0, unk04Ck24 = 0, unk04GroupKey = 0, unk04Mscn = 0;
+        long withGroupSurfaces = 0, insideGroupSurfaces = 0, outsideGroupSurfaces = 0;
+        long insideM2 = 0, insideWmo = 0, insideOther = 0;
         long inside = 0, outside = 0, finite = 0;
         var unk00 = new Dictionary<string, long>(StringComparer.Ordinal);
         var unk02 = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -112,6 +120,22 @@ public static class Pm4PathNodeProbe
             mprr += chunks.Mprr.Count;
 
             var polygons = BuildPolygons(chunks);
+            // Map each GroupObjectId to the surfaces whose MSLK window references it.
+            var surfacesByGroup = new Dictionary<uint, List<int>>();
+            for (int s = 0; s < chunks.Msur.Count; s++)
+            {
+                var surface = chunks.Msur[s];
+                long end = (long)surface._0x18 + surface.AttributeMask;
+                if (end > chunks.Mslk.Count)
+                    throw new InvalidDataException("Invalid proposed MSUR/MSLK window.");
+                for (long k = surface._0x18; k < end; k++)
+                {
+                    uint id = chunks.Mslk[(int)k].GroupObjectId;
+                    if (!surfacesByGroup.TryGetValue(id, out var list))
+                        surfacesByGroup[id] = list = [];
+                    if (!list.Contains(s)) list.Add(s);
+                }
+            }
             var mslkIds = new HashSet<uint>(chunks.Mslk.Select(l => l.GroupObjectId));
             var ck24Ids = new HashSet<uint>(chunks.Msur.Select(s => (uint)s.Ck24ObjectId));
             var groupKeys = new HashSet<uint>(chunks.Msur.Select(s => (uint)s.GroupKey));
@@ -121,6 +145,29 @@ public static class Pm4PathNodeProbe
                 if (ck24Ids.Contains(point.Unk04)) unk04Ck24++;
                 if (groupKeys.Contains(point.Unk04)) unk04GroupKey++;
                 if (point.Unk04 < chunks.Mscn.Count) unk04Mscn++;
+                if (surfacesByGroup.TryGetValue(point.Unk04, out var groupSurfaces))
+                {
+                    withGroupSurfaces++;
+                    Vector3 groupPlacement = Pm4CoordinateService.MprlToAdtPlacement(point.Position);
+                    if (groupSurfaces.Any(s => Contains(polygons[s], groupPlacement)))
+                        insideGroupSurfaces++;
+                    else
+                        outsideGroupSurfaces++;
+                }
+                Vector3 pointPlacement = Pm4CoordinateService.MprlToAdtPlacement(point.Position);
+                bool inM2 = false, inWmo = false, inOther = false;
+                for (int s = 0; s < polygons.Count; s++)
+                {
+                    if (!Contains(polygons[s], pointPlacement))
+                        continue;
+                    byte type = chunks.Msur[s].Ck24Type;
+                    if (type == 0) inM2 = true;
+                    else if (type is >= 64 and <= 67) inWmo = true;
+                    else inOther = true;
+                }
+                if (inM2) insideM2++;
+                if (inWmo) insideWmo++;
+                if (inOther) insideOther++;
                 Increment(unk00, point.Unk00.ToString());
                 Increment(unk02, point.Unk02.ToString());
                 Increment(unk04, point.Unk04.ToString());
@@ -198,6 +245,8 @@ public static class Pm4PathNodeProbe
             validMsurRange, validMprlIndices, zeroMiddleV2, msurWidthSum, msurOverlaps,
             singleUnk04, multipleUnk04, singleUnk00, multipleUnk00,
             unk04Mslk, unk04Ck24, unk04GroupKey, unk04Mscn,
+            withGroupSurfaces, insideGroupSurfaces, outsideGroupSurfaces,
+            insideM2, insideWmo, insideOther,
             inside, outside, finite,
             Rows(unk00), Rows(unk02), Rows(unk04), Rows(unk06), Rows(unk14), Rows(unk16),
             Rows(value1), Rows(value2),
