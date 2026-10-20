@@ -1,5 +1,10 @@
 # Phase 4 — Reference consolidation and opt-in model prior (2026-10-20)
 
+> **Follow-up (same day, operator-directed):** the reference was re-issued using the current
+> wowdev.wiki field names (`PM4`, `PD4`) as primary names. All commentary about earlier names was
+> removed. Proposed names now live only in §9, marked as suggestions for the wiki editor. The
+> document is written to stand alone as a reader/renderer specification.
+
 ## Question
 
 Two operator-directed deliverables:

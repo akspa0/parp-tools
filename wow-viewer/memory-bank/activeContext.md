@@ -40,8 +40,9 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md). Editor-node
   identity remains unknown. Operator wants checkpoints committed. **Reference consolidated
   (2026-10-20):** [pm4-format-reference.md](../docs/research/pm4-format-reference.md) rewritten top to
-  bottom, 717 → ~475 lines, one unknown register (U01–U17); refuted claims survive only as
-  load-bearing negatives. **Opt-in model prior:** `Pm4AssetMatchScorer` accepts an optional
+  bottom as a standalone reader/renderer specification using the current wowdev.wiki field names
+  (`PM4`, `PD4`) as primary names; proposed names live only in §9. No commentary about earlier names
+  remains. **Opt-in model prior:** `Pm4AssetMatchScorer` accepts an optional
   `modelPriors` map (exact path, then filename, clamped 0–1) and adds at most +0.10 to the overall
   score; `priorBonus` is 0 and the default path is unchanged when no map is supplied. 5/5 scorer
   tests pass, including `ScoreSegment_ModelPriorBreaksTieOnlyWhenSupplied`.

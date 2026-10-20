@@ -4,9 +4,10 @@ Last updated: 2026-10-20
 
 ## 2026-10-20 — PM4 reference consolidated + opt-in model prior
 
-- `docs/research/pm4-format-reference.md` rewritten top to bottom: 717 → ~475 lines, measured
-  relationships first, one unknown register (U01–U17), refuted claims kept only as load-bearing
-  negatives. No appended per-session notes remain.
+- `docs/research/pm4-format-reference.md` rewritten top to bottom as a standalone reader/renderer
+  specification. Field names now follow the current wowdev.wiki `PM4`/`PD4` articles; proposed names
+  live only in §9 as suggestions for the wiki editor. All commentary about earlier names removed.
+  Measured relationships first, one open-question register (Q01–Q17).
 - `Pm4AssetMatchScorer` gained an optional `modelPriors` map (exact path, then filename, clamped
   0–1). A prior adds at most +0.10 to the overall score and is recorded as `priorBonus`; with no map
   the default path is unchanged.
