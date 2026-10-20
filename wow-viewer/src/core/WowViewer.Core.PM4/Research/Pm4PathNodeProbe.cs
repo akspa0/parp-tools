@@ -56,6 +56,9 @@ public sealed record Pm4PathNodeReport(
     long MprlPointsInsideM2Surfaces,
     long MprlPointsInsideWmoSurfaces,
     long MprlPointsInsideOtherSurfaces,
+    long MprlPointsNearMspvTight,
+    long MprlPointsNearMspvLoose,
+    long MprlPointsFarFromMspv,
     long MprlInsideMesh,
     long MprlOutsideMesh,
     long MprlWithFinitePosition,
@@ -100,6 +103,7 @@ public static class Pm4PathNodeProbe
         long unk04Mslk = 0, unk04Ck24 = 0, unk04GroupKey = 0, unk04Mscn = 0;
         long withGroupSurfaces = 0, insideGroupSurfaces = 0, outsideGroupSurfaces = 0;
         long insideM2 = 0, insideWmo = 0, insideOther = 0;
+        long nearMspvTight = 0, nearMspvLoose = 0, farFromMspv = 0;
         long inside = 0, outside = 0, finite = 0;
         var unk00 = new Dictionary<string, long>(StringComparer.Ordinal);
         var unk02 = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -172,6 +176,16 @@ public static class Pm4PathNodeProbe
                 if (inM2) insideM2++;
                 if (inWmo) insideWmo++;
                 if (inOther) insideOther++;
+                float bestMspv = float.PositiveInfinity;
+                foreach (var vertex in chunks.Mspv)
+                {
+                    Vector3 v = Pm4CoordinateService.Pm4LocalToAdtPlacement(vertex);
+                    float d = Vector3.DistanceSquared(v, pointPlacement);
+                    if (d < bestMspv) bestMspv = d;
+                }
+                if (bestMspv <= 0.1f * 0.1f) nearMspvTight++;
+                else if (bestMspv <= 1f) nearMspvLoose++;
+                else farFromMspv++;
                 Increment(unk00, point.Unk00.ToString());
                 Increment(unk02, point.Unk02.ToString());
                 Increment(unk04, point.Unk04.ToString());
@@ -261,6 +275,7 @@ public static class Pm4PathNodeProbe
             unk04Mslk, unk04Ck24, unk04GroupKey, unk04Mscn,
             withGroupSurfaces, insideGroupSurfaces, outsideGroupSurfaces,
             insideM2, insideWmo, insideOther,
+            nearMspvTight, nearMspvLoose, farFromMspv,
             inside, outside, finite,
             Rows(unk00), Rows(unk02), Rows(unk04), Rows(unk06), Rows(unk14), Rows(unk16),
             Rows(value1), Rows(value2),

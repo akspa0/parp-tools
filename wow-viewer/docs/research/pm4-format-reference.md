@@ -323,7 +323,12 @@ ground surfaces that actually contain the points split as:
 | Other | 11,968 (6.7%) |
 
 So the object partition is: `GroupObjectId` → MPRL terrain-intersection points + MSLK connection
-records; the ground surfaces are the MSUR surfaces that contain those points. Source: **E-PATH**.
+records; the ground surfaces are the MSUR surfaces that contain those points.
+
+**MPRL points are not the MSPV path vertices.** Only 1,428 of 178,588 points (0.8%) lie within 0.1
+of an MSPV vertex, and 23,478 (13.1%) within 1.0; 153,682 (86.0%) are farther. The pathfinding path
+geometry is the separate MSPV/MSPI stream. The MPRL points are terrain-intersection/object-anchor
+points, not the walkable path itself. Source: **E-PATH**.
 
 ## 4. Binary envelope and parser contract
 

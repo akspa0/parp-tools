@@ -2,6 +2,13 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 MPRL points are not MSPV path vertices
+
+- Whole-map: only 1,428 of 178,588 MPRL points (0.8%) lie within 0.1 of an MSPV vertex, 23,478
+  (13.1%) within 1.0, and 153,682 (86.0%) farther. The pathfinding path geometry is the separate
+  MSPV/MSPI stream; MPRL points are terrain-intersection/object-anchor points.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 MPRR is a quadtree spatial index
 
 - Whole-map (616 files) node width/height distribution: 2 (1,205,258), 1 (872,798), 4 (740,137),

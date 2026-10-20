@@ -161,6 +161,12 @@ The `4k+3` run lengths and the ~4:1 decay are the quadtree hierarchy. The 32×32
 single-tile artifact; the whole-map distribution is 1/2/4/8/16/32. The first run of a file is a
 special header (e.g. `(0, 2304)` then `(0, 0)`), not a node.
 
+## Follow-up: MPRL points are not MSPV path vertices (whole map, 2026-10-20)
+
+Only 1,428 of 178,588 MPRL points (0.8%) lie within 0.1 of an MSPV vertex, and 23,478 (13.1%)
+within 1.0; 153,682 (86.0%) are farther. The pathfinding path geometry is the separate MSPV/MSPI
+stream. The MPRL points are terrain-intersection/object-anchor points, not the walkable path itself.
+
 ## Files changed
 
 - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4PathNodeProbe.cs` (new)
