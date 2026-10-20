@@ -680,7 +680,7 @@ internal sealed class ViewerSettingsService
 
     private sealed class ViewerSettings
     {
-        public int UiTheme { get; set; } = (int)UiThemeKind.ModernSlate;
+        public int UiTheme { get; set; } = (int)UiThemeKind.PreAlphaBrass;
         public float UiFontScale { get; set; } = 1.0f;
         public int WmoMliqRotationQuarterTurns { get; set; }
         public bool HasExplicitWmoMliqRotationOverride { get; set; }

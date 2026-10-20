@@ -33,7 +33,7 @@ internal sealed partial class ThemesService
         UiThemeKind.PreAlphaBrass,
     };
 
-    internal UiThemeKind _uiTheme = UiThemeKind.ModernSlate;
+    internal UiThemeKind _uiTheme = UiThemeKind.PreAlphaBrass;
 
     internal void ApplyActiveUiTheme()
     {
@@ -199,41 +199,42 @@ internal sealed partial class ThemesService
         style.ItemSpacing = new Vector2(8f, 7f);
         style.ItemInnerSpacing = new Vector2(6f, 4f);
 
-        style.Colors[(int)ImGuiCol.Text] = Rgba(229, 214, 170);
-        style.Colors[(int)ImGuiCol.TextDisabled] = Rgba(151, 140, 112);
-        style.Colors[(int)ImGuiCol.WindowBg] = Rgba(17, 24, 34, 244);
-        style.Colors[(int)ImGuiCol.ChildBg] = Rgba(21, 31, 44, 222);
-        style.Colors[(int)ImGuiCol.PopupBg] = Rgba(16, 22, 31, 248);
-        style.Colors[(int)ImGuiCol.Border] = Rgba(162, 128, 70, 224);
-        style.Colors[(int)ImGuiCol.BorderShadow] = Rgba(48, 30, 8, 96);
-        style.Colors[(int)ImGuiCol.FrameBg] = Rgba(57, 64, 54, 208);
-        style.Colors[(int)ImGuiCol.FrameBgHovered] = Rgba(82, 93, 73, 226);
-        style.Colors[(int)ImGuiCol.FrameBgActive] = Rgba(112, 96, 58, 236);
-        style.Colors[(int)ImGuiCol.TitleBg] = Rgba(35, 47, 63, 255);
-        style.Colors[(int)ImGuiCol.TitleBgActive] = Rgba(67, 53, 28, 255);
-        style.Colors[(int)ImGuiCol.MenuBarBg] = Rgba(40, 51, 64, 255);
-        style.Colors[(int)ImGuiCol.ScrollbarBg] = Rgba(12, 17, 24, 170);
+        // Pre-alpha palette: near-black leather panels, brass trim, parchment text.
+        style.Colors[(int)ImGuiCol.Text] = Rgba(232, 214, 170);
+        style.Colors[(int)ImGuiCol.TextDisabled] = Rgba(150, 132, 100);
+        style.Colors[(int)ImGuiCol.WindowBg] = Rgba(18, 14, 10, 244);
+        style.Colors[(int)ImGuiCol.ChildBg] = Rgba(24, 19, 13, 222);
+        style.Colors[(int)ImGuiCol.PopupBg] = Rgba(16, 12, 8, 248);
+        style.Colors[(int)ImGuiCol.Border] = Rgba(168, 132, 72, 224);
+        style.Colors[(int)ImGuiCol.BorderShadow] = Rgba(40, 24, 6, 120);
+        style.Colors[(int)ImGuiCol.FrameBg] = Rgba(52, 42, 28, 208);
+        style.Colors[(int)ImGuiCol.FrameBgHovered] = Rgba(78, 62, 38, 226);
+        style.Colors[(int)ImGuiCol.FrameBgActive] = Rgba(104, 80, 44, 236);
+        style.Colors[(int)ImGuiCol.TitleBg] = Rgba(30, 24, 16, 255);
+        style.Colors[(int)ImGuiCol.TitleBgActive] = Rgba(62, 48, 26, 255);
+        style.Colors[(int)ImGuiCol.MenuBarBg] = Rgba(34, 27, 18, 255);
+        style.Colors[(int)ImGuiCol.ScrollbarBg] = Rgba(12, 9, 6, 170);
         style.Colors[(int)ImGuiCol.ScrollbarGrab] = Rgba(120, 96, 54, 204);
         style.Colors[(int)ImGuiCol.ScrollbarGrabHovered] = Rgba(151, 124, 73, 222);
         style.Colors[(int)ImGuiCol.ScrollbarGrabActive] = Rgba(184, 152, 98, 236);
         style.Colors[(int)ImGuiCol.CheckMark] = Rgba(212, 180, 105);
         style.Colors[(int)ImGuiCol.SliderGrab] = Rgba(163, 127, 69, 214);
         style.Colors[(int)ImGuiCol.SliderGrabActive] = Rgba(208, 171, 103, 236);
-        style.Colors[(int)ImGuiCol.Button] = Rgba(64, 71, 54, 216);
-        style.Colors[(int)ImGuiCol.ButtonHovered] = Rgba(99, 87, 53, 232);
-        style.Colors[(int)ImGuiCol.ButtonActive] = Rgba(128, 104, 58, 242);
-        style.Colors[(int)ImGuiCol.Header] = Rgba(54, 63, 78, 218);
-        style.Colors[(int)ImGuiCol.HeaderHovered] = Rgba(85, 76, 52, 232);
-        style.Colors[(int)ImGuiCol.HeaderActive] = Rgba(117, 96, 58, 242);
+        style.Colors[(int)ImGuiCol.Button] = Rgba(58, 46, 30, 216);
+        style.Colors[(int)ImGuiCol.ButtonHovered] = Rgba(92, 72, 42, 232);
+        style.Colors[(int)ImGuiCol.ButtonActive] = Rgba(120, 92, 50, 242);
+        style.Colors[(int)ImGuiCol.Header] = Rgba(50, 40, 26, 218);
+        style.Colors[(int)ImGuiCol.HeaderHovered] = Rgba(82, 64, 38, 232);
+        style.Colors[(int)ImGuiCol.HeaderActive] = Rgba(112, 86, 48, 242);
         style.Colors[(int)ImGuiCol.Separator] = Rgba(132, 104, 63, 188);
         style.Colors[(int)ImGuiCol.SeparatorHovered] = Rgba(180, 146, 90, 224);
         style.Colors[(int)ImGuiCol.SeparatorActive] = Rgba(209, 176, 116, 236);
         style.Colors[(int)ImGuiCol.ResizeGrip] = Rgba(109, 85, 47, 150);
         style.Colors[(int)ImGuiCol.ResizeGripHovered] = Rgba(160, 129, 77, 212);
         style.Colors[(int)ImGuiCol.ResizeGripActive] = Rgba(208, 171, 103, 226);
-        style.Colors[(int)ImGuiCol.Tab] = Rgba(28, 39, 53, 255);
-        style.Colors[(int)ImGuiCol.TabHovered] = Rgba(93, 78, 48, 255);
-        style.Colors[(int)ImGuiCol.TabActive] = Rgba(67, 52, 30, 255);
+        style.Colors[(int)ImGuiCol.Tab] = Rgba(26, 21, 14, 255);
+        style.Colors[(int)ImGuiCol.TabHovered] = Rgba(88, 68, 40, 255);
+        style.Colors[(int)ImGuiCol.TabActive] = Rgba(64, 50, 28, 255);
         style.Colors[(int)ImGuiCol.DockingPreview] = Rgba(180, 146, 90, 164);
     }
 
