@@ -51,13 +51,7 @@ internal sealed partial class Pm4WorkbenchService
     private float _pm4RotationStepDegrees = 90f;
     private float _pm4ScaleStepUnits = 0.1f;
     private Pm4WorkbenchTab? _pendingPm4WorkbenchTab;
-    private Pm4ObjectMatchReport? _pm4ObjectMatchReport;
-    private Pm4ObjectMatchObject? _selectedPm4ObjectMatch;
-    private (int tileX, int tileY, uint ck24, int objectPart)? _selectedPm4ObjectMatchKey;
-    private int _selectedPm4ObjectMatchCacheMaxMatches = -1;
     private readonly List<(int tileX, int tileY, uint ck24, int objectPart)> _pm4ObjectCollection = new();
-    private int _selectedPm4ObjectMatchObjectIndex = -1;
-    private int _selectedPm4ObjectMatchCandidateIndex;
     private Pm4WmoMatchResult? _pm4WmoGroupMatchResult;
     private string _pm4WmoMatchStatus = "";
     private PmM2MatchResult? _pm2GroupMatchResult;

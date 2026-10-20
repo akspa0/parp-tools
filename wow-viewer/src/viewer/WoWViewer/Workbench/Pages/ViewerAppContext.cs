@@ -22,12 +22,10 @@ public interface IEditorPageHost
     void DrawPm4Exports();
 
     /// <summary>
-    /// Spec 231 T031: the PM4 workbench inspector (overlay/selection/correlation
-    /// tabs — transform, match, reconcile, collection, and graph tools) hosted as
-    /// a Placement & Objects section. The correlation tab draws the single
-    /// surviving correlation page (D2).
+    /// Opens the single PM4 Workbench sidebar. PM4 content is not duplicated in
+    /// the Editor page; this is a navigation shortcut only.
     /// </summary>
-    void DrawPm4Workbench();
+    void OpenPm4Workbench();
 
     /// <summary>
     /// Spec 234 US3: New Map creator in the Editor tab.

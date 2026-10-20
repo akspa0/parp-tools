@@ -1,3 +1,4 @@
+using ImGuiNET;
 using WoWViewer.UI;
 
 namespace WoWViewer.Workbench.Pages;
@@ -28,11 +29,12 @@ public sealed class EditorPlacementObjectsPage
 
         if (SharedUiWidgets.SectionHeader(
                 "PM4 Placement Tools",
-                "Overlay, selection (transform / match / reconcile), and correlation tools for the selected PM4 object. The correlation tab draws the single surviving correlation page (Spec 231 D2).",
+                "PM4 has a single home: the PM4 Workbench sidebar.",
                 defaultOpen: false,
                 id: "EditorPlacementPm4Tools"))
         {
-            _context.Host.DrawPm4Workbench();
+            if (ImGui.Button("Open PM4 Workbench"))
+                _context.Host.OpenPm4Workbench();
         }
 
         if (SharedUiWidgets.SectionHeader(

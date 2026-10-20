@@ -95,7 +95,7 @@ internal sealed partial class WorkbenchPanelsService
     {
         if (_worldScene != null)
         {
-            string[] tabs = ["Inspector", "World", "Model", "Settings", "PM4"];
+            string[] tabs = ["Inspector", "World", "Model", "Settings"];
             int current = _activeInspectorTab;
             if (current < 0 || current >= tabs.Length)
                 current = 0;
@@ -113,7 +113,6 @@ internal sealed partial class WorkbenchPanelsService
                             case 1: _worldObjectsPanel.DrawWorldObjectsPanelContent(); break;
                             case 2: _modelInspector.DrawModelInfoPanelContent(); break;
                             case 3: DrawUnifiedViewerSettingsSidebarContent(); break;
-                            case 4: _pm4Workbench.DrawPm4WorkbenchInspector(); break;
                         }
                         ImGui.EndTabItem();
                     }

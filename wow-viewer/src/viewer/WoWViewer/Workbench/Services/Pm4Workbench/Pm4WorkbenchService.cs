@@ -50,47 +50,72 @@ internal sealed partial class Pm4WorkbenchService
             return;
         }
 
-        ImGui.TextDisabled("Hover stays lightweight. Click a PM4 object to inspect its matches, graph, and correlation here.");
+        ImGui.TextDisabled("Hover stays lightweight. Click a PM4 object to inspect it here.");
         ImGui.SetNextItemOpen(true, ImGuiCond.Once);
         DrawPm4GlossarySummary();
 
+        if (_pendingPm4WorkbenchTab is { } pending)
+        {
+            _activePm4TabIndex = pending switch
+            {
+                Pm4WorkbenchTab.Overlay => (int)Pm4BottomTab.Overlay,
+                Pm4WorkbenchTab.Selection => (int)Pm4BottomTab.Selection,
+                Pm4WorkbenchTab.Correlation => (int)Pm4BottomTab.Correlation,
+                _ => _activePm4TabIndex,
+            };
+            _pendingPm4WorkbenchTab = null;
+        }
+
+        string[] labels = WorkbenchNavigator.GetPm4BottomTabLabels();
         if (!ImGui.BeginTabBar("##Pm4WorkbenchTabs"))
             return;
 
-        ImGuiTabItemFlags overlayFlags = _pendingPm4WorkbenchTab == Pm4WorkbenchTab.Overlay
-            ? ImGuiTabItemFlags.SetSelected
-            : ImGuiTabItemFlags.None;
-        bool overlayTabOpen = true;
-        if (ImGui.BeginTabItem("Overlay", ref overlayTabOpen, overlayFlags))
+        for (int index = 0; index < labels.Length; index++)
         {
-            DrawPm4OverlayWorkbenchContent();
-            ImGui.EndTabItem();
+            ImGuiTabItemFlags flags = _activePm4TabIndex == index
+                ? ImGuiTabItemFlags.SetSelected
+                : ImGuiTabItemFlags.None;
+            bool open = true;
+            if (ImGui.BeginTabItem(labels[index], ref open, flags))
+            {
+                _activePm4TabIndex = index;
+                DrawPm4TabContent((Pm4BottomTab)index);
+                ImGui.EndTabItem();
+            }
         }
 
-        ImGuiTabItemFlags selectionFlags = _pendingPm4WorkbenchTab == Pm4WorkbenchTab.Selection
-            ? ImGuiTabItemFlags.SetSelected
-            : ImGuiTabItemFlags.None;
-        bool selectionTabOpen = true;
-        if (ImGui.BeginTabItem("Selection", ref selectionTabOpen, selectionFlags))
-        {
-            DrawPm4SelectionWorkbenchContent();
-            ImGui.EndTabItem();
-        }
-
-        ImGuiTabItemFlags correlationFlags = _pendingPm4WorkbenchTab == Pm4WorkbenchTab.Correlation
-            ? ImGuiTabItemFlags.SetSelected
-            : ImGuiTabItemFlags.None;
-        bool correlationTabOpen = true;
-        if (ImGui.BeginTabItem("Correlation", ref correlationTabOpen, correlationFlags))
-        {
-            // Spec 231 D2: the workbench correlation copy was a strict subset of the
-            // canonical correlation page; both now draw the single survivor.
-            DrawPm4WmoCorrelationContent();
-            ImGui.EndTabItem();
-        }
-
-        _pendingPm4WorkbenchTab = null;
         ImGui.EndTabBar();
+    }
+
+    private void DrawPm4TabContent(Pm4BottomTab tab)
+    {
+        switch (tab)
+        {
+            case Pm4BottomTab.Overlay:
+                DrawPm4OverlayWorkbenchContent();
+                break;
+            case Pm4BottomTab.Selection:
+                DrawPm4SelectionWorkbenchContent();
+                break;
+            case Pm4BottomTab.Correlation:
+                DrawPm4WmoCorrelationContent();
+                break;
+            case Pm4BottomTab.Info:
+                DrawPm4InfoPanelContent();
+                break;
+            case Pm4BottomTab.Reconcile:
+                _host.ArchaeologyPanel.DrawPm4ReconciliationContent();
+                break;
+            case Pm4BottomTab.Alignment:
+                DrawPm4AlignmentContent();
+                break;
+            case Pm4BottomTab.Outliner:
+                DrawPm4Outliner();
+                break;
+            case Pm4BottomTab.ObjectGroups:
+                DrawPm4ObjectGroups();
+                break;
+        }
     }
 
     private void DrawPm4GlossarySummary()
@@ -98,22 +123,17 @@ internal sealed partial class Pm4WorkbenchService
         if (!ImGui.CollapsingHeader("PM4 Glossary / Evidence"))
             return;
 
-        ImGui.TextWrapped("PM4/PD4 are server-side navigation-mesh files (no renderable geometry): walkable surfaces, their adjacency, and what blocks movement. The cyan (MSCN) and magenta (MSPV) cubes you can toggle below are the visible projection of this data. Authoritative readings: docs/architecture/pm4-chunk-semantics.md (2026-06-09) and docs/wowdev-wiki/pm4-pd4-draft.md (2026-08-24, measured).");
-        ImGui.BulletText("MSUR — 32-byte surface record; a polygon fan over MSVI[0x14 .. 0x14+vertex count at 0x01]. 0x04 = normal; 0x10 = plane distance (NOT a Y-up height); 0x18 = start of the surface's MSLK adjacency window (length at 0x02) — measured 100.0000% against MSLK; the old 'indexes MSCN' reading is eliminated; 0x1C = IEEE float, see CK24 below.");
-        ImGui.BulletText("MSLK — the undirected surface-adjacency graph of the navmesh (98.76% reciprocity). RefIndex names a NEIGHBOURING surface, not the owner. ~47% of links carry an MSPI/MSPV vertical wall quad; the rest are open passage. Viewer TypeFlags: 0x03 = M2 top (walkable), 0x10 = interior floor (walkable), 0x12 = exterior solid (structural wall).");
-        ImGui.BulletText("MSCN — 3D connector/boundary node positions in the world frame (NOT normals, NOT per-surface indexed from MSUR). Objects share nodes (64.4%): node reuse is where objects meet. No in-file index consumer is known; the consumer is likely external. Visible as the cyan cubes.");
-        ImGui.BulletText("MSPV — wall-quad vertices on the blocked subset of MSLK links (0 of 598,790 path windows are Z-dominant = walls; MSUR normals are 91.7% Z-dominant = floors). Visible as the magenta cubes.");
-        ImGui.BulletText("MSVI / MSVT — mesh-index stream into mesh vertex positions: the actual 3D positions of every vertex of every polygon. Walked as MSUR.MsviFirstIndex..MsviFirstIndex+IndexCount -> MSVI -> MSVT. Polygon sizes are not triangles (77% quads in the measured corpus).");
-        ImGui.BulletText("MPRL — per-tile position reference: a 3D position + heading, used for spawn anchors. MPRL is the only permuted-axis chunk in the file.");
-        ImGui.BulletText("MSHD — 32-byte file header. 0x00/0x08 = clamped world-unit spans on the two axes (not counts); 0x04 == 1 marks a tile with no surfaces; 0x0C-0x1C are zero in all 502 measured files (reserved). The viewer's 'MSHD Region' grouping value (Field04) is a tile-level hint only — not a proven per-object grouping semantic.");
-        ImGui.BulletText("CK24: legacy viewer alias for MSUR field 0x1C. MEASURED 2026-08: it is an IEEE-754 float holding the Z coordinate of the ADT placement that produced the object (93.58% bit-exact vs MODF/MDDF). The old 'type' byte is the float's exponent band (why a tile shows only ~4 'types'); grouping by it collides for objects at equal height. 0x1C == 0.0f is the unattributed bucket (vertically stretched geometry), not an object id.");
-        ImGui.BulletText("part / ObjectPartId: viewer-generated split id. WoWViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional split, then optional connectivity split. It is not a raw PM4 field.");
-        ImGui.BulletText("MSLK Group: dominant MSLK.GroupObjectId seen in the current viewer object. Strong grouping hint, not final proof of identity.");
-        ImGui.BulletText("Linked MPRL refs: position-reference rows attached to the current viewer object or its dominant link family. Used as placement evidence.");
-        ImGui.BulletText("Group / Attr / MscnRef: dominant MSUR values across the selected viewer object. NOTE: 'MscnRef' is a legacy alias for MSUR.0x18, now measured to be the surface's MSLK adjacency window start — not an MSCN index. Debugging aid, not authoritative.");
-        ImGui.BulletText("PM4 Graph: the viewer's current decomposition of the selected object, not a literal raw node graph stored in PM4. MSLK is an adjacency graph of surfaces, not a graph of 'navmesh nodes'.");
-        ImGui.BulletText("Match uid: nearby MODF/MDDF placement candidate id. It is not a PM4-native object id. Per-object placement is (placement.X, placement.Y, MSUR.0x1C): X/Y come from the joined MODF/MDDF record, 0x1C is the authored Z and the join key.");
-        ImGui.BulletText("cyan:magenta ratio: per-object topology fingerprint. ~0 magenta = disjoint decoration (no MSLK links between surfaces). ~1:1 = connected WMO. >1:1 = contiguous M2 with a dense connection graph. Used by the spec 050/052 matcher as a pre-filter.");
+        ImGui.TextWrapped("PM4/PD4 are server-side navigation-mesh files: walkable surfaces, their adjacency, and what blocks movement. The cyan (MSCN) and magenta (MSPV) cubes are the visible projection of this data. The single authoritative reading is docs/research/pm4-format-reference.md.");
+        ImGui.BulletText("MSUR — 32-byte surface record. 0x01 = MSVI index count; 0x02 = MSLK window count; 0x04/0x08/0x0C = normal; 0x10 = plane distance; 0x14 = MSVI window start; 0x18 = MSLK window start; 0x1C = IEEE-754 float, the producing placement's Z.");
+        ImGui.BulletText("MSLK — the surface-adjacency graph. msur_index names a neighbouring surface in the tile addressed by 0x0C. 0x01 is a zero-based source-edge ordinal. 0x04 is the object-group id and equals MPRL.0x04. A non-empty MSPI window is a vertical wall quad; an empty one is open passage.");
+        ImGui.BulletText("MSCN — ordered connector/boundary node positions. Objects share nodes; nothing in the file indexes MSCN. Visible as the cyan cubes.");
+        ImGui.BulletText("MSPV / MSPI — wall-quad vertices and indices on the blocked subset of MSLK links. Visible as the magenta cubes.");
+        ImGui.BulletText("MSVI / MSVT — mesh indices and vertex positions. A surface is a polygon fan over MSVI[MSUR.0x14 .. + MSUR.0x01) into MSVT.");
+        ImGui.BulletText("MPRL — terrain-contact points. 0x00 is a per-tile region value; 0x04 is the object-group id; position is the only permuted chunk (height is Y).");
+        ImGui.BulletText("MSHD — 32-byte header. 0x00/0x08 are clamped world-unit spans; 0x04 == 1 marks a tile with no surfaces; 0x0C–0x1C are zero.");
+        ImGui.BulletText("part / ObjectPartId — viewer-generated split id from the current overlay build, not a raw PM4 field.");
+        ImGui.BulletText("MSLK Group — dominant MSLK.0x04 in the current viewer object. A grouping hint, not proof of identity.");
+        ImGui.BulletText("PM4 Graph — the viewer's decomposition of the selected object, not a literal raw node graph stored in PM4.");
     }
 
     internal void DrawPm4OverlayWorkbenchContent()
@@ -395,12 +415,6 @@ internal sealed partial class Pm4WorkbenchService
             return;
         }
 
-        int requestedMatches = _pm4ObjectMatchMaxMatchesPerObject;
-        ImGui.SetNextItemWidth(130f);
-        if (ImGui.SliderInt("Top Matches", ref requestedMatches, 3, 5))
-            _pm4ObjectMatchMaxMatchesPerObject = Math.Clamp(requestedMatches, 3, 5);
-
-        ImGui.SameLine();
         if (ImGui.Button("Open Advanced Align"))
             _activePm4TabIndex = (int)Pm4BottomTab.Alignment;
 

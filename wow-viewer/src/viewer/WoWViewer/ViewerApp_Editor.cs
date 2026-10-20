@@ -57,7 +57,7 @@ public partial class ViewerApp
     void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => _editorPanels.DrawArchaeologyEditorImportsSubTab();
     void Workbench.Pages.IEditorPageHost.DrawConverters() => _workbenchPanels.DrawConvertersSubTabContent();
     void Workbench.Pages.IEditorPageHost.DrawPm4Exports() => _pm4Workbench.DrawPm4ExportCommandSet();
-    void Workbench.Pages.IEditorPageHost.DrawPm4Workbench() => _pm4Workbench.DrawPm4WorkbenchInspector();
+    void Workbench.Pages.IEditorPageHost.OpenPm4Workbench() => _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
     void Workbench.Pages.IEditorPageHost.DrawNewMapCreator() => _newMapCreatorService.Draw(_editorPanels.LoadGeneratedNewMap);
 
     private readonly Workbench.Services.NewMapCreatorService _newMapCreatorService = new();

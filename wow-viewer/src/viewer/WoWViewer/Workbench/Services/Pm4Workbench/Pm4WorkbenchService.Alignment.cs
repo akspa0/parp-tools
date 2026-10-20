@@ -1095,10 +1095,6 @@ internal sealed partial class Pm4WorkbenchService
 
     internal void InvalidatePm4DerivedReports()
     {
-        _pm4ObjectMatchReport = null;
-        _selectedPm4ObjectMatch = null;
-        _selectedPm4ObjectMatchKey = null;
-        _selectedPm4ObjectMatchCacheMaxMatches = -1;
         _hoveredPm4ObjectMatch = null;
         _hoveredPm4ObjectMatchKey = null;
         _hoveredPm4ObjectMatchCacheMaxMatches = -1;
@@ -1140,92 +1136,6 @@ internal sealed partial class Pm4WorkbenchService
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Correlation] Report refresh failed: {ex}");
         }
     }
-
-    private void EnsurePm4ObjectMatchReportLoaded()
-    {
-        if (_pm4ObjectMatchReport == null)
-            RefreshPm4ObjectMatchReport();
-    }
-
-    private void RefreshPm4ObjectMatchReport()
-    {
-        if (_worldScene == null)
-            return;
-
-        try
-        {
-            _pm4ObjectMatchReport = _worldScene.Pm4Overlay.BuildPm4ObjectMatchReport(_pm4ObjectMatchMaxMatchesPerObject);
-            if (_pm4ObjectMatchReport.Objects.Count == 0)
-            {
-                _selectedPm4ObjectMatchObjectIndex = -1;
-                _selectedPm4ObjectMatchCandidateIndex = 0;
-            }
-            else if (!TryGetSelectedPm4ObjectMatch(out _)
-                && (_selectedPm4ObjectMatchObjectIndex < 0 || _selectedPm4ObjectMatchObjectIndex >= _pm4ObjectMatchReport.Objects.Count))
-            {
-                _selectedPm4ObjectMatchObjectIndex = 0;
-                _selectedPm4ObjectMatchCandidateIndex = 0;
-            }
-
-            _statusMessage = $"Refreshed PM4 object match report ({_pm4ObjectMatchReport.Summary.Pm4ObjectCount} PM4 objects).";
-        }
-        catch (Exception ex)
-        {
-            _pm4ObjectMatchReport = null;
-            _statusMessage = $"PM4 object match refresh failed: {ex.Message}";
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Object Match] Report refresh failed: {ex}");
-        }
-    }
-
-    private bool TryGetSelectedPm4ObjectMatch(out Pm4ObjectMatchObject objectMatch)
-    {
-        objectMatch = null!;
-
-        if (_worldScene == null || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
-            return false;
-
-        var selectedKey = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
-        if (_selectedPm4ObjectMatch != null
-            && _selectedPm4ObjectMatchKey.HasValue
-            && _selectedPm4ObjectMatchKey.Value == selectedKey
-            && _selectedPm4ObjectMatchCacheMaxMatches == _pm4ObjectMatchMaxMatchesPerObject)
-        {
-            objectMatch = _selectedPm4ObjectMatch;
-            return true;
-        }
-
-        if (!_worldScene.Pm4Overlay.TryBuildSelectedPm4ObjectMatch(_pm4ObjectMatchMaxMatchesPerObject, out Pm4ObjectMatchObject selectedMatch))
-            return false;
-
-        _selectedPm4ObjectMatch = selectedMatch;
-        _selectedPm4ObjectMatchKey = selectedKey;
-        _selectedPm4ObjectMatchCacheMaxMatches = _pm4ObjectMatchMaxMatchesPerObject;
-        objectMatch = selectedMatch;
-
-        if (_pm4ObjectMatchReport == null)
-            return true;
-
-        for (int index = 0; index < _pm4ObjectMatchReport.Objects.Count; index++)
-        {
-            Pm4ObjectMatchObject candidate = _pm4ObjectMatchReport.Objects[index];
-            if (candidate.TileX != selectedKey.tileX
-                || candidate.TileY != selectedKey.tileY
-                || candidate.Ck24 != selectedKey.ck24
-                || candidate.ObjectPartId != selectedKey.objectPart)
-            {
-                continue;
-            }
-
-            _selectedPm4ObjectMatchObjectIndex = index;
-            if (_selectedPm4ObjectMatchCandidateIndex < 0 || _selectedPm4ObjectMatchCandidateIndex >= candidate.Candidates.Count)
-                _selectedPm4ObjectMatchCandidateIndex = 0;
-            return true;
-        }
-
-        _selectedPm4ObjectMatchObjectIndex = -1;
-        return true;
-    }
-
 
     private void SelectPm4ObjectMatchObject(Pm4ObjectMatchObject objectMatch, bool frameCamera)
     {

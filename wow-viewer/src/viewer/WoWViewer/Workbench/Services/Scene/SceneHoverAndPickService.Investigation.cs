@@ -84,20 +84,6 @@ internal sealed partial class SceneHoverAndPickService
         return true;
     }
 
-    /// <summary>
-    /// Whether the hover overlay may show PM4 asset-match candidates.
-    /// </summary>
-    /// <remarks>
-    /// Gated to the explicit PM4 investigation mode. These candidates come from the geometric
-    /// fingerprint matcher, whose measured precision is P@1 = 1.3% (specs 046/065), so surfacing
-    /// them on every hover put a mostly-wrong answer in front of the user constantly. They stay
-    /// available when PM4 identity is what is being investigated, and are silent otherwise.
-    /// Note that object identity now has a far better route than fingerprinting - MSUR._0x1C is the
-    /// producing placement's Z, which resolves the asset outright (see `pm4 object-library`).
-    /// </remarks>
-    private bool ShouldShowHoveredPm4MatchCandidates()
-        => _visualInvestigationMode == VisualInvestigationMode.Pm4;
-
     private bool TryResolveTerrainChunkInspectionData(
         TerrainRenderer.TerrainChunkInfo chunkInfo,
         out TerrainChunkData? chunkData,

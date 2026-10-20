@@ -49,6 +49,8 @@ internal sealed partial class ArchaeologyPanelService
     private static readonly JsonSerializerOptions ReconciliationJsonOptions = new() { WriteIndented = true };
 
 
+    internal void DrawPm4ReconciliationContent() => DrawReconciliationPanel();
+
     private void DrawReconciliationPanel()
     {
         ImGui.Text("PM4/Museum Reconciliation");

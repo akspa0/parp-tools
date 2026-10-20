@@ -507,8 +507,10 @@ internal sealed partial class ArchaeologyPanelService
                 DrawCapturePanelContent();
                 break;
             case 4:
-                // PM4 Archaeological Analysis
-                DrawPm4SubTabContent();
+                // PM4 has a single home: the PM4 Workbench sidebar.
+                ImGui.TextDisabled("PM4 analysis lives in the PM4 Workbench sidebar.");
+                if (ImGui.Button("Open PM4 Workbench"))
+                    _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
                 break;
             case 5:
                 // Cartography (Spec 222 integration)
@@ -537,47 +539,6 @@ internal sealed partial class ArchaeologyPanelService
 
 
 
-
-    // ── PM4 sub-tab content ────────────────────────────────────────────────
-    private void DrawPm4SubTabContent()
-    {
-        if (_worldScene == null)
-        {
-            ImGui.TextDisabled("Load a world to use the PM4 tab.");
-            return;
-        }
-
-        _activePm4TabIndex = DrawNestedSubTabStrip(
-            "##Pm4SubTabs", WorkbenchNavigator.GetPm4BottomTabLabels(), _activePm4TabIndex);
-
-        switch ((Pm4BottomTab)_activePm4TabIndex)
-        {
-            case Pm4BottomTab.Overlay:
-                _pm4Workbench.DrawPm4OverlayWorkbenchContent();
-                break;
-            case Pm4BottomTab.Selection:
-                _pm4Workbench.DrawPm4SelectionWorkbenchContent();
-                break;
-            case Pm4BottomTab.Correlation:
-                _pm4Workbench.DrawPm4WmoCorrelationContent();
-                break;
-            case Pm4BottomTab.Info:
-                _pm4Workbench.DrawPm4InfoPanelContent();
-                break;
-            case Pm4BottomTab.Reconcile:
-                DrawReconciliationPanel();
-                break;
-            case Pm4BottomTab.Alignment:
-                _pm4Workbench.DrawPm4AlignmentContent();
-                break;
-            case Pm4BottomTab.Outliner:
-                _pm4Workbench.DrawPm4Outliner();
-                break;
-            case Pm4BottomTab.ObjectGroups:
-                _pm4Workbench.DrawPm4ObjectGroups();
-                break;
-        }
-    }
 
     // ── Archeology sub-tab content ──────────────────────────────────────────
     internal void DrawArcheologySubTabContent()

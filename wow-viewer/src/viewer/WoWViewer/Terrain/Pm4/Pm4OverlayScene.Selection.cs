@@ -826,25 +826,6 @@ public sealed partial class Pm4OverlayScene
         return true;
     }
 
-    internal bool TryBuildPm4ObjectMatch((int tileX, int tileY, uint ck24, int objectPart) objectKey, int maxMatchesPerObject, out Pm4ObjectMatchObject objectMatch)
-    {
-        objectMatch = null!;
-
-        EnsurePm4OverlayMatchesCameraWindow(GetPm4LoadAnchorCameraPosition());
-
-        if (_instancesDirty)
-            RebuildInstanceLists();
-
-        if (!_pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? obj))
-            return false;
-
-        Pm4ObjectMatchState pm4Object = BuildPm4ObjectMatchState(objectKey.tileX, objectKey.tileY, objectKey, obj);
-        List<Pm4PlacementMatchState> placements = BuildPm4PlacementMatchStates();
-        List<Pm4AssetProfileState> assetProfiles = BuildPm4AssetProfileStates(placements);
-        objectMatch = BuildPm4ObjectMatchObject(pm4Object, placements, assetProfiles, Math.Max(1, maxMatchesPerObject));
-        return true;
-    }
-
     internal bool ShouldRenderPm4ObjectType(byte ck24Type)
     {
         return ck24Type switch

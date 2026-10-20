@@ -217,9 +217,10 @@ internal sealed partial class WorkspacesService
             return;
         }
 
-        ImGui.TextWrapped("PM4 stays evidence-first here. This workspace groups overlay tuning, selected-object inspection, graph, and correlation without implying save ownership.");
+        ImGui.TextWrapped("PM4 stays evidence-first here. The single PM4 surface is the PM4 Workbench sidebar.");
         ImGui.Separator();
-        _pm4Workbench.DrawPm4WorkbenchInspector();
+        if (ImGui.Button("Open PM4 Workbench"))
+            _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
     }
 
     private void DrawEditorInspectWorkspace()

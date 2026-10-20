@@ -247,7 +247,7 @@ internal sealed partial class MainMenuBarService
                     if (_useTabUi) OpenWorkbenchTab(UtilitiesBottomTab.Lighting);
                     else OpenLegacyWorkbenchUtility(UtilitiesBottomTab.Lighting);
                 }
-                if (ImGui.MenuItem("Focus PM4 Tools", "P"))
+                if (ImGui.MenuItem("PM4 Workbench", "P"))
                     OpenPm4Workbench(Pm4WorkbenchTab.Selection);
                 if (ImGui.MenuItem("Reset Shell Layout"))
                     _shellLayout.ResetShellLayoutToDefaults();

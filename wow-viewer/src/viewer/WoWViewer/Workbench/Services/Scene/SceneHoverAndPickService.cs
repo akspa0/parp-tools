@@ -490,9 +490,6 @@ internal sealed partial class SceneHoverAndPickService
 
         ImGui.TextColored(new Vector4(0.72f, 0.78f, 0.90f, 1.0f), $"World: ({info.WorldPosition.X:F1}, {info.WorldPosition.Y:F1}, {info.WorldPosition.Z:F1})");
 
-        if (info.Pm4ObjectKey.HasValue && ShouldShowHoveredPm4MatchCandidates())
-            DrawHoveredPm4MatchCandidates(info.Pm4ObjectKey.Value);
-
         ImGui.Separator();
         ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.38f, 1.0f), "Left-click to view in Inspector");
 
@@ -518,67 +515,6 @@ internal sealed partial class SceneHoverAndPickService
             "WL liquid" => new Vector4(0.60f, 0.88f, 1.0f, 1.0f),
             _ => new Vector4(0.92f, 0.96f, 1.0f, 1.0f)
         };
-    }
-
-    private bool TryGetHoveredPm4ObjectMatch((int tileX, int tileY, uint ck24, int objectPart) objectKey, out Pm4ObjectMatchObject objectMatch)
-    {
-        objectMatch = null!;
-
-        int maxMatches = Math.Max(3, Math.Min(5, _pm4ObjectMatchMaxMatchesPerObject));
-        if (_hoveredPm4ObjectMatch != null
-            && _hoveredPm4ObjectMatchKey.HasValue
-            && _hoveredPm4ObjectMatchKey.Value == objectKey
-            && _hoveredPm4ObjectMatchCacheMaxMatches == maxMatches)
-        {
-            objectMatch = _hoveredPm4ObjectMatch;
-            return true;
-        }
-
-        if (_worldScene == null || !_worldScene.Pm4Overlay.TryBuildPm4ObjectMatch(objectKey, maxMatches, out Pm4ObjectMatchObject hoveredMatch))
-            return false;
-
-        _hoveredPm4ObjectMatch = hoveredMatch;
-        _hoveredPm4ObjectMatchKey = objectKey;
-        _hoveredPm4ObjectMatchCacheMaxMatches = maxMatches;
-        objectMatch = hoveredMatch;
-        return true;
-    }
-
-    private void DrawHoveredPm4MatchCandidates((int tileX, int tileY, uint ck24, int objectPart) objectKey)
-    {
-        ImGui.Separator();
-        ImGui.TextColored(new Vector4(1.0f, 0.90f, 0.52f, 1.0f), "Likely matches");
-
-        if (!TryGetHoveredPm4ObjectMatch(objectKey, out Pm4ObjectMatchObject objectMatch))
-        {
-            ImGui.TextColored(new Vector4(0.74f, 0.78f, 0.86f, 1.0f), "No PM4 match preview available for this hovered part.");
-            return;
-        }
-
-        if (objectMatch.Candidates.Count == 0)
-        {
-            ImGui.TextColored(new Vector4(0.74f, 0.78f, 0.86f, 1.0f), "No nearby WMO or M2 placement candidates were found.");
-            return;
-        }
-
-        int shownCount = Math.Min(3, objectMatch.Candidates.Count);
-        for (int i = 0; i < shownCount; i++)
-        {
-            Pm4ObjectMatchCandidate candidate = objectMatch.Candidates[i];
-            ImGui.PushID($"HoverPm4Candidate_{i}");
-            ImGui.TextColored(new Vector4(0.80f, 0.96f, 0.82f, 1.0f), $"{i + 1}. {candidate.Kind}  gap={candidate.PlanarGap:F1}");
-
-            if (!string.IsNullOrWhiteSpace(candidate.ModelName))
-                ImGui.TextColored(new Vector4(0.92f, 0.94f, 0.98f, 1.0f), candidate.ModelName);
-
-            ImGui.TextColored(
-                new Vector4(0.72f, 0.78f, 0.90f, 1.0f),
-                $"{candidate.EvidenceSource}  vertical={candidate.VerticalGap:F1}  overlap={candidate.PlanarOverlapRatio:P0}");
-            ImGui.PopID();
-        }
-
-        if (objectMatch.Candidates.Count > shownCount)
-            ImGui.TextColored(new Vector4(0.78f, 0.73f, 0.57f, 1.0f), $"+{objectMatch.Candidates.Count - shownCount} more in the inspector");
     }
 
     internal void DrawSelectedEntityNameplate()
