@@ -1,6 +1,12 @@
 # Active Context — wow-viewer
 
 Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlation**:
+- **PM4 open-question follow-up (2026-10-20):** `MSUR._0x10 = -dot(normal, v0)` in raw MSVT space
+  (518,080/518,092, median error 0); `MPRR` first two records are ordered spatial bounds in a
+  768×768 tile grid (3,171,133/3,171,912, 99.98%); `_0x1c` matches a placement Z anywhere in the
+  map for 69.7% of nonzero surfaces; `MSHD` spans vs raw placement spans r = 0.39–0.58;
+  `MPRL._0x14` is not the run index, node level, group size, link count, or run length. Receipt:
+  [phase-5](../specs/279-decode-pm4-format/evidence/phase-5-open-questions-2026-10-20.md).
 - **PM4 UI consolidation + matcher removal (2026-10-20, operator-directed):** the PM4 Workbench is
   now the single PM4 surface. Its tab bar exposes the eight PM4 pages (Overlay, Selection,
   Correlation, Info, Reconcile, Alignment, Outliner, Object Groups). The duplicate PM4 content in
