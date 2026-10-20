@@ -20,20 +20,22 @@ public static class Pm4AssetMatchScorer
     public static IReadOnlyList<Pm4SegmentMatchResult> ScoreSegments(
         IReadOnlyList<Pm4BuiltObjectSegment> segments,
         IReadOnlyList<Pm4AssetReferenceSignalRecord> assetReferences,
-        int maxCandidates = 10)
+        int maxCandidates = 10,
+        IReadOnlyDictionary<string, double>? modelPriors = null)
     {
         ArgumentNullException.ThrowIfNull(segments);
         ArgumentNullException.ThrowIfNull(assetReferences);
 
         return segments
-            .Select(segment => ScoreSegment(segment, assetReferences, maxCandidates))
+            .Select(segment => ScoreSegment(segment, assetReferences, maxCandidates, modelPriors))
             .ToList();
     }
 
     public static Pm4SegmentMatchResult ScoreSegment(
         Pm4BuiltObjectSegment segment,
         IReadOnlyList<Pm4AssetReferenceSignalRecord> assetReferences,
-        int maxCandidates = 10)
+        int maxCandidates = 10,
+        IReadOnlyDictionary<string, double>? modelPriors = null)
     {
         ArgumentNullException.ThrowIfNull(segment);
         ArgumentNullException.ThrowIfNull(assetReferences);
@@ -83,7 +85,9 @@ public static class Pm4AssetMatchScorer
 
         List<CandidateEvaluation> evaluations = assetReferences
             .Where(asset => string.Equals(asset.AssetKind, expectedAssetKind, StringComparison.OrdinalIgnoreCase))
-            .Select(asset => EvaluateTypedCandidate(segment, asset, typedBounds, profileMatchesExpectedKind, hasTypeFlagsData))
+            .Select(asset => EvaluateTypedCandidate(
+                segment, asset, typedBounds, profileMatchesExpectedKind, hasTypeFlagsData,
+                ResolvePrior(modelPriors, asset.AssetPath)))
             .Where(static evaluation => evaluation is not null)
             .Select(static evaluation => evaluation!)
             .OrderByDescending(static evaluation => evaluation.OverallScore)
@@ -138,12 +142,28 @@ public static class Pm4AssetMatchScorer
         return new Pm4SegmentMatchResult(segment, expectedAssetKind, status, reviewRequired, rationale, candidates);
     }
 
+    private static double ResolvePrior(IReadOnlyDictionary<string, double>? priors, string assetPath)
+    {
+        if (priors is null || priors.Count == 0)
+            return 0d;
+        if (priors.TryGetValue(assetPath, out double exact))
+            return Math.Clamp(exact, 0d, 1d);
+        string fileName = System.IO.Path.GetFileName(assetPath);
+        foreach (var pair in priors)
+        {
+            if (string.Equals(System.IO.Path.GetFileName(pair.Key), fileName, StringComparison.OrdinalIgnoreCase))
+                return Math.Clamp(pair.Value, 0d, 1d);
+        }
+        return 0d;
+    }
+
     private static CandidateEvaluation? EvaluateTypedCandidate(
         Pm4BuiltObjectSegment segment,
         Pm4AssetReferenceSignalRecord asset,
         Dictionary<byte, Pm4Bounds3> typedBounds,
         bool profileMatchesExpectedKind,
-        bool hasTypeFlagsData)
+        bool hasTypeFlagsData,
+        double priorBonus = 0d)
     {
         if (asset.Bounds is null || segment.Signal.Bounds is null)
             return null;
@@ -245,6 +265,10 @@ public static class Pm4AssetMatchScorer
         double shapeWeight = 1.0 - typeWeight - profileWeight;
 
         double overallScore = typedOverlapScore * typeWeight + profileScore * profileWeight + shapeScore * shapeWeight;
+        // Opt-in prior from the measured object-group join. Zero when no prior map is supplied,
+        // so the default scoring path is unchanged.
+        if (priorBonus > 0d)
+            overallScore = Math.Min(1d, overallScore + priorBonus * 0.10d);
 
         Dictionary<string, double> scoreBreakdown = new(StringComparer.Ordinal)
         {
@@ -260,6 +284,7 @@ public static class Pm4AssetMatchScorer
             ["typeWeight"] = typeWeight,
             ["profileWeight"] = profileWeight,
             ["shapeWeight"] = shapeWeight,
+            ["priorBonus"] = priorBonus,
         };
 
         List<string> rationale =
@@ -268,6 +293,8 @@ public static class Pm4AssetMatchScorer
             $"shape score {shapeScore:F3} (shapeWeight={shapeWeight:F2})",
             $"type profile {profileScore:F3} (profileWeight={profileWeight:F2})",
         ];
+        if (priorBonus > 0d)
+            rationale.Add($"object-group prior {priorBonus:F3} applied (+{priorBonus * 0.10d:F3}).");
 
         return new CandidateEvaluation(asset, typedOverlapScore, shapeScore, overallScore, scoreBreakdown, rationale);
     }

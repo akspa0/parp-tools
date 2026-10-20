@@ -110,6 +110,43 @@ public sealed class Pm4AssetMatchScorerTests
         Assert.Contains("sortedSpanScore", result.Candidates[0].ScoreBreakdown.Keys);
     }
 
+    [Fact]
+    public void ScoreSegment_ModelPriorBreaksTieOnlyWhenSupplied()
+    {
+        Pm4BuiltObjectSegment segment = CreateSegment(
+            ck24Type: 0x42,
+            boundsMin: new Vector3(0f, 0f, 0f),
+            boundsMax: new Vector3(10f, 10f, 4f),
+            anchorPlanarPoint: new Vector2(5f, 5f));
+
+        // Identical, imperfect geometry: without a prior the two candidates are indistinguishable.
+        // Bounds are deliberately larger than the segment so the base score stays below 1.0 and
+        // the prior bonus is not swallowed by the score clamp.
+        IReadOnlyList<Pm4AssetReferenceSignalRecord> assets =
+        [
+            CreateAsset("wmo-a", "world/wmo/a.wmo", "wmo", new Vector3(0f, 0f, 0f), new Vector3(20f, 20f, 4f), referencePosition: null),
+            CreateAsset("wmo-b", "world/wmo/b.wmo", "wmo", new Vector3(0f, 0f, 0f), new Vector3(20f, 20f, 4f), referencePosition: null),
+        ];
+
+        Pm4SegmentMatchResult baseline = Pm4AssetMatchScorer.ScoreSegment(segment, assets);
+        Assert.Equal(Pm4AssetMatchStatus.Ambiguous, baseline.Status);
+        Assert.Equal(0d, baseline.Candidates[0].ScoreBreakdown["priorBonus"]);
+
+        // Supplying a prior for the second asset promotes it and separates the scores.
+        Dictionary<string, double> priors = new(StringComparer.Ordinal)
+        {
+            ["world/wmo/b.wmo"] = 1d,
+        };
+
+        Pm4SegmentMatchResult withPrior = Pm4AssetMatchScorer.ScoreSegment(segment, assets, modelPriors: priors);
+
+        Assert.Equal(Pm4AssetMatchStatus.Matched, withPrior.Status);
+        Assert.Equal("wmo-b", withPrior.Candidates[0].AssetId);
+        Assert.Equal(1d, withPrior.Candidates[0].ScoreBreakdown["priorBonus"]);
+        Assert.Equal(0d, withPrior.Candidates[1].ScoreBreakdown["priorBonus"]);
+        Assert.True(withPrior.Candidates[0].OverallScore > baseline.Candidates[0].OverallScore);
+    }
+
     private static Pm4BuiltObjectSegment CreateSegment(
         byte ck24Type,
         Vector3 boundsMin,

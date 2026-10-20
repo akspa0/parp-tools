@@ -38,7 +38,14 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   consistent-only and camera focus. **MPRL points are not MSPV path vertices:** only 0.8% within 0.1
   and 13.1% within 1.0; the path geometry is the separate MSPV/MSPI stream.
   [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md). Editor-node
-  identity remains unknown. Operator wants checkpoints committed.
+  identity remains unknown. Operator wants checkpoints committed. **Reference consolidated
+  (2026-10-20):** [pm4-format-reference.md](../docs/research/pm4-format-reference.md) rewritten top to
+  bottom, 717 → ~475 lines, one unknown register (U01–U17); refuted claims survive only as
+  load-bearing negatives. **Opt-in model prior:** `Pm4AssetMatchScorer` accepts an optional
+  `modelPriors` map (exact path, then filename, clamped 0–1) and adds at most +0.10 to the overall
+  score; `priorBonus` is 0 and the default path is unchanged when no map is supplied. 5/5 scorer
+  tests pass, including `ScoreSegment_ModelPriorBreaksTieOnlyWhenSupplied`.
+  [Receipt](../specs/279-decode-pm4-format/evidence/phase-4-model-prior-2026-10-20.md).
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
   MSUR→MSLK start/count windows; packed link target is tile X=low byte, Y=next byte + surface index.
   **Not universally file-local:** 15,773 cross-tile links; 14,659 resolve. Same-tile addressed links

@@ -83,10 +83,19 @@ so meaning remains unknown. Phase 2 is planned, not certified or started by this
 
 ## Phase 4 — US3: Evidence-gated consumer integration (Gate R4)
 
-- [ ] T040 [US3] Produce exact viewer/matching consumer proposals tied to verified claims and baseline
+- [x] T040 [US3] Produce exact viewer/matching consumer proposals tied to verified claims and baseline
   receipts; operator approves each particular behavior change before implementation.
-- [ ] T041 [US3] Implement one approved owned-service/adapter slice with regression coverage, preserving
+  [Receipt](evidence/phase-4-model-prior-2026-10-20.md): proposal = feed the measured object-group →
+  model join into `Pm4AssetMatchScorer` as an opt-in prior; operator approved by directing the next
+  bounded step.
+- [x] T041 [US3] Implement one approved owned-service/adapter slice with regression coverage, preserving
   unrelated behavior and the existing WMO baseline.
+  [Receipt](evidence/phase-4-model-prior-2026-10-20.md): `modelPriors` is optional and defaults to
+  `null`; `priorBonus` is 0 on the default path; 5/5 scorer tests pass, including the new
+  tie-break test.
+- [x] T043 [US3] Rewrite the PM4 reference top to bottom as a single consolidated document of truth.
+  [Receipt](evidence/phase-4-model-prior-2026-10-20.md): 717 → ~475 lines, one unknown register
+  (U01–U17), refuted claims retained only as load-bearing negatives.
 - [ ] T042 [US3] Operator provides real viewer/matching evidence; keep runtime/accuracy criteria open
   until satisfied. Update reference, receipts and continuity in the same pass.
 

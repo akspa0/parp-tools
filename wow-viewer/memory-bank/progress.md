@@ -2,6 +2,18 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 reference consolidated + opt-in model prior
+
+- `docs/research/pm4-format-reference.md` rewritten top to bottom: 717 → ~475 lines, measured
+  relationships first, one unknown register (U01–U17), refuted claims kept only as load-bearing
+  negatives. No appended per-session notes remain.
+- `Pm4AssetMatchScorer` gained an optional `modelPriors` map (exact path, then filename, clamped
+  0–1). A prior adds at most +0.10 to the overall score and is recorded as `priorBonus`; with no map
+  the default path is unchanged.
+- New test `ScoreSegment_ModelPriorBreaksTieOnlyWhenSupplied`: identical imperfect geometry is
+  `Ambiguous` without a prior and `Matched` with one. 5/5 scorer tests pass.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-4-model-prior-2026-10-20.md).
+
 ## 2026-10-20 — PM4 object groups exposed in the viewer + ranked matcher
 
 - New `Pm4ObjectGroupCatalog` (per-tile `Unk04` groups with point/surface counts, ground-surface
