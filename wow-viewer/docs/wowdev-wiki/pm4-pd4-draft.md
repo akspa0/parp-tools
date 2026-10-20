@@ -1,5 +1,13 @@
 # PM4 / PD4 — wowdev.wiki draft
 
+> **Historical draft — current PM4 route changed 2026-10-20.** Read the
+> [PM4 measured format reference](../research/pm4-format-reference.md) and
+> [Spec 279](../../specs/279-decode-pm4-format/spec.md). This document retains older hypotheses,
+> incompatible subsets and now-refuted file-local reference assumptions. Its statements about
+> object IDs/types, point-node identities, coordinates and provenance are **not** automatically
+> current decoded facts. Do not publish it unchanged as a verified specification. PD4 observations
+> here are historical and are not re-certified by the new PM4 corpus measurements.
+
 **Status**: draft for wiki submission. Every claim below cites the command that produced it and the
 figure it produced, so an editor can re-run it.
 

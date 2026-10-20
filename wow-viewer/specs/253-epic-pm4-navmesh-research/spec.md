@@ -1,6 +1,15 @@
 # Epic 253 — PM4/PD4 Navmesh Decoding, Matching & Generation
 
-**Created**: 2026-09-23 (spec reconciliation) · **Branch**: `v0.6.0-dev` · **Status**: Triage pending
+**Created**: 2026-09-23 (spec reconciliation) · **Status**: P-01/P-02 and documentation portion of P-03 selected 2026-10-20; other items still triage pending
+
+## Current operator-directed lane
+
+Operator 2026-10-20: continue toward full PM4 comprehension, explicitly including unknowns, and
+provide a readable evidence-based writeup using Spec Kit. [Spec 279](../279-decode-pm4-format/spec.md)
+owns that phased lane; its [plan](../279-decode-pm4-format/plan.md) and
+[tasks](../279-decode-pm4-format/tasks.md) adopt current Spec 270 measurements, not old semantic
+assertions. [Current PM4 reference](../../docs/research/pm4-format-reference.md). Working WMO behavior
+and frozen readers are preserved; the request does not implicitly authorize global semantic renames.
 
 > Primary successor of 10 archived specs (split specs also contribute items; see the ledger) plus the old `epic-pm4-restoration`. **No new
 > scope** (§9.1). Evidence: [reconciliation ledger](../archived/reconciliation-2026-09-23/README.md),

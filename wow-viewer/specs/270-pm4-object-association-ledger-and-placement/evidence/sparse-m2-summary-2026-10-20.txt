@@ -1,0 +1,5 @@
+{"Tile":"development_00_00.pm4","M2":10,"Components":9,"LE2":3,"LE4":7,"Unique1":5,"Unique025":5,"Near24":9,"Reflected24":4}
+{"Tile":"development_00_02.pm4","M2":8,"Components":2,"LE2":1,"LE4":2,"Unique1":2,"Unique025":2,"Near24":2,"Reflected24":2}
+{"Tile":"development_16_32.pm4","M2":241,"Components":181,"LE2":71,"LE4":135,"Unique1":133,"Unique025":158,"Near24":180,"Reflected24":134}
+{"Tile":"development_16_33.pm4","M2":265,"Components":234,"LE2":89,"LE4":170,"Unique1":171,"Unique025":205,"Near24":233,"Reflected24":192}
+{"Tile":"development_50_38.pm4","M2":1,"Components":3,"LE2":3,"LE4":3,"Unique1":3,"Unique025":3,"Near24":0,"Reflected24":0}

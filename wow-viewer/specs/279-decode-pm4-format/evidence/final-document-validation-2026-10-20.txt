@@ -1,0 +1,6 @@
+PASS: 55 final local Markdown links resolve; authoring templates filled.
+PASS: 16 parsed chunk inventory rows / 17 unknown-register rows retained.
+PASS: Phase 1 real output matches the adopted complete-map fingerprint and link count.
+PASS: branch and Spec Kit feature pin agree.
+PASS: raw reader/model and baseline matchers/viewer unchanged against HEAD.
+Dashboard/ledger lines: 197/199

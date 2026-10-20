@@ -1,0 +1,6 @@
+PASS: all 16 reader signatures covered.
+PASS: 35 named fields covered in their record sections; shared vector/index and auxiliary tables reviewed.
+PASS: 17 explicit unknown question groups.
+PASS: 34 local documentation links resolve; no unfilled template markers.
+PASS: adopted 616-file reports and reference share the same corpus fingerprint.
+PASS: Spec 279 Phase 0 documentation checks complete; no runtime/semantic-completion claim.

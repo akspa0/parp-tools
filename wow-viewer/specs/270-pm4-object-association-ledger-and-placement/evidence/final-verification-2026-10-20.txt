@@ -1,0 +1,29 @@
+warning: in the working copy of 'wow-viewer/memory-bank/activeContext.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wow-viewer/memory-bank/archive/README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wow-viewer/memory-bank/progress.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wow-viewer/memory-bank/workstream-pm4-decode.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wow-viewer/specs/270-pm4-object-association-ledger-and-placement/plan.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wow-viewer/specs/270-pm4-object-association-ledger-and-placement/spec.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wow-viewer/specs/270-pm4-object-association-ledger-and-placement/tasks.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'wow-viewer/specs/STATUS.md', LF will be replaced by CRLF the next time Git touches it
+PASS: all ten source fingerprints unchanged.
+PASS: older progress entries preserved with rebased links.
+Live progress lines: 169
+PASS: git diff --check and production diff both exit 0; receipt outputs present.
+ M imgui.ini
+ M wow-viewer/memory-bank/activeContext.md
+ M wow-viewer/memory-bank/archive/README.md
+ M wow-viewer/memory-bank/progress.md
+ M wow-viewer/memory-bank/workstream-pm4-decode.md
+ M wow-viewer/specs/270-pm4-object-association-ledger-and-placement/plan.md
+ M wow-viewer/specs/270-pm4-object-association-ledger-and-placement/spec.md
+ M wow-viewer/specs/270-pm4-object-association-ledger-and-placement/tasks.md
+ M wow-viewer/specs/STATUS.md
+?? wow-viewer/memory-bank/archive/2026-10-20-progress-pre-2026-10-14.md
+?? wow-viewer/specs/270-pm4-object-association-ledger-and-placement/evidence/correlation-tests-2026-10-20.txt
+?? wow-viewer/specs/270-pm4-object-association-ledger-and-placement/evidence/final-verification-2026-10-20.txt
+?? wow-viewer/specs/270-pm4-object-association-ledger-and-placement/evidence/height-kind-2026-10-20.json
+?? wow-viewer/specs/270-pm4-object-association-ledger-and-placement/evidence/height-kind-probe-2026-10-20.txt
+?? wow-viewer/specs/270-pm4-object-association-ledger-and-placement/evidence/height-kind-probe/
+?? wow-viewer/specs/270-pm4-object-association-ledger-and-placement/evidence/investigation-2026-10-20.md
+?? wow-viewer/specs/270-pm4-object-association-ledger-and-placement/evidence/sparse-m2-summary-2026-10-20.txt

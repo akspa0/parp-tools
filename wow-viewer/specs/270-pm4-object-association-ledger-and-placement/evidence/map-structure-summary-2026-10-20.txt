@@ -1,0 +1,25 @@
+MAP: d6460882861d2ffa0e13db323a8ddf9a8e52705ce8d3c23e74fa1e6a86b8d709
+{"Files":616,"SurfaceFiles":309,"Surfaces":518092.0,"Links":1273335.0,"InvalidPolygons":0.0,"InvalidLinkWindows":0.0,"InvalidRefs":4553.0,"DiagnosticFiles":0,"ZeroCkSurfaces":186060.0,"RawZeroSurfaces":186060.0}
+ALL RELATIONS
+{"Relation":"hashed-target-control","N":1268782.0,"Vertex":3559.0,"Edge":1780.0,"EdgePct":0.1403,"Self":667.0}
+{"Relation":"offset-17-control","N":1268782.0,"Vertex":21822.0,"Edge":9219.0,"EdgePct":0.7266,"Self":3862.0}
+{"Relation":"stored-reference","N":1268782.0,"Vertex":932514.0,"Edge":666861.0,"EdgePct":52.5591,"Self":18.0}
+STORED BY CK/PATH
+{"Stratum":"both-zero, False","N":165415.0,"Edge":130.0,"EdgePct":0.0786}
+{"Stratum":"both-zero, True","N":245653.0,"Edge":243017.0,"EdgePct":98.9269}
+{"Stratum":"different, False","N":16774.0,"Edge":11.0,"EdgePct":0.0656}
+{"Stratum":"different, True","N":3761.0,"Edge":1315.0,"EdgePct":34.9641}
+{"Stratum":"same-nonzero, False","N":414347.0,"Edge":149.0,"EdgePct":0.036}
+{"Stratum":"same-nonzero, True","N":422832.0,"Edge":422239.0,"EdgePct":99.8598}
+STORED BY RAW TYPE
+{"RawType":"1","N":668292.0,"EdgePct":99.1508}
+{"RawType":"2","N":449079.0,"EdgePct":0.0644}
+{"RawType":"4","N":54548.0,"EdgePct":0.0}
+{"RawType":"10","N":64040.0,"EdgePct":0.0}
+{"RawType":"12","N":23365.0,"EdgePct":0.0043}
+{"RawType":"17","N":3954.0,"EdgePct":100.0}
+{"RawType":"18","N":4087.0,"EdgePct":0.0}
+{"RawType":"20","N":393.0,"EdgePct":0.0}
+{"RawType":"26","N":836.0,"EdgePct":0.0}
+{"RawType":"28","N":188.0,"EdgePct":0.0}
+DIAGNOSTICS

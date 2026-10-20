@@ -1,0 +1,18 @@
+MAP: d6460882861d2ffa0e13db323a8ddf9a8e52705ce8d3c23e74fa1e6a86b8d709
+{"Hypothesis":"source-one-based","Links":1273335.0,"ValidOrdinal":946326.0,"SharedSurfaceEdge":96.0,"Auxiliary":453403.0,"ExactAuxEdge":9.0,"EndpointsOnAux":16.0,"ValidXYPlane":453403.0,"AuxInPlane":641.0}
+{"Hypothesis":"source-shift-1-control","Links":1273335.0,"ValidOrdinal":1273335.0,"SharedSurfaceEdge":137.0,"Auxiliary":598882.0,"ExactAuxEdge":71.0,"EndpointsOnAux":317.0,"ValidXYPlane":598882.0,"AuxInPlane":3120.0}
+{"Hypothesis":"source-zero-based","Links":1273335.0,"ValidOrdinal":1273335.0,"SharedSurfaceEdge":674013.0,"Auxiliary":598882.0,"ExactAuxEdge":143325.0,"EndpointsOnAux":155083.0,"ValidXYPlane":598882.0,"AuxInPlane":536142.0}
+{"Hypothesis":"target-one-based","Links":1273335.0,"ValidOrdinal":917731.0,"SharedSurfaceEdge":110613.0,"Auxiliary":439865.0,"ExactAuxEdge":31474.0,"EndpointsOnAux":31597.0,"ValidXYPlane":439865.0,"AuxInPlane":91722.0}
+{"Hypothesis":"target-shift-1-control","Links":1273335.0,"ValidOrdinal":1168949.0,"SharedSurfaceEdge":146484.0,"Auxiliary":547405.0,"ExactAuxEdge":39856.0,"EndpointsOnAux":40018.0,"ValidXYPlane":547405.0,"AuxInPlane":116966.0}
+{"Hypothesis":"target-zero-based","Links":1273335.0,"ValidOrdinal":1168949.0,"SharedSurfaceEdge":167939.0,"Auxiliary":547405.0,"ExactAuxEdge":35884.0,"EndpointsOnAux":36057.0,"ValidXYPlane":547405.0,"AuxInPlane":112575.0}
+SOURCE ZERO BASED BY RAW TYPE
+{"RawType":"1","Links":670499.0,"ValidOrdinal":670499.0,"Auxiliary":0.0,"AuxPlane":0.0,"AuxEdge":0.0,"Endpoints":0.0}
+{"RawType":"2","Links":451195.0,"ValidOrdinal":451195.0,"Auxiliary":451195.0,"AuxPlane":398236.0,"AuxEdge":138375.0,"Endpoints":144879.0}
+{"RawType":"4","Links":54724.0,"ValidOrdinal":54724.0,"Auxiliary":54724.0,"AuxPlane":54662.0,"AuxEdge":3699.0,"Endpoints":8392.0}
+{"RawType":"10","Links":64048.0,"ValidOrdinal":64048.0,"Auxiliary":64048.0,"AuxPlane":55050.0,"AuxEdge":0.0,"Endpoints":0.0}
+{"RawType":"12","Links":23411.0,"ValidOrdinal":23411.0,"Auxiliary":23411.0,"AuxPlane":23385.0,"AuxEdge":0.0,"Endpoints":76.0}
+{"RawType":"17","Links":3954.0,"ValidOrdinal":3954.0,"Auxiliary":0.0,"AuxPlane":0.0,"AuxEdge":0.0,"Endpoints":0.0}
+{"RawType":"18","Links":4087.0,"ValidOrdinal":4087.0,"Auxiliary":4087.0,"AuxPlane":3683.0,"AuxEdge":1206.0,"Endpoints":1618.0}
+{"RawType":"20","Links":393.0,"ValidOrdinal":393.0,"Auxiliary":393.0,"AuxPlane":393.0,"AuxEdge":45.0,"Endpoints":118.0}
+{"RawType":"26","Links":836.0,"ValidOrdinal":836.0,"Auxiliary":836.0,"AuxPlane":545.0,"AuxEdge":0.0,"Endpoints":0.0}
+{"RawType":"28","Links":188.0,"ValidOrdinal":188.0,"Auxiliary":188.0,"AuxPlane":188.0,"AuxEdge":0.0,"Endpoints":0.0}

@@ -198,9 +198,9 @@ R-10 · R-38 (capture first) · F-01 (guard relax half) · E-03 · U-18 · U-21 
 
 | ID | Item | Size | Rec. | Decision |
 |---|---|---|---|---|
-| P-01 | Remaining decode | L | Later | |
-| P-02 | Field map close-out | M | Later | |
-| P-03 | Terminology restoration (renames) | S–M | Quick win | |
+| P-01 | Remaining decode | L | Later | Want — operator 2026-10-20, Spec 279: full comprehension via phased evidence-led research |
+| P-02 | Field map close-out | M | Later | Want — operator 2026-10-20, Spec 279: raw-field/evidence/unknown reference and experiments |
+| P-03 | Terminology restoration (renames) | S–M | Quick win | Want (documentation portion only) — operator 2026-10-20, Spec 279; semantic code renames remain gated |
 | P-04 | Live grouping readout | M | Later | |
 | P-05 | Top-1 disambiguation + WMO enumeration | M | Later | |
 | P-06 | Rotation recovery | M | Later (needs data) | |

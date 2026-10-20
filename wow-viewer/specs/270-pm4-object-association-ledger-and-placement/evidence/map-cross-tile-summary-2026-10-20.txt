@@ -1,0 +1,14 @@
+MAP: d6460882861d2ffa0e13db323a8ddf9a8e52705ce8d3c23e74fa1e6a86b8d709
+{"Hypothesis":"low-byte-X-next-byte-Y, False","Links":1257562.0,"Resolved":1257562.0,"MissingFile":0.0,"OutOfRange":0.0,"SharedEdge":666830.0,"Reciprocal":1257562.0,"Self":0.0}
+{"Hypothesis":"low-byte-X-next-byte-Y, True","Links":15773.0,"Resolved":14659.0,"MissingFile":1114.0,"OutOfRange":0.0,"SharedEdge":7190.0,"Reciprocal":13956.0,"Self":0.0}
+{"Hypothesis":"source-file-control, False","Links":1273335.0,"Resolved":1268782.0,"MissingFile":0.0,"OutOfRange":4553.0,"SharedEdge":666861.0,"Reciprocal":1257578.0,"Self":18.0}
+{"Hypothesis":"swapped-byte-control, False","Links":24564.0,"Resolved":24564.0,"MissingFile":0.0,"OutOfRange":0.0,"SharedEdge":13682.0,"Reciprocal":24564.0,"Self":0.0}
+{"Hypothesis":"swapped-byte-control, True","Links":1248771.0,"Resolved":75691.0,"MissingFile":858637.0,"OutOfRange":314443.0,"SharedEdge":47.0,"Reciprocal":8312.0,"Self":0.0}
+TRUE CROSS-TILE BY TYPE
+{"AddressHypothesis":"low-byte-X-next-byte-Y","DifferentTile":true,"RawType":1,"NegativePathStart":true,"Links":7754,"MissingTargetFile":543,"ReferenceOutOfRange":0,"Resolved":7211,"SharedBoundaryEdge":7190,"Reciprocal":7190,"SelfReference":0}
+{"AddressHypothesis":"low-byte-X-next-byte-Y","DifferentTile":true,"RawType":2,"NegativePathStart":false,"Links":7229,"MissingTargetFile":525,"ReferenceOutOfRange":0,"Resolved":6704,"SharedBoundaryEdge":0,"Reciprocal":6424,"SelfReference":0}
+{"AddressHypothesis":"low-byte-X-next-byte-Y","DifferentTile":true,"RawType":4,"NegativePathStart":false,"Links":593,"MissingTargetFile":28,"ReferenceOutOfRange":0,"Resolved":565,"SharedBoundaryEdge":0,"Reciprocal":286,"SelfReference":0}
+{"AddressHypothesis":"low-byte-X-next-byte-Y","DifferentTile":true,"RawType":10,"NegativePathStart":false,"Links":25,"MissingTargetFile":2,"ReferenceOutOfRange":0,"Resolved":23,"SharedBoundaryEdge":0,"Reciprocal":3,"SelfReference":0}
+{"AddressHypothesis":"low-byte-X-next-byte-Y","DifferentTile":true,"RawType":12,"NegativePathStart":false,"Links":172,"MissingTargetFile":16,"ReferenceOutOfRange":0,"Resolved":156,"SharedBoundaryEdge":0,"Reciprocal":53,"SelfReference":0}
+SAME-TILE NEGATIVE-PATH
+[{"AddressHypothesis":"low-byte-X-next-byte-Y","DifferentTile":false,"RawType":1,"NegativePathStart":true,"Links":662745,"MissingTargetFile":0,"ReferenceOutOfRange":0,"Resolved":662745,"SharedBoundaryEdge":662601,"Reciprocal":662745,"SelfReference":0},{"AddressHypothesis":"low-byte-X-next-byte-Y","DifferentTile":false,"RawType":17,"NegativePathStart":true,"Links":3954,"MissingTargetFile":0,"ReferenceOutOfRange":0,"Resolved":3954,"SharedBoundaryEdge":3954,"Reciprocal":3954,"SelfReference":0}]

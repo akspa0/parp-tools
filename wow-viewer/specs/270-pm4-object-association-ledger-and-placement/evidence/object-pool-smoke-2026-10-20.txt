@@ -1,0 +1,5 @@
+Retained 70 WL-family source hints, 11 recognized; no tile assignments created.
+Restricted=True; candidates 2 -> 1; pools=synthetic-pool
+PASS: CLI persistence, explicit candidate restriction, and no guessed WL tile assignment.
+WL source names: 70
+Recognized filename hints: 11

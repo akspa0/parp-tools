@@ -1,0 +1,2 @@
+Wrote I:\parp\parp-tools\wow-viewer\specs\270-pm4-object-association-ledger-and-placement\evidence\map-msur-window-2026-10-20.json
+Elapsed seconds: 7.087

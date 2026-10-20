@@ -1,0 +1,660 @@
+{
+  "Version": 1,
+  "MapName": "synthetic-context-smoke",
+  "Pools": [
+    {
+      "Id": "synthetic-pool",
+      "DesignKit": "synthetic-kit",
+      "ObjectClasses": [
+        "props"
+      ],
+      "AssetKinds": [
+        "m2"
+      ],
+      "AssetPaths": [],
+      "PathPrefixes": [
+        "world/synthetic-kit"
+      ],
+      "Note": "Operator-authored expectation, not a confirmed match."
+    }
+  ],
+  "Assignments": [
+    {
+      "PoolId": "synthetic-pool",
+      "MinTileX": 10,
+      "MinTileY": 20,
+      "MaxTileX": 10,
+      "MaxTileY": 20,
+      "Note": "Synthetic control, not a real development tile assignment."
+    }
+  ],
+  "HintAliases": null,
+  "SourceHints": [
+    {
+      "SourcePath": "Clayton Land - Purple Water.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Clayton Test.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Designer Island - Clayton Dubin Test.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Griz - Demo Pond.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "HFjord Testarea 01\u0027.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Frozen Ocean 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Green Srhine Pond 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah IceAge2 River 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Ocean 02.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Ocean 03.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Terrace Canal 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Terrace Pond 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Terrace Pond 02.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Terrace Pond 03.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Terrace Pond 04.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Tuskarr Village 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "LD Isle - Sarah Tuskarr Village 02.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Programmer Isle - Chow Test Fast.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Programmer Isle - Chow test still.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Scott K Test.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "TEST - Programmer ISLE.wlm",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "TEST - Programmer Isle 2.wlm",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "TEST - VS2K5.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Birmingham Work Loss.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Borean Beach 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Borean Pool 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Cave Water 1.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Cracktown River.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Craig.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Csteele Lava.wlm",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - DB Stream 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Dragonpool 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - HFjord - Terrace 01.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - HFjord - Terrace 02.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - HFjord - Terrace 03.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - HFjord - Terrace 04.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - HFjord - Terrace 05.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - HFjord - Terrace 06.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - HFjord - WindmillTown 01.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - HFjord Barb Vill 01.wlw",
+      "MatchedAliases": [
+        "HFjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Howling Fjord 01.wlw",
+      "MatchedAliases": [
+        "Howling Fjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Howling Fjord 02.wlw",
+      "MatchedAliases": [
+        "Howling Fjord"
+      ],
+      "SuggestedZones": [
+        "Howling Fjord"
+      ],
+      "SuggestedDesignKits": [
+        "Northrend"
+      ],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Iceberg Pond 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Icy Ocean 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Jules-frozen stream1.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - MKylmamaa - FastWater New.wll",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - MKylmamaa - GreenLava New.wll",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - MKylmamaa.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Northrend Lavapool 01.wlm",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Northrend Nerub Pond 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Northrend Pond 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Northrend Pond 02.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Northrend Pond 03.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Northrend Pond 04.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Northrend Pond 05.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Northrend Stream 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Sholazar Stumps.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Tauren Town 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Tauren Town 02.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Tauren Town 03.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Terrace Pond 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Terrace Pond 02.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Terrace Pond 03.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Thermal Pond .wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Venture Co - 01.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - Venture Co - 02.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - csteele 2.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - csteele 3.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "Test - csteele.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    },
+    {
+      "SourcePath": "WaterfallTestRiver.wlw",
+      "MatchedAliases": [],
+      "SuggestedZones": [],
+      "SuggestedDesignKits": [],
+      "TileAssociation": "Filename hint only; exact tile/footprint association not established.",
+      "OperatorConfirmed": false
+    }
+  ]
+}

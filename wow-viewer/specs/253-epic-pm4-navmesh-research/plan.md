@@ -1,6 +1,8 @@
 # Plan — Epic 253 PM4/PD4 Navmesh Decoding, Matching & Generation
 
-**Status**: Implementation approach **not yet selected** (operator directive 2026-09-23: triage first).
+**Status**: P-01/P-02 and documentation portion of P-03 now follow
+[Spec 279's selected plan](../279-decode-pm4-format/plan.md), operator-directed 2026-10-20.
+Other backlog implementation approaches remain unselected; the 2026-09-23 triage gate still applies.
 
 ## Dependencies
 

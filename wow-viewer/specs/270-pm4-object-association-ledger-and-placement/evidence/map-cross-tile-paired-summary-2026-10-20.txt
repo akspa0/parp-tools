@@ -1,0 +1,8 @@
+MAP: d6460882861d2ffa0e13db323a8ddf9a8e52705ce8d3c23e74fa1e6a86b8d709
+{"Stratum":"1, True","Paired":5042.0,"AddressEdge":5026.0,"LocalEdge":13.0,"AddressReciprocal":5029.0,"LocalReciprocal":4.0}
+{"Stratum":"2, False","Paired":4660.0,"AddressEdge":0.0,"LocalEdge":14.0,"AddressReciprocal":4480.0,"LocalReciprocal":11.0}
+{"Stratum":"4, False","Paired":395.0,"AddressEdge":0.0,"LocalEdge":0.0,"AddressReciprocal":199.0,"LocalReciprocal":0.0}
+{"Stratum":"10, False","Paired":15.0,"AddressEdge":0.0,"LocalEdge":0.0,"AddressReciprocal":3.0,"LocalReciprocal":0.0}
+{"Stratum":"12, False","Paired":110.0,"AddressEdge":0.0,"LocalEdge":1.0,"AddressReciprocal":37.0,"LocalReciprocal":0.0}
+TOTAL
+{"Paired":10222.0,"AddressEdge":5026.0,"LocalEdge":28.0,"AddressReciprocal":9748.0,"LocalReciprocal":15.0}

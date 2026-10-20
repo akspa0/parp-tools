@@ -3,12 +3,71 @@
 > **Owner since 2026-09-23:** Epic 253 (PM4) — [253-epic-pm4-navmesh-research](../specs/253-epic-pm4-navmesh-research/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
 
 Owner specs: 130 (remaining decode), 131 (scene graph / doodads), epic-pm4-restoration.
-Last updated: 2026-08-04. Branch `131-pm4-scene-graph-doodads`.
+Historical baseline: 2026-08-04, branch `131-pm4-scene-graph-doodads`. Latest continuation: 2026-10-20.
 
 This file is the durable home for PM4 decode findings. `activeContext.md` links here and stays
 short; put detail here, not there.
 
-## Settled — do not re-derive
+## Current format reference and remaining-decode owner
+
+Operator selected [Spec 279](../specs/279-decode-pm4-format/spec.md), branch `279-decode-pm4-format`,
+for full comprehension/writeup/remaining unknowns. Read the [current format reference](../docs/research/pm4-format-reference.md)
+before historical claims below. Phase 0 covers all 16 parsed signatures and 17 unknown groups.
+Sub-step [2A](../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md) identifies
+raw MSLK +0x01 as a source-edge ordinal in this corpus: all 1,273,335 in range; 674,013 selected
+boundary matches vs shifted control 137; auxiliary plane corroboration 536,142 vs 3,120.
+Direct +0x04 geometric-point readings tested do not identify a role. Next 2B tests reciprocal-edge
+value identity/reuse without selecting reverse records by the tested value. No asset ownership follows.
+Phase 1's [all-map raw +0x04 test](../specs/279-decode-pm4-format/evidence/phase-1-raw-04-2026-10-20.md)
+rejects a general reverse-link pointer: 1,603 full window/back-reference hits; source MSCN/MSLK/MSVI
+range fits all 100%, so no alternative semantic domain is selected. 502 structured files carry
+full MVER 0x3010; 114 are empty. Point-node identity and M2 ownership remain unresolved.
+
+## 2026-10-20 — authority correction and sparse-M2 measurements
+
+**Latest measured correction:** [structural foundations](../specs/270-pm4-object-association-ledger-and-placement/evidence/structural-foundations-2026-10-20.md).
+All 616 files were read; MSUR +0x18/+0x02 is an exact MSLK start/count relationship for this corpus.
+MSLK +0x0C low/next bytes address target tile X/Y; +0x10 indexes that tile's surfaces. Not every
+reference is file-local. 15,773 cross-tile links; 14,659 resolve with zero addressed index overruns.
+Paired 10,222 records yield 9,748 addressed vs 15 wrong-local reciprocal pairs. All 1,257,562
+same-tile addressed links reciprocate; 0x01/0x11 are geometric boundary-neighbor candidates.
+This corrects file-local graph assumptions in earlier instruments, **not** all remaining semantics.
+32 focused tests pass; only research audit/probes changed. Editor-authored route points (operator
+screenshot evidence, not newly inspected) remain distinct from the generated surface graph; their
+chunk identity and any source-object ownership partition are still unknown.
+
+**Latest instrument:** [whole-map context receipt](../specs/270-pm4-object-association-ledger-and-placement/evidence/map-context-instrument-2026-10-20.md)
+and [operator usage](../specs/270-pm4-object-association-ledger-and-placement/evidence/map-context-usage.md).
+Ten map-level partition hypotheses preserve all MSUR/MSLK entries, raw attrMask/group/type incidence,
+window controls, anchor/orphan links, geometry coincidences and scaled-family candidates. Full
+decoded chunks are retained for later interpretation; Museum placements retain paths/transforms/scales
+including unpaired tiles. **No full-map run or semantic decode yet.** 25 focused tests pass.
+File-backed operator tile pools constrain candidates without changing scores. WL import retained
+70 names/11 recognized aliases; names are hints, not tile footprints. Existing WMO matching unchanged.
+
+**Operator correction:** old research began in the ChatGPT 3.5 era and may contain coincidences.
+The historical “settled” labels below are not current proof or permission to change the working
+WMO path. M2 has substantially less surviving pathfinding geometry; investigate that directly.
+
+Five paired files were measured with existing readers unchanged; [Spec 270 receipt](../specs/270-pm4-object-association-ledger-and-placement/evidence/investigation-2026-10-20.md)
+contains input hashes, methods, controls, caveats and reproducible commands. On M2-only 16_33,
+170/234 unkeyed components have ≤4 triangles; default edge/area bins yield 171 distinct histograms
+(205 with 0.25 bins, not validated identity accuracy). Nearness to an M2 origin is 233/234 within
+24 yards, but the reflected-position control still reaches 192/234. Do not quote proximity as
+asset-match precision. Components can contain terrain and are not proven individual M2s.
+
+Current keyed-M2 routing also contradicts real paired-file observations: 16 groups routed as M2
+have bit-exact-Z/footprint WMO candidates. In 50_38 the two authored wall-post WMOs share the raw
+word used by four keyed surfaces; the test's “zero WMOs” premise is false. This is local evidence,
+not a complete field decode or unique object identity. WMO production behavior was not changed.
+
+**Further operator correction:** all PM4s must be read as a whole-map object. Existing WMO matching
+is ~70% accurate (operator-reported); important context may remain undecoded in already parsed
+chunks. The five-file probe only diagnoses local ambiguity, not complete M2 object boundaries or
+map-wide matching accuracy. Next: retain and audit whole-map cross-file/chunk context before
+revisiting isolated fragments. Four focused tests pass; none proves a real PM4-to-M2 asset match.
+
+## Historical findings — previously labeled “settled”; revalidation required
 
 ### The coordinate transform
 
@@ -175,7 +234,12 @@ MSLK linking statistics from all loaded PM4 research contexts:
   `AnchorOnlyLinks`, `PathWindowLinks`, `TotalComponents`, `ComponentsWithLinks`,
   `ComponentsWithoutLinks`, `RefIndexMismatches`.
 
-## Ground truth: Blizzard's WoW Editor 1.9.0 (circa 2005)
+## Historical screenshot interpretations — not confirmed chunk mappings
+
+**2026-10-20 operator clarification:** pathing points laid down for NPC movement may be the only
+directly displayed/authored pathfinding layer in WoWEdit. The historical descriptions below do not
+establish which PM4 chunks the editor displays. Do not promote those old labels to decoded facts;
+the current pass has not independently re-inspected the screenshots.
 
 User-supplied screenshots of the editor rendering this data, with the Karazhan Crypts WMO loaded in
 the same scene for comparison:

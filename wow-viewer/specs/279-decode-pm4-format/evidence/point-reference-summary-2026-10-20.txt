@@ -1,0 +1,175 @@
+MAP: d6460882861d2ffa0e13db323a8ddf9a8e52705ce8d3c23e74fa1e6a86b8d709
+{"Files":616,"WindowLinks":1273335,"MissingTargetLinks":1114,"InvalidTargetReferences":0,"TightTolerance":0.01,"LooseTolerance":0.25}
+POINT CANDIDATES
+{"Candidate":"addressed-MSCN","N":1273335.0,"Available":1269216.0,"SourceVertex":0.0,"SourceEdge":24.0,"SourceLoose":672.0,"TargetEdge":58.0,"BothEdges":1.0,"Auxiliary":1.0,"Centroid":202.0}
+{"Candidate":"source-MPRL-raw","N":1273335.0,"Available":280709.0,"SourceVertex":0.0,"SourceEdge":0.0,"SourceLoose":0.0,"TargetEdge":0.0,"BothEdges":0.0,"Auxiliary":0.0,"Centroid":0.0}
+{"Candidate":"source-MPRL-ZXY","N":1273335.0,"Available":280709.0,"SourceVertex":5.0,"SourceEdge":79.0,"SourceLoose":160.0,"TargetEdge":88.0,"BothEdges":10.0,"Auxiliary":3.0,"Centroid":0.0}
+{"Candidate":"source-MSCN","N":1273335.0,"Available":1273335.0,"SourceVertex":0.0,"SourceEdge":26.0,"SourceLoose":693.0,"TargetEdge":56.0,"BothEdges":1.0,"Auxiliary":1.0,"Centroid":209.0}
+{"Candidate":"source-MSCN-hashed-control","N":1273335.0,"Available":1273335.0,"SourceVertex":0.0,"SourceEdge":827.0,"SourceLoose":1266.0,"TargetEdge":793.0,"BothEdges":209.0,"Auxiliary":81.0,"Centroid":33.0}
+{"Candidate":"source-MSCN-plus-1-control","N":1273335.0,"Available":1273335.0,"SourceVertex":0.0,"SourceEdge":24.0,"SourceLoose":525.0,"TargetEdge":69.0,"BothEdges":3.0,"Auxiliary":4.0,"Centroid":120.0}
+{"Candidate":"source-MSCN-plus-17-control","N":1273335.0,"Available":1273157.0,"SourceVertex":0.0,"SourceEdge":99.0,"SourceLoose":346.0,"TargetEdge":155.0,"BothEdges":32.0,"Auxiliary":7.0,"Centroid":31.0}
+{"Candidate":"source-MSPI-to-MSPV","N":1273335.0,"Available":1268534.0,"SourceVertex":905.0,"SourceEdge":1268.0,"SourceLoose":1672.0,"TargetEdge":1291.0,"BothEdges":562.0,"Auxiliary":1101.0,"Centroid":0.0}
+{"Candidate":"source-MSPV","N":1273335.0,"Available":1250416.0,"SourceVertex":1138.0,"SourceEdge":1598.0,"SourceLoose":2101.0,"TargetEdge":1561.0,"BothEdges":671.0,"Auxiliary":1413.0,"Centroid":0.0}
+{"Candidate":"source-MSVI-plus-17-control","N":1273335.0,"Available":1273277.0,"SourceVertex":2755.0,"SourceEdge":3175.0,"SourceLoose":3573.0,"TargetEdge":2759.0,"BothEdges":1288.0,"Auxiliary":729.0,"Centroid":0.0}
+{"Candidate":"source-MSVI-to-MSVT","N":1273335.0,"Available":1273335.0,"SourceVertex":2858.0,"SourceEdge":3272.0,"SourceLoose":3663.0,"TargetEdge":2618.0,"BothEdges":1260.0,"Auxiliary":867.0,"Centroid":0.0}
+{"Candidate":"source-MSVT","N":1273335.0,"Available":1257696.0,"SourceVertex":5609.0,"SourceEdge":6182.0,"SourceLoose":6786.0,"TargetEdge":5172.0,"BothEdges":2563.0,"Auxiliary":1313.0,"Centroid":0.0}
+SUBTYPE EDGE ORDINALS
+{"Hypothesis":"source-one-based","N":1273335.0,"Target":1272221.0,"Valid":945247.0,"Shared":96.0}
+{"Hypothesis":"source-shift-1-control","N":1273335.0,"Target":1272221.0,"Valid":1272221.0,"Shared":137.0}
+{"Hypothesis":"source-zero-based","N":1273335.0,"Target":1272221.0,"Valid":1272221.0,"Shared":674013.0}
+{"Hypothesis":"target-one-based","N":1273335.0,"Target":1272221.0,"Valid":917731.0,"Shared":110613.0}
+{"Hypothesis":"target-shift-1-control","N":1273335.0,"Target":1272221.0,"Valid":1168949.0,"Shared":146484.0}
+{"Hypothesis":"target-zero-based","N":1273335.0,"Target":1272221.0,"Valid":1168949.0,"Shared":167939.0}
+DIRECT RAW TYPE 1 POINTS
+[
+  {
+    "Candidate": "source-MSCN",
+    "RawType": 1,
+    "SourceCk24Zero": false,
+    "Links": 423209,
+    "CandidateAvailable": 423209,
+    "TargetAvailable": 423069,
+    "SourceVertexTight": 0,
+    "SourceBoundaryTight": 3,
+    "SourceBoundaryLoose": 52,
+    "TargetBoundaryTight": 3,
+    "BothBoundariesTight": 0,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 16
+  },
+  {
+    "Candidate": "source-MSCN",
+    "RawType": 1,
+    "SourceCk24Zero": true,
+    "Links": 247290,
+    "CandidateAvailable": 247290,
+    "TargetAvailable": 246887,
+    "SourceVertexTight": 0,
+    "SourceBoundaryTight": 10,
+    "SourceBoundaryLoose": 209,
+    "TargetBoundaryTight": 7,
+    "BothBoundariesTight": 0,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 61
+  },
+  {
+    "Candidate": "source-MSPI-to-MSPV",
+    "RawType": 1,
+    "SourceCk24Zero": false,
+    "Links": 423209,
+    "CandidateAvailable": 421061,
+    "TargetAvailable": 423069,
+    "SourceVertexTight": 60,
+    "SourceBoundaryTight": 80,
+    "SourceBoundaryLoose": 116,
+    "TargetBoundaryTight": 81,
+    "BothBoundariesTight": 28,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 0
+  },
+  {
+    "Candidate": "source-MSPI-to-MSPV",
+    "RawType": 1,
+    "SourceCk24Zero": true,
+    "Links": 247290,
+    "CandidateAvailable": 245099,
+    "TargetAvailable": 246887,
+    "SourceVertexTight": 237,
+    "SourceBoundaryTight": 288,
+    "SourceBoundaryLoose": 369,
+    "TargetBoundaryTight": 278,
+    "BothBoundariesTight": 132,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 0
+  },
+  {
+    "Candidate": "source-MSPV",
+    "RawType": 1,
+    "SourceCk24Zero": false,
+    "Links": 423209,
+    "CandidateAvailable": 411312,
+    "TargetAvailable": 423069,
+    "SourceVertexTight": 124,
+    "SourceBoundaryTight": 170,
+    "SourceBoundaryLoose": 228,
+    "TargetBoundaryTight": 168,
+    "BothBoundariesTight": 64,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 0
+  },
+  {
+    "Candidate": "source-MSPV",
+    "RawType": 1,
+    "SourceCk24Zero": true,
+    "Links": 247290,
+    "CandidateAvailable": 238453,
+    "TargetAvailable": 246887,
+    "SourceVertexTight": 247,
+    "SourceBoundaryTight": 291,
+    "SourceBoundaryLoose": 387,
+    "TargetBoundaryTight": 286,
+    "BothBoundariesTight": 128,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 0
+  },
+  {
+    "Candidate": "source-MSVI-to-MSVT",
+    "RawType": 1,
+    "SourceCk24Zero": false,
+    "Links": 423209,
+    "CandidateAvailable": 423209,
+    "TargetAvailable": 423069,
+    "SourceVertexTight": 163,
+    "SourceBoundaryTight": 170,
+    "SourceBoundaryLoose": 208,
+    "TargetBoundaryTight": 163,
+    "BothBoundariesTight": 83,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 0
+  },
+  {
+    "Candidate": "source-MSVI-to-MSVT",
+    "RawType": 1,
+    "SourceCk24Zero": true,
+    "Links": 247290,
+    "CandidateAvailable": 247290,
+    "TargetAvailable": 246887,
+    "SourceVertexTight": 672,
+    "SourceBoundaryTight": 696,
+    "SourceBoundaryLoose": 741,
+    "TargetBoundaryTight": 675,
+    "BothBoundariesTight": 373,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 0
+  },
+  {
+    "Candidate": "source-MSVT",
+    "RawType": 1,
+    "SourceCk24Zero": false,
+    "Links": 423209,
+    "CandidateAvailable": 417404,
+    "TargetAvailable": 423069,
+    "SourceVertexTight": 725,
+    "SourceBoundaryTight": 739,
+    "SourceBoundaryLoose": 774,
+    "TargetBoundaryTight": 731,
+    "BothBoundariesTight": 416,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 0
+  },
+  {
+    "Candidate": "source-MSVT",
+    "RawType": 1,
+    "SourceCk24Zero": true,
+    "Links": 247290,
+    "CandidateAvailable": 239795,
+    "TargetAvailable": 246887,
+    "SourceVertexTight": 1610,
+    "SourceBoundaryTight": 1656,
+    "SourceBoundaryLoose": 1711,
+    "TargetBoundaryTight": 1610,
+    "BothBoundariesTight": 969,
+    "AuxiliaryBoundaryTight": 0,
+    "SourceCentroidTight": 0
+  }
+]

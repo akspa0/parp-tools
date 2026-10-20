@@ -1,0 +1,40 @@
+{"RawType":"1","All":670499.0,"Target":669956.0,"Valid":669956.0,"Shared":669791.0}
+{"RawType":"2","All":451195.0,"Target":450670.0,"Valid":450670.0,"Shared":268.0}
+{"RawType":"4","All":54724.0,"Target":54696.0,"Valid":54696.0,"Shared":0.0}
+{"RawType":"10","All":64048.0,"Target":64046.0,"Valid":64046.0,"Shared":0.0}
+{"RawType":"12","All":23411.0,"Target":23395.0,"Valid":23395.0,"Shared":0.0}
+{"RawType":"17","All":3954.0,"Target":3954.0,"Valid":3954.0,"Shared":3954.0}
+{"RawType":"18","All":4087.0,"Target":4087.0,"Valid":4087.0,"Shared":0.0}
+{"RawType":"20","All":393.0,"Target":393.0,"Valid":393.0,"Shared":0.0}
+{"RawType":"26","All":836.0,"Target":836.0,"Valid":836.0,"Shared":0.0}
+{"RawType":"28","All":188.0,"Target":188.0,"Valid":188.0,"Shared":0.0}
+ZERO VS KEYED TYPE 1
+[
+  {
+    "Hypothesis": "source-zero-based",
+    "RawType": 1,
+    "SourceCk24Zero": false,
+    "Links": 423209,
+    "TargetAvailable": 423069,
+    "ValidOrdinal": 423069,
+    "MatchesOtherBoundary": 423036
+  },
+  {
+    "Hypothesis": "source-zero-based",
+    "RawType": 1,
+    "SourceCk24Zero": true,
+    "Links": 247290,
+    "TargetAvailable": 246887,
+    "ValidOrdinal": 246887,
+    "MatchesOtherBoundary": 246755
+  },
+  {
+    "Hypothesis": "source-zero-based",
+    "RawType": 17,
+    "SourceCk24Zero": false,
+    "Links": 3954,
+    "TargetAvailable": 3954,
+    "ValidOrdinal": 3954,
+    "MatchesOtherBoundary": 3954
+  }
+]

@@ -8,6 +8,7 @@
 
 | File | What it holds |
 |------|---------------|
+| [2026-10-20-progress-pre-2026-10-14.md](2026-10-20-progress-pre-2026-10-14.md) | Older progress detail (2026-10-12 and earlier); retained when the 1,001-line live ledger was compressed during the PM4 investigation |
 | `2026-07-04-pre-2026-06-27.md` | Pre-2026-06-27 session history |
 | `2026-07-13-spec102-strict-target-detail.md` | Spec 102 strict-target detail |
 | `2026-07-18-spec110-viewer-stabilization-detail.md` | Spec 110 full session detail |

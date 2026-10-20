@@ -1,0 +1,9 @@
+  WowViewer.Core -> I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core\bin\Debug\net10.0\WowViewer.Core.dll
+  WowViewer.Core.PM4 -> I:\parp\parp-tools\wow-viewer\src\core\WowViewer.Core.PM4\bin\Debug\net10.0\WowViewer.Core.PM4.dll
+  ObjectPools -> I:\parp\parp-tools\wow-viewer\specs\270-pm4-object-association-ledger-and-placement\evidence\object-pools\bin\Debug\net10.0\ObjectPools.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.15

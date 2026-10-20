@@ -118,3 +118,89 @@ As an operator, I want all untextured, missing, or synthetic terrain tiles to be
 - **Multi-Source Convergence**: Pull from `335-dev`, `original_development` `_obj0.adt`, and `.pm4` navmeshes. Retain all existing authored placements, magnetically align matches, and append only net-new PM4 collision objects.
 - **Minimap PNG $\to$ MCCV Baking**: Sample all 2,252 authentic $256 \times 256$ development minimap PNGs into 145-vertex `MCCV` BGRA chunks for every untextured or missing tile, eliminating black tiles across the map.
 - **Monolithic Preservation**: Strip all companion `_obj0.adt` and `_tex0.adt` files to prevent split-file chunk desync in `WoWViewer`.
+
+### 2026-10-20: Operator-directed investigation continuation
+
+Operator request: “read memory bank files and continue pm4 investigation work”.
+The current handoff selects the shipped surface-correlation/unauthored-placement pipeline.
+This pass verifies that existing pipeline, starting with the contradiction between height-byte
+asset-kind routing and the already documented placement-Z interpretation of `MSUR._0x1C`.
+It does not authorize a new restoration algorithm, shared-reader changes, a corpus harvest,
+map regeneration, or a claim of visual/asset-identification accuracy from synthetic self-matches.
+Findings and any proposed production correction require evidence before implementation.
+
+**Same-session operator correction:** earlier PM4 research began in the ChatGPT 3.5 era and may
+contain coincidences; do not treat it as established truth. The operator reports that current WMO
+understanding works, while M2 identification is difficult because much less pathfinding geometry
+survives. Preserve WMO behavior. Treat the older Z interpretation and the current type heuristic
+as competing explanations to measure, not grounds for a broad correction. Focus continuation on
+the sparse M2 evidence and explicitly distinguish correspondence from proven asset identity.
+
+**Further same-session operator correction:** “all pm4's must be read not only as a single tile
+but as a whole map object, or else, you lose vital context”. The operator reports existing WMO
+matching at roughly **70% accuracy** and suspects important context remains undecoded even in
+chunks already parsed. That accuracy is operator-reported, not measured by this pass. The five-file
+probe is only a local diagnostic: its components are not confirmed complete objects and its counts
+do not evaluate map-wide matching. Subsequent investigation must retain whole-map cross-file/chunk
+context rather than treating isolated-tile fingerprints or nearby placements as sufficient identity.
+
+### 2026-10-20: Whole-map zero-bucket partition investigation
+
+Operator observations: copies of the same M2 occur nearby at different scales in PM4 geometry;
+similar objects and PM4 files tend to cluster. Operator request: “deep analysis of the 'ck24'
+0x000000 data, alongside all other mslk/msur data that we also link everything together by” to
+find missing structure that partitions M2 geometry into coherent pieces.
+
+This authorizes a read-only investigation instrument above the existing reader, not changes to
+working WMO matching. Read the map as one dataset; retain every surface and link (including
+anchor-only/unowned/invalid-reference records), the distinction between derived CK24 zero and
+raw-word zero, and original file/index provenance. Compare geometry and alternative link-derived
+partitions without assuming a field is an object ID or a connected component is a complete object.
+Measure scale-normalized candidate families and keep absolute scale, map location and membership
+for follow-up. Candidate families are not confirmed M2 identities. A broad corpus run remains
+operator-owned; synthetic multi-file controls validate the instrument, not map behavior.
+
+Further operator evidence: WoWMuseum development tiles contain authored M2 placements alongside
+PM4s; merged pathfinding geometry may contain one or many scaled/unscaled copies and may not be
+geometrically splittable. Use those authored placements as independent reference data. Raw fields
+currently labeled group/type are partition hypotheses, not established semantics. Preserve all
+placement paths, unique IDs, transforms and scales, including map context beyond paired tiles;
+do not infer a partition's correctness merely from connectivity or nearest-origin distance.
+
+Operator clarification also explicitly includes `attrMask`: its meaning, like other unknown
+fields, is not settled. Preserve raw values and compare grouping/bitfield/window-length hypotheses;
+do not adopt a semantic label or an old decoder comment as proof.
+
+### 2026-10-20: Operator-authored tile object pools
+
+Operator request: persist which object pool/type/class/design kit is expected on specific tiles,
+so viewer/tooling searches appropriate candidates (example: Zul'Drak/Northrend) rather than
+guessing across unrelated assets. Provide an explicit, portable map/tile annotation layer, separate
+from decoded PM4 facts and ground-truth matches. Design-kit names are operator metadata, not
+inferred semantics. Candidate restrictions must be opt-in and inspectable; do not inflate geometry
+scores, fabricate matches, or silently alter the existing unannotated WMO matching path.
+
+First bounded delivery is a file-backed manifest and reusable candidate-pool filter with a thin
+annotation utility/tool integration. Viewer authoring controls are a separate phase requiring the
+shared UI/inventory rules; no new ViewerApp/WorldScene members are authorized implicitly.
+
+Operator follow-up: WL-family source names supply zone/design-kit hints (HFjord → Howling Fjord,
+Grizzly → Grizzly Hills, plus other abbreviations). Retain source filenames and configurable alias
+rules as provenance-backed hints. Unrecognized/ambiguous names remain visible. Filename hints do
+not by themselves establish exact tile footprints or become hard candidate restrictions; explicit
+tile assignments remain separately inspectable.
+
+### 2026-10-20: Structural foundations before further matching
+
+Operator: “let's figure this out, because we still have no clear idea what the pm4 actually is,
+fully”. Prioritize measured format relationships over more matching heuristics. Re-test existing
+structural probes over every PM4 in the map; distinguish record-domain/count evidence from
+semantic meaning. A lightweight summary-only analysis is not the broad decoded-data export:
+the measured corpus is 616 files / 169.08 MiB, and the large export/full partition job remains
+separate. Do not claim a complete format decode or a correct M2 partition from one relationship.
+
+Operator follow-up: pathing nodes seen in WoWEdit screenshots are believed to be the authored,
+editor-visible points used for NPC movement, possibly the only directly displayed pathfinding
+layer. Preserve this as a distinct authored-node hypothesis, not a reason to equate those points
+with the generated polygon/link structure. Screenshot-to-chunk identification remains unverified
+in this pass; do not label MPRL, MSCN or MPRR as that editor layer solely from existing names.

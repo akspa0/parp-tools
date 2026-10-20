@@ -143,4 +143,86 @@ To resolve black tiles and unify disparate assets into a single cohesive develop
   - Implement `AdtMccvImageSampler` in `WowViewer.Core.IO` for PNG $\to$ 145-vertex MCCV chunk sampling.
   - Update `Pm4RestoreUnauthoredSupport.cs` to converge Museum, Original `_obj0`, and PM4 placements with deduplication.
   - Bake minimap PNGs onto all untextured/missing tiles, eliminating black tiles.
-  - Purge stray `_obj0`/`_tex0` files from output root and verify in `WoWViewer`.
+   - Purge stray `_obj0`/`_tex0` files from output root and verify in `WoWViewer`.
+
+## 4. Bounded investigation continuation — 2026-10-20
+
+Prerequisites: current memory-bank handoff, the scope note in `spec.md`, existing resolver,
+surface extractor/matcher, and their focused tests. This is verification, not a new feature phase.
+
+1. Audit asset-kind routing and the actual focused-test coverage against the documented Z field.
+2. Run an isolated, read-only evidence probe over at most five explicitly named paired tiles.
+   Record input hashes, exact-Z candidates inside canonical placement footprints, current resolver
+   routing, and separately labeled synthetic matcher controls. Use existing readers unchanged.
+   Following the same-session operator correction, measure the unkeyed remainder independently:
+   component triangle counts, default-bin fingerprint collisions, finer-bin sensitivity, and nearest
+   authored M2 origins against a reflected-centroid proximity control. Neither proximity nor a
+   fingerprint collision establishes asset identity; preserve the working WMO implementation.
+3. Run focused correlation tests; capture exact commands, exit statuses, real outputs and limits.
+4. Record the result and next bounded step in the receipt, tasks and memory bank. Do not change
+   production matching or regenerate placements during this investigation pass.
+
+### Operator correction after the local diagnostic
+
+The five-file measurements completed only a local diagnostic, not a whole-map investigation or
+matching benchmark. Follow-on analysis must read the PM4 corpus as one map object while retaining
+file-local indices, source provenance, and cross-chunk/cross-file relationships. An isolated
+component-to-model comparison is insufficient before that context is available. Preserve the
+operator-reported ~70%-accurate WMO baseline; parsed chunk fields are not assumed semantically
+decoded. No map-wide scan or match-accuracy evaluation was performed in the local evidence pass.
+
+## 5. Whole-map zero-bucket audit — operator-directed, 2026-10-20
+
+One bounded instrument phase; prerequisites are the operator amendments in `spec.md`, current raw
+entry contracts, MSUR-window and adjacency analyzers, and the local diagnostic's explicit limits.
+
+1. Trace existing losses: first-link reductions, early field-based splits, file-local graph resets,
+   and competing surface-window/reference interpretations. Record source-level findings separately
+   from old semantic claims; no old claim is adopted as truth merely because it is in a comment.
+2. Add an owned Core.PM4 research audit with global, file-qualified surface IDs. Retain complete
+   MSUR/MSLK entries and window-owner lists; preserve invalid/orphan/anchor-only links and count
+   reference-domain fits without equating fits with semantics. Include every surface, not zero-only
+   filtering before contextual graph construction.
+3. Compare explicit hypotheses: map-wide shared-geometry connectivity; window-to-reference graph
+   with all/anchor/path links; reciprocal edges; native hypotheses with cross-file geometry support;
+   and local-vs-map-scoped raw group-value reuse. Zero-bucket membership is an observed label only.
+   Include raw MSUR attrMask/group/padding values, attrMask-bit incidence and rival window-length
+   controls. A window's range fit does not establish what attrMask means.
+4. Measure normalized triangle-shape families for candidate partitions while preserving radius,
+   centroid, raw memberships and keyed/zero mixing. Uniformly scaled multi-file copies are a
+   synthetic positive control; wrong shape, reused local indices, link-only bridges, anchor-only
+   links, nonzero low-byte zero-CK24 records, and invalid/unowned links are negative/retention controls.
+5. Provide an evidence-only thin runner that reads every PM4 in the supplied map directory, exports
+   the raw decoded documents/chunk payloads with input fingerprints plus audit results, and refuses
+   to claim completeness if a file fails. No tile limit or sample mode for the corpus command.
+   Also ingest every authored placement ADT from the operator-supplied Museum map directory,
+   including tiles without PM4s, retaining M2 model paths, transforms, scales and source hashes.
+6. Run only focused synthetic tests/builds in-agent. Prepare the full-map PowerShell command for
+   the operator; do not execute the broad corpus pass or claim discovered map partitions beforehand.
+
+## 6. Operator-authored candidate pools — after instrument validation
+
+1. Define a portable map manifest: named pools with design-kit/zone labels, asset kinds, explicit
+   asset paths and path-prefix selectors; tile/range assignments reference named pools and retain
+   operator notes. Do not invent which development tiles belong to Zul'Drak.
+2. Add an opt-in Core.PM4 candidate filter. Assigned pools explicitly constrain eligible assets;
+   absent assignments leave the existing database unchanged. Reject invalid references/ranges.
+   Report active pools and before/after candidate counts; never change geometry scores.
+3. Provide a thin file-backed tile-assignment utility and a filtered-database output usable by
+   existing matching tooling. The whole-map audit can retain the same manifest as context.
+4. Validate persistence, map isolation, range selection, kind/path filtering, unknown pool errors,
+   empty eligible sets and unannotated baseline preservation. Viewer authoring UI remains a later
+   phase, not a hidden god-class modification.
+5. Add a filename-hint import using configurable WL-family aliases. Seed only the operator-provided
+   HFjord/Howling Fjord and Grizzly/Grizzly Hills meanings; retain unknowns and source names, and
+   do not invent development tile locations or silently turn filename hints into hard filters.
+
+## 7. Structural-foundation verification — 2026-10-20
+
+1. Inventory the entire map, including empty files; re-read the existing window/control analyzer.
+2. Run summary-only MSUR/MSLK window and adjacency tests across all PM4 inputs. Treat all results
+   as hypotheses until positive/negative controls and geometric checks discriminate alternatives.
+3. Cross-check the apparent relation using raw geometry and independently authored placement/scale
+   evidence where needed; preserve file/index/map context and do not assert islands are objects.
+4. Record measured facts, rejected interpretations, unresolved chunks/fields and the next decisive
+   experiment. Existing readers/matchers remain unchanged; no large export is needed for this pass.

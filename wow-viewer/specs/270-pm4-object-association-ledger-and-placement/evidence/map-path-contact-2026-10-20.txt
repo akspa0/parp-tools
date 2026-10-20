@@ -1,0 +1,1 @@
+Measured all 616 PM4 files in 4.865s; 700 relation/field strata. No asset matches asserted.

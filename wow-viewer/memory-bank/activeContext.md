@@ -1,6 +1,25 @@
 # Active Context — wow-viewer
 
 Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlation**:
+- **Spec 279 (operator: full PM4 comprehension + readable writeup, Spec Kit):**
+  [Current PM4 reference](../docs/research/pm4-format-reference.md) covers 16 parsed chunks,
+  raw fields/evidence levels and 17 unresolved question groups. Spec/plan/tasks/checklist on
+  `279-decode-pm4-format`; **2A validates raw MSLK +0x01 as source-edge ordinal**: 100% in-range,
+  674,013 boundary matches vs shifted control 137. [Receipt](../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md).
+  Direct +0x04 point-index tests fail to identify a role. Next: 2B independent reciprocal-edge/value
+  reuse test; +0x04 meaning, editor-node identity and M2 ownership remain unknown. Operator wants checkpoints committed.
+- **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
+  MSUR→MSLK start/count windows; packed link target is tile X=low byte, Y=next byte + surface index.
+  **Not universally file-local:** 15,773 cross-tile links; 14,659 resolve. Same-tile addressed links
+  are 1,257,562/1,257,562 reciprocal. Paired wrong-local comparison: 9,748 vs 15 back-links on
+  10,222 identical records. Raw 0x01/0x11 links behave as boundary adjacency; other kinds carry
+  connection geometry. **32 focused tests pass.** Research audit now retains addressed hypotheses.
+  [Measured/refuted/unknown ledger](../specs/270-pm4-object-association-ledger-and-placement/evidence/structural-foundations-2026-10-20.md).
+  **Unsolved:** editor-authored path-node chunk identity, remaining raw fields, M2 object partition.
+  Screenshot-reported NPC route nodes are a separate hypothesis, not automatically MPRL/MSCN.
+  Existing readers/matchers/viewer untouched; ~70% WMO accuracy remains operator-reported.
+  Prior [instruments/pools](../specs/270-pm4-object-association-ledger-and-placement/evidence/map-context-instrument-2026-10-20.md)
+  remain available; large Museum/raw export, viewer pool UI and WL footprint mapping are still open.
 - **Terrain Texture & Blending Fix (WoW 3.3.5 / Modern ADTs)**:
   - Completely resolved chunk-level checkerboarding, pitch black/dark green slopes, and corrupting layer textures across 3.3.5 maps (Dark Portal, Crystalsong, Dragonblight, Valgarde 18_23).
   - Fixed MCNK subchunk scanning desync in `Mcnk.cs`: `Header.SizeMcsh` is the raw payload (512 bytes), removed erroneous `- 8` which caused an 8-byte advance overrun into shadow data on 71 chunks; prioritized `Header.SizeMcal - 8` when declared size is 0, 4, or 512 to prevent overruns; adjusted walk loop to `while (remaining >= 8)` so 0-payload chunks (`MCSE`) don't break exact walk tracking.
@@ -65,7 +84,11 @@ the path. Operator must verify the actual client DB2 row/origin and visual playb
 still unexplained; exact bytes remain unavailable, so do not widen the reader based on that report.
 
 **Next on `v0.6.1-dev` (fresh chat start here):**
-1. **PM4 Surface Correlation & Placement Investigation**: Investigate PM4 collision surfaces, M2 mesh surface correlation, and unauthored development placement resolution using the new extraction and matching pipeline.
+1. **PM4 next:** test raw +0x04/subtype and point/reference chunk relationships against the now
+   correctly tile-addressed surface graph. Identify authored path-node layer independently; compare
+   any proposed M2 ownership partition with Museum copies/scales. Large export remains operator-owned
+   ([usage](../specs/270-pm4-object-association-ledger-and-placement/evidence/map-context-usage.md));
+   lightweight whole-map structural summaries have already run and must not be described as unrun.
 2. Operator runs the viewer on 1.60.1 inside `MD_CryptOneRm.wmo` and provides `[WMOAreaLookup]` diagnostics; do not implement a key/fallback change before reading the matching row IDs.
 3. Operator confirms character M2s render again after the `ReplaceableTextureResolver` rollback; FileDataID texture support remains unresolved.
 4. Operator verifies the actual 1.60.1 `CinematicCamera` row for FileDataID 116912 and plays/warmups FlybyUndead on base Azeroth with intended phase layers; record whether origin/facing and tile `(28,28)` agree.

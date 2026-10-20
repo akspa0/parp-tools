@@ -1,0 +1,104 @@
+MAP: d6460882861d2ffa0e13db323a8ddf9a8e52705ce8d3c23e74fa1e6a86b8d709
+{"Files":616,"Links":1273335,"DistinctRawValues":32484,"ZeroValues":539,"MaximumWordValues":0,"NonemptySurfaceWindows":469744,"ConstantValueWindows":90033}
+REVERSE HYPOTHESES
+{"Hypothesis":"addressed-index-plus-1-control","N":1273335.0,"MissingTile":1114.0,"BadTargetSurface":0.0,"InRange":1269140.0,"InTargetWindow":3422.0,"BackRef":1986.0,"WindowAndBackRef":1092.0}
+{"Hypothesis":"addressed-index-plus-17-control","N":1273335.0,"MissingTile":1114.0,"BadTargetSurface":0.0,"InRange":1268944.0,"InTargetWindow":2889.0,"BackRef":2096.0,"WindowAndBackRef":833.0}
+{"Hypothesis":"addressed-raw-index","N":1273335.0,"MissingTile":1114.0,"BadTargetSurface":0.0,"InRange":1269146.0,"InTargetWindow":2847.0,"BackRef":2512.0,"WindowAndBackRef":1603.0}
+{"Hypothesis":"source-file-control","N":1273335.0,"MissingTile":0.0,"BadTargetSurface":4553.0,"InRange":1268782.0,"InTargetWindow":2835.0,"BackRef":2512.0,"WindowAndBackRef":1591.0}
+DOMAINS
+{"Scope":"addressed-file","Domain":"MPRL","N":1272221,"InRange":282044,"Pct":22.1694}
+{"Scope":"addressed-file","Domain":"MPRR","N":1272221,"InRange":1266399,"Pct":99.5424}
+{"Scope":"addressed-file","Domain":"MSCN","N":1272221,"InRange":1269216,"Pct":99.7638}
+{"Scope":"addressed-file","Domain":"MSLK","N":1272221,"InRange":1269146,"Pct":99.7583}
+{"Scope":"addressed-file","Domain":"MSPI","N":1272221,"InRange":1265501,"Pct":99.4718}
+{"Scope":"addressed-file","Domain":"MSPV","N":1272221,"InRange":1246377,"Pct":97.9686}
+{"Scope":"addressed-file","Domain":"MSUR","N":1272221,"InRange":780966,"Pct":61.386}
+{"Scope":"addressed-file","Domain":"MSVI","N":1272221,"InRange":1269914,"Pct":99.8187}
+{"Scope":"addressed-file","Domain":"MSVT","N":1272221,"InRange":1252901,"Pct":98.4814}
+{"Scope":"source-file","Domain":"MPRL","N":1273335,"InRange":280709,"Pct":22.0452}
+{"Scope":"source-file","Domain":"MPRR","N":1273335,"InRange":1267568,"Pct":99.5471}
+{"Scope":"source-file","Domain":"MSCN","N":1273335,"InRange":1273335,"Pct":100.0}
+{"Scope":"source-file","Domain":"MSLK","N":1273335,"InRange":1273335,"Pct":100.0}
+{"Scope":"source-file","Domain":"MSPI","N":1273335,"InRange":1268534,"Pct":99.623}
+{"Scope":"source-file","Domain":"MSPV","N":1273335,"InRange":1250416,"Pct":98.2001}
+{"Scope":"source-file","Domain":"MSUR","N":1273335,"InRange":781590,"Pct":61.3813}
+{"Scope":"source-file","Domain":"MSVI","N":1273335,"InRange":1273335,"Pct":100.0}
+{"Scope":"source-file","Domain":"MSVT","N":1273335,"InRange":1257696,"Pct":98.7718}
+VERSIONS
+[
+  {
+    "Name": "0",
+    "Count": 114
+  },
+  {
+    "Name": "12304",
+    "Count": 502
+  }
+]
+CHUNK PRESENCE
+[
+  {
+    "Name": "MDBF",
+    "Count": 1
+  },
+  {
+    "Name": "MDBH",
+    "Count": 502
+  },
+  {
+    "Name": "MDBI",
+    "Count": 1
+  },
+  {
+    "Name": "MDOS",
+    "Count": 502
+  },
+  {
+    "Name": "MDSF",
+    "Count": 502
+  },
+  {
+    "Name": "MPRL",
+    "Count": 502
+  },
+  {
+    "Name": "MPRR",
+    "Count": 502
+  },
+  {
+    "Name": "MSCN",
+    "Count": 502
+  },
+  {
+    "Name": "MSHD",
+    "Count": 502
+  },
+  {
+    "Name": "MSLK",
+    "Count": 502
+  },
+  {
+    "Name": "MSPI",
+    "Count": 502
+  },
+  {
+    "Name": "MSPV",
+    "Count": 502
+  },
+  {
+    "Name": "MSUR",
+    "Count": 502
+  },
+  {
+    "Name": "MSVI",
+    "Count": 502
+  },
+  {
+    "Name": "MSVT",
+    "Count": 502
+  },
+  {
+    "Name": "MVER",
+    "Count": 502
+  }
+]
