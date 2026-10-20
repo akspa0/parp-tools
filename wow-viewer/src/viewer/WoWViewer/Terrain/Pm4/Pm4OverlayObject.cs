@@ -106,6 +106,9 @@ internal sealed class Pm4OverlayObject
         Vector3 boundsMax,
         IReadOnlyList<Pm4ConnectorKey> connectorKeys)
     {
+        // Cached bounds may predate the localized-bounds fix. Recompute them from the localized
+        // geometry so a stale cache cannot reintroduce the map-spanning selection box.
+        (Vector3 computedMin, Vector3 computedMax) = ComputeBounds(localizedLines, localizedTriangles);
         return new Pm4OverlayObject(
             sourcePath,
             mshdField00,
@@ -129,8 +132,8 @@ internal sealed class Pm4OverlayObject
             baseRotationRadians,
             planarTransform,
             connectorKeys,
-            boundsMin,
-            boundsMax,
+            computedMin,
+            computedMax,
             geometryIsLocalized: true);
     }
 

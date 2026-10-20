@@ -3898,6 +3898,23 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             if (applyObjectTransform)
                                 TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
 
+                            // Keep the selection box on the tile the object's data came from. A
+                            // merged or cross-tile object can otherwise produce a box that covers
+                            // the neighbouring tile and looks like a duplicate.
+                            if (Pm4CoordinateService.TryParseTileCoordinates(selectedPm4Object.SourcePath, out int selectedTileX, out int selectedTileY))
+                            {
+                                (float tileMinX, float tileMaxX) = Pm4CoordinateService.GetPlacementTileBand(selectedTileX);
+                                (float tileMinY, float tileMaxY) = Pm4CoordinateService.GetPlacementTileBand(selectedTileY);
+                                boundsMin = new Vector3(
+                                    Math.Max(boundsMin.X, tileMinX),
+                                    Math.Max(boundsMin.Y, tileMinY),
+                                    boundsMin.Z);
+                                boundsMax = new Vector3(
+                                    Math.Min(boundsMax.X, tileMaxX),
+                                    Math.Min(boundsMax.Y, tileMaxY),
+                                    boundsMax.Z);
+                            }
+
                             _bbRenderer.BatchHighlightedBoxMinMax(
                                 boundsMin,
                                 boundsMax,
