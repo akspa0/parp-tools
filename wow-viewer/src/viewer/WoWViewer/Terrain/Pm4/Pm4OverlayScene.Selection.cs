@@ -931,15 +931,13 @@ public sealed partial class Pm4OverlayScene
         in Vector3 cameraPos,
         out Vector3 transformedCenter)
     {
-        Vector3 boundsMin = obj.BoundsMin;
-        Vector3 boundsMax = obj.BoundsMax;
-        transformedCenter = obj.Center;
-
-        if (applyObjectTransform)
-        {
-            TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
-            transformedCenter = ApplyPm4OverlayTransform(obj.Center, objectTransform);
-        }
+        // The stored bounds are localized around the object's placement anchor. Culling must use
+        // the full geometry transform (base transform + optional user transform), otherwise a
+        // local AABB is tested against the world frustum and the object vanishes when the camera
+        // is close to it.
+        Matrix4x4 geometryTransform = BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform);
+        TransformBounds(obj.BoundsMin, obj.BoundsMax, geometryTransform, out Vector3 boundsMin, out Vector3 boundsMax);
+        transformedCenter = ApplyPm4OverlayTransform(obj.Center, geometryTransform);
 
         float distSq = Vector3.DistanceSquared(cameraPos, transformedCenter);
         if (distSq > NoCullRadiusSq && !_frustumCuller.TestAABB(boundsMin, boundsMax))
