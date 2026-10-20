@@ -932,13 +932,13 @@ internal sealed class SqlSpawnStreamingService
                         ImGui.TableSetColumnIndex(2);
                         bool isSelected = _selectedSpawnListIndex == sp.SpawnId;
                         if (ImGui.Selectable($"{sp.Name}##sp_{sp.SpawnId}", isSelected, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowDoubleClick))
-                        {
                             _selectedSpawnListIndex = sp.SpawnId;
-                            if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                            {
-                                TeleportCameraToSpawn(sp);
-                            }
-                        }
+
+                        // Check the double-click on the item itself; inside a table row the
+                        // Selectable's return value can be consumed by the row before the
+                        // double-click is observed.
+                        if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                            TeleportCameraToSpawn(sp);
 
                         ImGui.TableSetColumnIndex(3);
                         ImGui.TextUnformatted($"{sp.PositionWow.X:F1}, {sp.PositionWow.Y:F1}, {sp.PositionWow.Z:F1}");

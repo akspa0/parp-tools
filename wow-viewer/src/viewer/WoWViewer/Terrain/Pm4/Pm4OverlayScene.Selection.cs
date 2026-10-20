@@ -166,9 +166,10 @@ public sealed partial class Pm4OverlayScene
                 var candidateKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
                 Matrix4x4 objectTransform = BuildPm4ObjectTransform(candidateKey, applyPm4Transform, pm4Transform, out bool applyObjTransform);
 
-                Vector3 bmin = obj.BoundsMin, bmax = obj.BoundsMax;
-                if (applyObjTransform)
-                    TransformBounds(bmin, bmax, objectTransform, out bmin, out bmax);
+                // The stored bounds are localized; the ray is in world space. Use the same full
+                // geometry transform as the renderer, or the pick tests a local AABB and misses.
+                Matrix4x4 geometryTransform = BuildPm4GeometryTransform(obj, objectTransform, applyObjTransform);
+                TransformBounds(obj.BoundsMin, obj.BoundsMax, geometryTransform, out Vector3 bmin, out Vector3 bmax);
 
                 float t = RayAABBIntersect(rayOrigin, rayDir, bmin - padding, bmax + padding);
                 if (t >= 0f)
