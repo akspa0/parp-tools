@@ -97,7 +97,7 @@ internal sealed class SqlSpawnStreamingService
 
     private PopulationDatasetMode _datasetMode = PopulationDatasetMode.Auto;
     private string _activeVersionDetected = "3.3.5a";
-    private bool _sqlAutoLoadOnMapChange = false;
+    private bool _sqlAutoLoadOnMapChange = true;
     private string _sqlAlphaCoreRoot = "";
     private bool _sqlIncludeCreatures = true;
     private bool _sqlIncludeGameObjects = true;
@@ -438,7 +438,31 @@ internal sealed class SqlSpawnStreamingService
         if (!_showChatOverlay)
             return;
 
-        _chatWindow.Draw(viewportSize);
+        _chatWindow.Draw(viewportSize, DrawChatPopulationControls);
+    }
+
+    /// <summary>
+    /// Population quick controls live in the chat bar because they belong to the same
+    /// population/streaming system the chat reports on.
+    /// </summary>
+    private void DrawChatPopulationControls()
+    {
+        ImGui.SameLine();
+        ImGui.TextDisabled("|");
+        ImGui.SameLine();
+
+        bool autoStream = _sqlAutoLoadOnMapChange;
+        if (ImGui.Checkbox("Auto-Stream##ChatAutoStream", ref autoStream))
+            _sqlAutoLoadOnMapChange = autoStream;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Load and stream the population dataset automatically when a map loads or changes.");
+
+        ImGui.SameLine();
+        bool spawnsOnly = _worldScene?.ExternalSpawns.ShowSpawnBoundingBoxesOnly ?? false;
+        if (ImGui.Checkbox("Spawn BBs Only##ChatSpawnBBs", ref spawnsOnly) && _worldScene != null)
+            _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Show bounding boxes for NPC and GameObject spawns only, suppressing general world doodad boxes.");
     }
 
     internal void ResetSqlSpawnStreamingState(bool clearSceneSpawns)

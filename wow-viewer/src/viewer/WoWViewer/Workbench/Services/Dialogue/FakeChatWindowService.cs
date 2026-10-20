@@ -67,14 +67,14 @@ public sealed class FakeChatWindowService
     /// <summary>
     /// Renders the floating WoW chat window overlay in the viewport.
     /// </summary>
-    public void Draw(Vector2 viewportSize)
+    public void Draw(Vector2 viewportSize, Action? drawPopulationControls = null)
     {
         if (!IsVisible)
             return;
 
-        // Position bottom-left with padding
-        Vector2 defaultPos = new(12f, MathF.Max(viewportSize.Y - 210f, 50f));
-        Vector2 defaultSize = new(430f, 195f);
+        // Bottom bar above the status bars, semi-transparent so the render stays visible.
+        Vector2 defaultPos = new(0f, MathF.Max(viewportSize.Y - 250f, 50f));
+        Vector2 defaultSize = new(MathF.Max(viewportSize.X * 0.55f, 520f), 200f);
 
         ImGui.SetNextWindowPos(defaultPos, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(defaultSize, ImGuiCond.FirstUseEver);
@@ -103,6 +103,8 @@ public sealed class FakeChatWindowService
             ImGui.SameLine();
             if (ImGui.SmallButton("Hide##ChatHide"))
                 IsVisible = false;
+
+            drawPopulationControls?.Invoke();
 
             ImGui.Separator();
 
