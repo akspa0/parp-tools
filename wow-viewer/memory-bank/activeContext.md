@@ -1,6 +1,13 @@
 # Active Context — wow-viewer
 
 Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlation**:
+- **PM4 UI consolidation + matcher removal (2026-10-20, operator-directed):** the PM4 Workbench is
+  now the single PM4 surface. Its tab bar exposes the eight PM4 pages (Overlay, Selection,
+  Correlation, Info, Reconcile, Alignment, Outliner, Object Groups). The duplicate PM4 content in
+  the Inspector tabs, Editor Placement page, Editor PM4 workspace, and Archaeology PM4 sub-tab is
+  replaced with a navigation shortcut. The hover matcher and the workbench object-match report are
+  removed; matching now goes through the patched-ADT placement services (`Find WMO Match` /
+  `Shape Search`). Viewer build 0 errors.
 - **Spec 279 (operator: full PM4 comprehension + readable writeup, Spec Kit):**
   [Current PM4 reference](../docs/research/pm4-format-reference.md) covers 16 parsed chunks,
   raw fields/evidence levels and 17 unresolved question groups. Spec/plan/tasks/checklist on

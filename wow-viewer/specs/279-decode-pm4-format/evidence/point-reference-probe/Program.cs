@@ -15,6 +15,7 @@ bool placements = args.Length == 3 && args[0] == "--placements";
 bool m2Partition = args.Length == 3 && args[0] == "--m2-partition";
 bool pathNodes = args.Length == 3 && args[0] == "--path-nodes";
 bool objectModels = args.Length == 3 && args[0] == "--object-models";
+bool openQuestions = args.Length == 3 && args[0] == "--open-questions";
 if (args.Length == 3 && args[0] == "--mprr-dump")
 {
     var dumpDoc = Pm4ResearchReader.ReadFile(args[1]);
@@ -81,8 +82,8 @@ if (args.Length == 3 && args[0] == "--mprr-runs")
     Flush();
     return;
 }
-if (edgesOnly || edgeIdentity || mshd || placements || m2Partition || pathNodes || objectModels) args = args[1..];
-if (args.Length != 2) throw new ArgumentException("Usage: [--edges-only|--edge-identity|--mshd|--placements|--m2-partition|--path-nodes|--mprr-dump <file> <count>] <complete-map-pm4-directory> <new-report.json>");
+if (edgesOnly || edgeIdentity || mshd || placements || m2Partition || pathNodes || objectModels || openQuestions) args = args[1..];
+if (args.Length != 2) throw new ArgumentException("Usage: [--edges-only|--edge-identity|--mshd|--placements|--m2-partition|--path-nodes|--object-models|--open-questions|--mprr-dump <file> <count>] <complete-map-pm4-directory> <new-report.json>");
 if (File.Exists(args[1])) throw new IOException("Report exists; refusing overwrite.");
 var timer = Stopwatch.StartNew();
 var files = new List<Pm4MapAuditInput>();
@@ -103,7 +104,7 @@ foreach (string path in Directory.GetFiles(args[0], "*.pm4").Order(StringCompare
     sizes[name] = bytes.Length;
     hashes.Add(new { File = name, Bytes = bytes.Length, Sha256 = hash });
 
-    if (placements || m2Partition || objectModels)
+    if (placements || m2Partition || objectModels || openQuestions)
     {
         AdtPlacementCatalog? catalog = null;
         string? adtPath = Pm4CoordinateService.TryGetObj0PathForPm4(path);
@@ -175,6 +176,24 @@ if (objectModels)
     Console.WriteLine($"Object-model probe: {objectReport.FilesWithPlacements} files with placements, {objectReport.Groups} groups, " +
         $"one/multi/no model = {objectReport.GroupsWithOneModel}/{objectReport.GroupsWithMultipleModels}/{objectReport.GroupsWithNoModel}, " +
         $"no surface = {objectReport.GroupsWithNoSurface}, {timer.Elapsed.TotalSeconds:F3}s.");
+    return;
+}
+if (openQuestions)
+{
+    var fieldReport = Pm4FieldSemanticsProbe.Analyze(placementInputs);
+    var spatialReport = Pm4SpatialSemanticsProbe.Analyze(placementInputs);
+    File.WriteAllText(args[1], JsonSerializer.Serialize(new
+    {
+        Warning = "Field and spatial tests for the open questions. Counts and correlations only; no identity claims.",
+        MapSha256 = mapHash, AdtRead = adtRead, AdtMissing = adtMissing, AdtFailed = adtFailed,
+        Field = fieldReport, Spatial = spatialReport, Inputs = hashes, ElapsedSeconds = timer.Elapsed.TotalSeconds,
+    }, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"Open-questions probe: {fieldReport.Files} files, " +
+        $"normal match {fieldReport.NormalMatchesPolygon}/{fieldReport.SurfacesWithPolygon}, " +
+        $"plane match {fieldReport.PlaneDistanceMatches}, " +
+        $"groups one/multi/none = {fieldReport.GroupsWithOneModel}/{fieldReport.GroupsWithMultipleModels}/{fieldReport.GroupsWithNoModel}, " +
+        $"MSCN boundary/interior = {spatialReport.MscnCloserToBoundary}/{spatialReport.MscnCloserToInterior}, " +
+        $"{timer.Elapsed.TotalSeconds:F3}s.");
     return;
 }
 if (m2Partition)
