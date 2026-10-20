@@ -111,6 +111,21 @@ So an MPRR run is a **per-object group of MPRL terrain-intersection points**, ke
 mechanism the operator suspected. The first two records of a run are still **U**; they are not a
 32×32 chunk and not a disjoint MSUR partition.
 
+## Follow-up: MPRL.Unk04 is MSLK.GroupObjectId (2026-10-20)
+
+Across the whole map, 176,748 of 178,588 MPRL points (98.97%) carry an `Unk04` that appears as an
+`MSLK.GroupObjectId` (+0x04) in the same file. The alternatives are negligible:
+
+| Match | Points |
+|---|---|
+| `MPRL.Unk04` == `MSLK.GroupObjectId` | **176,748 (98.97%)** |
+| `MPRL.Unk04` == `MSUR.Ck24ObjectId` | 111 (0.06%) |
+| `MPRL.Unk04` == `MSUR.GroupKey` | 289 (0.16%) |
+
+This closes the loop: the terrain-intersection points, the connection records and the surfaces can
+be joined on one object-group id. The id is a **group/model id, not a unique placement id** — it is
+reused across placements, which is why earlier tests found 4,739 ids mapping to multiple models.
+
 ## Files changed
 
 - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4PathNodeProbe.cs` (new)

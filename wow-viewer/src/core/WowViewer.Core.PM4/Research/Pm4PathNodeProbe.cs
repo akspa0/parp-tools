@@ -46,6 +46,10 @@ public sealed record Pm4PathNodeReport(
     long MprrRunsWithMultipleMprlUnk04,
     long MprrRunsWithSingleMprlUnk00,
     long MprrRunsWithMultipleMprlUnk00,
+    long MprlUnk04MatchesMslkGroupObjectId,
+    long MprlUnk04MatchesMsurCk24ObjectId,
+    long MprlUnk04MatchesMsurGroupKey,
+    long MprlUnk04MatchesMscnIndex,
     long MprlInsideMesh,
     long MprlOutsideMesh,
     long MprlWithFinitePosition,
@@ -85,6 +89,7 @@ public static class Pm4PathNodeProbe
         long bounds32 = 0, aligned32 = 0, middleInChunk = 0, middleOutChunk = 0, middleZeroV2 = 0, middleNonZeroV2 = 0;
         long validMsurRange = 0, validMprlIndices = 0, zeroMiddleV2 = 0, msurWidthSum = 0, msurOverlaps = 0;
         long singleUnk04 = 0, multipleUnk04 = 0, singleUnk00 = 0, multipleUnk00 = 0;
+        long unk04Mslk = 0, unk04Ck24 = 0, unk04GroupKey = 0, unk04Mscn = 0;
         long inside = 0, outside = 0, finite = 0;
         var unk00 = new Dictionary<string, long>(StringComparer.Ordinal);
         var unk02 = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -107,8 +112,15 @@ public static class Pm4PathNodeProbe
             mprr += chunks.Mprr.Count;
 
             var polygons = BuildPolygons(chunks);
+            var mslkIds = new HashSet<uint>(chunks.Mslk.Select(l => l.GroupObjectId));
+            var ck24Ids = new HashSet<uint>(chunks.Msur.Select(s => (uint)s.Ck24ObjectId));
+            var groupKeys = new HashSet<uint>(chunks.Msur.Select(s => (uint)s.GroupKey));
             foreach (var point in chunks.Mprl)
             {
+                if (mslkIds.Contains(point.Unk04)) unk04Mslk++;
+                if (ck24Ids.Contains(point.Unk04)) unk04Ck24++;
+                if (groupKeys.Contains(point.Unk04)) unk04GroupKey++;
+                if (point.Unk04 < chunks.Mscn.Count) unk04Mscn++;
                 Increment(unk00, point.Unk00.ToString());
                 Increment(unk02, point.Unk02.ToString());
                 Increment(unk04, point.Unk04.ToString());
@@ -185,6 +197,7 @@ public static class Pm4PathNodeProbe
             bounds32, aligned32, middleInChunk, middleOutChunk, middleZeroV2, middleNonZeroV2,
             validMsurRange, validMprlIndices, zeroMiddleV2, msurWidthSum, msurOverlaps,
             singleUnk04, multipleUnk04, singleUnk00, multipleUnk00,
+            unk04Mslk, unk04Ck24, unk04GroupKey, unk04Mscn,
             inside, outside, finite,
             Rows(unk00), Rows(unk02), Rows(unk04), Rows(unk06), Rows(unk14), Rows(unk16),
             Rows(value1), Rows(value2),

@@ -285,7 +285,15 @@ MPRR runs against those groups:
 So an MPRR run is a **per-object group of MPRL terrain-intersection points**, keyed by
 `MPRL.Unk04` (and `Unk00`). This is the "collect all surfaces for an object within the footprint"
 mechanism the operator suspected. The first two records of a run are still **U**; they are not a
-32×32 chunk and not a disjoint MSUR partition. Source: **E-PATH**.
+32×32 chunk and not a disjoint MSUR partition.
+
+**`MPRL.Unk04` is `MSLK.GroupObjectId` (+0x04).** Across the whole map, 176,748 of 178,588 MPRL
+points (98.97%) carry an `Unk04` that appears as an `MSLK.GroupObjectId` in the same file. The
+alternatives are negligible: `MSUR.Ck24ObjectId` 111 (0.06%), `MSUR.GroupKey` 289 (0.16%). This
+closes the loop: the terrain-intersection points, the connection records and the surfaces can be
+joined on one object-group id. The id is a **group/model id, not a unique placement id** — it is
+reused across placements, which is why earlier tests found 4,739 ids mapping to multiple models.
+Source: **E-PATH**.
 
 ## 4. Binary envelope and parser contract
 

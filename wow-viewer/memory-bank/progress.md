@@ -2,6 +2,14 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 MPRL.Unk04 is MSLK.GroupObjectId
+
+- 176,748 of 178,588 MPRL points (98.97%) carry an `Unk04` that appears as an `MSLK.GroupObjectId`
+  (+0x04) in the same file. `MSUR.Ck24ObjectId` matches only 111 and `MSUR.GroupKey` only 289.
+- This joins the terrain-intersection points, the connection records and the surfaces on one
+  object-group id. The id is a group/model id, not a unique placement id.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 object partition found in MPRL.Unk04
 
 - MPRL `Unk04` is a spatial group id (573 vs 577 cluster the points; all share the terrain height).
