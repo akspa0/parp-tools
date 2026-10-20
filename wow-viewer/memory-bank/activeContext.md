@@ -1,6 +1,15 @@
 # Active Context — wow-viewer
 
 Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlation**:
+- **Known bugs to fix (operator-reported 2026-10-20, not yet fixed):**
+  1. **Sky / skyboxes** — no proper skybox support. Use the wowdecomp 3.3.5 / 4.3.4 sky code. Add
+     Quick-tab controls with a list of known-good settings from DBC/DB2 plus the current blank-sky
+     default for simple viewer use.
+  2. **Population model fallback** — 0.5.3 and 3.3.5 population tries to load `humanmale.mdx/m2`
+     for every quest-giver / gossip NPC. Suspect the bark/`bunnies` handling is not selecting the
+     real creature display.
+  3. **3.3.5 creature textures** — all 3.3.5 creature textures are missing; 0.5.3 works. Likely a
+     texture-path or BLP-version resolution difference between the two clients.
 - **PM4 open-question follow-up (2026-10-20):** `MSUR._0x10 = -dot(normal, v0)` in raw MSVT space
   (518,080/518,092, median error 0); `MPRR` first two records are ordered spatial bounds in a
   768×768 tile grid (3,171,133/3,171,912, 99.98%); `_0x1c` matches a placement Z anywhere in the
