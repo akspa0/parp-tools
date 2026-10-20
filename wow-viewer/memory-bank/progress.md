@@ -2,6 +2,17 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 MPRR "range records" follow-up
+
+- Operator clarified MPRL is the terrain-intersection point layer and MPRR is "range records".
+- MPRR stride is exactly 4 bytes. Tested candidate range interpretations: 32×32 chunk (2.4%,
+  refuted), MSUR range (73% in range but 22× overlap, refuted), middle MPRL indices (62%),
+  middle `Value2 == 0` (0.015%, refuted).
+- Best remaining signal: `Value1` high byte is a small row/type (0–6), low byte is bitmask-like
+  (0, 255, 31, 224, 32, 192, 128, 64); `Value2` high byte matches `MSLK.TypeFlags` strata.
+  Hypothesis: run-length encoded bitmap/range table over a pathfinding grid.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 MPRL/MPRR path-node layer
 
 - New `Pm4PathNodeProbe` plus `--path-nodes` and `--mprr-dump` runner modes.

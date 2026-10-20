@@ -15,6 +15,33 @@ public sealed record Pm4PathNodeReport(
     long MprrValue2InMprlRange,
     long MprrValue1InMscnRange,
     long MprrValue2InMscnRange,
+    long MprrValue1InMsurRange,
+    long MprrValue2InMsurRange,
+    long MprrValue1InMsvtRange,
+    long MprrValue2InMsvtRange,
+    long MprrValue1InMsviRange,
+    long MprrValue2InMsviRange,
+    long MprrValue1InMspvRange,
+    long MprrValue2InMspvRange,
+    long MprrValue1InMspiRange,
+    long MprrValue2InMspiRange,
+    long MprrValue1InMslkRange,
+    long MprrValue2InMslkRange,
+    long MprrRunsWithValidBox,
+    long MprrRunsWithInvalidBox,
+    long MprrMiddleValuesInsideBox,
+    long MprrMiddleValuesOutsideBox,
+    long MprrRunsWith32x32Bounds,
+    long MprrRunsAlignedTo32,
+    long MprrMiddleValuesInChunkRange,
+    long MprrMiddleValuesOutsideChunkRange,
+    long MprrMiddleValuesZeroV2,
+    long MprrMiddleValuesNonZeroV2,
+    long MprrRunsWithValidMsurRange,
+    long MprrRunsWithValidMprlIndices,
+    long MprrRunsWithZeroMiddleV2,
+    long MprrMsurRangeWidthSum,
+    long MprrMsurRangeOverlaps,
     long MprlInsideMesh,
     long MprlOutsideMesh,
     long MprlWithFinitePosition,
@@ -48,6 +75,11 @@ public static class Pm4PathNodeProbe
 
         long mprl = 0, mprr = 0, sentinels = 0;
         long v1Mprl = 0, v2Mprl = 0, v1Mscn = 0, v2Mscn = 0;
+        long v1Msur = 0, v2Msur = 0, v1Msvt = 0, v2Msvt = 0, v1Msvi = 0, v2Msvi = 0;
+        long v1Mspv = 0, v2Mspv = 0, v1Mspi = 0, v2Mspi = 0, v1Mslk = 0, v2Mslk = 0;
+        long validBox = 0, invalidBox = 0, middleInside = 0, middleOutside = 0;
+        long bounds32 = 0, aligned32 = 0, middleInChunk = 0, middleOutChunk = 0, middleZeroV2 = 0, middleNonZeroV2 = 0;
+        long validMsurRange = 0, validMprlIndices = 0, zeroMiddleV2 = 0, msurWidthSum = 0, msurOverlaps = 0;
         long inside = 0, outside = 0, finite = 0;
         var unk00 = new Dictionary<string, long>(StringComparer.Ordinal);
         var unk02 = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -87,6 +119,7 @@ public static class Pm4PathNodeProbe
             }
 
             int run = 0;
+            var current = new List<Pm4MprrEntry>();
             foreach (var record in chunks.Mprr)
             {
                 Increment(value1, record.Value1.ToString());
@@ -99,28 +132,115 @@ public static class Pm4PathNodeProbe
                 {
                     sentinels++;
                     Increment(runLengths, run.ToString());
+                    AnalyzeRun(current, ref validBox, ref invalidBox, ref middleInside, ref middleOutside,
+                        ref bounds32, ref aligned32, ref middleInChunk, ref middleOutChunk, ref middleZeroV2, ref middleNonZeroV2,
+                        chunks, ref validMsurRange, ref validMprlIndices, ref zeroMiddleV2, ref msurWidthSum, ref msurOverlaps);
+                    current.Clear();
                     run = 0;
                 }
                 else
                 {
+                    current.Add(record);
                     run++;
                 }
                 if (record.Value1 < chunks.Mprl.Count) v1Mprl++;
                 if (record.Value2 < chunks.Mprl.Count) v2Mprl++;
                 if (record.Value1 < chunks.Mscn.Count) v1Mscn++;
                 if (record.Value2 < chunks.Mscn.Count) v2Mscn++;
+                if (record.Value1 < chunks.Msur.Count) v1Msur++;
+                if (record.Value2 < chunks.Msur.Count) v2Msur++;
+                if (record.Value1 < chunks.Msvt.Count) v1Msvt++;
+                if (record.Value2 < chunks.Msvt.Count) v2Msvt++;
+                if (record.Value1 < chunks.Msvi.Count) v1Msvi++;
+                if (record.Value2 < chunks.Msvi.Count) v2Msvi++;
+                if (record.Value1 < chunks.Mspv.Count) v1Mspv++;
+                if (record.Value2 < chunks.Mspv.Count) v2Mspv++;
+                if (record.Value1 < chunks.Mspi.Count) v1Mspi++;
+                if (record.Value2 < chunks.Mspi.Count) v2Mspi++;
+                if (record.Value1 < chunks.Mslk.Count) v1Mslk++;
+                if (record.Value2 < chunks.Mslk.Count) v2Mslk++;
             }
             if (run > 0)
+            {
                 Increment(runLengths, run.ToString());
+                AnalyzeRun(current, ref validBox, ref invalidBox, ref middleInside, ref middleOutside,
+                    ref bounds32, ref aligned32, ref middleInChunk, ref middleOutChunk, ref middleZeroV2, ref middleNonZeroV2,
+                    chunks, ref validMsurRange, ref validMprlIndices, ref zeroMiddleV2, ref msurWidthSum, ref msurOverlaps);
+            }
         }
 
         return new Pm4PathNodeReport(
             input.Count, mprl, mprr, sentinels,
             v1Mprl, v2Mprl, v1Mscn, v2Mscn,
+            v1Msur, v2Msur, v1Msvt, v2Msvt, v1Msvi, v2Msvi,
+            v1Mspv, v2Mspv, v1Mspi, v2Mspi, v1Mslk, v2Mslk,
+            validBox, invalidBox, middleInside, middleOutside,
+            bounds32, aligned32, middleInChunk, middleOutChunk, middleZeroV2, middleNonZeroV2,
+            validMsurRange, validMprlIndices, zeroMiddleV2, msurWidthSum, msurOverlaps,
             inside, outside, finite,
             Rows(unk00), Rows(unk02), Rows(unk04), Rows(unk06), Rows(unk14), Rows(unk16),
             Rows(value1), Rows(value2),
             Rows(v1High), Rows(v1Low), Rows(v2High), Rows(v2Low), Rows(runLengths));
+    }
+
+    private static void AnalyzeRun(
+        List<Pm4MprrEntry> run,
+        ref long validBox, ref long invalidBox, ref long middleInside, ref long middleOutside,
+        ref long bounds32, ref long aligned32, ref long middleInChunk, ref long middleOutChunk,
+        ref long middleZeroV2, ref long middleNonZeroV2,
+        Pm4KnownChunkSet chunks,
+        ref long validMsurRange, ref long validMprlIndices, ref long zeroMiddleV2,
+        ref long msurWidthSum, ref long msurOverlaps)
+    {
+        if (run.Count < 2)
+            return;
+        // Hypothesis: the first two records are the (min, max) corners of a box and the rest are
+        // cells inside it. A valid box has min <= max on both axes.
+        var first = run[0];
+        var second = run[1];
+        bool valid = first.Value1 <= second.Value1 && first.Value2 <= second.Value2;
+        if (valid) validBox++; else invalidBox++;
+        if (!valid)
+            return;
+        for (int i = 2; i < run.Count; i++)
+        {
+            var r = run[i];
+            if (r.Value1 >= first.Value1 && r.Value1 <= second.Value1
+                && r.Value2 >= first.Value2 && r.Value2 <= second.Value2)
+                middleInside++;
+            else
+                middleOutside++;
+        }
+
+        // Chunk hypothesis: the first two records are a 32x32 chunk's world bounds and the middle
+        // records are chunk-local linear cell indices (0..1023) with a zero second word.
+        if (second.Value1 - first.Value1 == 31 && second.Value2 - first.Value2 == 31)
+            bounds32++;
+        if (first.Value1 % 32 == 0 && first.Value2 % 32 == 0)
+            aligned32++;
+        for (int i = 2; i < run.Count; i++)
+        {
+            var r = run[i];
+            if (r.Value1 < 1024) middleInChunk++; else middleOutChunk++;
+            if (r.Value2 == 0) middleZeroV2++; else middleNonZeroV2++;
+        }
+
+        // Range hypothesis: first = (MSUR start, 0), second = (MSUR end, width), middle = MPRL indices.
+        if (first.Value1 <= second.Value1 && second.Value1 < chunks.Msur.Count)
+        {
+            validMsurRange++;
+            msurWidthSum += second.Value1 - first.Value1 + 1;
+            if (second.Value1 - first.Value1 != second.Value2)
+                msurOverlaps++;
+        }
+        bool allMprl = true, allZero = true;
+        for (int i = 2; i < run.Count; i++)
+        {
+            if (run[i].Value1 >= chunks.Mprl.Count) allMprl = false;
+            if (run[i].Value2 != 0) allZero = false;
+        }
+        if (allMprl) validMprlIndices++;
+        if (allZero) zeroMiddleV2++;
     }
 
     private static List<Vector3[]> BuildPolygons(Pm4KnownChunkSet chunks)

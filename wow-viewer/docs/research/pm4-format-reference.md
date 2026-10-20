@@ -249,11 +249,28 @@ measured MPRL-to-placement mapping. `Unk02` is **−1** and `Unk06` is **0x8000*
 the varying payload is `Unk00`, `Unk04`, `Unk14` and `Unk16`. This is consistent with the operator's
 WoWEdit path-node screenshots (**H**), not yet an editor-node identity proof.
 
-MPRR holds **17,150,640** records. It is **not** an edge list over MPRL: only 39.5% of `Value1` and
-62.4% of `Value2` fall in MPRL range. Its values are linear cell indices (0, 31, 32, 63, 64, 95,
-256, 257, …), each run ends with `(0, 0x0300)`, and the run lengths between `0xFFFF` sentinels are
-**all `4k+3`** — 3 (2,394,347 runs), 7 (585,290), 11 (146,070), 15 (32,366), … with a ~4:1 decay.
-That is a hierarchical/quadtree signature (**H**); the exact cell width and node layout are **U**.
+MPRR holds **17,150,640** records at exactly **4 bytes each** (payload/record = 4.000). It is **not**
+an edge list over MPRL: only 39.5% of `Value1` and 62.4% of `Value2` fall in MPRL range. Each run
+ends with `(0, 0x0300)`, and the run lengths between `0xFFFF` sentinels are **all `4k+3`** — 3
+(2,394,347 runs), 7 (585,290), 11 (146,070), 15 (32,366), … with a ~4:1 decay.
+
+The operator's "range records" description is supported by the byte structure, but the first
+candidate range interpretation is refuted:
+
+| Test | Result |
+|---|---|
+| First two records form a valid `min <= max` box | 3,171,612 / 3,171,635 (99.999%) |
+| First two records form a 32×32 chunk | 75,101 (2.4%) — **refuted** |
+| First two records form a valid MSUR range | 2,314,976 (73.0%) |
+| MSUR range widths sum vs total MSUR count | 6,823,601 vs 308,892 — **22× overlap, refuted** |
+| Middle records are all valid MPRL indices | 1,967,408 (62.0%) |
+| Middle records all have `Value2 == 0` | 479 (0.015%) — **refuted** |
+
+The byte decomposition is the strongest remaining signal: `Value1`'s **high byte is a small
+row/type (0–6)** and its **low byte is a bitmask-like value** (0, 255, 31, 224, 32, 192, 128, 64).
+`Value2`'s high byte takes values 0, 1, 3, 5, 17, 9, 41, 25 — the same strata as `MSLK.TypeFlags`.
+This is consistent with a **run-length encoded bitmap / range table** over a pathfinding grid
+(**H**), not a point graph. The exact row width, bit order and region layout are **U**.
 Source: **E-PATH**.
 
 ## 4. Binary envelope and parser contract

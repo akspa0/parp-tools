@@ -19,8 +19,11 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   share vertices; 9,570 overlapping MSUR ranges; Padding always 0; 7,315 placements multi-GroupObjectId).
   [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-m2-partition-2026-10-20.md). Per-object M2
   ownership remains U. **Path layer:** MPRL 178,588 points, 99.4% inside the mesh, `Unk02 = −1` and
-  `Unk06 = 0x8000` constant; MPRR 17,150,640 records is a spatial grid, not an MPRL edge list
-  (39.5%/62.4% in range), with `4k+3` run lengths and a `(0, 0x0300)` terminator.
+  `Unk06 = 0x8000` constant; MPRR 17,150,640 records at 4 bytes each, `4k+3` run lengths and a
+  `(0, 0x0300)` terminator. Operator says MPRR is "range records"; the 32×32-chunk and MSUR-range
+  interpretations are refuted (2.4% and 22× overlap). `Value1` high byte is a small row/type (0–6),
+  low byte is bitmask-like; `Value2` high byte matches `MSLK.TypeFlags` strata. Best remaining
+  hypothesis: run-length encoded bitmap/range table over a pathfinding grid.
   [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md). Editor-node
   identity remains unknown. Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact

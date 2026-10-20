@@ -19,6 +19,11 @@ if (args.Length == 3 && args[0] == "--mprr-dump")
     var dumpDoc = Pm4ResearchReader.ReadFile(args[1]);
     int count = int.Parse(args[2]);
     Console.WriteLine($"MPRR records: {dumpDoc.KnownChunks.Mprr.Count}; MPRL: {dumpDoc.KnownChunks.Mprl.Count}; MSCN: {dumpDoc.KnownChunks.Mscn.Count}");
+    foreach (var chunk in dumpDoc.Chunks)
+        Console.WriteLine($"  CHUNK {chunk.Signature} size={chunk.Size} stride={(chunk.Size == 0 ? 0 : (double)chunk.Size / Math.Max(1, chunk.Size / 4))}");
+    var mprrChunk = dumpDoc.Chunks.FirstOrDefault(c => c.Signature == "MPRR");
+    if (mprrChunk is not null)
+        Console.WriteLine($"  MPRR payload={mprrChunk.Size} records={dumpDoc.KnownChunks.Mprr.Count} bytes/record={(double)mprrChunk.Size / Math.Max(1, dumpDoc.KnownChunks.Mprr.Count):F3}");
     int run = 0;
     for (int i = 0; i < Math.Min(count, dumpDoc.KnownChunks.Mprr.Count); i++)
     {
