@@ -541,7 +541,7 @@ Corpus-wide tests for the questions in §7. Counts are over 616 files (502 struc
 | Q08 `MSLK._0x0c` upper half | 1,273,335 / 1,273,335 are `0xFFFF` | answered |
 | Q09 path kinds | 4-index 587,229 (99.86% coplanar); 5-index 629 (63.8%); 6-index 11,024 (83.8%); 0 Z-dominant in all kinds | answered: all are vertical wall quads |
 | Q10 `MSCN` contour | 378,614 closer to boundary vs 281,007 closer to interior; median boundary 0.304, interior 0.554 | partial: supported, not decisive |
-| Q11 `MPRL._0x14` | 20,834 match the run index, 53,007 the node level, 293,588 neither | open |
+| Q11 `MPRL._0x14` | 20,834 match the run index, 53,007 the node level, 8,425 the group size, 29,369 the link count, 293,588 none | open |
 | Q12 `MPRR` | 3,171,912 runs; first two are ordered spatial bounds in 3,171,133 (99.98%); middle values are valid MPRL indices in 1,966,930 (62%); last record is `(0, 768)` in 1,366,697 (43%) | answered: spatial node bounds |
 | Q13/Q14 destructible | MDBH 502, MDBI 10, MDBF 30, MDOS 526, MDSF 2,684; all MDSF indices in range | answered: sparse but consistent |
 | Q16 unattributed groups | 17,965 groups: 2,478 one model, 14,053 multi-model, 1,434 none | answered: mostly multi-model |

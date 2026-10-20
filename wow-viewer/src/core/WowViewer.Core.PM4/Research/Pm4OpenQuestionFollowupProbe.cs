@@ -22,6 +22,8 @@ public sealed record Pm4OpenQuestionFollowupReport(
     long NonzeroPlacementZGlobalMatched,
     long MprlCounterMatchesRunIndex,
     long MprlCounterMatchesNodeLevel,
+    long MprlCounterMatchesGroupSize,
+    long MprlCounterMatchesLinkCount,
     long MprlCounterOther,
     long MprrRuns,
     long MprrFirstTwoAreSpatialBounds,
@@ -58,7 +60,7 @@ public static class Pm4OpenQuestionFollowupProbe
         var planeWorldErrors = new List<double>();
         var planeNegatedErrors = new List<double>();
         long nonzeroPlacementZ = 0, nonzeroPlacementZGlobalMatched = 0;
-        long counterRunIndex = 0, counterNodeLevel = 0, counterOther = 0;
+        long counterRunIndex = 0, counterNodeLevel = 0, counterGroupSize = 0, counterLinkCount = 0, counterOther = 0;
         long mprrRuns = 0, mprrFirstTwoBounds = 0, mprrLastTerminator = 0;
         long mprrMiddleInside = 0, mprrMiddleTotal = 0;
         var nodeSizes = new Dictionary<(int W, int H), int>();
@@ -117,6 +119,15 @@ public static class Pm4OpenQuestionFollowupProbe
             counterRunIndex += mprr.CounterRunIndex;
             counterNodeLevel += mprr.CounterNodeLevel;
             counterOther += mprr.CounterOther;
+
+            var groupSizes = chunks.Mprl.GroupBy(p => p.Unk04).ToDictionary(g => g.Key, g => g.Count());
+            var linkCounts = chunks.Mslk.GroupBy(l => (ushort)l.GroupObjectId).ToDictionary(g => g.Key, g => g.Count());
+            foreach (var point in chunks.Mprl)
+            {
+                if (point.Unk14 == 0xFFFF) continue;
+                if (groupSizes.TryGetValue(point.Unk04, out int size) && point.Unk14 == size) counterGroupSize++;
+                else if (linkCounts.TryGetValue(point.Unk04, out int links) && point.Unk14 == links) counterLinkCount++;
+            }
         }
 
         return new Pm4OpenQuestionFollowupReport(
@@ -134,6 +145,8 @@ public static class Pm4OpenQuestionFollowupProbe
             nonzeroPlacementZGlobalMatched,
             counterRunIndex,
             counterNodeLevel,
+            counterGroupSize,
+            counterLinkCount,
             counterOther,
             mprrRuns,
             mprrFirstTwoBounds,
