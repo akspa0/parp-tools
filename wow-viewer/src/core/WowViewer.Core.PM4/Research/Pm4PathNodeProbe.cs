@@ -42,6 +42,10 @@ public sealed record Pm4PathNodeReport(
     long MprrRunsWithZeroMiddleV2,
     long MprrMsurRangeWidthSum,
     long MprrMsurRangeOverlaps,
+    long MprrRunsWithSingleMprlUnk04,
+    long MprrRunsWithMultipleMprlUnk04,
+    long MprrRunsWithSingleMprlUnk00,
+    long MprrRunsWithMultipleMprlUnk00,
     long MprlInsideMesh,
     long MprlOutsideMesh,
     long MprlWithFinitePosition,
@@ -80,6 +84,7 @@ public static class Pm4PathNodeProbe
         long validBox = 0, invalidBox = 0, middleInside = 0, middleOutside = 0;
         long bounds32 = 0, aligned32 = 0, middleInChunk = 0, middleOutChunk = 0, middleZeroV2 = 0, middleNonZeroV2 = 0;
         long validMsurRange = 0, validMprlIndices = 0, zeroMiddleV2 = 0, msurWidthSum = 0, msurOverlaps = 0;
+        long singleUnk04 = 0, multipleUnk04 = 0, singleUnk00 = 0, multipleUnk00 = 0;
         long inside = 0, outside = 0, finite = 0;
         var unk00 = new Dictionary<string, long>(StringComparer.Ordinal);
         var unk02 = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -134,7 +139,8 @@ public static class Pm4PathNodeProbe
                     Increment(runLengths, run.ToString());
                     AnalyzeRun(current, ref validBox, ref invalidBox, ref middleInside, ref middleOutside,
                         ref bounds32, ref aligned32, ref middleInChunk, ref middleOutChunk, ref middleZeroV2, ref middleNonZeroV2,
-                        chunks, ref validMsurRange, ref validMprlIndices, ref zeroMiddleV2, ref msurWidthSum, ref msurOverlaps);
+                        chunks, ref validMsurRange, ref validMprlIndices, ref zeroMiddleV2, ref msurWidthSum, ref msurOverlaps,
+                        ref singleUnk04, ref multipleUnk04, ref singleUnk00, ref multipleUnk00);
                     current.Clear();
                     run = 0;
                 }
@@ -165,7 +171,8 @@ public static class Pm4PathNodeProbe
                 Increment(runLengths, run.ToString());
                 AnalyzeRun(current, ref validBox, ref invalidBox, ref middleInside, ref middleOutside,
                     ref bounds32, ref aligned32, ref middleInChunk, ref middleOutChunk, ref middleZeroV2, ref middleNonZeroV2,
-                    chunks, ref validMsurRange, ref validMprlIndices, ref zeroMiddleV2, ref msurWidthSum, ref msurOverlaps);
+                    chunks, ref validMsurRange, ref validMprlIndices, ref zeroMiddleV2, ref msurWidthSum, ref msurOverlaps,
+                    ref singleUnk04, ref multipleUnk04, ref singleUnk00, ref multipleUnk00);
             }
         }
 
@@ -177,6 +184,7 @@ public static class Pm4PathNodeProbe
             validBox, invalidBox, middleInside, middleOutside,
             bounds32, aligned32, middleInChunk, middleOutChunk, middleZeroV2, middleNonZeroV2,
             validMsurRange, validMprlIndices, zeroMiddleV2, msurWidthSum, msurOverlaps,
+            singleUnk04, multipleUnk04, singleUnk00, multipleUnk00,
             inside, outside, finite,
             Rows(unk00), Rows(unk02), Rows(unk04), Rows(unk06), Rows(unk14), Rows(unk16),
             Rows(value1), Rows(value2),
@@ -190,7 +198,8 @@ public static class Pm4PathNodeProbe
         ref long middleZeroV2, ref long middleNonZeroV2,
         Pm4KnownChunkSet chunks,
         ref long validMsurRange, ref long validMprlIndices, ref long zeroMiddleV2,
-        ref long msurWidthSum, ref long msurOverlaps)
+        ref long msurWidthSum, ref long msurOverlaps,
+        ref long singleUnk04, ref long multipleUnk04, ref long singleUnk00, ref long multipleUnk00)
     {
         if (run.Count < 2)
             return;
@@ -241,6 +250,26 @@ public static class Pm4PathNodeProbe
         }
         if (allMprl) validMprlIndices++;
         if (allZero) zeroMiddleV2++;
+
+        // Object-partition hypothesis: the middle records are MPRL indices and all share one
+        // MPRL.Unk04 (or Unk00) group id.
+        var unk04 = new HashSet<ushort>();
+        var unk00 = new HashSet<ushort>();
+        bool anyMprl = false;
+        for (int i = 2; i < run.Count; i++)
+        {
+            if (run[i].Value1 >= chunks.Mprl.Count)
+                continue;
+            anyMprl = true;
+            var point = chunks.Mprl[run[i].Value1];
+            unk04.Add(point.Unk04);
+            unk00.Add(point.Unk00);
+        }
+        if (anyMprl)
+        {
+            if (unk04.Count == 1) singleUnk04++; else multipleUnk04++;
+            if (unk00.Count == 1) singleUnk00++; else multipleUnk00++;
+        }
     }
 
     private static List<Vector3[]> BuildPolygons(Pm4KnownChunkSet chunks)

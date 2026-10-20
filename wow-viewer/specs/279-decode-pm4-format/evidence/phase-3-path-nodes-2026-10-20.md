@@ -93,6 +93,24 @@ row/type (0–6) and its low byte is a bitmask-like value (0, 255, 31, 224, 32, 
 This is consistent with a **run-length encoded bitmap / range table** over a pathfinding grid
 (**H**), not a point graph. The exact row width, bit order and region layout are **U**.
 
+## Follow-up: the object partition is MPRL.Unk04 (2026-10-20)
+
+MPRL `Unk04` is a spatial group id. In `development_00_00.pm4`, points with `Unk04 = 573` cluster
+around (225, 170) and points with `Unk04 = 577` cluster around (205, 185), all at the same terrain
+height (Y = 40.20). `Unk14` correlates with `Unk04` (573 → 3, 577 → 0).
+
+Testing the MPRR runs against those groups:
+
+| Test | Result |
+|---|---|
+| MPRR runs whose middle MPRL points share one `Unk04` | **2,549,636 / 2,582,056 (98.8%)** |
+| MPRR runs whose middle MPRL points share one `Unk00` | **2,581,846 / 2,581,846 (100%)** |
+
+So an MPRR run is a **per-object group of MPRL terrain-intersection points**, keyed by
+`MPRL.Unk04` (and `Unk00`). This is the "collect all surfaces for an object within the footprint"
+mechanism the operator suspected. The first two records of a run are still **U**; they are not a
+32×32 chunk and not a disjoint MSUR partition.
+
 ## Files changed
 
 - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4PathNodeProbe.cs` (new)

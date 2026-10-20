@@ -20,12 +20,11 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-m2-partition-2026-10-20.md). Per-object M2
   ownership remains U. **Path layer:** MPRL 178,588 points, 99.4% inside the mesh, `Unk02 = −1` and
   `Unk06 = 0x8000` constant; MPRR 17,150,640 records at 4 bytes each, `4k+3` run lengths and a
-  `(0, 0x0300)` terminator. Operator says MPRR is "range records"; the 32×32-chunk and MSUR-range
-  interpretations are refuted (2.4% and 22× overlap). `Value1` high byte is a small row/type (0–6),
-  low byte is bitmask-like; `Value2` high byte matches `MSLK.TypeFlags` strata. Best remaining
-  hypothesis: run-length encoded bitmap/range table over a pathfinding grid.
-  [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md). Editor-node
-  identity remains unknown. Operator wants checkpoints committed.
+  `(0, 0x0300)` terminator. **Object partition found:** MPRL `Unk04` is a spatial group id, and
+  98.8% of MPRR runs group MPRL points sharing one `Unk04` (100% share one `Unk00`). The 32×32-chunk
+  and MSUR-range interpretations are refuted (2.4% and 22× overlap). The first two records of a run
+  remain U. [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+  Editor-node identity remains unknown. Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
   MSUR→MSLK start/count windows; packed link target is tile X=low byte, Y=next byte + surface index.
   **Not universally file-local:** 15,773 cross-tile links; 14,659 resolve. Same-tile addressed links

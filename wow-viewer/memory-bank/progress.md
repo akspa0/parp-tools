@@ -2,6 +2,15 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 object partition found in MPRL.Unk04
+
+- MPRL `Unk04` is a spatial group id (573 vs 577 cluster the points; all share the terrain height).
+- 98.8% of MPRR runs group MPRL points sharing one `Unk04`; 100% share one `Unk00`. An MPRR run is
+  a per-object group of MPRL terrain-intersection points.
+- The first two records of a run remain U; the 32×32-chunk and MSUR-range interpretations are
+  refuted (2.4% and 22× overlap).
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 MPRR "range records" follow-up
 
 - Operator clarified MPRL is the terrain-intersection point layer and MPRR is "range records".
