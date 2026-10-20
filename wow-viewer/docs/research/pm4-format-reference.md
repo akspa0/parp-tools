@@ -368,16 +368,16 @@ negligible: `MSUR._0x00` 289 (0.16%), the low 16 bits of `MSUR._0x1c` 111 (0.06%
 17,150,640 records at exactly 4 bytes each. Each run is a quadtree node:
 
 ```text
-record 0        : node bound (min)
-record 1        : node bound (max)
+record 0        : node bound (minX, minY) in a 768x768 grid over the tile
+record 1        : node bound (maxX, maxY) in the same grid
 records 2..n-2  : MPRL indices inside the node
 record n-1      : terminator
 ```
 
 - Run lengths are `4k + 3`.
-- The first two records are **not** the min/max of the middle values: that holds for only 1,186 of
-  3,171,912 runs (0.04%). The bounds are encoded differently; the exact encoding is open.
+- The first two records are ordered spatial bounds in 3,171,133 of 3,171,912 runs (99.98%).
 - The middle values are valid `MPRL` indices in 1,966,930 runs (62%).
+- The last record is `(0, 768)` in 1,366,697 runs (43%); the other runs use a different terminator.
 - Across all 616 files the node width/height is a power of two:
 
 | Node width/height | Runs |
@@ -531,18 +531,18 @@ Corpus-wide tests for the questions in §7. Counts are over 616 files (502 struc
 | Question | Result | Status |
 |---|---|---|
 | Q01 `MVER` | 502 files at 12304; 114 zero-byte files at 0 | answered |
-| Q02 `MSHD` spans | `_0x00`/`_0x08` vs point-stream spans: r = 0.13–0.26; vs placement spans: r = 0.09–0.18 | open |
+| Q02 `MSHD` spans | `_0x00`/`_0x08` vs point-stream spans: r = 0.13–0.26; vs raw placement spans: r = 0.39–0.58 | partial |
 | Q03 `MSUR._0x00` | 7 classes: 3 = 184,356 surfaces, all `_0x1c == 0`, mean area 45.9; 16 = 87,243 (mean Z 97.1); 17 = 13,493 (83.9); 18 = 161,359 (81.1); 19 = 71,293 (114.0); 20 = 105; 21 = 243 | answered |
 | Q04 normal | 506,626 / 518,092 surfaces match the polygon normal within 5°, median angle 0° | answered |
-| Q04 plane distance | only 9 / 518,092 match `dot(normal, v0)`; median error 7,318 | open |
-| Q05 `_0x1c` | 332,032 nonzero; 196,016 (59.0%) match a placement Z in the same file | partial |
+| Q04 plane distance | `_0x10 = -dot(normal, v0)` in raw MSVT space: 518,080 / 518,092 (99.998%), median error 0 | answered |
+| Q05 `_0x1c` | 332,032 nonzero; 196,016 (59.0%) match a placement Z in the same file; 231,383 (69.7%) match one anywhere in the map | partial |
 | Q06 `MSLK._0x04` | 5,155 groups one model, 20,543 multi-model, 3,466 none | answered: finer group, not a model id |
 | Q07 `MSLK._0x00` | bit 0 = no geometry (flags 1, 17); bit 4 = local/same-tile (flags 17/18/20/26/28 have 0 cross-tile); low family 1/2/4/10/12 is cross-tile | partial |
 | Q08 `MSLK._0x0c` upper half | 1,273,335 / 1,273,335 are `0xFFFF` | answered |
 | Q09 path kinds | 4-index 587,229 (99.86% coplanar); 5-index 629 (63.8%); 6-index 11,024 (83.8%); 0 Z-dominant in all kinds | answered: all are vertical wall quads |
 | Q10 `MSCN` contour | 378,614 closer to boundary vs 281,007 closer to interior; median boundary 0.304, interior 0.554 | partial: supported, not decisive |
-| Q11 `MPRL._0x14` | 23,976 match the group index, 18,724 the reverse index, 135,888 neither | open |
-| Q12 `MPRR` | 3,171,912 runs; first two = min/max of the middle in only 1,186 (0.04%); middle values are valid MPRL indices in 1,966,930 (62%) | partial: bounds encoding is not min/max |
+| Q11 `MPRL._0x14` | 20,834 match the run index, 53,007 the node level, 293,588 neither | open |
+| Q12 `MPRR` | 3,171,912 runs; first two are ordered spatial bounds in 3,171,133 (99.98%); middle values are valid MPRL indices in 1,966,930 (62%); last record is `(0, 768)` in 1,366,697 (43%) | answered: spatial node bounds |
 | Q13/Q14 destructible | MDBH 502, MDBI 10, MDBF 30, MDOS 526, MDSF 2,684; all MDSF indices in range | answered: sparse but consistent |
 | Q16 unattributed groups | 17,965 groups: 2,478 one model, 14,053 multi-model, 1,434 none | answered: mostly multi-model |
 | Q17 chunk presence | 14 core chunks in 502 files; MDBI/MDBF in 1 file | answered |

@@ -1,5 +1,13 @@
 # Phase 5 — Open-question sweep (2026-10-20)
 
+> **Follow-up (same day):** `Pm4OpenQuestionFollowupProbe` resolved the plane frame and the MPRR
+> node bounds, and improved the placement-Z match. Results: `_0x10 = -dot(normal, v0)` in raw MSVT
+> space (518,080 / 518,092, median error 0); MPRR first two records are ordered spatial bounds in
+> 3,171,133 / 3,171,912 runs (99.98%); `_0x1c` matches a placement Z anywhere in the map for
+> 231,383 / 332,032 (69.7%); MSHD spans vs raw placement spans r = 0.39–0.58; `MPRL._0x14` is not
+> the run index (20,834) or the node level (53,007). Output:
+> `open-questions-2b-2026-10-20.json`.
+
 ## Question
 
 Resolve as many of the reference's open questions (Q01–Q20) as the corpus supports, using
