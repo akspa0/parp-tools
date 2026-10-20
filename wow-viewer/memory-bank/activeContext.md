@@ -7,13 +7,16 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   map for 69.7% of nonzero surfaces; `MSHD` spans vs raw placement spans r = 0.39–0.58;
   `MPRL._0x14` is not the run index, node level, group size, link count, or run length. Receipt:
   [phase-5](../specs/279-decode-pm4-format/evidence/phase-5-open-questions-2026-10-20.md).
-- **PM4 UI consolidation + matcher removal (2026-10-20, operator-directed):** the PM4 Workbench is
-  now the single PM4 surface. Its tab bar exposes the eight PM4 pages (Overlay, Selection,
-  Correlation, Info, Reconcile, Alignment, Outliner, Object Groups). The duplicate PM4 content in
-  the Inspector tabs, Editor Placement page, Editor PM4 workspace, and Archaeology PM4 sub-tab is
-  replaced with a navigation shortcut. The hover matcher and the workbench object-match report are
-  removed; matching now goes through the patched-ADT placement services (`Find WMO Match` /
-  `Shape Search`). Viewer build 0 errors.
+- **PM4 UI consolidation + matcher removal (2026-10-20, operator-directed):** PM4 now lives in the
+  **Inspector window** as a tab (Inspector, World, Model, Settings, PM4). The tab exposes the eight
+  PM4 pages (Overlay, Selection, Correlation, Info, Reconcile, Alignment, Outliner, Object Groups).
+  The duplicate PM4 content in the Editor Placement page, Editor PM4 workspace, and Archaeology PM4
+  sub-tab is replaced with a navigation shortcut. The hover matcher and the workbench object-match
+  report are removed; matching now goes through the patched-ADT placement services (`Find WMO
+  Match` / `Shape Search`). **Human curation:** `Pm4ObjectMatchStore` writes
+  `output/pm4_object_matches.json`; the PM4 Selection tab has a Match this object section (path
+  field, save/clear, saved-match list, Suggest nearest model), and the Rosetta object library has a
+  Match to selected PM4 object button. Viewer build 0 errors.
 - **Spec 279 (operator: full PM4 comprehension + readable writeup, Spec Kit):**
   [Current PM4 reference](../docs/research/pm4-format-reference.md) covers 16 parsed chunks,
   raw fields/evidence levels and 17 unresolved question groups. Spec/plan/tasks/checklist on
