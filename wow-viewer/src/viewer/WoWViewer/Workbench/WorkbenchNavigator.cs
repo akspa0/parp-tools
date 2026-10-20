@@ -96,6 +96,7 @@ public enum Pm4BottomTab
     Reconcile = 4,
     Alignment = 5,
     Outliner = 6,
+    ObjectGroups = 7,
 }
 
 /// <summary>
@@ -135,7 +136,7 @@ public static class WorkbenchNavigator
     public static string[] GetTerrainBottomTabLabels() => ["Clipboard", "Analysis", "MCNK", "Stratigraphy", "Export", "Tools"];
 
     /// <summary>Labels for <see cref="Pm4BottomTab"/>; order must match the enum.</summary>
-    public static string[] GetPm4BottomTabLabels() => ["Overlay", "Selection", "Correlation", "Info", "Reconcile", "Alignment", "Outliner"];
+    public static string[] GetPm4BottomTabLabels() => ["Overlay", "Selection", "Correlation", "Info", "Reconcile", "Alignment", "Outliner", "Object Groups"];
 
     /// <summary>Labels for <see cref="ArcheologyBottomTab"/>; order must match the enum.</summary>
     public static string[] GetArcheologyBottomTabLabels() => ["Range", "Layers", "Playback", "Capture", "Stratigraphy"];

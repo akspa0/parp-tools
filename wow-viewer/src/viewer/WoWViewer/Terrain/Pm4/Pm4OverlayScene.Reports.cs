@@ -86,6 +86,48 @@ namespace WoWViewer.Terrain;
 public sealed partial class Pm4OverlayScene
 {
 
+    /// <summary>
+    /// Builds the per-tile MPRL object-group catalog for one PM4 source path. The groups are keyed
+    /// by <c>MPRL.Unk04</c> (= <c>MSLK.GroupObjectId</c>) and carry the nearest authored model and a
+    /// class-consistency flag. Read-only; returns an empty list when the source is unavailable.
+    /// </summary>
+    public IReadOnlyList<WowViewer.Core.PM4.Research.Pm4ObjectGroupEntry> BuildPm4ObjectGroups(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath)
+            || !TryGetPm4ResearchContext(sourcePath, out Pm4ResearchContext? context)
+            || context?.RawDocument is null)
+        {
+            return [];
+        }
+
+        WowViewer.Core.Maps.AdtPlacementCatalog? catalog = null;
+        string? adtPath = WowViewer.Core.PM4.Services.Pm4CoordinateService.TryGetObj0PathForPm4(sourcePath);
+        if (adtPath is not null && File.Exists(adtPath))
+        {
+            try
+            {
+                catalog = WowViewer.Core.IO.Maps.AdtPlacementReader.Read(adtPath);
+            }
+            catch (InvalidDataException)
+            {
+                catalog = null;
+            }
+        }
+
+        return WowViewer.Core.PM4.Research.Pm4ObjectGroupCatalog.Build(context.RawDocument, catalog);
+    }
+
+    /// <summary>Returns the source path of the currently selected PM4 object, if any.</summary>
+    public string? GetSelectedPm4SourcePath()
+    {
+        if (!_selectedPm4ObjectKey.HasValue
+            || !_pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selected))
+        {
+            return null;
+        }
+        return selected.SourcePath;
+    }
+
     public string BuildPm4OverlayInterchangeJson(bool includeGeometry = true)
     {
         static float[] VectorToArray(Vector3 v) => new[] { v.X, v.Y, v.Z };

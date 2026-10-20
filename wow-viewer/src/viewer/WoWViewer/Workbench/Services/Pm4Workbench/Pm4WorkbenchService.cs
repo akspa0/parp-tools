@@ -948,6 +948,12 @@ internal sealed partial class Pm4WorkbenchService
     private bool _pm4OutlinerNamedOnly;
     private IReadOnlyList<Pm4OutlineRegion>? _pm4OutlineCache;
 
+    // -- PM4 object groups: MPRL Unk04 (= MSLK.GroupObjectId) per selected tile --
+    private string _pm4ObjectGroupFilter = string.Empty;
+    private bool _pm4ObjectGroupConsistentOnly;
+    private string? _pm4ObjectGroupSourcePath;
+    private IReadOnlyList<WowViewer.Core.PM4.Research.Pm4ObjectGroupEntry>? _pm4ObjectGroupCache;
+
     /// <summary>
     /// Hierarchical PM4 scene graph, grouped by MSHD region.
     /// </summary>
@@ -1127,6 +1133,84 @@ internal sealed partial class Pm4WorkbenchService
             }
 
             ImGui.TreePop();
+        }
+
+        ImGui.EndChild();
+    }
+
+    /// <summary>
+    /// Lists the MPRL object groups (<c>Unk04</c> = <c>MSLK.GroupObjectId</c>) of the selected PM4
+    /// tile, with point/surface counts, ground-surface class, nearest authored model and a
+    /// class-consistency flag. Clicking a group focuses the camera on its bounds.
+    /// </summary>
+    internal void DrawPm4ObjectGroups()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("Load a world to inspect PM4 object groups.");
+            return;
+        }
+
+        string? sourcePath = _worldScene.Pm4Overlay.GetSelectedPm4SourcePath();
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            ImGui.TextDisabled("Select a PM4 object in the scene or outliner to inspect its object groups.");
+            return;
+        }
+
+        ImGui.TextDisabled($"Source: {System.IO.Path.GetFileName(sourcePath)}");
+        ImGui.SameLine();
+        if (ImGui.Button("Refresh##Pm4ObjectGroups"))
+            _pm4ObjectGroupCache = null;
+
+        if (_pm4ObjectGroupCache is null || !string.Equals(_pm4ObjectGroupSourcePath, sourcePath, StringComparison.OrdinalIgnoreCase))
+        {
+            _pm4ObjectGroupSourcePath = sourcePath;
+            _pm4ObjectGroupCache = _worldScene.Pm4Overlay.BuildPm4ObjectGroups(sourcePath);
+        }
+        IReadOnlyList<WowViewer.Core.PM4.Research.Pm4ObjectGroupEntry> groups = _pm4ObjectGroupCache;
+
+        ImGui.SetNextItemWidth(240f);
+        ImGui.InputText("Filter##Pm4ObjectGroups", ref _pm4ObjectGroupFilter, 128);
+        ImGui.SameLine();
+        ImGui.Checkbox("Consistent only##Pm4ObjectGroups", ref _pm4ObjectGroupConsistentOnly);
+
+        int consistent = groups.Count(static g => g.Consistent);
+        ImGui.TextDisabled($"{groups.Count} groups | {consistent} consistent | {groups.Sum(static g => g.PointCount)} points");
+        ImGui.Separator();
+
+        if (!ImGui.BeginChild("##Pm4ObjectGroupsList", Vector2.Zero, true))
+        {
+            ImGui.EndChild();
+            return;
+        }
+
+        string filter = _pm4ObjectGroupFilter.Trim();
+        bool hasFilter = filter.Length > 0;
+        foreach (var group in groups)
+        {
+            if (_pm4ObjectGroupConsistentOnly && !group.Consistent)
+                continue;
+            if (hasFilter
+                && !group.GroupObjectId.ToString().Contains(filter, StringComparison.OrdinalIgnoreCase)
+                && !(group.NearestModel?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false))
+            {
+                continue;
+            }
+
+            string model = group.NearestModel is null ? "(no model)" : System.IO.Path.GetFileName(group.NearestModel);
+            string label = $"#{group.GroupObjectId}  {group.PointCount} pts / {group.SurfaceCount} surf  {group.SurfaceClass} -> {model} @ {group.NearestDistance:F1}";
+            if (ImGui.Selectable($"{label}##pm4group{group.GroupObjectId}"))
+                FocusCameraOnBounds(group.BoundsMin, group.BoundsMax);
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.Text(group.NearestModel ?? "(no nearest model)");
+                ImGui.TextDisabled($"consistent = {group.Consistent}  surface class = {group.SurfaceClass}");
+                ImGui.TextDisabled($"centroid = ({group.Centroid.X:F2}, {group.Centroid.Y:F2}, {group.Centroid.Z:F2})");
+                ImGui.EndTooltip();
+            }
         }
 
         ImGui.EndChild();

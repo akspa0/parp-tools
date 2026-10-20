@@ -573,6 +573,9 @@ internal sealed partial class ArchaeologyPanelService
             case Pm4BottomTab.Outliner:
                 _pm4Workbench.DrawPm4Outliner();
                 break;
+            case Pm4BottomTab.ObjectGroups:
+                _pm4Workbench.DrawPm4ObjectGroups();
+                break;
         }
     }
 
