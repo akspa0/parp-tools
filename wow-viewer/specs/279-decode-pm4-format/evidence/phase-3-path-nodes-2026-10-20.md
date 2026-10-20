@@ -167,6 +167,20 @@ Only 1,428 of 178,588 MPRL points (0.8%) lie within 0.1 of an MSPV vertex, and 2
 within 1.0; 153,682 (86.0%) are farther. The pathfinding path geometry is the separate MSPV/MSPI
 stream. The MPRL points are terrain-intersection/object-anchor points, not the walkable path itself.
 
+## Follow-up: MPRL scene-graph hierarchy (whole map, 2026-10-20)
+
+Across all 616 files the MPRL fields form a region → object → point hierarchy:
+
+| Level | Field | Distinct values | Behaviour |
+|---|---|---|---|
+| Region | `Unk00` | 265 | every `Unk04` group has exactly one `Unk00` (42,092 / 0) |
+| Object | `Unk04` | 42,092 | equals `MSLK.GroupObjectId`; groups the points spatially |
+| Point | `Unk14` | 1,603 | varies within an object group (23,263 single / 18,829 multi) |
+| Point | `Unk16` | 507 | mostly constant per object (32,107 single / 9,985 multi) |
+
+So `Unk00` is the region/zone parent, `Unk04` is the object group, and `Unk14`/`Unk16` are per-point
+node type/flags. This is the containment hierarchy the operator suspected.
+
 ## Files changed
 
 - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4PathNodeProbe.cs` (new)

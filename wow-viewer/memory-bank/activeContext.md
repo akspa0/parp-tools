@@ -22,13 +22,15 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   `Unk06 = 0x8000` constant; MPRR 17,150,640 records at 4 bytes each. **MPRR is a quadtree spatial
   index of the MPRL points:** each run is a node (first two records = bounds, middle = MPRL indices,
   last = terminator), and the whole-map node width/height is 1/2/4/8/16/32 (powers of two). The
-  `4k+3` run lengths and ~4:1 decay are the quadtree hierarchy. **Object partition found:**
-  `MPRL.Unk04` is `MSLK.GroupObjectId` (+0x04) for 176,748/178,588 points (98.97%), and 98.8% of
-  MPRR runs group MPRL points sharing one `Unk04` (100% share one `Unk00`). The id is a group/model
-  id, not a unique placement id. The direct group→surface link is not containment (0.4%); the points
-  sit on M2 surfaces (66.7%), WMO surfaces (29.0%) and other surfaces (6.7%). **MPRL points are not
-  MSPV path vertices:** only 0.8% within 0.1 and 13.1% within 1.0; the path geometry is the separate
-  MSPV/MSPI stream. [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+  `4k+3` run lengths and ~4:1 decay are the quadtree hierarchy. **Scene-graph hierarchy:** `Unk00`
+  (region, 265 values) → `Unk04` (object, 42,092 values; every group has exactly one `Unk00`) →
+  `Unk14`/`Unk16` (per-point type/flags). **Object partition found:** `MPRL.Unk04` is
+  `MSLK.GroupObjectId` (+0x04) for 176,748/178,588 points (98.97%), and 98.8% of MPRR runs group
+  MPRL points sharing one `Unk04` (100% share one `Unk00`). The id is a group/model id, not a unique
+  placement id. The direct group→surface link is not containment (0.4%); the points sit on M2
+  surfaces (66.7%), WMO surfaces (29.0%) and other surfaces (6.7%). **MPRL points are not MSPV path
+  vertices:** only 0.8% within 0.1 and 13.1% within 1.0; the path geometry is the separate MSPV/MSPI
+  stream. [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
   Editor-node identity remains unknown. Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
   MSUR→MSLK start/count windows; packed link target is tile X=low byte, Y=next byte + surface index.

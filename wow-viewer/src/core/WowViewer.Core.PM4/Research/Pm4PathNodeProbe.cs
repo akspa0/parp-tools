@@ -59,6 +59,16 @@ public sealed record Pm4PathNodeReport(
     long MprlPointsNearMspvTight,
     long MprlPointsNearMspvLoose,
     long MprlPointsFarFromMspv,
+    long MprlUnk04GroupsWithSingleUnk00,
+    long MprlUnk04GroupsWithMultipleUnk00,
+    long MprlUnk04GroupsWithSingleUnk14,
+    long MprlUnk04GroupsWithMultipleUnk14,
+    long MprlUnk04GroupsWithSingleUnk16,
+    long MprlUnk04GroupsWithMultipleUnk16,
+    long MprlDistinctUnk00Total,
+    long MprlDistinctUnk04Total,
+    long MprlDistinctUnk14Total,
+    long MprlDistinctUnk16Total,
     long MprlInsideMesh,
     long MprlOutsideMesh,
     long MprlWithFinitePosition,
@@ -104,6 +114,9 @@ public static class Pm4PathNodeProbe
         long withGroupSurfaces = 0, insideGroupSurfaces = 0, outsideGroupSurfaces = 0;
         long insideM2 = 0, insideWmo = 0, insideOther = 0;
         long nearMspvTight = 0, nearMspvLoose = 0, farFromMspv = 0;
+        long groupSingleUnk00 = 0, groupMultipleUnk00 = 0, groupSingleUnk14 = 0, groupMultipleUnk14 = 0;
+        long groupSingleUnk16 = 0, groupMultipleUnk16 = 0;
+        long distinctUnk00 = 0, distinctUnk04 = 0, distinctUnk14 = 0, distinctUnk16 = 0;
         long inside = 0, outside = 0, finite = 0;
         var unk00 = new Dictionary<string, long>(StringComparer.Ordinal);
         var unk02 = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -200,6 +213,18 @@ public static class Pm4PathNodeProbe
                 if (polygons.Any(p => Contains(p, placement))) inside++; else outside++;
             }
 
+            // Scene-graph hierarchy: Unk00 (region) -> Unk04 (object) -> Unk14/Unk16 (node type).
+            distinctUnk00 += chunks.Mprl.Select(p => p.Unk00).Distinct().Count();
+            distinctUnk04 += chunks.Mprl.Select(p => p.Unk04).Distinct().Count();
+            distinctUnk14 += chunks.Mprl.Select(p => p.Unk14).Distinct().Count();
+            distinctUnk16 += chunks.Mprl.Select(p => p.Unk16).Distinct().Count();
+            foreach (var group in chunks.Mprl.GroupBy(p => p.Unk04))
+            {
+                if (group.Select(p => p.Unk00).Distinct().Count() == 1) groupSingleUnk00++; else groupMultipleUnk00++;
+                if (group.Select(p => p.Unk14).Distinct().Count() == 1) groupSingleUnk14++; else groupMultipleUnk14++;
+                if (group.Select(p => p.Unk16).Distinct().Count() == 1) groupSingleUnk16++; else groupMultipleUnk16++;
+            }
+
             int run = 0;
             var current = new List<Pm4MprrEntry>();
             foreach (var record in chunks.Mprr)
@@ -276,6 +301,9 @@ public static class Pm4PathNodeProbe
             withGroupSurfaces, insideGroupSurfaces, outsideGroupSurfaces,
             insideM2, insideWmo, insideOther,
             nearMspvTight, nearMspvLoose, farFromMspv,
+            groupSingleUnk00, groupMultipleUnk00, groupSingleUnk14, groupMultipleUnk14,
+            groupSingleUnk16, groupMultipleUnk16,
+            distinctUnk00, distinctUnk04, distinctUnk14, distinctUnk16,
             inside, outside, finite,
             Rows(unk00), Rows(unk02), Rows(unk04), Rows(unk06), Rows(unk14), Rows(unk16),
             Rows(value1), Rows(value2),

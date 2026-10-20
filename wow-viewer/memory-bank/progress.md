@@ -2,6 +2,14 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 MPRL scene-graph hierarchy
+
+- Whole-map (616 files): `Unk00` (region) 265 distinct values; `Unk04` (object) 42,092 distinct
+  values; every `Unk04` group has exactly one `Unk00` (42,092 / 0). `Unk14` (1,603 values) and
+  `Unk16` (507 values) vary per point (23,263/18,829 and 32,107/9,985 single/multi per object).
+- Hierarchy: region (`Unk00`) → object (`Unk04` = `MSLK.GroupObjectId`) → point (`Unk14`/`Unk16`).
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 MPRL points are not MSPV path vertices
 
 - Whole-map: only 1,428 of 178,588 MPRL points (0.8%) lie within 0.1 of an MSPV vertex, 23,478
