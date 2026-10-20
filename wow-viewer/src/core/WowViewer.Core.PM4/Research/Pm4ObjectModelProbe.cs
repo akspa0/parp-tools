@@ -13,7 +13,10 @@ public sealed record Pm4ObjectModelRow(
     int Placements,
     string ModelPaths,
     string NearestModel,
-    float NearestDistance);
+    float NearestDistance,
+    string SurfaceClass,
+    string ModelClass,
+    bool Consistent);
 
 public sealed record Pm4ObjectModelReport(
     int Files,
@@ -29,6 +32,9 @@ public sealed record Pm4ObjectModelReport(
     long GroupsWithNearestWithin25,
     long GroupsWithNearestBeyond25,
     long GroupsWithNoPlacements,
+    long GroupsWithConsistentMatch,
+    long GroupsWithInconsistentMatch,
+    long GroupsWithNoMatchWithin25,
     IReadOnlyList<Pm4ObjectModelRow> Samples);
 
 /// <summary>
@@ -48,6 +54,7 @@ public static class Pm4ObjectModelProbe
 
         long groups = 0, oneModel = 0, multipleModels = 0, noModel = 0, noSurface = 0;
         long nearest1 = 0, nearest5 = 0, nearest10 = 0, nearest25 = 0, nearestBeyond = 0, noPlacements = 0;
+        long consistent = 0, inconsistent = 0, noMatchWithin25 = 0;
         int filesWithPlacements = 0;
         var samples = new List<Pm4ObjectModelRow>();
 
@@ -134,12 +141,28 @@ public static class Pm4ObjectModelProbe
                 else if (nearestDistance <= 25) nearest25++;
                 else nearestBeyond++;
 
+                // Consistency: the group's ground-surface class must match the nearest model's class.
+                bool hasM2 = false, hasWmo = false;
+                foreach (int s in surfaces)
+                {
+                    byte type = chunks.Msur[s].Ck24Type;
+                    if (type == 0) hasM2 = true;
+                    else if (type is >= 64 and <= 67) hasWmo = true;
+                }
+                string surfaceClass = hasM2 && hasWmo ? "mixed" : hasM2 ? "m2" : hasWmo ? "wmo" : "other";
+                string modelClass = nearestModel.EndsWith(".M2", StringComparison.OrdinalIgnoreCase) ? "m2"
+                    : nearestModel.EndsWith(".WMO", StringComparison.OrdinalIgnoreCase) ? "wmo" : "other";
+                bool isConsistent = nearestDistance <= 25 && surfaceClass == modelClass;
+                if (nearestDistance > 25) noMatchWithin25++;
+                else if (isConsistent) consistent++;
+                else inconsistent++;
+
                 if (samples.Count < 60)
                 {
                     samples.Add(new Pm4ObjectModelRow(
                         file.FileId, group.Key, group.Count(), surfaces.Count, models.Count,
                         string.Join('|', models.Order(StringComparer.OrdinalIgnoreCase)),
-                        nearestModel, nearestDistance));
+                        nearestModel, nearestDistance, surfaceClass, modelClass, isConsistent));
                 }
             }
         }
@@ -148,6 +171,7 @@ public static class Pm4ObjectModelProbe
             input.Count, filesWithPlacements, groups,
             oneModel, multipleModels, noModel, noSurface,
             nearest1, nearest5, nearest10, nearest25, nearestBeyond, noPlacements,
+            consistent, inconsistent, noMatchWithin25,
             samples);
     }
 

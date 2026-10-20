@@ -2,6 +2,15 @@
 
 Last updated: 2026-10-20
 
+## 2026-10-20 — PM4 object-to-model class-consistency precision
+
+- Added a class-consistency check to `Pm4ObjectModelProbe`: the group's ground-surface class must
+  match the nearest model's `.M2`/`.WMO` class. Whole map: 19,991 groups (68.5%) consistent,
+  5,363 (18.4%) class-mismatched, 3,662 (12.6%) no match within 25 units.
+- Consistent matches are clean (WMO ground groups -> `WG_WALL02D.WMO` at 5-11 units); inconsistent
+  ones are mostly WMO ground groups whose nearest placement is an M2 doodad at 17-23 units.
+- [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md).
+
 ## 2026-10-20 — PM4 nearest-placement object-to-model join
 
 - Added a nearest-placement join (group centroid -> nearest authored placement) to

@@ -215,6 +215,21 @@ So 85.1% of groups have a nearest authored placement within 25 units. The matche
 `ND_IRONDWARF_LARGEBUILDING.WMO`, and group 1319 maps to `WG_WALL02D.WMO` at 10.55 units. This is
 the usable object-to-asset join.
 
+## Follow-up: class-consistency precision (whole map, 2026-10-20)
+
+Adding a class-consistency check (the group's ground-surface class must match the nearest model's
+`.M2`/`.WMO` class) gives a precision figure:
+
+| Result | Groups |
+|---|---|
+| Consistent (≤ 25 units, class match) | 19,991 (68.5%) |
+| Inconsistent (≤ 25 units, class mismatch) | 5,363 (18.4%) |
+| No match within 25 units | 3,662 (12.6%) |
+
+The consistent matches are clean: WMO ground groups map to `WG_WALL02D.WMO` at 5–11 units. The
+inconsistent ones are mostly WMO ground groups whose nearest placement is an M2 doodad
+(`BURNEDGYPSYWAGON01.M2` at 17–23 units) — likely false matches.
+
 ## Files changed
 
 - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4PathNodeProbe.cs` (new)

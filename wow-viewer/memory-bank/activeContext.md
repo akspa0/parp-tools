@@ -30,9 +30,10 @@ Last updated: 2026-10-20 · **Terrain MCAL/MCSH Parsing & PM4 Surface Correlatio
   placement id. The direct group→surface link is not containment (0.4%); the points sit on M2
   surfaces (66.7%), WMO surfaces (29.0%) and other surfaces (6.7%). **Object→model join:** the
   nearest-placement join covers every group — 32.2% within 5 units, 59.7% within 10, 85.1% within
-  25; coherent matches (groups 572/573/577/490 → `ND_IRONDWARF_LARGEBUILDING.WMO`). **MPRL points
-  are not MSPV path vertices:** only 0.8% within 0.1 and 13.1% within 1.0; the path geometry is the
-  separate MSPV/MSPI stream.
+  25. **Class-consistency precision:** 19,991 groups (68.5%) have a consistent match (≤25 units and
+  model class matches ground-surface class), 5,363 (18.4%) are class-mismatched, 3,662 (12.6%) have
+  no match within 25. **MPRL points are not MSPV path vertices:** only 0.8% within 0.1 and 13.1%
+  within 1.0; the path geometry is the separate MSPV/MSPI stream.
   [Receipt](../specs/279-decode-pm4-format/evidence/phase-3-path-nodes-2026-10-20.md). Editor-node
   identity remains unknown. Operator wants checkpoints committed.
 - **PM4 structural findings (2026-10-20, newest):** summary probes read all **616 files**; exact
