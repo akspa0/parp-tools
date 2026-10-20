@@ -73,10 +73,7 @@ internal sealed partial class InspectorPayloadsService
 
             builder.AddSection("PM4 Actions")
                 .Action("clear_pm4_selection", "Clear PM4 Selection")
-                .Action("open_pm4_workbench", "Open in PM4 Tools")
-                .Action("export_pm4_json", "Export PM4 JSON")
-                .Action("export_pm4_obj", "Export PM4 OBJ")
-                .Action("export_pm4_llm", "Export PM4 LLM Bundle");
+                .Action("open_pm4_workbench", "Open in PM4 Tools");
 
             _terrainInspection.AppendPinnedTerrainChunkInspection(builder);
             return builder.Build();
@@ -491,18 +488,6 @@ internal sealed partial class InspectorPayloadsService
 
             case "open_pm4_workbench":
                 _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
-                break;
-
-            case "export_pm4_json":
-                _pm4Workbench.ExportPm4ObjectsJson();
-                break;
-
-            case "export_pm4_obj":
-                _pm4Workbench.ExportPm4ObjectsObjSet();
-                break;
-
-            case "export_pm4_llm":
-                _pm4Workbench.ExportPm4LlmEvidenceBundle();
                 break;
 
             case "clear_wl_selection":

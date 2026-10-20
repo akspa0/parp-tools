@@ -233,22 +233,18 @@ internal sealed class Pm4OverlayObject
         AverageSurfaceHeight = averageSurfaceHeight;
         PlanarTransform = planarTransform;
         ConnectorKeys = connectorKeys;
-        if (geometryIsLocalized)
-        {
-            BoundsMin = cachedBoundsMin;
-            BoundsMax = cachedBoundsMax;
-        }
-        else
-        {
-            (BoundsMin, BoundsMax) = ComputeBounds(lines, triangles);
-        }
-
-        Center = (BoundsMin + BoundsMax) * 0.5f;
-        PlacementAnchor = IsFiniteVector(placementAnchor) ? placementAnchor : Center;
+        // The geometry is localized around PlacementAnchor below. Bounds must be computed in the
+        // same space as the stored lines/triangles, otherwise the selection box is transformed a
+        // second time and spans the whole map. Compute them after localization.
+        PlacementAnchor = IsFiniteVector(placementAnchor)
+            ? placementAnchor
+            : (cachedBoundsMin + cachedBoundsMax) * 0.5f;
         BaseRotationRadians = float.IsFinite(baseRotationRadians) ? baseRotationRadians : 0f;
         BaseTransform = Pm4OverlayScene.BuildPm4BaseTransform(PlacementAnchor, BaseRotationRadians);
         if (geometryIsLocalized)
         {
+            BoundsMin = cachedBoundsMin;
+            BoundsMax = cachedBoundsMax;
             Lines = lines;
             Triangles = triangles;
         }
@@ -259,7 +255,10 @@ internal sealed class Pm4OverlayObject
 
             Lines = LocalizeLines(lines, inverseBaseTransform);
             Triangles = LocalizeTriangles(triangles, inverseBaseTransform);
+            (BoundsMin, BoundsMax) = ComputeBounds(Lines, Triangles);
         }
+
+        Center = (BoundsMin + BoundsMax) * 0.5f;
     }
 
     public string SourcePath { get; }

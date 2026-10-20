@@ -916,20 +916,7 @@ internal sealed partial class Pm4WorkbenchService
             return;
         }
 
-        if (ImGui.Button("Dump PM4 Objects JSON"))
-            ExportPm4ObjectsJson();
-        ImGui.SameLine();
-        if (ImGui.Button("Export PM4 OBJ Set"))
-            ExportPm4ObjectsObjSet();
-        ImGui.SameLine();
-        if (ImGui.Button("Export PM4 LLM Bundle"))
-            ExportPm4LlmEvidenceBundle();
-
-        if (ImGui.Button("Export Visible PM4 Report"))
-            ExportPm4OverlayReport();
-        ImGui.SameLine();
-        if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
-            ExportPm4WmoCorrelationJson();
+        ImGui.TextDisabled("PM4 exports are being reworked. The current build keeps the inspection and match-curation tools; file export is disabled until it is wired to a visible, tested path.");
     }
 
     internal void ExportPm4ObjectsJson()

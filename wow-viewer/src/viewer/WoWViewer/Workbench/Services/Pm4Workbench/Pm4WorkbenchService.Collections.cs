@@ -69,9 +69,6 @@ internal sealed partial class Pm4WorkbenchService
         if (!string.IsNullOrWhiteSpace(legend.Description))
             ImGui.TextDisabled(legend.Description);
 
-        if (ImGui.Button($"Export PM4 LLM Bundle##{idSuffix}"))
-            ExportPm4LlmEvidenceBundle();
-
         if (legend.Entries.Count == 0)
         {
             ImGui.TextDisabled("No loaded PM4 objects for the current legend mode.");
@@ -114,10 +111,6 @@ internal sealed partial class Pm4WorkbenchService
 
         if (ImGui.Button($"Collect Visible Region##{idSuffix}"))
             AddPm4VisibleRegionToCollection(regionInfo.RegionId);
-
-        ImGui.SameLine();
-        if (ImGui.Button($"Export PM4 LLM Bundle##Region{idSuffix}"))
-            ExportPm4LlmEvidenceBundle();
 
         if (ImGui.BeginChild($"Pm4RegionPeers##{idSuffix}", new Vector2(0f, 190f), true))
         {
