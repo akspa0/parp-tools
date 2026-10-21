@@ -173,6 +173,25 @@ labels without `Beta`; zero dead controls. Receipt: `evidence/p8-styling-naming.
 sidebars collapse to rails; the layout holds at 1280, 1600, and 1920 px. Receipt:
 `evidence/p9-visual-layout.md`.
 
+## U0–U6 — UI manager consolidation
+
+- [ ] T110 Create `ViewerUiManager`, `UiRegion`, `UiRegionState`, and `UiTokens`; draw the empty
+  regions with the correct rects.
+- [ ] T111 Move the top bar, bottom bar, and status bar into the manager; delete their window code.
+- [ ] T112 Move the left and right sidebars into the manager; delete `ShellLayoutService`.
+- [ ] T113 Move the minimap into the manager; support floating top-right and right-sidebar dock.
+- [ ] T114 Move the chat into the manager; anchor the Options sub-menu.
+- [ ] T115 Create one popup registry; move Settings, About, open-file, overlays, layers, and
+  transparency into it.
+- [ ] T116 Add `UiControlDoc` to every provider; generate `docs/WoWViewer/UI-REFERENCE.md`.
+- [ ] T117 Add a build check that fails when a visible control has no registry entry.
+- [ ] T118 Add a build check that regenerates `UI-REFERENCE.md` and fails on drift.
+- [ ] T119 Delete the legacy floating windows, the compatibility enums, and the dockspace path.
+
+**Gate U**: one service owns every chrome window; no provider calls `ImGui.Begin` for chrome; one
+token set; one input-ownership rule; every visible control has a registry entry; the generated
+reference matches. Receipt: `evidence/u-ui-manager.md`.
+
 ## Final verification
 
 - [ ] T090 `dotnet build wow-viewer/WowViewer.slnx -c Debug` — 0 errors.

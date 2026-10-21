@@ -74,22 +74,49 @@ The goal is "a 2026 tool that remembers 2001", not a 2001 skin.
 
 ## 4. Minimap specification
 
-The minimap moves from the left sidebar to the **top-right corner**, floating over the viewport.
+The minimap has **two homes**, and the operator chooses:
+
+1. **Floating top-right** (default): the old-WoW position, over the viewport.
+2. **Docked in the right sidebar**: a first-class panel at the top of the right sidebar, above the
+   inspector tabs.
+
+Both homes use the same renderer, the same cache, and the same interaction state. The choice is
+persisted per user.
 
 | Property | Value |
 |---|---|
 | Shape | Rounded square, 12 px corner radius (a circle is the 2004 look; a rounded square is the 2026 one) |
-| Size | 180 × 180 px default; 140 px at < 1600 px width; 32 px collapsed |
+| Size | 180 × 180 px floating; 100% of the sidebar width when docked; 32 px collapsed |
 | Ring | 2 px brass border; 1 px inner shadow |
 | Zone label | Below the map, 14 px, parchment text, truncated with tooltip |
 | Coordinates | Below the zone label, 12 px, muted |
-| Buttons | Top-right of the map: zoom +, zoom −, track, collapse |
-| Interaction | Drag to pan; wheel to zoom; click to set the camera target; right-click for the map menu |
+| Buttons | Top-right of the map: zoom +, zoom −, track, dock/undock, collapse |
 | Data | The same minimap tiles the left sidebar uses today; one renderer, one cache |
 | Collapse | Collapses to a 32 px brass button with the zone initial; `M` toggles |
 
 The left sidebar's "World Overview" keeps the **map list and map export**, but the minimap itself
-moves to the corner. The Utilities Minimap page is deleted (see the IA).
+moves to the corner or the right sidebar. The Utilities Minimap page is deleted (see the IA).
+
+### 4.1 Minimap controls — documented, not hidden
+
+The operator reports that the minimap has undocumented Shift/Ctrl behaviours for moving it around.
+That is a defect: a modifier-only action with no visible control and no tooltip is undiscoverable.
+The rework makes every minimap action visible and documented.
+
+| Action | Current behaviour | Target behaviour |
+|---|---|---|
+| Zoom | Mouse wheel over the map | Wheel, plus visible `+` / `−` buttons |
+| Pan | Left-drag on the map | Left-drag, plus a visible "Reset Pan" button |
+| Teleport | Triple-click a tile | Triple-click, plus a "Teleport to tile" context action |
+| Focus a LIT light | Double-click a marker | Double-click, plus a context action |
+| Fullscreen | `M` | `M`, plus a visible expand button |
+| Donor tool | `T` in fullscreen | `T`, plus a visible toolbar button |
+| Move the window | Drag the title bar; reported Shift/Ctrl variants | Drag the title bar; a visible "Dock / Undock" button; no modifier-only move |
+| Dock to sidebar | Not exposed | Visible "Dock to sidebar" button |
+| Reset pan | Small button when panned | Always-visible reset in the map menu |
+
+**Rule**: no action may exist only as a hidden modifier. If a modifier shortcut is kept, the same
+action must also be reachable from a visible control and listed in the UI reference.
 
 ## 5. Chat specification
 

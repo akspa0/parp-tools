@@ -109,6 +109,26 @@ curation are deleted from the viewer.
 **Rationale**: the operator's direction. The matching data (Museum ADTs plus original PM4s) is
 expensive to assemble and belongs in a repeatable CLI, not a GPU-bound viewer session.
 
+### AD-10 — One UI manager owns all chrome
+
+A single `ViewerUiManager` owns every chrome region, the design tokens, the draw order, input
+routing, and the documentation registry. Existing services become content providers that expose
+`DrawContent()` and never call `ImGui.Begin` for chrome. The full architecture is in
+[ui-manager.md](ui-manager.md).
+
+**Rationale**: the operator's big ask. Six services currently own windows independently, each with
+its own position, size, padding, colors, and fonts. That is why the UI looks like three rebuilds.
+One manager is the only way to make it cohesive from day one.
+
+### AD-11 — Documentation is generated from the UI
+
+Every visible control registers a `UiControlDoc` (label, region, shortcut, help). The registry
+feeds the in-app help, the generated `docs/WoWViewer/UI-REFERENCE.md`, and a build check that fails
+when a visible control has no entry. A control that is not in the registry is not allowed to ship.
+
+**Rationale**: the operator's second ask. The minimap's hidden Shift/Ctrl behaviour is the proof
+that hand-written documentation lags. Generated documentation cannot lag.
+
 ## 3. Target structure
 
 ```text
@@ -291,11 +311,24 @@ Each phase is independently buildable and verifiable. A phase is not complete un
 
 - Apply the design tokens from [layout.md](layout.md) §8 (colour, type, spacing).
 - Move the minimap to the floating top-right instrument; add collapse, zone label, and
-  coordinates; delete the Utilities Minimap page.
+  coordinates; support docking it in the right sidebar; delete the Utilities Minimap page.
 - Convert the chat to a resizable bottom-left dock; keep the population controls.
 - Add sidebar collapse rails and persistent widths.
 - Add the responsive breakpoints and default collapse.
 - Optional: `Ctrl+K` command palette over destinations and actions.
+
+### U0–U6 — UI manager consolidation
+
+The detailed phases are in [ui-manager.md](ui-manager.md) §9. They run alongside P2–P9 and are the
+structural guarantee that the result is one cohesive shell, not another layer:
+
+- **U0** manager skeleton (`ViewerUiManager`, `UiRegion`, `UiTokens`).
+- **U1** top bar, bottom bar, status bar move into the manager.
+- **U2** sidebars move into the manager; `ShellLayoutService` is deleted.
+- **U3** minimap and chat move into the manager; minimap supports floating and right-sidebar dock.
+- **U4** one popup registry; Options sub-menu.
+- **U5** documentation registry and generated `UI-REFERENCE.md`.
+- **U6** delete the old shell, floating windows, and compatibility enums.
 
 ## 6. Risks and mitigations
 
