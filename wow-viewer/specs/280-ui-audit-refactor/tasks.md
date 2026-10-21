@@ -56,10 +56,17 @@ imports one artifact of each kind; every action produces or consumes a real file
 - [ ] T023 Move the overlay, layer, and transparency popups into the Options sub-menu; delete the
   three bottom-bar popups.
 - [ ] T024 Keep the FPS/stats readout in the bottom bar in every destination.
+- [ ] T025 Move Render Quality and Lighting from Utilities into Options > Display.
+- [ ] T026 Move Audio from Utilities into Options > Audio.
+- [ ] T027 Move the bottom-bar grid, layer, overlay, object, and transparency toggles into the
+  Options groups defined in [information-architecture.md](information-architecture.md) §7.
+- [ ] T028 Delete the three bottom-bar popups (Overlays, Layers, Transparency) after the move.
+- [ ] T029 Delete the `Utilities` workbench tab and `UtilitiesBottomTab` after every page has a
+  new home.
 
 **Gate P2**: the operator reaches Viewer, Editor, Archaeology, and Options from the bottom bar in
 at most two clicks; the FPS/stats readout is visible; the Options sub-menu does not cover the chat
-or the status bars. Receipt: `evidence/p2-bottom-bar.md`.
+or the status bars; no Utilities page remains. Receipt: `evidence/p2-bottom-bar.md`.
 
 ## P3 — Top menu reduction
 
@@ -86,10 +93,18 @@ string inventory shows the deleted paths are gone. Receipt: `evidence/p3-top-men
   - File: `Workbench/WorkbenchNavigator.cs`
 - [ ] T044 Delete the legacy tab redirects and `Canonicalize`.
 - [ ] T045 Reset or migrate persisted layouts that point at deleted pages.
+- [ ] T046 Add the left-sidebar Diagnostics section (Log, Perf, Runtime Stats) and delete the
+  three Utilities pages.
+- [ ] T047 Add the Viewer left-sidebar Scene Tools section (Taxi, Capture, Camera Path) and delete
+  the two Utilities pages.
+- [ ] T048 Add the Viewer left-sidebar Assets section (Asset Catalog) and delete the Utilities
+  page.
+- [ ] T049 Make the left sidebar show only the common sections plus the current destination's
+  sections, per [information-architecture.md](information-architecture.md) §4.
 
 **Gate P4**: switching destination changes the visible sidebar content; no editor-only control
-appears in Viewer or Archaeology; the build has no references to the deleted enums. Receipt:
-`evidence/p4-destinations.md`.
+appears in Viewer or Archaeology; the build has no references to the deleted enums; the left
+sidebar matches the IA map. Receipt: `evidence/p4-destinations.md`.
 
 ## P5 — Archaeology dedupe
 

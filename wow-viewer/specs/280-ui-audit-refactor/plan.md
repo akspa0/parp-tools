@@ -119,13 +119,37 @@ Chat bar:   chat log | Auto-Scroll | Auto-Stream | Spawn BBs | Options ▾
 
 ### 3.1 Destinations
 
+The full surface→home map is [information-architecture.md](information-architecture.md). It assigns
+every visible surface exactly one home, including all 10 Utilities pages.
+
 | Destination | Left navigator | Right inspector | Page strip |
 |---|---|---|---|
-| Viewer | Workspace, World Overview, File Browser, Chat | Inspector, World, Model, Settings, PM4 | none (Inspector tabs are the pages) |
-| Editor | Editor workspace, File Browser | Editor tools | Placement & Objects, Terrain Tools, Data I/O, Converters |
-| Archaeology | Archaeology workspace, File Browser | Archaeology tools | Weak Signal & Stratigraphy, UniqueId Timeline, Layers & Provenance, Playback & Capture, Cartography |
+| Viewer | Workspace, World Overview, File Browser, Scene Tools, Assets, Diagnostics, Chat | Inspector, World, Model, PM4 | none (Inspector tabs are the pages) |
+| Editor | Editor workspace, Project Output, File Browser, Diagnostics, Chat | Editor tools | Placement & Objects, Terrain Tools, Data I/O, Converters |
+| Archaeology | Archaeology workspace, Layer Projects, File Browser, Diagnostics, Chat | Archaeology tools | Weak Signal & Stratigraphy, UniqueId Timeline, Layers & Provenance, Playback & Capture, Cartography |
+| Options | — (sub-menu anchored to the chat) | — | Display, Overlays, Layers, Grids, Objects, Audio, Simulation |
 
 PM4 Analysis is not an Archaeology page. It is a Viewer surface reached by one explicit shortcut.
+
+### 3.1.1 Utilities coverage
+
+The `Utilities` tab has 10 pages. None survives as a Utilities page; each becomes a named section
+in its logical home:
+
+| Utilities page | New home |
+|---|---|
+| Minimap | Left sidebar > World Overview |
+| Log | Left sidebar > Diagnostics |
+| Perf | Left sidebar > Diagnostics |
+| Render Quality | Options > Display |
+| Taxi | Viewer > Scene Tools |
+| Capture | Viewer > Scene Tools |
+| Asset Catalog | Viewer > Assets |
+| Runtime Stats | Left sidebar > Diagnostics |
+| Lighting | Options > Display |
+| Audio | Options > Audio |
+
+`UtilitiesBottomTab` and the `Utilities` workbench tab are deleted.
 
 ### 3.2 File operations
 
