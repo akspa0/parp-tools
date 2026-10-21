@@ -10,6 +10,7 @@ namespace WoWViewer;
 /// <summary>Owns shell windows, destination navigation, popup lifetime and scene input authority.</summary>
 internal sealed partial class ViewerUiManager
 {
+    internal const string MapSpawnsPopupId = "MapSpawns";
     private readonly IViewerAppHost _host;
     private readonly UiPopupRegistry _popups = new();
     private readonly Dictionary<UiRegion, UiRegionState> _hosted = new();
@@ -22,6 +23,7 @@ internal sealed partial class ViewerUiManager
     private bool _minimapDocked = true;
     private bool _chatCollapsed;
     private float _appliedFontScale = -1f;
+    private float _appliedStyleScale = -1f;
     internal ViewerUiManager(IViewerAppHost host)
     {
         _host = host;
@@ -67,6 +69,23 @@ internal sealed partial class ViewerUiManager
         {
             ImGui.GetIO().FontGlobalScale = fontScale;
             _appliedFontScale = fontScale;
+        }
+
+        // FontGlobalScale scales glyphs but not the style metrics, so at 4K the text grew while
+        // line spacing, frame padding and scrollbars stayed at 1080p sizes and every line
+        // overlapped the next. Scale the metrics with the same factor.
+        if (MathF.Abs(scale - _appliedStyleScale) > 0.001f)
+        {
+            var style = ImGui.GetStyle();
+            style.ItemSpacing = new Vector2(8f, 4f) * scale;
+            style.ItemInnerSpacing = new Vector2(4f, 4f) * scale;
+            style.FramePadding = new Vector2(6f, 3f) * scale;
+            style.CellPadding = new Vector2(4f, 2f) * scale;
+            style.ScrollbarSize = 14f * scale;
+            style.GrabMinSize = 10f * scale;
+            style.IndentSpacing = 21f * scale;
+            style.SeparatorTextBorderSize = MathF.Max(1f, scale);
+            _appliedStyleScale = scale;
         }
 
         Layout = new UiLayout(display, _host.HideUiChrome, _host.ShowLeftSidebar, _host.ShowRightSidebar,
@@ -119,6 +138,25 @@ internal sealed partial class ViewerUiManager
     {
         _minimapVisible = !_minimapVisible;
         SaveLayout();
+    }
+
+    // The minimap panel carries no controls of its own; these live in Options > Display.
+    internal bool MinimapVisible
+    {
+        get => _minimapVisible;
+        set { _minimapVisible = value; SaveLayout(); }
+    }
+
+    internal bool MinimapCollapsed
+    {
+        get => _minimapCollapsed;
+        set { _minimapCollapsed = value; SaveLayout(); }
+    }
+
+    internal bool MinimapDocked
+    {
+        get => _minimapDocked;
+        set { _minimapDocked = value; SaveLayout(); }
     }
     internal void ToggleLeftSidebar()
     {
@@ -196,81 +234,86 @@ internal sealed partial class ViewerUiManager
             return;
         }
 
-        if (ImGui.SmallButton("Collapse chat##CollapseChat"))
+        // Two columns: the chat log on the left, contextual tools on the right. The right side of
+        // this panel was dead whitespace; it now carries the actions the operator reaches for
+        // while reading the world, and the barker section appears only when the local area
+        // actually has creatures with ambient barks.
+        float scale = MathF.Max(1f, Layout.Scale);
+        float available = ImGui.GetContentRegionAvail().X;
+        float toolsWidth = MathF.Min(220f * scale, available * 0.35f);
+        float chatWidth = MathF.Max(0f, available - toolsWidth - 8f * scale);
+
+        if (ImGui.BeginChild("##ChatBody", new Vector2(chatWidth, 0f), false))
+        {
+            _host.SqlSpawnStreaming.DrawChatContent();
+            ImGui.EndChild();
+        }
+
+        ImGui.SameLine();
+
+        if (ImGui.BeginChild("##ChatTools", new Vector2(0f, 0f), false))
+        {
+            DrawChatTools();
+            ImGui.EndChild();
+        }
+    }
+
+    private void DrawChatTools()
+    {
+        SharedUiWidgets.SectionTitle("Tools");
+
+        if (ImGui.SmallButton("Map Spawns##ChatMapSpawns"))
+            _popups.Request(MapSpawnsPopupId);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the current map's spawn list and population controls");
+
+        if (ImGui.SmallButton("Options##ChatToolsOptions"))
+            _options = !_options;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the options sub-menu");
+
+        if (ImGui.SmallButton("Minimap##ChatToolsMinimap"))
+            ToggleMinimap();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show or hide the minimap (M)");
+
+        if (ImGui.SmallButton("Inspector##ChatToolsInspector"))
+            OpenViewer(ViewerPanel.Inspector);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the Inspector in the right sidebar");
+
+        if (ImGui.SmallButton("PM4##ChatToolsPm4"))
+            OpenViewer(ViewerPanel.PM4);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the PM4 workbench in the right sidebar");
+
+        if (ImGui.SmallButton("Collapse##ChatToolsCollapse"))
         {
             _chatCollapsed = true;
             SaveLayout();
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Collapse the chat to a one-line bar");
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Options##ChatOptions"))
-            _options = !_options;
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the options sub-menu (display, overlays, layers, grids, objects, audio, simulation)");
-        ImGui.SameLine();
-        _host.SqlSpawnStreaming.DrawChatContent();
+
+        // Barkers only when the current map is loaded and the local spawn set has creatures with
+        // ambient barks. An empty section on every map would be noise.
+        if (_host.SqlSpawnStreaming.HasLocalBarkers)
+        {
+            ImGui.Separator();
+            SharedUiWidgets.SectionTitle("Barkers");
+            SharedUiWidgets.CompactStatus("Ambient NPC barks are active in this area.");
+            if (ImGui.SmallButton("Clear chat##ChatToolsClearBarkers"))
+                _host.SqlSpawnStreaming.ClearChat();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Clear the chat log");
+        }
     }
 
     private void DrawMinimap()
     {
-        if (_minimapCollapsed)
-        {
-            if (ImGui.SmallButton("Map##ExpandMinimap"))
-            {
-                _minimapCollapsed = false;
-                SaveLayout();
-            }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Expand minimap (M)");
-        }
-        else
-        {
-            if (ImGui.SmallButton("Collapse##CollapseMinimap"))
-            {
-                _minimapCollapsed = true;
-                SaveLayout();
-            }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Collapse minimap (M)");
-        }
-        ImGui.SameLine();
-        if (_minimapDocked)
-        {
-            if (ImGui.SmallButton("Undock##MinimapDock"))
-            {
-                _minimapDocked = false;
-                SaveLayout();
-            }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Float the minimap top-right");
-        }
-        else
-        {
-            if (ImGui.SmallButton("Dock##MinimapDock"))
-            {
-                _minimapDocked = true;
-                SaveLayout();
-            }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Dock the minimap in the right sidebar");
-        }
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Hide##HideMinimap"))
-        {
-            _minimapVisible = false;
-            SaveLayout();
-        }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hide minimap (M)");
+        // The minimap is the minimap. No control row, no zone label, no coordinate readout: the
+        // real client's minimap is a map you click, drag and scroll, and every extra line here
+        // stole height from the map itself. Collapse, dock and hide live in Options > Display.
         if (_minimapCollapsed)
         {
             ImGui.TextDisabled("Minimap collapsed");
             return;
         }
-        ImGui.Separator();
+
         _host.MinimapAndStatus.DrawMinimapPanelContent();
-        ImGui.Separator();
-        string zone = string.IsNullOrWhiteSpace(_host.CurrentAreaName) ? "Unknown zone" : _host.CurrentAreaName;
-        ImGui.TextUnformatted(zone);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(zone);
-        var camera = _host.Camera.Position;
-        int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - camera.X) / WoWConstants.ChunkSize);
-        int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - camera.Y) / WoWConstants.ChunkSize);
-        ImGui.TextDisabled($"Tile ({tileY}, {tileX})  X {camera.X:F0}  Y {camera.Y:F0}  Z {camera.Z:F0}");
     }
 
     private void DrawLeft()
@@ -366,7 +409,7 @@ internal sealed partial class ViewerUiManager
         ImGui.SetNextWindowSize(state.Rect.Size);
         // Every region shares one token surface, so the shell reads as a single
         // surface treatment instead of a set of unrelated windows.
-        SharedUiWidgets.PushSurfaceStyle();
+        SharedUiWidgets.PushSurfaceStyle(Layout.Scale);
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar |
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoDocking | extra;
         if (!resizable) flags |= ImGuiWindowFlags.NoResize;
@@ -381,6 +424,11 @@ internal sealed partial class ViewerUiManager
         if (_registered) return;
         _registered = true;
         _popups.Register("Settings", () => { _host.SettingsWindow.DrawSettingsContent(); return false; });
+        _popups.Register(MapSpawnsPopupId, () =>
+        {
+            _host.SqlSpawnStreaming.DrawMapSpawnsContent();
+            return ImGui.Button("Close##mapSpawns");
+        }, size: new(760f, 600f));
         foreach (string id in new[] { MainMenuBarService.AboutPopupId, MainMenuBarService.KeyboardShortcutsPopupId, MainMenuBarService.ForgetBasePopupId })
             _popups.Register(id, () => _host.MainMenuBar.DrawPopupContent(id), () => _host.MainMenuBar.OnPopupClosed(id));
         _popups.Register(MainMenuBarService.UiReferencePopupId, () =>

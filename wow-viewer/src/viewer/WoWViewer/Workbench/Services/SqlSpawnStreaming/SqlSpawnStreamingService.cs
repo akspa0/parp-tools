@@ -114,6 +114,7 @@ internal sealed class SqlSpawnStreamingService
     private bool _isLoadingSpawns;
     private readonly HashSet<int> _lastAppliedSpawnIds = new();
     private IReadOnlyList<WorldSpawnRecord>? _lastAppliedSpawns;
+    private bool _hasLocalBarkers;
     private string _spawnFilterText = string.Empty;
     private int _selectedSpawnListIndex = -1;
 
@@ -435,6 +436,19 @@ internal sealed class SqlSpawnStreamingService
 
     internal bool ChatVisible => _showChatOverlay;
 
+    /// <summary>Clears the chat log from the chat tools panel.</summary>
+    internal void ClearChat() => _chatWindow.Clear();
+
+    /// <summary>
+    /// True when the current map is loaded and the local spawn set contains at least one creature
+    /// with ambient barks. The chat tools panel uses this to show the barker section only when it
+    /// has something to say.
+    /// </summary>
+    internal bool HasLocalBarkers => _hasLocalBarkers;
+
+    /// <summary>Map spawns body for the manager-owned Map Spawns window.</summary>
+    internal void DrawMapSpawnsContent() => DrawPopulationSubTabContent();
+
     /// <summary>Chat body for the manager-owned bottom-left dock.</summary>
     internal void DrawChatContent()
     {
@@ -476,6 +490,7 @@ internal sealed class SqlSpawnStreamingService
         _sqlForceStreamRefresh = false;
         _lastAppliedSpawns = null;
         _lastAppliedSpawnIds.Clear();
+        _hasLocalBarkers = false;
         if (clearSceneSpawns && _worldScene != null)
             _worldScene.ExternalSpawns.ClearExternalSpawns();
     }
@@ -598,6 +613,11 @@ internal sealed class SqlSpawnStreamingService
             finalSpawns = eventFilteredSpawns.Take(_sqlMaxSpawns).ToList();
 
         _lastAppliedSpawns = finalSpawns;
+        // The chat tools panel only shows the barker section when the local area actually has
+        // creatures with ambient barks. Recompute here, where the applied set changes, instead of
+        // scanning the spawn list every frame.
+        _hasLocalBarkers = finalSpawns.Any(s =>
+            s.SpawnType == WorldSpawnType.Creature && _dialogueService.HasBarkFor(s.EntryId));
 
         // Avoid re-dirtying scene graph and instance lists if spawn set has not changed
         bool changed = finalSpawns.Count != _lastAppliedSpawnIds.Count;

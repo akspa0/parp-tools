@@ -22,6 +22,8 @@ internal sealed partial class ViewerChromeService
                 _host.LightingPanel.DrawLightingContent();
             if (SharedUiWidgets.DrawSectionHeader("Theme", id: "OptionsTheme"))
                 _host.Themes.DrawUiThemeSettingsContent();
+            if (SharedUiWidgets.DrawSectionHeader("Minimap", id: "OptionsMinimap"))
+                DrawOptionsMinimapContent();
         }
 
         if (SharedUiWidgets.DrawSectionHeader("Overlays", id: "OptionsOverlays"))
@@ -47,6 +49,22 @@ internal sealed partial class ViewerChromeService
         SharedUiWidgets.CompactStatus(fps > 0f
             ? $"{fps:0} FPS | {1000f / fps:0.0} ms"
             : "FPS: -- | -- ms");
+    }
+
+    /// <summary>
+    /// The minimap panel is just the map. Its show/collapse/dock controls live here so the panel
+    /// itself keeps every pixel for the map, and the controls stay documented and reachable.
+    /// </summary>
+    private void DrawOptionsMinimapContent()
+    {
+        var ui = _host.UiManager;
+        bool visible = ui.MinimapVisible;
+        if (ImGui.Checkbox("Show minimap", ref visible)) ui.MinimapVisible = visible;
+        bool collapsed = ui.MinimapCollapsed;
+        if (ImGui.Checkbox("Collapse minimap", ref collapsed)) ui.MinimapCollapsed = collapsed;
+        bool docked = ui.MinimapDocked;
+        if (ImGui.Checkbox("Dock minimap in right sidebar", ref docked)) ui.MinimapDocked = docked;
+        SharedUiWidgets.CompactStatus("Scroll to zoom, drag to pan, click to teleport.");
     }
 
     private void DrawOptionsOverlaysContent(TerrainRenderer? terrain, LiquidRenderer? liquid)

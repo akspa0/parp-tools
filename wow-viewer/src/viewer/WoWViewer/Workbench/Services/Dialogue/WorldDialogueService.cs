@@ -32,6 +32,12 @@ public sealed class WorldDialogueService
     public int BarkCount => _flavorData?.CreatureBarks.Count ?? 0;
     public int QuestCount => _flavorData?.Quests.Count ?? 0;
 
+    /// <summary>True when the loaded flavor dataset has ambient barks for this creature entry.</summary>
+    public bool HasBarkFor(int creatureEntryId) =>
+        _flavorData != null
+        && _flavorData.CreatureBarks.TryGetValue(creatureEntryId, out var barks)
+        && barks.Count > 0;
+
     /// <summary>
     /// Loads the flavor dataset for the given version string ("3.3.5a" or "0.5.3").
     /// </summary>

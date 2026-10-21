@@ -30,6 +30,11 @@ internal sealed class UiPopupRegistry
     {
         // Popups need a current window for their ID stack. Without this host, OpenPopup and
         // BeginPopupModal run outside any window and the modal never appears.
+        //
+        // NoInputs is mandatory. This host covers the whole display; without it ImGui reports
+        // WantCaptureMouse/WantCaptureKeyboard everywhere, which made CanSceneConsumeMouse return
+        // false across the entire viewport and killed camera mouse and keyboard control. The
+        // popups themselves are separate windows and still receive input.
         ImGui.SetNextWindowPos(Vector2.Zero);
         ImGui.SetNextWindowSize(ImGui.GetIO().DisplaySize);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
@@ -37,7 +42,8 @@ internal sealed class UiPopupRegistry
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoDocking |
             ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoBringToFrontOnFocus |
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
+            ImGuiWindowFlags.NoInputs | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav);
 
         // Nest queued dialogs instead of replacing an active modal and losing its close callback.
         if (_active.Count == 0 && _requests.TryDequeue(out string? first))

@@ -19,6 +19,70 @@
       "visible": true
     },
     {
+      "id": "show-minimap",
+      "label": "Show minimap",
+      "region": "Options > Display > Minimap",
+      "shortcut": null,
+      "help": "Show or hide the minimap panel.",
+      "visible": true
+    },
+    {
+      "id": "collapse-minimap",
+      "label": "Collapse minimap",
+      "region": "Options > Display > Minimap",
+      "shortcut": null,
+      "help": "Collapse the minimap panel to a one-line bar.",
+      "visible": true
+    },
+    {
+      "id": "dock-minimap-in-right-sidebar",
+      "label": "Dock minimap in right sidebar",
+      "region": "Options > Display > Minimap",
+      "shortcut": null,
+      "help": "Dock the minimap at the top of the right sidebar instead of floating it.",
+      "visible": true
+    },
+    {
+      "id": "map-spawns",
+      "label": "Map Spawns",
+      "region": "Chat > Tools",
+      "shortcut": null,
+      "help": "Open the current map spawn list and population controls.",
+      "visible": true
+    },
+    {
+      "id": "minimap",
+      "label": "Minimap",
+      "region": "Chat > Tools",
+      "shortcut": "M",
+      "help": "Show or hide the minimap panel.",
+      "visible": true
+    },
+    {
+      "id": "inspector",
+      "label": "Inspector",
+      "region": "Chat > Tools",
+      "shortcut": "I",
+      "help": "Open the Inspector in the right sidebar.",
+      "visible": true
+    },
+    {
+      "id": "pm4",
+      "label": "PM4",
+      "region": "Chat > Tools",
+      "shortcut": "P",
+      "help": "Open the PM4 workbench in the right sidebar.",
+      "visible": true
+    },
+    {
+      "id": "clear-chat",
+      "label": "Clear chat",
+      "region": "Chat > Tools > Barkers",
+      "shortcut": null,
+      "help": "Clear the chat log.",
+      "visible": true
+    },
+    {
       "id": "about",
       "label": "About",
       "region": "Top menu > Help",

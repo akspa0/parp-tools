@@ -655,38 +655,13 @@ internal sealed partial class MinimapAndStatusService
             return;
         }
 
-        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / MinimapWorldTileSize;
-        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / MinimapWorldTileSize;
+        // The map fills the panel. Zoom is the scroll wheel, pan is drag, teleport is click —
+        // the same gestures the real client's minimap uses. No text row, no zoom buttons, no
+        // progress bar: those stole height from the map and are reported in the status bar.
         ClampMinimapPanOffset();
-        int ctX = (int)MathF.Floor(camTileX);
-        int ctY = (int)MathF.Floor(camTileY);
 
-        ImGui.Text($"Tile: ({ctX},{ctY})");
-        ImGui.SameLine();
-        if (ImGui.SmallButton("-##minimapZoomOut"))
-            _minimapZoom = Math.Clamp(_minimapZoom + 0.5f, 1f, 32f);
-        ImGui.SameLine();
-        if (ImGui.SmallButton("+##minimapZoomIn"))
-            _minimapZoom = Math.Clamp(_minimapZoom - 0.5f, 1f, 32f);
-        ImGui.SameLine();
-        ImGui.TextDisabled($"Zoom {_minimapZoom:F1}x");
-        ImGui.SameLine();
-        ImGui.TextDisabled($"Loaded {loadedTileCount}");
-
-        if (_minimapRenderer != null && (_minimapRenderer.IsBusy || _minimapRenderer.UploadedTileCount > 0 || _minimapRenderer.FailedTileCount > 0))
-        {
-            float progress = _minimapRenderer.LoadingProgress;
-            string overlay = _minimapRenderer.IsBusy
-                ? $"Minimap {progress * 100f:F0}%  {_minimapRenderer.PendingTileCount} pending"
-                : $"Minimap ready  {_minimapRenderer.UploadedTileCount} tiles";
-            ImGui.ProgressBar(progress, new Vector2(MathF.Min(220f, ImGui.GetContentRegionAvail().X), 0f), overlay);
-            if (_minimapRenderer.FailedTileCount > 0)
-                ImGui.TextDisabled($"Missing or failed tiles: {_minimapRenderer.FailedTileCount}");
-        }
-
-        float controlsHeight = ImGui.GetCursorPosY() + 8f;
         float mapAvailableWidth = ImGui.GetContentRegionAvail().X;
-        float mapAvailableHeight = ImGui.GetContentRegionAvail().Y - 4f;
+        float mapAvailableHeight = ImGui.GetContentRegionAvail().Y;
         float mapSize = MathF.Max(64f, MathF.Min(mapAvailableWidth, mapAvailableHeight));
 
         var cursorPos = ImGui.GetCursorScreenPos();
@@ -701,8 +676,6 @@ internal sealed partial class MinimapAndStatusService
             out _,
             out _,
             out _);
-
-        ImGui.SetCursorPosY(controlsHeight + mapSize + 2f);
     }
 
     internal void DrawFullscreenMinimap()
