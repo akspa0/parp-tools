@@ -1,6 +1,51 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
+
+## 2026-10-21 — Spec 282: client cursor model + triangle-level PM4 picking
+
+- `SceneCursorRenderer` now dispatches cursor candidates by extension. It previously called
+  `MdxFile.Load` on every candidate including the `.m2` ones, so the modern client's cursor never
+  loaded and the renderer silently fell back to the procedural arrow. MDX goes through
+  `MdxRenderer`; M2 goes through `WowViewerM2RuntimeBridge.BuildStaticRenderModel` (with
+  `Cursor.skin`/`Cursor00.skin`/`Cursor01.skin`/`Cursor02.skin` resolution) or
+  `BuildEra100StaticRenderModel` for Alpha-era inline geometry, then `M2Renderer`.
+- `ViewerApp.OnUpdate` re-points the cursor renderer at the live data source every frame. The
+  renderer is constructed before any client is opened and was never re-pointed, which is the
+  second reason the authentic cursor never appeared.
+- Options > Objects reports the resolved model (`ModelKind` + path) or the load error, and offers
+  `Reload cursor model` (registry entry + regenerated `UI-REFERENCE.md`).
+- PM4 picking is two-stage: AABB reject, then nearest actual triangle (Möller–Trumbore) in
+  `Pm4OverlayScene.Selection.cs` + `Pm4OverlayScene.cs`.
+- Verified: build 0 errors; `Verify-UiReference.ps1` PASSED
+  (`inventory_rows=128 distinct_labels=119 registry_entries=119`); PM4 165/165; UI doc tests 3/3.
+- Not proven: no real client cursor asset has been loaded in a run (skin names and authored scale
+  are unproven), the cursor idle animation is not driven, and PM4 selection accuracy needs an
+  operator spot check.
+- Receipt: [receipt-2026-10-21.md](../specs/282-client-cursor-and-pm4-pick/evidence/receipt-2026-10-21.md).
+
+## 2026-10-21 — Spec 280 UI refactor: implementation landed, ledger reconciled
+
+- Spec 280 implementation is in the tree on `280-ui-rework`: one `ViewerUiManager` owns every
+  chrome window; three destinations behind a slim bottom bar with an Options sub-menu; top menu
+  reduced to File/View/Help; Tools menu and export/import trees deleted and moved to their owning
+  destinations; 7 compatibility enums, `Canonicalize`, legacy tab redirects and `ShellLayoutService`
+  deleted with versioned `ui-layout-v1.json` persistence; 12 duplicate floating windows deleted;
+  archaeology legacy strip/window/launchers deleted (5 pages); Editor sections renamed; PM4
+  matching moved to Spec 281; a 117-control registry generates `docs/WoWViewer/UI-REFERENCE.md`
+  with a build-enforced drift check.
+- Verified: build 0 errors (323 warnings); Core 7 failed / 1822 passed / 1 skipped (the 7 are the
+  pre-existing P0 format/data set), Editor 91/91, Curation 39/39, PM4 165/165;
+  `Verify-UiReference.ps1` exit 0 (`inventory_rows=125 distinct_labels=117 registry_entries=117`);
+  `UiControlDocumentationTests` 3/3.
+- Open: the viewer **does not start** (`ViewerUiManager..ctor` reads `host.MinimapAndStatus` before
+  `_minimapAndStatus` is assigned); no real-client/visual/FPS/audio proof (T092/T093); T106 command
+  palette not implemented; bespoke styling remains outside the five manager surfaces;
+  `evidence/p7-floating-windows.md` and `evidence/p9-visual-layout.md` do not exist; PM4 Actions
+  popup still present.
+- Receipts: [final receipt](../specs/280-ui-audit-refactor/evidence/final-receipt.md),
+  [tasks ledger](../specs/280-ui-audit-refactor/tasks.md),
+  [audit §0.11/§2.1](../specs/280-ui-audit-refactor/audit.md).
 
 ## 2026-10-20 — PM4 reference consolidated + opt-in model prior
 

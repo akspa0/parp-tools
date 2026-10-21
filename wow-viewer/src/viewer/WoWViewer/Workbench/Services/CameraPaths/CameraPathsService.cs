@@ -97,19 +97,7 @@ internal sealed partial class CameraPathsService
     {
         _pendingCapturePanelTab = tab;
         _activeCapturePanelTabIndex = (int)tab;
-        if (_useTabUi)
-        {
-            _activeUtilitiesTabIndex = (int)Workbench.UtilitiesBottomTab.Capture;
-            _workbenchPanels.OpenWorkbenchTab(Workbench.ToolsBottomTab.Utilities);
-        }
-        else if (tab == CapturePanelTab.Automation)
-        {
-            _showCaptureAutomationWindow = true;
-        }
-        else
-        {
-            _showCameraPathWindow = true;
-        }
+        _host.UiManager.OpenSceneTools(1);
     }
 
     internal void DrawCapturePanelContent()
@@ -135,17 +123,6 @@ internal sealed partial class CameraPathsService
         _pendingCapturePanelTab = null;
     }
 
-    internal void DrawCameraPathWindow()
-    {
-        if (!ImGui.Begin("Camera Path", ref _showCameraPathWindow))
-        {
-            ImGui.End();
-            return;
-        }
-
-        DrawCameraPathContent();
-        ImGui.End();
-    }
 
     private void DrawCameraPathContent()
     {

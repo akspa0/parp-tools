@@ -49,43 +49,12 @@ internal sealed partial class WorkspacesService
 
     internal void SetWorkspaceMode(WorkspaceMode mode)
     {
-        // Quick is the cross-profile high-frequency surface. Retain it when
-        // the operator switches workspace profiles so Fog and camera controls
-        // do not disappear just because the profile owner changed.
-        bool retainQuickTab = _useTabUi && _activeTopTab == WorkbenchTab.Quick;
-        _workspaceMode = mode;
-        _showLeftSidebar = true;
-        _showRightSidebar = true;
-        _workbenchOpen = true;
-
-        if (_useTabUi)
+        _host.UiManager.Navigate(mode switch
         {
-            switch (mode)
-            {
-                case WorkspaceMode.Editor:
-                    _workspaceMode = WorkspaceMode.Editor;
-                    EnsureEditorHost();
-                    break;
-                case WorkspaceMode.Archaeology:
-                    break;
-                case WorkspaceMode.Viewer:
-                default:
-                    break;
-            }
-
-            _workbenchPanels.OpenWorkbenchTab(retainQuickTab
-                ? WorkbenchTab.Quick
-                : mode switch
-                {
-                    WorkspaceMode.Editor => WorkbenchTab.Editor,
-                    WorkspaceMode.Archaeology => WorkbenchTab.Archaeology,
-                    _ => WorkbenchTab.Quick,
-                });
-        }
-        else if (mode == WorkspaceMode.Editor && !HasWorldEditingContext())
-        {
-            _editorWorkspaceTask = EditorWorkspaceTask.Inspect;
-        }
+            WorkspaceMode.Editor => WorkbenchTab.Editor,
+            WorkspaceMode.Archaeology => WorkbenchTab.Archaeology,
+            _ => WorkbenchTab.Viewer,
+        });
     }
 
     internal void SetEditorWorkspaceTask(EditorWorkspaceTask task)
@@ -94,16 +63,14 @@ internal sealed partial class WorkspacesService
             SetWorkspaceMode(WorkspaceMode.Editor);
 
         _editorWorkspaceTask = task;
-        _activeBottomDrawerTab = task switch
+        _host.UiManager.Navigate(WorkbenchTab.Editor, task switch
         {
-            EditorWorkspaceTask.Terrain => FixedBottomDrawerTab.Terrain,
-            EditorWorkspaceTask.Objects => FixedBottomDrawerTab.World,
-            EditorWorkspaceTask.Pm4Evidence => FixedBottomDrawerTab.Pm4,
-            EditorWorkspaceTask.Inspect => FixedBottomDrawerTab.Workspace,
-            EditorWorkspaceTask.Publish => FixedBottomDrawerTab.Diagnostics,
-            _ => _activeBottomDrawerTab,
-        };
-        _pendingRightSidebarSection = _activeBottomDrawerTab;
+            EditorWorkspaceTask.Terrain => 1,
+            EditorWorkspaceTask.Objects => 0,
+            EditorWorkspaceTask.Pm4Evidence => 0,
+            EditorWorkspaceTask.Publish => 2,
+            _ => 0,
+        });
     }
 
     private bool HasWorldEditingContext()
@@ -265,22 +232,10 @@ internal sealed partial class WorkspacesService
             _showMinimapWindow = !_showMinimapWindow;
 
         ImGui.SameLine();
-        if (_useTabUi)
-        {
-            if (ImGui.Button("Log Viewer"))
-                _workbenchPanels.OpenWorkbenchTab(UtilitiesBottomTab.Log);
-
-            if (ImGui.Button("Perf"))
-                _workbenchPanels.OpenWorkbenchTab(UtilitiesBottomTab.Perf);
-        }
-        else
-        {
-            if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
-                _showLogViewer = !_showLogViewer;
-
-            if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
-                _showPerfWindow = !_showPerfWindow;
-        }
+        if (ImGui.Button("Log Viewer"))
+            _host.ShowLogViewer = true;
+        if (ImGui.Button("Perf"))
+            _host.ShowPerfWindow = true;
 
         ImGui.SameLine();
         if (ImGui.Button("Settings..."))

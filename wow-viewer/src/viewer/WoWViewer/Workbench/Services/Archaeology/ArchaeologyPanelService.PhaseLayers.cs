@@ -4,6 +4,7 @@ using System.Text.Json;
 using ImGuiNET;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
+using WoWViewer.UI;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Maps;
 using static WoWViewer.ViewerApp;
@@ -778,7 +779,6 @@ internal sealed partial class ArchaeologyPanelService
 
     // ── Cartography destination under Archaeology (Spec 223 / Spec 222) ───────
 
-    private int _cartographySubTab = 0;
     private string _cartographyDonorMap = string.Empty;
     private int _cartographyDonorTileX = 32;
     private int _cartographyDonorTileY = 32;
@@ -799,40 +799,16 @@ internal sealed partial class ArchaeologyPanelService
             return;
         }
 
-        string[] subTabs = ["Layers", "Synthesized Minimap", "Save Merged Output"];
-        for (int i = 0; i < subTabs.Length; i++)
-        {
-            if (i > 0)
-                ImGui.SameLine();
+        DrawCartographyLayersContent(terrain);
 
-            bool isSelected = _cartographySubTab == i;
-            if (isSelected)
-                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.26f, 0.59f, 0.98f, 0.8f));
+        if (SharedUiWidgets.SectionHeader("Synthesized Minimap", defaultOpen: false, id: "CartographyMinimap"))
+            DrawSynthesizedMinimapExportContent(showCloseButton: false);
 
-            if (ImGui.Button(subTabs[i]))
-                _cartographySubTab = i;
-
-            if (isSelected)
-                ImGui.PopStyleColor();
-        }
-
-        ImGui.Separator();
-
-        switch (_cartographySubTab)
-        {
-            case 0:
-                DrawCartographyLayersSubTab(terrain);
-                break;
-            case 1:
-                DrawSynthesizedMinimapExportContent(showCloseButton: false);
-                break;
-            case 2:
-                DrawCartographySaveMergedSubTab(terrain);
-                break;
-        }
+        if (SharedUiWidgets.SectionHeader("Save Merged Output", defaultOpen: false, id: "CartographySaveMerged"))
+            DrawCartographySaveMergedSubTab(terrain);
     }
 
-    private void DrawCartographyLayersSubTab(TerrainManager terrain)
+    private void DrawCartographyLayersContent(TerrainManager terrain)
     {
         ImGui.TextWrapped(
             "Stack phase maps and donor tiles over the base map. Layers apply in order from top to bottom; later layers win on shared channels.");
@@ -840,88 +816,99 @@ internal sealed partial class ArchaeologyPanelService
         IList<PhaseLayerSettings> layers = terrain.PhaseLayers;
         bool dirty = false;
 
-        // 1. Layer Stack (Spec 222-T109)
-        if (layers.Count > 0)
+        if (SharedUiWidgets.SectionHeader("Layer Stack", defaultOpen: true, id: "CartographyLayerStack"))
         {
-            dirty |= DrawPhaseLayerStack(terrain, layers);
-            if (ImGui.Button("Clear all layers"))
+            // 1. Layer Stack (Spec 222-T109)
+            if (layers.Count > 0)
             {
-                // Spec 232 FR-15: locked layers are protected from deletion — clear everything
-                // else and tell the operator what was kept.
-                int removed = 0;
-                for (int i = layers.Count - 1; i >= 0; i--)
+                dirty |= DrawPhaseLayerStack(terrain, layers);
+                if (ImGui.Button("Clear all layers"))
                 {
-                    if (layers[i].Locked)
-                        continue;
-                    layers.RemoveAt(i);
-                    removed++;
+                    // Spec 232 FR-15: locked layers are protected from deletion — clear everything
+                    // else and tell the operator what was kept.
+                    int removed = 0;
+                    for (int i = layers.Count - 1; i >= 0; i--)
+                    {
+                        if (layers[i].Locked)
+                            continue;
+                        layers.RemoveAt(i);
+                        removed++;
+                    }
+                    dirty |= removed > 0;
+                    if (removed > 0)
+                        _statusMessage = $"Cleared {removed} unlocked layer(s); locked layer(s) were kept — unlock them to remove.";
                 }
-                dirty |= removed > 0;
-                if (removed > 0)
-                    _statusMessage = $"Cleared {removed} unlocked layer(s); locked layer(s) were kept — unlock them to remove.";
+
+                // Spec 232 FR-7: tiles do not always load everything after a placement or alignment
+                // change — this forces every tile to evict and re-stream under the current stack.
+                ImGui.SameLine();
+                if (ImGui.Button("Force reload tiles"))
+                {
+                    terrain.RefreshPhaseLayers();
+                    dirty = true;
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Evicts and re-streams every tile under the current layer stack. Use when terrain, objects, or textures did not load after a change.");
+
+                ImGui.Separator();
             }
 
-            // Spec 232 FR-7: tiles do not always load everything after a placement or alignment
-            // change — this forces every tile to evict and re-stream under the current stack.
-            ImGui.SameLine();
-            if (ImGui.Button("Force reload tiles"))
+            // Spec 232 Phase 2 (FR-2/FR-8): layer-project persistence — Save writes this map's stack
+            // (auto-loaded on launch), Load replaces the live stack with the saved one.
+            ImGui.TextUnformatted("Layer project");
+            if (ImGui.Button("Save project"))
             {
-                terrain.RefreshPhaseLayers();
-                dirty = true;
+                try
+                {
+                    terrain.SaveLayerProject();
+                    _statusMessage = $"Layer project saved for '{terrain.MapName}'. It reloads automatically on launch.";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"Layer project save failed: {ex.Message}";
+                }
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Evicts and re-streams every tile under the current layer stack. Use when terrain, objects, or textures did not load after a change.");
-
+                ImGui.SetTooltip("Writes the current layer stack (offsets, rotation, mirrors, channels, locks) as this map's layer project. Auto-loads on every launch.");
+            ImGui.SameLine();
+            if (ImGui.Button("Load project"))
+            {
+                try
+                {
+                    bool loaded = terrain.LoadLayerProject();
+                    _statusMessage = loaded
+                        ? $"Layer project loaded for '{terrain.MapName}'."
+                        : $"No saved layer project exists for '{terrain.MapName}'.";
+                    _selectedPhaseLayerIndex = -1;
+                    if (_worldScene != null)
+                        _worldScene.SelectedPhaseLayerIndex = -1;
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"Layer project load failed: {ex.Message}";
+                }
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Replaces the live layer stack with this map's saved project.");
             ImGui.Separator();
         }
 
-        // Spec 232 Phase 2 (FR-2/FR-8): layer-project persistence — Save writes this map's stack
-        // (auto-loaded on launch), Load replaces the live stack with the saved one.
-        ImGui.TextUnformatted("Layer project");
-        if (ImGui.Button("Save project"))
-        {
-            try
-            {
-                terrain.SaveLayerProject();
-                _statusMessage = $"Layer project saved for '{terrain.MapName}'. It reloads automatically on launch.";
-            }
-            catch (Exception ex)
-            {
-                _statusMessage = $"Layer project save failed: {ex.Message}";
-            }
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Writes the current layer stack (offsets, rotation, mirrors, channels, locks) as this map's layer project. Auto-loads on every launch.");
-        ImGui.SameLine();
-        if (ImGui.Button("Load project"))
-        {
-            try
-            {
-                bool loaded = terrain.LoadLayerProject();
-                _statusMessage = loaded
-                    ? $"Layer project loaded for '{terrain.MapName}'."
-                    : $"No saved layer project exists for '{terrain.MapName}'.";
-                _selectedPhaseLayerIndex = -1;
-                if (_worldScene != null)
-                    _worldScene.SelectedPhaseLayerIndex = -1;
-            }
-            catch (Exception ex)
-            {
-                _statusMessage = $"Layer project load failed: {ex.Message}";
-            }
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Replaces the live layer stack with this map's saved project.");
-        ImGui.Separator();
-
         // 2. DBC Phase Discovery (Child maps from Map.dbc) - Spec 222-T110
-        dirty |= DrawDbcPhaseDiscovery(terrain, layers);
+        if (SharedUiWidgets.SectionHeader("DBC Phase Discovery", defaultOpen: false, id: "CartographyDbcPhases"))
+        {
+            if (_dbcProvider == null || string.IsNullOrWhiteSpace(_dbdDir) || string.IsNullOrWhiteSpace(_dbcBuild))
+                ImGui.TextDisabled("Load DBC data and a build definition to discover phase maps.");
+            else
+                dirty |= DrawDbcPhaseDiscovery(terrain, layers);
+        }
 
         // 3. Add Phase Map Controls
-        dirty |= DrawPhaseLayerAddControls(terrain, layers);
+        if (SharedUiWidgets.SectionHeader("Add Phase Map", defaultOpen: false, id: "CartographyAddPhase"))
+            dirty |= DrawPhaseLayerAddControls(terrain, layers);
 
         // 4. Donor Tile-Grid Picker (Single-Tile Placement) - Spec 222-T108
-        dirty |= DrawDonorTileGridPicker(terrain, layers);
+        if (SharedUiWidgets.SectionHeader("Donor Tile Grid Picker", defaultOpen: false, id: "CartographyDonorGrid"))
+            dirty |= DrawDonorTileGridPicker(terrain, layers);
 
         if (dirty)
             terrain.RefreshPhaseLayers();
@@ -929,9 +916,6 @@ internal sealed partial class ArchaeologyPanelService
 
     private bool DrawDonorTileGridPicker(TerrainManager terrain, IList<PhaseLayerSettings> layers)
     {
-        if (!ImGui.CollapsingHeader("Donor Tile Grid Picker (Single-Tile Placement)"))
-            return false;
-
         ImGui.TextWrapped("Browse a donor map's 64x64 grid and place a specific tile at a chosen target position (Spec 222-T108).");
 
         bool dirty = false;

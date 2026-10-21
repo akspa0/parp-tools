@@ -23,19 +23,6 @@ internal sealed partial class PerfPanelService
     private ref VlmTerrainManager? _vlmTerrainManager => ref _host.VlmTerrainManager;
     private ref WorldScene? _worldScene => ref _host.WorldScene;
 
-    internal void DrawPerfWindow()
-    {
-        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
-        // Workbench sub-tab uses DrawPerfContent directly.
-        ImGui.SetNextWindowSize(new Vector2(360, 0), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Perf", ref _showPerfWindow, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.End();
-            return;
-        }
-        DrawPerfContent();
-        ImGui.End();
-    }
 
     /// <summary>
     /// Utilities &gt; Perf. Frame timing over time is the primary content here: this is where anyone

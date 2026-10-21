@@ -433,12 +433,15 @@ internal sealed class SqlSpawnStreamingService
         }
     }
 
-    internal void DrawChatOverlay(Vector2 viewportSize)
+    internal bool ChatVisible => _showChatOverlay;
+
+    /// <summary>Chat body for the manager-owned bottom-left dock.</summary>
+    internal void DrawChatContent()
     {
         if (!_showChatOverlay)
             return;
 
-        _chatWindow.Draw(viewportSize, DrawChatPopulationControls);
+        _chatWindow.DrawContent(DrawChatPopulationControls);
     }
 
     /// <summary>

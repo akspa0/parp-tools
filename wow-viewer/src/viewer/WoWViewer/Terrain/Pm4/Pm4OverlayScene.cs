@@ -120,6 +120,52 @@ public sealed partial class Pm4OverlayScene
     private const float NoCullRadius = WorldScene.NoCullRadius;
     internal static Vector3 ConvertMprlPositionToWorld(Vector3 refPos) => Pm4OverlayMprlHelpers.ConvertMprlPositionToWorld(refPos);
     private static float RayAABBIntersect(Vector3 origin, Vector3 dir, Vector3 bmin, Vector3 bmax) => WorldScene.RayAABBIntersect(origin, dir, bmin, bmax);
+
+    /// <summary>
+    /// Nearest ray/triangle hit over an object's localized triangles, transformed by the same
+    /// geometry matrix the renderer uses. Returns -1 when no triangle is hit.
+    /// </summary>
+    private static float RayTrianglesIntersect(Vector3 origin, Vector3 dir, List<Pm4Triangle> triangles, Matrix4x4 transform)
+    {
+        float best = -1f;
+        foreach (Pm4Triangle triangle in triangles)
+        {
+            Vector3 a = Vector3.Transform(triangle.A, transform);
+            Vector3 b = Vector3.Transform(triangle.B, transform);
+            Vector3 c = Vector3.Transform(triangle.C, transform);
+            float t = RayTriangleIntersect(origin, dir, a, b, c);
+            if (t >= 0f && (best < 0f || t < best))
+                best = t;
+        }
+
+        return best;
+    }
+
+    /// <summary>Moller-Trumbore ray/triangle intersection; returns the ray distance or -1.</summary>
+    private static float RayTriangleIntersect(Vector3 origin, Vector3 dir, Vector3 a, Vector3 b, Vector3 c)
+    {
+        const float epsilon = 1e-6f;
+        Vector3 edge1 = b - a;
+        Vector3 edge2 = c - a;
+        Vector3 h = Vector3.Cross(dir, edge2);
+        float det = Vector3.Dot(edge1, h);
+        if (MathF.Abs(det) < epsilon)
+            return -1f;
+
+        float invDet = 1f / det;
+        Vector3 s = origin - a;
+        float u = Vector3.Dot(s, h) * invDet;
+        if (u < 0f || u > 1f)
+            return -1f;
+
+        Vector3 q = Vector3.Cross(s, edge1);
+        float v = Vector3.Dot(dir, q) * invDet;
+        if (v < 0f || u + v > 1f)
+            return -1f;
+
+        float t = Vector3.Dot(edge2, q) * invDet;
+        return t > epsilon ? t : -1f;
+    }
     private static void TransformBounds(Vector3 min, Vector3 max, Matrix4x4 m, out Vector3 outMin, out Vector3 outMax)
         => WorldScene.TransformBounds(min, max, m, out outMin, out outMax);
     private static void TransformBounds(Vector3 boundsMin, Vector3 boundsMax, in Matrix4x4 transform, out Vector3 transformedMin, out Vector3 transformedMax)

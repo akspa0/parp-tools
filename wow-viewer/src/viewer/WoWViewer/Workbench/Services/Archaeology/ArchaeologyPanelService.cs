@@ -63,7 +63,6 @@ internal sealed partial class ArchaeologyPanelService
 
     // Experimental pages retain their existing internal selectors while the
     // top-level destination owns the only visible category switch.
-    private int _activeArcheologyTabIndex = 0;
     private double _archeologyPlaybackAccumulator = 0.0; // for fractional uniqueId advancement
     private int _archeologyPlaybackRestoreMin = -1; // saved on Play, restored on Stop
     private int _archeologyPlaybackRestoreMax = -1;

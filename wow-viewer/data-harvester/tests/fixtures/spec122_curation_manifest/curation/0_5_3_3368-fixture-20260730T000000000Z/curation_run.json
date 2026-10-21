@@ -1,7 +1,7 @@
 {
   "schema": "v50-curation-run-v1",
   "curation_run_id": "0_5_3_3368-fixture-20260730T000000000Z",
-  "store_path": "i:\\parp\\parp-tools\\wow-viewer\\data-harvester\\tests\\fixtures\\spec122_curation_manifest",
+  "store_path": "I:\\parp\\parp-tools\\wow-viewer\\data-harvester\\tests\\fixtures\\spec122_curation_manifest",
   "build_fingerprint": "0_5_3_3368",
   "checks_run": [
     "difficulty_bucket",

@@ -65,101 +65,78 @@ public sealed class FakeChatWindowService
     }
 
     /// <summary>
-    /// Renders the floating WoW chat window overlay in the viewport.
+    /// Renders the chat body into the manager-owned chat region. The manager owns the
+    /// window, position, size, border and draw order.
     /// </summary>
-    public void Draw(Vector2 viewportSize, Action? drawPopulationControls = null)
+    public void DrawContent(Action? drawPopulationControls = null)
     {
         if (!IsVisible)
             return;
 
-        // Bottom bar above the status bars, semi-transparent so the render stays visible.
-        Vector2 defaultPos = new(0f, MathF.Max(viewportSize.Y - 250f, 50f));
-        Vector2 defaultSize = new(MathF.Max(viewportSize.X * 0.55f, 520f), 200f);
+        ImGui.TextColored(new Vector4(0.79f, 0.64f, 0.15f, 1f), "[General]");
+        ImGui.SameLine();
+        ImGui.TextDisabled("|");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Clear##ChatClear"))
+            Clear();
+        ImGui.SameLine();
+        bool auto = AutoScroll;
+        if (ImGui.Checkbox("Auto-Scroll##ChatAuto", ref auto))
+            AutoScroll = auto;
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Hide##ChatHide"))
+            IsVisible = false;
 
-        ImGui.SetNextWindowPos(defaultPos, ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(defaultSize, ImGuiCond.FirstUseEver);
+        drawPopulationControls?.Invoke();
 
-        // Styling: Authentic semi-transparent WoW chat backdrop
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0f, 0f, 0f, 0.60f));
-        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.2f, 0.2f, 0.2f, 0.45f));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 4f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8f, 6f));
+        ImGui.Separator();
 
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoCollapse;
-
-        if (ImGui.Begin("Chat##WoWChatWindowOverlay", flags))
+        if (ImGui.BeginChild("##ChatLogScrollRegion", new Vector2(0f, 0f), false, ImGuiWindowFlags.AlwaysVerticalScrollbar))
         {
-            // Mini Header: Tabs & Quick Controls
-            ImGui.TextColored(new Vector4(1f, 0.82f, 0f, 1f), "[General]");
-            ImGui.SameLine();
-            ImGui.TextDisabled("|");
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Clear##ChatClear"))
-                Clear();
-            ImGui.SameLine();
-            bool auto = AutoScroll;
-            if (ImGui.Checkbox("Auto-Scroll##ChatAuto", ref auto))
-                AutoScroll = auto;
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Hide##ChatHide"))
-                IsVisible = false;
-
-            drawPopulationControls?.Invoke();
-
-            ImGui.Separator();
-
-            // Scrollable Log
-            if (ImGui.BeginChild("##ChatLogScrollRegion", new Vector2(0f, 0f), false, ImGuiWindowFlags.AlwaysVerticalScrollbar))
+            if (_messages.Count == 0)
             {
-                if (_messages.Count == 0)
-                {
-                    ImGui.TextDisabled("Ambient dialogue and NPC barks appear here when within range...");
-                }
-                else
-                {
-                    ImGui.PushTextWrapPos(0.0f);
-                    for (int i = 0; i < _messages.Count; i++)
-                    {
-                        var msg = _messages[i];
-                        string timeStr = $"[{msg.Timestamp:HH:mm:ss}] ";
-
-                        ImGui.TextColored(ColorTimestamp, timeStr);
-                        ImGui.SameLine(0f, 0f);
-
-                        switch (msg.Type)
-                        {
-                            case DialogueChatType.Yell:
-                                ImGui.TextColored(msg.Color, $"[{msg.Sender}] yells: {msg.Text}");
-                                break;
-                            case DialogueChatType.Emote or DialogueChatType.BossEmote:
-                                ImGui.TextColored(msg.Color, $"{msg.Sender} {msg.Text}");
-                                break;
-                            case DialogueChatType.Whisper:
-                                ImGui.TextColored(msg.Color, $"[{msg.Sender}] whispers: {msg.Text}");
-                                break;
-                            case DialogueChatType.System:
-                                ImGui.TextColored(msg.Color, $"{msg.Text}");
-                                break;
-                            default:
-                                ImGui.TextColored(msg.Color, $"[{msg.Sender}] says: {msg.Text}");
-                                break;
-                        }
-                    }
-                    ImGui.PopTextWrapPos();
-                }
-
-                if (_scrollToBottom && AutoScroll)
-                {
-                    ImGui.SetScrollHereY(1.0f);
-                    _scrollToBottom = false;
-                }
-
-                ImGui.EndChild();
+                ImGui.TextDisabled("Ambient dialogue and NPC barks appear here when within range...");
             }
-        }
-        ImGui.End();
+            else
+            {
+                ImGui.PushTextWrapPos(0.0f);
+                for (int i = 0; i < _messages.Count; i++)
+                {
+                    var msg = _messages[i];
+                    string timeStr = $"[{msg.Timestamp:HH:mm:ss}] ";
 
-        ImGui.PopStyleVar(2);
-        ImGui.PopStyleColor(2);
+                    ImGui.TextColored(ColorTimestamp, timeStr);
+                    ImGui.SameLine(0f, 0f);
+
+                    switch (msg.Type)
+                    {
+                        case DialogueChatType.Yell:
+                            ImGui.TextColored(msg.Color, $"[{msg.Sender}] yells: {msg.Text}");
+                            break;
+                        case DialogueChatType.Emote or DialogueChatType.BossEmote:
+                            ImGui.TextColored(msg.Color, $"{msg.Sender} {msg.Text}");
+                            break;
+                        case DialogueChatType.Whisper:
+                            ImGui.TextColored(msg.Color, $"[{msg.Sender}] whispers: {msg.Text}");
+                            break;
+                        case DialogueChatType.System:
+                            ImGui.TextColored(msg.Color, $"{msg.Text}");
+                            break;
+                        default:
+                            ImGui.TextColored(msg.Color, $"[{msg.Sender}] says: {msg.Text}");
+                            break;
+                    }
+                }
+                ImGui.PopTextWrapPos();
+            }
+
+            if (_scrollToBottom && AutoScroll)
+            {
+                ImGui.SetScrollHereY(1.0f);
+                _scrollToBottom = false;
+            }
+
+            ImGui.EndChild();
+        }
     }
 }

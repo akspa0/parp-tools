@@ -47,24 +47,7 @@ namespace WoWViewer;
 // name in the moved code resolves exactly as it did there.
 internal sealed partial class Pm4WorkbenchService
 {
-    private float _pm4TranslationStepUnits = 10f;
-    private float _pm4RotationStepDegrees = 90f;
-    private float _pm4ScaleStepUnits = 0.1f;
     private Pm4WorkbenchTab? _pendingPm4WorkbenchTab;
-    private string _pm4MatchModelPath = "";
-    private string _pm4MatchFilter = "";
     private readonly List<(int tileX, int tileY, uint ck24, int objectPart)> _pm4ObjectCollection = new();
-    private Pm4WmoMatchResult? _pm4WmoGroupMatchResult;
-    private string _pm4WmoMatchStatus = "";
-    private PmM2MatchResult? _pm2GroupMatchResult;
-    private string _pm2MatchStatus = "";
-    private PmM2MatchStore? _pm2MatchStore;
-    private Dictionary<string, PmM2MatchEntry> _pm2MatchEntries = [];
-    private Pm4WmoCorrelationReport? _pm4WmoCorrelationReport;
-    private int _pm4WmoCorrelationMaxMatchesPerPlacement = 8;
-    private int _selectedPm4WmoCorrelationPlacementIndex = -1;
-    private int _selectedPm4WmoCorrelationMatchIndex;
-    private bool _pm4WmoCorrelationNearOnly = true;
-    private string _pm4WmoCorrelationModelFilter = string.Empty;
     private string _pm4SceneFilter = "";
 }

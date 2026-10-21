@@ -10,11 +10,23 @@ namespace WoWViewer.UI;
 /// still invoke the same authoritative action methods used by their full
 /// panels, which keeps Quick and legacy adapters as mirrors rather than new
 /// implementations.
+///
+/// Spec 280 P8: every section, body line, button row and empty state in the
+/// manager-owned surfaces is drawn through this class, and the colours and
+/// spacing come from <see cref="UiTokens"/> instead of local literals.
 /// </summary>
 public static class SharedUiWidgets
 {
     private static readonly Vector4 ImportantColor = new(1f, 0.85f, 0.4f, 1f);
     private static readonly Vector4 StatusColor = new(0.62f, 0.82f, 0.92f, 1f);
+
+    /// <summary>One button of a <see cref="DrawButtonRow"/>.</summary>
+    public readonly record struct ButtonSpec(
+        string Label,
+        Action? Action,
+        bool Enabled = true,
+        string? Help = null,
+        bool Small = false);
 
     /// <summary>Draws a consistent collapsible section heading and optional help affordance.</summary>
     public static bool DrawSectionHeader(
@@ -102,6 +114,135 @@ public static class SharedUiWidgets
         bool enabled = true,
         string? help = null,
         bool small = false) => ActionButton(label, enabled, help, small);
+
+    /// <summary>
+    /// Draws a section title that is not collapsible. Sections that hold data
+    /// (lists, filters) keep their own tree nodes; this is for the headings
+    /// that only group content.
+    /// </summary>
+    public static void SectionTitle(string title)
+    {
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(UiTokens.Space8, UiTokens.Space4));
+        ImGui.SeparatorText(title);
+        ImGui.PopStyleVar();
+    }
+
+    /// <summary>Body text in the shared body colour (token text or token muted text).</summary>
+    public static void BodyText(string text, bool muted = false)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, muted ? UiTokens.TextMuted : UiTokens.Text);
+        ImGui.TextUnformatted(text);
+        ImGui.PopStyleColor();
+    }
+
+    /// <summary>Wrapped body text. The text is never treated as a format string.</summary>
+    public static void BodyTextWrapped(string text, bool muted = false)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, muted ? UiTokens.TextMuted : UiTokens.Text);
+        ImGui.PushTextWrapPos(0f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+        ImGui.PopStyleColor();
+    }
+
+    /// <summary>Status text that reports something worked, in the shared success colour.</summary>
+    public static void SuccessText(string text)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, UiTokens.Success);
+        ImGui.TextUnformatted(text);
+        ImGui.PopStyleColor();
+    }
+
+    /// <summary>A selectable row drawn in the muted text colour.</summary>
+    public static bool MutedSelectable(
+        string label,
+        bool selected = false,
+        ImGuiSelectableFlags flags = ImGuiSelectableFlags.None,
+        Vector2 size = default)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, UiTokens.TextMuted);
+        bool clicked = ImGui.Selectable(label, selected, flags, size);
+        ImGui.PopStyleColor();
+        return clicked;
+    }
+
+    /// <summary>Builds one button of a <see cref="DrawButtonRow"/>.</summary>
+    public static ButtonSpec Btn(
+        string label,
+        Action action,
+        bool enabled = true,
+        string? help = null,
+        bool small = false) => new(label, action, enabled, help, small);
+
+    /// <summary>Draws a row of action buttons separated by the shared token spacing.</summary>
+    public static void DrawButtonRow(params ButtonSpec[] buttons)
+    {
+        if (buttons == null || buttons.Length == 0)
+            return;
+
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            if (i > 0)
+                ImGui.SameLine(0f, UiTokens.Space8);
+
+            ButtonSpec button = buttons[i];
+            if (!button.Enabled)
+                ImGui.BeginDisabled();
+
+            bool clicked = button.Small ? ImGui.SmallButton(button.Label) : ImGui.Button(button.Label);
+
+            if (!button.Enabled)
+                ImGui.EndDisabled();
+
+            if (!string.IsNullOrWhiteSpace(button.Help) && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(button.Help);
+
+            if (clicked)
+                button.Action?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Explicit empty state: what is missing, and the action that fixes it when
+    /// the panel owns one.
+    /// </summary>
+    public static void DrawEmptyState(
+        string title,
+        string message,
+        string? actionLabel = null,
+        Action? action = null,
+        string? help = null)
+    {
+        BodyText(title);
+        BodyTextWrapped(message, muted: true);
+
+        if (string.IsNullOrWhiteSpace(actionLabel) || action == null)
+            return;
+
+        ImGui.Spacing();
+        if (ActionButton(actionLabel, help: help))
+            action();
+    }
+
+    /// <summary>
+    /// Applies the shared window surface (background, border, rounding, padding)
+    /// so every manager-owned region reads as the same surface.
+    /// </summary>
+    public static void PushSurfaceStyle()
+    {
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, UiTokens.WindowRounding);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, UiTokens.WindowBorderSize);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, UiTokens.WindowPadding);
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, UiTokens.Surface1);
+        ImGui.PushStyleColor(ImGuiCol.Border, UiTokens.Border);
+    }
+
+    /// <summary>Undoes <see cref="PushSurfaceStyle"/>.</summary>
+    public static void PopSurfaceStyle()
+    {
+        ImGui.PopStyleColor(2);
+        ImGui.PopStyleVar(3);
+    }
 
     /// <summary>Draws a titled action group and invokes its body while the section is open.</summary>
     public static void DrawActionGroup(

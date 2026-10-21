@@ -69,6 +69,56 @@
     <Copy SourceFiles="@(OpenALSoftPublishedNative)" DestinationFiles="$(PublishDir)openal32.dll" SkipUnchangedFiles="true" Condition="Exists('%(OpenALSoftPublishedNative.Identity)')" />
   </Target>
 
+  <!-- The UI control registry is embedded so the in-app reference cannot drift from the
+       generated docs/WoWViewer/UI-REFERENCE.md document. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\..\eng\ui\ui-controls.json" LogicalName="WoWViewer.UI.ui-controls.json" />
+  </ItemGroup>
+
+  <!-- Spec 280 T117/T118: the UI documentation registry and the generated UI reference are
+       build-enforced. The check regenerates the control inventory from the viewer source,
+       regenerates the registry from that inventory, and fails the build when a visible control
+       has no registry entry or when docs/WoWViewer/UI-REFERENCE.md has drifted from the registry.
+       PowerShell 7 (pwsh) is required. When pwsh is not available the target SKIPS with a
+       warning instead of failing the build, so the viewer still builds on a machine without
+       PowerShell 7. Opt out explicitly with -p:SkipUiReferenceCheck=true.
+       Every path is relative to this project directory, so the repository can be checked out
+       at any path. -->
+  <PropertyGroup>
+    <SkipUiReferenceCheck Condition="'$(SkipUiReferenceCheck)' == ''">false</SkipUiReferenceCheck>
+    <UiReferenceCheckScript>../../../eng/ui/Verify-UiReference.ps1</UiReferenceCheckScript>
+    <UiReferenceCheckResultDirectory>obj/uicheck/$(MSBuildProjectName)</UiReferenceCheckResultDirectory>
+  </PropertyGroup>
+
+  <Target Name="VerifyUiReference" BeforeTargets="Build" Condition="'$(SkipUiReferenceCheck)' != 'true'">
+    <!-- The check writes its own result markers, so a machine without PowerShell 7 can be
+         detected and skipped instead of failing the build. -->
+    <RemoveDir Directories="$(MSBuildProjectDirectory)/$(UiReferenceCheckResultDirectory)" />
+    <MakeDir Directories="$(MSBuildProjectDirectory)/$(UiReferenceCheckResultDirectory)" />
+    <Exec Command="pwsh -NoProfile -File $(UiReferenceCheckScript) -ResultDirectory $(UiReferenceCheckResultDirectory)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          IgnoreExitCode="true"
+          ContinueOnError="true"
+          StandardOutputImportance="normal" />
+    <PropertyGroup>
+      <UiReferenceCheckStarted Condition="Exists('$(MSBuildProjectDirectory)/$(UiReferenceCheckResultDirectory)/ui-reference-check.started')">true</UiReferenceCheckStarted>
+      <UiReferenceCheckPassed Condition="Exists('$(MSBuildProjectDirectory)/$(UiReferenceCheckResultDirectory)/ui-reference-check.pass')">true</UiReferenceCheckPassed>
+      <UiReferenceCheckFailed Condition="Exists('$(MSBuildProjectDirectory)/$(UiReferenceCheckResultDirectory)/ui-reference-check.fail')">true</UiReferenceCheckFailed>
+    </PropertyGroup>
+    <ReadLinesFromFile File="$(MSBuildProjectDirectory)/$(UiReferenceCheckResultDirectory)/ui-reference-check.log" Condition="Exists('$(MSBuildProjectDirectory)/$(UiReferenceCheckResultDirectory)/ui-reference-check.log')">
+      <Output TaskParameter="Lines" ItemName="UiReferenceCheckLog" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <UiReferenceCheckLogText>@(UiReferenceCheckLog, '%0A')</UiReferenceCheckLogText>
+    </PropertyGroup>
+    <Error Condition="'$(UiReferenceCheckFailed)' == 'true'"
+           Text="UI reference build check FAILED (Spec 280 T117/T118).%0A$(UiReferenceCheckLogText)" />
+    <Error Condition="'$(UiReferenceCheckStarted)' == 'true' and '$(UiReferenceCheckPassed)' != 'true' and '$(UiReferenceCheckFailed)' != 'true'"
+           Text="UI reference build check did not complete (Spec 280 T117/T118).%0A$(UiReferenceCheckLogText)" />
+    <Warning Condition="'$(UiReferenceCheckStarted)' != 'true'"
+             Text="UI reference build check SKIPPED: PowerShell 7 (pwsh) was not found, so Spec 280 T117/T118 is not enforced on this machine. Install PowerShell 7, or run the check manually: pwsh -NoProfile -File wow-viewer/eng/ui/Verify-UiReference.ps1" />
+  </Target>
+
   <!-- Bundle WoWDBDefs definitions with the output (required for DBC parsing via DBCD) -->
   <ItemGroup>
     <Content Include="..\..\..\libs\wowdev\WoWDBDefs\definitions\**\*.dbd" Link="definitions\%(RecursiveDir)%(Filename)%(Extension)">

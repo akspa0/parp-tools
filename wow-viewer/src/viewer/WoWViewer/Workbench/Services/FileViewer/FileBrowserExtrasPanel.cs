@@ -19,24 +19,24 @@ internal sealed class FileBrowserExtrasPanel : IDisposable
     private Task<string>? _job;
     private CancellationTokenSource _cancel = new();
 
-    /// <summary>Draws the "Open WC3 data" section. <paramref name="open"/> is invoked with (folder, optional listfile).</summary>
+    /// <summary>Draws the "Open WC3 Beta data" section. <paramref name="open"/> is invoked with (folder, optional listfile).</summary>
     internal void DrawOpenWc3(Action<string, string?> open, string? currentSourceSummary)
     {
-        if (!SharedUiWidgets.SectionHeader("Open WC3 data", defaultOpen: false, id: "FileBrowserWc3"))
+        if (!SharedUiWidgets.SectionHeader("Open WC3 Beta data", defaultOpen: false, id: "FileBrowserWc3"))
             return;
         ImGui.InputText("Folder##wc3open", ref _wc3Root, 2048);
         if (ImGui.SmallButton("Browse folder##wc3open"))
-            Pick("Select WC3 install or extracted data folder", true, _wc3Root, null, p => _wc3Root = p);
+            Pick("Select WC3 Beta install or extracted data folder", true, _wc3Root, null, p => _wc3Root = p);
         ImGui.InputText("Listfile (optional)##wc3open", ref _wc3Listfile, 2048);
         if (ImGui.SmallButton("Choose listfile##wc3open"))
-            Pick("Select local WC3 listfile", false, _wc3Listfile, ".txt", p => _wc3Listfile = p);
+            Pick("Select local WC3 Beta listfile", false, _wc3Listfile, ".txt", p => _wc3Listfile = p);
         ImGui.SameLine();
         if (ImGui.SmallButton("Clear listfile##wc3open")) _wc3Listfile = "";
         ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_wc3Root));
-        if (ImGui.Button("Open WC3 data##wc3open"))
+        if (ImGui.Button("Open WC3 Beta data##wc3open"))
             open(_wc3Root.Trim(), string.IsNullOrWhiteSpace(_wc3Listfile) ? null : _wc3Listfile.Trim());
         ImGui.EndDisabled();
-        ImGui.TextDisabled("Loose extracted data needs no listfile. MPQs use the existing reader.");
+        ImGui.TextDisabled("Beta support: loose extracted data needs no listfile. MPQs use the existing reader.");
         if (!string.IsNullOrEmpty(currentSourceSummary))
         {
             ImGui.PushTextWrapPos(0f);

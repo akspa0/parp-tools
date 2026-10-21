@@ -61,10 +61,7 @@ internal sealed class ViewerSettingsService
     }
 
     // Host bridge (same names as the former ViewerApp members).
-    private ref int _activeBottomTabIndex => ref _host.ActiveBottomTabIndex;
     private ref string _activeDatasetVersionRoot => ref _host.ActiveDatasetVersionRoot;
-    private ref WorkbenchTab _activeTopTab => ref _host.ActiveTopTab;
-    private ref int _activeUtilitiesTabIndex => ref _host.ActiveUtilitiesTabIndex;
     private ref bool _archeologyApplyToNextCapture => ref _host.ArcheologyApplyToNextCapture;
     private ref bool _archeologyApplyToVideoRecording => ref _host.ArcheologyApplyToVideoRecording;
     private ref int _archeologyMaxUniqueId => ref _host.ArcheologyMaxUniqueId;
@@ -72,7 +69,6 @@ internal sealed class ViewerSettingsService
     private ref bool _archeologyPlaybackLoop => ref _host.ArcheologyPlaybackLoop;
     private ref float _archeologyPlaybackSpeed => ref _host.ArcheologyPlaybackSpeed;
     private ref int _archeologyScopeIndex => ref _host.ArcheologyScopeIndex;
-    private ref float _bottomDrawerHeight => ref _host.BottomDrawerHeight;
     private ref float _cameraSpeed => ref _host.CameraSpeed;
     private ref string _captureOutputDir => ref _host.CaptureOutputDir;
     private List<WoWViewer.Terrain.ClientBuildOption> _clientBuildOptions => _host.ClientBuildOptions;
@@ -81,39 +77,28 @@ internal sealed class ViewerSettingsService
     private ref float _defaultFogStart => ref _host.DefaultFogStart;
     private ref bool _enableMultisample => ref _host.EnableMultisample;
     private ref bool _enableTerrainBackfaceCulling => ref _host.EnableTerrainBackfaceCulling;
-    private ref bool _forceApplyShellPanelLayout => ref _host.ForceApplyShellPanelLayout;
     private ref float _fovDegrees => ref _host.FovDegrees;
     private ref bool _hasExplicitWmoMliqRotationOverride => ref _host.HasExplicitWmoMliqRotationOverride;
     private ref List<KnownGoodClientPath> _knownGoodClientPaths => ref _host.KnownGoodClientPaths;
     private ref string _lastGameFolderPath => ref _host.LastGameFolderPath;
     private ref string _lastLooseOverlayPath => ref _host.LastLooseOverlayPath;
-    private ref float _leftSidebarWidth => ref _host.LeftSidebarWidth;
     private ref Vector2 _minimapPanOffset => ref _host.MinimapPanOffset;
     private ref float _minimapZoom => ref _host.MinimapZoom;
     private ref bool _openForgetKnownGoodClientConfirm => ref _host.OpenForgetKnownGoodClientConfirm;
     private ref string? _pendingForgetKnownGoodClientDisplayName => ref _host.PendingForgetKnownGoodClientDisplayName;
     private ref string? _pendingForgetKnownGoodClientPath => ref _host.PendingForgetKnownGoodClientPath;
-    private HashSet<ShellPanelId> _pendingShellPanelLayoutRestore => _host.PendingShellPanelLayoutRestore;
     private ref Vector3 _pm4SavedOverlayRotationDegrees => ref _host.Pm4SavedOverlayRotationDegrees;
     private ref Vector3 _pm4SavedOverlayScale => ref _host.Pm4SavedOverlayScale;
     private ref Vector3 _pm4SavedOverlayTranslation => ref _host.Pm4SavedOverlayTranslation;
     private ref Dictionary<string, Pm4WmoMatchEntry> _pm4WmoMatchEntries => ref _host.Pm4WmoMatchEntries;
     private ref Pm4WmoMatchStore? _pm4WmoMatchStore => ref _host.Pm4WmoMatchStore;
-    private ref Pm4ObjectMatchStore? _pm4ObjectMatchStore => ref _host.Pm4ObjectMatchStore;
-    private ref Dictionary<string, Pm4ObjectMatchEntry> _pm4ObjectMatchEntries => ref _host.Pm4ObjectMatchEntries;
     private ref SceneCursorRenderer? _sceneCursorRenderer => ref _host.SceneCursorRenderer;
-    private ref float _rightSidebarWidth => ref _host.RightSidebarWidth;
     private ref int _savedDetailedAdtTileCountOverride => ref _host.SavedDetailedAdtTileCountOverride;
     private Dictionary<string, SavedObjectPathFilterMap> _savedObjectPathFiltersByMap => _host.SavedObjectPathFiltersByMap;
-    private Dictionary<string, SavedPm4ObjectMatchSelection> _savedPm4ObjectMatches => _host.SavedPm4ObjectMatches;
-    private Dictionary<ShellPanelId, SavedShellPanelLayout> _savedShellPanelLayouts => _host.SavedShellPanelLayouts;
     private Dictionary<string, Dictionary<int, string>> _savedTaxiActorModelOverridesByMap => _host.SavedTaxiActorModelOverridesByMap;
     private ref int _selectedBuildOptionIndex => ref _host.SelectedBuildOptionIndex;
     private ref string _selectedDatasetVersionRoot => ref _host.SelectedDatasetVersionRoot;
-    private ref bool _showLeftSidebar => ref _host.ShowLeftSidebar;
     private ref bool _showMinimapWindow => ref _host.ShowMinimapWindow;
-    private ref bool _showRightSidebar => ref _host.ShowRightSidebar;
-    private ref bool _showWorkspaceBarsPanel => ref _host.ShowWorkspaceBarsPanel;
     private TerrainWeakSignalRestoreService _terrainWeakSignalRestore => _host.TerrainWeakSignalRestore;
     private ref bool _terrainWeakSignalRestoreAllLoadedTiles => ref _host.TerrainWeakSignalRestoreAllLoadedTiles;
     private ref float _terrainWeakSignalRestoreCandidateMaxHeight => ref _host.TerrainWeakSignalRestoreCandidateMaxHeight;
@@ -125,21 +110,16 @@ internal sealed class ViewerSettingsService
     private ref TextureFilteringMode _textureFilteringMode => ref _host.TextureFilteringMode;
     private ref float _uiFontScale => ref _host.UiFontScale;
     private ref UiThemeKind _uiTheme => ref _host.UiTheme;
-    private ref bool _useDockspaceUi => ref _host.UseDockspaceUi;
-    private ref bool _useTabUi => ref _host.UseTabUi;
     private ref int _videoCaptureContainerIndex => ref _host.VideoCaptureContainerIndex;
     private ref int _videoCaptureFps => ref _host.VideoCaptureFps;
     private ref bool _videoCaptureIncludeUi => ref _host.VideoCaptureIncludeUi;
     private ref string _videoEncoderExecutable => ref _host.VideoEncoderExecutable;
     private void ApplySavedPm4AlignmentToScene() => _host.ApplySavedPm4AlignmentToScene();
     private int FindBuildOptionIndex(string? buildVersion) => _host.FindBuildOptionIndex(buildVersion);
-    private void NormalizeWorkbenchStateAfterLoad() => _host.NormalizeWorkbenchStateAfterLoad();
     private void RefreshClientBuildOptions() => _host.RefreshClientBuildOptions();
     private void RefreshDatasetCatalog() => _host.RefreshDatasetCatalog();
 
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
-    private const int CurrentShellPanelLayoutVersion = 4;
-    private const int CurrentWorkbenchNavigationVersion = 4;
 
     internal void QueueForgetKnownGoodClientPath(KnownGoodClientPath knownClient)
     {
@@ -249,7 +229,7 @@ internal sealed class ViewerSettingsService
             _uiFontScale = float.IsFinite(settings.UiFontScale) && settings.UiFontScale > 0.5f
                 ? Math.Clamp(settings.UiFontScale, 0.75f, 2.5f)
                 : 1.0f;
-            if (ShellLayoutService.HasImGuiContext())
+            if (ViewerUiManager.HasImGuiContext())
             {
                 ImGui.GetIO().FontGlobalScale = _uiFontScale;
             }
@@ -260,9 +240,6 @@ internal sealed class ViewerSettingsService
                 ? Math.Clamp(settings.FovDegrees, 20f, 90f)
                 : 45f;
             _showMinimapWindow = settings.ShowMinimapWindow;
-            _useDockspaceUi = settings.ShellPanelLayoutVersion < CurrentShellPanelLayoutVersion
-                ? true
-                : settings.UseDockspaceUi;
 
             // 069 Phase 6: sticky archeology + tab system persistence
             _archeologyMinUniqueId = settings.ArcheologyMinUniqueId;
@@ -274,26 +251,7 @@ internal sealed class ViewerSettingsService
             _archeologyPlaybackLoop = settings.ArcheologyPlaybackLoop;
             _archeologyApplyToNextCapture = settings.ArcheologyApplyToNextCapture;
             _archeologyApplyToVideoRecording = settings.ArcheologyApplyToVideoRecording;
-            _useTabUi = settings.UseTabUi;
-            if (Enum.IsDefined(typeof(WorkbenchTab), settings.ActiveTopTab))
-                _activeTopTab = (WorkbenchTab)settings.ActiveTopTab;
-            else
-                _activeTopTab = WorkbenchTab.Quick;
-            _activeBottomTabIndex = Math.Max(0, settings.ActiveBottomTab);
-            if (_activeTopTab == WorkbenchTab.Editor
-                && settings.WorkbenchNavigationVersion < CurrentWorkbenchNavigationVersion)
-            {
-                // Spec 231: pre-231 Editor page indices remap onto the 4-page IA.
-                _activeBottomTabIndex = Workbench.Pages.EditorWorkbenchPages.MigrateLegacyEditorPageIndex(_activeBottomTabIndex);
-            }
-            _activeUtilitiesTabIndex = _activeTopTab == WorkbenchTab.Utilities
-                ? _activeBottomTabIndex
-                : 0;
-            if (_useTabUi)
-                NormalizeWorkbenchStateAfterLoad();
-            _showLeftSidebar = settings.ShowLeftSidebar;
-            _showRightSidebar = settings.ShowRightSidebar;
-            _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
+            // Legacy navigation/layout intentionally reset by ViewerUiManager.LoadLayout.
             _terrainWeakSignalRestoreEnabled = false;
             _terrainWeakSignalRestoreAllLoadedTiles = false;
             _terrainWeakSignalRestoreUseTextureSubdivisions = true;
@@ -308,15 +266,6 @@ internal sealed class ViewerSettingsService
                 ? TerrainWeakSignalRestoreService.ClampTerrainWeakSignalRestoreZ(settings.WeakSignalTerrainRestoreCandidateMaxHeight)
                 : TerrainWeakSignalRestoreDefaultMaxZ;
             _terrainWeakSignalRestore.GetTerrainWeakSignalRestoreCandidateRange(out _terrainWeakSignalRestoreCandidateMinHeight, out _terrainWeakSignalRestoreCandidateMaxHeight);
-            _leftSidebarWidth = float.IsFinite(settings.LeftSidebarWidth)
-                ? settings.LeftSidebarWidth
-                : DefaultSidebarWidth;
-            _rightSidebarWidth = float.IsFinite(settings.RightSidebarWidth)
-                ? settings.RightSidebarWidth
-                : DefaultRightSidebarWidth;
-            _bottomDrawerHeight = float.IsFinite(settings.BottomDrawerHeight)
-                ? settings.BottomDrawerHeight
-                : DefaultBottomDrawerHeight;
             _minimapZoom = float.IsFinite(settings.MinimapZoom)
                 ? Math.Clamp(settings.MinimapZoom, 1f, 32f)
                 : 4f;
@@ -361,10 +310,6 @@ internal sealed class ViewerSettingsService
             _pm4WmoMatchStore = new Pm4WmoMatchStore(AppContext.BaseDirectory);
             _pm4WmoMatchEntries = _pm4WmoMatchStore.Load();
 
-            // Load the human-curated PM4 object → model match store
-            _pm4ObjectMatchStore = new Pm4ObjectMatchStore(AppContext.BaseDirectory);
-            _pm4ObjectMatchEntries = _pm4ObjectMatchStore.Load();
-
                         _savedTaxiActorModelOverridesByMap.Clear();
                         if (settings.TaxiActorModelOverrides != null)
                         {
@@ -385,25 +330,6 @@ internal sealed class ViewerSettingsService
                                 }
 
                                 overridesByRoute[savedOverride.RouteId] = savedOverride.ModelPath.Trim().Replace('/', '\\');
-                            }
-                        }
-
-                        _savedPm4ObjectMatches.Clear();
-                        if (settings.Pm4ObjectMatchSelections != null)
-                        {
-                            foreach (SavedPm4ObjectMatchSelection selection in settings.Pm4ObjectMatchSelections)
-                            {
-                                if (selection == null
-                                    || string.IsNullOrWhiteSpace(selection.MapName)
-                                    || string.IsNullOrWhiteSpace(selection.PlacementKind)
-                                    || string.IsNullOrWhiteSpace(selection.ModelPath)
-                                    || selection.ObjectPartId < 0)
-                                {
-                                    continue;
-                                }
-
-                                string key = BuildSavedPm4ObjectMatchKey(selection.MapName, selection.TileX, selection.TileY, selection.Ck24, selection.ObjectPartId);
-                                _savedPm4ObjectMatches[key] = selection;
                             }
                         }
 
@@ -436,37 +362,6 @@ internal sealed class ViewerSettingsService
                                     Enabled = savedMap.Enabled,
                                     Filters = savedEntries,
                                 };
-                            }
-                        }
-
-                        _savedShellPanelLayouts.Clear();
-                        _pendingShellPanelLayoutRestore.Clear();
-                        _forceApplyShellPanelLayout = settings.ShellPanelLayoutVersion != CurrentShellPanelLayoutVersion;
-                        if (!_forceApplyShellPanelLayout && settings.ShellPanelLayouts != null)
-                        {
-                            foreach (SavedShellPanelLayout savedLayout in settings.ShellPanelLayouts)
-                            {
-                                if (!Enum.IsDefined(typeof(ShellPanelId), savedLayout.PanelId))
-                                    continue;
-
-                                if (!float.IsFinite(savedLayout.NormalizedX)
-                                    || !float.IsFinite(savedLayout.NormalizedY)
-                                    || !float.IsFinite(savedLayout.NormalizedWidth)
-                                    || !float.IsFinite(savedLayout.NormalizedHeight))
-                                {
-                                    continue;
-                                }
-
-                                var panelId = (ShellPanelId)savedLayout.PanelId;
-                                _savedShellPanelLayouts[panelId] = new SavedShellPanelLayout
-                                {
-                                    PanelId = savedLayout.PanelId,
-                                    NormalizedX = Math.Clamp(savedLayout.NormalizedX, 0f, 0.95f),
-                                    NormalizedY = Math.Clamp(savedLayout.NormalizedY, 0f, 0.95f),
-                                    NormalizedWidth = Math.Clamp(savedLayout.NormalizedWidth, 0.12f, 1f),
-                                    NormalizedHeight = Math.Clamp(savedLayout.NormalizedHeight, 0.12f, 1f),
-                                };
-                                _pendingShellPanelLayoutRestore.Add(panelId);
                             }
                         }
 
@@ -527,10 +422,6 @@ internal sealed class ViewerSettingsService
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 UiFontScale = _uiFontScale,
                 ShowMinimapWindow = _showMinimapWindow,
-                UseDockspaceUi = _useDockspaceUi,
-                ShowLeftSidebar = _showLeftSidebar,
-                ShowRightSidebar = _showRightSidebar,
-                ShowWorkspaceBarsPanel = _showWorkspaceBarsPanel,
                 ShowBottomDrawer = false,
                 EnableWeakSignalTerrainRestore = false,
                 EnableWeakSignalTerrainRestoreAllLoadedTiles = false,
@@ -541,9 +432,6 @@ internal sealed class ViewerSettingsService
                 WeakSignalTerrainRestoreManualFactor = _terrainWeakSignalRestoreManualFactor,
                 WeakSignalTerrainRestoreCandidateMinHeight = _terrainWeakSignalRestoreCandidateMinHeight,
                 WeakSignalTerrainRestoreCandidateMaxHeight = _terrainWeakSignalRestoreCandidateMaxHeight,
-                LeftSidebarWidth = _leftSidebarWidth,
-                RightSidebarWidth = _rightSidebarWidth,
-                BottomDrawerHeight = _bottomDrawerHeight,
                 MinimapZoom = _minimapZoom,
                 MinimapPanOffsetX = _minimapPanOffset.X,
                 MinimapPanOffsetY = _minimapPanOffset.Y,
@@ -574,13 +462,6 @@ internal sealed class ViewerSettingsService
                             ModelPath = routeEntry.Value
                         }))
                     .ToList(),
-                Pm4ObjectMatchSelections = _savedPm4ObjectMatches.Values
-                    .OrderBy(selection => selection.MapName, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(selection => selection.TileX)
-                    .ThenBy(selection => selection.TileY)
-                    .ThenBy(selection => selection.Ck24)
-                    .ThenBy(selection => selection.ObjectPartId)
-                    .ToList(),
                 ObjectPathFilters = _savedObjectPathFiltersByMap.Values
                     .OrderBy(entry => entry.MapName, StringComparer.OrdinalIgnoreCase)
                     .Select(entry => new SavedObjectPathFilterMap
@@ -598,28 +479,13 @@ internal sealed class ViewerSettingsService
                             .ToList(),
                     })
                     .ToList(),
-                ShellPanelLayouts = _savedShellPanelLayouts.Values
-                    .OrderBy(layout => layout.PanelId)
-                    .Select(layout => new SavedShellPanelLayout
-                    {
-                        PanelId = layout.PanelId,
-                        NormalizedX = layout.NormalizedX,
-                        NormalizedY = layout.NormalizedY,
-                        NormalizedWidth = layout.NormalizedWidth,
-                        NormalizedHeight = layout.NormalizedHeight,
-                    })
-                    .ToList(),
                 ArcheologyMinUniqueId = _archeologyMinUniqueId,
                 ArcheologyMaxUniqueId = _archeologyMaxUniqueId,
                 ArcheologyScopeIndex = _archeologyScopeIndex,
                 ArcheologyPlaybackSpeed = _archeologyPlaybackSpeed,
                 ArcheologyPlaybackLoop = _archeologyPlaybackLoop,
                 ArcheologyApplyToNextCapture = _archeologyApplyToNextCapture,
-                ArcheologyApplyToVideoRecording = _archeologyApplyToVideoRecording,
-                UseTabUi = _useTabUi,
-                WorkbenchNavigationVersion = CurrentWorkbenchNavigationVersion,
-                ActiveTopTab = (int)_activeTopTab,
-                ActiveBottomTab = _activeBottomTabIndex
+                ArcheologyApplyToVideoRecording = _archeologyApplyToVideoRecording
             };
 
             string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
@@ -708,7 +574,6 @@ internal sealed class ViewerSettingsService
         public bool EnableTerrainBackfaceCulling { get; set; } = true;
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
         public bool ShowMinimapWindow { get; set; } = true;
-        public bool UseDockspaceUi { get; set; }
         public bool ShowLeftSidebar { get; set; } = true;
         public bool ShowRightSidebar { get; set; } = true;
         public bool ShowWorkspaceBarsPanel { get; set; } = true;
@@ -722,7 +587,6 @@ internal sealed class ViewerSettingsService
         public float WeakSignalTerrainRestoreManualFactor { get; set; } = 16f;
         public float WeakSignalTerrainRestoreCandidateMinHeight { get; set; } = TerrainWeakSignalRestoreDefaultMinZ;
         public float WeakSignalTerrainRestoreCandidateMaxHeight { get; set; } = TerrainWeakSignalRestoreDefaultMaxZ;
-        public int ShellPanelLayoutVersion { get; set; } = CurrentShellPanelLayoutVersion;
         public float LeftSidebarWidth { get; set; } = DefaultSidebarWidth;
         public float RightSidebarWidth { get; set; } = DefaultRightSidebarWidth;
         public float BottomDrawerHeight { get; set; } = DefaultBottomDrawerHeight;
@@ -746,9 +610,7 @@ internal sealed class ViewerSettingsService
         public float Pm4ScaleZ { get; set; } = 1f;
         public float Pm4YawDegrees { get; set; }
         public List<SavedTaxiActorOverride> TaxiActorModelOverrides { get; set; } = new();
-        public List<SavedPm4ObjectMatchSelection> Pm4ObjectMatchSelections { get; set; } = new();
         public List<SavedObjectPathFilterMap> ObjectPathFilters { get; set; } = new();
-        public List<SavedShellPanelLayout> ShellPanelLayouts { get; set; } = new();
 
         // 069 Phase 6: sticky archeology settings
         public int ArcheologyMinUniqueId { get; set; } = -1;
@@ -762,10 +624,6 @@ internal sealed class ViewerSettingsService
         public bool ArcheologyApplyToVideoRecording { get; set; }
 
         // 069 tab system persistence
-        public bool UseTabUi { get; set; } = true;
-        public int WorkbenchNavigationVersion { get; set; }
-        public int ActiveTopTab { get; set; }
-        public int ActiveBottomTab { get; set; }
 
         // Global fog defaults
         public float DefaultFogStart { get; set; } = 200f;

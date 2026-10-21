@@ -55,7 +55,6 @@ namespace WoWViewer;
 internal sealed partial class NavigatorPanelService
 {
     // Host bridge (same names as the former ViewerApp members).
-    private ref bool _autoOpenWorldMapsPanel => ref _host.AutoOpenWorldMapsPanel;
     private ref Camera _camera => ref _host.Camera;
     private CascAhdrSourceService _cascAhdrSource => _host.CascAhdrSource;
     private ref string _currentAreaName => ref _host.CurrentAreaName;
@@ -64,41 +63,21 @@ internal sealed partial class NavigatorPanelService
     private ref List<MapDefinition> _discoveredMaps => ref _host.DiscoveredMaps;
     private ref string _extensionFilter => ref _host.ExtensionFilter;
     private ref List<string> _filteredFiles => ref _host.FilteredFiles;
-    private ref bool _fullscreenMinimap => ref _host.FullscreenMinimap;
-    private ref float _leftSidebarWidth => ref _host.LeftSidebarWidth;
     private ref string? _loadedFileName => ref _host.LoadedFileName;
     private ref string? _loadedFilePath => ref _host.LoadedFilePath;
     private ref MapListSortMode _mapListSortMode => ref _host.MapListSortMode;
-    private ref MinimapRenderer? _minimapRenderer => ref _host.MinimapRenderer;
     private StandaloneModelLoaderService _modelLoader => _host.ModelLoader;
-    private ref int _pendingMinimapTeleportClickCount => ref _host.PendingMinimapTeleportClickCount;
-    private ref (int tileX, int tileY)? _pendingMinimapTeleportTile => ref _host.PendingMinimapTeleportTile;
     private ref string _searchFilter => ref _host.SearchFilter;
     private ref int _selectedFileIndex => ref _host.SelectedFileIndex;
-    private ShellLayoutService _shellLayout => _host.ShellLayout;
-    private ref bool _showFileBrowser => ref _host.ShowFileBrowser;
-    private ref bool _showLeftSidebar => ref _host.ShowLeftSidebar;
-    private ref bool _showMinimapWindow => ref _host.ShowMinimapWindow;
     private ref string _statusMessage => ref _host.StatusMessage;
     private TaxiAndAreaPoiSelectionService _taxiAndAreaPoi => _host.TaxiAndAreaPoi;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
-    private ref bool _useDockspaceUi => ref _host.UseDockspaceUi;
-    private ref bool _useTabUi => ref _host.UseTabUi;
     private ref VlmTerrainManager? _vlmTerrainManager => ref _host.VlmTerrainManager;
     private WdlPreviewService _wdlPreview => _host.WdlPreview;
     private ref WdlPreviewCacheService? _wdlPreviewCacheService => ref _host.WdlPreviewCacheService;
     private WorldLoaderService _worldLoader => _host.WorldLoader;
     private ref WorldScene? _worldScene => ref _host.WorldScene;
-    private float ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth) => _host.ClampFixedSidebarWidth(width, isLeftSidebar, displayWidth);
-    private void ClampMinimapPanOffset() => _host.ClampMinimapPanOffset();
     private void ClearSelectedWlLiquidBody(bool clearListIsolation) => _host.ClearSelectedWlLiquidBody(clearListIsolation);
-    private void DrawDockedShellPanelsForLane(ShellPanelLane lane, float sidebarHeight) => _host.DrawDockedShellPanelsForLane(lane, sidebarHeight);
-    private void DrawFixedSidebarWidthControl(string label, ref float width, bool isLeftSidebar, float displayWidth, string tooltip) => _host.DrawFixedSidebarWidthControl(label, ref width, isLeftSidebar, displayWidth, tooltip);
-    private void DrawInteractiveMinimapSurface(string interactionId, Vector2 cursorPos, float mapSize, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded, string? mapName, MinimapTeleportMode teleportMode, out float viewMinTx, out float viewMinTy, out float cellSize) => _host.DrawInteractiveMinimapSurface(interactionId, cursorPos, mapSize, existingTiles, isTileLoaded, mapName, teleportMode, out viewMinTx, out viewMinTy, out cellSize);
     private void DrawMapSortModeSelector(string id) => _host.DrawMapSortModeSelector(id);
-    private void DrawWorkspaceBarsPanelContent() => _host.DrawWorkspaceBarsPanelContent();
-    private float GetTopChromeHeight() => _host.GetTopChromeHeight();
     private void RefreshSelectedWorldObjectInfo() => _host.RefreshSelectedWorldObjectInfo();
-    private void ToggleFullscreenMinimap() => _host.ToggleFullscreenMinimap();
-    private bool TryGetActiveMinimapState(out List<(int tx, int ty)>? existingTiles, out Func<int, int, bool>? isTileLoaded, out int loadedTileCount, out string? mapName) => _host.TryGetActiveMinimapState(out existingTiles, out isTileLoaded, out loadedTileCount, out mapName);
 }

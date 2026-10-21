@@ -34,6 +34,7 @@ using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;
 using WoWViewer.Workbench;
+using WoWViewer.UI;
 using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
 using CoreMdxGeometryFile = WowViewer.Core.Mdx.MdxGeometryFile;
 using CoreMdxSummary = WowViewer.Core.Mdx.MdxSummary;
@@ -122,17 +123,10 @@ internal sealed partial class NavigatorPanelService
         }
 
         ImGui.Text(label);
-        if (ImGui.SmallButton($"Copy Path##{idSuffix}"))
-            CopyTextToClipboard(normalizedPath, "asset path");
-
-        ImGui.SameLine();
         bool canLoad = CanLoadAssetFromDataSource(normalizedPath);
-        if (!canLoad)
-            ImGui.BeginDisabled();
-        if (ImGui.SmallButton($"Load Asset##{idSuffix}"))
-            _modelLoader.LoadFileFromDataSource(normalizedPath);
-        if (!canLoad)
-            ImGui.EndDisabled();
+        SharedUiWidgets.DrawButtonRow(
+            SharedUiWidgets.Btn($"Copy Path##{idSuffix}", () => CopyTextToClipboard(normalizedPath, "asset path"), small: true),
+            SharedUiWidgets.Btn($"Load Asset##{idSuffix}", () => _modelLoader.LoadFileFromDataSource(normalizedPath), enabled: canLoad, small: true));
 
         ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 520f);
         ImGui.TextDisabled(normalizedPath);

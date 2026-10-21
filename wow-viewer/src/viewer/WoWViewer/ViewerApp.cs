@@ -56,7 +56,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     {
         Overlay,
         Selection,
-        Correlation,
     }
 
     internal enum WorkspaceMode
@@ -66,28 +65,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         Archaeology,
     }
 
-    [Obsolete("Shell panel system deprecated in 069. Use tab system (View > Tab System). Will be removed in 070.")]
-    internal enum ShellPanelId
-    {
-        Navigator,
-        Inspector,
-        Pm4Workbench,
-        TerrainControls,
-        RuntimeStats,
-        WorldObjects,
-        ModelInfo,
-        Minimap,
-        WorkspaceBars,
-        Pm4Info,
-        Pm4SceneGraph,
-    }
 
-    internal enum ShellPanelLane
-    {
-        Left,
-        Right,
-        Floating,
-    }
 
     internal enum EditorWorkspaceTask
     {
@@ -98,32 +76,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         Publish,
     }
 
-    internal enum FixedBottomDrawerTab
-    {
-        Workspace,
-        Terrain,
-        Pm4,
-        World,
-        Diagnostics,
-    }
 
-    internal readonly record struct ShellPanelDefinition(
-        ShellPanelId Id,
-        string WindowName,
-        ShellPanelLane Lane,
-        float DefaultWidth,
-        float MinWidth,
-        float CompactMinWidth,
-        float MaxWidth);
 
-    internal sealed class SavedShellPanelLayout
-    {
-        public int PanelId { get; set; }
-        public float NormalizedX { get; set; }
-        public float NormalizedY { get; set; }
-        public float NormalizedWidth { get; set; }
-        public float NormalizedHeight { get; set; }
-    }
 
     private const string ViewerProductTitle = "WoWViewer";
     internal static readonly string ViewerDisplayVersion = GetViewerDisplayVersion();
@@ -231,28 +185,20 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private float _pendingSceneMouseWheelDelta;
 
     // UI state
-    private bool _showFileBrowser = true;
     private bool _showModelInfo = true;
-    private bool _showWorkspaceBarsPanel = true;
     private bool _hideUiChrome;
     private bool _showLogViewer = false;
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
     private WorkspaceMode _workspaceMode = WorkspaceMode.Viewer;
     private EditorWorkspaceTask _editorWorkspaceTask = EditorWorkspaceTask.Terrain;
-    private FixedBottomDrawerTab _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
-    private FixedBottomDrawerTab? _pendingRightSidebarSection;
-    private bool _useDockspaceUi = true;
 
     // 069 Phase 1: tab system state. On by default; can toggle off via View > Legacy Sidebar UI.
-    private bool _useTabUi = true;
-    private WorkbenchTab _activeTopTab = WorkbenchTab.Quick;
+    private WorkbenchTab _activeTopTab = WorkbenchTab.Viewer;
     private int _activeBottomTabIndex = 0;
-    private int _activeUtilitiesTabIndex = 0;
     private int _activePm4TabIndex = 0;
 
     // Workbench popout (069 Phase 14: single resizable panel, no window sprawl)
-    private bool _workbenchOpen = true;
 
     // 069 Phase 6: sticky archeology settings (persist across viewer restarts).
     private int _archeologyMinUniqueId = -1; // -1 = unset (use first detected value)
@@ -268,8 +214,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool _archeologyApplyToNextCapture = false;
     private bool _archeologyApplyToVideoRecording = false;
     private bool _autoOpenWorldMapsPanel;
-    private Vector2 _dockspaceHostPosition;
-    private Vector2 _dockspaceHostSize;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantExportGlb = false;
@@ -280,23 +224,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private string? _selectedPlacementSaveTargetPath;
     private string _selectedPlacementSaveStatus = "Select a tile-backed world object to stage a translation-only save.";
 
-    internal static readonly ShellPanelDefinition[] ShellPanelDefinitions =
-    {
-        new(ShellPanelId.Navigator, "Navigator", ShellPanelLane.Left, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
-        new(ShellPanelId.Inspector, "Selection", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
-        new(ShellPanelId.Pm4Workbench, "PM4 Workbench", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
-        new(ShellPanelId.TerrainControls, "Terrain Controls", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
-        new(ShellPanelId.RuntimeStats, "Runtime Stats", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
-        new(ShellPanelId.WorldObjects, "World Objects", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
-        new(ShellPanelId.ModelInfo, "Model Info", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
-        new(ShellPanelId.Minimap, "Minimap", ShellPanelLane.Floating, 360f, 300f, 260f, 520f),
-        new(ShellPanelId.WorkspaceBars, "Workspace Bars", ShellPanelLane.Left, 360f, 280f, 240f, 520f),
-        new(ShellPanelId.Pm4Info, "PM4 Info", ShellPanelLane.Right, 400f, 280f, 200f, SidebarMaxWidth),
-        new(ShellPanelId.Pm4SceneGraph, "PM4 Scene Graph", ShellPanelLane.Right, 420f, 300f, 220f, SidebarMaxWidth),
-    };
-    private readonly Dictionary<ShellPanelId, SavedShellPanelLayout> _savedShellPanelLayouts = new();
-    private readonly HashSet<ShellPanelId> _pendingShellPanelLayoutRestore = new();
-    private bool _forceApplyShellPanelLayout;
 
     internal enum TerrainTileScope
     {
@@ -464,7 +391,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
     private float GetTopChromeHeight()
     {
-        return MenuBarHeight + GetActiveToolbarHeight();
+        return _hideUiChrome ? 0f : 28f;
     }
 
     private bool IsBottomDrawerVisible()
@@ -505,20 +432,12 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private Vector3 _pm4SavedOverlayTranslation = Vector3.Zero;
     private Vector3 _pm4SavedOverlayRotationDegrees = Vector3.Zero;
     private Vector3 _pm4SavedOverlayScale = Vector3.One;
-    private ShellPanelId? _pendingFocusedShellPanel;
     private Pm4ObjectMatchObject? _hoveredPm4ObjectMatch;
     private (int tileX, int tileY, uint ck24, int objectPart)? _hoveredPm4ObjectMatchKey;
     private int _hoveredPm4ObjectMatchCacheMaxMatches = -1;
     private int _pm4ObjectMatchMaxMatchesPerObject = 5;
-    private readonly Dictionary<string, SavedPm4ObjectMatchSelection> _savedPm4ObjectMatches = new(StringComparer.OrdinalIgnoreCase);
-    private Pm4ObjectMatchStore? _pm4ObjectMatchStore;
-    private Dictionary<string, Pm4ObjectMatchEntry> _pm4ObjectMatchEntries = new(StringComparer.OrdinalIgnoreCase);
     private Pm4WmoMatchStore? _pm4WmoMatchStore;
     private Dictionary<string, Pm4WmoMatchEntry> _pm4WmoMatchEntries = new(StringComparer.OrdinalIgnoreCase);
-    private bool _showCaptureAutomationWindow = false;
-    private bool _showCameraPathWindow;
-    private bool _showUniqueIdArchaeologyWindow;
-    private bool _showWeakSignalWindow;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -600,7 +519,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly SqlSpawnStreamingService _sqlSpawnStreaming;
     private readonly TaxiAndAreaPoiSelectionService _taxiAndAreaPoi;
     private readonly SceneHoverAndPickService _sceneHoverPick;
-    private readonly ShellLayoutService _shellLayout;
+    private readonly ViewerUiManager _uiManager;
     private readonly WdlPreviewService _wdlPreview;
     private readonly AreaContextService _areaContext;
     private readonly StandaloneModelLoaderService _modelLoader;
@@ -659,7 +578,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _sqlSpawnStreaming = new SqlSpawnStreamingService(this);
         _taxiAndAreaPoi = new TaxiAndAreaPoiSelectionService(this);
         _sceneHoverPick = new SceneHoverAndPickService(this);
-        _shellLayout = new ShellLayoutService(this);
+        _uiManager = new ViewerUiManager(this);
         _wdlPreview = new WdlPreviewService(this);
         _areaContext = new AreaContextService(this);
         _modelLoader = new StandaloneModelLoaderService(this);
@@ -732,8 +651,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _gl = _window.CreateOpenGL();
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
-        _shellLayout.SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
-        ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.DockingEnable;
+        _uiManager.SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
+        ImGui.GetIO().ConfigFlags &= ~ImGuiConfigFlags.DockingEnable;
 
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
@@ -746,6 +665,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
         _sqlSpawnStreaming.TryAutoPopulateAlphaCoreRoot();
         _settings.LoadViewerSettings();
+        _uiManager.LoadLayout(_window.Size.X);
         _themes.ApplyActiveUiTheme();
         _captureAutomation.LoadCameraShotPoints();
         _renderQuality.DetectRenderQualityCapabilities();
@@ -756,11 +676,11 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         {
             mouse.MouseDown += (_, btn) =>
             {
-                _shellLayout.QueueImGuiMouseButtonEvent(btn, down: true);
+                _uiManager.QueueImGuiMouseButtonEvent(btn, down: true);
 
-                if (btn == MouseButton.Right && _shellLayout.CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
+                if (btn == MouseButton.Right && _uiManager.CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
                     _mouseDown = true;
-                if (btn == MouseButton.Left && _shellLayout.CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
+                if (btn == MouseButton.Left && _uiManager.CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
                 {
                     bool shift = ImGui.GetIO().KeyShift;
                     var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
@@ -789,7 +709,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             };
             mouse.MouseUp += (_, btn) =>
             {
-                _shellLayout.QueueImGuiMouseButtonEvent(btn, down: false);
+                _uiManager.QueueImGuiMouseButtonEvent(btn, down: false);
 
                 if (btn == MouseButton.Right) _mouseDown = false;
             };
@@ -800,7 +720,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                 _lastMouseX = pos.X;
                 _lastMouseY = pos.Y;
 
-                if (_mouseDown && !_shellLayout.IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY))
+                if (_mouseDown && !_uiManager.IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY))
                 {
                     if (_captureAutomation._taxiRideCameraEnabled)
                     {
@@ -825,10 +745,17 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
     private void OnUpdate(double dt)
     {
-        _shellLayout.SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
+        _uiManager.SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
+        // The cursor renderer is constructed before any client is opened, so it starts with a null
+        // data source. Re-point it every frame; SetDataSource early-outs when the reference is
+        // unchanged, and a real change drops the cached cursor model so it re-resolves from the
+        // newly opened client instead of staying on the procedural fallback forever.
+        _sceneCursorRenderer?.SetDataSource(_dataSource, _texResolver);
         _imGui.Update((float)dt);
-        _shellLayout.FlushPendingImGuiMouseButtonEvents();
+        _uiManager.FlushPendingImGuiMouseButtonEvents();
         HandleSceneMouseWheelInput();
+        // Chrome shortcuts are handled in HandleKeyboardInput from the Silk keyboard; the
+        // viewer does not feed key events to ImGui, so the ImGui-based path is not used.
         HandleKeyboardInput((float)dt);
         _cameraPaths.UpdateCameraPathPlayback(dt);
         _cameraPaths.UpdateCameraPathPreload();
@@ -856,6 +783,9 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     }
 
     private bool _mKeyWasPressed = false;
+    private bool _leftBracketWasPressed = false;
+    private bool _rightBracketWasPressed = false;
+    private bool _f1WasPressed = false;
     private bool _pKeyWasPressed = false;
     private bool _iKeyWasPressed = false;
     private bool _tabKeyWasPressed = false;
@@ -872,7 +802,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         float scrollDelta = _pendingSceneMouseWheelDelta;
         _pendingSceneMouseWheelDelta = 0f;
 
-        if (!_shellLayout.CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
+        if (!_uiManager.CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
             return;
 
         _camera.Move(5f * scrollDelta, 0f, 0f, 1f);
@@ -886,7 +816,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private bool IsSceneKeyboardCaptureBlocked()
     {
         ImGuiIOPtr io = ImGui.GetIO();
-        return io.WantCaptureKeyboard || io.WantTextInput;
+        return _uiManager.IsSceneKeyboardCaptureBlocked();
     }
 
     private void HandleKeyboardInput(float dt)
@@ -920,8 +850,21 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
         bool tabPressed = kb.IsKeyPressed(Key.Tab);
         if (canSceneConsumeKeyboard && tabPressed && !_tabKeyWasPressed)
-            _hideUiChrome = !_hideUiChrome;
+            _uiManager.ToggleChrome();
         _tabKeyWasPressed = tabPressed;
+
+        // Chrome shortcuts are read from the Silk keyboard: the viewer does not feed key
+        // events to ImGui, so ImGui.IsKeyPressed never fires for them.
+        if (canSceneConsumeKeyboard)
+        {
+            if (kb.IsKeyPressed(Key.LeftBracket) && !_leftBracketWasPressed) _uiManager.ToggleLeftSidebar();
+            if (kb.IsKeyPressed(Key.RightBracket) && !_rightBracketWasPressed) _uiManager.ToggleRightSidebar();
+            if (kb.IsKeyPressed(Key.M) && !_mKeyWasPressed) _uiManager.ToggleMinimap();
+            if (kb.IsKeyPressed(Key.F1) && !_f1WasPressed) _uiManager.RequestKeyboardShortcuts();
+        }
+        _leftBracketWasPressed = kb.IsKeyPressed(Key.LeftBracket);
+        _rightBracketWasPressed = kb.IsKeyPressed(Key.RightBracket);
+        _f1WasPressed = kb.IsKeyPressed(Key.F1);
 
         bool escPressed = kb.IsKeyPressed(Key.Escape);
         if (canSceneConsumeKeyboard && escPressed && !_escKeyWasPressed)
@@ -950,9 +893,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         if (canSceneConsumeKeyboard && pPressed && !_pKeyWasPressed)
         {
             _showRightSidebar = true;
-            _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
-            if (_workspaceMode == WorkspaceMode.Editor)
-                _workspaces.SetEditorWorkspaceTask(EditorWorkspaceTask.Pm4Evidence);
+            _uiManager.OpenViewer(ViewerPanel.PM4);
         }
         _pKeyWasPressed = pPressed;
 
@@ -961,12 +902,13 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         {
             _showRightSidebar = !_showRightSidebar;
             if (_showRightSidebar)
-                _shellLayout.FocusShellPanel(ShellPanelId.Inspector);
+                _uiManager.OpenViewer(ViewerPanel.Inspector);
         }
         _iKeyWasPressed = iPressed;
 
-        // M key toggles fullscreen minimap (only when terrain is loaded)
-        bool mPressed = kb.IsKeyPressed(Key.M);
+        // M is owned by the UI manager (it toggles the minimap instrument). The fullscreen
+        // minimap keeps its own key so one key never has two meanings.
+        bool mPressed = kb.IsKeyPressed(Key.F);
         if (canSceneConsumeKeyboard && mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
             _minimapAndStatus.ToggleFullscreenMinimap();
         _mKeyWasPressed = mPressed;
@@ -1084,13 +1026,13 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
         // Render 3D scene first (always set up viewport and 3D scene cursor even on startup when _renderer is null)
         var size = _window.Size;
-        bool hasSceneViewportRect = _shellLayout.TryGetSceneViewportRect(out float sceneViewportX, out float sceneViewportY, out float sceneViewportWidth, out float sceneViewportHeight);
+        bool hasSceneViewportRect = _uiManager.TryGetSceneViewportRect(out float sceneViewportX, out float sceneViewportY, out float sceneViewportWidth, out float sceneViewportHeight);
         int sceneFramebufferX = 0;
         int sceneFramebufferY = 0;
         uint sceneFramebufferWidth = 0;
         uint sceneFramebufferHeight = 0;
         bool hasSceneViewport = hasSceneViewportRect
-            && _shellLayout.TryGetSceneFramebufferViewport(out sceneFramebufferX, out sceneFramebufferY, out sceneFramebufferWidth, out sceneFramebufferHeight);
+            && _uiManager.TryGetSceneFramebufferViewport(out sceneFramebufferX, out sceneFramebufferY, out sceneFramebufferWidth, out sceneFramebufferHeight);
         if (hasSceneViewport)
             _gl.Viewport(sceneFramebufferX, sceneFramebufferY, sceneFramebufferWidth, sceneFramebufferHeight);
         else
@@ -1116,10 +1058,14 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             else if (_vlmTerrainManager != null)
                 _vlmTerrainManager.UpdateAOI(_camera.Position);
 
-            if (_worldScene != null)
+            // Hover picking only runs while the pointer is over the viewport. Running it while
+            // the pointer is over a sidebar made the Inspector content collapse to "nothing
+            // selected", which moved the controls under the cursor and lost the hover every frame.
+            bool pointerOverScene = _uiManager.CanSceneConsumeMouse(_lastMouseX, _lastMouseY);
+            if (_worldScene != null && pointerOverScene)
                 _sceneHoverPick.UpdateWorldSceneWireframeReveal(view, proj);
 
-            if (_worldScene != null)
+            if (_worldScene != null && pointerOverScene)
                 _sceneHoverPick.UpdateWorldSceneHoveredAssetInfo(view, proj);
 
             // Update native-style ZoneText/SubzoneText from the resident chunk metadata under the
@@ -1221,11 +1167,11 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         // Render ImGui overlay when the native ImGui context is live. Startup capture and
         // teardown can briefly produce frames where the controller still exists but the
         // underlying context is not available.
-        if (ShellLayoutService.HasImGuiContext())
+        if (ViewerUiManager.HasImGuiContext())
         {
             bool hideHardwareCursor = _sceneCursorRenderer != null
                 && _sceneCursorRenderer.Style != CursorStyle.ClassicOSArrow
-                && _shellLayout.CanSceneConsumeMouse(_lastMouseX, _lastMouseY);
+                && _uiManager.CanSceneConsumeMouse(_lastMouseX, _lastMouseY);
 
             if (hideHardwareCursor)
             {
@@ -1357,118 +1303,16 @@ void main() {
 
     private void DrawUI()
     {
-        if (!ShellLayoutService.HasImGuiContext())
+        if (!ViewerUiManager.HasImGuiContext())
             return;
 
-        _shellLayout.UpdateShellLayout(ImGui.GetIO().DisplaySize);
-
-        _shellLayout.ResetDockPanelStates();
-
-        // Clear the host rect whenever DrawDockspaceHost will not run this frame - which includes
-        // tab UI mode, not just the chrome/dockspace toggles. A stale non-zero rect makes
-        // ShouldBypassDockspaceMouseCapture claim the mouse for the scene across the whole viewport
-        // rect, defeating ImGui's own capture for any floating window drawn over it: clicks meant
-        // for that window also fire scene picking, and the hardware cursor is hidden over it.
-        if (_hideUiChrome || !_useDockspaceUi || _useTabUi)
-        {
-            _dockspaceHostPosition = Vector2.Zero;
-            _dockspaceHostSize = Vector2.Zero;
-        }
-
-        if (!_hideUiChrome)
-        {
-            _mainMenuBar.DrawMenuBar();
-
-            // 069 Phase 1: tab system. Off by default; old sidebars still active.
-            // When enabled, replaces DrawDockspaceHost + DrawLeftSidebar + DrawRightSidebar
-            // with top tab bar + bottom tab bar + central content area.
-            if (_useTabUi)
-            {
-                // 071: left sidebar + right workbench squeeze the 3D viewport.
-                _navigatorPanel.DrawLeftSidebar();
-                _workbenchPanels.DrawRightSidebar();
-            }
-            else if (_useDockspaceUi)
-            {
-                DrawDockspaceHost();
-            }
-
-            if (!_useTabUi)
-            {
-                if (_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Left))
-                    _navigatorPanel.DrawLegacyLeftSidebar();
-                if (_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Right))
-                    _workbenchPanels.DrawLegacyRightSidebar();
-            }
-
-            _viewerChrome.DrawFixedSidebarSplitters();
-
-            // Toolbar is drawn after sidebars so it stays on top of any edge overlap.
-            _viewerChrome.DrawToolbar();
-
-            _viewerChrome.DrawBottomBar();
-
-            _minimapAndStatus.DrawStatusBar();
-
-            // Floating windows: when tab system is active, only the tools that
-            // aren't yet routed into a sub-tab render as floating windows.
-            // Phase 2 routes Scene + Utilities; later phases route the rest.
-            if (_useTabUi)
-            {
-                if (_showWdlPreview)
-                    _wdlPreview.DrawWdlPreviewDialog();
-                // All other tools are routed into tab sub-tabs. The
-                // _show*Window flags still exist for users who want the
-                // legacy window, but tab system renders its own sub-tab body.
-            }
-            else
-            {
-                // Asset Catalog (floating window)
-                _catalogView?.Draw();
-
-                // Log Viewer (floating window) - legacy mode only; tabbed mode uses Utilities > Log
-                if (_showLogViewer && !_useTabUi)
-                    _logViewer.DrawLogViewer();
-
-                // WDL Preview (floating window)
-                if (_showWdlPreview)
-                    _wdlPreview.DrawWdlPreviewDialog();
-
-                // Minimap panel
-                if (_shellLayout.IsShellPanelActive(ShellPanelId.Minimap) && !_fullscreenMinimap)
-                    _minimapAndStatus.DrawMinimapWindow();
-
-                // Perf (floating window) - legacy mode only; tabbed mode uses Utilities > Perf
-                if (_showPerfWindow && !_useTabUi)
-                    _perfPanel.DrawPerfWindow();
-
-                if (_showCaptureAutomationWindow)
-                    _captureAutomation.DrawCaptureAutomationWindow();
-
-                if (_showCameraPathWindow)
-                    _cameraPaths.DrawCameraPathWindow();
-
-                // Tool windows extracted from right sidebar
-                if (_showUniqueIdArchaeologyWindow && _worldScene != null)
-                    _archaeologyPanel.DrawUniqueIdArchaeologyWindow();
-
-            }
-
-            // Settings (global configuration window) - must render in BOTH tabbed and legacy modes
-            if (_settingsWindow._showSettingsWindow)
-                _settingsWindow.DrawSettingsWindow();
-
-            if (!_useTabUi && _showWeakSignalWindow && (_terrainManager != null || _vlmTerrainManager != null))
-                _terrainControlsPanel.DrawWeakSignalWindow();
-
-        }
+        _uiManager.Draw();
 
         if (_recordingCoordinator.ActiveTourPresentation is FeatureTourPresentation presentation)
             PromoTourOverlayRenderer.Draw(presentation);
 
         _showreelOverlay.Draw();
 
-        _forceApplyShellPanelLayout = false;
 
         // Fullscreen minimap overlay (M key toggle)
         if (_fullscreenMinimap && (_worldScene != null || _vlmTerrainManager != null))
@@ -1507,45 +1351,10 @@ void main() {
         _sceneHoverPick.DrawSceneHoverAssetOverlay();
         _sceneHoverPick.DrawClickSelectionOverlay();
         _sceneHoverPick.DrawSelectedEntityNameplate();
-        _sqlSpawnStreaming.DrawChatOverlay(ImGui.GetIO().DisplaySize);
 
         _autoOpenWorldMapsPanel = false;
     }
 
-    private void DrawDockspaceHost()
-    {
-        var io = ImGui.GetIO();
-        float topOffset = GetTopChromeHeight();
-        float dockHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
-        if (dockHeight <= 10f)
-            return;
-
-        _dockspaceHostPosition = new Vector2(0f, topOffset);
-        _dockspaceHostSize = new Vector2(io.DisplaySize.X, dockHeight);
-
-        ImGui.SetNextWindowPos(_dockspaceHostPosition, ImGuiCond.Always);
-        ImGui.SetNextWindowSize(_dockspaceHostSize, ImGuiCond.Always);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
-
-        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar
-            | ImGuiWindowFlags.NoCollapse
-            | ImGuiWindowFlags.NoResize
-            | ImGuiWindowFlags.NoMove
-            | ImGuiWindowFlags.NoBringToFrontOnFocus
-            | ImGuiWindowFlags.NoNavFocus
-            | ImGuiWindowFlags.NoBackground;
-
-        if (ImGui.Begin("##MainDockspaceHost", flags))
-        {
-            uint dockspaceId = ImGui.GetID("MainDockspace");
-            ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
-        }
-
-        ImGui.End();
-        ImGui.PopStyleVar(3);
-    }
 
     private void RefreshSelectedWorldObjectInfo()
     {
@@ -1578,8 +1387,8 @@ void main() {
         _selectedObjectType = type;
         _selectedObjectIndex = idx;
 
-        if (_useTabUi && _worldScene.Selection.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo or Terrain.ObjectType.WmoDoodad)
-            _workbenchPanels.OpenWorkbenchTab(ModelBottomTab.Info);
+        if (_worldScene.Selection.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo or Terrain.ObjectType.WmoDoodad)
+            _uiManager.OpenViewer(ViewerPanel.Model);
 
         // WMO doodads come from MODD, which has no uniqueId — uniqueId identifies an MDDF/MODF
         // placement in an ADT. Showing the MODD table index under a "UniqueId" label asserts a
@@ -1620,13 +1429,13 @@ void main() {
 
     private void OnWindowResize(Vector2D<int> size)
     {
-        _shellLayout.SyncImGuiWindowMetrics(size, _window.FramebufferSize);
+        _uiManager.SyncImGuiWindowMetrics(size, _window.FramebufferSize);
     }
 
     private void OnResize(Vector2D<int> size)
     {
         _gl.Viewport(size);
-        _shellLayout.SyncImGuiWindowMetrics(_window.Size, size);
+        _uiManager.SyncImGuiWindowMetrics(_window.Size, size);
     }
 
     private bool _disposed;
@@ -1685,6 +1494,7 @@ void main() {
         VlmTerrainManager? vlmTerrainManager = _vlmTerrainManager;
 
         _settings.SaveViewerSettings();
+        _uiManager.SaveLayout();
 
         _loadingScreen?.Dispose();
         _sceneCursorRenderer?.Dispose();
@@ -1729,21 +1539,6 @@ void main() {
         _gl?.Dispose();
     }
 
-    internal sealed class SavedPm4ObjectMatchSelection
-    {
-        public string MapName { get; set; } = "";
-        public int TileX { get; set; }
-        public int TileY { get; set; }
-        public uint Ck24 { get; set; }
-        public int ObjectPartId { get; set; }
-        public string PlacementKind { get; set; } = "";
-        public int PlacementUniqueId { get; set; }
-        public int PlacementTileX { get; set; }
-        public int PlacementTileY { get; set; }
-        public string ModelName { get; set; } = "";
-        public string ModelPath { get; set; } = "";
-        public string EvidenceSource { get; set; } = "";
-    }
 
     internal sealed class SavedObjectPathFilterMap
     {

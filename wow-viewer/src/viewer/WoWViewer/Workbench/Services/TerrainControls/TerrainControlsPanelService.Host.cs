@@ -61,7 +61,6 @@ internal sealed partial class TerrainControlsPanelService
     private ref ISceneRenderer? _renderer => ref _host.Renderer;
     private HashSet<(int tileX, int tileY, int chunkX, int chunkY)> _selectedChunks => _host.SelectedChunks;
     private ViewerSettingsService _settings => _host.Settings;
-    private ref bool _showWeakSignalWindow => ref _host.ShowWeakSignalWindow;
     private StratigraphyService _stratigraphy => _host.Stratigraphy;
     private ref WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode _stratigraphyAnchorMode => ref _host.StratigraphyAnchorMode;
     private ref bool _stratigraphyPolarityInverted => ref _host.StratigraphyPolarityInverted;

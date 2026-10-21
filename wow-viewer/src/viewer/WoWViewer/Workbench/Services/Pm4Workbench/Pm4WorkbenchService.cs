@@ -6,14 +6,14 @@ using ImGuiNET;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
 using WoWViewer.Workbench;
+using WoWViewer.UI;
 using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
 
 /// <summary>
-/// PM4 workbench UI: the workbench inspector, overlay and selection tabs, scene facts and outliner, perf panel.
-/// Partial class containing PM4 alignment and viewer utility windows.
+/// PM4 inspection: overlay, selection, info, outliner, object groups, and inspection exports.
 /// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
 /// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
 /// names the moved code used inside ViewerApp, so no moved body was edited.
@@ -29,19 +29,46 @@ internal sealed partial class Pm4WorkbenchService
 
     // Host bridge: see Pm4WorkbenchService.Host.cs.
 
-    private string _loosePm4InputPath = @"C:\WoW4-data\unk_pm4s\World\Maps\unk\unk1_00_00.pm4";
+    private enum InspectionPage { Overlay, Selection, Info, Outliner, ObjectGroups }
+    private static readonly string[] InspectionPageLabels = ["Overlay", "Selection", "Info", "Outliner", "Object Groups"];
+
+    private string _loosePm4InputPath = string.Empty;
+
+    /// <summary>Opens the shared path picker for a loose PM4/PD4 file (no typed path).</summary>
+    private void RequestLoosePm4File()
+    {
+        ImGuiPathPicker.Instance.Open(
+            "Select Loose PM4 / PD4 File",
+            pickFolder: false,
+            initialPath: string.IsNullOrWhiteSpace(_loosePm4InputPath) ? null : _loosePm4InputPath,
+            filterExtension: ".pm4;.pd4",
+            path =>
+            {
+                try
+                {
+                    if (!System.IO.File.Exists(path))
+                        throw new System.IO.FileNotFoundException("Selected file no longer exists.", path);
+                    if (_worldScene.Pm4Overlay.LoadLoosePm4File(path))
+                    {
+                        _loosePm4InputPath = path;
+                        _statusMessage = $"Loaded loose PM4/PD4 file: {System.IO.Path.GetFileName(path)}";
+                    }
+                    else
+                    {
+                        _statusMessage = $"Failed to decode loose PM4/PD4 file: {path}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"Open PM4/PD4 failed - {path}: {ex.Message}";
+                }
+            });
+    }
 
     internal void OpenPm4Workbench(Pm4WorkbenchTab tab)
     {
-        // PM4 lives in the Inspector window like the other inspection surfaces.
-        _shellLayout.FocusShellPanel(ShellPanelId.Inspector);
-        _host.WorkbenchPanels.FocusInspectorTab(4);
+        _host.UiManager.OpenViewer(ViewerPanel.PM4);
         _pendingPm4WorkbenchTab = tab;
-        _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
-        _pendingRightSidebarSection = FixedBottomDrawerTab.Pm4;
-        _showRightSidebar = true;
-        if (_workspaceMode == WorkspaceMode.Editor)
-            SetEditorWorkspaceTask(EditorWorkspaceTask.Pm4Evidence);
     }
 
     internal void DrawPm4WorkbenchInspector()
@@ -60,15 +87,14 @@ internal sealed partial class Pm4WorkbenchService
         {
             _activePm4TabIndex = pending switch
             {
-                Pm4WorkbenchTab.Overlay => (int)Pm4BottomTab.Overlay,
-                Pm4WorkbenchTab.Selection => (int)Pm4BottomTab.Selection,
-                Pm4WorkbenchTab.Correlation => (int)Pm4BottomTab.Correlation,
-                _ => _activePm4TabIndex,
+                Pm4WorkbenchTab.Overlay => (int)InspectionPage.Overlay,
+                _ => (int)InspectionPage.Selection,
             };
             _pendingPm4WorkbenchTab = null;
         }
 
-        string[] labels = WorkbenchNavigator.GetPm4BottomTabLabels();
+        string[] labels = InspectionPageLabels;
+        _activePm4TabIndex = Math.Clamp(_activePm4TabIndex, 0, labels.Length - 1);
         if (!ImGui.BeginTabBar("##Pm4WorkbenchTabs"))
             return;
 
@@ -81,7 +107,7 @@ internal sealed partial class Pm4WorkbenchService
             if (ImGui.BeginTabItem(labels[index], ref open, flags))
             {
                 _activePm4TabIndex = index;
-                DrawPm4TabContent((Pm4BottomTab)index);
+                DrawPm4TabContent((InspectionPage)index);
                 ImGui.EndTabItem();
             }
         }
@@ -89,32 +115,23 @@ internal sealed partial class Pm4WorkbenchService
         ImGui.EndTabBar();
     }
 
-    private void DrawPm4TabContent(Pm4BottomTab tab)
+    private void DrawPm4TabContent(InspectionPage tab)
     {
         switch (tab)
         {
-            case Pm4BottomTab.Overlay:
+            case InspectionPage.Overlay:
                 DrawPm4OverlayWorkbenchContent();
                 break;
-            case Pm4BottomTab.Selection:
+            case InspectionPage.Selection:
                 DrawPm4SelectionWorkbenchContent();
                 break;
-            case Pm4BottomTab.Correlation:
-                DrawPm4WmoCorrelationContent();
-                break;
-            case Pm4BottomTab.Info:
+            case InspectionPage.Info:
                 DrawPm4InfoPanelContent();
                 break;
-            case Pm4BottomTab.Reconcile:
-                _host.ArchaeologyPanel.DrawPm4ReconciliationContent();
-                break;
-            case Pm4BottomTab.Alignment:
-                DrawPm4AlignmentContent();
-                break;
-            case Pm4BottomTab.Outliner:
+            case InspectionPage.Outliner:
                 DrawPm4Outliner();
                 break;
-            case Pm4BottomTab.ObjectGroups:
+            case InspectionPage.ObjectGroups:
                 DrawPm4ObjectGroups();
                 break;
         }
@@ -151,29 +168,13 @@ internal sealed partial class Pm4WorkbenchService
         if (ImGui.Button("Reload PM4"))
             _worldScene.Pm4Overlay.ReloadPm4Overlay();
 
-        ImGui.SameLine();
-        if (ImGui.Button("Save Overlay Align"))
-            SaveCurrentPm4Alignment();
 
         ImGui.Separator();
         ImGui.TextDisabled("Direct PM4/PD4 File Loader (ignores map name and naming rules)");
-        ImGui.SetNextItemWidth(340f);
-        ImGui.InputText("##LoosePm4InputPath", ref _loosePm4InputPath, 512);
-        ImGui.SameLine();
-        if (ImGui.Button("Load Loose File"))
-        {
-            if (!string.IsNullOrWhiteSpace(_loosePm4InputPath) && System.IO.File.Exists(_loosePm4InputPath))
-            {
-                if (_worldScene.Pm4Overlay.LoadLoosePm4File(_loosePm4InputPath))
-                    _statusMessage = $"Loaded loose PM4/PD4 file: {System.IO.Path.GetFileName(_loosePm4InputPath)}";
-                else
-                    _statusMessage = $"Failed to decode loose PM4/PD4 file: {_loosePm4InputPath}";
-            }
-            else
-            {
-                _statusMessage = $"Loose PM4/PD4 file not found: {_loosePm4InputPath}";
-            }
-        }
+        if (SharedUiWidgets.ActionButton("Open Loose PM4 / PD4 File..."))
+            RequestLoosePm4File();
+        if (!string.IsNullOrWhiteSpace(_loosePm4InputPath))
+            ImGui.TextDisabled($"Last loaded: {System.IO.Path.GetFileName(_loosePm4InputPath)}");
         ImGui.Separator();
 
         bool showPm4Solid = _worldScene.Pm4Overlay.ShowPm4SolidOverlay;
@@ -398,8 +399,6 @@ internal sealed partial class Pm4WorkbenchService
             ImGui.TextDisabled($"Status: {_worldScene.Pm4Overlay.Pm4Status}");
         }
 
-        ImGui.TextDisabled($"Overlay Align: T=({_worldScene.Pm4Overlay.Pm4OverlayTranslation.X:F2}, {_worldScene.Pm4Overlay.Pm4OverlayTranslation.Y:F2}, {_worldScene.Pm4Overlay.Pm4OverlayTranslation.Z:F2}) Rot=({_worldScene.Pm4Overlay.Pm4OverlayRotationDegrees.X:F2}, {_worldScene.Pm4Overlay.Pm4OverlayRotationDegrees.Y:F2}, {_worldScene.Pm4Overlay.Pm4OverlayRotationDegrees.Z:F2})° S=({_worldScene.Pm4Overlay.Pm4OverlayScale.X:F3}, {_worldScene.Pm4Overlay.Pm4OverlayScale.Y:F3}, {_worldScene.Pm4Overlay.Pm4OverlayScale.Z:F3})");
-
         DrawPm4ColorLegend("WorkbenchOverlay");
     }
 
@@ -408,21 +407,15 @@ internal sealed partial class Pm4WorkbenchService
         if (_worldScene == null)
             return;
 
+        if (SharedUiWidgets.SectionHeader("PM4 Exports", defaultOpen: false, id: "Pm4InspectionExports"))
+            DrawPm4ExportCommandSet();
+
         if (!_worldScene.Pm4Overlay.HasSelectedPm4Object || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
         {
             ImGui.TextDisabled("No PM4 object selected. Left-click PM4 geometry to inspect one object at a time.");
             DrawPm4ObjectCollectionSummary("WorkbenchSelection");
-            if (ImGui.Button("Open Data I/O"))
-                OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
             return;
         }
-
-        if (ImGui.Button("Open Advanced Align"))
-            _activePm4TabIndex = (int)Pm4BottomTab.Alignment;
-
-        ImGui.SameLine();
-        if (ImGui.Button("Save Overlay Align"))
-            SaveCurrentPm4Alignment();
 
         if (ImGui.CollapsingHeader("Selected PM4", ImGuiTreeNodeFlags.DefaultOpen))
         {
@@ -464,501 +457,12 @@ internal sealed partial class Pm4WorkbenchService
                 }
             }
 
-            ImGui.TextDisabled($"Tile layer align: T=({_worldScene.Pm4Overlay.SelectedPm4Ck24LayerTranslation.X:F2}, {_worldScene.Pm4Overlay.SelectedPm4Ck24LayerTranslation.Y:F2}, {_worldScene.Pm4Overlay.SelectedPm4Ck24LayerTranslation.Z:F2}) Rot=({_worldScene.Pm4Overlay.SelectedPm4Ck24LayerRotationDegrees.X:F2}, {_worldScene.Pm4Overlay.SelectedPm4Ck24LayerRotationDegrees.Y:F2}, {_worldScene.Pm4Overlay.SelectedPm4Ck24LayerRotationDegrees.Z:F2})° S=({_worldScene.Pm4Overlay.SelectedPm4Ck24LayerScale.X:F3}, {_worldScene.Pm4Overlay.SelectedPm4Ck24LayerScale.Y:F3}, {_worldScene.Pm4Overlay.SelectedPm4Ck24LayerScale.Z:F3})");
-            ImGui.TextDisabled($"Object align: T=({_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.Z:F2}) Rot=({_worldScene.Pm4Overlay.SelectedPm4ObjectRotationDegrees.X:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectRotationDegrees.Y:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectRotationDegrees.Z:F2})° S=({_worldScene.Pm4Overlay.SelectedPm4ObjectScale.X:F3}, {_worldScene.Pm4Overlay.SelectedPm4ObjectScale.Y:F3}, {_worldScene.Pm4Overlay.SelectedPm4ObjectScale.Z:F3})");
-
             if (ImGui.Button("Clear PM4 Selection"))
                 _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
-            ImGui.SameLine();
-            if (ImGui.Button("Open Data I/O"))
-                OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
-
-            // Inline WMO match button when a WMO-type object is selected
-            if (debugInfo.Ck24Type is 0x42 or 0x43)
-            {
-                ImGui.Separator();
-                ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), "WMO Detection");
-
-                string? clientRoot = _dataSourceSession.GetActiveGamePath();
-                if (!string.IsNullOrWhiteSpace(clientRoot) && _dataSourceSession.GetCurrentSessionMapName() != null)
-                {
-                    string matchKey = Pm4WmoGroupMatchService.GetMatchKey(
-                        _dataSourceSession.GetCurrentSessionMapName()!, debugInfo.TileX, debugInfo.TileY, debugInfo.Ck24);
-
-                    if (_pm4WmoMatchStore == null)
-                        _pm4WmoMatchStore = new Pm4WmoMatchStore(AppContext.BaseDirectory);
-                    if (_pm4WmoMatchEntries.Count == 0)
-                        _pm4WmoMatchEntries = _pm4WmoMatchStore.Load();
-
-                    bool hasSaved = _pm4WmoMatchEntries.TryGetValue(matchKey, out var saved);
-                    if (hasSaved && saved != null)
-                    {
-                        ImGui.TextColored(new Vector4(0.95f, 0.85f, 0.35f, 1f), $"Matched: {saved.ModelName}");
-                        ImGui.TextDisabled(saved.WmoPath);
-                        ImGui.SameLine();
-                        if (ImGui.SmallButton("Clear"))
-                        {
-                            _pm4WmoMatchEntries.Remove(matchKey);
-                            _pm4WmoMatchStore.Save(_pm4WmoMatchEntries);
-                            _pm4WmoGroupMatchResult = null;
-                        }
-                    }
-                    else
-                    {
-                        ImGui.TextDisabled("No saved WMO match for this CK24.");
-                    }
-
-                    ImGui.Spacing();
-                    if (ImGui.Button("Find WMO Match", new Vector2(180f, 28f)))
-                    {
-                        var clusters = _worldScene.Pm4Overlay.GetPm4SurfaceGroupClusters(
-                            debugInfo.TileX, debugInfo.TileY, debugInfo.Ck24);
-                        _pm4WmoGroupMatchResult = Pm4WmoGroupMatchService.MatchFromPlacement(
-                            clientRoot, _dataSourceSession.GetCurrentSessionMapName()!,
-                            debugInfo.TileX, debugInfo.TileY, debugInfo.Ck24,
-                            debugInfo.BoundsMin, debugInfo.BoundsMax, clusters);
-                        _pm4WmoMatchStatus = _pm4WmoGroupMatchResult.ErrorMessage ?? "";
-                    }
-                    ImGui.SameLine();
-                    if (ImGui.Button("Shape Search", new Vector2(120f, 28f)))
-                    {
-                        // Mine the map's own placement ADTs first (split _obj0 and monolithic LK
-                        // root files alike — the Museum corpus is hand-made ground truth about
-                        // what fits), then fall back to raw client WMO geometry.
-                        var adtMatches = _dataSourceSession.GetCurrentSessionMapName() is { Length: > 0 } shapeMapName
-                            ? Pm4WmoGroupMatchService.SearchAdtPlacementsByShape(
-                                clientRoot, shapeMapName, debugInfo.BoundsMin, debugInfo.BoundsMax)
-                            : Array.Empty<Pm4WmoFallbackCandidate>();
-                        var clientMatches = Pm4WmoGroupMatchService.SearchWmoByShape(
-                            clientRoot, debugInfo.BoundsMin, debugInfo.BoundsMax);
-                        var merged = adtMatches
-                            .Concat(clientMatches)
-                            .GroupBy(c => c.ModelPath, StringComparer.OrdinalIgnoreCase)
-                            .Select(g => g.First())
-                            .ToList();
-
-                        _pm4WmoGroupMatchResult = _pm4WmoGroupMatchResult != null
-                            ? new Pm4WmoMatchResult(
-                                _pm4WmoGroupMatchResult.HasAdtData,
-                                _pm4WmoGroupMatchResult.Placements,
-                                merged)
-                            : new Pm4WmoMatchResult(false, Array.Empty<Pm4WmoPlacementResult>(), merged);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(_pm4WmoMatchStatus))
-                        ImGui.TextColored(new Vector4(1f, 0.7f, 0.3f, 1f), _pm4WmoMatchStatus);
-
-                    // Show quick match results summary inline
-                    if (_pm4WmoGroupMatchResult != null)
-                    {
-                        int placements = _pm4WmoGroupMatchResult.Placements.Count;
-                        int fallbacks = _pm4WmoGroupMatchResult.FallbackCandidates.Count;
-                        ImGui.TextDisabled($"Placements: {placements}  Fallback candidates: {fallbacks}");
-                    }
-                }
-                else
-                {
-                    ImGui.TextDisabled("Load a game folder to enable WMO matching.");
-                }
-            }
-            else
-            {
-                ImGui.Separator();
-                ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), "M2 Doodad Detection");
-
-                string? clientRoot = _dataSourceSession.GetActiveGamePath();
-                if (!string.IsNullOrWhiteSpace(clientRoot) && _dataSourceSession.GetCurrentSessionMapName() != null)
-                {
-                    string matchKey = PmM2GroupMatchService.GetMatchKey(
-                        _dataSourceSession.GetCurrentSessionMapName()!, debugInfo.TileX, debugInfo.TileY, debugInfo.ObjectPartId);
-
-                    if (_pm2MatchStore == null)
-                        _pm2MatchStore = new PmM2MatchStore(AppContext.BaseDirectory);
-                    if (_pm2MatchEntries.Count == 0)
-                        _pm2MatchEntries = _pm2MatchStore.Load();
-
-                    bool hasSaved = _pm2MatchEntries.TryGetValue(matchKey, out var saved);
-                    if (hasSaved && saved != null)
-                    {
-                        ImGui.TextColored(new Vector4(0.95f, 0.85f, 0.35f, 1f), $"Matched: {saved.ModelName}");
-                        ImGui.TextDisabled(saved.M2Path);
-                        ImGui.SameLine();
-                        if (ImGui.SmallButton("Clear##M2"))
-                        {
-                            _pm2MatchEntries.Remove(matchKey);
-                            _pm2MatchStore.Save(_pm2MatchEntries);
-                            _pm2GroupMatchResult = null;
-                        }
-                    }
-                    else
-                    {
-                        ImGui.TextDisabled("No saved M2 match for this doodad collision.");
-                    }
-
-                    ImGui.Spacing();
-                    if (ImGui.Button("Find M2 Match", new Vector2(180f, 28f)))
-                    {
-                        _pm2GroupMatchResult = PmM2GroupMatchService.MatchFromPlacement(
-                            clientRoot, _dataSourceSession.GetCurrentSessionMapName()!,
-                            debugInfo.TileX, debugInfo.TileY, debugInfo.ObjectPartId,
-                            debugInfo.BoundsMin, debugInfo.BoundsMax, debugInfo.Center);
-                        _pm2MatchStatus = _pm2GroupMatchResult.ErrorMessage ?? "";
-                    }
-                    ImGui.SameLine();
-                    if (ImGui.Button("Shape Search##M2", new Vector2(120f, 28f)))
-                    {
-                        var adtMatches = _dataSourceSession.GetCurrentSessionMapName() is { Length: > 0 } shapeMapName
-                            ? PmM2GroupMatchService.SearchAdtPlacementsByShape(
-                                clientRoot, shapeMapName, debugInfo.BoundsMin, debugInfo.BoundsMax)
-                            : Array.Empty<PmM2FallbackCandidate>();
-
-                        _pm2GroupMatchResult = new PmM2MatchResult(
-                            false,
-                            Array.Empty<PmM2PlacementResult>(),
-                            adtMatches);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(_pm2MatchStatus))
-                        ImGui.TextColored(new Vector4(1f, 0.7f, 0.3f, 1f), _pm2MatchStatus);
-
-                    if (_pm2GroupMatchResult != null)
-                    {
-                        int placements = _pm2GroupMatchResult.Placements.Count;
-                        int fallbacks = _pm2GroupMatchResult.FallbackCandidates.Count;
-                        ImGui.TextDisabled($"Placements: {placements}  Fallback candidates: {fallbacks}");
-                    }
-                }
-                else
-                {
-                    ImGui.TextDisabled("Load a game folder to enable M2 matching.");
-                }
-            }
         }
 
-        DrawPm4MatchCuration();
         DrawSelectedPm4RegionSummary("WorkbenchSelectedRegion");
-
-        if (ImGui.CollapsingHeader("Match details"))
-        {
-            DrawPm4WmoGroupMatchDetail();
-            DrawPmM2GroupMatchDetail();
-        }
     }
-
-    private void DrawPm4WmoGroupMatchDetail()
-    {
-        if (_pm4WmoGroupMatchResult == null)
-        {
-            ImGui.TextDisabled("No match results. Click 'Find WMO Match' or 'Shape Search' above.");
-            return;
-        }
-
-        int tileX = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.tileX ?? 0;
-        int tileY = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.tileY ?? 0;
-        uint ck24 = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.ck24 ?? 0;
-        var clusters = _worldScene?.Pm4Overlay.GetPm4SurfaceGroupClusters(tileX, tileY, ck24) ?? Array.Empty<Pm4SurfaceGroupCluster>();
-        string? mapName = _dataSourceSession.GetCurrentSessionMapName();
-        string matchKey = mapName != null
-            ? Pm4WmoGroupMatchService.GetMatchKey(mapName, tileX, tileY, ck24)
-            : "";
-        Pm4WmoMatchEntry? savedEntry = null;
-        bool hasSavedMatch = !string.IsNullOrWhiteSpace(matchKey)
-            && _pm4WmoMatchEntries.TryGetValue(matchKey, out savedEntry);
-
-        // Surface clusters summary
-        if (clusters.Count > 0)
-        {
-            ImGui.Spacing();
-            ImGui.Text($"PM4 Groups ({clusters.Count} group(s)):");
-            ImGui.Separator();
-            for (int ci = 0; ci < clusters.Count; ci++)
-            {
-                var cluster = clusters[ci];
-                string gkLabel = cluster.GroupKey switch
-                {
-                    0x03 => "M2 surf",
-                    0x10 => "Floor",
-                    0x12 => "Exterior",
-                    0x13 => "Portal",
-                    _ => $"0x{cluster.GroupKey:X2}"
-                };
-                ImGui.TextDisabled($"  GroupKey {gkLabel}: {cluster.SurfaceCount} surfaces, bounds=({cluster.BoundsMin.X:F1},{cluster.BoundsMin.Y:F1},{cluster.BoundsMin.Z:F1})..({cluster.BoundsMax.X:F1},{cluster.BoundsMax.Y:F1},{cluster.BoundsMax.Z:F1})");
-            }
-            ImGui.Spacing();
-        }
-
-        // ADT placements
-        if (_pm4WmoGroupMatchResult.Placements.Count == 0 && !_pm4WmoGroupMatchResult.HasAdtData)
-        {
-            ImGui.TextDisabled("No ADT placement data found.");
-        }
-        else if (_pm4WmoGroupMatchResult.Placements.Count == 0)
-        {
-            ImGui.TextDisabled("ADT data found but no overlapping WMO placements.");
-        }
-
-        foreach (var placement in _pm4WmoGroupMatchResult.Placements)
-        {
-            string headerLabel = $"{placement.ModelName} [uid={placement.UniqueId}]  ({placement.WmoGroupCount} groups)";
-            bool isSaved = savedEntry != null
-                && string.Equals(savedEntry.WmoPath, placement.ModelPath, StringComparison.OrdinalIgnoreCase);
-
-            if (isSaved)
-                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.95f, 0.85f, 0.35f, 1f));
-
-            if (ImGui.TreeNodeEx($"##Placement_{placement.UniqueId}", ImGuiTreeNodeFlags.DefaultOpen, headerLabel))
-            {
-                if (isSaved)
-                    ImGui.PopStyleColor();
-
-                ImGui.TextDisabled($"Path: {placement.ModelPath}");
-                ImGui.TextDisabled($"Position: ({placement.PlacementPosition.X:F1}, {placement.PlacementPosition.Y:F1}, {placement.PlacementPosition.Z:F1})");
-                ImGui.TextDisabled($"World bounds: ({placement.WorldBoundsMin.X:F1},{placement.WorldBoundsMin.Y:F1},{placement.WorldBoundsMin.Z:F1}) .. ({placement.WorldBoundsMax.X:F1},{placement.WorldBoundsMax.Y:F1},{placement.WorldBoundsMax.Z:F1})");
-                ImGui.TextDisabled($"WMO overall bounds: ({placement.WmoBoundsMin.X:F1},{placement.WmoBoundsMin.Y:F1},{placement.WmoBoundsMin.Z:F1}) .. ({placement.WmoBoundsMax.X:F1},{placement.WmoBoundsMax.Y:F1},{placement.WmoBoundsMax.Z:F1})");
-
-                // Confirm match button
-                if (!isSaved)
-                {
-                    if (ImGui.SmallButton($"Confirm Match##{placement.UniqueId}"))
-                    {
-                        _pm4WmoMatchEntries[matchKey] = new Pm4WmoMatchEntry
-                        {
-                            MapName = mapName,
-                            TileX = tileX,
-                            TileY = tileY,
-                            Ck24 = ck24,
-                            WmoPath = placement.ModelPath,
-                            ModelName = placement.ModelName,
-                            Source = "manual",
-                        };
-                        _pm4WmoMatchStore.Save(_pm4WmoMatchEntries);
-                        _pm4WmoMatchStatus = $"Saved match: {placement.ModelName}";
-                    }
-                }
-
-                // Group match table
-                if (placement.GroupMatches.Count > 0)
-                {
-                    ImGui.Spacing();
-                    ImGui.Text("Group overlap (Jaccard):");
-
-                    if (ImGui.BeginTable("##GroupMatchTable", 7,
-                        ImGuiTableFlags.BordersV | ImGuiTableFlags.BordersOuterH | ImGuiTableFlags.RowBg))
-                    {
-                        ImGui.TableSetupColumn("PM4 GK", ImGuiTableColumnFlags.WidthFixed, 60f);
-                        ImGui.TableSetupColumn("WMO Grp", ImGuiTableColumnFlags.WidthFixed, 50f);
-                        ImGui.TableSetupColumn("Flags", ImGuiTableColumnFlags.WidthFixed, 50f);
-                        ImGui.TableSetupColumn("Overlap", ImGuiTableColumnFlags.WidthFixed, 60f);
-                        ImGui.TableSetupColumn("PM4 Surfaces", ImGuiTableColumnFlags.WidthFixed, 80f);
-                        ImGui.TableSetupColumn("WMO Bounds");
-                        ImGui.TableSetupColumn("PM4 Bounds");
-                        ImGui.TableHeadersRow();
-
-                        foreach (var match in placement.GroupMatches)
-                        {
-                            ImGui.TableNextRow();
-                            ImGui.TableNextColumn();
-                            string gkLabel = match.Pm4GroupKey switch
-                            {
-                                0x03 => "M2",
-                                0x10 => "Floor",
-                                0x12 => "Ext",
-                                0x13 => "Portal",
-                                _ => $"0x{match.Pm4GroupKey:X2}"
-                            };
-                            ImGui.TextDisabled(gkLabel);
-
-                            ImGui.TableNextColumn();
-                            ImGui.TextDisabled($"#{match.WmoGroupIndex}");
-
-                            ImGui.TableNextColumn();
-                            ImGui.TextDisabled($"0x{match.WmoGroupFlags:X}");
-
-                            ImGui.TableNextColumn();
-                            float overlap = match.JaccardOverlap;
-                            Vector4 color = overlap >= 0.8f
-                                ? new Vector4(0.3f, 1f, 0.3f, 1f)
-                                : overlap >= 0.4f
-                                    ? new Vector4(1f, 0.85f, 0.3f, 1f)
-                                    : new Vector4(1f, 0.5f, 0.5f, 1f);
-                            ImGui.TextColored(color, $"{overlap:P1}");
-
-                            ImGui.TableNextColumn();
-                            ImGui.TextDisabled($"{match.Pm4SurfaceCount}");
-
-                            ImGui.TableNextColumn();
-                            ImGui.TextDisabled($"({match.WmoBoundsMin.X:F0},{match.WmoBoundsMin.Y:F0},{match.WmoBoundsMin.Z:F0})..({match.WmoBoundsMax.X:F0},{match.WmoBoundsMax.Y:F0},{match.WmoBoundsMax.Z:F0})");
-
-                            ImGui.TableNextColumn();
-                            ImGui.TextDisabled($"({match.Pm4BoundsMin.X:F0},{match.Pm4BoundsMin.Y:F0},{match.Pm4BoundsMin.Z:F0})..({match.Pm4BoundsMax.X:F0},{match.Pm4BoundsMax.Y:F0},{match.Pm4BoundsMax.Z:F0})");
-                        }
-
-                        ImGui.EndTable();
-                    }
-                }
-
-                ImGui.TreePop();
-            }
-            else if (isSaved)
-            {
-                ImGui.PopStyleColor();
-            }
-        }
-
-        // Fallback shape search candidates
-        if (_pm4WmoGroupMatchResult.FallbackCandidates.Count > 0)
-        {
-            ImGui.Spacing();
-            if (ImGui.TreeNodeEx("Fallback Shape Candidates", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                if (ImGui.BeginTable("##FallbackTable", 5,
-                    ImGuiTableFlags.BordersV | ImGuiTableFlags.BordersOuterH | ImGuiTableFlags.RowBg))
-                {
-                    ImGui.TableSetupColumn("WMO", ImGuiTableColumnFlags.WidthStretch);
-                    ImGui.TableSetupColumn("Volume", ImGuiTableColumnFlags.WidthFixed, 55f);
-                    ImGui.TableSetupColumn("Footprint", ImGuiTableColumnFlags.WidthFixed, 60f);
-                    ImGui.TableSetupColumn("Span", ImGuiTableColumnFlags.WidthFixed, 50f);
-                    ImGui.TableSetupColumn("Score", ImGuiTableColumnFlags.WidthFixed, 55f);
-                    ImGui.TableHeadersRow();
-
-                    foreach (var fb in _pm4WmoGroupMatchResult.FallbackCandidates)
-                    {
-                        ImGui.TableNextRow();
-                        ImGui.TableNextColumn();
-                        ImGui.TextDisabled(fb.ModelName);
-
-                        ImGui.TableNextColumn();
-                        ImGui.TextDisabled($"{fb.VolumeRatio:P0}");
-
-                        ImGui.TableNextColumn();
-                        ImGui.TextDisabled($"{fb.FootprintRatio:P0}");
-
-                        ImGui.TableNextColumn();
-                        ImGui.TextDisabled($"{fb.SpanRatio:P0}");
-
-                        ImGui.TableNextColumn();
-                        float score = fb.CombinedScore;
-                        Vector4 sc = score >= 0.7f
-                            ? new Vector4(0.3f, 1f, 0.3f, 1f)
-                            : score >= 0.4f
-                                ? new Vector4(1f, 0.85f, 0.3f, 1f)
-                                : new Vector4(1f, 0.5f, 0.5f, 1f);
-                        ImGui.TextColored(sc, $"{score:P1}");
-                    }
-
-                    ImGui.EndTable();
-                }
-
-                ImGui.TreePop();
-            }
-        }
-    }
-
-    private void DrawPmM2GroupMatchDetail()
-    {
-        if (_pm2GroupMatchResult == null)
-            return;
-
-        int tileX = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.tileX ?? 0;
-        int tileY = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.tileY ?? 0;
-        int partId = _worldScene?.Pm4Overlay.SelectedPm4ObjectKey?.objectPart ?? 0;
-        string? mapName = _dataSourceSession.GetCurrentSessionMapName();
-        string matchKey = mapName != null
-            ? PmM2GroupMatchService.GetMatchKey(mapName, tileX, tileY, partId)
-            : "";
-        _pm2MatchEntries.TryGetValue(matchKey, out var savedEntry);
-
-        ImGui.Separator();
-        ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), "M2 Candidates in Vicinity:");
-
-        if (_pm2GroupMatchResult.Placements.Count == 0 && !_pm2GroupMatchResult.HasAdtData)
-        {
-            ImGui.TextDisabled("No ADT placement data found.");
-        }
-        else if (_pm2GroupMatchResult.Placements.Count == 0)
-        {
-            ImGui.TextDisabled("No matching M2 doodads in vicinity.");
-        }
-
-        foreach (var placement in _pm2GroupMatchResult.Placements)
-        {
-            bool isSaved = savedEntry != null && string.Equals(savedEntry.M2Path, placement.ModelPath, StringComparison.OrdinalIgnoreCase);
-            if (isSaved) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.95f, 0.85f, 0.35f, 1f));
-
-            if (ImGui.TreeNodeEx($"##M2Placement_{placement.UniqueId}", ImGuiTreeNodeFlags.DefaultOpen, $"{placement.ModelName} [uid={placement.UniqueId}] (dist: {placement.DistanceToPm4Center:F1} yd)"))
-            {
-                if (isSaved) ImGui.PopStyleColor();
-
-                ImGui.TextDisabled($"Path: {placement.ModelPath}");
-                ImGui.TextDisabled($"Position: ({placement.PlacementPosition.X:F1}, {placement.PlacementPosition.Y:F1}, {placement.PlacementPosition.Z:F1})");
-                ImGui.TextDisabled($"Rotation: ({placement.PlacementRotation.X:F1}°, {placement.PlacementRotation.Y:F1}°, {placement.PlacementRotation.Z:F1}°)  Scale: {placement.PlacementScale:F2}");
-
-                float score = placement.MatchScore;
-                Vector4 sc = score >= 0.7f ? new Vector4(0.3f, 1f, 0.3f, 1f) : (score >= 0.4f ? new Vector4(1f, 0.85f, 0.3f, 1f) : new Vector4(1f, 0.5f, 0.5f, 1f));
-                ImGui.TextColored(sc, $"Match Confidence: {score:P0}");
-
-                if (!isSaved)
-                {
-                    if (ImGui.SmallButton($"Confirm Match##M2_{placement.UniqueId}"))
-                    {
-                        _pm2MatchEntries[matchKey] = new PmM2MatchEntry
-                        {
-                            MapName = mapName ?? "",
-                            TileX = tileX,
-                            TileY = tileY,
-                            ObjectPartId = partId,
-                            M2Path = placement.ModelPath,
-                            ModelName = placement.ModelName,
-                            Source = "manual",
-                        };
-                        _pm2MatchStore?.Save(_pm2MatchEntries);
-                        _pm2MatchStatus = $"Saved M2 match: {placement.ModelName}";
-                    }
-                }
-
-                ImGui.TreePop();
-            }
-            else if (isSaved)
-            {
-                ImGui.PopStyleColor();
-            }
-        }
-
-        if (_pm2GroupMatchResult.FallbackCandidates.Count > 0)
-        {
-            ImGui.Spacing();
-            if (ImGui.TreeNodeEx("Fallback M2 Shape Candidates", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                if (ImGui.BeginTable("##M2FallbackTable", 3,
-                    ImGuiTableFlags.BordersV | ImGuiTableFlags.BordersOuterH | ImGuiTableFlags.RowBg))
-                {
-                    ImGui.TableSetupColumn("M2 Model", ImGuiTableColumnFlags.WidthStretch);
-                    ImGui.TableSetupColumn("Volume", ImGuiTableColumnFlags.WidthFixed, 65f);
-                    ImGui.TableSetupColumn("Score", ImGuiTableColumnFlags.WidthFixed, 55f);
-                    ImGui.TableHeadersRow();
-
-                    foreach (var fb in _pm2GroupMatchResult.FallbackCandidates)
-                    {
-                        ImGui.TableNextRow();
-                        ImGui.TableNextColumn();
-                        ImGui.TextDisabled(fb.ModelName);
-
-                        ImGui.TableNextColumn();
-                        ImGui.TextDisabled($"{fb.VolumeRatio:P0}");
-
-                        ImGui.TableNextColumn();
-                        float score = fb.CombinedScore;
-                        Vector4 sc = score >= 0.7f ? new Vector4(0.3f, 1f, 0.3f, 1f) : (score >= 0.4f ? new Vector4(1f, 0.85f, 0.3f, 1f) : new Vector4(1f, 0.5f, 0.5f, 1f));
-                        ImGui.TextColored(sc, $"{score:P0}");
-                    }
-
-                    ImGui.EndTable();
-                }
-                ImGui.TreePop();
-            }
-        }
-    }
-
 
     // -- PM4 outliner: Region -> Tile -> Object -------------------------------
     private string _pm4OutlinerFilter = string.Empty;
@@ -1237,121 +741,4 @@ internal sealed partial class Pm4WorkbenchService
     /// Saves the current PM4 selection as a human-curated object → model match. Called from the
     /// object library and from the PM4 Selection tab.
     /// </summary>
-    internal bool TrySavePm4ObjectMatch(string modelPath, string modelName, string source)
-    {
-        if (_worldScene == null || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
-            return false;
-
-        string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(mapName))
-            return false;
-
-        var key = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
-        if (_pm4ObjectMatchStore == null)
-            _pm4ObjectMatchStore = new Pm4ObjectMatchStore(AppContext.BaseDirectory);
-        if (_pm4ObjectMatchEntries.Count == 0)
-            _pm4ObjectMatchEntries = _pm4ObjectMatchStore.Load();
-
-        string storeKey = Pm4ObjectMatchStore.BuildKey(mapName, key.tileX, key.tileY, key.ck24, key.objectPart);
-        _pm4ObjectMatchEntries[storeKey] = new Pm4ObjectMatchEntry
-        {
-            MapName = mapName,
-            TileX = key.tileX,
-            TileY = key.tileY,
-            Ck24 = key.ck24,
-            ObjectPartId = key.objectPart,
-            ModelPath = modelPath,
-            ModelName = modelName,
-            Source = source,
-            SavedAtUtc = DateTime.UtcNow.ToString("O"),
-        };
-        _pm4ObjectMatchStore.Save(_pm4ObjectMatchEntries);
-        _statusMessage = $"Saved PM4 match: {modelName}";
-        return true;
-    }
-
-    private void DrawPm4MatchCuration()
-    {
-        if (_worldScene == null || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
-            return;
-
-        var key = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
-        string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(mapName))
-            return;
-
-        if (_pm4ObjectMatchStore == null)
-            _pm4ObjectMatchStore = new Pm4ObjectMatchStore(AppContext.BaseDirectory);
-        if (_pm4ObjectMatchEntries.Count == 0)
-            _pm4ObjectMatchEntries = _pm4ObjectMatchStore.Load();
-
-        ImGui.Separator();
-        ImGui.TextColored(new Vector4(0.55f, 0.85f, 0.55f, 1f), "Match this object");
-        ImGui.TextDisabled("Pick a model in the Object Library and use 'Match to selected PM4 object', or paste a path here.");
-
-        ImGui.SetNextItemWidth(-90f);
-        ImGui.InputText("##Pm4MatchModelPath", ref _pm4MatchModelPath, 512);
-        ImGui.SameLine();
-        if (ImGui.Button("Save match") && !string.IsNullOrWhiteSpace(_pm4MatchModelPath))
-        {
-            string name = System.IO.Path.GetFileName(_pm4MatchModelPath);
-            TrySavePm4ObjectMatch(_pm4MatchModelPath.Trim(), name, "manual");
-        }
-
-        if (ImGui.Button("Suggest nearest model"))
-        {
-            if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug)
-                && _worldScene.Pm4Overlay.GetSelectedPm4SourcePath() is { } sourcePath)
-            {
-                var groups = _worldScene.Pm4Overlay.BuildPm4ObjectGroups(sourcePath);
-                var group = groups.FirstOrDefault(g => g.GroupObjectId == debug.LinkGroupObjectId);
-                if (group?.NearestModel is { Length: > 0 } suggestion)
-                {
-                    _pm4MatchModelPath = suggestion;
-                    _statusMessage = $"Suggested {System.IO.Path.GetFileName(suggestion)} at {group.NearestDistance:F1} units.";
-                }
-                else
-                {
-                    _statusMessage = "No nearest model suggestion for this object group.";
-                }
-            }
-        }
-        ImGui.SameLine();
-        ImGui.TextDisabled("Uses the measured object-group → nearest-placement join.");
-
-        string currentKey = Pm4ObjectMatchStore.BuildKey(mapName, key.tileX, key.tileY, key.ck24, key.objectPart);
-        if (_pm4ObjectMatchEntries.TryGetValue(currentKey, out var current))
-        {
-            ImGui.TextColored(new Vector4(0.95f, 0.85f, 0.35f, 1f), $"Saved: {current.ModelName}");
-            ImGui.TextDisabled(current.ModelPath);
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Clear##Pm4MatchClear"))
-            {
-                _pm4ObjectMatchEntries.Remove(currentKey);
-                _pm4ObjectMatchStore.Save(_pm4ObjectMatchEntries);
-            }
-        }
-
-        if (ImGui.CollapsingHeader($"Saved matches ({_pm4ObjectMatchEntries.Count})##Pm4MatchList"))
-        {
-            ImGui.SetNextItemWidth(220f);
-            ImGui.InputText("Filter##Pm4MatchFilter", ref _pm4MatchFilter, 128);
-            string filter = _pm4MatchFilter.Trim();
-            foreach (var pair in _pm4ObjectMatchEntries
-                .Where(p => string.Equals(p.Value.MapName, mapName, StringComparison.OrdinalIgnoreCase))
-                .Where(p => filter.Length == 0 || p.Value.ModelName.Contains(filter, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(p => p.Value.TileX).ThenBy(p => p.Value.TileY).ThenBy(p => p.Value.Ck24))
-            {
-                var entry = pair.Value;
-                string label = $"{entry.ModelName}  [{entry.TileX},{entry.TileY}] 0x{entry.Ck24:X6} part {entry.ObjectPartId}";
-                if (ImGui.Selectable($"{label}##{pair.Key}"))
-                {
-                    _worldScene.Pm4Overlay.SelectPm4Object((entry.TileX, entry.TileY, entry.Ck24, entry.ObjectPartId));
-                    _pm4MatchModelPath = entry.ModelPath;
-                }
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip($"{entry.ModelPath}\n{entry.Source}  {entry.SavedAtUtc}");
-            }
-        }
-    }
 }

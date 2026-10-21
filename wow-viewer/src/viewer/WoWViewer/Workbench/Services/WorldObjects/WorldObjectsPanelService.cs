@@ -206,20 +206,10 @@ internal sealed partial class WorldObjectsPanelService
         if (ImGui.IsItemHovered() && _worldScene.Pm4Overlay.ShowPm4Overlay)
             ImGui.SetTooltip(_worldScene.Pm4Overlay.Pm4Status);
 
-        DrawToolbarPopupButton("PM4 Actions", string.Empty, "##Pm4OverlayActionsPopup", () =>
-        {
-            if (ImGui.Button("PM4 Workbench"))
-            {
-                OpenPm4Workbench(_worldScene.Pm4Overlay.HasSelectedPm4Object ? Pm4WorkbenchTab.Selection : Pm4WorkbenchTab.Overlay);
-                ImGui.CloseCurrentPopup();
-            }
-
-            if (ImGui.Button("Reload PM4"))
-            {
-                _worldScene.Pm4Overlay.ReloadPm4Overlay();
-                ImGui.CloseCurrentPopup();
-            }
-        });
+        // One PM4 entry point: the Inspector > PM4 page. The old "PM4 Actions" popup
+        // duplicated it and is deleted (Spec 280 T072).
+        if (ImGui.Button("Open PM4 Workbench"))
+            OpenPm4Workbench(_worldScene.Pm4Overlay.HasSelectedPm4Object ? Pm4WorkbenchTab.Selection : Pm4WorkbenchTab.Overlay);
 
         if (_worldScene.Pm4Overlay.IsPm4Loading)
             ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Overlay.Pm4Status}");

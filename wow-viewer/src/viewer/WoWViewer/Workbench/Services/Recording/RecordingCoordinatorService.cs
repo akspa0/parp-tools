@@ -450,7 +450,7 @@ internal sealed class RecordingCoordinatorService
         readX = 0;
         readY = 0;
 
-        if (!includeUi && _host.ShellLayout.TryGetSceneFramebufferViewport(out readX, out readY, out uint sceneWidth, out uint sceneHeight))
+        if (!includeUi && _host.UiManager.TryGetSceneFramebufferViewport(out readX, out readY, out uint sceneWidth, out uint sceneHeight))
         {
             width = (int)sceneWidth;
             height = (int)sceneHeight;

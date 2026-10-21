@@ -26,18 +26,8 @@ internal sealed partial class SettingsWindowService
 
     internal bool _showSettingsWindow;
 
-    internal void DrawSettingsWindow()
-    {
-        if (!ImGui.Begin("Settings", ref _showSettingsWindow))
-        {
-            ImGui.End();
-            return;
-        }
-        DrawSettingsContent();
-        ImGui.End();
-    }
 
-    private void DrawSettingsContent()
+    internal void DrawSettingsContent()
     {
         if (ImGui.CollapsingHeader("Render Quality", ImGuiTreeNodeFlags.DefaultOpen))
         {
@@ -169,7 +159,7 @@ internal sealed partial class SettingsWindowService
         if (ImGui.SliderFloat("Text Font Size", ref fontScale, 0.85f, 2.20f, "%.2fx"))
         {
             _uiFontScale = fontScale;
-            if (ShellLayoutService.HasImGuiContext())
+            if (ViewerUiManager.HasImGuiContext())
             {
                 ImGui.GetIO().FontGlobalScale = _uiFontScale;
             }
@@ -183,49 +173,40 @@ internal sealed partial class SettingsWindowService
         if (ImGui.SmallButton("100%"))
         {
             _uiFontScale = 1.0f;
-            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             _settings.SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("120%"))
         {
             _uiFontScale = 1.20f;
-            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             _settings.SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("135%"))
         {
             _uiFontScale = 1.35f;
-            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             _settings.SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("150%"))
         {
             _uiFontScale = 1.50f;
-            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             _settings.SaveViewerSettings();
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("175%"))
         {
             _uiFontScale = 1.75f;
-            if (ShellLayoutService.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
+            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
             _settings.SaveViewerSettings();
         }
 
         ImGui.Spacing();
         ImGui.Separator();
-
-        bool useTabUi = _useTabUi;
-        if (ImGui.Checkbox("Use Tabbed UI", ref useTabUi))
-        {
-            _useTabUi = useTabUi;
-            _settings.SaveViewerSettings();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Toggle between the modern tabbed workbench and legacy dockspace layout.");
 
         bool showMinimap = _showMinimapWindow;
         if (ImGui.Checkbox("Show Minimap", ref showMinimap))

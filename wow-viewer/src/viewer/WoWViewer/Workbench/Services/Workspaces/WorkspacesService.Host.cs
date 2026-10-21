@@ -59,7 +59,6 @@ namespace WoWViewer;
 internal sealed partial class WorkspacesService
 {
     // Host bridge (same names as the former ViewerApp members).
-    private ref FixedBottomDrawerTab _activeBottomDrawerTab => ref _host.ActiveBottomDrawerTab;
     private ref WorkbenchTab _activeTopTab => ref _host.ActiveTopTab;
     private ref Camera _camera => ref _host.Camera;
     private CameraPathsService _cameraPaths => _host.CameraPaths;
@@ -73,7 +72,6 @@ internal sealed partial class WorkspacesService
     private ref string? _loadedFileName => ref _host.LoadedFileName;
     private ref string _modelInfo => ref _host.ModelInfo;
     private ModelInspectorPanelService _modelInspector => _host.ModelInspector;
-    private ref FixedBottomDrawerTab? _pendingRightSidebarSection => ref _host.PendingRightSidebarSection;
     private PlacementEditService _placementEditing => _host.PlacementEditing;
     private Pm4WorkbenchService _pm4Workbench => _host.Pm4Workbench;
     private ProjectOutputService _projectOutput => _host.ProjectOutput;
@@ -85,22 +83,18 @@ internal sealed partial class WorkspacesService
     private ref string? _selectedPlacementSaveTargetPath => ref _host.SelectedPlacementSaveTargetPath;
     private SettingsWindowService _settingsWindow => _host.SettingsWindow;
     private ref bool _showLeftSidebar => ref _host.ShowLeftSidebar;
-    private ref bool _showLogViewer => ref _host.ShowLogViewer;
     private ref bool _showMinimapWindow => ref _host.ShowMinimapWindow;
     private ref bool _showModelInfo => ref _host.ShowModelInfo;
-    private ref bool _showPerfWindow => ref _host.ShowPerfWindow;
     private ref bool _showRightSidebar => ref _host.ShowRightSidebar;
     private TerrainControlsPanelService _terrainControlsPanel => _host.TerrainControlsPanel;
     private ref TerrainExportKind _terrainExportKind => ref _host.TerrainExportKind;
     private ref TerrainImportKind _terrainImportKind => ref _host.TerrainImportKind;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
-    private ref bool _useTabUi => ref _host.UseTabUi;
     private ref VlmTerrainManager? _vlmTerrainManager => ref _host.VlmTerrainManager;
     private ref bool _wantExportGlb => ref _host.WantExportGlb;
     private ref bool _wantExportGlbCollision => ref _host.WantExportGlbCollision;
     private ref bool _wantTerrainExport => ref _host.WantTerrainExport;
     private ref bool _wantTerrainImport => ref _host.WantTerrainImport;
-    private ref bool _workbenchOpen => ref _host.WorkbenchOpen;
     private WorkbenchPanelsService _workbenchPanels => _host.WorkbenchPanels;
     private ref WorkspaceMode _workspaceMode => ref _host.WorkspaceMode;
     private WorldObjectsPanelService _worldObjectsPanel => _host.WorldObjectsPanel;

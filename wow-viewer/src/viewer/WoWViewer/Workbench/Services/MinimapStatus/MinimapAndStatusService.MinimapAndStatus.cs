@@ -495,81 +495,70 @@ internal sealed partial class MinimapAndStatusService
             state.Reset();
     }
 
-    internal void DrawStatusBar()
+    /// <summary>Status-bar body. The UI manager owns the window and passes the region rect.</summary>
+    internal void DrawStatusContent()
     {
         var io = ImGui.GetIO();
-        var windowHeight = io.DisplaySize.Y;
-        ImGui.SetNextWindowPos(new Vector2(0, windowHeight - 24));
-        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, 24));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 4));
-        if (ImGui.Begin("##statusbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
+        bool hasRuntimeScene = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+        string rightStatusText = hasRuntimeScene
+            ? BuildCompactRuntimeStatus()
+            : string.IsNullOrWhiteSpace(_statusMessage)
+                ? "Ready"
+                : _statusMessage.Replace(Environment.NewLine, " ").Trim();
+
+        string leftText = string.Empty;
+        if (hasRuntimeScene)
         {
-            bool hasRuntimeScene = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
-            string rightStatusText = hasRuntimeScene
-                ? BuildCompactRuntimeStatus()
-                : string.IsNullOrWhiteSpace(_statusMessage)
-                    ? "Ready"
-                    : _statusMessage.Replace(Environment.NewLine, " ").Trim();
-
-            string leftText = string.Empty;
-            if (hasRuntimeScene)
-            {
-                var pos = _camera.Position;
-                float wowX = WoWConstants.MapOrigin - pos.Y;
-                float wowY = WoWConstants.MapOrigin - pos.X;
-                float wowZ = pos.Z;
-                int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - pos.X) / WoWConstants.ChunkSize);
-                int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - pos.Y) / WoWConstants.ChunkSize);
-                string tileText = (tileX is >= 0 and < 64 && tileY is >= 0 and < 64)
-                    ? $"Tile: {tileY:D2}_{tileX:D2}"
-                    : "Tile: --";
-                float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
-                string facingLabel = GetWorldFacingLabel(facingDegrees);
-                leftText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  {tileText}  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
-            }
-
-            float rightWidth = GetImGuiTextWidth(rightStatusText) + 8f;
-
-            if (_worldScene is not null)
-            {
-                bool muted = _worldScene.AudioMuted;
-                ImGui.PushStyleColor(ImGuiCol.Button, muted
-                    ? new Vector4(0.42f, 0.18f, 0.12f, 1f)
-                    : new Vector4(0.12f, 0.38f, 0.20f, 1f));
-                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, muted
-                    ? new Vector4(0.58f, 0.24f, 0.14f, 1f)
-                    : new Vector4(0.18f, 0.52f, 0.28f, 1f));
-                string audioLabel = muted ? "AUDIO: MUTED" : "AUDIO: ON";
-                if (ImGui.Button(audioLabel))
-                {
-                    _worldScene.SetAudioMuted(!muted);
-                    _statusMessage = muted
-                        ? "Audio output enabled."
-                        : "Audio output muted.";
-                }
-
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(muted
-                        ? "Click to unmute all viewer audio output."
-                        : "Click to mute all viewer audio output.");
-                ImGui.PopStyleColor(2);
-                ImGui.SameLine();
-            }
-
-            if (!string.IsNullOrEmpty(leftText))
-                ImGui.TextUnformatted(leftText);
-
-            // Push right text to the right edge without moving it back over the
-            // coordinate text when the window is narrower than the full line.
-            if (!string.IsNullOrEmpty(leftText))
-                ImGui.SameLine();
-            float rightX = MathF.Max(ImGui.GetCursorPosX(), io.DisplaySize.X - rightWidth - 16f);
-            ImGui.SetCursorPosX(rightX);
-            ImGui.TextUnformatted(rightStatusText);
+            var pos = _camera.Position;
+            float wowX = WoWConstants.MapOrigin - pos.Y;
+            float wowY = WoWConstants.MapOrigin - pos.X;
+            float wowZ = pos.Z;
+            int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - pos.X) / WoWConstants.ChunkSize);
+            int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - pos.Y) / WoWConstants.ChunkSize);
+            string tileText = (tileX is >= 0 and < 64 && tileY is >= 0 and < 64)
+                ? $"Tile: {tileY:D2}_{tileX:D2}"
+                : "Tile: --";
+            float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
+            string facingLabel = GetWorldFacingLabel(facingDegrees);
+            leftText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  {tileText}  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
         }
-        ImGui.End();
-        ImGui.PopStyleVar();
+
+        float rightWidth = GetImGuiTextWidth(rightStatusText) + 8f;
+
+        if (_worldScene is not null)
+        {
+            bool muted = _worldScene.AudioMuted;
+            ImGui.PushStyleColor(ImGuiCol.Button, muted
+                ? new Vector4(0.42f, 0.18f, 0.12f, 1f)
+                : new Vector4(0.12f, 0.38f, 0.20f, 1f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, muted
+                ? new Vector4(0.58f, 0.24f, 0.14f, 1f)
+                : new Vector4(0.18f, 0.52f, 0.28f, 1f));
+            string audioLabel = muted ? "AUDIO: MUTED" : "AUDIO: ON";
+            if (ImGui.Button(audioLabel))
+            {
+                _worldScene.SetAudioMuted(!muted);
+                _statusMessage = muted
+                    ? "Audio output enabled."
+                    : "Audio output muted.";
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(muted
+                    ? "Click to unmute all viewer audio output."
+                    : "Click to mute all viewer audio output.");
+            ImGui.PopStyleColor(2);
+            ImGui.SameLine();
+        }
+
+        if (!string.IsNullOrEmpty(leftText))
+            ImGui.TextUnformatted(leftText);
+
+        if (!string.IsNullOrEmpty(leftText))
+            ImGui.SameLine();
+        float rightX = MathF.Max(ImGui.GetCursorPosX(), io.DisplaySize.X - rightWidth - 16f);
+        ImGui.SetCursorPosX(rightX);
+        ImGui.TextUnformatted(rightStatusText);
     }
 
     private string BuildCompactRuntimeStatus()
@@ -620,41 +609,16 @@ internal sealed partial class MinimapAndStatusService
         return string.IsNullOrEmpty(text) ? 0f : ImGui.CalcTextSize(text).X;
     }
 
-    internal void DrawMinimapWindow()
+    /// <summary>Minimap body. The UI manager owns the floating/docked window and its chrome.</summary>
+    internal void DrawMinimapPanelContent()
     {
-        bool hasWorldLoaded = TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName);
-
-        var io = ImGui.GetIO();
-        var panel = ShellLayoutService.GetShellPanelDefinition(ShellPanelId.Minimap);
-
-        if (!_useDockspaceUi)
+        if (!TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName))
         {
-            float rightOffset = _shellLayout.IsShellPanelActive(ShellPanelId.Inspector) ? _rightSidebarWidth + 20 : 20;
-            ImGui.SetNextWindowSize(new Vector2(panel.DefaultWidth, panel.DefaultWidth), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSizeConstraints(new Vector2(panel.MinWidth, panel.MinWidth), new Vector2(panel.MaxWidth, panel.MaxWidth));
-            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - panel.DefaultWidth - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
-        }
-        else
-        {
-            _shellLayout.PrepareDockableShellPanelWindow(
-                ShellPanelId.Minimap,
-                new Vector2(panel.DefaultWidth, panel.DefaultWidth),
-                new Vector2(panel.CompactMinWidth, panel.CompactMinWidth),
-                new Vector2(panel.MaxWidth, panel.MaxWidth));
-        }
-
-        if (!ImGui.Begin("Minimap", ref _showMinimapWindow,
-            ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
-        {
-            ImGui.End();
+            ImGui.TextWrapped("Load a world map or MK dataset project to activate the minimap.");
             return;
         }
 
-        if (_useDockspaceUi)
-            _shellLayout.CaptureDockPanelState(ShellPanelId.Minimap);
-
         DrawMinimapContent(loadedTileCount, mapName, existingTiles, isTileLoaded);
-        ImGui.End();
     }
 
     /// <summary>

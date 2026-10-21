@@ -152,7 +152,9 @@ public sealed partial class Pm4OverlayScene
         Vector3 padding = new(2f, 2f, 2f);
         float bestT = float.MaxValue;
 
-        // Single pass: test every object's AABB directly (simple and reliable)
+        // Two-stage pick: the AABB is only a cheap reject. The winner is the nearest actual
+        // triangle under the ray, so a large object's box can no longer steal a click from the
+        // surface the operator is pointing at.
         foreach (var (tileKey, objects) in _pm4TileObjects)
         {
             if (!ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
@@ -172,11 +174,16 @@ public sealed partial class Pm4OverlayScene
                 TransformBounds(obj.BoundsMin, obj.BoundsMax, geometryTransform, out Vector3 bmin, out Vector3 bmax);
 
                 float t = RayAABBIntersect(rayOrigin, rayDir, bmin - padding, bmax + padding);
-                if (t >= 0f)
-                    aabbHits++;
-                if (t >= 0f && t < bestT && IsHoverPickDistanceAllowed(t))
+                if (t < 0f)
+                    continue;
+                aabbHits++;
+
+                float triangleT = RayTrianglesIntersect(rayOrigin, rayDir, obj.Triangles, geometryTransform);
+                if (triangleT < 0f)
+                    continue;
+                if (triangleT < bestT && IsHoverPickDistanceAllowed(triangleT))
                 {
-                    bestT = t;
+                    bestT = triangleT;
                     objectKey = candidateKey;
                     objectGroupKey = ResolvePm4ObjectGroupKey(candidateKey);
                 }

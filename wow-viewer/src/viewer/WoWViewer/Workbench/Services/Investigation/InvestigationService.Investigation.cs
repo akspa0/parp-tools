@@ -204,16 +204,9 @@ internal sealed partial class InvestigationService
     // Spec 223: all chunk detail and overlay controls have one Inspector owner.
     private void DrawTerrainChunkInvestigationContent()
     {
-        if (_useTabUi)
-        {
-            ImGui.TextDisabled("Chunk details and flag overlays are in Inspector > Context.");
-            if (ImGui.Button("Open Terrain Inspector##Investigation"))
-                OpenWorkbenchTab(WoWViewer.Workbench.WorkbenchTab.Inspect);
-        }
-        else
-        {
-            DrawUnifiedInspectorContent();
-        }
+        ImGui.TextDisabled("Chunk details and flag overlays are in Inspector > Context.");
+        if (ImGui.Button("Open Terrain Inspector##Investigation"))
+            _host.UiManager.OpenViewer(WoWViewer.Workbench.ViewerPanel.Inspector);
     }
 
     private void DrawMcnkExplorerContent() => DrawTerrainChunkInvestigationContent();

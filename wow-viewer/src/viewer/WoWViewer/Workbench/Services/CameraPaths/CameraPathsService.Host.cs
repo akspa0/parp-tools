@@ -56,7 +56,6 @@ internal sealed partial class CameraPathsService
 {
     // Host bridge (same names as the former ViewerApp members).
     private ref PendingCaptureRequest? _activeCaptureRequest => ref _host.ActiveCaptureRequest;
-    private ref int _activeUtilitiesTabIndex => ref _host.ActiveUtilitiesTabIndex;
     private ref ActiveVideoRecording? _activeVideoRecording => ref _host.ActiveVideoRecording;
     private RecordingCoordinatorService _recordingCoordinator => _host.RecordingCoordinator;
     private ref Camera _camera => ref _host.Camera;
@@ -69,12 +68,9 @@ internal sealed partial class CameraPathsService
     private ref bool _hideUiChrome => ref _host.HideUiChrome;
     private StandaloneModelLoaderService _modelLoader => _host.ModelLoader;
     private NavigatorPanelService _navigatorPanel => _host.NavigatorPanel;
-    private ref bool _showCameraPathWindow => ref _host.ShowCameraPathWindow;
-    private ref bool _showCaptureAutomationWindow => ref _host.ShowCaptureAutomationWindow;
     private ref string _statusMessage => ref _host.StatusMessage;
     private ref bool _taxiRideCameraEnabled => ref _host.TaxiRideCameraEnabled;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
-    private ref bool _useTabUi => ref _host.UseTabUi;
     private ref int _videoCaptureFps => ref _host.VideoCaptureFps;
     private ref bool _videoCaptureIncludeUi => ref _host.VideoCaptureIncludeUi;
     private WorkbenchPanelsService _workbenchPanels => _host.WorkbenchPanels;

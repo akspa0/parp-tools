@@ -11,7 +11,7 @@ The primary development and runtime workspace for `parp-tools`. This project pro
 ### 1. 3D World Viewer (`src/viewer/WoWViewer`)
 An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **Modern CASC Clients**: File → Open CASC Install (local, or local + CDN fill), then pick the game version. Tested with WoW: Forever (`wow_classic_beta` 1.60.1.69876); works with every build since support landed. Covers FileDataID-era maps (`MAID`, `MDID`, FileDataID placements), chunked `MD21` M2s, `GFID`/`MODI` WMOs with modern per-LOD groups and materials, and DB2 tables. Terrain blends up to 8 tileset layers per chunk with 64-bit high-resolution holes.
-- **Archaeology: phase maps & map layering**: the Archaeology tab lists the DBC/DB2-defined phase maps for the loaded base map when the client has them; otherwise any map can be loaded on top of any other map.
+- **Archaeology: phase maps & map layering**: the Archaeology destination's **Layers & Provenance** page composes any map over any other map, with per-layer enable, lock, ordering, and offset/rotation/mirror alignment.
 - **Development-map restoration (partial)**: PM4 collision meshes are matched to museum object placements (persistent association ledger), minimap-only terrain is baked to vertex colour, and restored tiles are written as monolithic LK 3.3.5 ADTs. Objects on tiles adjacent to PM4-covered tiles are still missing; see the [restoration guide](docs/WoWViewer/development-map-restoration.md).
 - **DAT v26 Terrain (alpha)**: File → Open DAT v26 Terrain Folder renders the raw terrain project files that shipped in that build — heights (inches), normals, vertex colours, layers and `ACDO` objects — and File → Export Nearby Tiles as DAT v26 (experimental) writes them back ([format write-up](docs/architecture/adt-v26-format.md)).
 - **Terrain Streaming**: Bounded camera-centered tile streaming with directional lookahead and WDL low-detail horizon fallback.
@@ -20,7 +20,7 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **Dynamic Lighting & Skies**: Native Alpha 0.5.3 2,880-unit world clock, Light DBC fallback, LIT profiles, and fog.
 - **Positional Audio**: OpenAL runtime with resident MCSE / MCNK positional emitters and `SoundEntries` preview.
 - **Camera Path Authoring**: Full timeline keyframing, roll control, JSON project save/load, and native `.m2` camera export.
-- **PM4 Reconciliation Workbench**: Match real PM4 geometry segments to ADT placements with guarded preview, hash verification, and undoable apply operations.
+- **PM4 Inspection**: PM4 overlay, selection, object info, outliner and object groups in the Viewer's PM4 sidebar surface. PM4 object matching, alignment and reconciliation are offline work in the museum ADT patcher tool, not viewer surfaces.
 - **Cartography Composition**: Multi-layer map composition with donor tiles, placement locks, rotation/mirror, Z transform, WDL edge-snap, and project save/load.
 - **Map Save & New Map Creator**: A New Map creator service exists; **saving composed/merged maps to Alpha 0.5.3 WDT / LK v18 ADT is not implemented yet**.
 
@@ -55,6 +55,7 @@ PARP — the Pre-Alpha Restoration Project — works to recover World of Warcraf
 - **[Desktop viewer](src/viewer/WoWViewer/README.md)**: App launch, UI surfaces, and viewer-specific proof gates.
 - **[CLI tooling](tools/README.md)**: Canonical single-document index for all command-line projects.
 - **[Desktop user guide](docs/WoWViewer/USERGUIDE.md)**: End-user controls and workflows.
+- **[UI reference](docs/WoWViewer/UI-REFERENCE.md)**: Generated list of every documented control, its shortcut, and its home surface.
 - **[Development map restoration guide](docs/WoWViewer/development-map-restoration.md)**: Inputs, safe restore commands, validation, and viewer overlay setup.
 
 ---
@@ -106,23 +107,36 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.T
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  WoWViewer v0.6.1-dev                                           [_][□][X]    │
+│  WoWViewer v0.6.1-dev                                           [_][□][X]   │
+│  File   View   Help                                         ┌────────────┐  │
+│                                                             │  MINIMAP   │  │
+│                                                             └────────────┘  │
 ├──────────────┬───────────────────────────────────────────────┬──────────────┤
-│  NAVIGATOR   │                                               │  WORKBENCH   │
-│  (Left Bar)  │               3D VIEWPORT                     │  (Right Bar) │
+│ LEFT SIDEBAR │                                               │ RIGHT SIDEBAR│
+│ (destination)│               3D VIEWPORT                     │ (destination)│
 │              │                                               │              │
-│ • Client     │  [WASD + Mouse Fly Camera]                    │ Destinations:│
-│   Sources    │                                               │ • Quick      │
-│ • File Tree  │  [Bounded Terrain Stream Ring: Radius 2-3]    │ • Inspect    │
-│ • World Maps │                                               │ • Scene      │
-│ • Phase Maps │  [Dynamic Lighting, Sky & Fog]                │ • Utilities  │
-│              │                                               │ • Experiment │
+│ • Workspace  │  [WASD + Mouse Fly Camera]                    │ Viewer:      │
+│ • World      │                                               │  Inspector   │
+│   Overview   │  [Bounded Terrain Stream Ring: Radius 2-3]    │  World       │
+│ • File       │                                               │  Model       │
+│   Browser    │  [Dynamic Lighting, Sky & Fog]                │  PM4         │
+│ • + destination sections                                     │ Editor/      │
+│              │                                               │  Archaeology │
+│              │                                               │  page picker │
 ├──────────────┴───────────────────────────────────────────────┴──────────────┤
-│ [Scene Toggles]   [Subzone / Area Readout]   [Audio: ON/MUTED]   [FPS / ms] │
+│ Chat (bottom-left)                                             [Options ▾]  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Viewer │ Editor │ Archaeology │ Options                       FPS / ms      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Status bar: coordinates, tile, facing, audio, runtime stats                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-See the **[Desktop Viewer User Guide](docs/WoWViewer/USERGUIDE.md)** for a full manual detailing every keybinding, workbench destination, and workflow.
+The bottom bar is the destination switcher: **Viewer**, **Editor** and **Archaeology**, plus the
+**Options** sub-menu next to the chat and the FPS/frame-time readout. The sidebars show only the
+surfaces of the current destination.
+
+See the **[Desktop Viewer User Guide](docs/WoWViewer/USERGUIDE.md)** for a full manual detailing every keybinding, destination, and workflow, and the **[UI reference](docs/WoWViewer/UI-REFERENCE.md)** for the generated list of every control.
 
 ---
 

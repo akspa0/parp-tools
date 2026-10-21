@@ -59,16 +59,10 @@ internal sealed partial class InvestigationService
     private ref string _statusMessage => ref _host.StatusMessage;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
     private TerrainQueryService _terrainQuery => _host.TerrainQuery;
-    private ref bool _useTabUi => ref _host.UseTabUi;
     private ref VlmTerrainManager? _vlmTerrainManager => ref _host.VlmTerrainManager;
     private ref bool _wlLayerListIsolationEnabled => ref _host.WlLayerListIsolationEnabled;
     private ref string _wlLayerSelectedBodyKey => ref _host.WlLayerSelectedBodyKey;
     private ref WorldScene? _worldScene => ref _host.WorldScene;
     private void DrawUnifiedInspectorContent() => _host.DrawUnifiedInspectorContent();
-    private void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = -1) => _host.OpenWorkbenchTab(topTab, bottomIndex);
-    private void OpenWorkbenchTab(ModelBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(WorldBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(ToolsBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(UtilitiesBottomTab tab) => _host.OpenWorkbenchTab(tab);
     private void SetEditorWorkspaceTask(EditorWorkspaceTask task) => _host.SetEditorWorkspaceTask(task);
 }

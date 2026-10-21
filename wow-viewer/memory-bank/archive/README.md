@@ -8,6 +8,7 @@
 
 | File | What it holds |
 |------|---------------|
+| [2026-10-21-pre-spec280-active-context.md](2026-10-21-pre-spec280-active-context.md) | Spec 279 PM4 reference detail, the 2026-10-20 committed feature sets, and the older release/regression notes (WC3 browser, release packaging, ground-effect rollback, taxi mount, WMO area, M2 texture resolver, M2 camera); compressed out of `activeContext.md` when the Spec 280 UI-refactor entry was added |
 | [2026-10-20-progress-pre-2026-10-14.md](2026-10-20-progress-pre-2026-10-14.md) | Older progress detail (2026-10-12 and earlier); retained when the 1,001-line live ledger was compressed during the PM4 investigation |
 | `2026-07-04-pre-2026-06-27.md` | Pre-2026-06-27 session history |
 | `2026-07-13-spec102-strict-target-detail.md` | Spec 102 strict-target detail |

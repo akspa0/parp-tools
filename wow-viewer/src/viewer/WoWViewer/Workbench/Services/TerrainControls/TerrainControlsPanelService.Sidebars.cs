@@ -504,17 +504,6 @@ internal sealed partial class TerrainControlsPanelService
         }
     }
 
-    internal void DrawWeakSignalWindow()
-    {
-        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
-        // Workbench sub-tab uses DrawWeakSignalContent directly.
-        ImGui.SetNextWindowSize(new Vector2(400f, 480f), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("Weak Signal Amplifier", ref _showWeakSignalWindow))
-        {
-            DrawWeakSignalContent();
-        }
-        ImGui.End();
-    }
 
     private void DrawWeakSignalContent()
     {

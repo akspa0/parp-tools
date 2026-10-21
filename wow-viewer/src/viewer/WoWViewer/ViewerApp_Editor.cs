@@ -46,7 +46,7 @@ public partial class ViewerApp
     private Workbench.Pages.EditorWorkbenchPages EnsureEditorPages()
     {
         if (_editorPages == null)
-            _editorPages = new Workbench.Pages.EditorWorkbenchPages(new Workbench.Pages.ViewerAppContext(this));
+            _editorPages = new Workbench.Pages.EditorWorkbenchPages(new Workbench.Pages.ViewerAppContext(this), _mainMenuBar.DrawTerrainFileOperationsContent, _mainMenuBar.DrawConvertersContent);
         return _editorPages;
     }
 
@@ -56,8 +56,6 @@ public partial class ViewerApp
     void Workbench.Pages.IEditorPageHost.DrawTerrainLab() => _terrainControlsPanel.DrawTerrainLabSubTab();
     void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => _editorPanels.DrawArchaeologyEditorImportsSubTab();
     void Workbench.Pages.IEditorPageHost.DrawConverters() => _workbenchPanels.DrawConvertersSubTabContent();
-    void Workbench.Pages.IEditorPageHost.DrawPm4Exports() => _pm4Workbench.DrawPm4ExportCommandSet();
-    void Workbench.Pages.IEditorPageHost.OpenPm4Workbench() => _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
     void Workbench.Pages.IEditorPageHost.DrawNewMapCreator() => _newMapCreatorService.Draw(_editorPanels.LoadGeneratedNewMap);
 
     private readonly Workbench.Services.NewMapCreatorService _newMapCreatorService = new();

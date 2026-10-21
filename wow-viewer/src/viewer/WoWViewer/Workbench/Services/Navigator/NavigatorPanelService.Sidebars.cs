@@ -24,114 +24,76 @@ namespace WoWViewer;
 internal sealed partial class NavigatorPanelService
 {
 
-    internal void DrawLeftSidebar()
+    internal void DrawContent()
     {
-        if (!_useTabUi || !_showLeftSidebar)
-            return;
-
-        var io = ImGui.GetIO();
-        float topOffset = GetTopChromeHeight();
-        float sidebarHeight = io.DisplaySize.Y - topOffset - BottomBarHeight - StatusBarHeight;
-
-        _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth, isLeftSidebar: true, io.DisplaySize.X);
-        ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.08f, 0.08f, 0.10f, 0.85f));
-        if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        if (SharedUiWidgets.SectionHeader("Workspace", defaultOpen: true, id: "Workspace"))
         {
-            bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
-
-            DrawWorkspaceBarsPanelContent();
-
-            ImGui.Separator();
-
-            ImGui.Separator();
-
-            DrawSharedWorldOverviewSection(inScrollableChild: true);
-            if (hasWorldLoaded)
-                ImGui.Separator();
-
-            DrawFileBrowserContent(hasWorldLoaded ? 260f : 0f);
-
-            ImGui.Separator();
-            if (_discoveredMaps.Count > 0)
-                DrawMapDiscoveryContent();
-        }
-        ImGui.End();
-        ImGui.PopStyleColor();
-        ImGui.PopStyleVar();
-    }
-
-    internal void DrawLegacyLeftSidebar()
-    {
-        if (!_shellLayout.HasAnyShellPanelsInLane(ShellPanelLane.Left))
-            return;
-
-        var io = ImGui.GetIO();
-        float topOffset = GetTopChromeHeight();
-        float sidebarHeight = io.DisplaySize.Y - topOffset - BottomBarHeight - StatusBarHeight;
-        if (_useDockspaceUi)
-        {
-            DrawDockedShellPanelsForLane(ShellPanelLane.Left, sidebarHeight);
-            return;
-        }
-
-        _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth, isLeftSidebar: true, io.DisplaySize.X);
-        ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        if (ImGui.Begin("##LegacyLeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
-        {
-            DrawFixedSidebarWidthControl(
-                "Navigator Width",
-                ref _leftSidebarWidth,
-                isLeftSidebar: true,
-                io.DisplaySize.X,
-                "Resize the fixed navigator without relying on the edge splitter.");
-            DrawNavigatorPanelContent();
-        }
-        ImGui.End();
-        ImGui.PopStyleVar();
-    }
-
-    internal void DrawNavigatorPanelContent()
-    {
-        bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
-
-        DrawSharedWorldOverviewSection(inScrollableChild: false);
-
-        ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
-        if (_showFileBrowser && ImGui.CollapsingHeader("File Browser", hasWorldLoaded ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
-            DrawFileBrowserContent(hasWorldLoaded ? 260f : 0f);
-
-        DrawSharedWorldMapsSection(defaultOpenWhenNoWorld: false);
-    }
-
-    private void DrawSharedWorldOverviewSection(bool inScrollableChild)
-    {
-        bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
-        if (!hasWorldLoaded)
-            return;
-
-        ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-        if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            if (inScrollableChild)
+            ImGui.TextDisabled("Unified workspace");
+            ImGui.TextWrapped(_host.GetWorkspaceTargetSummary());
+            ImGui.TextDisabled(_host.GetWorkspaceSaveStatusSummary());
+            if (_dataSource != null) SharedUiWidgets.CompactStatus($"Source: {_dataSource.Name}");
+            if (SharedUiWidgets.ActionButton("Open Game Folder..."))
             {
-                float overviewHeight = MathF.Min(340f, MathF.Max(210f, ImGui.GetContentRegionAvail().Y * 0.42f));
-                if (ImGui.BeginChild("##LeftWorldOverview", new Vector2(0f, overviewHeight), true,
-                    ImGuiWindowFlags.None))
-                    DrawWorldOverviewContent();
-                ImGui.EndChild();
+                _host.ShowFolderInput = true;
+                _host.FolderInputBuf = string.IsNullOrWhiteSpace(_host.LastGameFolderPath) ? "" : _host.LastGameFolderPath;
             }
-            else
-            {
-                DrawWorldOverviewContent();
-            }
-
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Open File...")) _host.WantOpenFile = true;
+            _host.WorkbenchPanels.DrawCameraContent();
+            if (SharedUiWidgets.SectionHeader("Fog", defaultOpen: true, id: "WorkspaceFog"))
+                _host.DrawAuthoritativeFogControls(showDescription: false);
+            float width = _host.LeftSidebarWidth;
+            if (ImGui.SliderFloat("Sidebar width", ref width, 180, 600, "%.0f px")) _host.LeftSidebarWidth = width;
+            if (ImGui.IsItemDeactivatedAfterEdit()) _host.UiManager.SaveLayout();
+        }
+        // Destination sections come before the long lists: the map list and file browser
+        // are nested scroll regions, so anything below them is hard to reach.
+        switch (_host.ActiveTopTab)
+        {
+            case WorkbenchTab.Viewer:
+                bool sceneTools = SharedUiWidgets.SectionHeader("Scene Tools", defaultOpen: _host.UiManager.SceneToolsVisible, id: "SceneTools");
+                _host.UiManager.SceneToolsVisible = sceneTools;
+                if (sceneTools) _host.WorkbenchPanels.DrawSceneToolsContent();
+                if (SharedUiWidgets.SectionHeader("Assets", id: "Assets")) _host.WorkbenchPanels.DrawAssetsContent();
+                break;
+            case WorkbenchTab.Editor:
+                if (SharedUiWidgets.SectionHeader("Editor Workspace", defaultOpen: true, id: "EditorWorkspace"))
+                {
+                    string[] pages = WorkbenchNavigator.GetPageLabels(WorkbenchTab.Editor);
+                    for (int i = 0; i < pages.Length; i++)
+                        if (ImGui.Button(pages[i])) _host.UiManager.Navigate(WorkbenchTab.Editor, i);
+                }
+                if (SharedUiWidgets.SectionHeader("Project Output", id: "ProjectOutput"))
+                {
+                    if (ImGui.InputText("Output root", ref _host.ProjectOutputRootDir, 1024))
+                        _host.HandleProjectOutputRootChanged();
+                    ImGui.TextWrapped(_host.GetProjectOutputRootDirectory());
+                }
+                break;
+            case WorkbenchTab.Archaeology:
+                if (SharedUiWidgets.SectionHeader("Archaeology Workspace", defaultOpen: true, id: "ArchaeologyWorkspace"))
+                    SharedUiWidgets.CompactStatus("Analysis and reconstruction pages are in the right sidebar.");
+                if (SharedUiWidgets.SectionHeader("Layer Projects", id: "LayerProjects"))
+                {
+                    SharedUiWidgets.CompactStatus("Map layers and their project actions have one home: Cartography.");
+                    if (SharedUiWidgets.ActionButton("Open Cartography")) _host.UiManager.Navigate(WorkbenchTab.Archaeology, 4);
+                }
+                break;
+        }
+        if (SharedUiWidgets.SectionHeader("Diagnostics", id: "Diagnostics"))
+        {
+            if (SharedUiWidgets.ActionButton("Log")) _host.ShowLogViewer = !_host.ShowLogViewer;
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Performance")) _host.ShowPerfWindow = !_host.ShowPerfWindow;
+            _host.ViewerChrome.DrawRuntimeStatsPanelContent();
+        }
+        if (SharedUiWidgets.SectionHeader("World Overview", defaultOpen: true, id: "WorldOverview"))
+        {
+            DrawWorldOverviewContent();
             DrawMapExportControls();
+            DrawMapDiscoveryContent();
         }
+        if (SharedUiWidgets.SectionHeader("File Browser", defaultOpen: true, id: "FileBrowser")) DrawFileBrowserContent(260);
     }
 
     /// <summary>
@@ -145,7 +107,7 @@ internal sealed partial class NavigatorPanelService
             return;
 
         ImGui.Spacing();
-        ImGui.SeparatorText("Export Map");
+        SharedUiWidgets.SectionTitle("Export Map");
         Terrain.MapExportFormats.DrawCheckboxes("sidebar");
 
         ImGui.BeginDisabled(!Terrain.MapExportFormats.Any);
@@ -157,20 +119,6 @@ internal sealed partial class NavigatorPanelService
             ImGui.SetTooltip("Writes the loaded DAT folder in every ticked format, plus a manifest naming every field carried and dropped.");
     }
 
-    private void DrawSharedWorldMapsSection(bool defaultOpenWhenNoWorld = false)
-    {
-        if (_discoveredMaps.Count == 0)
-            return;
-
-        bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
-        if (_autoOpenWorldMapsPanel)
-            ImGui.SetNextItemOpen(true, ImGuiCond.Always);
-        else if (defaultOpenWhenNoWorld)
-            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
-
-        if (ImGui.CollapsingHeader("World Maps"))
-            DrawMapDiscoveryContent();
-    }
 
     private void DrawWorldOverviewContent()
     {
@@ -182,42 +130,6 @@ internal sealed partial class NavigatorPanelService
                 : "World");
 
         ImGui.Text(sceneLabel);
-
-        if (TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName))
-        {
-            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / MinimapWorldTileSize;
-            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / MinimapWorldTileSize;
-            ClampMinimapPanOffset();
-            int ctX = (int)MathF.Floor(camTileX);
-            int ctY = (int)MathF.Floor(camTileY);
-
-            ImGui.TextDisabled($"Tile: ({ctX}, {ctY})  Loaded: {loadedTileCount}");
-            if (_minimapRenderer != null && (_minimapRenderer.IsBusy || _minimapRenderer.UploadedTileCount > 0 || _minimapRenderer.FailedTileCount > 0))
-            {
-                float progress = _minimapRenderer.LoadingProgress;
-                string overlay = _minimapRenderer.IsBusy
-                    ? $"Minimap {progress * 100f:F0}%  {_minimapRenderer.PendingTileCount} pending"
-                    : $"Minimap ready  {_minimapRenderer.UploadedTileCount} tiles";
-                ImGui.ProgressBar(progress, new Vector2(MathF.Min(220f, ImGui.GetContentRegionAvail().X), 0f), overlay);
-                if (_minimapRenderer.FailedTileCount > 0)
-                    ImGui.TextDisabled($"Missing or failed tiles: {_minimapRenderer.FailedTileCount}");
-            }
-
-            float mapSize = ComputeMinimapSquareSize(ImGui.GetContentRegionAvail().X, 220f, 140f);
-            var cursorPos = ImGui.GetCursorScreenPos();
-            DrawInteractiveMinimapSurface(
-                "##sidebarMinimapInteraction",
-                cursorPos,
-                mapSize,
-                existingTiles,
-                isTileLoaded,
-                mapName,
-                MinimapTeleportMode.Armed,
-                out _,
-                out _,
-                out _);
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + mapSize + 4f);
-        }
 
         if (_worldScene != null || _terrainManager != null || _vlmTerrainManager != null)
         {
@@ -232,15 +144,6 @@ internal sealed partial class NavigatorPanelService
         if (_worldScene != null && (_worldScene.Pm4Overlay.ShowPm4Overlay || _worldScene.Pm4Overlay.Pm4LoadAttempted))
             ImGui.TextDisabled($"PM4: {_worldScene.Pm4Overlay.Pm4VisibleObjectCount}/{_worldScene.Pm4Overlay.Pm4ObjectCount} visible objects");
 
-        if (ImGui.Button(_fullscreenMinimap ? "Exit Full Minimap" : "Full Minimap"))
-            ToggleFullscreenMinimap();
-
-        ImGui.SameLine();
-        if (ImGui.Button(_showMinimapWindow ? "Hide Pop-out" : "Pop Out"))
-            _showMinimapWindow = !_showMinimapWindow;
-
-        if (_pendingMinimapTeleportTile.HasValue)
-            ImGui.TextDisabled($"Teleport armed: ({_pendingMinimapTeleportTile.Value.tileX}, {_pendingMinimapTeleportTile.Value.tileY}) {_pendingMinimapTeleportClickCount}/{MinimapTeleportConfirmClicks}");
     }
 
     private void DrawMapDiscoveryContent()
@@ -279,15 +182,12 @@ internal sealed partial class NavigatorPanelService
                 if (hasWdt)
                     reservedActionWidth += loadButtonWidth + style.ItemSpacing.X;
                 float labelWidth = MathF.Max(1f, ImGui.GetContentRegionAvail().X - reservedActionWidth);
-                if (!hasWdt) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
+                bool clicked = hasWdt
+                    ? ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick, new Vector2(labelWidth, 0f))
+                    : SharedUiWidgets.MutedSelectable(label, false, ImGuiSelectableFlags.AllowDoubleClick, new Vector2(labelWidth, 0f));
 
-                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick, new Vector2(labelWidth, 0f)))
-                {
-                    if (hasWdt && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        _worldLoader.LoadMapAtDefaultSpawn(map);
-                }
-
-                if (!hasWdt) ImGui.PopStyleColor();
+                if (clicked && hasWdt && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    _worldLoader.LoadMapAtDefaultSpawn(map);
 
                 if (hasWdt)
                 {
@@ -316,7 +216,7 @@ internal sealed partial class NavigatorPanelService
                     ImGui.Text($"WDT: {(hasWdt ? "Found" : "Missing")}");
                     ImGui.Text($"WDL: {(hasWdl ? "Found" : "Missing")}");
                     if (previewState == WdlPreviewWarmState.Ready)
-                        ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), "WDL preview ready. Click 'Spawn' to choose a start tile.");
+                        SharedUiWidgets.SuccessText("WDL preview ready. Click 'Spawn' to choose a start tile.");
                     else if (!hasWdl)
                         ImGui.TextDisabled("No WDL preview is available. 'Load' will use the default map spawn.");
                     else if (previewState is WdlPreviewWarmState.Loading or WdlPreviewWarmState.NotQueued)
@@ -342,7 +242,15 @@ internal sealed partial class NavigatorPanelService
 
         if (_dataSource == null || !_dataSource.IsLoaded)
         {
-            ImGui.TextWrapped("No data source loaded.\nUse File > Open Game Folder to load MPQ archives, or 'Open WC3 data' above.");
+            SharedUiWidgets.DrawEmptyState(
+                "No data source loaded",
+                "Use File > Open Game Folder to load MPQ archives, or 'Open WC3 Beta data' above.",
+                "Open Game Folder...",
+                () =>
+                {
+                    _host.ShowFolderInput = true;
+                    _host.FolderInputBuf = string.IsNullOrWhiteSpace(_host.LastGameFolderPath) ? "" : _host.LastGameFolderPath;
+                });
             return;
         }
 
@@ -380,18 +288,18 @@ internal sealed partial class NavigatorPanelService
 
         if (TryGetSelectedBrowserAssetPath(out string selectedAssetPath))
         {
-            if (ImGui.Button("Open Selected"))
+            if (SharedUiWidgets.ActionButton("Open Selected"))
                 _modelLoader.LoadFileFromDataSource(selectedAssetPath);
 
             ImGui.SameLine();
-            if (ImGui.Button("Copy Path"))
+            if (SharedUiWidgets.ActionButton("Copy Path"))
                 CopyTextToClipboard(selectedAssetPath, "asset path");
 
             if (_taxiAndAreaPoi.TryGetTaxiActorOverrideRouteId(out _)
                 && TaxiAndAreaPoiSelectionService.IsTaxiActorModelPath(selectedAssetPath))
             {
                 ImGui.SameLine();
-                if (ImGui.Button("Use For Taxi Override"))
+                if (SharedUiWidgets.ActionButton("Use For Taxi Override"))
                     _taxiAndAreaPoi.TryApplySelectedBrowserAssetToTaxiOverride();
             }
 
@@ -400,7 +308,7 @@ internal sealed partial class NavigatorPanelService
 
         if (_dataSourceSession.HasWorldReturnTarget() && _worldScene == null)
         {
-            if (ImGui.Button("Return To Last World"))
+            if (SharedUiWidgets.ActionButton("Return To Last World"))
                 _dataSourceSession.ReturnToLastWorldScene();
         }
 

@@ -24,37 +24,6 @@ namespace WoWViewer;
 internal sealed partial class ArchaeologyPanelService
 {
 
-    // ── Tool windows extracted from right sidebar ──────────────────────
-
-    internal void DrawUniqueIdArchaeologyWindow()
-    {
-        ImGui.SetNextWindowSize(new Vector2(420f, 360f), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("UniqueId Archaeology", ref _showUniqueIdArchaeologyWindow))
-        {
-            DrawUniqueIdArchaeologyContent();
-        }
-        ImGui.End();
-    }
-
-    private void DrawUniqueIdArchaeologyContent()
-    {
-        // Legacy entry point (was used by the floating window). Now delegates
-        // to the per-sub-tab dispatch. Kept so the floating window still works
-        // when _useTabUi = false.
-        if (_worldScene == null)
-            return;
-
-        int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
-        int cameraTileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
-        _worldScene.ObjectFilters.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
-
-        DrawArcheologyRangeSubTab();
-        ImGui.Separator();
-        DrawArcheologyLayersSubTab();
-        ImGui.Separator();
-        DrawArcheologyPlaybackSubTab();
-    }
-
     private void DrawArcheologyRangeSubTab()
     {
         int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
@@ -468,6 +437,11 @@ internal sealed partial class ArchaeologyPanelService
 
     internal void DrawArchaeologyWorkbenchSubTabContent()
     {
+        // Cross-destination navigation only: PM4 is not an archaeology page.
+        if (ImGui.Button("Inspect PM4 in Viewer"))
+            _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
+
+        ImGui.Separator();
         switch (_activeBottomTabIndex)
         {
             case 0:
@@ -507,12 +481,6 @@ internal sealed partial class ArchaeologyPanelService
                 DrawCapturePanelContent();
                 break;
             case 4:
-                // PM4 has a single home: the PM4 Workbench sidebar.
-                ImGui.TextDisabled("PM4 analysis lives in the PM4 Workbench sidebar.");
-                if (ImGui.Button("Open PM4 Workbench"))
-                    _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
-                break;
-            case 5:
                 // Cartography (Spec 222 integration)
                 DrawArchaeologyCartographyContent();
                 break;
@@ -522,98 +490,5 @@ internal sealed partial class ArchaeologyPanelService
         }
     }
 
-    /// <summary>
-    /// Draws the tab strip for a nested sub-tab level and returns the selected index.
-    /// The parent strip in DrawWorkbenchContent only covers the first level, so without this
-    /// a nested section can never select anything but its parent's index.
-    /// </summary>
-    private int DrawNestedSubTabStrip(string id, string[] labels, int activeIndex)
-    {
-        if (labels.Length == 0)
-            return 0;
 
-        return DrawPageCombo(id, labels, activeIndex);
-    }
-
-
-
-
-
-
-    // ── Archeology sub-tab content ──────────────────────────────────────────
-    internal void DrawArcheologySubTabContent()
-    {
-        if (_worldScene == null)
-        {
-            ImGui.TextDisabled("Load a world to use the Archeology tab.");
-            return;
-        }
-
-        if (_archeologyPlaybackActive)
-        {
-            ImGui.TextColored(new Vector4(0.95f, 0.75f, 0.25f, 1f), "Playback is active");
-            ImGui.SameLine();
-            DrawArcheologyPlaybackTransportControls();
-            ImGui.Separator();
-        }
-
-        _activeArcheologyTabIndex = DrawNestedSubTabStrip(
-            "##ArcheologySubTabs", WorkbenchNavigator.GetArcheologyBottomTabLabels(), _activeArcheologyTabIndex);
-
-        switch ((ArcheologyBottomTab)_activeArcheologyTabIndex)
-        {
-            case ArcheologyBottomTab.Range:
-                DrawArcheologyRangeSubTab();
-                break;
-            case ArcheologyBottomTab.Layers:
-                DrawArcheologyLayersSubTab();
-                break;
-            case ArcheologyBottomTab.Playback:
-                DrawArcheologyPlaybackSubTab();
-                break;
-            case ArcheologyBottomTab.Capture:
-                DrawArcheologyCaptureSubTab();
-                break;
-            case ArcheologyBottomTab.Stratigraphy:
-                DrawTemporalStratigraphySubTab();
-                break;
-        }
-    }
-
-    internal void DrawArchaeologyQuickSection()
-    {
-        ImGui.Spacing();
-        ImGui.Text("Visual Investigation");
-        ImGui.Separator();
-        DrawVisualInvestigationToolbox(showWorldObjectRangeControls: false);
-
-        ImGui.Spacing();
-        ImGui.Text("Phase Layers");
-        ImGui.Separator();
-        int phaseCount = _terrainManager?.PhaseLayers.Count ?? 0;
-        ImGui.TextDisabled(phaseCount == 0 ? "No active phase layers (base map only)." : $"{phaseCount} active phase layer(s) configured.");
-        if (ImGui.Button("Manage Layers & Provenance##Quick"))
-        {
-            OpenWorkbenchTab(WorkbenchTab.Archaeology, 2);
-        }
-
-        ImGui.Spacing();
-        ImGui.Text("Archaeological Launchers");
-        ImGui.Separator();
-        if (ImGui.Button("Cartography (Spec 222)##Quick"))
-        {
-            OpenWorkbenchTab(WorkbenchTab.Archaeology, 5);
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("UniqueId Timeline##Quick"))
-        {
-            OpenWorkbenchTab(WorkbenchTab.Archaeology, 1);
-        }
-
-        if (ImGui.Button("Synthesized Minimap Export...##Quick"))
-        {
-            PrepareSynthesizedMinimapExportDialogInputs();
-            _showSynthesizedMinimapExportDialog = true;
-        }
-    }
 }

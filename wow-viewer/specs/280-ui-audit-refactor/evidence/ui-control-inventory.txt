@@ -1,0 +1,127 @@
+3D Cursor|Workbench/Services/Chrome/ViewerChromeService.Options.cs|183|Checkbox
+About|Workbench/Services/MainMenu/MainMenuBarService.cs|187|MenuItem
+ADT Detail Tiles|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|233|SliderInt
+ADT Detail Tiles|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|347|SliderInt
+ADT Retain Radius|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|251|SliderInt
+ADT Retain Radius|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|364|SliderInt
+All Layers|Workbench/Services/Chrome/ViewerChromeService.Options.cs|110|ActionButton
+Alpha|Workbench/Services/Chrome/ViewerChromeService.Options.cs|57|Checkbox
+Anim|Workbench/Services/Chrome/ViewerChromeService.Options.cs|171|Checkbox
+Archaeology Workspace|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|79|SectionHeader
+Assets|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|62|SectionHeader
+Attach Loose Map Folder...|Workbench/Services/MainMenu/MainMenuBarService.cs|122|MenuItem
+Audio|Workbench/Services/Chrome/ViewerChromeService.Options.cs|35|DrawSectionHeader
+Auto|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|243|SmallButton
+Auto|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|356|SmallButton
+Automatic 24-minute cycle|Workbench/Services/Chrome/ViewerChromeService.Sidebars.cs|168|Checkbox
+Base Layer (L0)|Workbench/Services/Chrome/ViewerChromeService.Options.cs|107|Checkbox
+Base Only|Workbench/Services/Chrome/ViewerChromeService.Options.cs|114|ActionButton
+Bounding Boxes|Workbench/Services/Chrome/ViewerChromeService.Options.cs|77|Checkbox
+Camera Speed|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|220|SliderFloat
+Cancel|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|114|ActionButton
+Cells|Workbench/Services/Chrome/ViewerChromeService.Options.cs|152|Checkbox
+Chunks|Workbench/Services/Chrome/ViewerChromeService.Options.cs|150|Checkbox
+Close Options|Workbench/Services/UiManager/ViewerUiManager.cs|150|SmallButton
+Close|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|100|ActionButton
+Close|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|97|ActionButton
+Close|Workbench/Services/UiManager/ViewerUiManager.cs|390|Button
+Collapse chat|Workbench/Services/UiManager/ViewerUiManager.cs|184|SmallButton
+Collapse left sidebar|Workbench/Services/UiManager/ViewerUiManager.cs|281|SmallButton
+Collapse right sidebar|Workbench/Services/UiManager/ViewerUiManager.cs|302|SmallButton
+Collapse|Workbench/Services/UiManager/ViewerUiManager.cs|227|SmallButton
+Color NPC/GO BBs|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|315|Checkbox
+Color Spawns|Workbench/Services/Chrome/ViewerChromeService.Options.cs|87|Checkbox
+Contours|Workbench/Services/Chrome/ViewerChromeService.Options.cs|63|Checkbox
+Copy Path|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|293|ActionButton
+DAT Conversion|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|46|SectionHeader
+Detailed graph attribution (costs frame time)|Workbench/Services/Chrome/ViewerChromeService.Sidebars.cs|72|Checkbox
+Diagnostics|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|88|SectionHeader
+Display|Workbench/Services/Chrome/ViewerChromeService.Options.cs|17|DrawSectionHeader
+Dock|Workbench/Services/UiManager/ViewerUiManager.cs|246|SmallButton
+Dynamic Hover Range|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|132|Checkbox
+Editor Workspace|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|65|SectionHeader
+Expand chat|Workbench/Services/UiManager/ViewerUiManager.cs|175|SmallButton
+Expand left sidebar|Workbench/Services/UiManager/ViewerUiManager.cs|289|SmallButton
+Expand right sidebar|Workbench/Services/UiManager/ViewerUiManager.cs|310|SmallButton
+Export Loaded DAT Map...|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|49|ActionButton
+Export Nearby Tiles as DAT v26 (experimental)|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|51|ActionButton
+File Browser|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|55|SectionHeader
+Fog Objects|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|118|Checkbox
+Fog|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|43|SectionHeader
+FOV|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|222|SliderFloat
+Grids|Workbench/Services/Chrome/ViewerChromeService.Options.cs|31|DrawSectionHeader
+Group Names|Workbench/Services/Chrome/ViewerChromeService.Options.cs|93|Checkbox
+Hide All|Workbench/Services/Chrome/ViewerChromeService.Options.cs|118|ActionButton
+Hide UI Chrome|Workbench/Services/MainMenu/MainMenuBarService.cs|173|MenuItem
+Hide|Workbench/Services/UiManager/ViewerUiManager.cs|254|SmallButton
+Holes|Workbench/Services/Chrome/ViewerChromeService.Options.cs|125|Checkbox
+Hover Tooltips|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|122|Checkbox
+Hover/Pick Range|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|136|SliderFloat
+Keyboard Shortcuts|Workbench/Services/MainMenu/MainMenuBarService.cs|181|MenuItem
+Launch Map Converter|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|26|ActionButton
+Launch WMO Converter|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|35|ActionButton
+Layer Projects|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|81|SectionHeader
+Layers|Workbench/Services/Chrome/ViewerChromeService.Options.cs|29|DrawSectionHeader
+Left Sidebar|Workbench/Services/MainMenu/MainMenuBarService.cs|174|MenuItem
+Lighting|Workbench/Services/Chrome/ViewerChromeService.Options.cs|21|DrawSectionHeader
+Limit Hover/Pick Range|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|126|Checkbox
+Load Area POIs|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|157|ActionButton
+Load AreaTriggers|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|209|ActionButton
+Log|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|90|ActionButton
+M2/WMO WF|Workbench/Services/Chrome/ViewerChromeService.Options.cs|168|Checkbox
+Map Converter|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|23|SectionHeader
+Map|Workbench/Services/UiManager/ViewerUiManager.cs|218|SmallButton
+MCCV|Workbench/Services/Chrome/ViewerChromeService.Options.cs|61|Checkbox
+Model WF|Workbench/Services/Chrome/ViewerChromeService.Options.cs|177|Checkbox
+Objects|Workbench/Services/Chrome/ViewerChromeService.Options.cs|33|DrawSectionHeader
+Open Alpha WDT (loose map)...|Workbench/Services/MainMenu/MainMenuBarService.cs|80|MenuItem
+Open Cartography|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|84|ActionButton
+Open CASC Install (local + CDN fill)...|Workbench/Services/MainMenu/MainMenuBarService.cs|100|MenuItem
+Open CASC Install (local)...|Workbench/Services/MainMenu/MainMenuBarService.cs|94|MenuItem
+Open DAT Terrain Folder...|Workbench/Services/MainMenu/MainMenuBarService.cs|106|MenuItem
+Open File...|Workbench/Services/MainMenu/MainMenuBarService.cs|77|MenuItem
+Open File...|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|41|ActionButton
+Open Game Folder (MPQ)...|Workbench/Services/MainMenu/MainMenuBarService.cs|88|MenuItem
+Open Game Folder...|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|35|ActionButton
+Open Loose PM4 / PD4 File...|Workbench/Services/MainMenu/MainMenuBarService.cs|83|MenuItem
+Open Selected|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|289|ActionButton
+Options|Workbench/Services/UiManager/ViewerUiManager.cs|191|SmallButton
+Options|Workbench/Services/UiManager/ViewerUiManager.cs|349|Button
+Overlays|Workbench/Services/Chrome/ViewerChromeService.Options.cs|27|DrawSectionHeader
+Performance|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|92|ActionButton
+PM4 Overlay|Workbench/Services/Chrome/ViewerChromeService.Options.cs|80|Checkbox
+PM4 Overlay|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|328|Checkbox
+Project Output|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|71|SectionHeader
+Quit|Workbench/Services/MainMenu/MainMenuBarService.cs|165|MenuItem
+Remove|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|106|ActionButton
+Render Quality|Workbench/Services/Chrome/ViewerChromeService.Options.cs|19|DrawSectionHeader
+Reset Camera|Workbench/Services/MainMenu/MainMenuBarService.cs|172|MenuItem
+Reset load phases|Workbench/Services/Chrome/ViewerChromeService.Sidebars.cs|142|SmallButton
+Reset Shell Layout|Workbench/Services/MainMenu/MainMenuBarService.cs|176|MenuItem
+Return To Last World|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|309|ActionButton
+Right Sidebar|Workbench/Services/MainMenu/MainMenuBarService.cs|175|MenuItem
+Save Current Game Folder As Known-Good Base|Workbench/Services/MainMenu/MainMenuBarService.cs|141|MenuItem
+Scene Tools|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|59|SectionHeader
+Selected Object|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|286|SectionHeader
+Settings...|Workbench/Services/MainMenu/MainMenuBarService.cs|160|MenuItem
+Shadows|Workbench/Services/Chrome/ViewerChromeService.Options.cs|59|Checkbox
+Show Selected Object Bounds|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|143|Checkbox
+Show WDL Terrain|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|307|Checkbox
+Sidebar width|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|46|SliderFloat
+Simulation|Workbench/Services/Chrome/ViewerChromeService.Options.cs|37|DrawSectionHeader
+Spawn BBs Only|Workbench/Services/Chrome/ViewerChromeService.Options.cs|202|Checkbox
+Spawn BBs Only|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|322|Checkbox
+Terrain WF|Workbench/Services/Chrome/ViewerChromeService.Options.cs|165|Checkbox
+Theme|Workbench/Services/Chrome/ViewerChromeService.Options.cs|23|DrawSectionHeader
+Tiles|Workbench/Services/Chrome/ViewerChromeService.Options.cs|148|Checkbox
+Time of Day|Workbench/Services/Chrome/ViewerChromeService.Sidebars.cs|172|SliderFloat
+UI Reference|Workbench/Services/MainMenu/MainMenuBarService.cs|184|MenuItem
+Undock|Workbench/Services/UiManager/ViewerUiManager.cs|237|SmallButton
+Use For Taxi Override|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|300|ActionButton
+WDL|Workbench/Services/Chrome/ViewerChromeService.Options.cs|136|Checkbox
+WMO Converter|Workbench/Services/MainMenu/MainMenuBarService.Content.cs|32|SectionHeader
+WMO Group BBs|Workbench/Services/Chrome/ViewerChromeService.Options.cs|92|Checkbox
+WMO WF|Workbench/Services/Chrome/ViewerChromeService.Options.cs|177|Checkbox
+Workspace|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|29|SectionHeader
+World Bounding Boxes|Workbench/Services/WorkbenchPanels/WorkbenchPanelsService.cs|311|Checkbox
+World Overview|Workbench/Services/Navigator/NavigatorPanelService.Sidebars.cs|49|SectionHeader

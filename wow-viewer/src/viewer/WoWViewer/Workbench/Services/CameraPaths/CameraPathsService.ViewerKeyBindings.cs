@@ -11,6 +11,6 @@ internal sealed partial class CameraPathsService
     private bool IsCaptureKeyboardContextActive()
     {
         return GetActiveKeyContext() == ViewerKeyContext.Capture
-            && (_showCameraPathWindow || _activeCapturePanelTabIndex == (int)CapturePanelTab.CameraPath);
+            && _activeCapturePanelTabIndex == (int)CapturePanelTab.CameraPath;
     }
 }

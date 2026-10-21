@@ -15,29 +15,14 @@ public sealed class EditorWorkbenchPages
     private readonly EditorDataIoPage _dataIo;
     private readonly EditorConvertersPage _converters;
 
-    public EditorWorkbenchPages(ViewerAppContext context)
+    public EditorWorkbenchPages(ViewerAppContext context, Action? terrainFileOperations = null, Action? converters = null)
     {
         _placementObjects = new EditorPlacementObjectsPage(context);
-        _terrainTools = new EditorTerrainToolsPage(context);
+        _terrainTools = new EditorTerrainToolsPage(context, terrainFileOperations);
         _dataIo = new EditorDataIoPage(context);
-        _converters = new EditorConvertersPage(context);
+        _converters = new EditorConvertersPage(context, converters);
     }
 
-    /// <summary>
-    /// Maps a pre-231 saved or menu-passed Editor bottom-tab index onto the 4-page IA.
-    /// Old order: Tasks & Workspace / Converters / 3D Object Library / Imports & Exports /
-    /// Terrain Lab / Population. New order: Placement & Objects / Terrain Tools / Data I/O /
-    /// Converters.
-    /// </summary>
-    public static int MigrateLegacyEditorPageIndex(int legacyIndex) => legacyIndex switch
-    {
-        1 => 3, // Converters
-        2 => 0, // 3D Object Library → Placement & Objects
-        3 => 2, // Imports & Exports → Data I/O
-        4 => 1, // Terrain Lab → Terrain Tools
-        5 => 0, // Population → Placement & Objects
-        _ => Math.Clamp(legacyIndex, 0, PageCount - 1),
-    };
 
     public void Draw(int pageIndex)
     {

@@ -1,0 +1,958 @@
+{
+  "version": 1,
+  "generatedFrom": "wow-viewer/src/viewer/WoWViewer/Workbench/Services (manager-owned surfaces)",
+  "controls": [
+    {
+      "id": "3d-cursor",
+      "label": "3D Cursor",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Toggle the in-scene 3D cursor used for placement aiming.",
+      "visible": true
+    },
+    {
+      "id": "reload-cursor-model",
+      "label": "Reload cursor model",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Re-resolve the client cursor.mdx/cursor.m2 model from the active data source.",
+      "visible": true
+    },
+    {
+      "id": "about",
+      "label": "About",
+      "region": "Top menu > Help",
+      "shortcut": null,
+      "help": "Show viewer version, credits and project links.",
+      "visible": true
+    },
+    {
+      "id": "adt-detail-tiles",
+      "label": "ADT Detail Tiles",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "How many terrain tiles stay resident around the camera.",
+      "visible": true
+    },
+    {
+      "id": "adt-retain-radius",
+      "label": "ADT Retain Radius",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Radius in tiles kept resident for terrain streaming.",
+      "visible": true
+    },
+    {
+      "id": "all-layers",
+      "label": "All Layers",
+      "region": "Options > Layers",
+      "shortcut": null,
+      "help": "Show every terrain layer at once.",
+      "visible": true
+    },
+    {
+      "id": "alpha",
+      "label": "Alpha",
+      "region": "Options > Overlays",
+      "shortcut": null,
+      "help": "Show the terrain alpha (opacity) map overlay.",
+      "visible": true
+    },
+    {
+      "id": "anim",
+      "label": "Anim",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Advance animations on world doodad MDX/M2 models.",
+      "visible": true
+    },
+    {
+      "id": "archaeology-workspace",
+      "label": "Archaeology Workspace",
+      "region": "Left sidebar > Archaeology",
+      "shortcut": null,
+      "help": "Current map, analysis scope and playback state.",
+      "visible": true
+    },
+    {
+      "id": "assets",
+      "label": "Assets",
+      "region": "Left sidebar > Viewer",
+      "shortcut": null,
+      "help": "Asset catalog for the loaded data source.",
+      "visible": true
+    },
+    {
+      "id": "attach-loose-map-folder",
+      "label": "Attach Loose Map Folder...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Attach a loose map folder to the active MPQ archive.",
+      "visible": true
+    },
+    {
+      "id": "audio",
+      "label": "Audio",
+      "region": "Options > Audio",
+      "shortcut": null,
+      "help": "Audio output and per-zone audio settings.",
+      "visible": true
+    },
+    {
+      "id": "auto",
+      "label": "Auto",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Use automatic detail-tile and retention defaults.",
+      "visible": true
+    },
+    {
+      "id": "automatic-24-minute-cycle",
+      "label": "Automatic 24-minute cycle",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Advance the world time of day on the in-game day cycle.",
+      "visible": true
+    },
+    {
+      "id": "base-layer-l0",
+      "label": "Base Layer (L0)",
+      "region": "Options > Layers",
+      "shortcut": null,
+      "help": "Show the base terrain layer (L0).",
+      "visible": true
+    },
+    {
+      "id": "base-only",
+      "label": "Base Only",
+      "region": "Options > Layers",
+      "shortcut": null,
+      "help": "Show only the base terrain layer.",
+      "visible": true
+    },
+    {
+      "id": "bounding-boxes",
+      "label": "Bounding Boxes",
+      "region": "Options > Overlays",
+      "shortcut": null,
+      "help": "Draw world object bounding boxes.",
+      "visible": true
+    },
+    {
+      "id": "camera-speed",
+      "label": "Camera Speed",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Camera movement speed for keyboard and drag navigation.",
+      "visible": true
+    },
+    {
+      "id": "cancel",
+      "label": "Cancel",
+      "region": "Popup",
+      "shortcut": "Esc",
+      "help": "Close the dialog without applying anything.",
+      "visible": true
+    },
+    {
+      "id": "cells",
+      "label": "Cells",
+      "region": "Options > Grids",
+      "shortcut": null,
+      "help": "Show the terrain chunk cell grid.",
+      "visible": true
+    },
+    {
+      "id": "chunks",
+      "label": "Chunks",
+      "region": "Options > Grids",
+      "shortcut": null,
+      "help": "Show the terrain chunk grid.",
+      "visible": true
+    },
+    {
+      "id": "close-options",
+      "label": "Close Options",
+      "region": "Options",
+      "shortcut": "Esc",
+      "help": "Close the options sub-menu.",
+      "visible": true
+    },
+    {
+      "id": "close",
+      "label": "Close",
+      "region": "Popup",
+      "shortcut": "Esc",
+      "help": "Close the dialog.",
+      "visible": true
+    },
+    {
+      "id": "collapse-chat",
+      "label": "Collapse chat",
+      "region": "Chat",
+      "shortcut": null,
+      "help": "Collapse the chat dock to a one-line bar.",
+      "visible": true
+    },
+    {
+      "id": "collapse-left-sidebar",
+      "label": "Collapse left sidebar",
+      "region": "Left sidebar",
+      "shortcut": "[",
+      "help": "Collapse the left sidebar to its rail.",
+      "visible": true
+    },
+    {
+      "id": "collapse-right-sidebar",
+      "label": "Collapse right sidebar",
+      "region": "Right sidebar",
+      "shortcut": "]",
+      "help": "Collapse the right sidebar to its rail.",
+      "visible": true
+    },
+    {
+      "id": "collapse",
+      "label": "Collapse",
+      "region": "Minimap",
+      "shortcut": "M",
+      "help": "Collapse the minimap to its small header button.",
+      "visible": true
+    },
+    {
+      "id": "color-npc-go-bbs",
+      "label": "Color NPC/GO BBs",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Colour bounding boxes by NPC and GameObject spawn type.",
+      "visible": true
+    },
+    {
+      "id": "color-spawns",
+      "label": "Color Spawns",
+      "region": "Options > Overlays",
+      "shortcut": null,
+      "help": "Colour spawn markers by type.",
+      "visible": true
+    },
+    {
+      "id": "contours",
+      "label": "Contours",
+      "region": "Options > Overlays",
+      "shortcut": null,
+      "help": "Show terrain height contours.",
+      "visible": true
+    },
+    {
+      "id": "copy-path",
+      "label": "Copy Path",
+      "region": "Left sidebar > File Browser",
+      "shortcut": null,
+      "help": "Copy the selected file path to the clipboard.",
+      "visible": true
+    },
+    {
+      "id": "dat-conversion",
+      "label": "DAT Conversion",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Export the loaded DAT map or nearby tiles as DAT v26.",
+      "visible": true
+    },
+    {
+      "id": "detailed-graph-attribution-costs-frame-time",
+      "label": "Detailed graph attribution (costs frame time)",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Attribute frame time to detailed scene-graph nodes.",
+      "visible": true
+    },
+    {
+      "id": "diagnostics",
+      "label": "Diagnostics",
+      "region": "Left sidebar",
+      "shortcut": null,
+      "help": "Log, performance counters and runtime statistics.",
+      "visible": true
+    },
+    {
+      "id": "display",
+      "label": "Display",
+      "region": "Options",
+      "shortcut": null,
+      "help": "Render quality, lighting and theme settings.",
+      "visible": true
+    },
+    {
+      "id": "dock",
+      "label": "Dock",
+      "region": "Minimap",
+      "shortcut": null,
+      "help": "Dock the minimap at the top of the right sidebar.",
+      "visible": true
+    },
+    {
+      "id": "dynamic-hover-range",
+      "label": "Dynamic Hover Range",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Scale the hover/pick range with the camera distance.",
+      "visible": true
+    },
+    {
+      "id": "editor-workspace",
+      "label": "Editor Workspace",
+      "region": "Left sidebar > Editor",
+      "shortcut": null,
+      "help": "Editor session, undo state and output folder.",
+      "visible": true
+    },
+    {
+      "id": "expand-chat",
+      "label": "Expand chat",
+      "region": "Chat",
+      "shortcut": null,
+      "help": "Expand the collapsed chat dock.",
+      "visible": true
+    },
+    {
+      "id": "expand-left-sidebar",
+      "label": "Expand left sidebar",
+      "region": "Left sidebar",
+      "shortcut": "[",
+      "help": "Expand the left sidebar.",
+      "visible": true
+    },
+    {
+      "id": "expand-right-sidebar",
+      "label": "Expand right sidebar",
+      "region": "Right sidebar",
+      "shortcut": "]",
+      "help": "Expand the right sidebar.",
+      "visible": true
+    },
+    {
+      "id": "export-loaded-dat-map",
+      "label": "Export Loaded DAT Map...",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Export the loaded DAT map with the existing exporter.",
+      "visible": true
+    },
+    {
+      "id": "export-nearby-tiles-as-dat-v26-experimental",
+      "label": "Export Nearby Tiles as DAT v26 (experimental)",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Export nearby tiles as DAT v26 (experimental format path).",
+      "visible": true
+    },
+    {
+      "id": "file-browser",
+      "label": "File Browser",
+      "region": "Left sidebar",
+      "shortcut": null,
+      "help": "Browse the active data source and open assets.",
+      "visible": true
+    },
+    {
+      "id": "fog-objects",
+      "label": "Fog Objects",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Apply distance fog to world objects.",
+      "visible": true
+    },
+    {
+      "id": "fog",
+      "label": "Fog",
+      "region": "Left sidebar > Workspace",
+      "shortcut": null,
+      "help": "Fog start and end distance for the scene.",
+      "visible": true
+    },
+    {
+      "id": "fov",
+      "label": "FOV",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Camera field of view in degrees.",
+      "visible": true
+    },
+    {
+      "id": "grids",
+      "label": "Grids",
+      "region": "Options",
+      "shortcut": null,
+      "help": "Terrain tile, chunk and cell grid overlays.",
+      "visible": true
+    },
+    {
+      "id": "group-names",
+      "label": "Group Names",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Show WMO group names in the overlay.",
+      "visible": true
+    },
+    {
+      "id": "hide-all",
+      "label": "Hide All",
+      "region": "Options > Layers",
+      "shortcut": null,
+      "help": "Hide every terrain layer.",
+      "visible": true
+    },
+    {
+      "id": "hide-ui-chrome",
+      "label": "Hide UI Chrome",
+      "region": "Top menu > View",
+      "shortcut": "Tab",
+      "help": "Hide or show all viewer chrome.",
+      "visible": true
+    },
+    {
+      "id": "hide",
+      "label": "Hide",
+      "region": "Minimap",
+      "shortcut": "M",
+      "help": "Hide the minimap window.",
+      "visible": true
+    },
+    {
+      "id": "holes",
+      "label": "Holes",
+      "region": "Options > Layers",
+      "shortcut": null,
+      "help": "Mask terrain holes (missing chunks) in the render.",
+      "visible": true
+    },
+    {
+      "id": "hover-tooltips",
+      "label": "Hover Tooltips",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Show hover tooltips for the asset under the pointer.",
+      "visible": true
+    },
+    {
+      "id": "hover-pick-range",
+      "label": "Hover/Pick Range",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Maximum hover and click-pick distance in yards.",
+      "visible": true
+    },
+    {
+      "id": "keyboard-shortcuts",
+      "label": "Keyboard Shortcuts",
+      "region": "Top menu > Help",
+      "shortcut": "F1",
+      "help": "List the registered keyboard shortcuts.",
+      "visible": true
+    },
+    {
+      "id": "launch-map-converter",
+      "label": "Launch Map Converter",
+      "region": "Editor > Converters",
+      "shortcut": null,
+      "help": "Open the map converter dialog.",
+      "visible": true
+    },
+    {
+      "id": "launch-wmo-converter",
+      "label": "Launch WMO Converter",
+      "region": "Editor > Converters",
+      "shortcut": null,
+      "help": "Open the WMO converter dialog.",
+      "visible": true
+    },
+    {
+      "id": "layer-projects",
+      "label": "Layer Projects",
+      "region": "Left sidebar > Archaeology",
+      "shortcut": null,
+      "help": "Save and load layer projects.",
+      "visible": true
+    },
+    {
+      "id": "layers",
+      "label": "Layers",
+      "region": "Options",
+      "shortcut": null,
+      "help": "Terrain layer visibility and WDL overlay.",
+      "visible": true
+    },
+    {
+      "id": "left-sidebar",
+      "label": "Left Sidebar",
+      "region": "Top menu > View",
+      "shortcut": "[",
+      "help": "Show or hide the left sidebar.",
+      "visible": true
+    },
+    {
+      "id": "lighting",
+      "label": "Lighting",
+      "region": "Options > Display",
+      "shortcut": null,
+      "help": "Scene lighting diagnostics and settings.",
+      "visible": true
+    },
+    {
+      "id": "limit-hover-pick-range",
+      "label": "Limit Hover/Pick Range",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Restrict hover and pick to a bounded distance.",
+      "visible": true
+    },
+    {
+      "id": "load-area-pois",
+      "label": "Load Area POIs",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Load area points of interest for the current map.",
+      "visible": true
+    },
+    {
+      "id": "load-areatriggers",
+      "label": "Load AreaTriggers",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Load area trigger volumes for the current map.",
+      "visible": true
+    },
+    {
+      "id": "log",
+      "label": "Log",
+      "region": "Left sidebar > Diagnostics",
+      "shortcut": null,
+      "help": "Open the viewer log window.",
+      "visible": true
+    },
+    {
+      "id": "m2-wmo-wf",
+      "label": "M2/WMO WF",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Wireframe overlay for M2 doodads and WMO buildings.",
+      "visible": true
+    },
+    {
+      "id": "map-converter",
+      "label": "Map Converter",
+      "region": "Editor > Converters",
+      "shortcut": null,
+      "help": "Convert maps with the existing converter service.",
+      "visible": true
+    },
+    {
+      "id": "map",
+      "label": "Map",
+      "region": "Minimap",
+      "shortcut": "M",
+      "help": "Expand the collapsed minimap.",
+      "visible": true
+    },
+    {
+      "id": "mccv",
+      "label": "MCCV",
+      "region": "Options > Overlays",
+      "shortcut": null,
+      "help": "Show the terrain vertex colour (MCCV) overlay.",
+      "visible": true
+    },
+    {
+      "id": "model-wf",
+      "label": "Model WF",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Wireframe overlay for the standalone model.",
+      "visible": true
+    },
+    {
+      "id": "objects",
+      "label": "Objects",
+      "region": "Options",
+      "shortcut": null,
+      "help": "Object transparency, wireframes, animation and 3D cursor.",
+      "visible": true
+    },
+    {
+      "id": "open-alpha-wdt-loose-map",
+      "label": "Open Alpha WDT (loose map)...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Open a loose alpha-era WDT map file.",
+      "visible": true
+    },
+    {
+      "id": "open-cartography",
+      "label": "Open Cartography",
+      "region": "Left sidebar > Archaeology",
+      "shortcut": null,
+      "help": "Open the archaeology cartography page.",
+      "visible": true
+    },
+    {
+      "id": "open-casc-install-local-cdn-fill",
+      "label": "Open CASC Install (local + CDN fill)...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Open a local CASC install and fill missing files from the CDN.",
+      "visible": true
+    },
+    {
+      "id": "open-casc-install-local",
+      "label": "Open CASC Install (local)...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Open a local CASC install.",
+      "visible": true
+    },
+    {
+      "id": "open-dat-terrain-folder",
+      "label": "Open DAT Terrain Folder...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Open a folder of DAT terrain files.",
+      "visible": true
+    },
+    {
+      "id": "open-file",
+      "label": "Open File...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Open a single file through the shared path picker.",
+      "visible": true
+    },
+    {
+      "id": "open-game-folder-mpq",
+      "label": "Open Game Folder (MPQ)...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Open a game folder as an MPQ data source.",
+      "visible": true
+    },
+    {
+      "id": "open-game-folder",
+      "label": "Open Game Folder...",
+      "region": "Left sidebar > Workspace",
+      "shortcut": null,
+      "help": "Open a game folder as an MPQ data source.",
+      "visible": true
+    },
+    {
+      "id": "open-loose-pm4-pd4-file",
+      "label": "Open Loose PM4 / PD4 File...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Open a loose PM4 or PD4 file.",
+      "visible": true
+    },
+    {
+      "id": "open-selected",
+      "label": "Open Selected",
+      "region": "Left sidebar > File Browser",
+      "shortcut": null,
+      "help": "Open the selected file from the data source.",
+      "visible": true
+    },
+    {
+      "id": "options",
+      "label": "Options",
+      "region": "Bottom bar",
+      "shortcut": null,
+      "help": "Open the options sub-menu next to the chat.",
+      "visible": true
+    },
+    {
+      "id": "overlays",
+      "label": "Overlays",
+      "region": "Options",
+      "shortcut": null,
+      "help": "Surface overlays: alpha, shadows, MCCV, contours, liquid, WL, BBs, PM4.",
+      "visible": true
+    },
+    {
+      "id": "performance",
+      "label": "Performance",
+      "region": "Left sidebar > Diagnostics",
+      "shortcut": null,
+      "help": "Open the performance window.",
+      "visible": true
+    },
+    {
+      "id": "pm4-overlay",
+      "label": "PM4 Overlay",
+      "region": "Options > Overlays",
+      "shortcut": null,
+      "help": "Show the PM4 surface overlay in the scene.",
+      "visible": true
+    },
+    {
+      "id": "project-output",
+      "label": "Project Output",
+      "region": "Left sidebar > Editor",
+      "shortcut": null,
+      "help": "Current editor project folder and new-folder action.",
+      "visible": true
+    },
+    {
+      "id": "quit",
+      "label": "Quit",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Close the viewer.",
+      "visible": true
+    },
+    {
+      "id": "remove",
+      "label": "Remove",
+      "region": "Popup",
+      "shortcut": null,
+      "help": "Remove the saved known-good base.",
+      "visible": true
+    },
+    {
+      "id": "render-quality",
+      "label": "Render Quality",
+      "region": "Options > Display",
+      "shortcut": null,
+      "help": "Render quality settings for the scene.",
+      "visible": true
+    },
+    {
+      "id": "reset-camera",
+      "label": "Reset Camera",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Reset the camera to the default view.",
+      "visible": true
+    },
+    {
+      "id": "reset-load-phases",
+      "label": "Reset load phases",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Reset the staged load phases to the start.",
+      "visible": true
+    },
+    {
+      "id": "reset-shell-layout",
+      "label": "Reset Shell Layout",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Reset the shell layout to the default sizes and destination.",
+      "visible": true
+    },
+    {
+      "id": "return-to-last-world",
+      "label": "Return To Last World",
+      "region": "Left sidebar > Workspace",
+      "shortcut": null,
+      "help": "Return to the last loaded world.",
+      "visible": true
+    },
+    {
+      "id": "right-sidebar",
+      "label": "Right Sidebar",
+      "region": "Top menu > View",
+      "shortcut": "]",
+      "help": "Show or hide the right sidebar.",
+      "visible": true
+    },
+    {
+      "id": "save-current-game-folder-as-known-good-base",
+      "label": "Save Current Game Folder As Known-Good Base",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Remember the current game folder as a known-good base.",
+      "visible": true
+    },
+    {
+      "id": "scene-tools",
+      "label": "Scene Tools",
+      "region": "Left sidebar > Viewer",
+      "shortcut": null,
+      "help": "Taxi routes, capture automation and camera paths.",
+      "visible": true
+    },
+    {
+      "id": "selected-object",
+      "label": "Selected Object",
+      "region": "Viewer > Inspector",
+      "shortcut": null,
+      "help": "Details of the currently selected object.",
+      "visible": true
+    },
+    {
+      "id": "settings",
+      "label": "Settings...",
+      "region": "Top menu > File",
+      "shortcut": null,
+      "help": "Open the viewer settings.",
+      "visible": true
+    },
+    {
+      "id": "shadows",
+      "label": "Shadows",
+      "region": "Options > Overlays",
+      "shortcut": null,
+      "help": "Show terrain shadow overlays.",
+      "visible": true
+    },
+    {
+      "id": "show-selected-object-bounds",
+      "label": "Show Selected Object Bounds",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Draw the bounds of the selected object.",
+      "visible": true
+    },
+    {
+      "id": "show-wdl-terrain",
+      "label": "Show WDL Terrain",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Show the WDL terrain layer.",
+      "visible": true
+    },
+    {
+      "id": "sidebar-width",
+      "label": "Sidebar width",
+      "region": "Left sidebar",
+      "shortcut": null,
+      "help": "Width of the left sidebar in pixels.",
+      "visible": true
+    },
+    {
+      "id": "simulation",
+      "label": "Simulation",
+      "region": "Options",
+      "shortcut": null,
+      "help": "Population streaming and spawn display settings.",
+      "visible": true
+    },
+    {
+      "id": "spawn-bbs-only",
+      "label": "Spawn BBs Only",
+      "region": "Options > Simulation",
+      "shortcut": null,
+      "help": "Show bounding boxes for spawns only.",
+      "visible": true
+    },
+    {
+      "id": "terrain-wf",
+      "label": "Terrain WF",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Wireframe overlay for terrain.",
+      "visible": true
+    },
+    {
+      "id": "theme",
+      "label": "Theme",
+      "region": "Options > Display",
+      "shortcut": null,
+      "help": "Viewer colour theme.",
+      "visible": true
+    },
+    {
+      "id": "tiles",
+      "label": "Tiles",
+      "region": "Options > Grids",
+      "shortcut": null,
+      "help": "Show the terrain tile grid.",
+      "visible": true
+    },
+    {
+      "id": "time-of-day",
+      "label": "Time of Day",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "World time of day in hours.",
+      "visible": true
+    },
+    {
+      "id": "ui-reference",
+      "label": "UI Reference",
+      "region": "Top menu > Help",
+      "shortcut": null,
+      "help": "Open the searchable list of every documented control.",
+      "visible": true
+    },
+    {
+      "id": "undock",
+      "label": "Undock",
+      "region": "Minimap",
+      "shortcut": null,
+      "help": "Float the minimap in the top-right corner of the viewport.",
+      "visible": true
+    },
+    {
+      "id": "use-for-taxi-override",
+      "label": "Use For Taxi Override",
+      "region": "Left sidebar > File Browser",
+      "shortcut": null,
+      "help": "Use the selected path as the taxi actor model override.",
+      "visible": true
+    },
+    {
+      "id": "wdl",
+      "label": "WDL",
+      "region": "Options > Layers",
+      "shortcut": null,
+      "help": "Show the WDL terrain layer in the viewport.",
+      "visible": true
+    },
+    {
+      "id": "wmo-converter",
+      "label": "WMO Converter",
+      "region": "Editor > Converters",
+      "shortcut": null,
+      "help": "Convert WMO files with the existing converter service.",
+      "visible": true
+    },
+    {
+      "id": "wmo-group-bbs",
+      "label": "WMO Group BBs",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Draw WMO group bounding boxes.",
+      "visible": true
+    },
+    {
+      "id": "wmo-wf",
+      "label": "WMO WF",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Wireframe overlay for the standalone WMO.",
+      "visible": true
+    },
+    {
+      "id": "workspace",
+      "label": "Workspace",
+      "region": "Left sidebar",
+      "shortcut": null,
+      "help": "Open data and return to the last world.",
+      "visible": true
+    },
+    {
+      "id": "world-bounding-boxes",
+      "label": "World Bounding Boxes",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Draw world object bounding boxes.",
+      "visible": true
+    },
+    {
+      "id": "world-overview",
+      "label": "World Overview",
+      "region": "Left sidebar",
+      "shortcut": null,
+      "help": "Map list and map export.",
+      "visible": true
+    }
+  ]
+}

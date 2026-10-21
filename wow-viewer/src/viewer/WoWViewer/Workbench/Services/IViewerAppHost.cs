@@ -207,31 +207,17 @@ internal interface IViewerAppHost
     bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info);
     bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info, out Vector3 hitPoint);
     bool TryResolveHoveredWlLiquidBody(HoveredAssetInfo hoveredInfo, out WlLiquidBody? body);
-    ref FixedBottomDrawerTab ActiveBottomDrawerTab { get; }
-    ref float BottomDrawerHeight { get; }
-    ref Vector2 DockspaceHostPosition { get; }
-    ref Vector2 DockspaceHostSize { get; }
-    ref bool ForceApplyShellPanelLayout { get; }
     ref bool FullscreenMinimap { get; }
     ref bool HideUiChrome { get; }
     ref ImGuiController ImGui { get; }
     ref float LeftSidebarWidth { get; }
     ref string ModelInfo { get; }
-    ref ShellPanelId? PendingFocusedShellPanel { get; }
-    ref FixedBottomDrawerTab? PendingRightSidebarSection { get; }
-    HashSet<ShellPanelId> PendingShellPanelLayoutRestore { get; }
     ref float RightSidebarWidth { get; }
-    Dictionary<ShellPanelId, SavedShellPanelLayout> SavedShellPanelLayouts { get; }
     ref bool ShowLeftSidebar { get; }
     ref bool ShowMinimapWindow { get; }
     ref bool ShowModelInfo { get; }
     ref bool ShowRightSidebar { get; }
-    ref bool ShowWorkspaceBarsPanel { get; }
-    ref bool UseDockspaceUi { get; }
-    ref bool UseTabUi { get; }
     ref IWindow Window { get; }
-    float ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth);
-    float GetTopChromeHeight();
     void SetEditorWorkspaceTask(EditorWorkspaceTask task);
     ref List<MapDefinition> DiscoveredMaps { get; }
     ref Vector3? PendingWorldSpawnOverride { get; }
@@ -296,7 +282,7 @@ internal interface IViewerAppHost
     ref int LastMcnkOverlayChunkCount { get; }
     ref int LastMcnkWeakCornerCount { get; }
     ref McnkOverlayFlags McnkOverlayFlags { get; }
-    ShellLayoutService ShellLayout { get; }
+    ViewerUiManager UiManager { get; }
     ref bool ShowCameraPathOverlay { get; }
     ref bool ShowMcnkFlagOverlay { get; }
     ref bool ShowMcnkWeakCorners { get; }
@@ -315,7 +301,6 @@ internal interface IViewerAppHost
     ref int ActiveBottomTabIndex { get; }
     ref string ActiveDatasetVersionRoot { get; }
     ref WorkbenchTab ActiveTopTab { get; }
-    ref int ActiveUtilitiesTabIndex { get; }
     ref bool ArcheologyApplyToNextCapture { get; }
     ref bool ArcheologyApplyToVideoRecording { get; }
     ref int ArcheologyMaxUniqueId { get; }
@@ -341,10 +326,6 @@ internal interface IViewerAppHost
     ref Vector3 Pm4SavedOverlayTranslation { get; }
     ref Dictionary<string, Pm4WmoMatchEntry> Pm4WmoMatchEntries { get; }
     ref Pm4WmoMatchStore? Pm4WmoMatchStore { get; }
-    ref Pm4ObjectMatchStore? Pm4ObjectMatchStore { get; }
-    ref Dictionary<string, Pm4ObjectMatchEntry> Pm4ObjectMatchEntries { get; }
-    Dictionary<string, SavedPm4ObjectMatchSelection> SavedPm4ObjectMatches { get; }
-    bool TrySavePm4ObjectMatch(string modelPath, string modelName, string source);
     ref int SelectedBuildOptionIndex { get; }
     ref string SelectedDatasetVersionRoot { get; }
     ref TextureFilteringMode TextureFilteringMode { get; }
@@ -355,7 +336,6 @@ internal interface IViewerAppHost
     ref bool VideoCaptureIncludeUi { get; }
     ref string VideoEncoderExecutable { get; }
     int FindBuildOptionIndex(string? buildVersion);
-    void NormalizeWorkbenchStateAfterLoad();
     void RefreshClientBuildOptions();
     void RefreshDatasetCatalog();
     ProjectOutputService ProjectOutput { get; }
@@ -370,8 +350,6 @@ internal interface IViewerAppHost
     ref bool ShowRosettaDatastoreDialog { get; }
     CascAhdrSourceService CascAhdrSource { get; }
     ClientDialogsService ClientDialogs { get; }
-    ref UtilitiesBottomTab? LegacyUtilityPage { get; }
-    ref bool ShowFileBrowser { get; }
     ref bool ShowLogViewer { get; }
     ref bool ShowPerfWindow { get; }
     ref bool ShowSettingsWindow { get; }
@@ -383,17 +361,9 @@ internal interface IViewerAppHost
     ref bool WantSelectDatasetCatalogRoot { get; }
     ref bool WantTerrainExport { get; }
     ref bool WantTerrainImport { get; }
-    ref bool WorkbenchOpen { get; }
     ViewerKeyContext GetActiveKeyContext();
     void OpenCapturePanelTab(CapturePanelTab tab);
-    void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = -1);
-    void OpenWorkbenchTab(ModelBottomTab tab);
-    void OpenWorkbenchTab(WorldBottomTab tab);
-    void OpenWorkbenchTab(ToolsBottomTab tab);
-    void OpenWorkbenchTab(UtilitiesBottomTab tab);
-    void PrepareSynthesizedMinimapExportDialogInputs();
     void ResetCamera();
-    void SetWorkspaceMode(WorkspaceMode mode);
     ref int ActivePm4TabIndex { get; }
     ref ActiveVideoRecording? ActiveVideoRecording { get; }
     ref long LastTaxiRideCameraTick { get; }
@@ -416,11 +386,9 @@ internal interface IViewerAppHost
     ref MapListSortMode MapListSortMode { get; }
     Pm4WorkbenchService Pm4Workbench { get; }
     PerfPanelService PerfPanel { get; }
-    ref bool ShowUniqueIdArchaeologyWindow { get; }
     void DrawCapturePanelContent();
     void DrawMapSortModeSelector(string id);
     void DrawSynthesizedMinimapExportContent(bool showCloseButton = false);
-    void DrawTemporalStratigraphySubTab();
     void DrawTerrainControlsAdjustmentWeakSignalContent();
     void EnsureEditorHost();
     HashSet<int> HighlightedStandaloneWmoGroupIndices { get; }
@@ -435,26 +403,21 @@ internal interface IViewerAppHost
     void ToggleStandaloneWmoGroupHighlight(int renderGroupIndex);
     ChunkEditService ChunkEdit { get; }
     ref bool LayoutObjectPreviewMode { get; }
-    ref bool ShowWeakSignalWindow { get; }
     StratigraphyService Stratigraphy { get; }
     void ClampMinimapPanOffset();
     void DrawAuthoritativeFogControls(bool showDescription = true);
     bool TryGetActiveMinimapState(out List<(int tx, int ty)>? existingTiles, out Func<int, int, bool>? isTileLoaded, out int loadedTileCount, out string? mapName);
     ref int PendingMinimapTeleportClickCount { get; }
     ref (int tileX, int tileY)? PendingMinimapTeleportTile { get; }
-    void DrawDockedShellPanelsForLane(ShellPanelLane lane, float sidebarHeight);
-    void DrawFixedSidebarWidthControl(string label, ref float width, bool isLeftSidebar, float displayWidth, string tooltip);
-    void DrawInteractiveMinimapSurface(string interactionId, Vector2 cursorPos, float mapSize, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded, string? mapName, MinimapTeleportMode teleportMode, out float viewMinTx, out float viewMinTy, out float cellSize);
-    void DrawWorkspaceBarsPanelContent();
     void ToggleFullscreenMinimap();
     ModelInspectorPanelService ModelInspector { get; }
     TerrainControlsPanelService TerrainControlsPanel { get; }
-    void DrawVisualInvestigationModeButton(VisualInvestigationMode mode, string label, string tooltip);
     string GetWorkspaceSaveStatusSummary();
     string GetWorkspaceTargetSummary();
     void FocusCameraOnLitLight(int lightIndex, bool closeFullscreenAfterFocus);
     TerrainQueryService TerrainQuery { get; }
     NavigatorPanelService NavigatorPanel { get; }
+    MinimapAndStatusService MinimapAndStatus { get; }
     void DrawUnifiedInspectorContent();
     InvestigationService Investigation { get; }
     TerrainInspectionPanelService TerrainInspection { get; }
@@ -470,7 +433,6 @@ internal interface IViewerAppHost
     ViewerChromeService ViewerChrome { get; }
     WorldObjectsPanelService WorldObjectsPanel { get; }
     void DrawLogViewerContent();
-    void DrawMinimapContent(int loadedTileCount, string? mapName, List<(int tx, int ty)> existingTiles, Func<int, int, bool> isTileLoaded);
     void DrawRenderQualityContent();
     Workbench.Pages.EditorWorkbenchPages EnsureEditorPages();
     bool IsEditorTaskAvailable(EditorWorkspaceTask task);
@@ -489,8 +451,6 @@ internal interface IViewerAppHost
     void QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture = false, int captureAfterFrames = 1, bool allowWindowCloseOnCapture = false);
     ref PendingCaptureRequest? ActiveCaptureRequest { get; }
     Queue<PendingCaptureRequest> CaptureQueue { get; }
-    ref bool ShowCameraPathWindow { get; }
-    ref bool ShowCaptureAutomationWindow { get; }
     WorkbenchPanelsService WorkbenchPanels { get; }
     void DrawCaptureAutomationContent();
     string GetCurrentCaptureBuildVersion();

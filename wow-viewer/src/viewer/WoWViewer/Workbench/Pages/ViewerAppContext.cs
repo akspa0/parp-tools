@@ -15,19 +15,6 @@ public interface IEditorPageHost
     void DrawConverters();
 
     /// <summary>
-    /// Spec 231 D1: single authoritative draw site for the PM4 export command
-    /// set (JSON dump, OBJ set, LLM bundle, visible report, correlation JSON).
-    /// All PM4 panels link here instead of drawing their own export buttons.
-    /// </summary>
-    void DrawPm4Exports();
-
-    /// <summary>
-    /// Opens the single PM4 Workbench sidebar. PM4 content is not duplicated in
-    /// the Editor page; this is a navigation shortcut only.
-    /// </summary>
-    void OpenPm4Workbench();
-
-    /// <summary>
     /// Spec 234 US3: New Map creator in the Editor tab.
     /// </summary>
     void DrawNewMapCreator();

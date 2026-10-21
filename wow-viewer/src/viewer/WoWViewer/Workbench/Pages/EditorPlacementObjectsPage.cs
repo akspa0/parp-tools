@@ -1,12 +1,9 @@
-using ImGuiNET;
 using WoWViewer.UI;
 
 namespace WoWViewer.Workbench.Pages;
 
 /// <summary>
-/// Spec 231 Editor page 1: Placement & Objects. Phase 1 hosts the legacy
-/// Tasks & Workspace, 3D Object Library, and Population content as sections;
-/// consolidation of the scattered transform/correlation panels happens in Phase 3.
+/// Placement & Objects: archaeology tasks, the Rosetta object library, and population.
 /// </summary>
 public sealed class EditorPlacementObjectsPage
 {
@@ -20,7 +17,7 @@ public sealed class EditorPlacementObjectsPage
         // every other section is collapsed by default so the page does not stack
         // three large panels into one wall of content.
         if (SharedUiWidgets.SectionHeader(
-                "Tasks & Workspace",
+                "Archaeology Tasks",
                 defaultOpen: true,
                 id: "EditorPlacementTasks"))
         {
@@ -28,17 +25,7 @@ public sealed class EditorPlacementObjectsPage
         }
 
         if (SharedUiWidgets.SectionHeader(
-                "PM4 Placement Tools",
-                "PM4 has a single home: the PM4 Workbench sidebar.",
-                defaultOpen: false,
-                id: "EditorPlacementPm4Tools"))
-        {
-            if (ImGui.Button("Open PM4 Workbench"))
-                _context.Host.OpenPm4Workbench();
-        }
-
-        if (SharedUiWidgets.SectionHeader(
-                "3D Object Library",
+                "Rosetta Object Library",
                 defaultOpen: false,
                 id: "EditorPlacementLibrary"))
         {

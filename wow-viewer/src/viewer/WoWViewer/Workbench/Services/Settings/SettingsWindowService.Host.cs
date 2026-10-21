@@ -59,7 +59,6 @@ internal sealed partial class SettingsWindowService
     private ref bool _showMinimapWindow => ref _host.ShowMinimapWindow;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
     private ref float _uiFontScale => ref _host.UiFontScale;
-    private ref bool _useTabUi => ref _host.UseTabUi;
     private ref VlmTerrainManager? _vlmTerrainManager => ref _host.VlmTerrainManager;
     private ref WorldScene? _worldScene => ref _host.WorldScene;
 }

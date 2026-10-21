@@ -256,18 +256,6 @@ internal sealed partial class CaptureAutomationService
         public List<CameraShotPoint> Shots { get; set; } = new();
     }
 
-    internal void DrawCaptureAutomationWindow()
-    {
-        // 069 Phase 16: wrapper keeps legacy floating-window behavior.
-        // Workbench sub-tab uses DrawCaptureAutomationContent directly.
-        if (!ImGui.Begin("Capture Automation", ref _showCaptureAutomationWindow))
-        {
-            ImGui.End();
-            return;
-        }
-        DrawCaptureAutomationContent();
-        ImGui.End();
-    }
 
     internal void DrawCaptureAutomationContent()
     {

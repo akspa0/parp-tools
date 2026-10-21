@@ -23,6 +23,12 @@
              Link="Capture\VideoEncoderExecutableResolver.cs" />
     <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\Recording\RecordingModels.cs"
              Link="Recording\RecordingModels.cs" />
+    <!-- Spec 280 UI documentation contract: the registry parser, the renderer and the
+         control scanner are pure code, so the build check can reuse them verbatim. -->
+    <Compile Include="..\..\src\viewer\WoWViewer\UI\UiReferenceDocument.cs"
+             Link="UI\UiReferenceDocument.cs" />
+    <Compile Include="..\..\src\viewer\WoWViewer\UI\UiControlScanner.cs"
+             Link="UI\UiControlScanner.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -68,7 +68,6 @@ internal sealed partial class ArchaeologyPanelService
 {
     // Host bridge (same names as the former ViewerApp members).
     private ref int _activeBottomTabIndex => ref _host.ActiveBottomTabIndex;
-    private ref int _activePm4TabIndex => ref _host.ActivePm4TabIndex;
     private ref bool _archeologyApplyToNextCapture => ref _host.ArcheologyApplyToNextCapture;
     private ref bool _archeologyApplyToVideoRecording => ref _host.ArcheologyApplyToVideoRecording;
     private ref int _archeologyMaxUniqueId => ref _host.ArcheologyMaxUniqueId;
@@ -90,8 +89,6 @@ internal sealed partial class ArchaeologyPanelService
     private Pm4WorkbenchService _pm4Workbench => _host.Pm4Workbench;
     private ProjectOutputService _projectOutput => _host.ProjectOutput;
     private ViewerSettingsService _settings => _host.Settings;
-    private ref bool _showSynthesizedMinimapExportDialog => ref _host.ShowSynthesizedMinimapExportDialog;
-    private ref bool _showUniqueIdArchaeologyWindow => ref _host.ShowUniqueIdArchaeologyWindow;
     private ref string _statusMessage => ref _host.StatusMessage;
     private ref TerrainExportKind _terrainExportKind => ref _host.TerrainExportKind;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
@@ -102,14 +99,5 @@ internal sealed partial class ArchaeologyPanelService
     private void DrawCapturePanelContent() => _host.DrawCapturePanelContent();
     private void DrawMapSortModeSelector(string id) => _host.DrawMapSortModeSelector(id);
     private void DrawSynthesizedMinimapExportContent(bool showCloseButton = false) => _host.DrawSynthesizedMinimapExportContent(showCloseButton);
-    private void DrawTemporalStratigraphySubTab() => _host.DrawTemporalStratigraphySubTab();
     private void DrawTerrainControlsAdjustmentWeakSignalContent() => _host.DrawTerrainControlsAdjustmentWeakSignalContent();
-    private void DrawVisualInvestigationToolbox(bool showWorldObjectRangeControls) => _host.DrawVisualInvestigationToolbox(showWorldObjectRangeControls);
-    private void EnsureEditorHost() => _host.EnsureEditorHost();
-    private void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = -1) => _host.OpenWorkbenchTab(topTab, bottomIndex);
-    private void OpenWorkbenchTab(ModelBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(WorldBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(ToolsBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(UtilitiesBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void PrepareSynthesizedMinimapExportDialogInputs() => _host.PrepareSynthesizedMinimapExportDialogInputs();
 }

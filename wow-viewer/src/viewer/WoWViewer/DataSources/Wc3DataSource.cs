@@ -35,7 +35,7 @@ public sealed class Wc3DataSource : IDataSource
 
     public string Root => _source.Root;
     public string Summary => _source.Summary;
-    public string Name => "WC3: " + _source.Root;
+    public string Name => "WC3 Beta: " + _source.Root;
     public bool IsLoaded => true;
     public List<string> Diagnostics { get; } = [];
 

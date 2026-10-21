@@ -9,11 +9,19 @@ namespace WoWViewer.Workbench.Pages;
 public sealed class EditorTerrainToolsPage
 {
     private readonly ViewerAppContext _context;
+    private readonly Action? _drawFileOperations;
 
-    public EditorTerrainToolsPage(ViewerAppContext context) => _context = context;
+    public EditorTerrainToolsPage(ViewerAppContext context, Action? drawFileOperations = null)
+    {
+        _context = context;
+        _drawFileOperations = drawFileOperations;
+    }
 
     public void Draw()
     {
+        // Parent injects MainMenuBarService.DrawTerrainFileOperationsContent. No shell type or
+        // broad host dependency is introduced into this destination page.
+        _drawFileOperations?.Invoke();
         if (SharedUiWidgets.SectionHeader(
                 "Terrain Lab",
                 defaultOpen: true,

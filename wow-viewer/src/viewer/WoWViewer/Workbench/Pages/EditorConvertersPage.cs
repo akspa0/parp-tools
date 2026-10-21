@@ -9,8 +9,13 @@ namespace WoWViewer.Workbench.Pages;
 public sealed class EditorConvertersPage
 {
     private readonly ViewerAppContext _context;
+    private readonly Action? _drawConverters;
 
-    public EditorConvertersPage(ViewerAppContext context) => _context = context;
+    public EditorConvertersPage(ViewerAppContext context, Action? drawConverters = null)
+    {
+        _context = context;
+        _drawConverters = drawConverters;
+    }
 
     public void Draw()
     {
@@ -19,7 +24,8 @@ public sealed class EditorConvertersPage
                 defaultOpen: true,
                 id: "EditorConvertersContent"))
         {
-            _context.Host.DrawConverters();
+            if (_drawConverters != null) _drawConverters();
+            else _context.Host.DrawConverters();
         }
     }
 }

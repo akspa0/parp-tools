@@ -29,9 +29,14 @@ internal static class ViewerKeyBindingCatalog
     public static IReadOnlyList<ViewerKeyBinding> All { get; } =
     [
         new("ui.toggle_chrome", "Global", "Tab", "Show or hide the viewer chrome.", ViewerKeyContext.Global, true),
-        new("ui.toggle_inspector", "Global", "I", "Show or hide the right inspector/workbench.", ViewerKeyContext.Global, true),
-        new("ui.focus_pm4", "Global", "P", "Focus PM4 tools when available.", ViewerKeyContext.Global, true),
-        new("ui.toggle_minimap", "Global", "M", "Toggle the fullscreen minimap when terrain is loaded.", ViewerKeyContext.Global, true),
+        new("ui.toggle_left_sidebar", "Global", "[", "Show or hide the left sidebar.", ViewerKeyContext.Global, true),
+        new("ui.toggle_right_sidebar", "Global", "]", "Show or hide the right sidebar.", ViewerKeyContext.Global, true),
+        new("ui.toggle_inspector", "Global", "I", "Show the right sidebar on its Inspector page.", ViewerKeyContext.Global, true),
+        new("ui.focus_pm4", "Global", "P", "Show the right sidebar on its PM4 page.", ViewerKeyContext.Global, true),
+        new("ui.toggle_minimap", "Global", "M", "Show or hide the minimap instrument.", ViewerKeyContext.Global, true),
+        new("ui.fullscreen_minimap", "Global", "F", "Open or close the fullscreen minimap when terrain is loaded.", ViewerKeyContext.Global, true),
+        new("ui.keyboard_shortcuts", "Global", "F1", "Open the keyboard shortcut list.", ViewerKeyContext.Global, true),
+        new("ui.close_popup", "Global", "Esc", "Close the topmost popup.", ViewerKeyContext.Global, true),
         new("camera.free_fly", "Global", "WASD / Q E", "Move the free-fly camera; hold Shift for a speed boost.", ViewerKeyContext.Global, true),
         new("model.animation", "Inspect", "Left / Right / Space", "Step or play the loaded model animation.", ViewerKeyContext.Inspect),
         new("world.navigation", "Scene", "WASD / Q E", "Navigate the loaded world with the camera.", ViewerKeyContext.Scene),
@@ -59,26 +64,13 @@ public partial class ViewerApp
 
     private ViewerKeyContext GetActiveKeyContext()
     {
-        if (_workbenchPanels.IsWorkbenchUtilityVisible(Workbench.UtilitiesBottomTab.Capture))
-            return ViewerKeyContext.Capture;
-        if (_workbenchPanels.IsWorkbenchUtilityVisible(Workbench.UtilitiesBottomTab.Audio))
-            return ViewerKeyContext.Audio;
-
-        if (!_useTabUi)
-            return (_showCaptureAutomationWindow || _showCameraPathWindow) ? ViewerKeyContext.Capture : ViewerKeyContext.Global;
-
+        if (_uiManager.IsCaptureVisible) return ViewerKeyContext.Capture;
+        if (_uiManager.IsAudioVisible) return ViewerKeyContext.Audio;
         return _activeTopTab switch
         {
-            Workbench.WorkbenchTab.Quick => ViewerKeyContext.Quick,
-            Workbench.WorkbenchTab.Inspect => ViewerKeyContext.Inspect,
-            Workbench.WorkbenchTab.Scene => ViewerKeyContext.Scene,
-            Workbench.WorkbenchTab.Utilities when (Workbench.UtilitiesBottomTab)_activeUtilitiesTabIndex == Workbench.UtilitiesBottomTab.Audio => ViewerKeyContext.Audio,
-            Workbench.WorkbenchTab.Utilities when (Workbench.UtilitiesBottomTab)_activeUtilitiesTabIndex == Workbench.UtilitiesBottomTab.Capture => ViewerKeyContext.Capture,
-            Workbench.WorkbenchTab.Utilities => ViewerKeyContext.Utilities,
-            Workbench.WorkbenchTab.Experimental => ViewerKeyContext.Experimental,
-            Workbench.WorkbenchTab.Archaeology => ViewerKeyContext.Archaeology,
             Workbench.WorkbenchTab.Editor => ViewerKeyContext.Editor,
-            _ => ViewerKeyContext.Global,
+            Workbench.WorkbenchTab.Archaeology => ViewerKeyContext.Archaeology,
+            _ => ViewerKeyContext.Inspect,
         };
     }
 }

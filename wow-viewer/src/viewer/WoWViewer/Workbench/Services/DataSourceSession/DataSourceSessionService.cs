@@ -165,7 +165,7 @@ internal sealed class DataSourceSessionService
         _pendingDataSourceReloadGeneration = ++_activeDataSourceReloadGeneration;
         try
         {
-            _statusMessage = $"Opening WC3 data from {rootPath}...";
+            _statusMessage = $"Opening WC3 Beta data from {rootPath}...";
             var source = new Wc3DataSource(rootPath, listfilePath);
 
             ISceneRenderer? previousRenderer = _renderer;
@@ -192,11 +192,11 @@ internal sealed class DataSourceSessionService
             _extensionFilter = AllFilesFilter;
             _searchFilter = string.Empty;
             RefreshFileList();
-            _statusMessage = $"Opened WC3 data: {source.GetFileList().Count:N0} files. Select a file in the browser.";
+            _statusMessage = $"Opened WC3 Beta data: {source.GetFileList().Count:N0} files. Select a file in the browser.";
         }
         catch (Exception ex)
         {
-            _statusMessage = $"Failed to open WC3 data: {ex.GetBaseException().Message}";
+            _statusMessage = $"Failed to open WC3 Beta data: {ex.GetBaseException().Message}";
         }
     }
 

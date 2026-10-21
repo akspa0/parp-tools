@@ -72,7 +72,7 @@ internal sealed partial class TerrainQueryService
     private ref int _lastMcnkWeakCornerCount => ref _host.LastMcnkWeakCornerCount;
     private ref McnkOverlayFlags _mcnkOverlayFlags => ref _host.McnkOverlayFlags;
     private HashSet<(int tileX, int tileY, int chunkX, int chunkY)> _selectedChunks => _host.SelectedChunks;
-    private ShellLayoutService _shellLayout => _host.ShellLayout;
+    private ViewerUiManager _shellLayout => _host.UiManager;
     private ref bool _showCameraPathOverlay => ref _host.ShowCameraPathOverlay;
     private ref bool _showMcnkFlagOverlay => ref _host.ShowMcnkFlagOverlay;
     private ref bool _showMcnkWeakCorners => ref _host.ShowMcnkWeakCorners;

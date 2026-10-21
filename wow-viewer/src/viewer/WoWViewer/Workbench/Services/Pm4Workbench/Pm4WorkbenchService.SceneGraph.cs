@@ -25,8 +25,8 @@ internal sealed partial class Pm4WorkbenchService
         {
             ImGui.TextDisabled("Select a PM4 object to inspect.");
             ImGui.Spacing();
-            if (ImGui.Button("Open Data I/O"))
-                OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
+            if (ImGui.Button("Open PM4 Selection & Exports"))
+                OpenPm4Workbench(Pm4WorkbenchTab.Selection);
             ImGui.PopTextWrapPos();
             return;
         }
@@ -67,8 +67,8 @@ internal sealed partial class Pm4WorkbenchService
 
         ImGui.Separator();
         ImGui.Spacing();
-        if (ImGui.Button("Open Data I/O"))
-            OpenWorkbenchTab(WorkbenchTab.Editor, 2); // Spec 231 D1: exports live on the Data I/O page
+        if (ImGui.Button("Open PM4 Selection & Exports"))
+            OpenPm4Workbench(Pm4WorkbenchTab.Selection);
 
         ImGui.Separator();
         DrawPm4SceneGraph();
@@ -525,8 +525,7 @@ internal sealed partial class Pm4WorkbenchService
         if (_worldScene == null) return;
 
         string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-        string outputDir = Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "output", "tmp");
+        string outputDir = Path.GetFullPath(ExportDir);
         Directory.CreateDirectory(outputDir);
         string mdPath = Path.Combine(outputDir, $"pm4_overlay_{timestamp}.md");
 
@@ -596,6 +595,7 @@ internal sealed partial class Pm4WorkbenchService
             }
         }
 
+        sw.Flush();
         _statusMessage = $"Wrote PM4 overlay report: {mdPath}";
     }
 

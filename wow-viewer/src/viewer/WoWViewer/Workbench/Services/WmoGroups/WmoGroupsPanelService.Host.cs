@@ -55,7 +55,7 @@ internal sealed partial class WmoGroupsPanelService
     private ref float _lastMouseX => ref _host.LastMouseX;
     private ref float _lastMouseY => ref _host.LastMouseY;
     private ref int _selectedStandaloneWmoGroupIndex => ref _host.SelectedStandaloneWmoGroupIndex;
-    private ShellLayoutService _shellLayout => _host.ShellLayout;
+    private ViewerUiManager _shellLayout => _host.UiManager;
     private ref bool _standaloneWmoGroupLabelsAllEnabled => ref _host.StandaloneWmoGroupLabelsAllEnabled;
     private ref bool _standaloneWmoGroupOverlayEnabled => ref _host.StandaloneWmoGroupOverlayEnabled;
     private ref bool _standaloneWmoOverlayIncludeHiddenGroups => ref _host.StandaloneWmoOverlayIncludeHiddenGroups;

@@ -319,19 +319,48 @@ content.
 
 ### 0.11 Audit status
 
-| Area | Status |
-|---|---|
-| File menu | audited; flattening proposed |
-| View menu | audited; duplicates identified |
-| Tools menu | audited; 5-level export/import tree identified |
-| Left sidebar | audited; duplicates identified |
-| Right sidebar | audited; cleanest surface |
-| Bottom bar | audited; options toolbar to move |
-| Status bar | audited; keep |
-| Chat bar | audited; keep, add Options anchor |
-| Editor pages | audited; 4 pages, 13 sections, archaeology-named content |
-| Archaeology pages | audited; 6 pages, 4 parallel navigation systems, 4-level Cartography tree |
-| Popups | audited; 12 duplicate floating windows, 3 bottom-bar popups, 4 export dialogs |
+**Status: `partial — implementation landed, verification outstanding` (2026-10-21).**
+
+The refactor is implemented in source and the ledger in [tasks.md](tasks.md) is reconciled against
+it. This status is **not** `implemented`, because the audit's own acceptance criteria are not met:
+
+- The audit was never confirmed **against the running viewer** (task T003; the named receipt
+  `evidence/p0-audit-closure.md` does not exist).
+- **The viewer does not currently start.** The operator reported (2026-10-21) a startup crash:
+  `System.ArgumentException: Delegate to an instance method cannot have null 'this'` at
+  `ViewerUiManager..ctor` (`Workbench/Services/UiManager/ViewerUiManager.cs:24`). The constructor
+  reads `host.MinimapAndStatus.DrawStatusContent`, but `ViewerApp` constructs the manager at
+  `ViewerApp.cs:581` and only assigns `_minimapAndStatus` at `ViewerApp.cs:621`. Every
+  runtime/visual acceptance clause in this audit is therefore blocked, not merely outstanding.
+- Two evidence files named by the task ledger do not exist:
+  `evidence/p7-floating-windows.md` (P7) and `evidence/p9-visual-layout.md` (P9). No P9 task is
+  complete and the `Ctrl+K` command palette was not implemented.
+- Bespoke styling outside the five manager-owned surfaces still exists — 34 files / 179 hits
+  ([p8 §5](evidence/p8-styling-naming.md)) — so "every sidebar uses the shared primitives" is
+  **not** met. The documentation `WC3 → WC3 Beta` rename and the final dead-control sweep are
+  also not done.
+- The PM4 Actions popup still exists in source
+  (`Workbench/Services/WorldObjects/WorldObjectsPanelService.cs:209`), so there is still more
+  than one PM4 entry point.
+- The whole-spec receipt is [evidence/final-receipt.md](evidence/final-receipt.md). It records
+  the same open gates, and two of its P7 claims (that the PM4 Actions popup is gone, and the
+  registry count of 104) are stale against the current tree.
+
+Per-area audit status, with the implementation outcome added:
+
+| Area | Audit status | Implementation outcome (2026-10-21) |
+|---|---|---|
+| File menu | audited; flattening proposed | Top menu is File / View / Help. Typed path replaced by the shared picker; exports moved to owning destinations; unproven import entries removed. See §2.1. |
+| View menu | audited; duplicates identified | Duplicates deleted; legacy "Tab System (069)" / "Dockable Shell Panels" toggles removed. |
+| Tools menu | audited; 5-level export/import tree identified | Entire Tools menu (Panels, Converters, Export, Import) deleted. |
+| Left sidebar | audited; duplicates identified | Destination-aware; common sections plus the current destination's sections; Diagnostics, Scene Tools, Assets added. |
+| Right sidebar | audited; cleanest surface | Destination-aware: Viewer tab strip, otherwise the destination's pages. |
+| Bottom bar | audited; options toolbar to move | Slim destination bar: Viewer / Editor / Archaeology / Options / FPS-stats. |
+| Status bar | audited; keep | Kept, always visible, manager-owned. |
+| Chat bar | audited; keep, add Options anchor | Kept and manager-owned; the Options rect is derived from the chat rect. Resizable dock not proven. |
+| Editor pages | audited; 4 pages, 13 sections, archaeology-named content | Renamed to their real owners ("Archaeology Tasks", "Rosetta Object Library", "Archaeology Imports"); one-button PM4 section and the second PM4 export home deleted. |
+| Archaeology pages | audited; 6 pages, 4 parallel navigation systems, 4-level Cartography tree | Legacy 5-tab strip, floating UniqueId window and Quick launchers deleted; the destination is now **5** pages (PM4 is a cross-destination button), not 6. |
+| Popups | audited; 12 duplicate floating windows, 3 bottom-bar popups, 4 export dialogs | Duplicate floating windows deleted (Log and Perf only); the three bottom-bar popups moved into Options. The PM4 Actions popup remains. |
 
 ## 1. Surface inventory
 
@@ -366,6 +395,29 @@ content.
 | PM4 culling | 3D viewport | Objects vanished when the camera was close | Fixed 2026-10-20: cull uses the full geometry transform |
 | Population double-click | Population directory | Did not move the camera | Fixed 2026-10-20: check the item hover and mouse state directly |
 | PM4 selection box | 3D viewport | Box spanned the map | Fixed 2026-10-20: bounds localized and clamped to the originating tile |
+
+### 2.1 File-menu functional state (post-implementation)
+
+**Operator report, 2026-10-20 (pre-implementation, recorded in
+[functionality.md](functionality.md) and [evidence/p1-file-operations.md](evidence/p1-file-operations.md)):**
+File menu **mostly works**; **Export unreliable**; **Import non-functional**; **Open File required
+a typed path**.
+
+**Post-implementation state (2026-10-21).** The implementation changed the File-menu surface as
+follows. Runtime confirmation of every row remains operator-owned, and is currently blocked
+because the viewer does not start (§0.11).
+
+| Action | Operator-reported state | Post-implementation state | Evidence |
+|---|---|---|---|
+| Open File... | required a typed path | **Replaced by the shared path picker**; the bespoke text-path modal is gone. Still unverified on a real client. | [p1](evidence/p1-file-operations.md); `MainMenuBarService.cs:207` |
+| Export (all kinds) | unreliable | **Moved to their owning destinations** — 10 terrain exports under Editor > Terrain Tools, model/world exports under the Viewer Model and World pages, PM4 exports under PM4 Selection (one home). Each writes through a reporter that fails on zero/negative work, a thrown exception, a missing file or an empty file, and reports the full output path. **No export has been executed against real client data**, so "unreliable" is not yet re-labelled. | [p1](evidence/p1-file-operations.md), [p1-reporter-artifact](evidence/p1-reporter-artifact.md), [p6](evidence/p6-editor.md) |
+| Import (all kinds) | non-functional | **Unproven import entries were removed**; 3 explicit session-only terrain apply chains remain (Alpha atlas, 257 heightmap + JSON, MCCV PNG) with non-zero-work enforcement. They are session-only — they do not write an ADT. No import has been applied to real terrain, so "non-functional" is not yet re-labelled. | [p1](evidence/p1-file-operations.md) |
+| Open Alpha WDT / Open Loose PM4 / Open CASC / Open Game Folder | wired | Unchanged in behaviour; the path pickers are in place. Open Game Folder still uses the folder-input popup. | [p3](evidence/p3-top-menu.md) |
+
+**Honest summary:** the *code* for the P1 repair is landed and receipted. The *functional state*
+of each action is still the operator's 2026-10-20 report, because no action has been exercised on
+a real client — the viewer does not currently start (§0.11). `works` / `unreliable` / `dead` are
+therefore **not** re-assigned here.
 
 ## 3. Styling inconsistencies
 

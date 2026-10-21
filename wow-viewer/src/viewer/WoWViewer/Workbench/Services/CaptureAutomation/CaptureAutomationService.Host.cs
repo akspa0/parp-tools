@@ -72,8 +72,7 @@ internal sealed partial class CaptureAutomationService
     private NavigatorPanelService _navigatorPanel => _host.NavigatorPanel;
     private ref ISceneRenderer? _renderer => ref _host.Renderer;
     private ref MapDefinition? _selectedMapForPreview => ref _host.SelectedMapForPreview;
-    private ShellLayoutService _shellLayout => _host.ShellLayout;
-    private ref bool _showCaptureAutomationWindow => ref _host.ShowCaptureAutomationWindow;
+    private ViewerUiManager _shellLayout => _host.UiManager;
     private StartupAutomationService _startupAutomation => _host.StartupAutomation;
     private ref string _statusMessage => ref _host.StatusMessage;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;

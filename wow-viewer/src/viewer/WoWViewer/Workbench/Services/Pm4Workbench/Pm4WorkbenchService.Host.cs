@@ -53,35 +53,15 @@ namespace WoWViewer;
 internal sealed partial class Pm4WorkbenchService
 {
     // Host bridge (same names as the former ViewerApp members).
-    private ref FixedBottomDrawerTab _activeBottomDrawerTab => ref _host.ActiveBottomDrawerTab;
     private ref int _activePm4TabIndex => ref _host.ActivePm4TabIndex;
     private ref Camera _camera => ref _host.Camera;
-    private DataSourceSessionService _dataSourceSession => _host.DataSourceSession;
     private ref Pm4ObjectMatchObject? _hoveredPm4ObjectMatch => ref _host.HoveredPm4ObjectMatch;
     private ref int _hoveredPm4ObjectMatchCacheMaxMatches => ref _host.HoveredPm4ObjectMatchCacheMaxMatches;
     private ref (int tileX, int tileY, uint ck24, int objectPart)? _hoveredPm4ObjectMatchKey => ref _host.HoveredPm4ObjectMatchKey;
-    private ref FixedBottomDrawerTab? _pendingRightSidebarSection => ref _host.PendingRightSidebarSection;
-    private ref int _pm4ObjectMatchMaxMatchesPerObject => ref _host.Pm4ObjectMatchMaxMatchesPerObject;
     private ref Vector3 _pm4SavedOverlayRotationDegrees => ref _host.Pm4SavedOverlayRotationDegrees;
     private ref Vector3 _pm4SavedOverlayScale => ref _host.Pm4SavedOverlayScale;
     private ref Vector3 _pm4SavedOverlayTranslation => ref _host.Pm4SavedOverlayTranslation;
-    private ref Dictionary<string, Pm4WmoMatchEntry> _pm4WmoMatchEntries => ref _host.Pm4WmoMatchEntries;
-    private ref Pm4WmoMatchStore? _pm4WmoMatchStore => ref _host.Pm4WmoMatchStore;
-    private ref Pm4ObjectMatchStore? _pm4ObjectMatchStore => ref _host.Pm4ObjectMatchStore;
-    private ref Dictionary<string, Pm4ObjectMatchEntry> _pm4ObjectMatchEntries => ref _host.Pm4ObjectMatchEntries;
-    private Dictionary<string, SavedPm4ObjectMatchSelection> _savedPm4ObjectMatches => _host.SavedPm4ObjectMatches;
-    private ViewerSettingsService _settings => _host.Settings;
-    private ShellLayoutService _shellLayout => _host.ShellLayout;
-    private ref bool _showRightSidebar => ref _host.ShowRightSidebar;
     private ref string _statusMessage => ref _host.StatusMessage;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
-    private ref VlmTerrainManager? _vlmTerrainManager => ref _host.VlmTerrainManager;
-    private ref WorkspaceMode _workspaceMode => ref _host.WorkspaceMode;
     private ref WorldScene? _worldScene => ref _host.WorldScene;
-    private void OpenWorkbenchTab(WorkbenchTab topTab, int bottomIndex = -1) => _host.OpenWorkbenchTab(topTab, bottomIndex);
-    private void OpenWorkbenchTab(ModelBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(WorldBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(ToolsBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void OpenWorkbenchTab(UtilitiesBottomTab tab) => _host.OpenWorkbenchTab(tab);
-    private void SetEditorWorkspaceTask(EditorWorkspaceTask task) => _host.SetEditorWorkspaceTask(task);
 }

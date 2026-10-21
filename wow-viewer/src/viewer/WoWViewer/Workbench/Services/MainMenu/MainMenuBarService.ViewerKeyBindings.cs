@@ -1,4 +1,5 @@
 using ImGuiNET;
+using WoWViewer.UI;
 using static WoWViewer.ViewerApp;
 
 namespace WoWViewer;
@@ -9,20 +10,15 @@ internal sealed partial class MainMenuBarService
 {
     private bool _showKeyboardShortcutsWindow;
 
-    private void DrawKeyboardShortcutsWindow()
+    public void DrawKeyboardShortcutsContent()
     {
-        if (!_showKeyboardShortcutsWindow)
-            return;
-
-        ImGui.SetNextWindowSize(new System.Numerics.Vector2(560f, 420f), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("Keyboard Shortcuts", ref _showKeyboardShortcutsWindow, ImGuiWindowFlags.NoCollapse))
-        {
             ViewerKeyContext activeContext = GetActiveKeyContext();
-            ImGui.TextUnformatted("Keyboard Shortcuts");
+            SharedUiWidgets.SectionTitle("Keyboard Shortcuts");
             ImGui.TextDisabled($"Active page: {activeContext}");
             ImGui.Separator();
 
-            if (ImGui.BeginChild("##KeyboardShortcutsBody", new System.Numerics.Vector2(0f, 0f), false,
+            if (ImGui.BeginChild("##KeyboardShortcutsBody", new System.Numerics.Vector2(0f,
+                    Math.Max(80f, ImGui.GetContentRegionAvail().Y - ImGui.GetFrameHeightWithSpacing())), false,
                 ImGuiWindowFlags.None))
             {
                 DrawKeyboardBindingGroup("Global", ViewerKeyBindingCatalog.All.Where(binding => binding.IsGlobal));
@@ -43,13 +39,11 @@ internal sealed partial class MainMenuBarService
                 }
             }
             ImGui.EndChild();
-        }
-        ImGui.End();
     }
 
     private static void DrawKeyboardBindingGroup(string title, IEnumerable<ViewerKeyBinding> bindings)
     {
-        ImGui.TextColored(new System.Numerics.Vector4(0.95f, 0.78f, 0.28f, 1f), title);
+        SharedUiWidgets.SectionTitle(title);
         bool any = false;
         foreach (ViewerKeyBinding binding in bindings)
         {

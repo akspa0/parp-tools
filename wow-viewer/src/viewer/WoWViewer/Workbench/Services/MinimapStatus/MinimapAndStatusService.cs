@@ -73,12 +73,10 @@ internal sealed partial class MinimapAndStatusService
     private ref int _pendingMinimapTeleportClickCount => ref _host.PendingMinimapTeleportClickCount;
     private ref (int tileX, int tileY)? _pendingMinimapTeleportTile => ref _host.PendingMinimapTeleportTile;
     private ref float _rightSidebarWidth => ref _host.RightSidebarWidth;
-    private ShellLayoutService _shellLayout => _host.ShellLayout;
     private ref bool _showFolderInput => ref _host.ShowFolderInput;
     private ref bool _showMinimapWindow => ref _host.ShowMinimapWindow;
     private ref string _statusMessage => ref _host.StatusMessage;
     private ref TerrainManager? _terrainManager => ref _host.TerrainManager;
-    private ref bool _useDockspaceUi => ref _host.UseDockspaceUi;
     private ref VlmTerrainManager? _vlmTerrainManager => ref _host.VlmTerrainManager;
     private ref bool _wantOpenFile => ref _host.WantOpenFile;
     private ref WorldScene? _worldScene => ref _host.WorldScene;

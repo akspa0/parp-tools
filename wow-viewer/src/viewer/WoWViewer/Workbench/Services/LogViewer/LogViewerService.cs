@@ -22,22 +22,6 @@ internal sealed partial class LogViewerService
 
     // Host bridge: see LogViewerService.Host.cs.
 
-    internal void DrawLogViewer()
-    {
-        // 069 Phase 16: this wrapper keeps legacy floating-window behavior
-        // for users who still toggle the old Viewer > Log Viewer menu item.
-        // The workbench sub-tab uses DrawLogViewerContent directly.
-        ImGui.SetNextWindowSize(new Vector2(800, 400), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowPos(new Vector2(
-            ImGui.GetIO().DisplaySize.X / 2 - 400,
-            ImGui.GetIO().DisplaySize.Y / 2 - 200), ImGuiCond.FirstUseEver);
-
-        if (ImGui.Begin("Log Viewer", ref _showLogViewer))
-        {
-            DrawLogViewerContent();
-        }
-        ImGui.End();
-    }
 
     /// <summary>
     /// Headless log viewer body. Call from any container that already has
