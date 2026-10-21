@@ -76,31 +76,38 @@ the band boundaries:
 
 ## 5. Chat dock (T103)
 
-- The chat is a bottom-left region: default rect `(24, h - status - bottom - 160, min(420, w-48),
-  min(160, sceneHeight))` (`UiLayout.cs:55-57`), drawn by the manager at
-  `ViewerUiManager.cs:112-113`.
+> **Operator correction, 2026-10-21.** The original receipt described a resizable bottom-left
+> floating dock. The operator rejected it: the chat covered the UI and could not be moved. The
+> chat is now a fixed docked panel. The resize clause is withdrawn; the dock and collapse clauses
+> stand.
+
+- The chat is a docked panel: rect `(lw, top + sceneHeight - dockHeight, w - lw - rw, dockHeight)`
+  where `dockHeight = min(180 * scale, 28% of sceneHeight)` (`UiLayout.cs:71-80`). It spans the
+  scene between the sidebars and can never overlap a sidebar, the bottom bar or the status bar.
+- The manager draws it with `NoMove | NoResize` (`ViewerUiManager.cs:159-161`); there is no drag or
+  resize handle.
 - The chat content keeps **Auto-Stream** and **Spawn BBs Only**:
   `SqlSpawnStreamingService.cs:457-466` (`Auto-Stream##ChatAutoStream`,
   `Spawn BBs Only##ChatSpawnBBs`).
-- **Resizable:** the chat region is the only region drawn without `NoResize`
-  (`ViewerUiManager.cs:112`, `DrawRegion(..., resizable: true)`), and the manager persists the
-  operator's size (`_chatWidth`/`_chatHeight`, `ViewerUiManager.cs:163-170`,
-  `ViewerUiManager.Persistence.cs:27-29`, `:51-53`, `:104-105`).
 - **Collapsible:** `Collapse chat` / `Expand chat` collapse the dock to a 28 px one-line bar
-  (`ViewerUiManager.cs:141-171`, `UiLayout.cs:56`), persisted as `ChatCollapsed`.
-- T103's resize and collapse clauses are met structurally; the rendered result is operator-owned.
+  (`ViewerUiManager.cs:186-211`, `UiLayout.cs:74-76`), persisted as `ChatCollapsed`
+  (`ViewerUiManager.Persistence.cs:30`, `:51`, `:80`, `:109`).
+- The persisted floating rect (`ChatWidth`/`ChatHeight`/`ChatX`/`ChatY`) is deleted and the layout
+  document is bumped to v3 (`ViewerUiManager.Persistence.cs:10-13`), so a stale floating rect
+  cannot be restored.
+- T103's dock and collapse clauses are met structurally; the rendered result is operator-owned.
 
 ## 6. Options anchor (T114 / SC-008)
 
-The Options rect is derived from the chat rect, not from a hard-coded screen position:
+The Options rect anchors to the right sidebar's left edge, independent of the chat dock:
 
 ```csharp
-float ox = Math.Clamp(chatRect.X + chatRect.Width + 8, 0, Math.Max(0, w - ow));
+float ox = Math.Clamp(w - rw - ow - 8 * s, 0, Math.Max(0, w - ow));
 [UiRegion.Options] = new(new(ox, Math.Max(top, h - status - bottom - oh), ow, oh), !hidden && options);
 ```
 
-Source: `UiLayout.cs:56-58`, `:67`. The manager draws it only while `_options` is true and offers
-`Close Options` (`ViewerUiManager.cs:115-119`). Whether it visually covers neither the chat nor the
+Source: `UiLayout.cs:82-85`, `:94`. The manager draws it only while `_options` is true and offers
+`Close Options` (`ViewerUiManager.cs:163-167`). Whether it visually covers neither the chat nor the
 status bar is an operator visual fact (SC-008).
 
 ## 7. Task verdicts
@@ -110,7 +117,7 @@ status bar is an operator visual fact (SC-008).
 | **T100** | Apply the design tokens from [layout.md](../layout.md) §8: colour, type, spacing | **Partial — not ticked** | Colour, spacing and surface tokens are consumed (`SharedUiWidgets.cs:124-238`; `UiTokens.cs:15-49`). The **type scale** (`Caption`/`Body`/`Label`/`Title`, `UiTokens.cs:27-31`) is defined but has **0 consumers** in the viewer tree; no font size is applied from it. The "type" clause is not met. |
 | **T101** | Move the minimap to the floating top-right instrument; add collapse, zone label, and coordinates | **Done (structural)** | Floating top-right, collapse/expand, dock/undock, hide, zone label and coordinates are implemented (§4). |
 | **T102** | Delete the Utilities Minimap page; the top-right minimap is canonical | **Done (structural)** | The `Utilities` tab and its pages were deleted (T029); 0 matches for a minimap page enum/label in the viewer tree. The only minimap surface is the manager-owned `UiRegion.Minimap`. |
-| **T103** | Convert the chat to a resizable bottom-left dock; keep Auto-Stream and Spawn BBs Only | **Done (structural)** | Bottom-left dock, both controls, a resize handle and a persisted size/collapse state are implemented (§5). |
+| **T103** | Convert the chat to a docked panel; keep Auto-Stream and Spawn BBs Only | **Done (structural)** | Docked panel spanning the scene between the sidebars, both controls, and a persisted collapse state are implemented (§5). The resize clause was withdrawn by operator correction 2026-10-21. |
 | **T104** | Add sidebar collapse rails and persistent widths | **Done (structural)** | 24 px rails (`UiLayout.cs:32-33`), collapse/expand buttons (`ViewerUiManager.cs:193-231`), versioned persistence (`ViewerUiManager.Persistence.cs:10-11`, `:30-64`, `:91-114`). |
 | **T105** | Add the responsive breakpoints and default collapse from [layout.md](../layout.md) §9 | **Done (structural)** | Four bands and their defaults are implemented in `UiLayout.cs:34`, `:74-75` (§2). The visual "layout holds at 1280/1600/1920" clause is operator-owned. |
 | **T106** | Optional: `Ctrl+K` command palette over destinations and actions | **Not implemented** | 0 matches for `CommandPalette`, `Ctrl+K` or `ImGuiKey_K` in the viewer tree. |

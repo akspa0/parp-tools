@@ -354,10 +354,14 @@ search is not zero-wide.*
   - Receipt: `evidence/p9-visual-layout.md` §7 — the `Utilities` tab and its pages are gone
     (T029); 0 matches for a minimap page enum/label in the viewer tree. The only minimap surface
     is the manager-owned `UiRegion.Minimap`.
-- [x] T103 Convert the chat to a resizable bottom-left dock; keep Auto-Stream and Spawn BBs Only.
-  - Receipt: `evidence/p9-visual-layout.md` §5 — bottom-left dock, both population controls, a
-    resize handle (`DrawRegion(..., resizable: true)`) and a persisted size/collapse state
-    (`ViewerUiManager.cs:141-171`; `ViewerUiManager.Persistence.cs:27-29`, `:51-53`, `:104-105`).
+- [x] T103 Convert the chat to a docked panel; keep Auto-Stream and Spawn BBs Only.
+  - **Operator correction 2026-10-21:** the original "resizable bottom-left dock" was rejected —
+    the operator reported it as a floating window that covered the UI and could not be moved. The
+    chat is now a fixed docked panel spanning the scene between the sidebars, drawn with
+    `NoMove | NoResize`; the persisted floating rect is deleted and the layout document is v3.
+  - Receipt: `evidence/p9-visual-layout.md` §5 — docked rect derived from the sidebar widths and
+    scene height (`UiLayout.cs:71-80`), both population controls, collapse state persisted as
+    `ChatCollapsed` (`ViewerUiManager.Persistence.cs:30`, `:51`, `:80`, `:109`).
     Visual confirmation is operator-owned.
 - [x] T104 Add sidebar collapse rails and persistent widths.
   - Receipt: `evidence/p9-visual-layout.md` §3 — 24 px rails (`UiLayout.cs:32-33`),

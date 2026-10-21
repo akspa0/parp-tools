@@ -2,6 +2,20 @@
 
 Last updated: 2026-10-21
 
+## 2026-10-21 — Chat is a docked panel, not a floating window
+
+- Operator report: the chat was a floating window that covered the UI and could not be moved.
+- `UiLayout` now derives the chat rect from the sidebar widths and the scene height: it spans the
+  scene between the sidebars and sits on the bottom edge of the scene area, so it can never overlap
+  a sidebar, the bottom bar or the status bar.
+- `ViewerUiManager` draws it with `NoMove | NoResize`; the drag/resize persistence block is gone.
+- The persisted floating rect (`ChatWidth`/`ChatHeight`/`ChatX`/`ChatY`) is deleted and the layout
+  document is bumped to `ui-layout-v3.json`, so a stale floating rect cannot be restored.
+- The Options panel now anchors to the right sidebar's left edge instead of the chat rect.
+- Spec 280 `layout.md` §5, `plan.md`, `tasks.md` T103, `evidence/p9-visual-layout.md` §5–§7 and
+  `evidence/final-receipt.md` carry a dated operator-correction note.
+- Verified: build 0 errors.
+
 ## 2026-10-21 — Spec 282: client cursor model + triangle-level PM4 picking
 
 - `SceneCursorRenderer` now dispatches cursor candidates by extension. It previously called

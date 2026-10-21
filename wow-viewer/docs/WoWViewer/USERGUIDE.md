@@ -209,9 +209,17 @@ machine before relying on a recording.
 The left sidebar adds **Archaeology Workspace** and **Layer Projects** (which points at
 **Cartography** for the layer actions).
 
+### Chat panel
+
+The chat is a **docked panel**, not a floating window. It spans the scene between the left and
+right sidebars and sits on the bottom edge of the scene area, so it never covers a sidebar, the
+bottom bar or the status bar. It cannot be dragged or resized. **Collapse chat** reduces it to a
+one-line bar and **Expand chat** restores it; the collapsed state is remembered between sessions.
+
 ### Options sub-menu
 
-The **Options** button in the bottom bar opens a sub-menu next to the chat. It is grouped as:
+The **Options** button in the bottom bar (and the **Options** button in the chat header) opens a
+sub-menu anchored to the right sidebar. It is grouped as:
 
 | Group | Contents |
 |---|---|
@@ -219,7 +227,7 @@ The **Options** button in the bottom bar opens a sub-menu next to the chat. It i
 | Overlays | Alpha, Shadows, MCCV, Contours, Liquid, WL, Bounding Boxes, PM4 Overlay, Color Spawns |
 | Layers | Terrain layer toggles, Holes, WDL |
 | Grids | Tiles, Chunks, Cells |
-| Objects | Object transparency, Terrain WF, M2/WMO WF, Anim, 3D Cursor |
+| Objects | Object transparency, Terrain WF, M2/WMO WF, Anim, 3D Cursor, cursor model status and **Reload cursor model** |
 | Audio | Audio output and per-zone audio settings |
 | Simulation | Spawn BBs Only (Auto-Stream stays in the chat population controls) |
 

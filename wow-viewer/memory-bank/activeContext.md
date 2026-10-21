@@ -42,11 +42,18 @@ Last updated: 2026-10-21 · **Spec 280 UI refactor implemented; startup crash fi
   reach. Fixed in code: `UiLayout.ScaleFor` scales every metric and the font by display height
   (1.0 at 1080p, 2.0 at 4K); the layout uses the window client size instead of ImGui's
   `DisplaySize` (which could be the framebuffer size); the minimap is **docked at the top of the
-  right sidebar by default** and sized to the sidebar; the chat is movable, resizable, clamped to
-  the display and persisted; an **Options** button sits in the chat header; **Fog Start/End** are
-  back in the Workspace section; the left sidebar order is Workspace → destination sections →
-  Diagnostics → World Overview → File Browser (long nested lists last); layout persistence bumped
-  to `ui-layout-v2.json` so the stale tiny layout is ignored.
+  right sidebar by default** and sized to the sidebar; an **Options** button sits in the chat
+  header; **Fog Start/End** are back in the Workspace section; the left sidebar order is
+  Workspace → destination sections → Diagnostics → World Overview → File Browser (long nested
+  lists last); layout persistence bumped to `ui-layout-v2.json` so the stale tiny layout is
+  ignored.
+  **Chat dock correction (operator report 2026-10-21):** the movable/resizable chat was rejected —
+  it covered the UI and could not be moved back. The chat is now a **fixed docked panel** spanning
+  the scene between the sidebars, bottom-anchored, drawn with `NoMove | NoResize`
+  (`UiLayout.cs:71-80`, `ViewerUiManager.cs:159-161`). The persisted floating rect
+  (`ChatWidth`/`ChatHeight`/`ChatX`/`ChatY`) is deleted and the layout document is bumped to
+  `ui-layout-v3.json`, so a stale floating rect cannot be restored. The Options panel now anchors
+  to the right sidebar's left edge instead of the chat rect.
   **Hover-jump fix (operator report 2026-10-21):** hovering the right sidebar made the Inspector
   content collapse and the controls move. Cause: scene hover picking ran every frame even when the
   pointer was over a sidebar, so the hovered asset cleared, the Inspector payload changed, and the

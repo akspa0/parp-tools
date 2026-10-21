@@ -54,7 +54,7 @@ The goal is "a 2026 tool that remembers 2001", not a 2001 skin.
 │               │                                              │               │
 │               │                                              │               │
 ├───────────────┴──────────────────────────────────────────────┴───────────────┤
-│ Chat (bottom-left, resizable)                          [Options ▾]           │
+│ Chat (docked panel, full scene width, not movable)     [Options ▾]           │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ Viewer │ Editor │ Archaeology │ Options              FPS / stats            │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -120,12 +120,21 @@ action must also be reachable from a visible control and listed in the UI refere
 
 ## 5. Chat specification
 
-The chat stays bottom-left, where the old UI put it, but becomes a modern dock.
+The chat is a **docked panel**, not a floating window. It spans the scene between the sidebars and
+sits on the bottom edge of the scene area, so it can never cover a sidebar, the bottom bar or the
+status bar, and it has no drag or resize handle to lose.
+
+> **Operator correction, 2026-10-21:** the original draft made the chat a resizable bottom-left
+> floating dock. The operator rejected that: "the floating chat window ... needs to be a fucking
+> panel in the ui, not a floating ... window ... that covers the fucking ui and cannot be moved."
+> The chat is now a fixed docked panel. `UiLayout` derives its rect from the sidebar widths and the
+> scene height; `ViewerUiManager` draws it with `NoMove | NoResize`; the persisted floating rect
+> (`ChatWidth`/`ChatHeight`/`ChatX`/`ChatY`) is deleted and the layout document is bumped to v3.
 
 | Property | Value |
 |---|---|
-| Position | Bottom-left, above the bottom bar, left of the Options anchor |
-| Default size | 420 × 160 px; resizable by the top-right grip |
+| Position | Docked: spans the scene between the sidebars, bottom edge of the scene area |
+| Size | Full scene width × `min(180 px, 28% of scene height)`; **not resizable, not movable** |
 | Collapsed | One line, 28 px, with the last message and an expand chevron |
 | Tabs | General, System, NPC, Errors |
 | Controls | Auto-Scroll, Clear, Filter, Options ▾ |
@@ -238,7 +247,8 @@ page, and action by name. It does not replace the menus; it makes them optional.
 1. **Tokens and primitives** (P8): colour, type, spacing, section header, button, empty state.
 2. **Minimap relocation** (P9): move the renderer to the top-right, add collapse and the zone
    label; delete the Utilities Minimap page.
-3. **Chat dock** (P9): bottom-left resizable dock; keep the population controls.
+3. **Chat dock** (P9): docked panel spanning the scene between the sidebars; not movable or
+   resizable; keep the population controls.
 4. **Sidebar rails** (P9): collapse behaviour and persistent width.
 5. **Bottom bar** (P2): destinations, Options, FPS/stats.
 6. **Command palette** (P9, optional): `Ctrl+K` search over destinations and actions.

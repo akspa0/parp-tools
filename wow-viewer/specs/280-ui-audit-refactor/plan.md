@@ -312,7 +312,8 @@ Each phase is independently buildable and verifiable. A phase is not complete un
 - Apply the design tokens from [layout.md](layout.md) §8 (colour, type, spacing).
 - Move the minimap to the floating top-right instrument; add collapse, zone label, and
   coordinates; support docking it in the right sidebar; delete the Utilities Minimap page.
-- Convert the chat to a resizable bottom-left dock; keep the population controls.
+- Convert the chat to a docked panel spanning the scene between the sidebars (not movable, not
+  resizable — operator correction 2026-10-21); keep the population controls.
 - Add sidebar collapse rails and persistent widths.
 - Add the responsive breakpoints and default collapse.
 - Optional: `Ctrl+K` command palette over destinations and actions.
