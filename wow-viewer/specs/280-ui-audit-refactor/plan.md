@@ -98,6 +98,17 @@ New behavior lives in owned service classes that receive state through construct
 A duplicate surface is deleted. It is not hidden behind a flag, a collapsed header, or a
 "legacy" toggle. The audit's `duplicate` rows are the deletion list.
 
+### AD-9 — PM4 matching moves offline
+
+PM4 object matching, alignment, and reconciliation are batch jobs that patch ADTs, not
+interactive viewer features. They move to the offline WoWMuseum patcher in
+[Spec 281](../281-museum-adt-patcher/spec.md). The viewer keeps PM4 inspection only: Overlay,
+Selection, Info, Outliner, and Object Groups. The `Pm4ObjectMatchStore` and the manual match
+curation are deleted from the viewer.
+
+**Rationale**: the operator's direction. The matching data (Museum ADTs plus original PM4s) is
+expensive to assemble and belongs in a repeatable CLI, not a GPU-bound viewer session.
+
 ## 3. Target structure
 
 ```text
@@ -170,7 +181,9 @@ PM4 Analysis is not an Archaeology page. It is a Viewer surface reached by one e
 |---|---|
 | `Workbench/Services/MainMenu/MainMenuBarService.cs` | "Open File..." uses `ImGuiPathPicker`; delete the text popup |
 | `Workbench/Services/EditorPanels/EditorPanelsService.cs` | Import actions read and apply, or are removed |
-| `Workbench/Services/Pm4Workbench/Pm4WorkbenchService.Alignment.cs` | One export home; every export writes and reports |
+| `Workbench/Services/Pm4Workbench/Pm4WorkbenchService.Alignment.cs` | One export home; every export writes and reports; remove Correlation/Reconcile/Alignment tabs (Spec 281) |
+| `Workbench/Services/Pm4Workbench/Pm4WorkbenchService.cs` | Remove the match-curation section from Selection (Spec 281) |
+| `Pm4ObjectMatchStore.cs` | Delete (Spec 281) |
 | `Workbench/Services/TerrainControls/TerrainControlsPanelService.Sidebars.cs` | Terrain export/import actions with the write-and-report contract |
 
 ### 4.5 Styling

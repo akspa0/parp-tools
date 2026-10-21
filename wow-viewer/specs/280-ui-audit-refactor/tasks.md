@@ -112,9 +112,13 @@ shows the deleted entry points are gone. Receipt: `evidence/p5-archaeology.md`.
 - [ ] T063 Delete the one-button "PM4 Placement Tools" section.
 - [ ] T064 Remove the second PM4 export home from Data I/O.
 - [ ] T065 Delete `MigrateLegacyEditorPageIndex` after the layout reset.
+- [ ] T066 Move PM4 matching offline: remove the Correlation, Reconcile, and Alignment tabs, the
+  match-curation section, and `Pm4ObjectMatchStore.cs`; the offline tool is
+  [Spec 281](../281-museum-adt-patcher/spec.md).
 
-**Gate P6**: the Editor pages name their real content; PM4 has one export home; the build has no
-reference to the deleted migration. Receipt: `evidence/p6-editor.md`.
+**Gate P6**: the Editor pages name their real content; PM4 has one export home; the viewer has no
+matching/alignment/reconciliation tabs; the build has no reference to the deleted migration.
+Receipt: `evidence/p6-editor.md`.
 
 ## P7 — Floating-window dedupe
 
