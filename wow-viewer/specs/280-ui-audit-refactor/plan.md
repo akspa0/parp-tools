@@ -151,6 +151,13 @@ in its logical home:
 
 `UtilitiesBottomTab` and the `Utilities` workbench tab are deleted.
 
+### 3.1.2 Visual layout
+
+The screen layout is specified in [layout.md](layout.md): old-WoW structure (minimap top-right,
+chat bottom-left, world in the centre) with a 2026 surface treatment (flat surfaces, one brass
+accent, one type scale, 8px grid, responsive collapse). The minimap moves from the left sidebar to
+a floating top-right instrument; the left sidebar keeps the map list and map export.
+
 ### 3.2 File operations
 
 | Action | Current | Target |
@@ -279,6 +286,16 @@ Each phase is independently buildable and verifiable. A phase is not complete un
 - Remove local colors and bespoke headers.
 - Rename WC3 data support to "WC3 Beta" in the UI and documentation.
 - Final dead-control sweep.
+
+### P9 — Visual layout
+
+- Apply the design tokens from [layout.md](layout.md) §8 (colour, type, spacing).
+- Move the minimap to the floating top-right instrument; add collapse, zone label, and
+  coordinates; delete the Utilities Minimap page.
+- Convert the chat to a resizable bottom-left dock; keep the population controls.
+- Add sidebar collapse rails and persistent widths.
+- Add the responsive breakpoints and default collapse.
+- Optional: `Ctrl+K` command palette over destinations and actions.
 
 ## 6. Risks and mitigations
 

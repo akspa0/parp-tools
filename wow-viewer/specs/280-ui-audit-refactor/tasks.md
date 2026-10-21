@@ -158,6 +158,21 @@ deleted windows are gone. Receipt: `evidence/p7-floating-windows.md`.
 **Gate P8**: every sidebar uses the shared primitives; zero bespoke section styles; zero `WC3`
 labels without `Beta`; zero dead controls. Receipt: `evidence/p8-styling-naming.md`.
 
+## P9 — Visual layout
+
+- [ ] T100 Apply the design tokens from [layout.md](layout.md) §8: colour, type, spacing.
+- [ ] T101 Move the minimap to the floating top-right instrument; add collapse, zone label, and
+  coordinates.
+- [ ] T102 Delete the Utilities Minimap page; the top-right minimap is canonical.
+- [ ] T103 Convert the chat to a resizable bottom-left dock; keep Auto-Stream and Spawn BBs Only.
+- [ ] T104 Add sidebar collapse rails and persistent widths.
+- [ ] T105 Add the responsive breakpoints and default collapse from [layout.md](layout.md) §9.
+- [ ] T106 Optional: `Ctrl+K` command palette over destinations and actions.
+
+**Gate P9**: the minimap is top-right and collapsible; the chat is a bottom-left dock; both
+sidebars collapse to rails; the layout holds at 1280, 1600, and 1920 px. Receipt:
+`evidence/p9-visual-layout.md`.
+
 ## Final verification
 
 - [ ] T090 `dotnet build wow-viewer/WowViewer.slnx -c Debug` — 0 errors.
