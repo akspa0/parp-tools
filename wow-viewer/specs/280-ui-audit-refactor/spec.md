@@ -88,6 +88,23 @@ The operator sees the WC3 data support labelled **WC3 Beta** everywhere it appea
 
 ---
 
+### User Story 6 - File operations actually work (Priority: P1)
+
+The operator opens a file, exports data, and imports data through the same shared picker used everywhere else. No action asks the operator to type a filesystem path, and every export writes a file the operator can find, and every import either works or is removed from the UI.
+
+**Why this priority**: The operator reports that only the File menu mostly works, that the Export menu is unreliable, that Import does not work at all, and that "Open File..." expects a typed path. A UI that cannot open, export, or import is not usable regardless of how it is arranged.
+
+**Independent Test**: The operator opens a file through the picker, exports one artifact of each kind, and imports one artifact of each kind; every action either produces or consumes a real file, and no action requires typing a path.
+
+**Acceptance Scenarios**:
+
+1. **Given** the File menu, **When** the operator chooses "Open File...", **Then** the shared path picker opens and the operator can browse to the file; no text field is the only way to supply the path.
+2. **Given** any Export action, **When** the operator runs it, **Then** a file is written to a reported location and the status line names the path.
+3. **Given** any Import action, **When** the operator runs it, **Then** the file is read and applied, or the action is absent from the UI.
+4. **Given** an Export or Import action that cannot complete, **When** it fails, **Then** the UI reports the failure and does not leave a silent no-op.
+
+---
+
 ### Edge Cases
 
 - A control that is dead but is the only path to a feature: the audit must mark it `dead` and the refactor must either wire it or remove the feature from the UI, not leave a dead entry point.
@@ -115,6 +132,11 @@ The operator sees the WC3 data support labelled **WC3 Beta** everywhere it appea
 - **FR-013**: The refactor MUST preserve the existing PM4, population, terrain, and model functionality.
 - **FR-014**: The refactor MUST provide an explicit empty state for any destination with no content.
 - **FR-015**: The refactor MUST migrate or reset persisted layouts from the old UI without crashing.
+- **FR-016**: "Open File..." MUST use the shared path picker; no open action may require the operator to type a filesystem path.
+- **FR-017**: Every Export action MUST write a real file to a reported location and MUST report the path in the status line.
+- **FR-018**: Every Import action MUST read and apply a real file, or MUST be removed from the UI.
+- **FR-019**: Every Export and Import action MUST report failure explicitly; a silent no-op is a defect.
+- **FR-020**: The audit MUST record the operator-reported functional state of each File-menu action (`works`, `unreliable`, `dead`) as evidence, separate from the structural nesting map.
 
 ### Key Entities
 
@@ -137,6 +159,9 @@ The operator sees the WC3 data support labelled **WC3 Beta** everywhere it appea
 - **SC-008**: The options sub-menu opens next to the chat and does not cover the chat or the status bars at the default window size.
 - **SC-009**: 0 UI strings label WC3 support without "Beta".
 - **SC-010**: The existing PM4, population, terrain, and model workflows still run after the refactor.
+- **SC-011**: 0 open actions require a typed filesystem path; every open action uses the shared picker.
+- **SC-012**: Every Export action produces a file at a reported path; 0 silent no-ops remain.
+- **SC-013**: Every Import action either applies a real file or is absent; 0 dead import entries remain.
 
 ## Assumptions
 
