@@ -3,6 +3,14 @@
   "generatedFrom": "wow-viewer/src/viewer/WoWViewer/Workbench/Services (manager-owned surfaces)",
   "controls": [
     {
+      "id": "maps-action",
+      "label": "Maps",
+      "region": "Left action bar",
+      "shortcut": null,
+      "help": "Open map browsing, map loading, and spawn-point preview in a closeable window.",
+      "visible": true
+    },
+    {
       "id": "3d-cursor",
       "label": "3D Cursor",
       "region": "Options > Objects",
@@ -35,51 +43,99 @@
       "visible": true
     },
     {
-      "id": "dock-minimap-in-right-sidebar",
-      "label": "Dock minimap in right sidebar",
-      "region": "Options > Display > Minimap",
-      "shortcut": null,
-      "help": "Dock the minimap at the top of the right sidebar instead of floating it.",
-      "visible": true
-    },
-    {
-      "id": "map-spawns",
-      "label": "Map Spawns",
-      "region": "Chat > Tools",
-      "shortcut": null,
-      "help": "Open the current map spawn list and population controls.",
-      "visible": true
-    },
-    {
-      "id": "minimap",
+      "id": "minimap-options",
       "label": "Minimap",
-      "region": "Chat > Tools",
-      "shortcut": "M",
-      "help": "Show or hide the minimap panel.",
-      "visible": true
-    },
-    {
-      "id": "inspector",
-      "label": "Inspector",
-      "region": "Chat > Tools",
-      "shortcut": "I",
-      "help": "Open the Inspector in the right sidebar.",
-      "visible": true
-    },
-    {
-      "id": "pm4",
-      "label": "PM4",
-      "region": "Chat > Tools",
-      "shortcut": "P",
-      "help": "Open the PM4 workbench in the right sidebar.",
-      "visible": true
-    },
-    {
-      "id": "clear-chat",
-      "label": "Clear chat",
-      "region": "Chat > Tools > Barkers",
+      "region": "Options > Display",
       "shortcut": null,
-      "help": "Clear the chat log.",
+      "help": "Show minimap visibility and collapse controls.",
+      "visible": true
+    },
+    {
+      "id": "assets-rail-icon",
+      "label": "Assets",
+      "region": "Left action bar",
+      "shortcut": null,
+      "help": "Open the Assets browser window.",
+      "visible": true
+    },
+    {
+      "id": "taxi-rail-icon",
+      "label": "Taxi",
+      "region": "Left action bar",
+      "shortcut": null,
+      "help": "Open or close the Taxi and Routes window.",
+      "visible": true
+    },
+    {
+      "id": "capture-rail-icon",
+      "label": "Capture",
+      "region": "Left action bar",
+      "shortcut": null,
+      "help": "Open or close the camera and capture window.",
+      "visible": true
+    },
+    {
+      "id": "inspect-rail-icon",
+      "label": "Inspector",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the selected-asset Inspector window.",
+      "visible": true
+    },
+    {
+      "id": "world-rail-icon",
+      "label": "World",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the World inspection window.",
+      "visible": true
+    },
+    {
+      "id": "model-rail-icon",
+      "label": "Model",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the Model inspection window.",
+      "visible": true
+    },
+    {
+      "id": "pm4-rail-icon",
+      "label": "PM4",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the PM4 inspection window.",
+      "visible": true
+    },
+    {
+      "id": "bottom-spawns",
+      "label": "Spawns",
+      "region": "Bottom action bar",
+      "shortcut": null,
+      "help": "Open the map spawn and population window.",
+      "visible": true
+    },
+    {
+      "id": "bottom-pages",
+      "label": "Pages",
+      "region": "Bottom action bar",
+      "shortcut": null,
+      "help": "Open the current preset's workbench pages.",
+      "visible": true
+    },
+    {
+      "id": "toggle-left-action-bar",
+      "label": "Left Bar",
+      "region": "Bottom action bar",
+      "shortcut": null,
+      "help": "Show or hide the left action bar.",
+      "visible": true
+    },
+    {
+      "id": "toggle-right-action-bar",
+      "label": "Right Bar",
+      "region": "Bottom action bar",
+      "shortcut": null,
+      "help": "Show or hide the right action bar.",
       "visible": true
     },
     {
@@ -128,22 +184,6 @@
       "region": "Options > Objects",
       "shortcut": null,
       "help": "Advance animations on world doodad MDX/M2 models.",
-      "visible": true
-    },
-    {
-      "id": "archaeology-workspace",
-      "label": "Archaeology Workspace",
-      "region": "Left sidebar > Archaeology",
-      "shortcut": null,
-      "help": "Current map, analysis scope and playback state.",
-      "visible": true
-    },
-    {
-      "id": "assets",
-      "label": "Assets",
-      "region": "Left sidebar > Viewer",
-      "shortcut": null,
-      "help": "Asset catalog for the loaded data source.",
       "visible": true
     },
     {
@@ -235,43 +275,11 @@
       "visible": true
     },
     {
-      "id": "close-options",
-      "label": "Close Options",
-      "region": "Options",
-      "shortcut": "Esc",
-      "help": "Close the options sub-menu.",
-      "visible": true
-    },
-    {
       "id": "close",
       "label": "Close",
       "region": "Popup",
       "shortcut": "Esc",
       "help": "Close the dialog.",
-      "visible": true
-    },
-    {
-      "id": "collapse-chat",
-      "label": "Collapse chat",
-      "region": "Chat",
-      "shortcut": null,
-      "help": "Collapse the chat dock to a one-line bar.",
-      "visible": true
-    },
-    {
-      "id": "collapse-left-sidebar",
-      "label": "Collapse left sidebar",
-      "region": "Left sidebar",
-      "shortcut": "[",
-      "help": "Collapse the left sidebar to its rail.",
-      "visible": true
-    },
-    {
-      "id": "collapse-right-sidebar",
-      "label": "Collapse right sidebar",
-      "region": "Right sidebar",
-      "shortcut": "]",
-      "help": "Collapse the right sidebar to its rail.",
       "visible": true
     },
     {
@@ -333,9 +341,9 @@
     {
       "id": "diagnostics",
       "label": "Diagnostics",
-      "region": "Left sidebar",
+      "region": "Left action bar",
       "shortcut": null,
-      "help": "Log, performance counters and runtime statistics.",
+      "help": "Open runtime statistics, logs, performance and load-phase controls.",
       "visible": true
     },
     {
@@ -347,14 +355,6 @@
       "visible": true
     },
     {
-      "id": "dock",
-      "label": "Dock",
-      "region": "Minimap",
-      "shortcut": null,
-      "help": "Dock the minimap at the top of the right sidebar.",
-      "visible": true
-    },
-    {
       "id": "dynamic-hover-range",
       "label": "Dynamic Hover Range",
       "region": "Viewer > World",
@@ -363,35 +363,11 @@
       "visible": true
     },
     {
-      "id": "editor-workspace",
-      "label": "Editor Workspace",
-      "region": "Left sidebar > Editor",
-      "shortcut": null,
-      "help": "Editor session, undo state and output folder.",
-      "visible": true
-    },
-    {
       "id": "expand-chat",
       "label": "Expand chat",
       "region": "Chat",
       "shortcut": null,
       "help": "Expand the collapsed chat dock.",
-      "visible": true
-    },
-    {
-      "id": "expand-left-sidebar",
-      "label": "Expand left sidebar",
-      "region": "Left sidebar",
-      "shortcut": "[",
-      "help": "Expand the left sidebar.",
-      "visible": true
-    },
-    {
-      "id": "expand-right-sidebar",
-      "label": "Expand right sidebar",
-      "region": "Right sidebar",
-      "shortcut": "]",
-      "help": "Expand the right sidebar.",
       "visible": true
     },
     {
@@ -413,9 +389,9 @@
     {
       "id": "file-browser",
       "label": "File Browser",
-      "region": "Left sidebar",
+      "region": "Left action bar",
       "shortcut": null,
-      "help": "Browse the active data source and open assets.",
+      "help": "Open the client file browser in a closeable window.",
       "visible": true
     },
     {
@@ -475,14 +451,6 @@
       "visible": true
     },
     {
-      "id": "hide",
-      "label": "Hide",
-      "region": "Minimap",
-      "shortcut": "M",
-      "help": "Hide the minimap window.",
-      "visible": true
-    },
-    {
       "id": "holes",
       "label": "Holes",
       "region": "Options > Layers",
@@ -528,14 +496,6 @@
       "region": "Editor > Converters",
       "shortcut": null,
       "help": "Open the WMO converter dialog.",
-      "visible": true
-    },
-    {
-      "id": "layer-projects",
-      "label": "Layer Projects",
-      "region": "Left sidebar > Archaeology",
-      "shortcut": null,
-      "help": "Save and load layer projects.",
       "visible": true
     },
     {
@@ -611,14 +571,6 @@
       "visible": true
     },
     {
-      "id": "map",
-      "label": "Map",
-      "region": "Minimap",
-      "shortcut": "M",
-      "help": "Expand the collapsed minimap.",
-      "visible": true
-    },
-    {
       "id": "mccv",
       "label": "MCCV",
       "region": "Options > Overlays",
@@ -648,14 +600,6 @@
       "region": "Top menu > File",
       "shortcut": null,
       "help": "Open a loose alpha-era WDT map file.",
-      "visible": true
-    },
-    {
-      "id": "open-cartography",
-      "label": "Open Cartography",
-      "region": "Left sidebar > Archaeology",
-      "shortcut": null,
-      "help": "Open the archaeology cartography page.",
       "visible": true
     },
     {
@@ -835,14 +779,6 @@
       "visible": true
     },
     {
-      "id": "scene-tools",
-      "label": "Scene Tools",
-      "region": "Left sidebar > Viewer",
-      "shortcut": null,
-      "help": "Taxi routes, capture automation and camera paths.",
-      "visible": true
-    },
-    {
       "id": "selected-object",
       "label": "Selected Object",
       "region": "Viewer > Inspector",
@@ -880,14 +816,6 @@
       "region": "Viewer > World",
       "shortcut": null,
       "help": "Show the WDL terrain layer.",
-      "visible": true
-    },
-    {
-      "id": "sidebar-width",
-      "label": "Sidebar width",
-      "region": "Left sidebar",
-      "shortcut": null,
-      "help": "Width of the left sidebar in pixels.",
       "visible": true
     },
     {
@@ -947,14 +875,6 @@
       "visible": true
     },
     {
-      "id": "undock",
-      "label": "Undock",
-      "region": "Minimap",
-      "shortcut": null,
-      "help": "Float the minimap in the top-right corner of the viewport.",
-      "visible": true
-    },
-    {
       "id": "use-for-taxi-override",
       "label": "Use For Taxi Override",
       "region": "Left sidebar > File Browser",
@@ -997,9 +917,9 @@
     {
       "id": "workspace",
       "label": "Workspace",
-      "region": "Left sidebar",
+      "region": "Left action bar",
       "shortcut": null,
-      "help": "Open data and return to the last world.",
+      "help": "Open the Workspace window for camera, fog, and source controls.",
       "visible": true
     },
     {
@@ -1008,14 +928,6 @@
       "region": "Viewer > World",
       "shortcut": null,
       "help": "Draw world object bounding boxes.",
-      "visible": true
-    },
-    {
-      "id": "world-overview",
-      "label": "World Overview",
-      "region": "Left sidebar",
-      "shortcut": null,
-      "help": "Map list and map export.",
       "visible": true
     }
   ]

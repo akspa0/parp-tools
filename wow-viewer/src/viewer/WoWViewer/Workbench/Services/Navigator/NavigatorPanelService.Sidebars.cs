@@ -24,76 +24,45 @@ namespace WoWViewer;
 internal sealed partial class NavigatorPanelService
 {
 
-    internal void DrawContent()
+    internal void DrawWorkspaceContent()
     {
-        if (SharedUiWidgets.SectionHeader("Workspace", defaultOpen: true, id: "Workspace"))
+        if (SharedUiWidgets.ActionButton("Open Game Folder..."))
         {
-            ImGui.TextDisabled("Unified workspace");
-            ImGui.TextWrapped(_host.GetWorkspaceTargetSummary());
-            ImGui.TextDisabled(_host.GetWorkspaceSaveStatusSummary());
-            if (_dataSource != null) SharedUiWidgets.CompactStatus($"Source: {_dataSource.Name}");
-            if (SharedUiWidgets.ActionButton("Open Game Folder..."))
-            {
-                _host.ShowFolderInput = true;
-                _host.FolderInputBuf = string.IsNullOrWhiteSpace(_host.LastGameFolderPath) ? "" : _host.LastGameFolderPath;
-            }
-            ImGui.SameLine();
-            if (SharedUiWidgets.ActionButton("Open File...")) _host.WantOpenFile = true;
-            _host.WorkbenchPanels.DrawCameraContent();
-            if (SharedUiWidgets.SectionHeader("Fog", defaultOpen: true, id: "WorkspaceFog"))
-                _host.DrawAuthoritativeFogControls(showDescription: false);
-            float width = _host.LeftSidebarWidth;
-            if (ImGui.SliderFloat("Sidebar width", ref width, 180, 600, "%.0f px")) _host.LeftSidebarWidth = width;
-            if (ImGui.IsItemDeactivatedAfterEdit()) _host.UiManager.SaveLayout();
+            _host.ShowFolderInput = true;
+            _host.FolderInputBuf = string.IsNullOrWhiteSpace(_host.LastGameFolderPath) ? "" : _host.LastGameFolderPath;
         }
-        // Destination sections come before the long lists: the map list and file browser
-        // are nested scroll regions, so anything below them is hard to reach.
-        switch (_host.ActiveTopTab)
+        ImGui.SameLine();
+        if (SharedUiWidgets.ActionButton("Open File...")) _host.WantOpenFile = true;
+        _host.WorkbenchPanels.DrawCameraContent();
+        if (SharedUiWidgets.SectionHeader("Fog", defaultOpen: true, id: "WorkspaceFog"))
+            _host.DrawAuthoritativeFogControls(showDescription: false);
+    }
+
+    internal void DrawMapsContent()
+    {
+        DrawWorldOverviewContent();
+        DrawMapExportControls();
+        DrawMapDiscoveryContent();
+    }
+
+    internal void DrawFilesContent() => DrawFileBrowserContent();
+
+    internal void DrawDiagnosticsContent()
+    {
+        if (SharedUiWidgets.ActionButton("Log")) _host.ShowLogViewer = !_host.ShowLogViewer;
+        ImGui.SameLine();
+        if (SharedUiWidgets.ActionButton("Performance")) _host.ShowPerfWindow = !_host.ShowPerfWindow;
+        _host.ViewerChrome.DrawRuntimeStatsPanelContent();
+    }
+
+    internal void DrawProjectOutputContent()
+    {
+        if (SharedUiWidgets.SectionHeader("Project Output", id: "ProjectOutput"))
         {
-            case WorkbenchTab.Viewer:
-                bool sceneTools = SharedUiWidgets.SectionHeader("Scene Tools", defaultOpen: _host.UiManager.SceneToolsVisible, id: "SceneTools");
-                _host.UiManager.SceneToolsVisible = sceneTools;
-                if (sceneTools) _host.WorkbenchPanels.DrawSceneToolsContent();
-                if (SharedUiWidgets.SectionHeader("Assets", id: "Assets")) _host.WorkbenchPanels.DrawAssetsContent();
-                break;
-            case WorkbenchTab.Editor:
-                if (SharedUiWidgets.SectionHeader("Editor Workspace", defaultOpen: true, id: "EditorWorkspace"))
-                {
-                    string[] pages = WorkbenchNavigator.GetPageLabels(WorkbenchTab.Editor);
-                    for (int i = 0; i < pages.Length; i++)
-                        if (ImGui.Button(pages[i])) _host.UiManager.Navigate(WorkbenchTab.Editor, i);
-                }
-                if (SharedUiWidgets.SectionHeader("Project Output", id: "ProjectOutput"))
-                {
-                    if (ImGui.InputText("Output root", ref _host.ProjectOutputRootDir, 1024))
-                        _host.HandleProjectOutputRootChanged();
-                    ImGui.TextWrapped(_host.GetProjectOutputRootDirectory());
-                }
-                break;
-            case WorkbenchTab.Archaeology:
-                if (SharedUiWidgets.SectionHeader("Archaeology Workspace", defaultOpen: true, id: "ArchaeologyWorkspace"))
-                    SharedUiWidgets.CompactStatus("Analysis and reconstruction pages are in the right sidebar.");
-                if (SharedUiWidgets.SectionHeader("Layer Projects", id: "LayerProjects"))
-                {
-                    SharedUiWidgets.CompactStatus("Map layers and their project actions have one home: Cartography.");
-                    if (SharedUiWidgets.ActionButton("Open Cartography")) _host.UiManager.Navigate(WorkbenchTab.Archaeology, 4);
-                }
-                break;
+            if (ImGui.InputText("Output root", ref _host.ProjectOutputRootDir, 1024))
+                _host.HandleProjectOutputRootChanged();
+            ImGui.TextWrapped(_host.GetProjectOutputRootDirectory());
         }
-        if (SharedUiWidgets.SectionHeader("Diagnostics", id: "Diagnostics"))
-        {
-            if (SharedUiWidgets.ActionButton("Log")) _host.ShowLogViewer = !_host.ShowLogViewer;
-            ImGui.SameLine();
-            if (SharedUiWidgets.ActionButton("Performance")) _host.ShowPerfWindow = !_host.ShowPerfWindow;
-            _host.ViewerChrome.DrawRuntimeStatsPanelContent();
-        }
-        if (SharedUiWidgets.SectionHeader("World Overview", defaultOpen: true, id: "WorldOverview"))
-        {
-            DrawWorldOverviewContent();
-            DrawMapExportControls();
-            DrawMapDiscoveryContent();
-        }
-        if (SharedUiWidgets.SectionHeader("File Browser", defaultOpen: true, id: "FileBrowser")) DrawFileBrowserContent(260);
     }
 
     /// <summary>

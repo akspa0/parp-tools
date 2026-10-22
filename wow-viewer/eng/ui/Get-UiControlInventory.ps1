@@ -38,6 +38,7 @@ $coveredRoots = @(
 # whose branches are literals, so every non-interpolated literal in the first argument
 # counts. This mirrors UiControlScanner in src/viewer/WoWViewer/UI/UiControlScanner.cs.
 $callPattern = 'ImGui\.(Button|SmallButton|Checkbox|RadioButton|MenuItem|Selectable|TreeNode|CollapsingHeader|Combo|SliderFloat|SliderInt)\(([^;]*)\)'
+$actionBarIconPattern = 'DrawActionBarIcon\(([^;]*)\)'
 $widgetPattern = 'SharedUiWidgets\.(ActionButton|DrawActionGroup|SectionHeader|DrawSectionHeader)\(([^;]*)\)'
 $literalPattern = '(?<!\$)"((?:[^"\\]|\\.)*)"'
 
@@ -88,6 +89,14 @@ foreach ($relative in $coveredRoots)
                     {
                         $rows.Add(('{0}|{1}|{2}|{3}' -f $label, $relativePath.Replace('\', '/'), ($index + 1), $kind))
                     }
+                }
+            }
+            foreach ($match in [regex]::Matches($line, $actionBarIconPattern))
+            {
+                $relativePath = $file.FullName.Substring($viewerRoot.Length).TrimStart([char]'\', [char]'/')
+                foreach ($label in (Get-FirstArgumentLabels -Arguments $match.Groups[1].Value))
+                {
+                    $rows.Add(('{0}|{1}|{2}|ActionBarIcon' -f $label, $relativePath.Replace('\', '/'), ($index + 1)))
                 }
             }
         }

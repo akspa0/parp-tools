@@ -1,6 +1,74 @@
 # Progress — wow-viewer
 
-Last updated: 2026-10-21
+Last updated: 2026-10-22
+
+## 2026-10-22 - Spec 286 View discoverability, Maps startup and screenshot guide (specified)
+
+- Recorded operator acceptance of the Spec 283 icon-bar direction without bulk-closing runtime gates.
+- Authored [Spec 286](../specs/286-view-controls-userguide/spec.md): direct View controls, explicit scale/layout resets, one-shot Maps opening on successful client activation, and a genuine screenshot user guide.
+- Created branch 286-view-controls-userguide through the project Spec Kit script; existing dirty worktree retained. Specification quality checklist passes; implementation plan/tasks are next.
+- [Specification receipt](../specs/286-view-controls-userguide/evidence/specification-2026-10-22.md). No runtime code, client/GPU run or screenshot capture in this pass.
+
+
+## 2026-10-22 - Spec 283 anchored tool icons and popup repair
+
+- Replaced full-height sidebars with narrow pictogram rails, full-name tooltips and independent closeable tool windows; removed the rejected Spellbook.
+- Restored Maps/File Browser/Diagnostics launch routes and Editor page selection; kept Taxi and Capture independent.
+- Fixed WDL preview visibility and reserved footer space for Load/Cancel; bounded tool-window opening rects; chat uses its full log width without a duplicate population-settings row.
+- Solution build exit 0 (411 warnings/0 errors); 13 focused UI/geometry tests pass; reference checker exit 0 (125 rows, 116 labels/entries, zero warnings).
+- [Receipt](../specs/283-v070-ui-presets-and-explore/evidence/action-bars-and-popup-windows-2026-10-22.md). No runtime/visual proof; operator walkthrough and full Spec 283 preset/Explore work remain open.
+- Earlier Spellbook entry below is historical only and superseded by explicit operator rejection.
+
+
+## 2026-10-21 — Spec 283 shell correction and UI-reference repair
+
+- Replaced the chat Tools list with Spellbook entry points; introduced and wired the owned
+  `SpellbookService`. Reduced minimap and chat layout footprints.
+- Added the omitted `Minimap` section to `eng/ui/ui-controls.json` and regenerated
+  `docs/WoWViewer/UI-REFERENCE.md`.
+- `Verify-UiReference.ps1`: exit 0, 130 inventory rows / 120 distinct labels / 121 registry entries;
+  no errors/warnings. Debug solution build: exit 0, 384 warnings / 0 errors.
+- Updated Spec 283's operator amendment, task ledger and status row. Receipt:
+  [UI shell correction](../specs/283-v070-ui-presets-and-explore/evidence/ui-shell-correction-2026-10-21.md).
+- No visual/runtime/action walkthrough was run; user proof remains open. Converter/0.5.3 DBC work
+  remains separate and unverified.
+
+## 2026-10-21 — Per-layer opacity and viewer writer refresh (planning only)
+
+- Added [MCAL/MCLY report contract](../specs/285-v65-terrain-interchange/contracts/layer-opacity-report.md)
+  and US7: source/decode/effective maps, every-layer identity/validity/statistics/cell summaries.
+  Spec 285 now has 62 pending tasks; prior final T050–T054 move to T058–T062.
+- Traced viewer New Map creation to `LkAdtWriter`, `LkWdtWriter`, `WdlWriter`; planned reuse behind
+  a shared target materializer. Height patching remains distinct; defaulted/unsupported metadata
+  requires explicit dispositions and source/output opacity readback. Spec 284 remains 74 pending tasks.
+- [Receipt](../specs/285-v65-terrain-interchange/evidence/opacity-writer-planning-receipt.md).
+  Documentation only; no source changes, map generation, harvests, builds or client runs.
+
+## 2026-10-21 — v65 dataset convergence and converter rebase (planning only)
+
+- Operator correction: use current data-harvester/dataset interchange and original conversion logic
+  rebased on modern tooling; old Converter has no confirmed current working baseline.
+- Added [Spec 285 v65](../specs/285-v65-terrain-interchange/plan.md) with 54 pending tasks: native
+  terrain, missing chunk coverage, Python-owned store and reverse stream, explicit CASC source reads.
+- Operator clarified **keep placement metadata in v65; exclude geometry/masks**. Exact source IDs
+  must be extracted before float32 projection; model payloads are not reversible object storage.
+- Operator expanded retention: unknown terrain chunks/metadata remain indexed; cell/layer material
+  relationships and every referenced terrain source/PNG texture form a durable future-viewer/model reference.
+- Rebases [Spec 284's 74 tasks](../specs/284-map-object-converter-revitalization/tasks.md) on v65;
+  removes old CLI wrapper/parity obligations. No source changes, builds, harvests or client runs.
+- [Receipt](../specs/284-map-object-converter-revitalization/evidence/rebase-v65-receipt.md).
+
+## 2026-10-21 — Spec 284 converter plan and tasks only
+
+- Authored [converter revitalization plan](../specs/284-map-object-converter-revitalization/plan.md),
+  [74 pending tasks](../specs/284-map-object-converter-revitalization/tasks.md), operator-derived spec,
+  code-grounded research, data model, local service/CLI contracts and PowerShell handoff commands.
+- Covers separate Map/Model/WMO tools in CLI and Editor, loaded/saved known-good client routing,
+  deterministic placement IDs, modern→Alpha pilot, WMO regrouping and explicit source-mesh generation.
+- Existing WMO splitting/merging and saved known-good paths verified in source; no general remesher
+  or working full modern→Alpha pipeline assumed. No source changes, builds, conversion or client runs.
+- [Planning receipt](../specs/284-map-object-converter-revitalization/evidence/planning-receipt.md).
+  Implementation belongs to the next chat, starting T001–T009; target/visual acceptance remains open.
 
 ## 2026-10-21 — Chat is a docked panel, not a floating window
 

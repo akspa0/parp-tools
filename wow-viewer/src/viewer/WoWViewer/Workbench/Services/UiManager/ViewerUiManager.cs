@@ -12,21 +12,19 @@ internal sealed partial class ViewerUiManager
 {
     internal const string MapSpawnsPopupId = "MapSpawns";
     private readonly IViewerAppHost _host;
+    private readonly ViewerActionBarsService _actionBars;
     private readonly UiPopupRegistry _popups = new();
     private readonly Dictionary<UiRegion, UiRegionState> _hosted = new();
     private bool _registered;
-    private bool _options;
-    private bool _focusRight;
     private bool _minimapVisible = true;
     private bool _minimapCollapsed;
-    // Docked at the top of the right sidebar is the default home; Undock floats it.
-    private bool _minimapDocked = true;
     private bool _chatCollapsed;
     private float _appliedFontScale = -1f;
     private float _appliedStyleScale = -1f;
     internal ViewerUiManager(IViewerAppHost host)
     {
         _host = host;
+        _actionBars = new ViewerActionBarsService(host);
         // Resolve the provider at draw time: the manager is constructed before the
         // minimap/status service, so capturing the delegate here would bind a null target.
         StatusContent = () => host.MinimapAndStatus.DrawStatusContent();
@@ -89,9 +87,8 @@ internal sealed partial class ViewerUiManager
         }
 
         Layout = new UiLayout(display, _host.HideUiChrome, _host.ShowLeftSidebar, _host.ShowRightSidebar,
-            _host.LeftSidebarWidth, _host.RightSidebarWidth, _options,
-            _hosted.TryGetValue(UiRegion.Chat, out var chat) && chat.Visible ? chat.Rect : null,
-            _minimapVisible, _minimapCollapsed, _minimapDocked, _host.SqlSpawnStreaming.ChatVisible,
+            _host.LeftSidebarWidth, _host.RightSidebarWidth, false,
+            _minimapVisible, _minimapCollapsed, _host.SqlSpawnStreaming.ChatVisible,
             _chatCollapsed, scale);
     }
 
@@ -108,7 +105,6 @@ internal sealed partial class ViewerUiManager
         int count = WorkbenchNavigator.GetPageLabels(destination).Length;
         _host.ActiveBottomTabIndex = Math.Clamp(page < 0 ? _pages[(int)Destination] : page, 0, Math.Max(0, count - 1));
         _host.ShowRightSidebar = true;
-        _focusRight = true;
         SaveLayout();
     }
 
@@ -122,6 +118,7 @@ internal sealed partial class ViewerUiManager
             case ViewerPanel.Inspector: InspectorPage = Math.Clamp(page, 0, 3); break;
         }
         Navigate(WorkbenchTab.Viewer);
+        _actionBars.OpenViewerPanel(panel);
     }
 
     internal void OpenSceneTools(int page = 0)
@@ -130,10 +127,32 @@ internal sealed partial class ViewerUiManager
         SceneToolsVisible = true;
         Navigate(WorkbenchTab.Viewer);
         _host.ShowLeftSidebar = true;
+        _actionBars.OpenSceneTool(SceneToolsPage);
     }
 
-    internal void OpenOptions() => _options = true;
-    internal void ToggleOptions() => _options = !_options;
+    internal void ToggleSceneToolsWindow(int page)
+    {
+        SceneToolsPage = Math.Clamp(page, 0, 1);
+        SceneToolsVisible = true;
+        _host.ShowLeftSidebar = true;
+        _actionBars.ToggleSceneTool(SceneToolsPage);
+        SaveLayout();
+    }
+
+    internal void OpenOptions() => _actionBars.OpenOptionsWindow();
+    internal void ToggleOptions() => _actionBars.ToggleOptionsWindow();
+    internal void OpenWorkspaceWindow() => _actionBars.OpenWorkspaceWindow();
+    internal void OpenDestinationPage(WorkbenchTab destination, int page = -1)
+    {
+        Navigate(destination, page);
+        _actionBars.OpenDestinationWindow();
+    }
+    internal void SelectDestinationPage(int page)
+    {
+        int count = WorkbenchNavigator.GetPageLabels(Destination).Length;
+        _host.ActiveBottomTabIndex = Math.Clamp(page, 0, Math.Max(0, count - 1));
+        SaveLayout();
+    }
     internal void ToggleMinimap()
     {
         _minimapVisible = !_minimapVisible;
@@ -153,11 +172,6 @@ internal sealed partial class ViewerUiManager
         set { _minimapCollapsed = value; SaveLayout(); }
     }
 
-    internal bool MinimapDocked
-    {
-        get => _minimapDocked;
-        set { _minimapDocked = value; SaveLayout(); }
-    }
     internal void ToggleLeftSidebar()
     {
         _host.ShowLeftSidebar = !_host.ShowLeftSidebar;
@@ -171,8 +185,8 @@ internal sealed partial class ViewerUiManager
     internal void ToggleChrome() => _host.HideUiChrome = !_host.HideUiChrome;
     internal void RequestKeyboardShortcuts() => _host.MainMenuBar.RequestKeyboardShortcuts();
     internal void CloseTopmostPopup() => _popups.CloseTopmost();
-    internal bool IsCaptureVisible => !_host.HideUiChrome && _host.ShowLeftSidebar && Destination == WorkbenchTab.Viewer && SceneToolsVisible && SceneToolsPage == 1;
-    internal bool IsAudioVisible => !_host.HideUiChrome && _options;
+    internal bool IsCaptureVisible => !_host.HideUiChrome && _actionBars.IsCaptureOpen;
+    internal bool IsAudioVisible => !_host.HideUiChrome && _actionBars.IsOptionsOpen;
 
     // Parent minimap/chat conversion reports the actual displayed rectangle here each frame.
     internal void ReportHostedRegion(UiRegion region, UiRect rect, bool visible) => _hosted[region] = new(rect, visible);
@@ -189,27 +203,26 @@ internal sealed partial class ViewerUiManager
                 if (ImGui.BeginMenuBar()) { _host.MainMenuBar.DrawContent(); ImGui.EndMenuBar(); }
             }, ImGuiWindowFlags.MenuBar);
             DrawRegion(UiRegion.LeftSidebar, "##UiLeftSidebar", DrawLeft);
-            if (_focusRight) ImGui.SetNextWindowFocus();
             DrawRegion(UiRegion.RightSidebar, "##UiRightSidebar", DrawRight);
-            _focusRight = false;
             DrawRegion(UiRegion.Minimap, "Minimap##UiMinimap", DrawMinimap,
                 ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
             // Docked panel: no resize and no move. A floating chat could be dragged over the
             // sidebars and had no reliable way back.
             DrawRegion(UiRegion.Chat, "Chat##UiChat", DrawChat, ImGuiWindowFlags.NoScrollbar);
             DrawRegion(UiRegion.BottomBar, "##UiBottomBar", DrawBottom, ImGuiWindowFlags.HorizontalScrollbar);
-            if (_options) DrawRegion(UiRegion.Options, "Options##UiOptions", () =>
-            {
-                if (ImGui.SmallButton("Close Options")) _options = false;
-                _host.ViewerChrome.DrawOptionsContent();
-            });
             DrawDiagnosticsWindows();
+            _actionBars.DrawToolWindows();
         }
         DrawRegion(UiRegion.StatusBar, "##UiStatusBar", () =>
         {
             if (StatusContent != null) StatusContent();
             else ImGui.TextUnformatted(_host.StatusMessage);
         });
+        // The WDL map-spawn chooser is a standalone window opened from the map list's Spawn
+        // button. The Spec 280 shell rewrite dropped its draw call, so the button set the flag and
+        // nothing ever rendered the window. It is drawn here, inside the ImGui frame, regardless
+        // of chrome visibility because it is a chooser, not chrome.
+        _host.WdlPreview.DrawWdlPreviewDialog();
         // Requests can originate from any destination. Drain deferred file operations exactly once.
         _host.MainMenuBar.DrawDeferredActions();
         if (_host.SettingsWindow._showSettingsWindow)
@@ -234,72 +247,17 @@ internal sealed partial class ViewerUiManager
             return;
         }
 
-        // Two columns: the chat log on the left, contextual tools on the right. The right side of
-        // this panel was dead whitespace; it now carries the actions the operator reaches for
-        // while reading the world, and the barker section appears only when the local area
-        // actually has creatures with ambient barks.
-        float scale = MathF.Max(1f, Layout.Scale);
-        float available = ImGui.GetContentRegionAvail().X;
-        float toolsWidth = MathF.Min(220f * scale, available * 0.35f);
-        float chatWidth = MathF.Max(0f, available - toolsWidth - 8f * scale);
-
-        if (ImGui.BeginChild("##ChatBody", new Vector2(chatWidth, 0f), false))
+        // Configuration lives in tool windows. The compact chat frame is a full-width log,
+        // not a miniature two-column workbench with clipped controls.
+        _host.SqlSpawnStreaming.DrawChatContent(() =>
         {
-            _host.SqlSpawnStreaming.DrawChatContent();
-            ImGui.EndChild();
-        }
-
-        ImGui.SameLine();
-
-        if (ImGui.BeginChild("##ChatTools", new Vector2(0f, 0f), false))
-        {
-            DrawChatTools();
-            ImGui.EndChild();
-        }
-    }
-
-    private void DrawChatTools()
-    {
-        SharedUiWidgets.SectionTitle("Tools");
-
-        if (ImGui.SmallButton("Map Spawns##ChatMapSpawns"))
-            _popups.Request(MapSpawnsPopupId);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the current map's spawn list and population controls");
-
-        if (ImGui.SmallButton("Options##ChatToolsOptions"))
-            _options = !_options;
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the options sub-menu");
-
-        if (ImGui.SmallButton("Minimap##ChatToolsMinimap"))
-            ToggleMinimap();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show or hide the minimap (M)");
-
-        if (ImGui.SmallButton("Inspector##ChatToolsInspector"))
-            OpenViewer(ViewerPanel.Inspector);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the Inspector in the right sidebar");
-
-        if (ImGui.SmallButton("PM4##ChatToolsPm4"))
-            OpenViewer(ViewerPanel.PM4);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open the PM4 workbench in the right sidebar");
-
-        if (ImGui.SmallButton("Collapse##ChatToolsCollapse"))
-        {
-            _chatCollapsed = true;
-            SaveLayout();
-        }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Collapse the chat to a one-line bar");
-
-        // Barkers only when the current map is loaded and the local spawn set has creatures with
-        // ambient barks. An empty section on every map would be noise.
-        if (_host.SqlSpawnStreaming.HasLocalBarkers)
-        {
-            ImGui.Separator();
-            SharedUiWidgets.SectionTitle("Barkers");
-            SharedUiWidgets.CompactStatus("Ambient NPC barks are active in this area.");
-            if (ImGui.SmallButton("Clear chat##ChatToolsClearBarkers"))
-                _host.SqlSpawnStreaming.ClearChat();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Clear the chat log");
-        }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Collapse##ChatCollapse"))
+            {
+                _chatCollapsed = true;
+                SaveLayout();
+            }
+        });
     }
 
     private void DrawMinimap()
@@ -318,86 +276,37 @@ internal sealed partial class ViewerUiManager
 
     private void DrawLeft()
     {
-        if (_host.ShowLeftSidebar)
-        {
-            if (ImGui.SmallButton("Collapse left sidebar##CollapseLeft"))
-            {
-                _host.ShowLeftSidebar = false;
-                SaveLayout();
-            }
-        }
-        else
-        {
-            if (ImGui.SmallButton("Expand left sidebar##ExpandLeft"))
-            {
-                _host.ShowLeftSidebar = true;
-                SaveLayout();
-            }
-        }
-        if (_host.ShowLeftSidebar) _host.NavigatorPanel.DrawContent();
+        _actionBars.DrawLeftBar();
     }
 
     private void DrawRight()
     {
-        if (_host.ShowRightSidebar)
-        {
-            if (ImGui.SmallButton("Collapse right sidebar##CollapseRight"))
-            {
-                _host.ShowRightSidebar = false;
-                SaveLayout();
-            }
-        }
-        else
-        {
-            if (ImGui.SmallButton("Expand right sidebar##ExpandRight"))
-            {
-                _host.ShowRightSidebar = true;
-                SaveLayout();
-            }
-        }
-        if (!_host.ShowRightSidebar) return;
-        if (Destination == WorkbenchTab.Viewer)
-        {
-            if (ImGui.BeginTabBar("##ViewerPanels"))
-            {
-                foreach (ViewerPanel panel in Enum.GetValues<ViewerPanel>())
-                {
-                    var flags = _focusRight && panel == ViewerPanel ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
-                    if (BeginPanelTab(panel.ToString(), flags))
-                    {
-                        ViewerPanel = panel;
-                        _host.WorkbenchPanels.DrawViewerContent(panel);
-                        ImGui.EndTabItem();
-                    }
-                }
-                ImGui.EndTabBar();
-            }
-        }
-        else
-        {
-            int page = WorkbenchPanelsService.DrawPageCombo("##DestinationPage", WorkbenchNavigator.GetPageLabels(Destination), _host.ActiveBottomTabIndex);
-            if (page != _host.ActiveBottomTabIndex) { _host.ActiveBottomTabIndex = page; SaveLayout(); }
-            _host.WorkbenchPanels.DrawDestinationContent(Destination);
-        }
+        _actionBars.DrawRightBar();
     }
 
     private void DrawBottom()
     {
+        float scale = MathF.Max(1f, Layout.Scale);
         foreach (WorkbenchTab destination in Enum.GetValues<WorkbenchTab>())
         {
-            if (ImGui.Button(destination.ToString())) Navigate(destination);
+            string label = destination switch
+            {
+                WorkbenchTab.Viewer => "Viewer",
+                WorkbenchTab.Editor => "Editor",
+                _ => "Archaeology",
+            };
+            float width = MathF.Max(82f * scale, ImGui.CalcTextSize(label).X + ImGui.GetStyle().FramePadding.X * 2f);
+            if (ImGui.Button($"{label}##Preset_{destination}", new Vector2(width, 36f * scale)))
+            {
+                Navigate(destination);
+                if (destination != WorkbenchTab.Viewer) _actionBars.OpenDestinationWindow();
+            }
             ImGui.SameLine();
         }
-        if (ImGui.Button("Options")) _options = !_options;
+        _actionBars.DrawBottomActions();
         ImGui.SameLine();
-        _host.ViewerChrome.DrawStatsContent();
-    }
-
-    private static unsafe bool BeginPanelTab(string label, ImGuiTabItemFlags flags)
-    {
-        byte[] text = System.Text.Encoding.UTF8.GetBytes(label + "\0");
-        fixed (byte* pointer = text)
-            return ImGuiNative.igBeginTabItem(pointer, null, flags) != 0;
+        if (ImGui.Button("Options##BottomOptions", new Vector2(76f * scale, 36f * scale))) ToggleOptions();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open display, rendering, and viewer options");
     }
 
     private void DrawRegion(UiRegion region, string name, Action content, ImGuiWindowFlags extra = 0,
@@ -410,12 +319,16 @@ internal sealed partial class ViewerUiManager
         // Every region shares one token surface, so the shell reads as a single
         // surface treatment instead of a set of unrelated windows.
         SharedUiWidgets.PushSurfaceStyle(Layout.Scale);
+        bool actionRail = region is UiRegion.LeftSidebar or UiRegion.RightSidebar;
+        if (actionRail)
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(3f, 3f) * Layout.Scale);
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar |
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoDocking | extra;
         if (!resizable) flags |= ImGuiWindowFlags.NoResize;
         if (!movable) flags |= ImGuiWindowFlags.NoMove;
         if (ImGui.Begin(name, flags)) content();
         ImGui.End();
+        if (actionRail) ImGui.PopStyleVar();
         SharedUiWidgets.PopSurfaceStyle();
     }
 

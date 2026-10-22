@@ -32,6 +32,9 @@ public static partial class UiControlScanner
     [GeneratedRegex(@"ImGui\.(Button|SmallButton|Checkbox|RadioButton|MenuItem|Selectable|TreeNode|CollapsingHeader|Combo|SliderFloat|SliderInt)\(([^;]*)\)")]
     private static partial Regex ImGuiCallRegex();
 
+    [GeneratedRegex(@"DrawActionBarIcon\(([^;]*)\)")]
+    private static partial Regex ActionBarIconRegex();
+
     [GeneratedRegex(@"SharedUiWidgets\.(ActionButton|DrawActionGroup|SectionHeader|DrawSectionHeader)\(([^;]*)\)")]
     private static partial Regex SharedWidgetRegex();
 
@@ -52,13 +55,13 @@ public static partial class UiControlScanner
                 string[] lines = File.ReadAllLines(file);
                 for (int index = 0; index < lines.Length; index++)
                 {
-                    foreach (string line in lines)
-                    {
-                        foreach (Match match in ImGuiCallRegex().Matches(line))
-                            AddControls(controls, match, file, viewerRoot, index + 1);
-                        foreach (Match match in SharedWidgetRegex().Matches(line))
-                            AddControls(controls, match, file, viewerRoot, index + 1);
-                    }
+                    string line = lines[index];
+                    foreach (Match match in ImGuiCallRegex().Matches(line))
+                        AddControls(controls, match, file, viewerRoot, index + 1);
+                    foreach (Match match in SharedWidgetRegex().Matches(line))
+                        AddControls(controls, match, file, viewerRoot, index + 1);
+                    foreach (Match match in ActionBarIconRegex().Matches(line))
+                        AddActionBarIconControl(controls, match, file, viewerRoot, index + 1);
                 }
             }
         }
@@ -86,10 +89,24 @@ public static partial class UiControlScanner
         }
     }
 
-    /// <summary>Returns the visible labels of the call's first argument.</summary>
-    private static IEnumerable<string> ExtractFirstArgumentLabels(Match match)
+    private static void AddActionBarIconControl(
+        List<UiControlSource> controls,
+        Match match,
+        string file,
+        string viewerRoot,
+        int line)
     {
-        string arguments = match.Groups[2].Value;
+        string relative = Path.GetRelativePath(viewerRoot, file).Replace('\\', '/');
+        foreach (string label in ExtractFirstArgumentLabels(match.Groups[1].Value))
+            controls.Add(new UiControlSource(label, relative, line, "ActionBarIcon"));
+    }
+
+    /// <summary>Returns the visible labels of the call's first argument.</summary>
+    private static IEnumerable<string> ExtractFirstArgumentLabels(Match match) =>
+        ExtractFirstArgumentLabels(match.Groups[2].Value);
+
+    private static IEnumerable<string> ExtractFirstArgumentLabels(string arguments)
+    {
         int depth = 0;
         int end = arguments.Length;
         for (int index = 0; index < arguments.Length; index++)

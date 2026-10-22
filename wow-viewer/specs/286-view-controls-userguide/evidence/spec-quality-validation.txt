@@ -1,0 +1,7 @@
+SPEC_286_VALIDATION PASSED
+stories=3 requirements=13 success_criteria=7
+checklist_passed=16 local_links_checked=12
+branch=286-view-controls-userguide
+feature_pin=specs/286-view-controls-userguide
+implementation=NOT_RUN screenshots=NOT_CAPTURED runtime_visual_proof=OPEN
+exit=0

@@ -78,6 +78,12 @@ internal sealed partial class WorkbenchPanelsService
         }
         else DrawCapturePanelContent();
     }
+
+    internal void DrawTaxiWindowContent()
+    {
+        if (_worldScene != null) _taxiPanel.DrawTaxiContent();
+        else SharedUiWidgets.DrawEmptyState("No world loaded", "Load a world to use the taxi route tools.");
+    }
     internal void DrawAssetsContent()
     {
         if (_catalogView == null)

@@ -65,6 +65,26 @@ public sealed class UiControlDocumentationTests
             "UI reference is missing entries for: " + string.Join(", ", missing));
     }
 
+    [Fact]
+    public void IconActions_AreDocumentedByFullName_AndExactSourceLine()
+    {
+        var found = UiControlScanner.Scan(ViewerRoot).Where(control => control.Kind == "ActionBarIcon").ToList();
+        string[] expected = ["Workspace", "File Browser", "Maps", "Assets", "Taxi", "Capture", "Diagnostics", "Inspector", "World", "Model", "PM4"];
+        Assert.Equal(expected.OrderBy(label => label, StringComparer.Ordinal), found.Select(control => control.Label));
+        foreach (var control in found)
+        {
+            string[] lines = File.ReadAllLines(Path.Combine(ViewerRoot, control.File));
+            Assert.Contains($"DrawActionBarIcon(\"{control.Label}\"", lines[control.Line - 1]);
+        }
+    }
+
+    [Fact]
+    public void Registry_DoesNotExposeRejectedSpellbookOrRailAbbreviations()
+    {
+        string[] rejected = ["Spellbook", "Ws", "Op", "As", "Tx", "Cp", "In", "Wr", "Md", "P4"];
+        Assert.DoesNotContain(LoadRegistry(), control => control.Visible && rejected.Contains(control.Label));
+    }
+
     private static IReadOnlyList<UiControlDoc> LoadRegistry()
     {
         string json = File.ReadAllText(RegistryPath);

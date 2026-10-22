@@ -52,7 +52,7 @@ internal sealed partial class ViewerChromeService
     }
 
     /// <summary>
-    /// The minimap panel is just the map. Its show/collapse/dock controls live here so the panel
+    /// The minimap panel is just the map. Its show/collapse controls live here so the panel
     /// itself keeps every pixel for the map, and the controls stay documented and reachable.
     /// </summary>
     private void DrawOptionsMinimapContent()
@@ -62,8 +62,6 @@ internal sealed partial class ViewerChromeService
         if (ImGui.Checkbox("Show minimap", ref visible)) ui.MinimapVisible = visible;
         bool collapsed = ui.MinimapCollapsed;
         if (ImGui.Checkbox("Collapse minimap", ref collapsed)) ui.MinimapCollapsed = collapsed;
-        bool docked = ui.MinimapDocked;
-        if (ImGui.Checkbox("Dock minimap in right sidebar", ref docked)) ui.MinimapDocked = docked;
         SharedUiWidgets.CompactStatus("Scroll to zoom, drag to pan, click to teleport.");
     }
 

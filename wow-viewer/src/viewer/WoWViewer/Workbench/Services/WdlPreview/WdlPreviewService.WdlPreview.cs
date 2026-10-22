@@ -12,6 +12,12 @@ internal sealed partial class WdlPreviewService
 {
     internal void DrawWdlPreviewDialog()
     {
+        // This window is requested by the map list only. Without this guard, the
+        // map/renderer state remains populated after Load, Cancel or the title-bar X,
+        // and Begin() reopens the preview every frame despite _showWdlPreview=false.
+        if (!_showWdlPreview)
+            return;
+
         if (_selectedMapForPreview == null || _wdlPreviewRenderer == null)
         {
             _showWdlPreview = false;
@@ -72,17 +78,20 @@ internal sealed partial class WdlPreviewService
             return;
         }
 
-        ImGui.SetNextWindowSize(new Vector2(820, 900), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowPos(new Vector2(
-            ImGui.GetIO().DisplaySize.X / 2 - 410,
-            ImGui.GetIO().DisplaySize.Y / 2 - 450), ImGuiCond.FirstUseEver);
+        Vector2 display = ImGui.GetIO().DisplaySize;
+        ImGui.SetNextWindowSize(Vector2.Min(new Vector2(820, 900), display * 0.88f), ImGuiCond.Appearing);
+        ImGui.SetNextWindowPos(display * 0.5f, ImGuiCond.Appearing, new Vector2(0.5f));
 
         if (ImGui.Begin($"Map Preview - {_selectedMapForPreview.Name}", ref _showWdlPreview, ImGuiWindowFlags.NoCollapse))
         {
             ImGui.TextWrapped("Click on the map preview to select a spawn point, then click 'Load Map' to start at that location.");
             ImGui.Separator();
 
-            float previewSize = MathF.Min(ImGui.GetContentRegionAvail().X, 768f);
+            // Reserve the footer before sizing the image. Otherwise the square preview pushes
+            // Load/Cancel below the window, particularly when the UI font is scaled up.
+            float footerHeight = ImGui.GetFrameHeightWithSpacing() * 6f;
+            float previewSize = MathF.Max(1f, MathF.Min(768f,
+                MathF.Min(ImGui.GetContentRegionAvail().X, ImGui.GetContentRegionAvail().Y - footerHeight)));
             var cursorPos = ImGui.GetCursorScreenPos();
 
             ImGui.Image((nint)_wdlPreviewRenderer.TextureId, new Vector2(previewSize, previewSize));
@@ -146,7 +155,6 @@ internal sealed partial class WdlPreviewService
                     : "Select a spawn point on the map first");
             }
 
-            ImGui.SameLine();
             if (ImGui.Button("Cancel", new Vector2(100, 0)))
             {
                 _showWdlPreview = false;

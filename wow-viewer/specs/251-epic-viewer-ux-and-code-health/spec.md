@@ -65,6 +65,7 @@ navigation — built on code that is small enough to change safely.
 | U-32 | Selection-silhouette outlines (current selection is a bounding box) | 212 US6/FR-024–029 |
 | U-33 | Simple interactive viewer surface | 151 US2/FR-006–007 |
 | U-34 | Workspace profiles / editor mode + MK Dataset purge | 197 T101–T108 |
+| U-35 | Discoverable View/scale/reset controls, automatic Maps after client load, and real screenshot user guide; preserve the accepted icon-bar UI | [286](../286-view-controls-userguide/spec.md), operator request 2026-10-22 |
 
 ### D. Parked
 

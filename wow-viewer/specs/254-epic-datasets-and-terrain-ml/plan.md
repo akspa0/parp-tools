@@ -4,6 +4,15 @@
 
 ## Dependencies
 
+**Operator-selected addition, 2026-10-21**: [Spec 285 v65](../285-v65-terrain-interchange/plan.md)
+owns current data-harvester terrain/placement interchange, missing chunk coverage and CASC source
+reads for Spec 284. Placement metadata stays in v65; object geometry/masks are excluded. Existing
+dataset/training scope remains on its prior contracts; no other epic backlog item is activated.
+
+The same operator addition retains unknown/source/native terrain metadata and textures for future
+viewing/models, with cell/layer appearance indexes and all referenced tilesets as native RGBA PNGs.
+Source texture bytes and unknown chunk evidence persist; no new model/trainer is activated.
+
 ```text
 D-01 patch-chain resolver ──> D-02 multi-build store ──> D-03 incremental ──> D-04 encoding
                                                     └──> D-05 viewer load ──> D-06 residency

@@ -68,7 +68,7 @@ public sealed class FakeChatWindowService
     /// Renders the chat body into the manager-owned chat region. The manager owns the
     /// window, position, size, border and draw order.
     /// </summary>
-    public void DrawContent(Action? drawPopulationControls = null)
+    public void DrawContent(Action? drawHeaderControls = null)
     {
         if (!IsVisible)
             return;
@@ -83,11 +83,7 @@ public sealed class FakeChatWindowService
         bool auto = AutoScroll;
         if (ImGui.Checkbox("Auto-Scroll##ChatAuto", ref auto))
             AutoScroll = auto;
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Hide##ChatHide"))
-            IsVisible = false;
-
-        drawPopulationControls?.Invoke();
+        drawHeaderControls?.Invoke();
 
         ImGui.Separator();
 
@@ -95,7 +91,7 @@ public sealed class FakeChatWindowService
         {
             if (_messages.Count == 0)
             {
-                ImGui.TextDisabled("Ambient dialogue and NPC barks appear here when within range...");
+                ImGui.TextDisabled("No messages.");
             }
             else
             {
@@ -136,7 +132,7 @@ public sealed class FakeChatWindowService
                 _scrollToBottom = false;
             }
 
-            ImGui.EndChild();
         }
+        ImGui.EndChild();
     }
 }

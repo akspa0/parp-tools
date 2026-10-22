@@ -1,5 +1,18 @@
 # Active Context — wow-viewer
 
+**Operator follow-up 2026-10-22 - Spec 286:** current icon-bar UI accepted as nice-looking and pretty functional; keep it. [View controls / screenshot guide spec](../specs/286-view-controls-userguide/spec.md) now defines direct View access to scale and existing visual settings, explicit layout/scale/combined resets, Maps opening once after each successful client activation, and a real illustrated guide. Branch: 286-view-controls-userguide. Specification/checklist only; no new runtime implementation or screenshots. Next bounded step: implementation plan and ordered tasks, starting shared scale/reset ownership and View routes. Operator capture remains required; do not fabricate guide screenshots or reopen the accepted layout.
+
+**Planning-only handoff, 2026-10-21**: [Spec 285 v65 interchange](../specs/285-v65-terrain-interchange/plan.md)
+([62 pending tasks](../specs/285-v65-terrain-interchange/tasks.md)) rebases [Spec 284 converters](../specs/284-map-object-converter-revitalization/plan.md)
+([74 pending tasks](../specs/284-map-object-converter-revitalization/tasks.md)) on current data-harvester → decoded dataset → modern target export.
+v65 retains native terrain and **typed placement metadata**; excludes object geometry/masks; **CASC reads required**.
+Unknown terrain bytes/metadata stay indexed; all referenced terrain textures retain source + native RGBA PNGs, cell/layer mappings and appearance inputs for later viewing/models.
+Every-layer MCAL/MCLY reports retain raw/decode/effective opacity metadata; converter output reuses actual viewer New Map ADT/WDT/WDL writers, with field-capability audits and independent report readback.
+Python owns Zarr I/O; old Converter is unverified algorithm reference, not a functional dependency/parity gate.
+Next chat starts Spec 285 coverage/contracts, then Spec 284 export gates. No implementation/runs; preserve Spec 283/UI WIP. Heavy/visual proof operator-owned.
+
+**Spec 283 UI correction (2026-10-22):** anchored pictogram rails now open small closeable tool windows; full-name tooltips, no two-letter control labels, and no Spellbook. Maps, File Browser, Diagnostics, camera/fog and Editor pages retain their existing owners. Chat log uses its full frame width; minimap/chat no longer inherit saved sidebar widths (layout v5). Spawn-preview show-flag guard and footer sizing fixed. Solution build 0 errors; 13 focused tests pass; reference check 125 rows/116 entries, no warnings. [Receipt](../specs/283-v070-ui-presets-and-explore/evidence/action-bars-and-popup-windows-2026-10-22.md). **Not runtime/visual proven**; operator icon/window walk, full presets/Explore and separate converter work remain open.
+
 Last updated: 2026-10-21 · **Spec 280 UI refactor implemented; startup crash fixed in code, operator smoke owed**:
 - **Spec 280 UI refactor — implementation landed, ledger reconciled 2026-10-21** (branch
   `280-ui-rework`; spec, plan, tasks, audit and 18 receipts under

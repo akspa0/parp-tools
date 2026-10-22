@@ -29,6 +29,8 @@
              Link="UI\UiReferenceDocument.cs" />
     <Compile Include="..\..\src\viewer\WoWViewer\UI\UiControlScanner.cs"
              Link="UI\UiControlScanner.cs" />
+    <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\UiManager\UiLayout.cs"
+             Link="UI\UiLayout.cs" />
   </ItemGroup>
 
   <ItemGroup>

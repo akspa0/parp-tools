@@ -108,6 +108,24 @@ public static class SharedUiWidgets
         return clicked;
     }
 
+    /// <summary>Framed icon hit target with a full-name tooltip and selected/hover feedback.</summary>
+    public static bool IconButton(string label, string id, Vector2 size, string help, bool selected = false)
+    {
+        Vector2 position = ImGui.GetCursorScreenPos();
+        bool clicked = ImGui.InvisibleButton($"{label}##{id}", size);
+        bool hovered = ImGui.IsItemHovered();
+        Vector4 background = selected || ImGui.IsItemActive() ? UiTokens.Surface2 : UiTokens.Surface1;
+        if (hovered) background = UiTokens.Surface2;
+        var draw = ImGui.GetWindowDrawList();
+        float scale = MathF.Max(1f, size.X / 34f);
+        draw.AddRectFilled(position, position + size, ImGui.ColorConvertFloat4ToU32(background), 3f * scale);
+        draw.AddRect(position, position + size,
+            ImGui.ColorConvertFloat4ToU32(selected || hovered ? UiTokens.Brass : UiTokens.Border),
+            3f * scale, ImDrawFlags.None, MathF.Max(1f, scale));
+        if (hovered) ImGui.SetTooltip($"{label}\n{help}");
+        return clicked;
+    }
+
     /// <summary>Shared action-group button contract used by compact workbench destinations.</summary>
     public static bool DrawActionGroup(
         string label,
@@ -228,11 +246,12 @@ public static class SharedUiWidgets
     /// Applies the shared window surface (background, border, rounding, padding)
     /// so every manager-owned region reads as the same surface.
     /// </summary>
-    public static void PushSurfaceStyle()
+    public static void PushSurfaceStyle(float scale = 1f)
     {
+        float s = float.IsFinite(scale) ? Math.Clamp(scale, 1f, 2.5f) : 1f;
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, UiTokens.WindowRounding);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, UiTokens.WindowBorderSize);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, UiTokens.WindowPadding);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, UiTokens.WindowPadding * s);
         ImGui.PushStyleColor(ImGuiCol.WindowBg, UiTokens.Surface1);
         ImGui.PushStyleColor(ImGuiCol.Border, UiTokens.Border);
     }
