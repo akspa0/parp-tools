@@ -29,19 +29,34 @@ internal sealed class UiLayout
     /// <summary>Scale factor applied to every metric (1.0 at 1080p, 2.0 at 2160p).</summary>
     public float Scale { get; }
 
+    /// <summary>Vertical window padding (1080p px) around the bottom action bar's button row.</summary>
+    public const float BottomBarPadY = 4f;
+
+    /// <summary>Vertical window padding (1080p px) around the status bar's single row.</summary>
+    public const float StatusBarPadY = 2f;
+
+    /// <summary>Smallest footer control row (1080p px), used until the real font is measured.</summary>
+    public const float MinFooterRow = 22f;
+
+    /// <param name="footerRowHeight">
+    /// Measured height of one footer control row (font size x text scale + frame padding), in the
+    /// same physical pixels as <paramref name="display"/>. Both footer bars are sized from it, so
+    /// they can never be shorter than the controls they hold; text scale growth grows the bars.
+    /// </param>
     public UiLayout(Vector2 display, bool hidden, bool left, bool right, float leftWidth, float rightWidth,
         bool options = false, bool minimapVisible = true, bool minimapCollapsed = false,
         bool chatVisible = true, bool chatCollapsed = false, float scale = 1f,
-        bool rightDockVisible = false, float rightDockWidth = 360f)
+        bool rightDockVisible = false, float rightDockWidth = 360f, float footerRowHeight = 0f)
     {
         float w = float.IsFinite(display.X) ? Math.Max(0, display.X) : 0;
         float h = float.IsFinite(display.Y) ? Math.Max(0, display.Y) : 0;
         float s = float.IsFinite(scale) ? Math.Clamp(scale, 1f, 2.5f) : 1f;
         Scale = s;
 
+        float row = MathF.Max(MinFooterRow * s, float.IsFinite(footerRowHeight) ? footerRowHeight : 0f);
         float top = hidden ? 0 : Math.Min(28f * s, h);
-        float status = Math.Min(22f * s, Math.Max(0, h - top));
-        float bottom = hidden ? 0 : Math.Min(52f * s, Math.Max(0, h - top - status));
+        float status = Math.Min(row + 2f * StatusBarPadY * s, Math.Max(0, h - top));
+        float bottom = hidden ? 0 : Math.Min(row + 2f * BottomBarPadY * s, Math.Max(0, h - top - status));
         float sceneHeight = Math.Max(0, h - top - bottom - status);
 
         // Edge regions are compact action rails, never full-width data sidebars. Their tool content

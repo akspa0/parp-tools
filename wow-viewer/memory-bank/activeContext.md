@@ -1,13 +1,33 @@
 # Active Context — wow-viewer
 
-**Implementation handoff 2026-10-22 — branch 286-view-controls-userguide:** [Spec 286 U0 + U0b](../specs/286-view-controls-userguide/tasks.md)
-source/tests landed. Footer regions fit their actual client rect with no scrollbars; the status
-readout right-aligns inside the region; FPS hover discloses the existing counters through one
-immutable snapshot. U0b docks Inspector/World/Model/PM4 under the minimap and above the bottom
-bars, resizable and persisted, and starts the chat collapsed. U0 T001–T007 and U0b T049–T052
-checked; 35/35 focused tests; solution build 0 errors; registry 0 errors/0 warnings. Next:
-operator runtime proof for SC-008/010/011, then U1. [U0 receipt](../specs/286-view-controls-userguide/evidence/u0-source-tests.md),
-[U0b receipt](../specs/286-view-controls-userguide/evidence/right-dock-and-chat-2026-10-22.md).
+**Operator's first real run (2026-10-22, 3440×1392) → U0c fix (source/probe; operator re-check T057 owed):**
+dock panels showed only their page selector and the status bar was clipped. Causes: the dock's
+full-height splitter `InvisibleButton`+`SameLine` made ImGui's line height the whole window (all
+later widgets landed below it), and the 22 px status region was shorter than its button row plus
+8 px window padding. Fixed: scrolling child body + last-submitted overlay splitter; footer bars
+sized from the measured control row (`UiLayout footerRowHeight`) with tight padding; Left Bar /
+Right Bar buttons removed (Tab hides chrome, `[`/`]` toggle rails); buttons at standard height.
+90/90 focused tests, viewer compiles (scratch output; the running viewer locks `bin\`), headless
+ImGui probe in `specs/286-…/evidence/imgui-layout-probe/` (ImGui.NET 1.89.9.3). Pure-policy tests
+cannot see ImGui line-height/padding bugs — verify ImGui layout changes with that probe.
+[U0c receipt](../specs/286-view-controls-userguide/evidence/u0c-dock-and-footer-2026-10-22.md).
+
+**Implementation handoff 2026-10-22 — branch 286-view-controls-userguide:** [Spec 286 U0 + U0b + U1](../specs/286-view-controls-userguide/tasks.md)
+source/tests landed. Footer regions fit their actual client rect with no scrollbars; FPS hover
+discloses the existing counters. U0b docks Inspector/World/Model/PM4 under the minimap, resizable
+and persisted, chat starts collapsed. **U1:** one `ViewPreferencesService` (owned by
+`ViewerUiManager`) owns the user text size; View, Settings and the settings loader all use it and
+only the manager writes `FontGlobalScale` (display × user composition). View now holds Visual
+Options..., Camera and Fog..., a Text Size submenu and three named resets — **Reset Text Size
+Only / Reset Layout Only / Reset Layout and Text Size** (the old "Reset Shell Layout" label is
+retired). T001–T007, T049–T052 and T009–T015 checked; 82/82 focused tests; solution build 0
+errors; registry 121/121, 0 warnings. **U1 started with T008 still open (operator direction).**
+Next: operator runtime proof — T008 (SC-008/010/011) and T016 (SC-001–003: View reachability,
+the three resets, restart persistence, 0.85–2.20 legibility at 1080p/1440p/4K; known risk: style
+metrics scale with display only, text with user × display) — then U2 (Maps once per activation).
+[U0 receipt](../specs/286-view-controls-userguide/evidence/u0-source-tests.md),
+[U0b receipt](../specs/286-view-controls-userguide/evidence/right-dock-and-chat-2026-10-22.md),
+[U1 receipt](../specs/286-view-controls-userguide/evidence/u1-source-tests.md).
 [Renderer plan](../specs/249-epic-renderer-performance-and-correctness/plan.md)
 owns evidence-gated sky/liquid work; [flora plan](../specs/259-ground-effects-and-wmo-detail-doodads/plan.md)
 owns distance/density/fade. Preserve Spec 273/276 work, culling quarantine and reverted AC-009.

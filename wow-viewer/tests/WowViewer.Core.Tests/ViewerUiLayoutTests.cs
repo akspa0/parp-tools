@@ -59,6 +59,63 @@ public sealed class ViewerUiLayoutTests
         Assert.True(status.Y >= bottom.Y + bottom.Height - 0.5f);
     }
 
+    // Measured button-row height at a text scale: the base font is 14 px, frame padding 3 px per side.
+    private static float RowAt(float displayScale, float userScale) =>
+        14f * userScale * displayScale + 2f * 3f * displayScale;
+
+    [Theory]
+    [InlineData(1920, 1080, 1.0f)]
+    [InlineData(1920, 1080, 2.2f)]
+    [InlineData(3440, 1392, 1.0f)]   // the operator's ultrawide run: status text was clipped here
+    [InlineData(3440, 1392, 2.2f)]
+    [InlineData(3840, 2160, 1.0f)]
+    [InlineData(3840, 2160, 2.2f)]
+    public void FooterBars_AreNeverShorterThanTheirButtonRow(int width, int height, float userScale)
+    {
+        var display = new Vector2(width, height);
+        float scale = UiLayout.ScaleFor(display);
+        float row = RowAt(scale, userScale);
+        var layout = new UiLayout(display, hidden: false, left: true, right: true,
+            leftWidth: 280f, rightWidth: 360f, scale: scale, footerRowHeight: row);
+
+        UiRect bottom = layout[UiRegion.BottomBar].Rect;
+        UiRect status = layout[UiRegion.StatusBar].Rect;
+
+        // The content a bar holds is one row plus its own vertical window padding top and bottom.
+        Assert.True(bottom.Height >= row + 2f * UiLayout.BottomBarPadY * scale - 0.01f);
+        Assert.True(status.Height >= row + 2f * UiLayout.StatusBarPadY * scale - 0.01f);
+        Assert.True(status.Y + status.Height <= height + 0.5f);
+        Assert.True(bottom.Y + bottom.Height <= status.Y + 0.5f);
+    }
+
+    [Fact]
+    public void FooterBars_GrowWithTextSizeAndShrinkTheSceneInstead()
+    {
+        var display = new Vector2(1920f, 1080f);
+        var normal = new UiLayout(display, false, true, true, 280f, 360f, scale: 1f, footerRowHeight: RowAt(1f, 1.0f));
+        var large = new UiLayout(display, false, true, true, 280f, 360f, scale: 1f, footerRowHeight: RowAt(1f, 2.2f));
+
+        Assert.True(large[UiRegion.StatusBar].Rect.Height > normal[UiRegion.StatusBar].Rect.Height);
+        Assert.True(large[UiRegion.BottomBar].Rect.Height > normal[UiRegion.BottomBar].Rect.Height);
+        Assert.True(large[UiRegion.Scene].Rect.Height < normal[UiRegion.Scene].Rect.Height);
+        // The bars plus the scene still tile the client exactly.
+        float total = large[UiRegion.TopBar].Rect.Height + large[UiRegion.Scene].Rect.Height
+            + large[UiRegion.BottomBar].Rect.Height + large[UiRegion.StatusBar].Rect.Height;
+        Assert.Equal(display.Y, total, 1);
+    }
+
+    [Fact]
+    public void FooterBars_FallBackToTheFloorBeforeTheFontIsMeasured()
+    {
+        var display = new Vector2(1920f, 1080f);
+        var unmeasured = new UiLayout(display, false, true, true, 280f, 360f, scale: 1f);
+        var invalid = new UiLayout(display, false, true, true, 280f, 360f, scale: 1f, footerRowHeight: float.NaN);
+
+        Assert.Equal(UiLayout.MinFooterRow + 2f * UiLayout.StatusBarPadY, unmeasured[UiRegion.StatusBar].Rect.Height, 2);
+        Assert.Equal(unmeasured[UiRegion.StatusBar].Rect, invalid[UiRegion.StatusBar].Rect);
+        Assert.Equal(unmeasured[UiRegion.BottomBar].Rect, invalid[UiRegion.BottomBar].Rect);
+    }
+
     [Theory]
     [InlineData(1920, 1080)]
     [InlineData(2560, 1440)]

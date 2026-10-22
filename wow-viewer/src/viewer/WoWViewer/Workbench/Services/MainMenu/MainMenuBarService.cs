@@ -169,11 +169,7 @@ internal sealed partial class MainMenuBarService
             }
         if (ImGui.BeginMenu("View"))
         {
-            if (ImGui.MenuItem("Reset Camera")) ResetCamera();
-            if (ImGui.MenuItem("Hide UI Chrome", "Tab", _hideUiChrome)) _hideUiChrome = !_hideUiChrome;
-            ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
-            ImGui.MenuItem("Right Sidebar", "I", ref _showRightSidebar);
-            if (ImGui.MenuItem("Reset Shell Layout")) _shellLayout.ResetLayout();
+            DrawViewMenuContent();
             ImGui.EndMenu();
         }
             if (ImGui.BeginMenu("Help"))

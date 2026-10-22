@@ -501,6 +501,10 @@ internal sealed partial class MinimapAndStatusService
         FooterDiagnosticsSnapshot snapshot = BuildDiagnosticsSnapshot();
         float scale = MathF.Max(1f, _host.UiManager.Layout.Scale);
 
+        // Centre the plain text on the same baseline as the audio button, so the one-row bar
+        // reads as a single aligned line.
+        ImGui.AlignTextToFramePadding();
+
         if (_worldScene is not null)
         {
             bool muted = _worldScene.AudioMuted;

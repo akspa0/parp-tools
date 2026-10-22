@@ -1,0 +1,121 @@
+using System.Numerics;
+using ImGuiNET;
+
+// Headless ImGui layout probe (no GPU, no viewer). Reproduces the exact ImGui call patterns used by
+// ViewerUiManager.DrawRightDock and the footer regions, before and after the fix, against the same
+// ImGui version the viewer ships (1.89.9.3), and prints where the widgets land.
+
+ImGui.CreateContext();
+ImGuiIOPtr io = ImGui.GetIO();
+io.Fonts.AddFontDefault();
+io.Fonts.GetTexDataAsRGBA32(out IntPtr _, out int _, out int _);
+io.DisplaySize = new Vector2(3440, 1392);
+io.DeltaTime = 1f / 60f;
+
+float s = 3440f / 1920f;            // the operator's ultrawide display scale
+io.FontGlobalScale = 1.0f * s;      // user 1.0 x display
+ImGuiStylePtr style = ImGui.GetStyle();
+style.ItemSpacing = new Vector2(8, 4) * s;
+style.FramePadding = new Vector2(6, 3) * s;
+
+const ImGuiWindowFlags Base = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings
+    | ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize;
+const ImGuiWindowFlags NoScroll = ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+
+var results = new List<string>();
+void Report(string name, string text) => results.Add($"{name,-46} {text}");
+
+for (int pass = 0; pass < 2; pass++)
+{
+results.Clear();
+ImGui.NewFrame();
+
+// ---- Dock, OLD pattern: full-height InvisibleButton + SameLine + content ----
+{
+    var pos = new Vector2(1900, 300); var size = new Vector2(500, 700);
+    ImGui.SetNextWindowPos(pos); ImGui.SetNextWindowSize(size);
+    ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 8) * s);
+    ImGui.Begin("dockOld", Base | NoScroll);
+    Vector2 avail = ImGui.GetContentRegionAvail();
+    ImGui.InvisibleButton("##splitter", new Vector2(6 * s, avail.Y));
+    ImGui.SameLine();
+    ImGui.Text("page selector");
+    Vector2 first = ImGui.GetItemRectMin();
+    ImGui.Text("content line 1");
+    Vector2 second = ImGui.GetItemRectMin();
+    float bottom = pos.Y + size.Y;
+    Report("OLD dock: selector y / window bottom", $"{first.Y:F0} / {bottom:F0}  visible={first.Y < bottom}");
+    Report("OLD dock: first content line y", $"{second.Y:F0}  visible={second.Y < bottom}  (clipped away: {second.Y >= bottom})");
+    ImGui.End(); ImGui.PopStyleVar();
+}
+
+// ---- Dock, NEW pattern: scrolling child body + overlay splitter submitted last ----
+{
+    var pos = new Vector2(1900, 300); var size = new Vector2(500, 700);
+    ImGui.SetNextWindowPos(pos); ImGui.SetNextWindowSize(size);
+    ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 8) * s);
+    ImGui.Begin("dockNew", Base | NoScroll);
+    float grip = 6 * s;
+    Vector2 origin = ImGui.GetCursorPos();
+    Vector2 avail = ImGui.GetContentRegionAvail();
+    ImGui.SetCursorPos(origin + new Vector2(grip, 0));
+    ImGui.BeginChild("##body", new Vector2(MathF.Max(1, avail.X - grip), MathF.Max(1, avail.Y)), false);
+    ImGui.Text("page selector");
+    Vector2 first = ImGui.GetItemRectMin();
+    ImGui.Text("content line 1");
+    Vector2 second = ImGui.GetItemRectMin();
+    for (int i = 2; i < 80; i++) ImGui.Text($"content line {i}");   // taller than the window
+    float scrollMax = ImGui.GetScrollMaxY();
+    ImGui.EndChild();
+    ImGui.SetCursorPos(origin);
+    ImGui.InvisibleButton("##splitter", new Vector2(grip, MathF.Max(1, avail.Y)));
+    Vector2 gripMin = ImGui.GetItemRectMin(); Vector2 gripMax = ImGui.GetItemRectMax();
+    float bottom = pos.Y + size.Y;
+    Report("NEW dock: selector y / window bottom", $"{first.Y:F0} / {bottom:F0}  visible={first.Y < bottom}");
+    Report("NEW dock: first content line y", $"{second.Y:F0}  visible={second.Y < bottom}");
+    Report("NEW dock: body scrolls (ScrollMaxY>0)", $"{scrollMax:F0}  scrolls={scrollMax > 0}");
+    Report("NEW dock: grip x-range vs content x", $"grip {gripMin.X:F0}-{gripMax.X:F0}, content starts {first.X:F0}  overlap={gripMax.X > first.X + 0.5f}");
+    ImGui.End(); ImGui.PopStyleVar();
+}
+
+// ---- Status bar (one row): OLD 22*s tall with 8*s padding vs NEW measured row + 2*s padding ----
+float baseFont = io.Fonts.Fonts[0].FontSize;
+float frame = baseFont * io.FontGlobalScale + style.FramePadding.Y * 2f;
+void Status(string name, float height, Vector2 padding)
+{
+    var pos = new Vector2(0, 1392 - height); var size = new Vector2(3440, height);
+    ImGui.SetNextWindowPos(pos); ImGui.SetNextWindowSize(size);
+    ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, padding);
+    ImGui.Begin(name, Base | NoScroll);
+    ImGui.AlignTextToFramePadding();
+    ImGui.Button("AUDIO: ON");
+    Vector2 bMin = ImGui.GetItemRectMin(), bMax = ImGui.GetItemRectMax();
+    ImGui.SameLine();
+    ImGui.Text("Local: (-4275, 1923, 143)");
+    Vector2 tMin = ImGui.GetItemRectMin(), tMax = ImGui.GetItemRectMax();
+    float bottom = pos.Y + size.Y;
+    bool fits = bMax.Y <= bottom + 0.01f && tMax.Y <= bottom + 0.01f;
+    Report($"{name}: window bottom", $"{bottom:F1}");
+    Report($"{name}: button bottom / text bottom", $"{bMax.Y:F1} / {tMax.Y:F1}  fitsInside={fits}  (height {height:F1}, row {frame:F1})");
+    ImGui.End(); ImGui.PopStyleVar();
+}
+Status("statusOld", 22 * s, new Vector2(8, 8) * s);
+Status("statusNew", frame + 2 * 2 * s, new Vector2(8, 2) * s);
+
+// ---- Bottom bar (button row): NEW height = row + 2*4*s, padding 4*s ----
+{
+    float height = frame + 2 * 4 * s;
+    var pos = new Vector2(0, 1392 - 22 * s - height); var size = new Vector2(3440, height);
+    ImGui.SetNextWindowPos(pos); ImGui.SetNextWindowSize(size);
+    ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 4) * s);
+    ImGui.Begin("bottomNew", Base | NoScroll);
+    ImGui.Button("Viewer", new Vector2(0, ImGui.GetFrameHeight()));
+    Vector2 b = ImGui.GetItemRectMax();
+    float bottom = pos.Y + size.Y;
+    Report("bottomNew: button bottom / window bottom", $"{b.Y:F1} / {bottom:F1}  fitsInside={b.Y <= bottom + 0.01f}  frameHeight={ImGui.GetFrameHeight():F1} measuredRow={frame:F1}");
+    ImGui.End(); ImGui.PopStyleVar();
+}
+
+ImGui.EndFrame();
+}
+foreach (string line in results) Console.WriteLine(line);

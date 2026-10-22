@@ -27,12 +27,15 @@ internal sealed partial class ViewerUiManager
     {
         _host = host;
         _actionBars = new ViewerActionBarsService(host);
+        ViewPreferences = new ViewPreferencesService(host);
         // Resolve the provider at draw time: the manager is constructed before the
         // minimap/status service, so capturing the delegate here would bind a null target.
         StatusContent = () => host.MinimapAndStatus.DrawStatusContent();
     }
     internal UiLayout Layout { get; private set; } = new(Vector2.Zero, false, true, true, 280, 360);
     internal UiPopupRegistry Popups => _popups;
+    /// <summary>The one owner of the user's text size and the view reset actions.</summary>
+    internal ViewPreferencesService ViewPreferences { get; }
     private readonly UiControlRegistry _controlRegistry = new();
     internal WorkbenchTab Destination => _host.ActiveTopTab;
     internal ViewerPanel ViewerPanel { get; private set; }
@@ -64,7 +67,7 @@ internal sealed partial class ViewerUiManager
         if (!_layoutLoaded) LoadLayout(display.X);
         float scale = UiLayout.ScaleFor(display);
         // One font scale for the whole shell: the operator's setting times the display scale.
-        float fontScale = Math.Clamp(_host.UiFontScale * scale, 0.75f, 4f);
+        float fontScale = ViewPreferencePolicy.EffectiveFontScale(_host.UiFontScale, scale);
         if (MathF.Abs(fontScale - _appliedFontScale) > 0.001f)
         {
             ImGui.GetIO().FontGlobalScale = fontScale;
@@ -91,7 +94,20 @@ internal sealed partial class ViewerUiManager
         Layout = new UiLayout(display, _host.HideUiChrome, _host.ShowLeftSidebar, _host.ShowRightSidebar,
             _host.LeftSidebarWidth, _host.RightSidebarWidth, false,
             _minimapVisible, _minimapCollapsed, _host.SqlSpawnStreaming.ChatVisible,
-            _chatCollapsed, scale, _rightDockOpen, _rightDockWidth);
+            _chatCollapsed, scale, _rightDockOpen, _rightDockWidth, MeasureFooterRow(fontScale));
+    }
+
+    /// <summary>
+    /// Height of one button row at the current text size: base font pixels x effective font scale
+    /// plus frame padding. Computed from the values this method just applied rather than read back
+    /// from ImGui, whose frame font size lags a scale change by a frame.
+    /// </summary>
+    private static float MeasureFooterRow(float fontScale)
+    {
+        if (!HasImGuiContext()) return 0f;
+        var fonts = ImGui.GetIO().Fonts.Fonts;
+        if (fonts.Size == 0) return 0f;
+        return fonts[0].FontSize * fontScale + ImGui.GetStyle().FramePadding.Y * 2f;
     }
 
     internal void Navigate(WorkbenchTab destination, int page = -1)
@@ -331,43 +347,50 @@ internal sealed partial class ViewerUiManager
     private void DrawRightDock()
     {
         float scale = MathF.Max(1f, Layout.Scale);
+        float grip = 6f * scale;
+        Vector2 origin = ImGui.GetCursorPos();
         Vector2 available = ImGui.GetContentRegionAvail();
+
+        // The panel body is a scrolling child to the right of the grip. The body is drawn first
+        // and the splitter is submitted last as an overlay on the left edge: a full-height item
+        // on the same line as the page selector made ImGui's line height the whole window, so
+        // every widget after the selector was laid out below the window and the panels looked dead.
+        ImGui.SetCursorPos(origin + new Vector2(grip, 0f));
+        ImGui.BeginChild("##RightDockBody", new Vector2(MathF.Max(1f, available.X - grip), MathF.Max(1f, available.Y)), false);
+        _host.WorkbenchPanels.DrawViewerContent(ViewerPanel);
+        ImGui.EndChild();
 
         // A thin splitter on the left edge. Dragging it left widens the dock; the width is
         // persisted so the operator's choice survives a restart.
-        ImGui.InvisibleButton("##RightDockSplitter", new Vector2(6f * scale, MathF.Max(1f, available.Y)));
-        if (ImGui.IsItemHovered() || ImGui.IsItemActive())
+        ImGui.SetCursorPos(origin);
+        ImGui.InvisibleButton("##RightDockSplitter", new Vector2(grip, MathF.Max(1f, available.Y)));
+        bool gripActive = ImGui.IsItemActive();
+        if (ImGui.IsItemHovered() || gripActive)
+        {
             ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
-        if (ImGui.IsItemActive())
+            ImGui.GetWindowDrawList().AddRectFilled(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(),
+                ImGui.ColorConvertFloat4ToU32(UiTokens.BrassDim));
+        }
+        if (gripActive)
             _rightDockWidth = Math.Clamp(_rightDockWidth - ImGui.GetIO().MouseDelta.X / scale, 240f, 720f);
         if (ImGui.IsItemDeactivated()) SaveLayout();
-
-        ImGui.SameLine();
-        _host.WorkbenchPanels.DrawViewerContent(ViewerPanel);
     }
 
     private void DrawBottom()
     {
         float scale = MathF.Max(1f, Layout.Scale);
-        float height = 36f * scale;
+        // Standard button height: the region is sized from the same measurement (UiLayout footer
+        // row), so the row always fits. Tab hides every bar, so there are no bar-toggle buttons here.
+        float height = ImGui.GetFrameHeight();
 
         // Measure every item first, then place it. The old code drew left-to-right and let the
         // window scroll, so a long label or a narrow client pushed Options off-screen.
         var items = new List<FooterItemMeasure>();
         foreach (WorkbenchTab destination in Enum.GetValues<WorkbenchTab>())
-        {
-            string label = DestinationLabel(destination);
-            float natural = MathF.Max(82f * scale, ImGui.CalcTextSize(label).X + ImGui.GetStyle().FramePadding.X * 2f);
-            items.Add(new FooterItemMeasure($"preset-{destination}", natural, 64f * scale, FooterItemPriority.Essential));
-        }
-
-        float actionNatural = 78f * scale;
-        float actionCompact = 56f * scale;
-        items.Add(new FooterItemMeasure("bottom-spawns", actionNatural, actionCompact, FooterItemPriority.Essential));
-        items.Add(new FooterItemMeasure("bottom-pages", actionNatural, actionCompact, FooterItemPriority.Essential));
-        items.Add(new FooterItemMeasure("toggle-left-action-bar", actionNatural, actionCompact, FooterItemPriority.Essential));
-        items.Add(new FooterItemMeasure("toggle-right-action-bar", actionNatural, actionCompact, FooterItemPriority.Essential));
-        items.Add(new FooterItemMeasure("bottom-options", 76f * scale, 56f * scale, FooterItemPriority.Essential));
+            items.Add(MeasureFooterButton($"preset-{destination}", DestinationLabel(destination), scale));
+        items.Add(MeasureFooterButton("bottom-spawns", "Spawns", scale));
+        items.Add(MeasureFooterButton("bottom-pages", "Pages", scale));
+        items.Add(MeasureFooterButton("bottom-options", "Options", scale));
 
         FooterFitResult fit = ViewerFooterLayout.Fit(GetRegionRect(UiRegion.BottomBar), scale, items);
         float originX = ImGui.GetCursorPosX();
@@ -385,7 +408,7 @@ internal sealed partial class ViewerUiManager
             }
         }
 
-        _actionBars.DrawBottomActions(fit, originX, y, scale);
+        _actionBars.DrawBottomActions(fit, originX, y);
 
         FooterItemPlacement options = fit.Get("bottom-options");
         if (options.Visible)
@@ -394,6 +417,13 @@ internal sealed partial class ViewerUiManager
             if (ImGui.Button("Options##BottomOptions", new Vector2(options.Width, height))) ToggleOptions();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open display, rendering, and viewer options");
         }
+    }
+
+    /// <summary>A footer button sized to its label plus a small click margin, compacting to 80%.</summary>
+    private static FooterItemMeasure MeasureFooterButton(string id, string label, float scale)
+    {
+        float natural = ImGui.CalcTextSize(label).X + ImGui.GetStyle().FramePadding.X * 2f + 6f * scale;
+        return new FooterItemMeasure(id, natural, natural * 0.8f, FooterItemPriority.Essential);
     }
 
     private static string DestinationLabel(WorkbenchTab destination) => destination switch
@@ -414,15 +444,21 @@ internal sealed partial class ViewerUiManager
         // surface treatment instead of a set of unrelated windows.
         SharedUiWidgets.PushSurfaceStyle(Layout.Scale);
         bool actionRail = region is UiRegion.LeftSidebar or UiRegion.RightSidebar;
+        // The footer bars are one button row tall. The shared 8 px window padding alone consumed
+        // most of the status bar, so its button and text were clipped at the window edge.
+        bool footer = region is UiRegion.BottomBar or UiRegion.StatusBar;
         if (actionRail)
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(3f, 3f) * Layout.Scale);
+        else if (footer)
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(ViewerFooterLayout.RegionPadding,
+                region == UiRegion.BottomBar ? UiLayout.BottomBarPadY : UiLayout.StatusBarPadY) * Layout.Scale);
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar |
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoDocking | extra;
         if (!resizable) flags |= ImGuiWindowFlags.NoResize;
         if (!movable) flags |= ImGuiWindowFlags.NoMove;
         if (ImGui.Begin(name, flags)) content();
         ImGui.End();
-        if (actionRail) ImGui.PopStyleVar();
+        if (actionRail || footer) ImGui.PopStyleVar();
         SharedUiWidgets.PopSurfaceStyle();
     }
 

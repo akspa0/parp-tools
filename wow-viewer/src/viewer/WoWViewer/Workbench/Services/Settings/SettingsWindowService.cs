@@ -154,56 +154,31 @@ internal sealed partial class SettingsWindowService
 
     private void DrawInterfaceSettingsContent()
     {
+        // The text size has one owner (View > Text Size uses the same service); the shell composes
+        // it with the display scale, so nothing here writes ImGui's font scale directly.
+        ViewPreferencesService view = _host.UiManager.ViewPreferences;
         ImGui.Text("UI Typography & Font Size:");
-        float fontScale = _uiFontScale;
-        if (ImGui.SliderFloat("Text Font Size", ref fontScale, 0.85f, 2.20f, "%.2fx"))
-        {
-            _uiFontScale = fontScale;
-            if (ViewerUiManager.HasImGuiContext())
-            {
-                ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            }
-            _settings.SaveViewerSettings();
-        }
+        float fontScale = view.UserScale;
+        if (ImGui.SliderFloat("Text Font Size", ref fontScale, ViewPreferencePolicy.MinUserScale, ViewPreferencePolicy.MaxUserScale, "%.2fx"))
+            view.SetUserScale(fontScale);
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            view.Commit();
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Scales all UI text, labels, inspector panels, and menus across the entire application.");
 
         ImGui.TextDisabled("Presets:");
-        ImGui.SameLine();
-        if (ImGui.SmallButton("100%"))
+        foreach (float preset in ViewPreferencePolicy.Presets)
         {
-            _uiFontScale = 1.0f;
-            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            _settings.SaveViewerSettings();
+            ImGui.SameLine();
+            if (ImGui.SmallButton(ViewPreferencePolicy.FormatPercent(preset)))
+            {
+                view.SetUserScale(preset);
+                view.Commit();
+            }
         }
         ImGui.SameLine();
-        if (ImGui.SmallButton("120%"))
-        {
-            _uiFontScale = 1.20f;
-            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            _settings.SaveViewerSettings();
-        }
-        ImGui.SameLine();
-        if (ImGui.SmallButton("135%"))
-        {
-            _uiFontScale = 1.35f;
-            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            _settings.SaveViewerSettings();
-        }
-        ImGui.SameLine();
-        if (ImGui.SmallButton("150%"))
-        {
-            _uiFontScale = 1.50f;
-            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            _settings.SaveViewerSettings();
-        }
-        ImGui.SameLine();
-        if (ImGui.SmallButton("175%"))
-        {
-            _uiFontScale = 1.75f;
-            if (ViewerUiManager.HasImGuiContext()) ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            _settings.SaveViewerSettings();
-        }
+        if (ImGui.SmallButton("Reset Text Size"))
+            view.Reset(ViewResetKind.TextScaleOnly);
 
         ImGui.Spacing();
         ImGui.Separator();

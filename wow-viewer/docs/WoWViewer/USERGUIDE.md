@@ -138,8 +138,12 @@ Folder (MPQ)...**, **Open CASC Install (local)...**, **Open CASC Install (local 
 **Load Loose Map Folder Against Saved Base**. The menu also holds **Save Current Game Folder As
 Known-Good Base**, **Forget Known-Good Base**, **Settings...** and **Quit**.
 
-The **View** menu holds **Reset Camera**, **Hide UI Chrome** (`Tab`), **Left Sidebar** (`[`),
-**Right Sidebar** (`]`) and **Reset Shell Layout**.
+The **View** menu holds **Reset Camera**, **Hide UI Chrome** (`Tab`), **Left Sidebar** (`[`) and
+**Right Sidebar** (`]`); **Visual Options...** (the Options window: render quality, lighting, theme,
+minimap, overlays, layers, grids and objects) and **Camera and Fog...** (the Workspace window); a
+**Text Size** submenu with a slider and 100%–175% presets; and three named recoveries that never
+unload the client or map: **Reset Text Size Only**, **Reset Layout Only** and **Reset Layout and
+Text Size**.
 
 ### Viewer destination
 

@@ -226,13 +226,10 @@ internal sealed class ViewerSettingsService
             _defaultFogEnd = float.IsFinite(settings.DefaultFogEnd)
                 ? Math.Clamp(settings.DefaultFogEnd, 100f, 6000f)
                 : 1500f;
-            _uiFontScale = float.IsFinite(settings.UiFontScale) && settings.UiFontScale > 0.5f
-                ? Math.Clamp(settings.UiFontScale, 0.75f, 2.5f)
-                : 1.0f;
-            if (ViewerUiManager.HasImGuiContext())
-            {
-                ImGui.GetIO().FontGlobalScale = _uiFontScale;
-            }
+            // The preference owner normalises the stored value. ViewerUiManager composes it with the
+            // display scale each frame, so the loader no longer writes ImGui's font scale directly
+            // (a direct write bypassed the display scale and could disagree with the shell).
+            _uiFontScale = _host.UiManager.ViewPreferences.LoadPersisted(settings.UiFontScale);
             _cameraSpeed = float.IsFinite(settings.CameraSpeed)
                 ? Math.Clamp(settings.CameraSpeed, 1f, 500f)
                 : 50f;

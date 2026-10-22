@@ -37,6 +37,9 @@
              Link="UI\ViewerFooterLayout.cs" />
     <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\MinimapStatus\FooterDiagnosticsSnapshot.cs"
              Link="UI\FooterDiagnosticsSnapshot.cs" />
+    <!-- Spec 286 U1: the text-scale and reset rules are pure, shared with the viewer. -->
+    <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\Settings\ViewPreferencePolicy.cs"
+             Link="UI\ViewPreferencePolicy.cs" />
   </ItemGroup>
 
   <ItemGroup>

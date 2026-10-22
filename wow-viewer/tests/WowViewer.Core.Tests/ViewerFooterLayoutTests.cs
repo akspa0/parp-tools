@@ -24,8 +24,6 @@ public sealed class ViewerFooterLayoutTests
         new FooterItemMeasure("preset-Archaeology", 120f * scale, 64f * scale, FooterItemPriority.Essential),
         new FooterItemMeasure("bottom-spawns", 78f * scale, 56f * scale, FooterItemPriority.Essential),
         new FooterItemMeasure("bottom-pages", 78f * scale, 56f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("toggle-left-action-bar", 78f * scale, 56f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("toggle-right-action-bar", 78f * scale, 56f * scale, FooterItemPriority.Essential),
         new FooterItemMeasure("bottom-options", 76f * scale, 56f * scale, FooterItemPriority.Essential),
     };
 

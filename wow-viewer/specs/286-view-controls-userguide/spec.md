@@ -244,3 +244,23 @@ resized. Simple and neat. The chat should start collapsed."
 - **SC-011**: At 1080p/1440p/4K, opening Inspector/World/Model/PM4 shows one docked panel under
   the minimap and above the bottom bars; dragging its left edge resizes it; the width survives a
   restart; the chat starts collapsed. Runtime/visual proof remains operator-owned.
+
+## Operator amendment — first real run: dock content and footer (2026-10-22)
+
+**Origin:** operator, after the first run of the U0/U0b build (3440×1392 window): "none of the
+inspector or model buttons do anything … and the bottom bar is STILL CUT OFF! There's no reason
+for the buttons for Left Bar or Right Bar, as Tab hides both, on the keyboard, just like noggit.
+The buttons can be smaller, too."
+
+- **FR-022**: Each right-dock panel (Inspector, World, Model, PM4) MUST show its full content
+  below the page selector and MUST scroll vertically when the content is taller than the dock.
+  Opening a panel from the right rail MUST NOT leave an empty dock.
+- **FR-023**: Both footer bars MUST be sized from the measured control row (font size × text scale
+  + frame padding) so their buttons and text are never clipped at any text size; the status bar
+  MUST be fully visible at the bottom edge of the window.
+- **FR-024**: The bottom action bar MUST NOT contain Left Bar / Right Bar buttons: Tab already
+  hides all chrome and `[` / `]` toggle the rails. Its buttons use the standard button height,
+  sized to their labels.
+- **SC-012**: At the operator's 3440×1392 window and at 1080p/1440p/4K, every dock panel shows
+  content, the status bar text and the audio button are fully inside the window, and the bottom
+  bar holds no bar-toggle buttons. Runtime/visual proof remains operator-owned.

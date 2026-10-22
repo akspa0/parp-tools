@@ -2,6 +2,23 @@
 
 Last updated: 2026-10-22
 
+## 2026-10-22 — Spec 286 U0c: dock content and footer fit after the operator's first run
+
+- Operator screenshot (3440×1392): dock showed only the page selector; status bar clipped; asked to drop Left/Right Bar buttons and shrink buttons.
+- Fixed the dock (scrolling child + overlay splitter), sized footer bars from the measured row, removed the two bar-toggle buttons. 90/90 focused tests, viewer compile 0 errors (scratch output; viewer was running), headless ImGui probe confirms positions. T057 operator re-check owed.
+  [Receipt](../specs/286-view-controls-userguide/evidence/u0c-dock-and-footer-2026-10-22.md).
+
+## 2026-10-22 — Spec 286 U1: one text-scale owner and View routes (source/tests; runtime proof owed)
+
+- `ViewPreferencePolicy` (pure, 0.85–2.20, default 1.0, reset truth table) + `ViewPreferencesService`
+  (owned by `ViewerUiManager`) now back the View menu, the Settings slider/presets and the settings
+  loader; direct `FontGlobalScale` writes removed everywhere except the manager.
+- View menu: Visual Options..., Camera and Fog..., Text Size submenu, and Reset Text Size Only /
+  Reset Layout Only / Reset Layout and Text Size (replaces "Reset Shell Layout"). Registry 121/121, reference regenerated.
+- 60/60 U1 tests, 82/82 cumulative focused, solution build 0 errors. Started with T008 open on
+  operator direction; T008 and T016 are the open operator gates before U2. No viewer launch, no commit.
+  [Receipt](../specs/286-view-controls-userguide/evidence/u1-source-tests.md).
+
 ## 2026-10-22 — contextual UI and renderer fidelity plans (documentation only)
 
 - Filled [Spec 286 plan](../specs/286-view-controls-userguide/plan.md) and research/model/contracts/quickstart;

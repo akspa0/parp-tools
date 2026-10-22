@@ -123,22 +123,6 @@
       "visible": true
     },
     {
-      "id": "toggle-left-action-bar",
-      "label": "Left Bar",
-      "region": "Bottom action bar",
-      "shortcut": null,
-      "help": "Show or hide the left action bar.",
-      "visible": true
-    },
-    {
-      "id": "toggle-right-action-bar",
-      "label": "Right Bar",
-      "region": "Bottom action bar",
-      "shortcut": null,
-      "help": "Show or hide the right action bar.",
-      "visible": true
-    },
-    {
       "id": "about",
       "label": "About",
       "region": "Top menu > Help",
@@ -747,11 +731,51 @@
       "visible": true
     },
     {
-      "id": "reset-shell-layout",
-      "label": "Reset Shell Layout",
+      "id": "reset-layout-only",
+      "label": "Reset Layout Only",
       "region": "Top menu > View",
       "shortcut": null,
-      "help": "Reset the shell layout to the default sizes and destination.",
+      "help": "Restore the default panel layout and close tool windows. Text size and the loaded client/map are unchanged.",
+      "visible": true
+    },
+    {
+      "id": "reset-text-size-only",
+      "label": "Reset Text Size Only",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Return the user text size to 100%. Layout and the loaded client/map are unchanged; high-resolution displays keep their automatic sizing.",
+      "visible": true
+    },
+    {
+      "id": "reset-layout-and-text-size",
+      "label": "Reset Layout and Text Size",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Restore the default panel layout and return the text size to 100%. The loaded client/map is unchanged.",
+      "visible": true
+    },
+    {
+      "id": "text-scale",
+      "label": "Text Scale",
+      "region": "Top menu > View > Text Size",
+      "shortcut": null,
+      "help": "Interface text size from 0.85x to 2.20x, shared with Settings. The 100% to 175% presets sit below it; the current size is checked.",
+      "visible": true
+    },
+    {
+      "id": "visual-options",
+      "label": "Visual Options...",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Open Options: render quality, lighting, theme, minimap, overlays, layers, grids, objects, audio and simulation.",
+      "visible": true
+    },
+    {
+      "id": "camera-and-fog",
+      "label": "Camera and Fog...",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Open Workspace: camera, fog and client source controls.",
       "visible": true
     },
     {

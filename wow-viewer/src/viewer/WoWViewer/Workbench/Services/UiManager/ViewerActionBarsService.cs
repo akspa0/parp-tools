@@ -92,9 +92,9 @@ internal sealed class ViewerActionBarsService
     /// owns the row origin so destination buttons, these actions and Options share one measured
     /// layout instead of each drawing left-to-right into a scrolling window.
     /// </summary>
-    internal void DrawBottomActions(FooterFitResult fit, float originX, float y, float scale)
+    internal void DrawBottomActions(FooterFitResult fit, float originX, float y)
     {
-        float height = 36f * scale;
+        float height = ImGui.GetFrameHeight();
 
         // Literal labels stay inline so the UI control scanner keeps finding these four routes.
         FooterItemPlacement spawns = fit.Get("bottom-spawns");
@@ -113,22 +113,7 @@ internal sealed class ViewerActionBarsService
             if (ImGui.Button("Pages##BottomPages", new Vector2(pages.Width, height))) OpenDestinationWindow();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open pages for the selected preset");
         }
-
-        FooterItemPlacement leftBar = fit.Get("toggle-left-action-bar");
-        if (leftBar.Visible)
-        {
-            ImGui.SetCursorPos(new Vector2(originX + leftBar.X, y));
-            if (ImGui.Button("Left Bar##ToggleLeftBar", new Vector2(leftBar.Width, height))) _host.UiManager.ToggleLeftSidebar();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show or hide the left action bar");
-        }
-
-        FooterItemPlacement rightBar = fit.Get("toggle-right-action-bar");
-        if (rightBar.Visible)
-        {
-            ImGui.SetCursorPos(new Vector2(originX + rightBar.X, y));
-            if (ImGui.Button("Right Bar##ToggleRightBar", new Vector2(rightBar.Width, height))) _host.UiManager.ToggleRightSidebar();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show or hide the right action bar");
-        }
+        // No bar-toggle buttons: Tab hides all chrome and [ / ] toggle the rails from the keyboard.
     }
 
     internal void DrawToolWindows()
