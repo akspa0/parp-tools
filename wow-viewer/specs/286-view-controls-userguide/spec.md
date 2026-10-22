@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-22
 
-**Status**: Specified; ready for implementation planning. No implementation or new screenshots claimed.
+**Status**: Planned (2026-10-22); task generation next. No implementation or new screenshots claimed.
 
 **Input**: Operator: "this is very nice looking and pretty functional"; "the reset shell layout option
 does not also reset the font scale, but that should also be an option in the menu somewhere, maybe a
@@ -193,3 +193,54 @@ client, choose a map/spawn, open/close a tool window, adjust/reset scale and fin
   capture instructions and integrate approved images, but tests/builds cannot close visual criteria.
 - No game data is bundled. Client roots remain runtime configuration; portable documentation must
   not hardcode machine-local client paths.
+
+## Operator amendment — contextual status and selection (2026-10-22)
+
+**Origin:** operator: "the bottom bar should not be a scrollbar, ever"; clipped "Pending" and
+other debug text "needs to be hidden in a tooltip that pops up when you hover over the fps";
+"Simplify it or put it in a pop-up window". Selection should have a larger bright/bold name
+over a top-middle, battle-interface-style bar; color-code object types and their bounding boxes
+("all trees are one color"). Follow-up: "use speckit and lay this all out as a plan".
+
+This adds contextual disclosure to the accepted shell, not another shell redesign. Renderer
+fidelity remains with [Epic 249](../249-epic-renderer-performance-and-correctness/plan.md) and
+[Spec 259](../259-ground-effects-and-wmo-detail-doodads/plan.md).
+
+- **FR-014**: Bottom action/status bars MUST NOT expose horizontal or vertical scrollbars.
+  Essential controls/readouts MUST fit the actual client region, not remain hidden off-screen.
+- **FR-015**: Runtime/debug detail, including pending asset loads, MUST be readable in an
+  FPS-hover tooltip. An interactive popup may supplement long detail; reuse existing diagnostics
+  rather than collect the same telemetry in a second pipeline.
+- **FR-016**: Selecting a scene object MUST show its larger, bright/bold readable name on a
+  top-middle contextual bar inside the scene viewport. This is identity, not invented HP.
+  Missing display names MUST fall back to an honest existing asset identifier.
+- **FR-017**: Header/selection and enabled object bounds MUST share a deterministic type-color
+  policy. Known semantic categories such as trees share a category color; unknown classifications
+  have an explicit fallback, never fabricated semantic certainty.
+- **FR-018**: Contextual disclosure MUST reuse existing inspection data/UI primitives, remain
+  inside client bounds, and respect UI input ownership rather than select/move through overlays.
+- **SC-008**: At SC-003 display/scale cases, both bottom bars remain non-scrolling, FPS is
+  reachable, and all formerly clipped diagnostic fields are readable on disclosure.
+- **SC-009**: Named/unnamed, known-tree, WMO, NPC and unknown-category selections show a readable
+  viewport-centered identity bar and matching category bounds colors; clearing/replacing selection
+  leaves no stale identity or fake health value.
+- **SC-010**: FPS/object hover reveals the appropriate context without off-screen content or
+  input leakage. Runtime/screenshots remain operator-owned proof.
+
+## Operator amendment — docked right panel and collapsed chat (2026-10-22)
+
+**Origin:** operator: "the inspector and any right-sided stuff should fit under the minimap and
+above the bottom bars, neatly tucked in that spot. resizeable by the user, if they want it to be
+resized. Simple and neat. The chat should start collapsed."
+
+- **FR-019**: The inspector, world, model and PM4 panels MUST share one docked right panel. The
+  dock MUST sit below the minimap and above the bottom action/status bars, to the left of the
+  right icon rail, and MUST NOT float over the scene as independent windows.
+- **FR-020**: The right dock MUST be resizable by the user from its left edge, and the chosen
+  width MUST persist across restarts. The width MUST stay within a usable minimum and a bound
+  that leaves the scene and the icon rail intact.
+- **FR-021**: The chat dock MUST start collapsed on a fresh layout (and after a layout reset),
+  while an explicit user expansion still persists.
+- **SC-011**: At 1080p/1440p/4K, opening Inspector/World/Model/PM4 shows one docked panel under
+  the minimap and above the bottom bars; dragging its left edge resizes it; the width survives a
+  restart; the chat starts collapsed. Runtime/visual proof remains operator-owned.

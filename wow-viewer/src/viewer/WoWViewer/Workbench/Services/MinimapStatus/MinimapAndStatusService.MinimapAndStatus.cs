@@ -498,32 +498,8 @@ internal sealed partial class MinimapAndStatusService
     /// <summary>Status-bar body. The UI manager owns the window and passes the region rect.</summary>
     internal void DrawStatusContent()
     {
-        var io = ImGui.GetIO();
-        bool hasRuntimeScene = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
-        string rightStatusText = hasRuntimeScene
-            ? BuildCompactRuntimeStatus()
-            : string.IsNullOrWhiteSpace(_statusMessage)
-                ? "Ready"
-                : _statusMessage.Replace(Environment.NewLine, " ").Trim();
-
-        string leftText = string.Empty;
-        if (hasRuntimeScene)
-        {
-            var pos = _camera.Position;
-            float wowX = WoWConstants.MapOrigin - pos.Y;
-            float wowY = WoWConstants.MapOrigin - pos.X;
-            float wowZ = pos.Z;
-            int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - pos.X) / WoWConstants.ChunkSize);
-            int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - pos.Y) / WoWConstants.ChunkSize);
-            string tileText = (tileX is >= 0 and < 64 && tileY is >= 0 and < 64)
-                ? $"Tile: {tileY:D2}_{tileX:D2}"
-                : "Tile: --";
-            float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
-            string facingLabel = GetWorldFacingLabel(facingDegrees);
-            leftText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  {tileText}  Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}";
-        }
-
-        float rightWidth = GetImGuiTextWidth(rightStatusText) + 8f;
+        FooterDiagnosticsSnapshot snapshot = BuildDiagnosticsSnapshot();
+        float scale = MathF.Max(1f, _host.UiManager.Layout.Scale);
 
         if (_worldScene is not null)
         {
@@ -551,38 +527,114 @@ internal sealed partial class MinimapAndStatusService
             ImGui.SameLine();
         }
 
+        string leftText = snapshot.LeftText;
+        float leftEnd = 0f;
         if (!string.IsNullOrEmpty(leftText))
+        {
             ImGui.TextUnformatted(leftText);
-
-        if (!string.IsNullOrEmpty(leftText))
             ImGui.SameLine();
-        float rightX = MathF.Max(ImGui.GetCursorPosX(), io.DisplaySize.X - rightWidth - 16f);
-        ImGui.SetCursorPosX(rightX);
-        ImGui.TextUnformatted(rightStatusText);
+            leftEnd = ImGui.GetCursorPosX();
+        }
+
+        // Spec 286 U0: right-align inside the actual status region. The old code used
+        // io.DisplaySize.X, so the readout was positioned against the whole window and clipped
+        // whenever the region was narrower than the display.
+        float contentWidth = ImGui.GetContentRegionMax().X;
+        string fpsText = snapshot.FpsText;
+        string suffix = snapshot.CompactSuffix;
+        float fpsWidth = GetImGuiTextWidth(fpsText);
+        float suffixWidth = GetImGuiTextWidth(suffix);
+        FooterStatusFit fit = ViewerFooterLayout.FitStatus(contentWidth, scale, leftEnd, fpsWidth + suffixWidth);
+        if (!fit.RightVisible) return;
+
+        ImGui.SetCursorPosX(fit.RightX);
+        ImGui.TextUnformatted(fpsText);
+        FooterDiagnosticsPresenter.DrawHoverDisclosure(snapshot, _host.UiManager.DisplaySize, scale);
+        if (!fit.Compacted && suffixWidth > 0f)
+        {
+            ImGui.SameLine(0f, 0f);
+            ImGui.TextUnformatted(suffix);
+        }
     }
 
-    private string BuildCompactRuntimeStatus()
+    /// <summary>
+    /// Project the counters the status bar already reads into one immutable snapshot. No new
+    /// collectors, no asset/DBC/disk I/O: the hover disclosure reads this same object.
+    /// </summary>
+    private FooterDiagnosticsSnapshot BuildDiagnosticsSnapshot()
     {
-        string fps = _currentFps > 0 ? $"FPS {_currentFps:0}" : "FPS --";
-        string area = BuildAreaStatusText();
+        bool hasRuntimeScene = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
         int loadedTiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
+        string area = BuildAreaStatusText();
+
+        string coordinates = string.Empty;
+        string tile = "Tile: --";
+        string facing = string.Empty;
+        if (hasRuntimeScene)
+        {
+            var pos = _camera.Position;
+            float wowX = WoWConstants.MapOrigin - pos.Y;
+            float wowY = WoWConstants.MapOrigin - pos.X;
+            float wowZ = pos.Z;
+            int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - pos.X) / WoWConstants.ChunkSize);
+            int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - pos.Y) / WoWConstants.ChunkSize);
+            tile = (tileX is >= 0 and < 64 && tileY is >= 0 and < 64)
+                ? $"Tile: {tileY:D2}_{tileX:D2}"
+                : "Tile: --";
+            float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
+            string facingLabel = GetWorldFacingLabel(facingDegrees);
+            coordinates = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})";
+            facing = $"Facing: {facingDegrees:F1}° {facingLabel ?? string.Empty}".TrimEnd();
+        }
 
         if (_worldScene != null)
         {
             var stats = _worldScene.LastRenderFrameStats;
-            return $"{fps} | {area} | CPU {stats.TotalCpuMs:0.0}ms | Tiles {loadedTiles} | " +
-                $"Chunks {stats.TerrainChunksRendered}/{stats.TerrainChunksCulled} | " +
-                $"WMO {stats.VisibleWmoCount}/{_worldScene.WmoInstanceCount} | " +
-                $"MDX {stats.VisibleMdxCount}/{_worldScene.MdxInstanceCount} " +
-                $"({_worldScene.Assets.MdxModelsLoaded} ok/{_worldScene.Assets.MdxModelsFailed} fail) | " +
-                $"Audio {_worldScene.ActiveAudioEmitterCount}/{_worldScene.ResidentAudioEmitterCount} | " +
-                $"Pending {stats.PendingAssetLoadCount}";
+            return new FooterDiagnosticsSnapshot(
+                HasRuntimeScene: true,
+                Fps: _currentFps,
+                Area: area,
+                CpuMs: stats.TotalCpuMs,
+                LoadedTiles: loadedTiles,
+                ChunksRendered: stats.TerrainChunksRendered,
+                ChunksCulled: stats.TerrainChunksCulled,
+                VisibleWmo: stats.VisibleWmoCount,
+                TotalWmo: _worldScene.WmoInstanceCount,
+                VisibleMdx: stats.VisibleMdxCount,
+                TotalMdx: _worldScene.MdxInstanceCount,
+                MdxLoaded: _worldScene.Assets.MdxModelsLoaded,
+                MdxFailed: _worldScene.Assets.MdxModelsFailed,
+                ActiveAudio: _worldScene.ActiveAudioEmitterCount,
+                ResidentAudio: _worldScene.ResidentAudioEmitterCount,
+                PendingAssetLoads: stats.PendingAssetLoadCount,
+                Coordinates: coordinates,
+                Tile: tile,
+                Facing: facing,
+                StatusMessage: _statusMessage);
         }
 
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        return renderer == null
-            ? $"{fps} | {area} | Tiles {loadedTiles}"
-                : $"{fps} | {area} | Tiles {loadedTiles} | Chunks {renderer.ChunksRendered}/{renderer.ChunksCulled}";
+        return new FooterDiagnosticsSnapshot(
+            HasRuntimeScene: hasRuntimeScene,
+            Fps: _currentFps,
+            Area: area,
+            CpuMs: 0d,
+            LoadedTiles: loadedTiles,
+            ChunksRendered: renderer?.ChunksRendered ?? 0,
+            ChunksCulled: renderer?.ChunksCulled ?? 0,
+            VisibleWmo: 0,
+            TotalWmo: 0,
+            VisibleMdx: 0,
+            TotalMdx: 0,
+            MdxLoaded: 0,
+            MdxFailed: 0,
+            ActiveAudio: 0,
+            ResidentAudio: 0,
+            PendingAssetLoads: 0,
+            Coordinates: coordinates,
+            Tile: tile,
+            Facing: facing,
+            StatusMessage: _statusMessage);
     }
 
     private string BuildAreaStatusText()

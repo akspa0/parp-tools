@@ -31,6 +31,12 @@
              Link="UI\UiControlScanner.cs" />
     <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\UiManager\UiLayout.cs"
              Link="UI\UiLayout.cs" />
+    <!-- Spec 286 U0: footer fit and diagnostics projection are pure, so the headless tests
+         exercise the same policy the viewer draws with. -->
+    <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\UiManager\ViewerFooterLayout.cs"
+             Link="UI\ViewerFooterLayout.cs" />
+    <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\MinimapStatus\FooterDiagnosticsSnapshot.cs"
+             Link="UI\FooterDiagnosticsSnapshot.cs" />
   </ItemGroup>
 
   <ItemGroup>

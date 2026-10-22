@@ -7,10 +7,10 @@ namespace WoWViewer;
 
 internal sealed partial class ViewerUiManager
 {
-    // v5 resets the unusable sidebar-first layout. Sidebars now start hidden and overlay the scene;
+    // v6 adds the docked right panel and starts the chat collapsed. Sidebars remain compact rails;
     // chat/minimap are independently positioned game chrome, not columns between sidebars.
-    private const int LayoutVersion = 5;
-    private static readonly string LayoutPath = Path.Combine(SettingsDir, "ui-layout-v5.json");
+    private const int LayoutVersion = 6;
+    private static readonly string LayoutPath = Path.Combine(SettingsDir, "ui-layout-v6.json");
     private bool _layoutLoaded;
     private readonly int[] _pages = [0, 0, 4];
 
@@ -26,7 +26,9 @@ internal sealed partial class ViewerUiManager
         public int[]? Pages { get; set; }
         public bool MinimapVisible { get; set; } = true;
         public bool MinimapCollapsed { get; set; }
-        public bool ChatCollapsed { get; set; }
+        public bool ChatCollapsed { get; set; } = true;
+        public bool RightDockOpen { get; set; }
+        public float RightDockWidth { get; set; } = 360f;
     }
 
     internal void LoadLayout(float width)
@@ -47,6 +49,8 @@ internal sealed partial class ViewerUiManager
             _minimapVisible = saved.MinimapVisible;
             _minimapCollapsed = saved.MinimapCollapsed;
             _chatCollapsed = saved.ChatCollapsed;
+            _rightDockOpen = saved.RightDockOpen;
+            if (float.IsFinite(saved.RightDockWidth)) _rightDockWidth = Math.Clamp(saved.RightDockWidth, 240f, 720f);
             _host.ActiveTopTab = Enum.IsDefined(saved.Destination) ? saved.Destination : WorkbenchTab.Viewer;
             ViewerPanel = Enum.IsDefined(saved.ViewerPanel) ? saved.ViewerPanel : ViewerPanel.Inspector;
             if (saved.Pages is { Length: 3 })
@@ -74,7 +78,9 @@ internal sealed partial class ViewerUiManager
         _host.RightSidebarWidth = defaults.RightWidth;
         _minimapVisible = true;
         _minimapCollapsed = false;
-        _chatCollapsed = false;
+        _chatCollapsed = true;
+        _rightDockOpen = false;
+        _rightDockWidth = 360f;
         _host.ActiveTopTab = WorkbenchTab.Viewer;
         _host.ActiveBottomTabIndex = 0;
         _host.ActivePm4TabIndex = 0;
@@ -104,6 +110,7 @@ internal sealed partial class ViewerUiManager
                 Destination = Destination, ViewerPanel = ViewerPanel, Pages = _pages,
                 MinimapVisible = _minimapVisible, MinimapCollapsed = _minimapCollapsed,
                 ChatCollapsed = _chatCollapsed,
+                RightDockOpen = _rightDockOpen, RightDockWidth = _rightDockWidth,
             };
             string pending = LayoutPath + ".pending";
             File.WriteAllText(pending, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true }));

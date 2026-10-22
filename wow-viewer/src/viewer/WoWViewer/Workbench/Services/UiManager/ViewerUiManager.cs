@@ -18,7 +18,9 @@ internal sealed partial class ViewerUiManager
     private bool _registered;
     private bool _minimapVisible = true;
     private bool _minimapCollapsed;
-    private bool _chatCollapsed;
+    private bool _chatCollapsed = true;
+    private bool _rightDockOpen;
+    private float _rightDockWidth = 360f;
     private float _appliedFontScale = -1f;
     private float _appliedStyleScale = -1f;
     internal ViewerUiManager(IViewerAppHost host)
@@ -89,7 +91,7 @@ internal sealed partial class ViewerUiManager
         Layout = new UiLayout(display, _host.HideUiChrome, _host.ShowLeftSidebar, _host.ShowRightSidebar,
             _host.LeftSidebarWidth, _host.RightSidebarWidth, false,
             _minimapVisible, _minimapCollapsed, _host.SqlSpawnStreaming.ChatVisible,
-            _chatCollapsed, scale);
+            _chatCollapsed, scale, _rightDockOpen, _rightDockWidth);
     }
 
     internal void Navigate(WorkbenchTab destination, int page = -1)
@@ -105,6 +107,9 @@ internal sealed partial class ViewerUiManager
         int count = WorkbenchNavigator.GetPageLabels(destination).Length;
         _host.ActiveBottomTabIndex = Math.Clamp(page < 0 ? _pages[(int)Destination] : page, 0, Math.Max(0, count - 1));
         _host.ShowRightSidebar = true;
+        // The destination window owns the right side on Editor/Archaeology; close the viewer
+        // dock so the two surfaces cannot overlap.
+        if (destination != WorkbenchTab.Viewer) _rightDockOpen = false;
         SaveLayout();
     }
 
@@ -118,8 +123,42 @@ internal sealed partial class ViewerUiManager
             case ViewerPanel.Inspector: InspectorPage = Math.Clamp(page, 0, 3); break;
         }
         Navigate(WorkbenchTab.Viewer);
-        _actionBars.OpenViewerPanel(panel);
+        OpenViewerDock(panel);
     }
+
+    /// <summary>
+    /// Open the right dock on <paramref name="panel"/>. The dock is the single home for the
+    /// inspector, world, model and PM4 panels: below the minimap, above the bottom bars.
+    /// </summary>
+    internal void OpenViewerDock(ViewerPanel panel)
+    {
+        ViewerPanel = panel;
+        _rightDockOpen = true;
+        SaveLayout();
+    }
+
+    internal void ToggleRightDock(ViewerPanel panel)
+    {
+        if (_rightDockOpen && ViewerPanel == panel)
+        {
+            _rightDockOpen = false;
+        }
+        else
+        {
+            if (Destination != WorkbenchTab.Viewer) Navigate(WorkbenchTab.Viewer);
+            ViewerPanel = panel;
+            _rightDockOpen = true;
+        }
+        SaveLayout();
+    }
+
+    internal void CloseRightDock()
+    {
+        _rightDockOpen = false;
+        SaveLayout();
+    }
+
+    internal bool RightDockOpen => _rightDockOpen;
 
     internal void OpenSceneTools(int page = 0)
     {
@@ -204,12 +243,17 @@ internal sealed partial class ViewerUiManager
             }, ImGuiWindowFlags.MenuBar);
             DrawRegion(UiRegion.LeftSidebar, "##UiLeftSidebar", DrawLeft);
             DrawRegion(UiRegion.RightSidebar, "##UiRightSidebar", DrawRight);
+            DrawRegion(UiRegion.RightDock, "##UiRightDock", DrawRightDock,
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
             DrawRegion(UiRegion.Minimap, "Minimap##UiMinimap", DrawMinimap,
                 ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
             // Docked panel: no resize and no move. A floating chat could be dragged over the
             // sidebars and had no reliable way back.
             DrawRegion(UiRegion.Chat, "Chat##UiChat", DrawChat, ImGuiWindowFlags.NoScrollbar);
-            DrawRegion(UiRegion.BottomBar, "##UiBottomBar", DrawBottom, ImGuiWindowFlags.HorizontalScrollbar);
+            // Spec 286 U0: footer regions fit their content. A scrollbar here hid essential
+            // actions off-screen instead of laying them out inside the real region.
+            DrawRegion(UiRegion.BottomBar, "##UiBottomBar", DrawBottom,
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
             DrawDiagnosticsWindows();
             _actionBars.DrawToolWindows();
         }
@@ -217,7 +261,7 @@ internal sealed partial class ViewerUiManager
         {
             if (StatusContent != null) StatusContent();
             else ImGui.TextUnformatted(_host.StatusMessage);
-        });
+        }, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
         // The WDL map-spawn chooser is a standalone window opened from the map list's Spawn
         // button. The Spec 280 shell rewrite dropped its draw call, so the button set the flag and
         // nothing ever rendered the window. It is drawn here, inside the ImGui frame, regardless
@@ -284,30 +328,80 @@ internal sealed partial class ViewerUiManager
         _actionBars.DrawRightBar();
     }
 
+    private void DrawRightDock()
+    {
+        float scale = MathF.Max(1f, Layout.Scale);
+        Vector2 available = ImGui.GetContentRegionAvail();
+
+        // A thin splitter on the left edge. Dragging it left widens the dock; the width is
+        // persisted so the operator's choice survives a restart.
+        ImGui.InvisibleButton("##RightDockSplitter", new Vector2(6f * scale, MathF.Max(1f, available.Y)));
+        if (ImGui.IsItemHovered() || ImGui.IsItemActive())
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+        if (ImGui.IsItemActive())
+            _rightDockWidth = Math.Clamp(_rightDockWidth - ImGui.GetIO().MouseDelta.X / scale, 240f, 720f);
+        if (ImGui.IsItemDeactivated()) SaveLayout();
+
+        ImGui.SameLine();
+        _host.WorkbenchPanels.DrawViewerContent(ViewerPanel);
+    }
+
     private void DrawBottom()
     {
         float scale = MathF.Max(1f, Layout.Scale);
+        float height = 36f * scale;
+
+        // Measure every item first, then place it. The old code drew left-to-right and let the
+        // window scroll, so a long label or a narrow client pushed Options off-screen.
+        var items = new List<FooterItemMeasure>();
         foreach (WorkbenchTab destination in Enum.GetValues<WorkbenchTab>())
         {
-            string label = destination switch
-            {
-                WorkbenchTab.Viewer => "Viewer",
-                WorkbenchTab.Editor => "Editor",
-                _ => "Archaeology",
-            };
-            float width = MathF.Max(82f * scale, ImGui.CalcTextSize(label).X + ImGui.GetStyle().FramePadding.X * 2f);
-            if (ImGui.Button($"{label}##Preset_{destination}", new Vector2(width, 36f * scale)))
+            string label = DestinationLabel(destination);
+            float natural = MathF.Max(82f * scale, ImGui.CalcTextSize(label).X + ImGui.GetStyle().FramePadding.X * 2f);
+            items.Add(new FooterItemMeasure($"preset-{destination}", natural, 64f * scale, FooterItemPriority.Essential));
+        }
+
+        float actionNatural = 78f * scale;
+        float actionCompact = 56f * scale;
+        items.Add(new FooterItemMeasure("bottom-spawns", actionNatural, actionCompact, FooterItemPriority.Essential));
+        items.Add(new FooterItemMeasure("bottom-pages", actionNatural, actionCompact, FooterItemPriority.Essential));
+        items.Add(new FooterItemMeasure("toggle-left-action-bar", actionNatural, actionCompact, FooterItemPriority.Essential));
+        items.Add(new FooterItemMeasure("toggle-right-action-bar", actionNatural, actionCompact, FooterItemPriority.Essential));
+        items.Add(new FooterItemMeasure("bottom-options", 76f * scale, 56f * scale, FooterItemPriority.Essential));
+
+        FooterFitResult fit = ViewerFooterLayout.Fit(GetRegionRect(UiRegion.BottomBar), scale, items);
+        float originX = ImGui.GetCursorPosX();
+        float y = ImGui.GetCursorPosY();
+
+        foreach (WorkbenchTab destination in Enum.GetValues<WorkbenchTab>())
+        {
+            FooterItemPlacement placement = fit.Get($"preset-{destination}");
+            if (!placement.Visible) continue;
+            ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
+            if (ImGui.Button($"{DestinationLabel(destination)}##Preset_{destination}", new Vector2(placement.Width, height)))
             {
                 Navigate(destination);
                 if (destination != WorkbenchTab.Viewer) _actionBars.OpenDestinationWindow();
             }
-            ImGui.SameLine();
         }
-        _actionBars.DrawBottomActions();
-        ImGui.SameLine();
-        if (ImGui.Button("Options##BottomOptions", new Vector2(76f * scale, 36f * scale))) ToggleOptions();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open display, rendering, and viewer options");
+
+        _actionBars.DrawBottomActions(fit, originX, y, scale);
+
+        FooterItemPlacement options = fit.Get("bottom-options");
+        if (options.Visible)
+        {
+            ImGui.SetCursorPos(new Vector2(originX + options.X, y));
+            if (ImGui.Button("Options##BottomOptions", new Vector2(options.Width, height))) ToggleOptions();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open display, rendering, and viewer options");
+        }
     }
+
+    private static string DestinationLabel(WorkbenchTab destination) => destination switch
+    {
+        WorkbenchTab.Viewer => "Viewer",
+        WorkbenchTab.Editor => "Editor",
+        _ => "Archaeology",
+    };
 
     private void DrawRegion(UiRegion region, string name, Action content, ImGuiWindowFlags extra = 0,
         bool resizable = false, bool movable = false)

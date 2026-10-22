@@ -38,17 +38,7 @@ internal sealed class ViewerActionBarsService
         foreach (var window in _windows.Values) window.Open = false;
     }
 
-    internal void OpenViewerPanel(ViewerPanel panel)
-    {
-        string key = panel switch
-        {
-            ViewerPanel.World => "world",
-            ViewerPanel.Model => "model",
-            ViewerPanel.PM4 => "pm4",
-            _ => "inspector",
-        };
-        _windows[key].Open = true;
-    }
+    internal void OpenViewerPanel(ViewerPanel panel) => _host.UiManager.OpenViewerDock(panel);
 
     internal void OpenSceneTool(int page)
     {
@@ -88,29 +78,57 @@ internal sealed class ViewerActionBarsService
     {
         float scale = MathF.Max(1f, _host.UiManager.Layout.Scale);
         var size = new Vector2(34f * scale, 34f * scale);
-        DrawActionBarIcon("Inspector", "ActionInspector", IconKind.Inspector, size, "Inspect the selected scene asset", () => ToggleWindow("inspector"));
-        DrawActionBarIcon("World", "ActionWorld", IconKind.World, size, "Inspect objects, placements, and world data", () => ToggleWindow("world"));
-        DrawActionBarIcon("Model", "ActionModel", IconKind.Model, size, "Inspect the loaded model and animations", () => ToggleWindow("model"));
-        DrawActionBarIcon("PM4", "ActionPm4", IconKind.Pm4, size, "Inspect PM4 navigation and object data", () => ToggleWindow("pm4"));
+        bool dockOpen = _host.UiManager.RightDockOpen;
+        ViewerPanel active = _host.UiManager.ViewerPanel;
+        // One line per call: the UI control scanner reads source line-by-line.
+        DrawActionBarIcon("Inspector", "ActionInspector", IconKind.Inspector, size, "Inspect the selected scene asset", () => _host.UiManager.ToggleRightDock(ViewerPanel.Inspector), dockOpen && active == ViewerPanel.Inspector);
+        DrawActionBarIcon("World", "ActionWorld", IconKind.World, size, "Inspect objects, placements, and world data", () => _host.UiManager.ToggleRightDock(ViewerPanel.World), dockOpen && active == ViewerPanel.World);
+        DrawActionBarIcon("Model", "ActionModel", IconKind.Model, size, "Inspect the loaded model and animations", () => _host.UiManager.ToggleRightDock(ViewerPanel.Model), dockOpen && active == ViewerPanel.Model);
+        DrawActionBarIcon("PM4", "ActionPm4", IconKind.Pm4, size, "Inspect PM4 navigation and object data", () => _host.UiManager.ToggleRightDock(ViewerPanel.PM4), dockOpen && active == ViewerPanel.PM4);
     }
 
-    internal void DrawBottomActions()
+    /// <summary>
+    /// Draw the four bottom actions at the placements the footer fit policy computed. The caller
+    /// owns the row origin so destination buttons, these actions and Options share one measured
+    /// layout instead of each drawing left-to-right into a scrolling window.
+    /// </summary>
+    internal void DrawBottomActions(FooterFitResult fit, float originX, float y, float scale)
     {
-        float scale = MathF.Max(1f, _host.UiManager.Layout.Scale);
-        var size = new Vector2(78f * scale, 36f * scale);
-        ImGui.SameLine(0f, 10f * scale);
-        if (ImGui.Button("Spawns##BottomSpawns", size))
-            _host.UiManager.Popups.Request(ViewerUiManager.MapSpawnsPopupId);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Choose a map spawn or open population controls");
-        ImGui.SameLine();
-        if (ImGui.Button("Pages##BottomPages", size)) OpenDestinationWindow();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open pages for the selected preset");
-        ImGui.SameLine();
-        if (ImGui.Button("Left Bar##ToggleLeftBar", size)) _host.UiManager.ToggleLeftSidebar();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show or hide the left action bar");
-        ImGui.SameLine();
-        if (ImGui.Button("Right Bar##ToggleRightBar", size)) _host.UiManager.ToggleRightSidebar();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show or hide the right action bar");
+        float height = 36f * scale;
+
+        // Literal labels stay inline so the UI control scanner keeps finding these four routes.
+        FooterItemPlacement spawns = fit.Get("bottom-spawns");
+        if (spawns.Visible)
+        {
+            ImGui.SetCursorPos(new Vector2(originX + spawns.X, y));
+            if (ImGui.Button("Spawns##BottomSpawns", new Vector2(spawns.Width, height)))
+                _host.UiManager.Popups.Request(ViewerUiManager.MapSpawnsPopupId);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Choose a map spawn or open population controls");
+        }
+
+        FooterItemPlacement pages = fit.Get("bottom-pages");
+        if (pages.Visible)
+        {
+            ImGui.SetCursorPos(new Vector2(originX + pages.X, y));
+            if (ImGui.Button("Pages##BottomPages", new Vector2(pages.Width, height))) OpenDestinationWindow();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open pages for the selected preset");
+        }
+
+        FooterItemPlacement leftBar = fit.Get("toggle-left-action-bar");
+        if (leftBar.Visible)
+        {
+            ImGui.SetCursorPos(new Vector2(originX + leftBar.X, y));
+            if (ImGui.Button("Left Bar##ToggleLeftBar", new Vector2(leftBar.Width, height))) _host.UiManager.ToggleLeftSidebar();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show or hide the left action bar");
+        }
+
+        FooterItemPlacement rightBar = fit.Get("toggle-right-action-bar");
+        if (rightBar.Visible)
+        {
+            ImGui.SetCursorPos(new Vector2(originX + rightBar.X, y));
+            if (ImGui.Button("Right Bar##ToggleRightBar", new Vector2(rightBar.Width, height))) _host.UiManager.ToggleRightSidebar();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show or hide the right action bar");
+        }
     }
 
     internal void DrawToolWindows()
@@ -132,12 +150,9 @@ internal sealed class ViewerActionBarsService
         DrawToolWindow("capture", "Capture", new(rail + 12f * scale, top + 100f * scale), new(520f, 620f),
             _host.DrawCapturePanelContent);
 
+        // Inspector/World/Model/PM4 are docked in UiRegion.RightDock, not floating windows.
         float rightX = Math.Max(rail, display.X - rail - 430f * scale - 12f * scale);
         float rightY = top + mapHeight + 12f * scale;
-        DrawViewerWindow("inspector", "Inspector", new(rightX, rightY), ViewerPanel.Inspector, new(430f, 560f));
-        DrawViewerWindow("world", "World", new(rightX - 24f * scale, rightY + 24f * scale), ViewerPanel.World, new(430f, 560f));
-        DrawViewerWindow("model", "Model", new(rightX - 48f * scale, rightY + 48f * scale), ViewerPanel.Model, new(430f, 560f));
-        DrawViewerWindow("pm4", "PM4", new(rightX - 72f * scale, rightY + 72f * scale), ViewerPanel.PM4, new(430f, 560f));
         if (_host.ActiveTopTab != WorkbenchTab.Viewer)
             DrawToolWindow("destination", _host.ActiveTopTab.ToString(), new(rightX, rightY), new(500f, 620f),
                 DrawDestinationContent);
@@ -158,12 +173,12 @@ internal sealed class ViewerActionBarsService
     private void ToggleWindow(string key) => _windows[key].Open = !_windows[key].Open;
 
     private void DrawActionBarIcon(string label, string id, IconKind icon, Vector2 size,
-        string help, Action action)
+        string help, Action action, bool? selected = null)
     {
         Vector2 position = ImGui.GetCursorScreenPos();
         string key = icon == IconKind.Open ? "files" : icon.ToString().ToLowerInvariant();
-        bool selected = _windows.TryGetValue(key, out var window) && window.Open;
-        if (SharedUiWidgets.IconButton(label, id, size, help, selected)) action();
+        bool isSelected = selected ?? (_windows.TryGetValue(key, out var window) && window.Open);
+        if (SharedUiWidgets.IconButton(label, id, size, help, isSelected)) action();
 
         ImDrawListPtr draw = ImGui.GetWindowDrawList();
         Vector2 center = position + size * 0.5f;
@@ -261,9 +276,6 @@ internal sealed class ViewerActionBarsService
                 break;
         }
     }
-
-    private void DrawViewerWindow(string key, string title, Vector2 position, ViewerPanel panel, Vector2 size) =>
-        DrawToolWindow(key, title, position, size, () => _host.WorkbenchPanels.DrawViewerContent(panel));
 
     private void DrawToolWindow(string key, string title, Vector2 position, Vector2 logicalSize, Action content)
     {

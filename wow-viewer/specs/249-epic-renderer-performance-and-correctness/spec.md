@@ -182,3 +182,29 @@ whole process in a GC while anything at normal priority runs; it can also hold a
 needs (priority inversion). Two consecutive unmeasured changes made things worse, so R-39 restarts from
 measurement: per-tile read / decode / upload time and GC counts in the frame stats, captured by the
 operator on a CASC client, before any further minimap change.
+
+## Operator amendment — bounded fidelity plan refresh (2026-10-22)
+
+**Origin:** operator requested bounded renderer research (ground-effect distance/opacity/density,
+WMO/MH2O liquid resolution/materials, sky/lighting, observed 3.3.5/4.3.4 references), then:
+"use speckit and lay this all out as a plan, please?" This authorizes planning, not a renderer
+rewrite or reader modification. [Current plan](plan.md) defines evidence gates before fixes.
+
+- **R-35 refresh:** retain the existing dome/LightSkybox/backdrop implementation as baseline;
+  investigate exact-build sky/lighting fidelity using available references, not an assumption
+  that no sky code exists. Preserve simple blank-sky mode and plan known-good DBC/DB2 choices
+  through the existing visual-control owner, not another permanent UI surface.
+- **R-38 refresh:** investigate WMO and MH2O family/material resolution separately. Record raw
+  identity → exact-build table row → family/vertex-layout → submitted material. Do not conflate
+  LiquidMaterial vertex format with visual material fidelity or assume a working reader is wrong.
+- **Ground effects:** [Spec 259](../259-ground-effects-and-wmo-detail-doodads/plan.md) owns distance,
+  density and fade evidence; its reverted AC-009 remains separately gated. Spec 276's delivered
+  alpha/fade work must not be blindly reimplemented.
+- **Existing work:** Spec 273 owns later R-10/rendering refinements; its WMO culling quarantine
+  and operator proof gaps remain intact. This amendment does not reopen batching, minimap,
+  portal admission, terrain loading, converters or unrelated epic items.
+- **Acceptance for future fixes:** same identified build/map/assets/camera and explicit settings;
+  baseline and after outputs with criterion mapping; pure policy regression tests; operator
+  visual approval. Missing reference/client evidence is a blocked gate, never guessed parity.
+- **Safety:** no new app/scene god-class members; no automatic reader change, new decomp/tool
+  installation, broad archive audit, client/GPU/heavy run or commit from this planning request.

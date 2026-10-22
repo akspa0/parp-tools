@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-22
 
+## 2026-10-22 — contextual UI and renderer fidelity plans (documentation only)
+
+- Filled [Spec 286 plan](../specs/286-view-controls-userguide/plan.md) and research/model/contracts/quickstart;
+  operator amendment records no-scroll footer, FPS disclosure, prominent selection and category colors.
+- Refreshed [Epic 249](../specs/249-epic-renderer-performance-and-correctness/plan.md) sky/liquid gates
+  and [Spec 259](../specs/259-ground-effects-and-wmo-detail-doodads/plan.md) distance/density/fade gates;
+  preserved Spec 273/276 ownership, quarantine and reverted tint. No task checkbox closed.
+- Next: ordered unchecked tasks, then UI U0 or renderer E0 as separate bounded phases. No runtime
+  implementation/build/test, client/GPU/heavy run, screenshot or commit; existing UI state file preserved.
+
 ## 2026-10-22 - Spec 286 View discoverability, Maps startup and screenshot guide (specified)
 
 - Recorded operator acceptance of the Spec 283 icon-bar direction without bulk-closing runtime gates.

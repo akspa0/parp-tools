@@ -1,6 +1,17 @@
 # Active Context — wow-viewer
 
-**Operator follow-up 2026-10-22 - Spec 286:** current icon-bar UI accepted as nice-looking and pretty functional; keep it. [View controls / screenshot guide spec](../specs/286-view-controls-userguide/spec.md) now defines direct View access to scale and existing visual settings, explicit layout/scale/combined resets, Maps opening once after each successful client activation, and a real illustrated guide. Branch: 286-view-controls-userguide. Specification/checklist only; no new runtime implementation or screenshots. Next bounded step: implementation plan and ordered tasks, starting shared scale/reset ownership and View routes. Operator capture remains required; do not fabricate guide screenshots or reopen the accepted layout.
+**Implementation handoff 2026-10-22 — branch 286-view-controls-userguide:** [Spec 286 U0 + U0b](../specs/286-view-controls-userguide/tasks.md)
+source/tests landed. Footer regions fit their actual client rect with no scrollbars; the status
+readout right-aligns inside the region; FPS hover discloses the existing counters through one
+immutable snapshot. U0b docks Inspector/World/Model/PM4 under the minimap and above the bottom
+bars, resizable and persisted, and starts the chat collapsed. U0 T001–T007 and U0b T049–T052
+checked; 35/35 focused tests; solution build 0 errors; registry 0 errors/0 warnings. Next:
+operator runtime proof for SC-008/010/011, then U1. [U0 receipt](../specs/286-view-controls-userguide/evidence/u0-source-tests.md),
+[U0b receipt](../specs/286-view-controls-userguide/evidence/right-dock-and-chat-2026-10-22.md).
+[Renderer plan](../specs/249-epic-renderer-performance-and-correctness/plan.md)
+owns evidence-gated sky/liquid work; [flora plan](../specs/259-ground-effects-and-wmo-detail-doodads/plan.md)
+owns distance/density/fade. Preserve Spec 273/276 work, culling quarantine and reverted AC-009.
+Operator owns real proof; do not fabricate parity or reapply tint from the fade investigation.
 
 **Planning-only handoff, 2026-10-21**: [Spec 285 v65 interchange](../specs/285-v65-terrain-interchange/plan.md)
 ([62 pending tasks](../specs/285-v65-terrain-interchange/tasks.md)) rebases [Spec 284 converters](../specs/284-map-object-converter-revitalization/plan.md)

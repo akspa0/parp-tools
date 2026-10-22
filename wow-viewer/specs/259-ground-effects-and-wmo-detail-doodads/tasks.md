@@ -1,5 +1,9 @@
 # Tasks: Spec 259 — Ground Effects & WMO Detail Doodad Engine
 
+**2026-10-22 planning handoff:** [plan](plan.md) adds evidence-gated G0/G1 distance/density/fade
+work. Generate its unchecked tasks next; T014–T016 and AC-009 remain separate/open. This note
+does not claim new implementation or revalidate historical checked tasks.
+
 ## Phase 1: DBC/DB2 Format Expansion & WMO MDDL Reader
 
 - [x] T001 [US1] Extend `GroundEffectLookup.cs` with full record definitions (`GroundEffectDoodadRecord`, `GroundEffectTextureRecord`), parsing flags `0x1` (AlignToNormal) and `0x2` (IgnoreMCCV), density, and scale.

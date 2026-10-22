@@ -2,6 +2,10 @@
 
 Implementation tasks are generated **after** triage. Nothing is checked without a §9.2 receipt.
 
+**2026-10-22 planning handoff:** bounded R-35/R-38 refresh is now in [plan](plan.md), separate
+from the older epic-wide backlog. Generate unchecked E/L/S tasks next; historical R-10 text
+does not supersede later Spec 273 work/quarantine. No implementation checkbox changed here.
+
 ## Phase 0 — Triage (operator)
 
 - [ ] T001 Operator marks every R-xx item Want / Drop / Later in [TRIAGE.md](../TRIAGE.md).

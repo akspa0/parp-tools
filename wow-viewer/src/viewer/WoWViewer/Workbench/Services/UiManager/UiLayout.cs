@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace WoWViewer;
 
-internal enum UiRegion { Scene, TopBar, BottomBar, StatusBar, LeftSidebar, RightSidebar, Options, Minimap, Chat }
+internal enum UiRegion { Scene, TopBar, BottomBar, StatusBar, LeftSidebar, RightSidebar, RightDock, Options, Minimap, Chat }
 
 internal readonly record struct UiRect(float X, float Y, float Width, float Height)
 {
@@ -31,7 +31,8 @@ internal sealed class UiLayout
 
     public UiLayout(Vector2 display, bool hidden, bool left, bool right, float leftWidth, float rightWidth,
         bool options = false, bool minimapVisible = true, bool minimapCollapsed = false,
-        bool chatVisible = true, bool chatCollapsed = false, float scale = 1f)
+        bool chatVisible = true, bool chatCollapsed = false, float scale = 1f,
+        bool rightDockVisible = false, float rightDockWidth = 360f)
     {
         float w = float.IsFinite(display.X) ? Math.Max(0, display.X) : 0;
         float h = float.IsFinite(display.Y) ? Math.Max(0, display.Y) : 0;
@@ -65,6 +66,13 @@ internal sealed class UiLayout
         float rightTop = top + (minimapVisible ? mapSize + mapPadding * 2f : 0f);
         float rightHeight = Math.Max(0f, sceneHeight - (rightTop - top));
 
+        // The right dock is the inspector/world/model/PM4 home: below the minimap, above the
+        // bottom bars, and to the left of the icon rail. The user can drag its left edge.
+        float minDock = 240f * s;
+        float maxDock = MathF.Max(minDock, MathF.Min(w * 0.45f, w - rw - 80f * s));
+        float dockWidth = Math.Clamp(rightDockWidth * s, minDock, maxDock);
+        var rightDockRect = new UiRect(Math.Max(0f, w - rw - dockWidth), rightTop, dockWidth, rightHeight);
+
         // Chat is lower-left game chrome. It is independent of the sidebars and remains readable
         // when either data panel is opened. It overlays the scene instead of stealing its columns.
         float chatDockHeight = chatCollapsed
@@ -87,6 +95,7 @@ internal sealed class UiLayout
             [UiRegion.BottomBar] = new(new(0, h - status - bottom, w, bottom), !hidden),
             [UiRegion.LeftSidebar] = new(new(0, top, lw, sceneHeight), !hidden && left),
             [UiRegion.RightSidebar] = new(new(w - rw, rightTop, rw, rightHeight), !hidden && right),
+            [UiRegion.RightDock] = new(rightDockRect, !hidden && right && rightDockVisible),
             [UiRegion.Options] = new(new(ox, Math.Max(top, h - status - bottom - oh), ow, oh), !hidden && options),
             [UiRegion.Minimap] = new(minimapRect, !hidden && minimapVisible),
             [UiRegion.Chat] = new(chatRect, !hidden && chatVisible),

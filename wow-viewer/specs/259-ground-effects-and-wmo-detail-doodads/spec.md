@@ -40,3 +40,14 @@ This spec introduces comprehensive support for ground effects and detail doodads
 - **AC-009 (operator amendment, 2026-10-14)**: Terrain ground-effect doodad instances carry their MCCV RGB multiplier (neutral value remains 1.0) and MCSH shadow attenuation into the rendered model material tint; the doodad remains subject to the existing directional and ambient MDX lighting. Operator visual smoke is required before marking the criterion complete.
 
 **Regression note (2026-10-14):** the first tint-propagation implementation shipped in the initial `v0.6.0.1` attempt; the operator then reported that the viewer could no longer load content. That implementation has been reverted while the release is replaced. AC-009 is open and must not be treated as implemented until a separately validated fix is approved and proven.
+
+## Operator amendment — distance/density/opacity plan refresh (2026-10-22)
+
+The operator requested bounded source evidence on distance culling versus opacity/density and
+dense distant effects, then requested a Spec Kit plan. [Plan](plan.md) now defines evidence-first
+G phases; this does not establish a root cause or approve a global density/opacity change.
+Preserve already-delivered Spec 276 alpha/fade behavior; AC-009 and the load-regression boundary
+remain separate. Record current UI/control ranges as observed implementation drift, not silently
+replace US4's stated ranges or units. A range/unit change requires an explicit operator decision.
+Acceptance remains original ACs plus identified real before/after evidence for any diagnosed
+distance/fade correction; builds/tests do not close visual criteria.
