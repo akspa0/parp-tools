@@ -2,8 +2,21 @@
 
 **Spec**: [Spec 275: High-Performance Asset Streaming for MPQ and CASC](spec.md)  
 **Plan**: [Technical Design Plan](plan.md)  
-**Status**: Authoring / Pending Phase 1 Execution  
+**Status**: Phase 0 (CASC-1) implemented 2026-10-22, operator capture owed (T027); Phases 1-6 pending  
 **Receipt**: `evidence/receipt-spec275.md` (to be authored upon verification)  
+
+---
+
+## Phase 0 (CASC-1): CASC local read path — operator amendment 2026-10-22
+
+Receipt: [casc1-local-read-path-2026-10-22.md](evidence/casc1-local-read-path-2026-10-22.md).
+
+- [x] **T022**: Measure the per-read cost of TACTSharp's local read against a cached handle (synthetic probe, `evidence/read-cost-probe/`).
+- [x] **T023**: `LocalCascArchiveReader` in `WowViewer.Core.IO/Casc/` reusing TACTSharp's public `CASCIndexInstance`; `LocalCascArchiveReaderTests` (9 tests: parity with `CDN.TryGetLocalFile`, parallel, newest index version, truncated/missing archive, writer-sharing, dispose).
+- [x] **T024**: `CascStorage` fast path with stock fallback, shadow verification of the first 64 reads (self-disable on mismatch), `PARP_CASC_FAST_READS=0` switch, `ReadStats`.
+- [x] **T025**: `CascDataSource.ReadStats` (loader misses, prefetch read time) and Perf panel lines.
+- [x] **T026**: `inspect casc bench` read A/B (`--read-ab-only`) and the real-install run on `wow_classic_beta` Azeroth: 9,401 files byte-identical; sequential 2.9x, parallel x8 6.1x.
+- [ ] **T027**: Operator capture in the viewer on a streaming scene: Perf panel "CASC reads" / "loader misses" lines and frame history with and without `PARP_CASC_FAST_READS=0`. Decides whether CASC-2 (prefetch priority, coalescing, eviction) is worth starting.
 
 ---
 

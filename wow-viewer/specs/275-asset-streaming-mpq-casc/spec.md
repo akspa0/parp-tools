@@ -68,3 +68,37 @@ Streaming game assets (M2 models, WMO buildings, skins, and textures) across bot
    - `WorldAssetPriorityQueue.cs`: Camera-distance and frustum-ranked priority queue.
    - `WorldTextureStreamer.cs`: Generalized texture decoding and DXT compressed packet management.
 3. **`AGENTS.md` §9 Scope Fidelity & Receipts**: Each phase must be verified with automated test suites and concrete receipts before setting tasks to `[x]`.
+
+---
+
+## 5. Operator amendment — CASC local read path (2026-10-22, CASC-1)
+
+**Origin:** operator: "the next thing needed is to stream data from casc a bit better, as that is
+holding the CASC support back in terms of performance. Everything else is fine, once things
+stabilize."
+
+**Amendment to §4.1:** the constraint that `CascStorage.cs` remains untouched is lifted for the
+**local read path only**, by this operator direction. The change is additive: the stock TACTSharp
+read stays as the fallback, and no format reader or parser changes.
+
+**Finding (measured, `evidence/casc-read-ab-azeroth-2026-10-22.txt`, `evidence/read-cost-probe/`):**
+TACTSharp's local read (`CDN.TryGetLocalFile`) stats the archive, maps the whole `data.NNN` file,
+creates a view over it, copies the entry, unmaps and closes - per file - and then copies the bytes a
+second time. A synthetic probe measured 250-385 us per read regardless of size, with 8 threads only
+~1.5x one thread, against 7-18 us for a cached handle with positional reads (4-64 KB entries).
+
+- **FR-CASC-1**: Local CASC reads MUST return byte-identical results to the stock TACTSharp read and
+  MUST fall back to it on any local miss, short read or error (CDN fill stays with the stock path).
+- **FR-CASC-2**: The fast path MUST check itself: the first reads are compared with the stock path
+  and a single difference MUST switch the fast path off. A documented switch
+  (`PARP_CASC_FAST_READS=0`) MUST start it off.
+- **FR-CASC-3**: Which path served reads, and how often a loader blocked on a read the prefetch
+  cache did not hold, MUST be visible in the Perf panel.
+- **AC-009**: On a real install, a file set read through both paths is byte-identical and the fast
+  path is faster sequentially and in parallel (`inspect casc bench --read-ab-only`).
+- **SC-CASC-1**: Operator-owned: Perf panel loader-miss count/time and streaming hitches are no worse
+  than with `PARP_CASC_FAST_READS=0`, ideally better. FPS/visual claims come only from operator captures.
+
+**Not in this amendment (proposed only, awaiting the operator's capture):** camera-distance prefetch
+ordering (Phase 4 here), in-flight read coalescing, re-prefetch after cache eviction, caching
+synchronous reads, and BLTE decode allocation. None is started.

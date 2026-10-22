@@ -1,6 +1,16 @@
 # Active Context — wow-viewer
 
-**Operator's first real run (2026-10-22, 3440×1392) → U0c fix (source/probe; operator re-check T057 owed):**
+**Next lane — CASC streaming (operator-directed 2026-10-22; Spec 275 Phase 0 / CASC-1, uncommitted):**
+TACTSharp's local read maps the whole `data.NNN` archive per file (250–385 µs fixed, ~1.5× at 8 threads).
+`LocalCascArchiveReader` + `CascStorage` fast path (cached handles, stock fallback, first-64 shadow check,
+`PARP_CASC_FAST_READS=0` to disable) cut that: real `wow_classic_beta` Azeroth set, 9,401 files
+byte-identical, sequential 2.9×, parallel ×8 6.1× (`inspect casc bench --read-ab-only`). New Perf panel
+lines "CASC reads"/"loader misses". 9 new tests; full suite = the 7 known failures (one unexplained
+extra flake in run 1). **Owed:** operator capture T027 (viewer streaming with/without the env switch);
+only then CASC-2 (prefetch priority, coalescing, re-prefetch after eviction) — none started.
+[Receipt](../specs/275-asset-streaming-mpq-casc/evidence/casc1-local-read-path-2026-10-22.md).
+
+**Operator's first real run (2026-10-22, 3440×1392) → U0c fix (committed with U1; operator re-check T057 owed):**
 dock panels showed only their page selector and the status bar was clipped. Causes: the dock's
 full-height splitter `InvisibleButton`+`SameLine` made ImGui's line height the whole window (all
 later widgets landed below it), and the 22 px status region was shorter than its button row plus

@@ -151,6 +151,16 @@ internal sealed partial class ViewerChromeService
         {
             (long prefetchCompleted, long cacheHits, long cachedBytes) = cascDataSource.Stats;
             ImGui.TextWrapped($"CASC prefetch done {prefetchCompleted}  cache hits {cacheHits}  cached {FormatBytes(cachedBytes)}");
+
+            // Spec 275 CASC-1: which read path served the files, and how often a loader had to wait.
+            var reads = cascDataSource.ReadStats;
+            var storage = reads.Storage;
+            ImGui.TextWrapped($"CASC reads: fast {storage.FastReads} (avg {storage.FastAverageMs:0.00} ms)  stock {storage.StockReads} (avg {storage.StockAverageMs:0.00} ms)"
+                + $"  checked vs stock {storage.ShadowChecked - storage.ShadowMismatches}/{storage.ShadowChecked}  fast path {(storage.FastEnabled ? "on" : "off")}");
+            ImGui.TextWrapped($"  loader misses {reads.LoaderMisses} (avg {reads.LoaderMissAverageMs:0.00} ms, total {reads.LoaderMissTotalMs / 1000.0:0.0} s)"
+                + $"  prefetch read avg {reads.PrefetchReadAverageMs:0.00} ms");
+            if (storage.DisabledReason is { } fastReadDisabledReason)
+                ImGui.TextWrapped($"  fast path disabled: {fastReadDisabledReason}");
         }
 
         if (_dataSource is MpqDataSource mpqDataSource)

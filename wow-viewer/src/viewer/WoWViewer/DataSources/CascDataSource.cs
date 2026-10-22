@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Threading.Channels;
 using WoWViewer.Logging;
@@ -41,6 +42,7 @@ public sealed class CascDataSource : IDataSource
     private readonly CancellationTokenSource _prefetchCancellation = new();
     private long _prefetchCompleted;
     private long _cacheHits;
+    private long _loaderMisses, _loaderMissTicks, _prefetchReadTicks;
 
     public CascDataSource(IReadOnlyList<CascStorage> storages, CommunityListfile listfile)
     {
@@ -48,6 +50,8 @@ public sealed class CascDataSource : IDataSource
             throw new ArgumentException("At least one CASC product is required.", nameof(storages));
 
         _storages = storages;
+        foreach (CascStorage storage in storages)
+            storage.Log ??= static message => ViewerLog.Important(ViewerLog.Category.MpqData, message);
         _listfile = listfile;
         _resolver = listfile.GetPath;
         FileDataIdPaths.Resolver = _resolver;
@@ -70,6 +74,18 @@ public sealed class CascDataSource : IDataSource
     /// <summary>Background prefetch reads completed, cache hits served to loaders, and bytes held.</summary>
     public (long PrefetchCompleted, long CacheHits, long CachedBytes) Stats => (Interlocked.Read(ref _prefetchCompleted), Interlocked.Read(ref _cacheHits), Interlocked.Read(ref _cachedBytes));
 
+    /// <summary>
+    /// Spec 275 CASC-1: how reads are being served. <c>LoaderMisses</c> are <see cref="ReadFile(uint)"/>
+    /// calls the prefetch cache did not hold, each of which blocks its caller (often the render thread)
+    /// for a full read; a low count with a high prefetch count means prefetch is keeping ahead.
+    /// </summary>
+    public CascDataSourceReadStats ReadStats => new(
+        CascReadStats.Combine(_storages.Select(static s => s.ReadStats)),
+        Interlocked.Read(ref _loaderMisses),
+        Interlocked.Read(ref _loaderMissTicks) * 1000.0 / Stopwatch.Frequency,
+        Interlocked.Read(ref _prefetchCompleted),
+        Interlocked.Read(ref _prefetchReadTicks) * 1000.0 / Stopwatch.Frequency);
+
     public bool FileExists(string virtualPath) =>
         TryGetFileDataId(virtualPath, out uint fileDataId) && FileExists(fileDataId);
 
@@ -86,7 +102,11 @@ public sealed class CascDataSource : IDataSource
             return cached;
         }
 
-        return ReadFromStorages(fileDataId);
+        long started = Stopwatch.GetTimestamp();
+        byte[]? data = ReadFromStorages(fileDataId);
+        Interlocked.Increment(ref _loaderMisses);
+        Interlocked.Add(ref _loaderMissTicks, Stopwatch.GetTimestamp() - started);
+        return data;
     }
 
     public void PrefetchFile(string virtualPath)
@@ -124,6 +144,8 @@ public sealed class CascDataSource : IDataSource
         _prefetchQueue.Writer.TryComplete();
         if (FileDataIdPaths.Resolver == _resolver)
             FileDataIdPaths.Resolver = null;
+        foreach (CascStorage storage in _storages)
+            storage.Dispose();
     }
 
     /// <summary>Resolves explicit IDs, registered aliases, or a virtual path through the CASC listfile.</summary>
@@ -161,7 +183,9 @@ public sealed class CascDataSource : IDataSource
             {
                 try
                 {
+                    long started = Stopwatch.GetTimestamp();
                     byte[]? data = ReadFromStorages(fileDataId);
+                    Interlocked.Add(ref _prefetchReadTicks, Stopwatch.GetTimestamp() - started);
                     if (data is null)
                         continue;
 
@@ -259,4 +283,22 @@ public sealed class CascDataSource : IDataSource
 
     private static string ChunkId(byte[] data, int offset) =>
         offset + 4 <= data.Length ? new string(Encoding.ASCII.GetString(data, offset, 4).Reverse().ToArray()) : string.Empty;
+}
+
+/// <summary>Read counters for the CASC data source (Spec 275 CASC-1).</summary>
+/// <param name="Storage">Fast/stock read counters summed over the opened products.</param>
+/// <param name="LoaderMisses">Synchronous <c>ReadFile</c> calls the prefetch cache did not hold.</param>
+/// <param name="LoaderMissTotalMs">Total time callers spent blocked in those reads.</param>
+/// <param name="PrefetchReads">Background prefetch reads completed.</param>
+/// <param name="PrefetchReadTotalMs">Total worker time spent reading for prefetch.</param>
+public readonly record struct CascDataSourceReadStats(
+    CascReadStats Storage,
+    long LoaderMisses,
+    double LoaderMissTotalMs,
+    long PrefetchReads,
+    double PrefetchReadTotalMs)
+{
+    public double LoaderMissAverageMs => LoaderMisses == 0 ? 0 : LoaderMissTotalMs / LoaderMisses;
+
+    public double PrefetchReadAverageMs => PrefetchReads == 0 ? 0 : PrefetchReadTotalMs / PrefetchReads;
 }

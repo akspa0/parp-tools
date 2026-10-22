@@ -848,7 +848,7 @@ public static class CascCommandSupport
         int threads = int.Parse(GetOption(args, "--threads") ?? "8");
         if (install is null || product is null || cache is null || wdtIdText is null || listfiles.Count == 0)
         {
-            Console.WriteLine("  casc bench --install <dir> --product <p> --cache <dir> --wdt-id <id> --listfile <csv> [--threads 8]");
+            Console.WriteLine("  casc bench --install <dir> --product <p> --cache <dir> --wdt-id <id> --listfile <csv> [--threads 8] [--read-ab-only]");
             Environment.ExitCode = 1;
             return;
         }
@@ -904,6 +904,10 @@ public static class CascCommandSupport
                 files.AddRange(ids.SkinFileDataIds.Take(1));
         }
         Console.WriteLine($"file set: {wmoIds.Count} WMO roots + groups = {wmoFileCount} files, {modelIds.Count} M2 + skins; total {files.Count} (all already read once above: warm)");
+
+        RunReadAb(storage, files, threads);
+        if (args.Contains("--read-ab-only", StringComparer.OrdinalIgnoreCase))
+            return;
 
         sw.Restart();
         long bytes = 0;
@@ -997,6 +1001,82 @@ public static class CascCommandSupport
             sizes[key] = sizes.GetValueOrDefault(key) + 1;
         }
         Console.WriteLine($"WMO textures: decoded {decoded}, not readable {missing}; read {readMs} ms, decode mip0->RGBA {decodeMs} ms, {decodePixels * 4 / 1_048_576.0:F0} MB RGBA; sizes {string.Join(' ', sizes.Select(static kv => $"{kv.Key}:{kv.Value}"))}");
+    }
+
+    /// <summary>
+    /// Spec 275 CASC-1: the same files through the stock TACTSharp local read (stat + map the whole
+    /// archive + copy twice, per file) and the cached-handle fast path, then a byte-for-byte equality
+    /// pass over every file. Real-install proof for the synthetic-data unit tests.
+    /// </summary>
+    private static void RunReadAb(CascStorage storage, List<uint> files, int threads)
+    {
+        if (!storage.HasFastLocalReader)
+        {
+            Console.WriteLine("read A/B: this install has no readable Data/data; only the stock path exists.");
+            return;
+        }
+
+        List<uint> distinct = files.Distinct().ToList();
+        bool original = storage.FastLocalReads;
+        try
+        {
+            // One untimed pass first so neither mode pays for cold disk reads.
+            foreach (uint id in distinct)
+                _ = storage.TryReadFile(id, out _);
+
+            foreach (bool fast in new[] { false, true })
+            {
+                storage.FastLocalReads = fast;
+                string mode = fast ? "fast (cached handles)" : "stock (map archive per read)";
+
+                var sw = Stopwatch.StartNew();
+                long bytes = 0;
+                foreach (uint id in distinct)
+                {
+                    if (storage.TryReadFile(id, out byte[]? data) == CascReadStatus.Ok && data is not null)
+                        bytes += data.Length;
+                }
+
+                double sequentialMs = Math.Max(0.001, sw.Elapsed.TotalMilliseconds);
+
+                sw.Restart();
+                long parallelBytes = 0;
+                Parallel.ForEach(distinct, new ParallelOptions { MaxDegreeOfParallelism = threads }, id =>
+                {
+                    if (storage.TryReadFile(id, out byte[]? data) == CascReadStatus.Ok && data is not null)
+                        Interlocked.Add(ref parallelBytes, data.Length);
+                });
+                double parallelMs = Math.Max(0.001, sw.Elapsed.TotalMilliseconds);
+
+                Console.WriteLine($"read A/B {mode,-28} sequential {sequentialMs,8:F0} ms ({distinct.Count / (sequentialMs / 1000.0),7:F0} files/s, {bytes / 1_048_576.0:F1} MB)"
+                    + $"   parallel x{threads} {parallelMs,8:F0} ms ({distinct.Count / (parallelMs / 1000.0),7:F0} files/s)");
+            }
+
+            int identical = 0, different = 0, unreadable = 0;
+            foreach (uint id in distinct)
+            {
+                storage.FastLocalReads = false;
+                byte[]? stock = storage.TryReadFile(id, out byte[]? a) == CascReadStatus.Ok ? a : null;
+                storage.FastLocalReads = true;
+                byte[]? fastBytes = storage.TryReadFile(id, out byte[]? b) == CascReadStatus.Ok ? b : null;
+                if (stock is null && fastBytes is null)
+                    unreadable++;
+                else if (stock is null || fastBytes is null || !stock.AsSpan().SequenceEqual(fastBytes))
+                    different++;
+                else
+                    identical++;
+            }
+
+            Console.WriteLine($"read A/B byte-for-byte over {distinct.Count} files: {identical} identical, {different} DIFFERENT, {unreadable} unreadable by both");
+            CascReadStats stats = storage.ReadStats;
+            Console.WriteLine($"read A/B counters: fast {stats.FastReads} (avg {stats.FastAverageMs:F3} ms), stock {stats.StockReads} (avg {stats.StockAverageMs:F3} ms), "
+                + $"shadow-checked {stats.ShadowChecked}, shadow mismatches {stats.ShadowMismatches}, fast path {(stats.FastEnabled ? "on" : "off")}"
+                + (stats.DisabledReason is null ? string.Empty : " - " + stats.DisabledReason));
+        }
+        finally
+        {
+            storage.FastLocalReads = original;
+        }
     }
 
     /// <summary>

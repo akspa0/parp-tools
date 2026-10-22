@@ -2,6 +2,14 @@
 
 Last updated: 2026-10-22
 
+## 2026-10-22 — Spec 275 CASC-1: CASC local read path (operator-directed; uncommitted)
+
+- Found TACTSharp maps the whole archive file per read; added `LocalCascArchiveReader` + `CascStorage` fast path
+  (cached handles, stock fallback, first-64 shadow check, `PARP_CASC_FAST_READS=0`), `CascDataSource.ReadStats`,
+  Perf panel lines, `casc bench --read-ab-only`.
+- Real install A/B (Azeroth, 9,401 files): byte-identical; sequential 2.9×, parallel ×8 6.1×. 9 new tests; full suite = known 7 failures.
+- Operator capture T027 owed before any CASC-2 work. [Receipt](../specs/275-asset-streaming-mpq-casc/evidence/casc1-local-read-path-2026-10-22.md).
+
 ## 2026-10-22 — Spec 286 U0c: dock content and footer fit after the operator's first run
 
 - Operator screenshot (3440×1392): dock showed only the page selector; status bar clipped; asked to drop Left/Right Bar buttons and shrink buttons.
