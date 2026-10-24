@@ -1,8 +1,8 @@
 {
   "mapId": 620,
-  "mapName": "Transport: Moa'ki to Unu'pe",
+  "mapName": "Transport: Moa\u0027ki to Unu\u0027pe",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-19T08:25:37.3513884Z",
+  "exportedUtc": "2026-10-24T23:00:01.2369182Z",
   "spawns": [
     {
       "spawnId": 62739,
@@ -11,7 +11,9 @@
       "spawnType": 0,
       "name": "Aumanil",
       "subname": "Walker of Waves",
-      "modelPath": "Character\\Tuskarr\\Male\\TuskarrMale.mdx",
+      "modelPath": "Character\\Tuskarr\\Male\\TuskarrMale.m2",
+      "displayId": 27731,
+      "fileDataId": null,
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,
@@ -36,6 +38,8 @@
       "name": "Nagojut",
       "subname": "Walker of Waves",
       "modelPath": null,
+      "displayId": 1,
+      "fileDataId": null,
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,

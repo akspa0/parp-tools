@@ -1,6 +1,6 @@
 {
   "version": "3.3.5a",
-  "generatedUtc": "2026-10-19T08:25:37.3891297Z",
+  "generatedUtc": "2026-10-24T23:00:01.2723336Z",
   "totalCreatures": 151823,
   "totalGameObjects": 94992,
   "maps": [
@@ -104,7 +104,7 @@
     },
     {
       "mapId": 209,
-      "mapName": "Zul'Farrak",
+      "mapName": "Zul\u0027Farrak",
       "creatureCount": 268,
       "gameObjectCount": 92,
       "relativeFilePath": "map_209.json"
@@ -125,7 +125,7 @@
     },
     {
       "mapId": 249,
-      "mapName": "Onyxia's Lair",
+      "mapName": "Onyxia\u0027s Lair",
       "creatureCount": 9,
       "gameObjectCount": 251,
       "relativeFilePath": "map_249.json"
@@ -146,7 +146,7 @@
     },
     {
       "mapId": 309,
-      "mapName": "Zul'Gurub",
+      "mapName": "Zul\u0027Gurub",
       "creatureCount": 807,
       "gameObjectCount": 176,
       "relativeFilePath": "map_309.json"
@@ -223,7 +223,7 @@
     },
     {
       "mapId": 509,
-      "mapName": "Ruins of Ahn'Qiraj",
+      "mapName": "Ruins of Ahn\u0027Qiraj",
       "creatureCount": 372,
       "gameObjectCount": 10,
       "relativeFilePath": "map_509.json"
@@ -237,7 +237,7 @@
     },
     {
       "mapId": 531,
-      "mapName": "Ahn'Qiraj Temple",
+      "mapName": "Ahn\u0027Qiraj Temple",
       "creatureCount": 574,
       "gameObjectCount": 17,
       "relativeFilePath": "map_531.json"
@@ -286,7 +286,7 @@
     },
     {
       "mapId": 544,
-      "mapName": "Magtheridon's Lair",
+      "mapName": "Magtheridon\u0027s Lair",
       "creatureCount": 33,
       "gameObjectCount": 13,
       "relativeFilePath": "map_544.json"
@@ -391,7 +391,7 @@
     },
     {
       "mapId": 565,
-      "mapName": "Gruul's Lair",
+      "mapName": "Gruul\u0027s Lair",
       "creatureCount": 18,
       "gameObjectCount": 2,
       "relativeFilePath": "map_565.json"
@@ -405,7 +405,7 @@
     },
     {
       "mapId": 568,
-      "mapName": "Zul'Aman",
+      "mapName": "Zul\u0027Aman",
       "creatureCount": 427,
       "gameObjectCount": 93,
       "relativeFilePath": "map_568.json"
@@ -461,7 +461,7 @@
     },
     {
       "mapId": 582,
-      "mapName": "Transport: Rut'theran to Auberdine",
+      "mapName": "Transport: Rut\u0027theran to Auberdine",
       "creatureCount": 8,
       "gameObjectCount": 0,
       "relativeFilePath": "map_582.json"
@@ -475,7 +475,7 @@
     },
     {
       "mapId": 585,
-      "mapName": "Magister's Terrace",
+      "mapName": "Magister\u0027s Terrace",
       "creatureCount": 210,
       "gameObjectCount": 20,
       "relativeFilePath": "map_585.json"
@@ -503,14 +503,14 @@
     },
     {
       "mapId": 589,
-      "mapName": "Transport: Orgrimmar to Grom'Gol",
+      "mapName": "Transport: Orgrimmar to Grom\u0027Gol",
       "creatureCount": 11,
       "gameObjectCount": 0,
       "relativeFilePath": "map_589.json"
     },
     {
       "mapId": 590,
-      "mapName": "Transport: Grom'Gol to Undercity",
+      "mapName": "Transport: Grom\u0027Gol to Undercity",
       "creatureCount": 11,
       "gameObjectCount": 0,
       "relativeFilePath": "map_590.json"
@@ -552,7 +552,7 @@
     },
     {
       "mapId": 600,
-      "mapName": "Drak'Tharon Keep",
+      "mapName": "Drak\u0027Tharon Keep",
       "creatureCount": 183,
       "gameObjectCount": 15,
       "relativeFilePath": "map_600.json"
@@ -650,28 +650,28 @@
     },
     {
       "mapId": 619,
-      "mapName": "Ahn'kahet: The Old Kingdom",
+      "mapName": "Ahn\u0027kahet: The Old Kingdom",
       "creatureCount": 216,
       "gameObjectCount": 13,
       "relativeFilePath": "map_619.json"
     },
     {
       "mapId": 620,
-      "mapName": "Transport: Moa'ki to Unu'pe",
+      "mapName": "Transport: Moa\u0027ki to Unu\u0027pe",
       "creatureCount": 2,
       "gameObjectCount": 0,
       "relativeFilePath": "map_620.json"
     },
     {
       "mapId": 621,
-      "mapName": "Transport: Moa'ki to Kamagua",
+      "mapName": "Transport: Moa\u0027ki to Kamagua",
       "creatureCount": 2,
       "gameObjectCount": 0,
       "relativeFilePath": "map_621.json"
     },
     {
       "mapId": 622,
-      "mapName": "Transport: Orgrim's Hammer",
+      "mapName": "Transport: Orgrim\u0027s Hammer",
       "creatureCount": 74,
       "gameObjectCount": 0,
       "relativeFilePath": "map_622.json"
@@ -769,7 +769,7 @@
     },
     {
       "mapId": 673,
-      "mapName": "Transport: Orgrim's Hammer (Icecrown Citadel Raid)",
+      "mapName": "Transport: Orgrim\u0027s Hammer (Icecrown Citadel Raid)",
       "creatureCount": 29,
       "gameObjectCount": 4,
       "relativeFilePath": "map_673.json"
@@ -783,7 +783,7 @@
     },
     {
       "mapId": 713,
-      "mapName": "Transport: Orgrim's Hammer (IC Dungeon)",
+      "mapName": "Transport: Orgrim\u0027s Hammer (IC Dungeon)",
       "creatureCount": 55,
       "gameObjectCount": 4,
       "relativeFilePath": "map_713.json"

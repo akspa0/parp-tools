@@ -1,8 +1,8 @@
 {
   "mapId": 621,
-  "mapName": "Transport: Moa'ki to Kamagua",
+  "mapName": "Transport: Moa\u0027ki to Kamagua",
   "clientVersion": "3.3.5a",
-  "exportedUtc": "2026-10-19T08:25:37.3518085Z",
+  "exportedUtc": "2026-10-24T23:00:01.2375394Z",
   "spawns": [
     {
       "spawnId": 62741,
@@ -12,6 +12,8 @@
       "name": "Qatiichii",
       "subname": "Green Island",
       "modelPath": null,
+      "displayId": 1,
+      "fileDataId": null,
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,
@@ -35,7 +37,9 @@
       "spawnType": 0,
       "name": "Oomailiq",
       "subname": "Green Island",
-      "modelPath": "Character\\Tuskarr\\Male\\TuskarrMale.mdx",
+      "modelPath": "Character\\Tuskarr\\Male\\TuskarrMale.m2",
+      "displayId": 27730,
+      "fileDataId": null,
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,
