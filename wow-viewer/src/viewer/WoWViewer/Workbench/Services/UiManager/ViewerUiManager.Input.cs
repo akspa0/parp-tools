@@ -40,10 +40,14 @@ internal sealed partial class ViewerUiManager
         if (ImGui.IsKeyPressed(ImGuiKey.LeftBracket)) { _host.ShowLeftSidebar = !_host.ShowLeftSidebar; SaveLayout(); }
         if (ImGui.IsKeyPressed(ImGuiKey.RightBracket)) { _host.ShowRightSidebar = !_host.ShowRightSidebar; SaveLayout(); }
         if (ImGui.IsKeyPressed(ImGuiKey.Tab)) _host.HideUiChrome = !_host.HideUiChrome;
-        if (ImGui.IsKeyPressed(ImGuiKey.M)) { _minimapVisible = !_minimapVisible; SaveLayout(); }
+        if (ImGui.IsKeyPressed(ImGuiKey.M)) _host.ToggleFullscreenMinimap();
         if (ImGui.IsKeyPressed(ImGuiKey.I)) OpenViewer(Workbench.ViewerPanel.Inspector);
         if (ImGui.IsKeyPressed(ImGuiKey.P)) OpenViewer(Workbench.ViewerPanel.PM4);
-        if (ImGui.IsKeyPressed(ImGuiKey.Escape)) _popups.CloseTopmost();
+        if (ImGui.IsKeyPressed(ImGuiKey.Escape))
+        {
+            if (_host.FullscreenMinimap) _host.ToggleFullscreenMinimap();
+            else _popups.CloseTopmost();
+        }
     }
     internal void QueueImGuiMouseButtonEvent(MouseButton button, bool down)
     {

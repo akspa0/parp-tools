@@ -953,6 +953,38 @@
       "shortcut": null,
       "help": "Draw world object bounding boxes.",
       "visible": true
+    },
+    {
+      "id": "minimap-toggle-collapse",
+      "label": "[~]",
+      "region": "Minimap",
+      "shortcut": null,
+      "help": "Toggle collapsing or expanding the minimap.",
+      "visible": true
+    },
+    {
+      "id": "minimap-zoom-in",
+      "label": "+",
+      "region": "Minimap",
+      "shortcut": null,
+      "help": "Zoom in on the minimap.",
+      "visible": true
+    },
+    {
+      "id": "minimap-zoom-out",
+      "label": "-",
+      "region": "Minimap",
+      "shortcut": null,
+      "help": "Zoom out on the minimap.",
+      "visible": true
+    },
+    {
+      "id": "minimap-fullscreen-button",
+      "label": "M",
+      "region": "Minimap",
+      "shortcut": "M",
+      "help": "Toggle the fullscreen map.",
+      "visible": true
     }
   ]
 }

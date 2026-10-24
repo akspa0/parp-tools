@@ -325,14 +325,46 @@ internal sealed partial class ViewerUiManager
 
     private void DrawMinimap()
     {
-        // The minimap is the minimap. No control row, no zone label, no coordinate readout: the
-        // real client's minimap is a map you click, drag and scroll, and every extra line here
-        // stole height from the map itself. Collapse, dock and hide live in Options > Display.
         if (_minimapCollapsed)
         {
-            ImGui.TextDisabled("Minimap collapsed");
+            if (ImGui.SmallButton("[~]##MinimapExpand"))
+            {
+                _minimapCollapsed = false;
+                SaveLayout();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Expand the minimap");
+            ImGui.SameLine();
+            ImGui.TextDisabled("Minimap");
             return;
         }
+
+        if (ImGui.SmallButton("[~]##MinimapCollapse"))
+        {
+            _minimapCollapsed = true;
+            SaveLayout();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Collapse the minimap");
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+##MinimapZoomIn"))
+        {
+            _host.MinimapZoom = Math.Clamp(_host.MinimapZoom - 1f, 1f, 32f);
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Zoom in (or mouse wheel over map)");
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("-##MinimapZoomOut"))
+        {
+            _host.MinimapZoom = Math.Clamp(_host.MinimapZoom + 1f, 1f, 32f);
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Zoom out (or mouse wheel over map)");
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("M##MinimapFullscreen"))
+        {
+            _host.ToggleFullscreenMinimap();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Toggle fullscreen map (M)");
 
         _host.MinimapAndStatus.DrawMinimapPanelContent();
     }

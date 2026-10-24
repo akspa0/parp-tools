@@ -859,17 +859,23 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         {
             if (kb.IsKeyPressed(Key.LeftBracket) && !_leftBracketWasPressed) _uiManager.ToggleLeftSidebar();
             if (kb.IsKeyPressed(Key.RightBracket) && !_rightBracketWasPressed) _uiManager.ToggleRightSidebar();
-            if (kb.IsKeyPressed(Key.M) && !_mKeyWasPressed) _uiManager.ToggleMinimap();
+            if (kb.IsKeyPressed(Key.M) && !_mKeyWasPressed)
+                _minimapAndStatus.ToggleFullscreenMinimap();
             if (kb.IsKeyPressed(Key.F1) && !_f1WasPressed) _uiManager.RequestKeyboardShortcuts();
         }
         _leftBracketWasPressed = kb.IsKeyPressed(Key.LeftBracket);
         _rightBracketWasPressed = kb.IsKeyPressed(Key.RightBracket);
+        _mKeyWasPressed = kb.IsKeyPressed(Key.M);
         _f1WasPressed = kb.IsKeyPressed(Key.F1);
 
         bool escPressed = kb.IsKeyPressed(Key.Escape);
         if (canSceneConsumeKeyboard && escPressed && !_escKeyWasPressed)
         {
-            if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
+            if (_fullscreenMinimap)
+            {
+                _minimapAndStatus.ToggleFullscreenMinimap();
+            }
+            else if (_sceneClusterSelector3D != null && _sceneClusterSelector3D.IsActive)
             {
                 _sceneClusterSelector3D.Close();
                 _sceneHoverPick.ClearPendingClickSelection();
@@ -905,13 +911,6 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                 _uiManager.OpenViewer(ViewerPanel.Inspector);
         }
         _iKeyWasPressed = iPressed;
-
-        // M is owned by the UI manager (it toggles the minimap instrument). The fullscreen
-        // minimap keeps its own key so one key never has two meanings.
-        bool mPressed = kb.IsKeyPressed(Key.F);
-        if (canSceneConsumeKeyboard && mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
-            _minimapAndStatus.ToggleFullscreenMinimap();
-        _mKeyWasPressed = mPressed;
 
         // Arrow keys and spacebar for MDX animation control
         if (!cameraPathKeyboardAction && _renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null && modelRenderer.Animator.Sequences.Count > 0)
