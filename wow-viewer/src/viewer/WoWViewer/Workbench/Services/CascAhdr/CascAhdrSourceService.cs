@@ -281,6 +281,7 @@ internal sealed partial class CascAhdrSourceService
             _wdlPreview.ResetWdlPreviewSupport();
             _dataSource?.Dispose();
             _dataSource = new CascDataSource(storages, listfile);
+            long generation = _dataSourceSession.CommitActivation(installDir);
             _wdlPreview.InitializeWdlPreviewSupport();
 
             _texResolver = new ReplaceableTextureResolver();
@@ -324,6 +325,7 @@ internal sealed partial class CascAhdrSourceService
             {
                 ViewerLog.Important(ViewerLog.Category.Dbc, $"CASC {_dbcBuild}: Map.db2 discovery failed ({ex.Message}); falling back to WDT file scan");
                 _discoveredMaps = MapDiscoveryService.DiscoverLooseMapsOnly(_dataSource);
+                _dataSourceSession.NotifyDiscoveryCompleted(generation, _discoveredMaps.Count, isSuccess: true);
             }
 
             _dataSourceSession.RefreshFileList();

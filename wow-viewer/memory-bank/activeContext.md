@@ -22,22 +22,26 @@ ImGui probe in `specs/286-…/evidence/imgui-layout-probe/` (ImGui.NET 1.89.9.3)
 cannot see ImGui line-height/padding bugs — verify ImGui layout changes with that probe.
 [U0c receipt](../specs/286-view-controls-userguide/evidence/u0c-dock-and-footer-2026-10-22.md).
 
-**Implementation handoff 2026-10-22 — branch 286-view-controls-userguide:** [Spec 286 U0 + U0b + U1](../specs/286-view-controls-userguide/tasks.md)
+**Implementation handoff 2026-10-23 — branch 286-view-controls-userguide:** [Spec 286 U0 + U0b + U0c + U1 + U2](../specs/286-view-controls-userguide/tasks.md)
 source/tests landed. Footer regions fit their actual client rect with no scrollbars; FPS hover
 discloses the existing counters. U0b docks Inspector/World/Model/PM4 under the minimap, resizable
 and persisted, chat starts collapsed. **U1:** one `ViewPreferencesService` (owned by
-`ViewerUiManager`) owns the user text size; View, Settings and the settings loader all use it and
-only the manager writes `FontGlobalScale` (display × user composition). View now holds Visual
-Options..., Camera and Fog..., a Text Size submenu and three named resets — **Reset Text Size
-Only / Reset Layout Only / Reset Layout and Text Size** (the old "Reset Shell Layout" label is
-retired). T001–T007, T049–T052 and T009–T015 checked; 82/82 focused tests; solution build 0
-errors; registry 121/121, 0 warnings. **U1 started with T008 still open (operator direction).**
-Next: operator runtime proof — T008 (SC-008/010/011) and T016 (SC-001–003: View reachability,
-the three resets, restart persistence, 0.85–2.20 legibility at 1080p/1440p/4K; known risk: style
-metrics scale with display only, text with user × display) — then U2 (Maps once per activation).
+`ViewerUiManager`) owns user text size; View, Settings and the loader all use it and only the
+manager writes `FontGlobalScale`. View holds Visual Options..., Camera and Fog..., a Text Size
+submenu and three named resets (**Reset Text Size Only / Reset Layout Only / Reset Layout and Text Size**).
+**U2 (2026-10-23):** session-owned `MapsActivationCoordinator` and pure `MapsActivationPolicy`
+govern client activations (MPQ, CASC, WC3); Maps opens once per successful activation (FR-007/008)
+including 0-map empty state (FR-009); ordinary refresh and user close respected; auto-dismisses on map load;
+11/11 U2 tests pass, 101/101 cumulative focused pass; solution build 0 errors; registry 119/119, 0 warnings.
+T001–T007, T049–T056, T009–T015, and T017–T023 checked. Next: operator runtime proof —
+T008 (SC-008/010/011), T057 (SC-012), T016 (SC-001–003), and T024 (SC-004/005) — then U3
+(Contextual selected identity and hover).
 [U0 receipt](../specs/286-view-controls-userguide/evidence/u0-source-tests.md),
 [U0b receipt](../specs/286-view-controls-userguide/evidence/right-dock-and-chat-2026-10-22.md),
-[U1 receipt](../specs/286-view-controls-userguide/evidence/u1-source-tests.md).
+[U0c receipt](../specs/286-view-controls-userguide/evidence/u0c-dock-and-footer-2026-10-22.md),
+[U1 receipt](../specs/286-view-controls-userguide/evidence/u1-source-tests.md),
+[U2 receipt](../specs/286-view-controls-userguide/evidence/u2-source-tests.md),
+[U2 route audit](../specs/286-view-controls-userguide/evidence/u2-activation-route-audit.md).
 [Renderer plan](../specs/249-epic-renderer-performance-and-correctness/plan.md)
 owns evidence-gated sky/liquid work; [flora plan](../specs/259-ground-effects-and-wmo-detail-doodads/plan.md)
 owns distance/density/fade. Preserve Spec 273/276 work, culling quarantine and reverted AC-009.

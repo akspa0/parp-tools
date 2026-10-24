@@ -516,6 +516,7 @@ internal sealed partial class WorldLoaderService
             // until the first terrain tiles are actually rendered (checked in OnRender).
             _loadingScreen?.SetWorldLoaded();
             PresentLoadingFrame();
+            _host.UiManager.CloseMapsWindow();
         }
         catch (Exception ex)
         {
@@ -611,6 +612,7 @@ internal sealed partial class WorldLoaderService
 
             _loadingScreen?.SetWorldLoaded();
             PresentLoadingFrame();
+            _host.UiManager.CloseMapsWindow();
         }
         catch (Exception ex)
         {

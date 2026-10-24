@@ -7,7 +7,7 @@
       "label": "Maps",
       "region": "Left action bar",
       "shortcut": null,
-      "help": "Open map browsing, map loading, and spawn-point preview in a closeable window.",
+      "help": "Open map browsing, map loading, and spawn-point preview in a closeable window. Automatically opens once per successful client activation.",
       "visible": true
     },
     {

@@ -117,7 +117,12 @@ internal sealed partial class NavigatorPanelService
 
     private void DrawMapDiscoveryContent()
     {
-        if (_discoveredMaps.Count == 0) return;
+        if (_discoveredMaps.Count == 0)
+        {
+            ImGui.Spacing();
+            ImGui.TextDisabled("No maps discovered in active client.");
+            return;
+        }
 
         ImGui.Text($"{_discoveredMaps.Count} maps discovered");
         DrawMapSortModeSelector("##mapListSort");

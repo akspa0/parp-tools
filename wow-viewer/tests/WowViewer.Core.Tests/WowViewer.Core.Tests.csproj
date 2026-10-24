@@ -40,6 +40,9 @@
     <!-- Spec 286 U1: the text-scale and reset rules are pure, shared with the viewer. -->
     <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\Settings\ViewPreferencePolicy.cs"
              Link="UI\ViewPreferencePolicy.cs" />
+    <!-- Spec 286 U2: the maps activation policy is pure, shared with the viewer. -->
+    <Compile Include="..\..\src\viewer\WoWViewer\Workbench\Services\DataSourceSession\MapsActivationPolicy.cs"
+             Link="UI\MapsActivationPolicy.cs" />
   </ItemGroup>
 
   <ItemGroup>

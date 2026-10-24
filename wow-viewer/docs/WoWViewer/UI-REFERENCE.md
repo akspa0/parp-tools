@@ -37,7 +37,7 @@ Controls documented: **119**
 | Capture | - | Open or close the camera and capture window. |
 | Diagnostics | - | Open runtime statistics, logs, performance and load-phase controls. |
 | File Browser | - | Open the client file browser in a closeable window. |
-| Maps | - | Open map browsing, map loading, and spawn-point preview in a closeable window. |
+| Maps | - | Open map browsing, map loading, and spawn-point preview in a closeable window. Automatically opens once per successful client activation. |
 | Taxi | - | Open or close the Taxi and Routes window. |
 | Workspace | - | Open the Workspace window for camera, fog, and source controls. |
 ## Left sidebar > Diagnostics

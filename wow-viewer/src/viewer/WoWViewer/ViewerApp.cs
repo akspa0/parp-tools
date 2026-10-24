@@ -1387,9 +1387,6 @@ void main() {
         _selectedObjectType = type;
         _selectedObjectIndex = idx;
 
-        if (_worldScene.Selection.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo or Terrain.ObjectType.WmoDoodad)
-            _uiManager.OpenViewer(ViewerPanel.Model);
-
         // WMO doodads come from MODD, which has no uniqueId — uniqueId identifies an MDDF/MODF
         // placement in an ADT. Showing the MODD table index under a "UniqueId" label asserts a
         // relationship that does not exist. Label it for what it is.

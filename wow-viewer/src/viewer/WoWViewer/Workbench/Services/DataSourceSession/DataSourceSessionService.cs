@@ -53,11 +53,18 @@ namespace WoWViewer;
 internal sealed class DataSourceSessionService
 {
     private readonly IViewerAppHost _host;
+    private readonly MapsActivationCoordinator _activationCoordinator;
 
     internal DataSourceSessionService(IViewerAppHost host)
     {
         _host = host;
+        _activationCoordinator = new MapsActivationCoordinator(() => _host.UiManager.OpenMapsWindow());
     }
+
+    internal MapsActivationCoordinator ActivationCoordinator => _activationCoordinator;
+    internal long CommitActivation(string sourceName) => _activationCoordinator.CommitActivation(sourceName);
+    internal bool NotifyDiscoveryCompleted(long generation, int mapCount, bool isSuccess, string? errorMessage = null)
+        => _activationCoordinator.NotifyDiscoveryCompleted(generation, mapCount, isSuccess, errorMessage);
 
     // Host bridge (same names as the former ViewerApp members).
     private ref AreaTableService? _areaTableService => ref _host.AreaTableService;
@@ -184,6 +191,8 @@ internal sealed class DataSourceSessionService
             _wdlPreview.ResetWdlPreviewSupport();
             _dataSource?.Dispose();
             _dataSource = source;
+            long generation = _activationCoordinator.CommitActivation(rootPath);
+            _activationCoordinator.NotifyDiscoveryCompleted(generation, 0, isSuccess: true);
             _texResolver = null;
             _dbcProvider = null;
             _dbdDir = null;
@@ -250,7 +259,8 @@ internal sealed class DataSourceSessionService
                 $"Discovered {_discoveredMaps.Count} loose maps without Map.dbc metadata.");
         }
 
-        _autoOpenWorldMapsPanel = _discoveredMaps.Count > 0 && previousDiscoveredMapCount == 0;
+        _autoOpenWorldMapsPanel = false;
+        _activationCoordinator.NotifyDiscoveryCompleted(_activationCoordinator.CurrentGeneration, _discoveredMaps.Count, isSuccess: true);
         _wdlPreview.WarmDiscoveredWdlPreviews();
     }
 
@@ -272,6 +282,7 @@ internal sealed class DataSourceSessionService
             _dataSource?.Dispose();
             _dataSource = new MpqDataSource(gamePath, resolvedListfilePath);
             _statusMessage = $"Loaded: {_dataSource.Name}";
+            _activationCoordinator.CommitActivation(gamePath);
             _wdlPreview.InitializeWdlPreviewSupport();
 
             // Load DBC tables directly from MPQ for replaceable texture resolution

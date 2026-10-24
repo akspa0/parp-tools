@@ -31,6 +31,9 @@ internal sealed class ViewerActionBarsService
 
     internal bool IsCaptureOpen => _windows["capture"].Open;
     internal bool IsOptionsOpen => _windows["options"].Open;
+    internal bool IsMapsOpen => _windows["maps"].Open;
+    internal void OpenMapsWindow() => _windows["maps"].Open = true;
+    internal void CloseMapsWindow() => _windows["maps"].Open = false;
     internal void OpenOptionsWindow() => _windows["options"].Open = true;
     internal void ToggleOptionsWindow() => ToggleWindow("options");
     internal void CloseAll()

@@ -194,6 +194,9 @@ internal sealed partial class ViewerUiManager
         SaveLayout();
     }
 
+    internal bool IsMapsOpen => _actionBars.IsMapsOpen;
+    internal void OpenMapsWindow() => _actionBars.OpenMapsWindow();
+    internal void CloseMapsWindow() => _actionBars.CloseMapsWindow();
     internal void OpenOptions() => _actionBars.OpenOptionsWindow();
     internal void ToggleOptions() => _actionBars.ToggleOptionsWindow();
     internal void OpenWorkspaceWindow() => _actionBars.OpenWorkspaceWindow();

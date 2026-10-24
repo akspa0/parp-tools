@@ -1,0 +1,16 @@
+listfile load: 2017 ms (2274746 entries)
+Loaded local CASC indices in 6ms
+Configs loaded in 10ms
+Group index loaded in 1ms
+Encoding loaded in 1ms
+File index loaded in 1ms
+Root loaded in 69ms
+Install loaded in 3ms
+storage open: 105 ms (cdn fill False)
+GetFileList base build (FileExists over listfile): 121 ms (1228879 present)
+one GetFileList(".blp") filter pass: 25 ms (593984 matches)
+file set: 521 WMO roots + groups = 3179 files, 3111 M2 + skins; total 9401 (all already read once above: warm)
+read A/B stock (map archive per read) sequential     2407 ms (   3905 files/s, 406.3 MB)   parallel x8      941 ms (   9989 files/s)
+read A/B fast (cached handles)        sequential      844 ms (  11143 files/s, 406.3 MB)   parallel x8      154 ms (  61220 files/s)
+read A/B byte-for-byte over 9401 files: 9401 identical, 0 DIFFERENT, 0 unreadable by both
+read A/B counters: fast 41973 (avg 0.118 ms), stock 28203 (avg 0.432 ms), shadow-checked 64, shadow mismatches 0, fast path on

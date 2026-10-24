@@ -1,0 +1,84 @@
+using System.Diagnostics;
+using System.IO.MemoryMappedFiles;
+using Microsoft.Win32.SafeHandles;
+
+// Per-read cost of two ways to read a slice out of a large archive file.
+//  A = TACTSharp CDN.TryGetLocalFile pattern: FileInfo stat + map the WHOLE file + view + copy, then the caller copies again.
+//  B = one cached read-only handle + RandomAccess.Read into the result array (one copy).
+string dir = args.Length > 0 ? args[0] : Path.GetTempPath();
+string path = Path.Combine(dir, "data.probe");
+const long FileSize = 768L * 1024 * 1024;
+if (!File.Exists(path) || new FileInfo(path).Length != FileSize)
+{
+    var rnd = new Random(1);
+    var chunk = new byte[1 << 20];
+    using var fs = new FileStream(path, FileMode.Create, FileAccess.Write);
+    for (long w = 0; w < FileSize; w += chunk.Length) { rnd.NextBytes(chunk); fs.Write(chunk); }
+}
+// Warm the OS cache so both paths measure call overhead, as the existing bench does ("warm OS cache").
+using (var warm = File.OpenRead(path)) { var b = new byte[1 << 20]; while (warm.Read(b) > 0) { } }
+
+static byte[] ReadA(string p, long off, int size)
+{
+    long len = new FileInfo(p).Length;
+    using var mmf = MemoryMappedFile.CreateFromFile(p, FileMode.Open, null, 0, MemoryMappedFileAccess.Read);
+    using var acc = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+    using var h = acc.SafeMemoryMappedViewHandle;
+    unsafe
+    {
+        byte* ptr = null;
+        try
+        {
+            h.AcquirePointer(ref ptr);
+            if (off + size > len) return Array.Empty<byte>();
+            byte[] first = new ReadOnlySpan<byte>(ptr + off, size).ToArray();   // TryGetLocalFile
+            return first.AsSpan().ToArray();                                     // DownloadFileFromArchive: data.ToArray()
+        }
+        finally { h.ReleasePointer(); }
+    }
+}
+
+SafeFileHandle handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, FileOptions.RandomAccess);
+byte[] ReadB(long off, int size)
+{
+    var buf = new byte[size];
+    int got = 0;
+    while (got < size) { int n = RandomAccess.Read(handle, buf.AsSpan(got), off + got); if (n <= 0) break; got += n; }
+    return buf;
+}
+
+// Equivalence: identical bytes for a spread of offsets.
+var offs = new Random(7);
+for (int i = 0; i < 200; i++)
+{
+    int sz = 1 + offs.Next(200_000); long o = offs.NextInt64(0, FileSize - sz);
+    if (!ReadA(path, o, sz).AsSpan().SequenceEqual(ReadB(o, sz))) { Console.WriteLine("MISMATCH"); return; }
+}
+Console.WriteLine("equivalence: 200 random slices identical");
+
+void Run(string label, int size, int threads, int reads)
+{
+    var rnd = new Random(42);
+    var offsets = new long[reads];
+    for (int i = 0; i < reads; i++) offsets[i] = rnd.NextInt64(0, FileSize - size);
+    foreach (string mode in new[] { "A mmap-per-read", "B cached handle" })
+    {
+        // warm-up
+        for (int i = 0; i < 50; i++) _ = mode[0] == 'A' ? ReadA(path, offsets[i], size) : ReadB(offsets[i], size);
+        var sw = Stopwatch.StartNew();
+        long total = 0;
+        Parallel.For(0, reads, new ParallelOptions { MaxDegreeOfParallelism = threads }, i =>
+        {
+            byte[] d = mode[0] == 'A' ? ReadA(path, offsets[i], size) : ReadB(offsets[i], size);
+            Interlocked.Add(ref total, d.Length);
+        });
+        sw.Stop();
+        Console.WriteLine($"{label,-22} {mode,-16} {sw.Elapsed.TotalMilliseconds * 1000 / reads,8:F1} us/read  {reads / sw.Elapsed.TotalSeconds,9:F0} reads/s  {total / 1048576.0 / sw.Elapsed.TotalSeconds,8:F0} MB/s");
+    }
+}
+Run("4 KB x1 thread", 4 * 1024, 1, 20000);
+Run("4 KB x8 threads", 4 * 1024, 8, 40000);
+Run("64 KB x1 thread", 64 * 1024, 1, 8000);
+Run("64 KB x8 threads", 64 * 1024, 8, 16000);
+Run("1 MB x8 threads", 1024 * 1024, 8, 2000);
+Console.WriteLine("(" + Environment.ProcessorCount + " logical processors)");
