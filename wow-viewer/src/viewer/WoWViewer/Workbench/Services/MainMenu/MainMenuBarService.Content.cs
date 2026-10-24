@@ -132,7 +132,6 @@ internal sealed partial class MainMenuBarService
         ImGui.TextWrapped("World/model viewer and debugging surface for WoW Alpha, Wrath, and early Cataclysm data.");
         ImGui.Spacing();
         ImGui.TextWrapped("Author: github.com/akspa0/parp-tools");
-        ImGui.TextWrapped("Discord: discord.gg/6YdUksuKuU");
         ImGui.Spacing();
         ImGui.TextUnformatted("In memory of Hayven Games");
         ImGui.TextWrapped("An inspiration for this project and a friend, whose short films explored World of Warcraft's secrets and little-known details through game footage.");
@@ -144,7 +143,7 @@ internal sealed partial class MainMenuBarService
         ImGui.TextWrapped("Without the WoW Exploration community, this project would not exist. Everyone named here contributed inspiration to this project in some way.");
         ImGui.TextDisabled("This tooling is about restoration, not touching up or polishing what we recover - it is the instrument for restoring what already exists. Noggit and Noggit-Red remain the preferred editors for fine-tuning the results this library and tooling produce.");
         ImGui.Spacing();
-        ImGui.TextWrapped("Special thanks to WoWdev.wiki, Exploration Reboot, The Alpha Project, and everyone in the Pre-Alpha Restoration Project discord!");
+        ImGui.TextWrapped("Special thanks to WoWdev.wiki, Exploration Reboot, and The Alpha Project!");
         ImGui.Spacing();
     }
 
