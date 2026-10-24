@@ -1391,7 +1391,11 @@ void main() {
         // relationship that does not exist. Label it for what it is.
         string identityLine = _worldScene.Selection.SelectedObjectType == Terrain.ObjectType.WmoDoodad
             ? $"Doodad def: {inst.PlacementEntryIndex} (MODD index, WMO-local; MODD has no uniqueId)\n"
-            : $"UniqueId: {inst.UniqueId}\n";
+            : (inst.SpawnId.HasValue
+                ? (inst.DisplayId.HasValue
+                    ? $"Spawn GUID: {inst.SpawnId.Value}  DisplayID: {inst.DisplayId.Value}\n"
+                    : $"Spawn GUID: {inst.SpawnId.Value}\n")
+                : (inst.UniqueId > 0 ? $"UniqueId: {inst.UniqueId}\n" : ""));
 
         string entityHeader = "";
         if (!string.IsNullOrEmpty(inst.DisplayName))

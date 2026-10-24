@@ -174,7 +174,12 @@ internal sealed partial class InspectorPayloadsService
                 entity.Row("Template Entry", $"{inst.SpawnEntryId.Value}", isImportant: true);
             if (!string.IsNullOrEmpty(inst.AssetKind))
                 entity.Row("Entity Kind", inst.AssetKind);
-            entity.Row("Spawn ID", $"{inst.UniqueId}");
+            if (inst.SpawnId.HasValue)
+                entity.Row("Spawn GUID", $"{inst.SpawnId.Value}", isImportant: true);
+            if (inst.DisplayId.HasValue)
+                entity.Row("Display ID", $"{inst.DisplayId.Value}");
+            if (inst.FileDataId.HasValue)
+                entity.Row("FileDataID", $"{inst.FileDataId.Value}");
         }
         else
         {
@@ -190,7 +195,8 @@ internal sealed partial class InspectorPayloadsService
         placement.Row("WoW Coordinates", $"({wowX:F2}, {wowY:F2}, {wowZ:F2})");
         placement.Row("Rotation", $"({inst.PlacementRotation.X:F1}°, {inst.PlacementRotation.Y:F1}°, {inst.PlacementRotation.Z:F1}°)");
         placement.Row("Scale", $"{inst.PlacementScale:F3}");
-        placement.Row("UniqueId", $"{inst.UniqueId}");
+        if (!inst.SpawnId.HasValue && inst.UniqueId > 0)
+            placement.Row("UniqueId", $"{inst.UniqueId}");
         placement.Row("Bounds", $"Min ({inst.BoundsMin.X:F1}, {inst.BoundsMin.Y:F1}, {inst.BoundsMin.Z:F1}) Max ({inst.BoundsMax.X:F1}, {inst.BoundsMax.Y:F1}, {inst.BoundsMax.Z:F1})");
 
         string normKey = WorldAssetManager.NormalizeKey(inst.ModelPath);
@@ -303,7 +309,12 @@ internal sealed partial class InspectorPayloadsService
                 entity.Row("Template Entry", $"{inst.SpawnEntryId.Value}", isImportant: true);
             if (!string.IsNullOrEmpty(inst.AssetKind))
                 entity.Row("Entity Kind", inst.AssetKind);
-            entity.Row("Spawn ID", $"{inst.UniqueId}");
+            if (inst.SpawnId.HasValue)
+                entity.Row("Spawn GUID", $"{inst.SpawnId.Value}", isImportant: true);
+            if (inst.DisplayId.HasValue)
+                entity.Row("Display ID", $"{inst.DisplayId.Value}");
+            if (inst.FileDataId.HasValue)
+                entity.Row("FileDataID", $"{inst.FileDataId.Value}");
         }
         else
         {
@@ -319,7 +330,8 @@ internal sealed partial class InspectorPayloadsService
         placement.Row("WoW Coordinates", $"({wowX:F2}, {wowY:F2}, {wowZ:F2})");
         placement.Row("Rotation", $"({inst.PlacementRotation.X:F1}°, {inst.PlacementRotation.Y:F1}°, {inst.PlacementRotation.Z:F1}°)");
         placement.Row("Scale", $"{inst.PlacementScale:F3}");
-        placement.Row("UniqueId", $"{inst.UniqueId}");
+        if (!inst.SpawnId.HasValue && inst.UniqueId > 0)
+            placement.Row("UniqueId", $"{inst.UniqueId}");
         placement.Row("Bounds", $"Min ({inst.BoundsMin.X:F1}, {inst.BoundsMin.Y:F1}, {inst.BoundsMin.Z:F1}) Max ({inst.BoundsMax.X:F1}, {inst.BoundsMax.Y:F1}, {inst.BoundsMax.Z:F1})");
 
         string normKey = WorldAssetManager.NormalizeKey(inst.ModelPath);

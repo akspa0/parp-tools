@@ -5,17 +5,51 @@ namespace WowViewer.Core.IO.Population;
 
 /// <summary>
 /// Resolves creature and gameobject display IDs into canonical model paths and scales
-/// using CreatureDisplayInfo, CreatureModelData, and GameObjectDisplayInfo tables.
+/// using CreatureDisplayInfo, CreatureModelData, and GameObjectDisplayInfo tables,
+/// matched accurately against client MPQ internal listfiles.
 /// </summary>
 public sealed class DbcModelResolver : IDbcModelResolver
 {
-    private readonly Dictionary<int, (string modelPath, float scale)> _creatureDisplays = new();
-    private readonly Dictionary<int, (string modelPath, float scale)> _gameObjectDisplays = new();
+    private readonly Dictionary<int, (string modelPath, float scale, uint? fileDataId)> _creatureDisplays = new();
+    private readonly Dictionary<int, (string modelPath, float scale, uint? fileDataId)> _gameObjectDisplays = new();
     private readonly Dictionary<int, string> _mapNames = new();
+
+    private readonly HashSet<string> _availableFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<string>> _filesByBaseName = new(StringComparer.OrdinalIgnoreCase);
 
     public int CreatureDisplayCount => _creatureDisplays.Count;
     public int GameObjectDisplayCount => _gameObjectDisplays.Count;
     public int MapCount => _mapNames.Count;
+    public int AvailableFileCount => _availableFiles.Count;
+
+    public string? PreferredClientVersion { get; set; }
+
+    public void SetAvailableFiles(IEnumerable<string> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        _availableFiles.Clear();
+        _filesByBaseName.Clear();
+
+        foreach (var file in files)
+        {
+            if (string.IsNullOrWhiteSpace(file))
+                continue;
+
+            string normalized = file.Trim().Replace('/', '\\');
+            _availableFiles.Add(normalized);
+
+            string baseName = Path.GetFileNameWithoutExtension(normalized);
+            if (!string.IsNullOrEmpty(baseName))
+            {
+                if (!_filesByBaseName.TryGetValue(baseName, out var list))
+                {
+                    list = new List<string>();
+                    _filesByBaseName[baseName] = list;
+                }
+                list.Add(normalized);
+            }
+        }
+    }
 
     public string GetMapName(int mapId)
     {
@@ -33,42 +67,188 @@ public sealed class DbcModelResolver : IDbcModelResolver
 
     public bool TryResolveCreature(int displayId, out string? modelPath, out float displayScale)
     {
+        return TryResolveCreature(displayId, out modelPath, out displayScale, out _);
+    }
+
+    public bool TryResolveCreature(int displayId, out string? modelPath, out float displayScale, out uint? fileDataId)
+    {
         if (_creatureDisplays.TryGetValue(displayId, out var entry))
         {
             modelPath = entry.modelPath;
             displayScale = entry.scale;
+            fileDataId = entry.fileDataId;
             return true;
         }
 
         modelPath = null;
         displayScale = 1.0f;
+        fileDataId = null;
         return false;
     }
 
     public bool TryResolveGameObject(int displayId, out string? modelPath, out float displayScale)
     {
+        return TryResolveGameObject(displayId, out modelPath, out displayScale, out _);
+    }
+
+    public bool TryResolveGameObject(int displayId, out string? modelPath, out float displayScale, out uint? fileDataId)
+    {
         if (_gameObjectDisplays.TryGetValue(displayId, out var entry))
         {
             modelPath = entry.modelPath;
             displayScale = entry.scale;
+            fileDataId = entry.fileDataId;
             return true;
         }
 
         modelPath = null;
         displayScale = 1.0f;
+        fileDataId = null;
         return false;
     }
 
-    public void RegisterCreature(int displayId, string modelPath, float scale = 1.0f)
+    public void RegisterCreature(int displayId, string modelPath, float scale = 1.0f, uint? fileDataId = null)
     {
         if (displayId > 0 && !string.IsNullOrWhiteSpace(modelPath))
-            _creatureDisplays[displayId] = (NormalizeCreaturePath(modelPath), scale > 0 ? scale : 1.0f);
+        {
+            string resolved = ResolveModelPath(modelPath, isCreature: true);
+            _creatureDisplays[displayId] = (resolved, scale > 0 ? scale : 1.0f, fileDataId);
+        }
     }
 
-    public void RegisterGameObject(int displayId, string modelPath, float scale = 1.0f)
+    public void RegisterGameObject(int displayId, string modelPath, float scale = 1.0f, uint? fileDataId = null)
     {
         if (displayId > 0 && !string.IsNullOrWhiteSpace(modelPath))
-            _gameObjectDisplays[displayId] = (NormalizeGameObjectPath(modelPath), scale > 0 ? scale : 1.0f);
+        {
+            string resolved = ResolveModelPath(modelPath, isCreature: false);
+            _gameObjectDisplays[displayId] = (resolved, scale > 0 ? scale : 1.0f, fileDataId);
+        }
+    }
+
+    public string ResolveModelPath(string rawPath, bool isCreature)
+    {
+        string p = rawPath.Trim().Replace('/', '\\');
+
+        // 1. If internal listfile files are available, match against them:
+        if (_availableFiles.Count > 0)
+        {
+            if (_availableFiles.Contains(p))
+                return p;
+
+            // Try swapping extension: .mdx <-> .m2 <-> .mdl
+            foreach (var alt in GetAlternatePaths(p))
+            {
+                if (_availableFiles.Contains(alt))
+                    return alt;
+            }
+
+            // If not found, look up by base filename in catalog
+            string baseName = Path.GetFileNameWithoutExtension(p);
+            if (_filesByBaseName.TryGetValue(baseName, out var matches) && matches.Count > 0)
+            {
+                string prefix = isCreature ? "Creature\\" : "World\\";
+                var preferred = matches.FirstOrDefault(m => m.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    ?? matches[0];
+                return preferred;
+            }
+        }
+
+        // 2. Fallback normalization when listfile is not present or model not indexed
+        bool hasListfile = _availableFiles.Count > 0;
+        bool isVersion335 = string.Equals(PreferredClientVersion, "3.3.5a", StringComparison.OrdinalIgnoreCase);
+        bool isVersion053 = string.Equals(PreferredClientVersion, "0.5.3", StringComparison.OrdinalIgnoreCase);
+
+        bool preferM2ForCreature = isVersion335 || (!isVersion053 && (!hasListfile || HasMostlyM2Files()));
+        bool preferM2ForGameObject = isVersion335 || (!isVersion053 && (hasListfile && HasMostlyM2Files()));
+
+        return isCreature
+            ? NormalizeCreaturePathFallback(p, preferM2ForCreature)
+            : NormalizeGameObjectPathFallback(p, preferM2ForGameObject);
+    }
+
+    private bool HasMostlyM2Files()
+    {
+        if (_availableFiles.Count == 0) return true; // Default to modern/3.3.5
+        int m2Count = 0;
+        int mdxCount = 0;
+        foreach (var f in _availableFiles)
+        {
+            if (f.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)) m2Count++;
+            else if (f.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase)) mdxCount++;
+        }
+        return m2Count >= mdxCount;
+    }
+
+    private static IEnumerable<string> GetAlternatePaths(string path)
+    {
+        if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return path[..^4] + ".m2";
+            yield return path[..^4] + ".mdl";
+        }
+        else if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return path[..^3] + ".mdx";
+            yield return path[..^3] + ".mdl";
+        }
+        else if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return path[..^4] + ".m2";
+            yield return path[..^4] + ".mdx";
+        }
+    }
+
+    private static string NormalizeCreaturePathFallback(string path, bool preferM2)
+    {
+        string p = path.Trim().Replace('/', '\\');
+        if (preferM2)
+        {
+            if (p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+                p = p[..^4] + ".m2";
+            else if (!p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                p += ".m2";
+        }
+        else
+        {
+            if (p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                p = p[..^3] + ".mdx";
+            else if (!p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+                p += ".mdx";
+        }
+
+        if (!p.StartsWith("Creature\\", StringComparison.OrdinalIgnoreCase) &&
+            !p.StartsWith("Character\\", StringComparison.OrdinalIgnoreCase) &&
+            !p.Contains('\\'))
+        {
+            string name = Path.GetFileNameWithoutExtension(p);
+            p = $"Creature\\{name}\\{p}";
+        }
+
+        return p;
+    }
+
+    private static string NormalizeGameObjectPathFallback(string path, bool preferM2)
+    {
+        string p = path.Trim().Replace('/', '\\');
+        if (p.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+            return p;
+
+        if (preferM2)
+        {
+            if (p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+                p = p[..^4] + ".m2";
+            else if (!p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                p += ".m2";
+        }
+        else
+        {
+            if (p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                p = p[..^3] + ".mdx";
+            else if (!p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+                p += ".mdx";
+        }
+
+        return p;
     }
 
     /// <summary>
@@ -77,6 +257,11 @@ public sealed class DbcModelResolver : IDbcModelResolver
     public void MergeFrom(DbcModelResolver other)
     {
         ArgumentNullException.ThrowIfNull(other);
+        if (_availableFiles.Count == 0 && other._availableFiles.Count > 0)
+        {
+            SetAvailableFiles(other._availableFiles);
+        }
+
         foreach (var (id, entry) in other._creatureDisplays)
         {
             _creatureDisplays[id] = entry;
@@ -94,7 +279,7 @@ public sealed class DbcModelResolver : IDbcModelResolver
     /// <summary>
     /// Loads DBC files from a path, which can be a directory (loose DBCs or MPQs) or a single MPQ archive.
     /// </summary>
-    public static DbcModelResolver LoadFromPath(string path)
+    public static DbcModelResolver LoadFromPath(string path, string? clientVersion = null)
     {
         if (string.IsNullOrWhiteSpace(path))
             return new DbcModelResolver();
@@ -105,7 +290,9 @@ public sealed class DbcModelResolver : IDbcModelResolver
             {
                 using var catalog = new MpqArchiveCatalog();
                 catalog.LoadArchives([Path.GetDirectoryName(path) ?? path]);
-                return LoadFromArchive(catalog);
+                var resolver = LoadFromArchive(catalog);
+                if (clientVersion != null) resolver.PreferredClientVersion = clientVersion;
+                return resolver;
             }
             catch
             {
@@ -115,7 +302,9 @@ public sealed class DbcModelResolver : IDbcModelResolver
 
         if (Directory.Exists(path))
         {
-            return LoadFromDirectory(path);
+            var resolver = LoadFromDirectory(path);
+            if (clientVersion != null) resolver.PreferredClientVersion = clientVersion;
+            return resolver;
         }
 
         return new DbcModelResolver();
@@ -149,23 +338,39 @@ public sealed class DbcModelResolver : IDbcModelResolver
         byte[]? gdiBytes = File.Exists(gdi) ? File.ReadAllBytes(gdi) : null;
         byte[]? mapBytes = File.Exists(map) ? File.ReadAllBytes(map) : null;
 
-        if (cdiBytes != null || cmdBytes != null || gdiBytes != null || mapBytes != null)
+        // If all 3 essential display DBCs exist loose, load them directly
+        if (cdiBytes != null && cmdBytes != null && gdiBytes != null)
         {
             resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes);
             return resolver;
         }
 
-        // If no loose DBCs exist, try loading via MPQs located in the directory or its client hierarchy
+        // If loose display DBCs are missing or incomplete, search for MPQ archives
         try
         {
             using var catalog = new MpqArchiveCatalog();
             catalog.LoadArchives([directory]);
-            return LoadFromArchive(catalog);
+            var archiveResolver = LoadFromArchive(catalog);
+            if (archiveResolver.CreatureDisplayCount > 0 || archiveResolver.GameObjectDisplayCount > 0)
+            {
+                if (mapBytes != null && archiveResolver.MapCount == 0)
+                {
+                    archiveResolver.LoadData(null, null, null, mapBytes);
+                }
+                return archiveResolver;
+            }
         }
         catch
         {
-            return resolver;
         }
+
+        // Fallback to partial loose data if MPQ search yielded nothing
+        if (cdiBytes != null || cmdBytes != null || gdiBytes != null || mapBytes != null)
+        {
+            resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes);
+        }
+
+        return resolver;
     }
 
     /// <summary>
@@ -186,6 +391,18 @@ public sealed class DbcModelResolver : IDbcModelResolver
         byte[]? mapBytes = catalog.ReadFile("DBFilesClient\\Map.dbc")
             ?? catalog.ReadFile("DBFilesClient/Map.dbc")
             ?? catalog.ReadFile("Map.dbc");
+
+        try
+        {
+            var internalFiles = catalog.ExtractInternalListfiles();
+            if (internalFiles.Count > 0)
+            {
+                resolver.SetAvailableFiles(internalFiles);
+            }
+        }
+        catch
+        {
+        }
 
         resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes);
         return resolver;
@@ -280,33 +497,11 @@ public sealed class DbcModelResolver : IDbcModelResolver
 
     public static string NormalizeCreaturePath(string path)
     {
-        string p = path.Trim().Replace('/', '\\');
-        if (!p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) && !p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
-        {
-            p += ".m2";
-        }
-
-        if (!p.StartsWith("Creature\\", StringComparison.OrdinalIgnoreCase) &&
-            !p.StartsWith("Character\\", StringComparison.OrdinalIgnoreCase) &&
-            !p.Contains('\\'))
-        {
-            string name = Path.GetFileNameWithoutExtension(p);
-            p = $"Creature\\{name}\\{p}";
-        }
-
-        return p;
+        return NormalizeCreaturePathFallback(path, preferM2: true);
     }
 
     public static string NormalizeGameObjectPath(string path)
     {
-        string p = path.Trim().Replace('/', '\\');
-        if (!p.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) &&
-            !p.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) &&
-            !p.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
-        {
-            p += ".mdx";
-        }
-
-        return p;
+        return NormalizeGameObjectPathFallback(path, preferM2: true);
     }
 }

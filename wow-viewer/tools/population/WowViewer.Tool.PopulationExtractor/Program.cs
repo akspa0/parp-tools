@@ -108,14 +108,15 @@ internal static class Program
 
         // Step 1: Initialize DBC Resolver with built-in fallbacks and client DBCs if provided
         var dbcResolver = new DbcModelResolver();
-        RegisterBuiltInDevModelFallbacks(dbcResolver);
+        dbcResolver.PreferredClientVersion = version;
+        RegisterBuiltInDevModelFallbacks(dbcResolver, version);
 
         if (!string.IsNullOrWhiteSpace(dbcDir))
         {
-            Console.WriteLine($"Loading client DBCs from {dbcDir}...");
-            var loadedResolver = DbcModelResolver.LoadFromPath(dbcDir);
+            Console.WriteLine($"Loading client DBCs from {dbcDir} (target version: {version})...");
+            var loadedResolver = DbcModelResolver.LoadFromPath(dbcDir, version);
             dbcResolver.MergeFrom(loadedResolver);
-            Console.WriteLine($"Loaded {loadedResolver.CreatureDisplayCount} creature displays, {loadedResolver.GameObjectDisplayCount} gameobject displays.");
+            Console.WriteLine($"Loaded {loadedResolver.CreatureDisplayCount} creature displays, {loadedResolver.GameObjectDisplayCount} gameobject displays, {loadedResolver.AvailableFileCount} internal files.");
         }
 
         // Step 2: Read SQL and extract map populations in a single high-throughput pass
@@ -142,7 +143,7 @@ internal static class Program
                     int displayId = (tmpl?.ModelIds != null && tmpl.ModelIds.Length > 0 && tmpl.ModelIds[0] > 0)
                         ? tmpl.ModelIds[0] : 0;
 
-                    dbcResolver.TryResolveCreature(displayId, out string? modelPath, out float displayScale);
+                    dbcResolver.TryResolveCreature(displayId, out string? modelPath, out float displayScale, out uint? fileDataId);
 
                     var orig = new PopulationRecord
                     {
@@ -153,6 +154,8 @@ internal static class Program
                         Name = name,
                         Subname = tmpl?.Subname,
                         ModelPath = modelPath,
+                        DisplayId = displayId,
+                        FileDataId = fileDataId,
                         Scale = tmpl?.Scale ?? 1.0f,
                         DisplayScale = displayScale,
                         EffectiveScale = (tmpl?.Scale ?? 1.0f) * displayScale,
@@ -183,7 +186,7 @@ internal static class Program
                     int displayId = tmpl?.DisplayId ?? 0;
                     int goType = tmpl?.Type ?? 0;
 
-                    dbcResolver.TryResolveGameObject(displayId, out string? modelPath, out float displayScale);
+                    dbcResolver.TryResolveGameObject(displayId, out string? modelPath, out float displayScale, out uint? fileDataId);
 
                     var orig = new PopulationRecord
                     {
@@ -194,6 +197,8 @@ internal static class Program
                         Name = name,
                         Subname = null,
                         ModelPath = modelPath,
+                        DisplayId = displayId,
+                        FileDataId = fileDataId,
                         Scale = scale,
                         DisplayScale = displayScale,
                         EffectiveScale = scale * displayScale,
@@ -278,22 +283,25 @@ internal static class Program
         return 0;
     }
 
-    private static void RegisterBuiltInDevModelFallbacks(DbcModelResolver resolver)
+    private static void RegisterBuiltInDevModelFallbacks(DbcModelResolver resolver, string version)
     {
+        bool isAlpha = string.Equals(version, "0.5.3", StringComparison.OrdinalIgnoreCase);
+        string ext = isAlpha ? ".mdx" : ".m2";
+
         // 3.3.5a Map 451 Creature Models
-        resolver.RegisterCreature(14379, @"Creature\FieldRepairBot\FieldRepairBot.m2", 1.25f);
+        resolver.RegisterCreature(14379, $@"Creature\FieldRepairBot\FieldRepairBot{ext}", 1.25f);
 
         // Alpha-Core Corner Prototype Test Fixtures (authentic 0.5.3 models)
-        resolver.RegisterCreature(907, @"Character\Human\Male\HumanMale.mdx", 1.0f);   // Twain The Tester & Jesse The Tester
-        resolver.RegisterCreature(251, @"Creature\HumanMaleKid\HumanMaleKid.mdx", 1.0f); // pnagle's test dude
-        resolver.RegisterCreature(2688, @"Character\Human\Male\HumanMale.mdx", 1.0f);  // CHOW Guard
+        resolver.RegisterCreature(907, $@"Character\Human\Male\HumanMale{ext}", 1.0f);   // Twain The Tester & Jesse The Tester
+        resolver.RegisterCreature(251, $@"Creature\HumanMaleKid\HumanMaleKid{ext}", 1.0f); // pnagle's test dude
+        resolver.RegisterCreature(2688, $@"Character\Human\Male\HumanMale{ext}", 1.0f);  // CHOW Guard
 
-        // 3.3.5a Map 451 GameObject Models
-        resolver.RegisterGameObject(399, @"World\Generic\Active\Anvil\Anvil.mdx", 1.0f);          // TEST BRONZE/MARBLE/STONE/SILVER
-        resolver.RegisterGameObject(233, @"World\Generic\Active\Forge\Forge.mdx", 1.0f);          // Forge
-        resolver.RegisterGameObject(245, @"World\Generic\Passive\Signposts\ScottMarker.mdx", 1.0f);// Scott's Marker
-        resolver.RegisterGameObject(273, @"World\Generic\Active\Anvil\Anvil.mdx", 1.0f);          // Anvil
-        resolver.RegisterGameObject(153, @"World\Generic\Active\Chests\OrcLock.mdx", 1.0f);       // Orc Lock
-        resolver.RegisterGameObject(307, @"World\Generic\Active\FirePit\FirePit.mdx", 1.0f);      // Firepit of Death
+        // Map 451 GameObject Models
+        resolver.RegisterGameObject(399, $@"World\Generic\Active\Anvil\Anvil{ext}", 1.0f);          // TEST BRONZE/MARBLE/STONE/SILVER
+        resolver.RegisterGameObject(233, $@"World\Generic\Active\Forge\Forge{ext}", 1.0f);          // Forge
+        resolver.RegisterGameObject(245, $@"World\Generic\Passive\Signposts\ScottMarker{ext}", 1.0f);// Scott's Marker
+        resolver.RegisterGameObject(273, $@"World\Generic\Active\Anvil\Anvil{ext}", 1.0f);          // Anvil
+        resolver.RegisterGameObject(153, $@"World\Generic\Active\Chests\OrcLock{ext}", 1.0f);       // Orc Lock
+        resolver.RegisterGameObject(307, $@"World\Generic\Active\FirePit\FirePit{ext}", 1.0f);      // Firepit of Death
     }
 }

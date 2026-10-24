@@ -460,9 +460,23 @@ internal sealed partial class SceneHoverAndPickService
         // WMO doodads have no uniqueId to report (MODD carries none), so the position is the whole
         // identity here. Printing "UniqueId: 0" would read as a real id.
         string position = $"Pos: ({hit.PlacementPosition.X:F1}, {hit.PlacementPosition.Y:F1}, {hit.PlacementPosition.Z:F1})";
-        string detail = hit.ObjectType == ObjectType.WmoDoodad
-            ? $"in WMO [{hit.ParentWmoIndex}]  {position}"
-            : $"UniqueId: {hit.UniqueId}  {position}";
+        string detail;
+        if (hit.ObjectType == ObjectType.WmoDoodad)
+        {
+            detail = $"in WMO [{hit.ParentWmoIndex}]  {position}";
+        }
+        else if (hit.SpawnId.HasValue)
+        {
+            detail = hit.DisplayId.HasValue && hit.DisplayId.Value > 0
+                ? $"Spawn GUID: {hit.SpawnId.Value}  DisplayID: {hit.DisplayId.Value}  {position}"
+                : $"Spawn GUID: {hit.SpawnId.Value}  {position}";
+        }
+        else
+        {
+            detail = hit.UniqueId > 0
+                ? $"UniqueId: {hit.UniqueId}  {position}"
+                : position;
+        }
 
         string title = !string.IsNullOrEmpty(hit.DisplayName)
             ? $"{hit.DisplayName}{(string.IsNullOrEmpty(hit.Subname) ? "" : $" <{hit.Subname}>")} ({hit.KindLabel})"

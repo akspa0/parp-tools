@@ -30,6 +30,9 @@ public struct WorldObjectInstance
     public string? DisplayName;
     public string? Subname;
     public int? SpawnEntryId;
+    public int? SpawnId;
+    public int? DisplayId;
+    public uint? FileDataId;
     public int UniqueId;
     public int PlacementEntryIndex;
     public int TileX;

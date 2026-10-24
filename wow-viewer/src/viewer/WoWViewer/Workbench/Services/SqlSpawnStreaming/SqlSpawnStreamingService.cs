@@ -227,7 +227,7 @@ internal sealed class SqlSpawnStreamingService
 
         var inst = _worldScene.Selection.SelectedInstance.Value;
         var spawn = _sqlMapSpawnsCache.FirstOrDefault(s =>
-            s.SpawnId == inst.UniqueId &&
+            (inst.SpawnId.HasValue ? s.SpawnId == inst.SpawnId.Value : s.SpawnId == inst.UniqueId) &&
             (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
         if (spawn == null)
             return;
@@ -539,15 +539,24 @@ internal sealed class SqlSpawnStreamingService
 
                 var spawnList = mapSpawns.ToList();
 
-                // If active client is 0.5.3 Alpha, normalize any .m2 model paths to .mdx directly
-                if (string.Equals(clientVer, "0.5.3", StringComparison.OrdinalIgnoreCase))
+                // Target version normalization based on active client:
+                // If active client is 0.5.3 Alpha, normalize any .m2 model paths to .mdx
+                // If active client is 3.3.5a, normalize any .mdx model paths to .m2 (for non-WMO models)
+                bool isAlpha053 = string.Equals(clientVer, "0.5.3", StringComparison.OrdinalIgnoreCase);
+                bool is335 = string.Equals(clientVer, "3.3.5a", StringComparison.OrdinalIgnoreCase);
+
+                for (int i = 0; i < spawnList.Count; i++)
                 {
-                    for (int i = 0; i < spawnList.Count; i++)
+                    var sp = spawnList[i];
+                    if (!string.IsNullOrEmpty(sp.ModelPath))
                     {
-                        var sp = spawnList[i];
-                        if (!string.IsNullOrEmpty(sp.ModelPath) && sp.ModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+                        if (isAlpha053 && sp.ModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
                         {
                             sp.ModelPath = sp.ModelPath[..^3] + ".mdx";
+                        }
+                        else if (is335 && sp.ModelPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+                        {
+                            sp.ModelPath = sp.ModelPath[..^4] + ".m2";
                         }
                     }
                 }
@@ -673,7 +682,7 @@ internal sealed class SqlSpawnStreamingService
 
         var inst = _worldScene.Selection.SelectedInstance.Value;
         return _sqlMapSpawnsCache.Any(s =>
-            s.SpawnId == inst.UniqueId &&
+            (inst.SpawnId.HasValue ? s.SpawnId == inst.SpawnId.Value : s.SpawnId == inst.UniqueId) &&
             (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
     }
 

@@ -177,6 +177,8 @@ public sealed class SqlWorldPopulationService : IDisposable
                     Name = s.Name,
                     Subname = s.Subname,
                     ModelPath = s.ModelPath,
+                    DisplayId = s.DisplayId,
+                    FileDataId = s.FileDataId,
                     Scale = s.Scale,
                     DisplayScale = s.DisplayScale,
                     EffectiveScale = s.EffectiveScale,

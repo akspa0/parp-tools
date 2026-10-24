@@ -415,9 +415,10 @@ public sealed class TrinityCoreSqlReader
 
             string? modelPath = null;
             float displayScale = 1.0f;
+            uint? fileDataId = null;
             if (displayId > 0 && dbcResolver != null)
             {
-                dbcResolver.TryResolveCreature(displayId, out modelPath, out displayScale);
+                dbcResolver.TryResolveCreature(displayId, out modelPath, out displayScale, out fileDataId);
             }
 
             records.Add(new PopulationRecord
@@ -429,6 +430,8 @@ public sealed class TrinityCoreSqlReader
                 Name = name,
                 Subname = subname,
                 ModelPath = modelPath,
+                DisplayId = displayId,
+                FileDataId = fileDataId,
                 Scale = scale,
                 DisplayScale = displayScale,
                 EffectiveScale = scale * displayScale,
@@ -454,9 +457,10 @@ public sealed class TrinityCoreSqlReader
 
             string? modelPath = null;
             float displayScale = 1.0f;
+            uint? fileDataId = null;
             if (displayId > 0 && dbcResolver != null)
             {
-                dbcResolver.TryResolveGameObject(displayId, out modelPath, out displayScale);
+                dbcResolver.TryResolveGameObject(displayId, out modelPath, out displayScale, out fileDataId);
             }
 
             records.Add(new PopulationRecord
@@ -468,6 +472,8 @@ public sealed class TrinityCoreSqlReader
                 Name = name,
                 Subname = null,
                 ModelPath = modelPath,
+                DisplayId = displayId,
+                FileDataId = fileDataId,
                 Scale = scale,
                 DisplayScale = displayScale,
                 EffectiveScale = scale * displayScale,
@@ -748,8 +754,9 @@ public sealed class TrinityCoreSqlReader
 
                     string? modelPath = null;
                     float displayScale = 1.0f;
+                    uint? fileDataId = null;
                     if (displayId > 0 && dbcResolver != null)
-                        dbcResolver.TryResolveCreature(displayId, out modelPath, out displayScale);
+                        dbcResolver.TryResolveCreature(displayId, out modelPath, out displayScale, out fileDataId);
 
                     records.Add(new PopulationRecord
                     {
@@ -760,6 +767,8 @@ public sealed class TrinityCoreSqlReader
                         Name = name,
                         Subname = subname,
                         ModelPath = modelPath,
+                        DisplayId = displayId,
+                        FileDataId = fileDataId,
                         Scale = scale,
                         DisplayScale = displayScale,
                         EffectiveScale = scale * displayScale,
@@ -787,8 +796,9 @@ public sealed class TrinityCoreSqlReader
 
                     string? modelPath = null;
                     float displayScale = 1.0f;
+                    uint? fileDataId = null;
                     if (displayId > 0 && dbcResolver != null)
-                        dbcResolver.TryResolveGameObject(displayId, out modelPath, out displayScale);
+                        dbcResolver.TryResolveGameObject(displayId, out modelPath, out displayScale, out fileDataId);
 
                     records.Add(new PopulationRecord
                     {
@@ -799,6 +809,8 @@ public sealed class TrinityCoreSqlReader
                         Name = name,
                         Subname = null,
                         ModelPath = modelPath,
+                        DisplayId = displayId,
+                        FileDataId = fileDataId,
                         Scale = scale,
                         DisplayScale = displayScale,
                         EffectiveScale = scale * displayScale,

@@ -156,9 +156,10 @@ public sealed class ExternalSpawnLayer
             if (string.IsNullOrWhiteSpace(spawn.ModelPath))
                 continue;
 
-            string modelPath = spawn.ModelPath.Replace('/', '\\');
-            bool isWmo = modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
+            string rawModelPath = spawn.ModelPath.Replace('/', '\\');
+            bool isWmo = rawModelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
 
+            string modelPath = isWmo ? rawModelPath : _assets.ResolveCanonicalModelPath(rawModelPath);
             string key = WorldAssetManager.NormalizeKey(modelPath);
             float orientationRadians = spawn.OrientationWowRadians;
             float yawOffsetRadians = spawn.SpawnType == WorldSpawnType.Creature ? MathF.PI : 0f;
@@ -213,11 +214,14 @@ public sealed class ExternalSpawnLayer
                     DisplayName = spawn.Name,
                     Subname = spawn.Subname,
                     SpawnEntryId = spawn.EntryId,
+                    SpawnId = spawn.SpawnId,
+                    DisplayId = spawn.DisplayId,
+                    FileDataId = spawn.FileDataId,
                     AssetKind = spawn.SpawnType == WorldSpawnType.Creature ? "NPC Spawn" : "GameObject Spawn",
                     PlacementPosition = pos,
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
                     PlacementScale = 1.0f,
-                    UniqueId = spawn.SpawnId,
+                    UniqueId = 0,
                     PlacementEntryIndex = -1,
                     TileX = tileX,
                     TileY = tileY,
@@ -278,11 +282,14 @@ public sealed class ExternalSpawnLayer
                     DisplayName = spawn.Name,
                     Subname = spawn.Subname,
                     SpawnEntryId = spawn.EntryId,
+                    SpawnId = spawn.SpawnId,
+                    DisplayId = spawn.DisplayId,
+                    FileDataId = spawn.FileDataId,
                     AssetKind = spawn.SpawnType == WorldSpawnType.Creature ? "NPC Spawn" : "GameObject Spawn",
                     PlacementPosition = pos,
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
                     PlacementScale = mdxScale,
-                    UniqueId = spawn.SpawnId,
+                    UniqueId = 0,
                     PlacementEntryIndex = -1,
                     TileX = tileX,
                     TileY = tileY,

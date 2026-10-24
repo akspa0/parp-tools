@@ -18,7 +18,9 @@ public readonly record struct SceneObjectPickHit(
     int ChunkGridDistance,
     int ParentWmoIndex = -1,
     string? DisplayName = null,
-    string? Subname = null)
+    string? Subname = null,
+    int? SpawnId = null,
+    int? DisplayId = null)
 {
     public string KindLabel => ObjectType switch
     {

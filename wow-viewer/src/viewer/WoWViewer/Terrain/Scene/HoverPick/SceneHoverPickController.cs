@@ -424,9 +424,19 @@ public sealed class SceneHoverPickController
         string displayName = !string.IsNullOrEmpty(hit.DisplayName)
             ? $"{hit.DisplayName}{(string.IsNullOrEmpty(hit.Subname) ? "" : $" <{hit.Subname}>")}"
             : hit.ModelName;
-        string detail = !string.IsNullOrEmpty(hit.DisplayName)
-            ? $"Model: {hit.ModelName}  UniqueId: {hit.UniqueId}"
-            : $"UniqueId: {hit.UniqueId}";
+        string detail;
+        if (hit.SpawnId.HasValue)
+        {
+            detail = hit.DisplayId.HasValue
+                ? $"Model: {hit.ModelName}  Spawn GUID: {hit.SpawnId.Value}  DisplayID: {hit.DisplayId.Value}"
+                : $"Model: {hit.ModelName}  Spawn GUID: {hit.SpawnId.Value}";
+        }
+        else
+        {
+            detail = !string.IsNullOrEmpty(hit.DisplayName)
+                ? (hit.UniqueId > 0 ? $"Model: {hit.ModelName}  UniqueId: {hit.UniqueId}" : $"Model: {hit.ModelName}")
+                : (hit.UniqueId > 0 ? $"UniqueId: {hit.UniqueId}" : $"Model: {hit.ModelName}");
+        }
 
         return new HoveredAssetInfo(
             assetKind,
@@ -620,7 +630,9 @@ public sealed class SceneHoverPickController
                 chunkGridDistance,
                 -1,
                 instance.DisplayName,
-                instance.Subname));
+                instance.Subname,
+                instance.SpawnId,
+                instance.DisplayId));
         }
     }
 
@@ -837,9 +849,19 @@ public sealed class SceneHoverPickController
         string displayName = !string.IsNullOrEmpty(inst.DisplayName)
             ? $"{inst.DisplayName}{(string.IsNullOrEmpty(inst.Subname) ? "" : $" <{inst.Subname}>")}"
             : inst.ModelName;
-        string detail = !string.IsNullOrEmpty(inst.DisplayName)
-            ? $"Model: {inst.ModelName}  UniqueId: {inst.UniqueId}"
-            : $"UniqueId: {inst.UniqueId}";
+        string detail;
+        if (inst.SpawnId.HasValue)
+        {
+            detail = inst.DisplayId.HasValue
+                ? $"Model: {inst.ModelName}  Spawn GUID: {inst.SpawnId.Value}  DisplayID: {inst.DisplayId.Value}"
+                : $"Model: {inst.ModelName}  Spawn GUID: {inst.SpawnId.Value}";
+        }
+        else
+        {
+            detail = !string.IsNullOrEmpty(inst.DisplayName)
+                ? (inst.UniqueId > 0 ? $"Model: {inst.ModelName}  UniqueId: {inst.UniqueId}" : $"Model: {inst.ModelName}")
+                : (inst.UniqueId > 0 ? $"UniqueId: {inst.UniqueId}" : $"Model: {inst.ModelName}");
+        }
 
         return new HoveredAssetInfo(
             effectiveKind,
