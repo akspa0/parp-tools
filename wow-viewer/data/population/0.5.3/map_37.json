@@ -1,8 +1,8 @@
 {
   "mapId": 37,
-  "mapName": "Azshara Crater",
+  "mapName": "PVPZone02",
   "clientVersion": "0.5.3",
-  "exportedUtc": "2026-10-19T16:06:52.8701151Z",
+  "exportedUtc": "2026-10-24T23:28:42.7517033Z",
   "spawns": [
     {
       "spawnId": 400468,
@@ -12,6 +12,8 @@
       "name": "Baelish Frostbane",
       "subname": "Binder",
       "modelPath": "Character\\Human\\Male\\HumanMale.mdx",
+      "displayId": 2582,
+      "fileDataId": null,
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,
@@ -36,6 +38,8 @@
       "name": "Orgrun Iceflow",
       "subname": "Binder",
       "modelPath": "Creature\\OrcMaleWarriorLight\\OrcMaleWarriorLight.mdx",
+      "displayId": 240,
+      "fileDataId": null,
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,

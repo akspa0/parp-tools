@@ -1,8 +1,8 @@
 {
   "mapId": 13,
-  "mapName": "Testing",
+  "mapName": "test",
   "clientVersion": "0.5.3",
-  "exportedUtc": "2026-10-19T16:06:52.8656417Z",
+  "exportedUtc": "2026-10-24T23:28:42.7461303Z",
   "spawns": [
     {
       "spawnId": 3998046,
@@ -12,6 +12,8 @@
       "name": "Renataki, of the Thousand Blades",
       "subname": null,
       "modelPath": "World\\Generic\\Troll\\Passive Doodads\\TrollTablets\\TrollTablet.mdx",
+      "displayId": 5,
+      "fileDataId": null,
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,
@@ -36,6 +38,8 @@
       "name": "Renataki, of the Thousand Blades",
       "subname": null,
       "modelPath": "World\\Generic\\Troll\\Passive Doodads\\TrollTablets\\TrollTablet.mdx",
+      "displayId": 5,
+      "fileDataId": null,
       "scale": 1,
       "displayScale": 1,
       "effectiveScale": 1,
