@@ -666,7 +666,7 @@ internal sealed partial class WorldLoaderService
 
     internal void LoadVlmProject(string projectRoot)
     {
-        _statusMessage = $"Loading MK dataset from {projectRoot}...";
+        _statusMessage = $"Loading dataset from {projectRoot}...";
 
         _terrainAnalysisHiddenCandidates.Clear();
         _terrainAnalysisHiddenSelectedIndex = -1;
@@ -700,7 +700,7 @@ internal sealed partial class WorldLoaderService
             _camera.Pitch = -20f;
 
             var loader = _vlmTerrainManager.Loader;
-            _modelInfo = $"Type: MK Dataset\n" +
+            _modelInfo = $"Type: Terrain Dataset\n" +
                          $"Map: {loader.MapName}\n" +
                          $"Path: {projectRoot}\n\n" +
                          $"Tiles: {loader.TileCoords.Count}\n" +
@@ -712,13 +712,13 @@ internal sealed partial class WorldLoaderService
             var vlmMapDef = _discoveredMaps.FirstOrDefault(m =>
                 string.Equals(m.Directory, loader.MapName, StringComparison.OrdinalIgnoreCase));
             _currentMapId = vlmMapDef?.Id ?? -1;
-            _statusMessage = $"Loaded MK dataset: {loader.MapName} ({loader.TileCoords.Count} tiles)";
+            _statusMessage = $"Loaded dataset: {loader.MapName} ({loader.TileCoords.Count} tiles)";
         }
         catch (Exception ex)
         {
             ViewerLog.Trace($"[ViewerApp] VLM project load failed: {ex}");
-            _statusMessage = $"MK dataset load failed: {ex.Message}";
-            _modelInfo = $"MK dataset load error:\n{ex.Message}\n\nPath: {projectRoot}";
+            _statusMessage = $"Dataset load failed: {ex.Message}";
+            _modelInfo = $"Dataset load error:\n{ex.Message}\n\nPath: {projectRoot}";
             _vlmTerrainManager?.Dispose();
             _vlmTerrainManager = null;
         }

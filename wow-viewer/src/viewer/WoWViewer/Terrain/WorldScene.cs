@@ -4988,8 +4988,11 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
         Matrix4x4.Invert(proj, out var invProj);
         Matrix4x4.Invert(view, out var invView);
 
-        // Near point in clip space → world
-        var nearClip = new Vector4(ndcX, ndcY, -1f, 1f);
+        // Near point in clip space → world.
+        // System.Numerics Matrix4x4.CreatePerspectiveFieldOfView uses DirectX clip space conventions
+        // where near plane is Z = 0 and far plane is Z = 1. Using Z = -1 caused the ray origin to be
+        // computed ~1000 units behind the camera, reversing depth order and picking objects behind the viewer.
+        var nearClip = new Vector4(ndcX, ndcY, 0f, 1f);
         var nearView = Vector4.Transform(nearClip, invProj);
         nearView /= nearView.W;
         var nearWorld = Vector4.Transform(nearView, invView);

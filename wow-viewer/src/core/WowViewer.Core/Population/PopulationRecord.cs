@@ -24,6 +24,7 @@ public sealed class PopulationRecord
     public string? ModelPath { get; init; }
     public int DisplayId { get; init; }
     public uint? FileDataId { get; init; }
+    public string[]? CustomTextures { get; init; }
 
     public float Scale { get; init; } = 1.0f;
     public float DisplayScale { get; init; } = 1.0f;

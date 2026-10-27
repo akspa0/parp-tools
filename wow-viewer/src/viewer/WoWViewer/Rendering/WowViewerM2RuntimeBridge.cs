@@ -272,20 +272,22 @@ internal static class WowViewerM2RuntimeBridge
         ReplaceableTextureResolver? texResolver,
         string? buildVersion,
         string sourceModelPath,
-        bool deferInitialTextureLoads = false)
+        bool deferInitialTextureLoads = false,
+        IReadOnlyList<string>? explicitTextureVariations = null)
     {
         ArgumentNullException.ThrowIfNull(gl);
         ArgumentNullException.ThrowIfNull(runtimeModel);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceModelPath);
 
         if (ShouldUseNativeStaticRenderer(adaptedMdx))
-            return new M2Renderer(gl, runtimeModel, sourceModelPath, dataSource, texResolver, deferTextureLoads: deferInitialTextureLoads);
+            return new M2Renderer(gl, runtimeModel, sourceModelPath, dataSource, texResolver, deferTextureLoads: deferInitialTextureLoads, explicitTextureVariations: explicitTextureVariations);
 
         string resolvedModelDir = modelDir ?? Path.GetDirectoryName(sourceModelPath) ?? string.Empty;
         return new M2Renderer(
-            new MdxRenderer(gl, adaptedMdx!, resolvedModelDir, dataSource, texResolver, sourceModelPath, true, buildVersion, deferInitialTextureLoads: deferInitialTextureLoads),
+            new MdxRenderer(gl, adaptedMdx!, resolvedModelDir, dataSource, texResolver, sourceModelPath, true, buildVersion, deferInitialTextureLoads: deferInitialTextureLoads, explicitTextureVariations: explicitTextureVariations),
             runtimeModel,
-            sourceModelPath);
+            sourceModelPath,
+            explicitTextureVariations: explicitTextureVariations);
     }
 
     private static int GuessProfileIndex(string modelPath, string skinPath)

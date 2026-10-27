@@ -355,6 +355,15 @@ public class WorldAssetManager : IDisposable
             boundsMax = r.BoundsMax;
             return true;
         }
+
+        int texIdx = normalizedKey.IndexOf("#tex:", StringComparison.OrdinalIgnoreCase);
+        if (texIdx >= 0 && _mdxModels.TryGetValue(normalizedKey[..texIdx], out r) && r != null)
+        {
+            boundsMin = r.BoundsMin;
+            boundsMax = r.BoundsMax;
+            return true;
+        }
+
         boundsMin = boundsMax = Vector3.Zero;
         return false;
     }
@@ -373,6 +382,15 @@ public class WorldAssetManager : IDisposable
             boundsMax = r.SelectionBoundsMax;
             return true;
         }
+
+        int texIdx = normalizedKey.IndexOf("#tex:", StringComparison.OrdinalIgnoreCase);
+        if (texIdx >= 0 && _mdxModels.TryGetValue(normalizedKey[..texIdx], out r) && r != null)
+        {
+            boundsMin = r.SelectionBoundsMin;
+            boundsMax = r.SelectionBoundsMax;
+            return true;
+        }
+
         boundsMin = boundsMax = Vector3.Zero;
         return false;
     }
@@ -922,17 +940,30 @@ private int _mdxLoadFailCount = 0;
     {
         var stopwatch = Stopwatch.StartNew();
         long phaseStart = Stopwatch.GetTimestamp();
+        string loadPathKey = normalizedKey;
+        string[]? explicitTextures = null;
+        int texIdx = normalizedKey.IndexOf("#tex:", StringComparison.OrdinalIgnoreCase);
+        if (texIdx >= 0)
+        {
+            loadPathKey = normalizedKey[..texIdx];
+            string texStr = normalizedKey[(texIdx + 5)..];
+            if (!string.IsNullOrEmpty(texStr))
+            {
+                explicitTextures = texStr.Split(';', StringSplitOptions.RemoveEmptyEntries);
+            }
+        }
+
         try
         {
-            string resolvedModelPath = _pathResolver.ResolveCanonicalModelPath(normalizedKey);
+            string resolvedModelPath = _pathResolver.ResolveCanonicalModelPath(loadPathKey);
             string buildProfileId = FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId ?? "unknown";
             byte[]? data;
 
-            if (!_pathResolver.TryReadPreferredClassicModelData(normalizedKey, out string preferredClassicPath, out data))
+            if (!_pathResolver.TryReadPreferredClassicModelData(loadPathKey, out string preferredClassicPath, out data))
             {
                 data = ReadFileData(resolvedModelPath);
-                if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
-                    data = ReadFileData(normalizedKey);
+                if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(loadPathKey, StringComparison.OrdinalIgnoreCase))
+                    data = ReadFileData(loadPathKey);
             }
             else
             {
@@ -943,7 +974,7 @@ private int _mdxLoadFailCount = 0;
             {
                 if (_pathResolver.TryGetCachedResolvedPath(resolvedModelPath, out string? cachedResolved) && !string.IsNullOrWhiteSpace(cachedResolved))
                     resolvedModelPath = cachedResolved;
-                else if (_pathResolver.TryGetCachedResolvedPath(normalizedKey, out string? cachedKeyResolved) && !string.IsNullOrWhiteSpace(cachedKeyResolved))
+                else if (_pathResolver.TryGetCachedResolvedPath(loadPathKey, out string? cachedKeyResolved) && !string.IsNullOrWhiteSpace(cachedKeyResolved))
                     resolvedModelPath = cachedKeyResolved;
             }
 
@@ -1024,7 +1055,8 @@ private int _mdxLoadFailCount = 0;
                             _texResolver,
                             _buildVersion,
                             resolvedModelPath,
-                            deferInitialTextureLoads: true);
+                            deferInitialTextureLoads: true,
+                            explicitTextureVariations: explicitTextures);
                         LoadPhases.Mark(ModelLoadPhase.GpuCreate, phaseStart);
                         return createdRenderer;
                     }
@@ -1063,7 +1095,8 @@ private int _mdxLoadFailCount = 0;
                                 texResolver: _texResolver,
                                 buildVersion: _buildVersion,
                                 sourceModelPath: resolvedModelPath,
-                                deferInitialTextureLoads: true);
+                                deferInitialTextureLoads: true,
+                                explicitTextureVariations: explicitTextures);
                         }
                         catch (Exception ex)
                         {
@@ -1087,8 +1120,9 @@ private int _mdxLoadFailCount = 0;
                             ViewerLog.Info(ViewerLog.Category.Mdx,
                                 $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
                             return new M2Renderer(
-                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
-                                resolvedModelPath);
+                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true, explicitTextureVariations: explicitTextures),
+                                resolvedModelPath,
+                                explicitTextureVariations: explicitTextures);
                         }
                         catch (Exception ex)
                         {
@@ -1121,7 +1155,8 @@ private int _mdxLoadFailCount = 0;
                                 _texResolver,
                                 _buildVersion,
                                 resolvedModelPath,
-                                deferInitialTextureLoads: true);
+                                deferInitialTextureLoads: true,
+                                explicitTextureVariations: explicitTextures);
                         }
                         catch (Exception ex)
                         {
@@ -1144,8 +1179,9 @@ private int _mdxLoadFailCount = 0;
                             ViewerLog.Info(ViewerLog.Category.Mdx,
                                 $"[M2] Loaded embedded 1.12.1 geometry for {Path.GetFileName(normalizedKey)} (era={detectedEra.ToDisplayString()})");
                             return new M2Renderer(
-                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
-                                resolvedModelPath);
+                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true, explicitTextureVariations: explicitTextures),
+                                resolvedModelPath,
+                                explicitTextureVariations: explicitTextures);
                         }
                         catch (Exception ex)
                         {
@@ -1178,8 +1214,9 @@ private int _mdxLoadFailCount = 0;
                                 ViewerLog.Info(ViewerLog.Category.Mdx,
                                     $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(normalizedKey)} after adapter failure");
                                 return new M2Renderer(
-                                    new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
-                                    resolvedModelPath);
+                                    new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true, explicitTextureVariations: explicitTextures),
+                                    resolvedModelPath,
+                                    explicitTextureVariations: explicitTextures);
                             }
 
                             lastSkinError = new InvalidDataException(
@@ -1210,7 +1247,7 @@ private int _mdxLoadFailCount = 0;
             _mdxRouteDecisions[normalizedKey] = mdxRoute;
             M2RouteDiagnostics.LogRouteDecision(mdxRoute);
 
-            return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath, buildVersion: _buildVersion, deferInitialTextureLoads: true);
+            return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath, buildVersion: _buildVersion, deferInitialTextureLoads: true, explicitTextureVariations: explicitTextures);
         }
         catch (Exception ex)
         {
@@ -1282,7 +1319,10 @@ private int _mdxLoadFailCount = 0;
         if (_dataSource is not { } mpqDataSource)
             return;
 
-        string canonicalModelPath = _pathResolver.ResolveCanonicalModelPath(normalizedKey);
+        int texIdx = normalizedKey.IndexOf("#tex:", StringComparison.OrdinalIgnoreCase);
+        string modelKey = texIdx >= 0 ? normalizedKey[..texIdx] : normalizedKey;
+
+        string canonicalModelPath = _pathResolver.ResolveCanonicalModelPath(modelKey);
         mpqDataSource.PrefetchFile(canonicalModelPath);
 
         if (canonicalModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))

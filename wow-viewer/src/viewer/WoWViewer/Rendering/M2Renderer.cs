@@ -30,6 +30,7 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
 
     // Spec 256 P2b: world-streamed models read/decode textures off the render thread (M2TextureStreamer).
     private readonly bool _deferTextureLoads;
+    private readonly IReadOnlyList<string>? _explicitTextureVariations;
     private int _textureGeneration;
     private bool _disposed;
     private readonly string _modelDir = string.Empty;
@@ -77,16 +78,17 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
     private static bool _shaderInitialized;
     private static int _shaderRefCount;
 
-    public M2Renderer(MdxRenderer innerRenderer, string sourceModelPath)
+    public M2Renderer(MdxRenderer innerRenderer, string sourceModelPath, IReadOnlyList<string>? explicitTextureVariations = null)
     {
         ArgumentNullException.ThrowIfNull(innerRenderer);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceModelPath);
 
         _legacyRenderer = innerRenderer;
+        _explicitTextureVariations = explicitTextureVariations;
         SourceModelPath = sourceModelPath.Replace('/', '\\');
     }
 
-    public M2Renderer(MdxRenderer innerRenderer, M2StaticRenderModel runtimeModel, string sourceModelPath)
+    public M2Renderer(MdxRenderer innerRenderer, M2StaticRenderModel runtimeModel, string sourceModelPath, IReadOnlyList<string>? explicitTextureVariations = null)
     {
         ArgumentNullException.ThrowIfNull(innerRenderer);
         ArgumentNullException.ThrowIfNull(runtimeModel);
@@ -94,6 +96,7 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
 
         _legacyRenderer = innerRenderer;
         _runtimeModel = runtimeModel;
+        _explicitTextureVariations = explicitTextureVariations;
         SourceModelPath = sourceModelPath.Replace('/', '\\');
 
         for (int index = 0; index < runtimeModel.Sections.Count; index++)
@@ -105,9 +108,10 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
     }
 
     public M2Renderer(GL gl, M2StaticRenderModel runtimeModel, string sourceModelPath, IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null,
-        bool deferTextureLoads = false)
+        bool deferTextureLoads = false, IReadOnlyList<string>? explicitTextureVariations = null)
     {
         _deferTextureLoads = deferTextureLoads;
+        _explicitTextureVariations = explicitTextureVariations;
         ArgumentNullException.ThrowIfNull(gl);
         ArgumentNullException.ThrowIfNull(runtimeModel);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceModelPath);
@@ -1431,6 +1435,40 @@ void main()
     // instead of probing naming conventions and scanning every .blp in the data source for a look-alike.
     private string? ResolveReplaceableTexture(uint replaceableId)
     {
+        if (_explicitTextureVariations != null && _explicitTextureVariations.Count > 0)
+        {
+            if (_explicitTextureVariations.Count == 1 && (replaceableId == 1 || replaceableId == 2 || replaceableId == 8 || replaceableId == 11))
+            {
+                string singleTex = _explicitTextureVariations[0]?.Trim() ?? string.Empty;
+                if (!string.IsNullOrEmpty(singleTex))
+                {
+                    if (!singleTex.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                        singleTex += ".blp";
+                    return singleTex;
+                }
+            }
+
+            int variationIndex = replaceableId switch
+            {
+                1 or 11 => 0,
+                2 or 12 => 1,
+                3 or 13 => 2,
+                8 => 0,
+                _ => -1
+            };
+
+            if (variationIndex >= 0 && variationIndex < _explicitTextureVariations.Count)
+            {
+                string variation = _explicitTextureVariations[variationIndex]?.Trim() ?? string.Empty;
+                if (!string.IsNullOrEmpty(variation))
+                {
+                    if (!variation.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                        variation += ".blp";
+                    return variation;
+                }
+            }
+        }
+
         string? resolved = _texResolver?.Resolve(
             SourceModelPath,
             replaceableId,

@@ -487,7 +487,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private string _wmoConvertSourcePath = "";
 
     // Terrain-derived minimap export state. This is intentionally separate from the retired
-    // VLM/MK dataset workflow: it invokes the direct client terrain synthesis command.
+    // offline dataset workflow: it invokes the direct client terrain synthesis command.
     private bool _showSynthesizedMinimapExportDialog;
 
     // ML Dataset build state

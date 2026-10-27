@@ -12,7 +12,7 @@ namespace WoWViewer;
 /// </summary>
 internal sealed class ViewerActionBarsService
 {
-    private enum IconKind { Workspace, Open, Assets, Taxi, Capture, Inspector, World, Model, Pm4, Maps, Diagnostics }
+    private enum IconKind { Workspace, Open, Assets, Taxi, Capture, Inspector, World, Model, Gossip, Pm4, Maps, Diagnostics }
 
     private sealed class WindowState
     {
@@ -23,7 +23,7 @@ internal sealed class ViewerActionBarsService
     private readonly Dictionary<string, WindowState> _windows = new(StringComparer.Ordinal)
     {
         ["workspace"] = new(), ["assets"] = new(), ["taxi"] = new(), ["capture"] = new(),
-        ["inspector"] = new(), ["world"] = new(), ["model"] = new(), ["pm4"] = new(),
+        ["inspector"] = new(), ["world"] = new(), ["model"] = new(), ["gossip"] = new(), ["pm4"] = new(),
         ["destination"] = new(), ["maps"] = new(), ["files"] = new(), ["diagnostics"] = new(), ["options"] = new(),
     };
 
@@ -86,7 +86,7 @@ internal sealed class ViewerActionBarsService
         // One line per call: the UI control scanner reads source line-by-line.
         DrawActionBarIcon("Inspector", "ActionInspector", IconKind.Inspector, size, "Inspect the selected scene asset", () => _host.UiManager.ToggleRightDock(ViewerPanel.Inspector), dockOpen && active == ViewerPanel.Inspector);
         DrawActionBarIcon("World", "ActionWorld", IconKind.World, size, "Inspect objects, placements, and world data", () => _host.UiManager.ToggleRightDock(ViewerPanel.World), dockOpen && active == ViewerPanel.World);
-        DrawActionBarIcon("Model", "ActionModel", IconKind.Model, size, "Inspect the loaded model and animations", () => _host.UiManager.ToggleRightDock(ViewerPanel.Model), dockOpen && active == ViewerPanel.Model);
+        DrawActionBarIcon("Gossip", "ActionGossip", IconKind.Gossip, size, "Inspect creature gossip, quests, and dialogue", () => _host.UiManager.ToggleRightDock(ViewerPanel.Gossip), dockOpen && active == ViewerPanel.Gossip);
         DrawActionBarIcon("PM4", "ActionPm4", IconKind.Pm4, size, "Inspect PM4 navigation and object data", () => _host.UiManager.ToggleRightDock(ViewerPanel.PM4), dockOpen && active == ViewerPanel.PM4);
     }
 
@@ -231,6 +231,18 @@ internal sealed class ViewerActionBarsService
                 draw.AddLine(a, b, ink, stroke); draw.AddLine(b, c, ink, stroke); draw.AddLine(c, d, ink, stroke);
                 draw.AddLine(d, leftBottom, ink, stroke); draw.AddLine(leftBottom, leftTop, ink, stroke); draw.AddLine(leftTop, a, ink, stroke);
                 draw.AddLine(a, center, muted, stroke); draw.AddLine(b, center, muted, stroke); draw.AddLine(center, d, muted, stroke);
+                break;
+            case IconKind.Gossip:
+                Vector2 bMin = new(center.X - half * 0.9f, center.Y - half * 0.8f);
+                Vector2 bMax = new(center.X + half * 0.9f, center.Y + half * 0.35f);
+                draw.AddRect(bMin, bMax, ink, unit * 0.12f, ImDrawFlags.None, stroke);
+                Vector2 t1 = new(center.X - half * 0.35f, bMax.Y);
+                Vector2 t2 = new(center.X - half * 0.7f, center.Y + half * 0.9f);
+                Vector2 t3 = new(center.X - half * 0.05f, bMax.Y);
+                draw.AddLine(t1, t2, ink, stroke);
+                draw.AddLine(t2, t3, ink, stroke);
+                draw.AddLine(new(bMin.X + unit * 0.14f, center.Y - unit * 0.10f), new(bMax.X - unit * 0.14f, center.Y - unit * 0.10f), muted, stroke);
+                draw.AddLine(new(bMin.X + unit * 0.14f, center.Y + unit * 0.08f), new(bMax.X - unit * 0.28f, center.Y + unit * 0.08f), muted, stroke);
                 break;
             case IconKind.Pm4:
                 for (int i = -1; i <= 1; i++)

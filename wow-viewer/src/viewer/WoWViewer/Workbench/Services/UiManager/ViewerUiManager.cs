@@ -134,9 +134,9 @@ internal sealed partial class ViewerUiManager
         ViewerPanel = panel;
         switch (panel)
         {
-            case ViewerPanel.Model: ModelPage = Math.Clamp(page, 0, 2); break;
+            case ViewerPanel.Gossip: break;
             case ViewerPanel.World: WorldPage = Math.Clamp(page, 0, 3); break;
-            case ViewerPanel.Inspector: InspectorPage = Math.Clamp(page, 0, 3); break;
+            case ViewerPanel.Inspector: InspectorPage = Math.Clamp(page, 0, 5); break;
         }
         Navigate(WorkbenchTab.Viewer);
         OpenViewerDock(panel);

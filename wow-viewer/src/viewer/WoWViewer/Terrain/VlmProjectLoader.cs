@@ -9,8 +9,8 @@ using WoWViewer.Terrain.Vlm;
 namespace WoWViewer.Terrain;
 
 /// <summary>
-/// Loads an MK dataset project folder and converts it into TerrainChunkData
-/// for rendering in the viewer. MK datasets are human-readable JSON exports
+/// Loads a terrain dataset project folder and converts it into TerrainChunkData
+/// for rendering in the viewer. Terrain datasets are human-readable JSON exports
 /// of WoW terrain data, produced by VlmDatasetExporter.
 ///
 /// Expected folder structure:
@@ -29,7 +29,7 @@ public class VlmProjectLoader
     public string ProjectRoot => _projectRoot;
 
     /// <summary>Map name inferred from JSON filenames.</summary>
-    public string MapName { get; private set; } = "MK Dataset";
+    public string MapName { get; private set; } = "Terrain Dataset";
 
     /// <summary>All tile indices found in the dataset (tileX*64+tileY).</summary>
     public List<int> ExistingTiles { get; } = new();
@@ -76,7 +76,7 @@ public class VlmProjectLoader
         _datasetDir = Path.Combine(projectRoot, "dataset");
 
         if (!Directory.Exists(_datasetDir))
-            throw new DirectoryNotFoundException($"MK dataset directory not found: {_datasetDir}");
+            throw new DirectoryNotFoundException($"Dataset directory not found: {_datasetDir}");
 
         ScanTiles();
     }
@@ -104,7 +104,7 @@ public class VlmProjectLoader
             {
                 int tileX = fileY;  // fileY = tileIndex / 64 = WoW tileX
                 int tileY = fileX;  // fileX = tileIndex % 64 = WoW tileY
-                if (MapName == "MK Dataset")
+                if (MapName == "Terrain Dataset")
                     MapName = string.Join("_", parts[..^2]);
 
                 int idx = tileX * 64 + tileY;

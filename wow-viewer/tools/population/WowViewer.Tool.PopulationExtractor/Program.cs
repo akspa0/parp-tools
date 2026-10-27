@@ -140,10 +140,17 @@ internal static class Program
                 {
                     alphaCreatureTemplates.TryGetValue(c.Entry, out var tmpl);
                     string name = tmpl?.Name ?? $"Prototype #{c.Entry}";
-                    int displayId = (tmpl?.ModelIds != null && tmpl.ModelIds.Length > 0 && tmpl.ModelIds[0] > 0)
-                        ? tmpl.ModelIds[0] : 0;
+                    int displayId = 0;
+                    if (tmpl?.ModelIds != null)
+                    {
+                        var valid = tmpl.ModelIds.Where(m => m > 0).ToArray();
+                        if (valid.Length > 0)
+                        {
+                            displayId = valid[(int)((uint)c.Guid % (uint)valid.Length)];
+                        }
+                    }
 
-                    dbcResolver.TryResolveCreature(displayId, out string? modelPath, out float displayScale, out uint? fileDataId);
+                    dbcResolver.TryResolveCreature(displayId, out string? modelPath, out float displayScale, out uint? fileDataId, out string[]? customTextures);
 
                     var orig = new PopulationRecord
                     {
@@ -156,6 +163,7 @@ internal static class Program
                         ModelPath = modelPath,
                         DisplayId = displayId,
                         FileDataId = fileDataId,
+                        CustomTextures = customTextures,
                         Scale = tmpl?.Scale ?? 1.0f,
                         DisplayScale = displayScale,
                         EffectiveScale = (tmpl?.Scale ?? 1.0f) * displayScale,

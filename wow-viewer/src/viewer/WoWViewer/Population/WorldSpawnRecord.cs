@@ -20,13 +20,15 @@ public sealed class WorldSpawnRecord
     public string? ModelPath { get; set; }
     public int DisplayId { get; set; }
     public uint? FileDataId { get; set; }
+    public string[]? CustomTextures { get; set; }
 
     public float Scale { get; init; } = 1.0f;
-    public float DisplayScale { get; init; } = 1.0f;
-    public float EffectiveScale { get; init; } = 1.0f;
+    public float DisplayScale { get; set; } = 1.0f;
+    public float EffectiveScale { get; set; } = 1.0f;
 
     public Vector3 PositionWow { get; init; }
     public float OrientationWowRadians { get; init; }
+    public Quaternion? Rotation { get; init; }
 
     public int Faction { get; init; }
     public int NpcFlags { get; init; }

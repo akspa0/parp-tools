@@ -97,7 +97,7 @@ internal sealed partial class SynthesizedMinimapExportService
 
         ImGui.TextWrapped(
             "Build paired terrain-only and _liquid PNG minimaps directly from client BLP textures plus MCLY/MCAL, MCNR, MCSH, and decoded liquid coverage. " +
-            "This does not read a shipped minimap image or use the retired VLM/MK dataset workflow.");
+            "This does not read a shipped minimap image or use a retired offline dataset workflow.");
         ImGui.TextWrapped(
             "Global clear-weather LIT colors are used when evaluable at the selected time. Otherwise the output records a visible authored fallback; " +
             "neither mode claims unproven local-zone lighting as client-exact.");

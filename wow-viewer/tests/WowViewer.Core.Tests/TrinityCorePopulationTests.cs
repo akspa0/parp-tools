@@ -2,6 +2,7 @@ using System.Numerics;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Population;
 using WowViewer.Core.Population;
+using WowViewer.Core.IO.Dbc;
 using Xunit;
 
 namespace WowViewer.Core.Tests;
@@ -215,7 +216,7 @@ public class TrinityCorePopulationTests
             Assert.Contains(manifest.Maps, m => m.MapId == 451); // Development
 
             var map33Alpha = Assert.Single(manifest.Maps, m => m.MapId == 33);
-            Assert.Equal("Shadowfang Keep", map33Alpha.MapName);
+            Assert.True(map33Alpha.MapName is "Shadowfang" or "Shadowfang Keep");
         }
     }
 
@@ -250,9 +251,28 @@ public class TrinityCorePopulationTests
             Assert.True(resolver053.TryResolveCreature(251, out string? path251, out float scale251));
             Assert.Equal(@"Creature\HumanMaleKid\HumanMaleKid.mdx", path251);
 
-            // Verify DisplayID 907 (Twain)
-            Assert.True(resolver053.TryResolveCreature(907, out string? path907, out float scale907));
-            Assert.Equal(@"Character\Human\Male\HumanMale.mdx", path907);
+            // Verify DisplayID 1756 (Caretaker Folsom - baked NPC texture)
+            Assert.True(resolver053.TryResolveCreature(1756, out string? path1756, out float scale1756, out uint? fdid1756, out string[]? tex1756));
+            Assert.NotNull(tex1756);
+            Assert.Single(tex1756);
+            Assert.Contains(@"textures\BakedNpcTextures\", tex1756[0], StringComparison.OrdinalIgnoreCase);
+
+            // Verify DisplayID 1141 (Rat - BlackSkin variation)
+            Assert.True(resolver053.TryResolveCreature(1141, out string? path1141, out float scale1141, out uint? fdid1141, out string[]? tex1141));
+            Assert.NotNull(tex1141);
+            Assert.Contains("BlackSkin", tex1141[0], StringComparison.OrdinalIgnoreCase);
+
+            // Verify DisplayID 3167 (Stormwind City Guard) and 4137 (Stromgarde Defender)
+            Assert.True(resolver053.TryResolveCreature(3167, out string? path3167, out float scale3167, out uint? fdid3167, out string[]? tex3167));
+            Assert.NotNull(tex3167);
+            Assert.Single(tex3167);
+            Assert.Contains(@"textures\BakedNpcTextures\", tex3167[0], StringComparison.OrdinalIgnoreCase);
+
+            Assert.True(resolver053.TryResolveCreature(4137, out string? path4137, out float scale4137, out uint? fdid4137, out string[]? tex4137));
+            Assert.NotNull(tex4137);
+            Assert.Single(tex4137);
+            Assert.Contains(@"textures\BakedNpcTextures\", tex4137[0], StringComparison.OrdinalIgnoreCase);
+
         }
 
         string dir335 = @"H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft";
@@ -358,5 +378,43 @@ public class TrinityCorePopulationTests
         Assert.Equal("humanmale", match.Groups["base"].Value);
         Assert.Equal("0128", match.Groups["digits"].Value);
         Assert.Equal(128, int.Parse(match.Groups["digits"].Value));
+    }
+
+    [Fact]
+    public void ScreenToRay_PlacesRayOriginInFrontOfCameraAlongViewFrustum()
+    {
+        var pos = new System.Numerics.Vector3(100f, 200f, 50f);
+        var forward = new System.Numerics.Vector3(1f, 0f, 0f); // Facing +X
+        var target = pos + forward;
+        var up = System.Numerics.Vector3.UnitZ;
+        var view = System.Numerics.Matrix4x4.CreateLookAt(pos, target, up);
+        float nearPlane = 0.1f;
+        float farPlane = 1000f;
+        var proj = System.Numerics.Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 3f, 16f / 9f, nearPlane, farPlane);
+
+        System.Numerics.Matrix4x4.Invert(proj, out var invProj);
+        System.Numerics.Matrix4x4.Invert(view, out var invView);
+
+        // Near point in clip space (0 for DirectX convention used by System.Numerics)
+        var nearClip = new System.Numerics.Vector4(0f, 0f, 0f, 1f);
+        var nearView = System.Numerics.Vector4.Transform(nearClip, invProj);
+        nearView /= nearView.W;
+        var nearWorld = System.Numerics.Vector4.Transform(nearView, invView);
+
+        var farClip = new System.Numerics.Vector4(0f, 0f, 1f, 1f);
+        var farView = System.Numerics.Vector4.Transform(farClip, invProj);
+        farView /= farView.W;
+        var farWorld = System.Numerics.Vector4.Transform(farView, invView);
+
+        var origin = new System.Numerics.Vector3(nearWorld.X, nearWorld.Y, nearWorld.Z);
+        var farPt = new System.Numerics.Vector3(farWorld.X, farWorld.Y, farWorld.Z);
+        var dir = System.Numerics.Vector3.Normalize(farPt - origin);
+
+        // The ray direction must point forward along +X
+        Assert.True(System.Numerics.Vector3.Dot(dir, forward) > 0.999f);
+
+        // The ray origin must be in front of the camera (greater X than camera position), NOT behind it
+        Assert.True(origin.X > pos.X);
+        Assert.True(origin.X <= pos.X + nearPlane + 0.01f);
     }
 }

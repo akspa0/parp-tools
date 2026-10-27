@@ -91,11 +91,11 @@
       "visible": true
     },
     {
-      "id": "model-rail-icon",
-      "label": "Model",
+      "id": "gossip-rail-icon",
+      "label": "Gossip",
       "region": "Right action bar",
       "shortcut": null,
-      "help": "Open or close the Model inspection window.",
+      "help": "Open or close the Gossip and quests dialogue window in the right sidebar.",
       "visible": true
     },
     {
@@ -800,6 +800,14 @@
       "region": "Top menu > File",
       "shortcut": null,
       "help": "Remember the current game folder as a known-good base.",
+      "visible": true
+    },
+    {
+      "id": "model-animations",
+      "label": "Model Animations",
+      "region": "Viewer > Inspector",
+      "shortcut": null,
+      "help": "Controls for animating the selected creature or game object model.",
       "visible": true
     },
     {

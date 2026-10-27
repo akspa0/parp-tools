@@ -403,22 +403,20 @@ public sealed class TrinityCoreSqlReader
             int displayId = c.ModelIdOverride > 0 ? c.ModelIdOverride : 0;
             if (displayId == 0 && tmpl?.ModelIds != null)
             {
-                foreach (int m in tmpl.ModelIds)
+                var valid = tmpl.ModelIds.Where(m => m > 0).ToArray();
+                if (valid.Length > 0)
                 {
-                    if (m > 0)
-                    {
-                        displayId = m;
-                        break;
-                    }
+                    displayId = valid[(int)((uint)c.Guid % (uint)valid.Length)];
                 }
             }
 
             string? modelPath = null;
             float displayScale = 1.0f;
             uint? fileDataId = null;
+            string[]? customTextures = null;
             if (displayId > 0 && dbcResolver != null)
             {
-                dbcResolver.TryResolveCreature(displayId, out modelPath, out displayScale, out fileDataId);
+                dbcResolver.TryResolveCreature(displayId, out modelPath, out displayScale, out fileDataId, out customTextures);
             }
 
             records.Add(new PopulationRecord
@@ -432,6 +430,7 @@ public sealed class TrinityCoreSqlReader
                 ModelPath = modelPath,
                 DisplayId = displayId,
                 FileDataId = fileDataId,
+                CustomTextures = customTextures,
                 Scale = scale,
                 DisplayScale = displayScale,
                 EffectiveScale = scale * displayScale,
@@ -742,21 +741,19 @@ public sealed class TrinityCoreSqlReader
                     int displayId = c.ModelIdOverride > 0 ? c.ModelIdOverride : 0;
                     if (displayId == 0 && tmpl?.ModelIds != null)
                     {
-                        foreach (int m in tmpl.ModelIds)
+                        var valid = tmpl.ModelIds.Where(m => m > 0).ToArray();
+                        if (valid.Length > 0)
                         {
-                            if (m > 0)
-                            {
-                                displayId = m;
-                                break;
-                            }
+                            displayId = valid[(int)((uint)c.Guid % (uint)valid.Length)];
                         }
                     }
 
                     string? modelPath = null;
                     float displayScale = 1.0f;
                     uint? fileDataId = null;
+                    string[]? customTextures = null;
                     if (displayId > 0 && dbcResolver != null)
-                        dbcResolver.TryResolveCreature(displayId, out modelPath, out displayScale, out fileDataId);
+                        dbcResolver.TryResolveCreature(displayId, out modelPath, out displayScale, out fileDataId, out customTextures);
 
                     records.Add(new PopulationRecord
                     {
@@ -769,6 +766,7 @@ public sealed class TrinityCoreSqlReader
                         ModelPath = modelPath,
                         DisplayId = displayId,
                         FileDataId = fileDataId,
+                        CustomTextures = customTextures,
                         Scale = scale,
                         DisplayScale = displayScale,
                         EffectiveScale = scale * displayScale,

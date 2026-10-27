@@ -66,6 +66,7 @@ public static class AlphaCoreCornerTransposer
             ModelPath = spawn.ModelPath,
             DisplayId = spawn.DisplayId,
             FileDataId = spawn.FileDataId,
+            CustomTextures = spawn.CustomTextures,
             Scale = spawn.Scale,
             DisplayScale = spawn.DisplayScale,
             EffectiveScale = spawn.EffectiveScale,

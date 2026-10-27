@@ -20,6 +20,15 @@ public interface IDbcModelResolver
     }
 
     /// <summary>
+    /// Resolves a creature display ID to its model path (.m2), scale, optional FileDataId, and custom/baked textures.
+    /// </summary>
+    bool TryResolveCreature(int displayId, out string? modelPath, out float displayScale, out uint? fileDataId, out string[]? customTextures)
+    {
+        customTextures = null;
+        return TryResolveCreature(displayId, out modelPath, out displayScale, out fileDataId);
+    }
+
+    /// <summary>
     /// Resolves a gameobject display ID to its model path (.mdx/.m2) and scale.
     /// </summary>
     bool TryResolveGameObject(int displayId, out string? modelPath, out float displayScale);

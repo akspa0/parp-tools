@@ -3550,6 +3550,16 @@ void main()
         if (_explicitTextureVariations == null || _explicitTextureVariations.Count == 0)
             return null;
 
+        // If exactly 1 explicit texture is provided (e.g. NPC Baked Texture), it covers ReplaceableId 1, 2, and 8 (Hair/Pelvis)
+        if (_explicitTextureVariations.Count == 1 && (replaceableId == 1 || replaceableId == 2 || replaceableId == 8 || replaceableId == 11))
+        {
+            string singleTex = _explicitTextureVariations[0]?.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(singleTex))
+            {
+                return FormatCandidatePath(singleTex);
+            }
+        }
+
         int variationIndex = replaceableId switch
         {
             1 or 11 => 0,
@@ -3563,6 +3573,12 @@ void main()
         string variation = _explicitTextureVariations[variationIndex]?.Trim() ?? string.Empty;
         if (string.IsNullOrEmpty(variation))
             return null;
+
+        return FormatCandidatePath(variation);
+    }
+
+    private string FormatCandidatePath(string variation)
+    {
 
         string candidate;
         if (variation.Contains('\\') || variation.Contains('/'))

@@ -10,7 +10,7 @@ namespace WowViewer.Core.IO.Population;
 /// </summary>
 public sealed class DbcModelResolver : IDbcModelResolver
 {
-    private readonly Dictionary<int, (string modelPath, float scale, uint? fileDataId)> _creatureDisplays = new();
+    private readonly Dictionary<int, (string modelPath, float scale, uint? fileDataId, string[]? customTextures)> _creatureDisplays = new();
     private readonly Dictionary<int, (string modelPath, float scale, uint? fileDataId)> _gameObjectDisplays = new();
     private readonly Dictionary<int, string> _mapNames = new();
 
@@ -67,22 +67,29 @@ public sealed class DbcModelResolver : IDbcModelResolver
 
     public bool TryResolveCreature(int displayId, out string? modelPath, out float displayScale)
     {
-        return TryResolveCreature(displayId, out modelPath, out displayScale, out _);
+        return TryResolveCreature(displayId, out modelPath, out displayScale, out _, out _);
     }
 
     public bool TryResolveCreature(int displayId, out string? modelPath, out float displayScale, out uint? fileDataId)
+    {
+        return TryResolveCreature(displayId, out modelPath, out displayScale, out fileDataId, out _);
+    }
+
+    public bool TryResolveCreature(int displayId, out string? modelPath, out float displayScale, out uint? fileDataId, out string[]? customTextures)
     {
         if (_creatureDisplays.TryGetValue(displayId, out var entry))
         {
             modelPath = entry.modelPath;
             displayScale = entry.scale;
             fileDataId = entry.fileDataId;
+            customTextures = entry.customTextures;
             return true;
         }
 
         modelPath = null;
         displayScale = 1.0f;
         fileDataId = null;
+        customTextures = null;
         return false;
     }
 
@@ -107,12 +114,12 @@ public sealed class DbcModelResolver : IDbcModelResolver
         return false;
     }
 
-    public void RegisterCreature(int displayId, string modelPath, float scale = 1.0f, uint? fileDataId = null)
+    public void RegisterCreature(int displayId, string modelPath, float scale = 1.0f, uint? fileDataId = null, string[]? customTextures = null)
     {
         if (displayId > 0 && !string.IsNullOrWhiteSpace(modelPath))
         {
             string resolved = ResolveModelPath(modelPath, isCreature: true);
-            _creatureDisplays[displayId] = (resolved, scale > 0 ? scale : 1.0f, fileDataId);
+            _creatureDisplays[displayId] = (resolved, scale > 0 ? scale : 1.0f, fileDataId, customTextures);
         }
     }
 
@@ -333,7 +340,12 @@ public sealed class DbcModelResolver : IDbcModelResolver
         if (!File.Exists(map))
             map = Path.Combine(directory, "DBFilesClient", "Map.dbc");
 
+        string cdie = Path.Combine(directory, "CreatureDisplayInfoExtra.dbc");
+        if (!File.Exists(cdie))
+            cdie = Path.Combine(directory, "DBFilesClient", "CreatureDisplayInfoExtra.dbc");
+
         byte[]? cdiBytes = File.Exists(cdi) ? File.ReadAllBytes(cdi) : null;
+        byte[]? cdieBytes = File.Exists(cdie) ? File.ReadAllBytes(cdie) : null;
         byte[]? cmdBytes = File.Exists(cmd) ? File.ReadAllBytes(cmd) : null;
         byte[]? gdiBytes = File.Exists(gdi) ? File.ReadAllBytes(gdi) : null;
         byte[]? mapBytes = File.Exists(map) ? File.ReadAllBytes(map) : null;
@@ -341,7 +353,7 @@ public sealed class DbcModelResolver : IDbcModelResolver
         // If all 3 essential display DBCs exist loose, load them directly
         if (cdiBytes != null && cmdBytes != null && gdiBytes != null)
         {
-            resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes);
+            resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes, cdieBytes);
             return resolver;
         }
 
@@ -355,7 +367,7 @@ public sealed class DbcModelResolver : IDbcModelResolver
             {
                 if (mapBytes != null && archiveResolver.MapCount == 0)
                 {
-                    archiveResolver.LoadData(null, null, null, mapBytes);
+                    archiveResolver.LoadData(null, null, null, mapBytes, null);
                 }
                 return archiveResolver;
             }
@@ -365,9 +377,9 @@ public sealed class DbcModelResolver : IDbcModelResolver
         }
 
         // Fallback to partial loose data if MPQ search yielded nothing
-        if (cdiBytes != null || cmdBytes != null || gdiBytes != null || mapBytes != null)
+        if (cdiBytes != null || cmdBytes != null || gdiBytes != null || mapBytes != null || cdieBytes != null)
         {
-            resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes);
+            resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes, cdieBytes);
         }
 
         return resolver;
@@ -382,6 +394,9 @@ public sealed class DbcModelResolver : IDbcModelResolver
         byte[]? cdiBytes = catalog.ReadFile("DBFilesClient\\CreatureDisplayInfo.dbc")
             ?? catalog.ReadFile("DBFilesClient/CreatureDisplayInfo.dbc")
             ?? catalog.ReadFile("CreatureDisplayInfo.dbc");
+        byte[]? cdieBytes = catalog.ReadFile("DBFilesClient\\CreatureDisplayInfoExtra.dbc")
+            ?? catalog.ReadFile("DBFilesClient/CreatureDisplayInfoExtra.dbc")
+            ?? catalog.ReadFile("CreatureDisplayInfoExtra.dbc");
         byte[]? cmdBytes = catalog.ReadFile("DBFilesClient\\CreatureModelData.dbc")
             ?? catalog.ReadFile("DBFilesClient/CreatureModelData.dbc")
             ?? catalog.ReadFile("CreatureModelData.dbc");
@@ -404,11 +419,11 @@ public sealed class DbcModelResolver : IDbcModelResolver
         {
         }
 
-        resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes);
+        resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes, cdieBytes);
         return resolver;
     }
 
-    public void LoadData(byte[]? cdiBytes, byte[]? cmdBytes, byte[]? gdiBytes, byte[]? mapBytes = null)
+    public void LoadData(byte[]? cdiBytes, byte[]? cmdBytes, byte[]? gdiBytes, byte[]? mapBytes = null, byte[]? cdieBytes = null)
     {
         // 1. CreatureModelData: ID(0) -> ModelPath(2)
         var modelDataPaths = new Dictionary<int, string>();
@@ -433,20 +448,74 @@ public sealed class DbcModelResolver : IDbcModelResolver
             }
         }
 
-        // 2. CreatureDisplayInfo: ID(0) -> ModelID(1), Scale(4)
+        // 1b. CreatureDisplayInfoExtra: ID(0) -> BakeName(last field / field 18 in 0.5.3, field 18 in 3.3.5)
+        var extraBakedTextures = new Dictionary<int, string>();
+        if (cdieBytes != null && cdieBytes.Length > 0)
+        {
+            var cdie = DbcReader.Load(cdieBytes);
+            int lastField = (int)(cdie.Header.RecordSize / 4) - 1;
+            for (int r = 0; r < cdie.Rows.Count; r++)
+            {
+                int extraId = cdie.GetInt(r, 0);
+                string bakeName = string.Empty;
+                if (lastField > 0)
+                {
+                    uint strOffset = cdie.GetUInt(r, lastField);
+                    bakeName = cdie.GetString(strOffset);
+                }
+
+                if (!string.IsNullOrWhiteSpace(bakeName))
+                {
+                    string bakePath = bakeName.Trim().Replace('/', '\\');
+                    if (!bakePath.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                        bakePath += ".blp";
+                    if (!bakePath.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase))
+                        bakePath = Path.Combine("textures\\BakedNpcTextures", bakePath);
+
+                    extraBakedTextures[extraId] = bakePath;
+                }
+            }
+        }
+
+        // 2. CreatureDisplayInfo: ID(0) -> ModelID(1), ExtendedDisplayInfoID(3), Scale(4), TextureVariation[3](6, 7, 8)
         if (cdiBytes != null && cdiBytes.Length > 0)
         {
             var cdi = DbcReader.Load(cdiBytes);
+            int fieldCount = (int)(cdi.Header.RecordSize / 4);
             for (int r = 0; r < cdi.Rows.Count; r++)
             {
                 int id = cdi.GetInt(r, 0);
                 int modelDataId = cdi.GetInt(r, 1);
-                float scale = cdi.GetFloat(r, 4);
+                int extraId = fieldCount > 3 ? cdi.GetInt(r, 3) : 0;
+                float scale = fieldCount > 4 ? cdi.GetFloat(r, 4) : 1.0f;
                 if (scale <= 0) scale = 1.0f;
+
+                string[]? customTextures = null;
+                if (extraId > 0 && extraBakedTextures.TryGetValue(extraId, out string? bakedPath))
+                {
+                    customTextures = new[] { bakedPath };
+                }
+                else if (fieldCount >= 9)
+                {
+                    // TextureVariation 1, 2, 3
+                    string t1 = cdi.GetString(cdi.GetUInt(r, 6));
+                    string t2 = cdi.GetString(cdi.GetUInt(r, 7));
+                    string t3 = cdi.GetString(cdi.GetUInt(r, 8));
+
+                    if (!string.IsNullOrWhiteSpace(t1) || !string.IsNullOrWhiteSpace(t2) || !string.IsNullOrWhiteSpace(t3))
+                    {
+                        var variations = new List<string>();
+                        if (!string.IsNullOrWhiteSpace(t1)) variations.Add(t1.Trim());
+                        if (!string.IsNullOrWhiteSpace(t2)) variations.Add(t2.Trim());
+                        if (!string.IsNullOrWhiteSpace(t3)) variations.Add(t3.Trim());
+                        if (variations.Count > 0)
+                            customTextures = variations.ToArray();
+                    }
+                }
 
                 if (modelDataPaths.TryGetValue(modelDataId, out var path))
                 {
-                    RegisterCreature(id, path, scale);
+                    RegisterCreature(id, path, scale, fileDataId: null, customTextures: customTextures);
                 }
             }
         }

@@ -83,6 +83,8 @@ internal sealed class SqlSpawnStreamingService
     private int _lastSelectedSpawnId = -1;
     private bool _showChatOverlay = true;
 
+    private WorldSpawnRecord? _selectedGossipSpawn = null;
+
     internal WorldDialogueService DialogueService => _dialogueService;
     internal FakeChatWindowService ChatWindow => _chatWindow;
     internal WorldEventRegistry EventRegistry => _eventRegistry;
@@ -135,6 +137,68 @@ internal sealed class SqlSpawnStreamingService
         }
 
         return "3.3.5a";
+    }
+
+    private DbcModelResolver? _activeDbcResolver;
+    private string? _activeDbcResolverClientVersion;
+    private IDataSource? _activeDbcResolverDataSource;
+
+    private DbcModelResolver? GetOrLoadDbcModelResolver(IDataSource? dataSource, string clientVersion)
+    {
+        if (dataSource == null)
+            return null;
+
+        if (_activeDbcResolver != null && 
+            _activeDbcResolverDataSource == dataSource && 
+            string.Equals(_activeDbcResolverClientVersion, clientVersion, StringComparison.OrdinalIgnoreCase))
+        {
+            return _activeDbcResolver;
+        }
+
+        try
+        {
+            byte[]? cdiBytes = dataSource.ReadFile("DBFilesClient\\CreatureDisplayInfo.dbc")
+                ?? dataSource.ReadFile("DBFilesClient/CreatureDisplayInfo.dbc")
+                ?? dataSource.ReadFile("CreatureDisplayInfo.dbc");
+            byte[]? cdieBytes = dataSource.ReadFile("DBFilesClient\\CreatureDisplayInfoExtra.dbc")
+                ?? dataSource.ReadFile("DBFilesClient/CreatureDisplayInfoExtra.dbc")
+                ?? dataSource.ReadFile("CreatureDisplayInfoExtra.dbc");
+            byte[]? cmdBytes = dataSource.ReadFile("DBFilesClient\\CreatureModelData.dbc")
+                ?? dataSource.ReadFile("DBFilesClient/CreatureModelData.dbc")
+                ?? dataSource.ReadFile("CreatureModelData.dbc");
+            byte[]? gdiBytes = dataSource.ReadFile("DBFilesClient\\GameObjectDisplayInfo.dbc")
+                ?? dataSource.ReadFile("DBFilesClient/GameObjectDisplayInfo.dbc")
+                ?? dataSource.ReadFile("GameObjectDisplayInfo.dbc");
+            byte[]? mapBytes = dataSource.ReadFile("DBFilesClient\\Map.dbc")
+                ?? dataSource.ReadFile("DBFilesClient/Map.dbc")
+                ?? dataSource.ReadFile("Map.dbc");
+
+            if (cdiBytes != null || cmdBytes != null || gdiBytes != null)
+            {
+                var resolver = new DbcModelResolver { PreferredClientVersion = clientVersion };
+                try
+                {
+                    var fileList = dataSource.GetFileList();
+                    if (fileList != null && fileList.Count > 0)
+                    {
+                        resolver.SetAvailableFiles(fileList);
+                    }
+                }
+                catch { }
+
+                resolver.LoadData(cdiBytes, cmdBytes, gdiBytes, mapBytes, cdieBytes);
+                _activeDbcResolver = resolver;
+                _activeDbcResolverClientVersion = clientVersion;
+                _activeDbcResolverDataSource = dataSource;
+                return resolver;
+            }
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Info(ViewerLog.Category.Dbc, $"[SqlSpawnStreaming] Failed to load DBCs from data source: {ex.Message}");
+        }
+
+        return null;
     }
 
     internal static string? ResolveDatasetPathForVersion(string version)
@@ -339,29 +403,82 @@ internal sealed class SqlSpawnStreamingService
                 ExportAnimationStateJson(animator, currentSeq, currentSeqName, seqStart, seqEnd);
         }
 
-        // --- Gossip & Dialogue Section ---
+        // --- Gossip & Quests Button ---
+        int gossipCount = spawn.SpawnType == WorldSpawnType.Creature ? _dialogueService.GetGossipForCreature(spawn.EntryId).Count : 0;
+        int barkCount = spawn.SpawnType == WorldSpawnType.Creature ? _dialogueService.GetBarksForCreature(spawn.EntryId).Count : 0;
+        int questCount = spawn.SpawnType == WorldSpawnType.Creature
+            ? _dialogueService.GetQuestsForCreature(spawn.EntryId).Count
+            : _dialogueService.GetQuestsForGameObject(spawn.EntryId).Count;
+        int totalDialogue = gossipCount + barkCount + questCount;
+
+        if (totalDialogue > 0)
+        {
+            ImGui.Separator();
+            string gossipLabel = $"Gossip ({totalDialogue})##OpenGossipDock";
+            if (ImGui.Button(gossipLabel))
+            {
+                _selectedGossipSpawn = spawn;
+                _host.UiManager.OpenViewer(Workbench.ViewerPanel.Gossip);
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip($"Open Gossip panel in right sidebar with {gossipCount} gossip, {barkCount} barks, and {questCount} quests.");
+        }
+
+
+
+
+
+    }
+
+    internal void DrawGossipPanelContent()
+    {
+        WorldSpawnRecord? spawn = GetActiveGossipSpawn();
+        if (spawn == null)
+        {
+            SharedUiWidgets.DrawEmptyState(
+                "No Dialogue Selected",
+                "Select an NPC, creature, or game object in the world to view its gossip, ambient barks, and offered quests.");
+            return;
+        }
+
+
+
+
+
+
+
+
+
+
+        string headerTitle = spawn.SpawnType == WorldSpawnType.Creature
+            ? $"NPC: {spawn.Name}" + (!string.IsNullOrEmpty(spawn.Subname) ? $" <{spawn.Subname}>" : "")
+            : $"GameObject: {spawn.Name}";
+        ImGui.TextColored(new Vector4(0.85f, 1f, 0.85f, 1f), headerTitle);
+        ImGui.TextDisabled($"SpawnId: {spawn.SpawnId}  Entry: {spawn.EntryId}");
+        ImGui.Separator();
+
         if (spawn.SpawnType == WorldSpawnType.Creature)
         {
             var gossipList = _dialogueService.GetGossipForCreature(spawn.EntryId);
             if (gossipList.Count > 0)
             {
-                ImGui.Separator();
-                ImGui.TextColored(new Vector4(1f, 0.85f, 0.45f, 1f), "NPC Gossip & Dialogue:");
+                ImGui.TextColored(new Vector4(1f, 0.85f, 0.45f, 1f), $"NPC Gossip & Dialogue ({gossipList.Count}):");
                 for (int i = 0; i < gossipList.Count; i++)
                 {
                     string text = gossipList[i];
                     ImGui.TextWrapped($"\"{text}\"");
                     if (ImGui.SmallButton($"Speak in Chat##gossip_{i}"))
                         _chatWindow.PostNpcBark(spawn.Name, text, DialogueChatType.Say);
+                    ImGui.Spacing();
                 }
+                ImGui.Separator();
             }
 
             var barks = _dialogueService.GetBarksForCreature(spawn.EntryId);
             if (barks.Count > 0)
             {
-                ImGui.Separator();
                 ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), $"Ambient Barks ({barks.Count}):");
-                for (int i = 0; i < Math.Min(barks.Count, 5); i++)
+                for (int i = 0; i < Math.Min(barks.Count, 10); i++)
                 {
                     var b = barks[i];
                     ImGui.TextWrapped($"[{b.Type}] \"{b.Text}\"");
@@ -369,16 +486,15 @@ internal sealed class SqlSpawnStreamingService
                     if (ImGui.SmallButton($"Bark##bark_{i}"))
                         _chatWindow.PostNpcBark(spawn.Name, b.Text, b.Type);
                 }
+                ImGui.Separator();
             }
         }
 
-        // --- Quests Section ---
         var offeredQuests = spawn.SpawnType == WorldSpawnType.Creature
             ? _dialogueService.GetQuestsForCreature(spawn.EntryId)
             : _dialogueService.GetQuestsForGameObject(spawn.EntryId);
         if (offeredQuests.Count > 0)
         {
-            ImGui.Separator();
             ImGui.TextColored(new Vector4(1f, 0.82f, 0.2f, 1f), $"Offered Quests ({offeredQuests.Count}):");
             for (int i = 0; i < offeredQuests.Count; i++)
             {
@@ -388,11 +504,31 @@ internal sealed class SqlSpawnStreamingService
                     ImGui.TextDisabled($"   Objectives: {q.Objectives}");
                 if (!string.IsNullOrEmpty(q.Details))
                 {
+                    ImGui.TextWrapped($"   {q.Details}");
                     if (ImGui.SmallButton($"Post Quest Text##q_{q.QuestId}"))
                         _chatWindow.PostSystemMessage($"Quest [{q.QuestLevel}] {q.Title}: {q.Details}");
                 }
+                ImGui.Spacing();
             }
         }
+
+    }
+
+    private WorldSpawnRecord? GetActiveGossipSpawn()
+    {
+        if (_worldScene != null && _worldScene.Selection.SelectedInstance.HasValue && _sqlMapSpawnsCache != null)
+        {
+            var inst = _worldScene.Selection.SelectedInstance.Value;
+            var matched = _sqlMapSpawnsCache.FirstOrDefault(s =>
+                (inst.SpawnId.HasValue ? s.SpawnId == inst.SpawnId.Value : s.SpawnId == inst.UniqueId) &&
+                (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
+            if (matched != null)
+            {
+                _selectedGossipSpawn = matched;
+                return matched;
+            }
+        }
+        return _selectedGossipSpawn;
     }
 
     internal void UpdateSqlSpawnStreaming()
@@ -539,6 +675,8 @@ internal sealed class SqlSpawnStreamingService
 
                 var spawnList = mapSpawns.ToList();
 
+                var dbcResolver = GetOrLoadDbcModelResolver(_dataSource, clientVer);
+
                 // Target version normalization based on active client:
                 // If active client is 0.5.3 Alpha, normalize any .m2 model paths to .mdx
                 // If active client is 3.3.5a, normalize any .mdx model paths to .m2 (for non-WMO models)
@@ -548,6 +686,30 @@ internal sealed class SqlSpawnStreamingService
                 for (int i = 0; i < spawnList.Count; i++)
                 {
                     var sp = spawnList[i];
+                    if (sp.SpawnType == WorldSpawnType.Creature && sp.DisplayId > 0 && dbcResolver != null)
+                    {
+                        if (dbcResolver.TryResolveCreature(sp.DisplayId, out var resModel, out var resScale, out var fdid, out var customTex))
+                        {
+                            if (!string.IsNullOrEmpty(resModel))
+                                sp.ModelPath = resModel;
+                            if (customTex != null && customTex.Length > 0)
+                                sp.CustomTextures = customTex;
+                            if (resScale > 0 && sp.DisplayScale <= 0)
+                            {
+                                sp.DisplayScale = resScale;
+                                sp.EffectiveScale = sp.Scale * resScale;
+                            }
+                        }
+                    }
+                    else if (sp.SpawnType == WorldSpawnType.GameObject && sp.DisplayId > 0 && dbcResolver != null)
+                    {
+                        if (dbcResolver.TryResolveGameObject(sp.DisplayId, out var resModel, out var resScale, out var fdid))
+                        {
+                            if (!string.IsNullOrEmpty(resModel))
+                                sp.ModelPath = resModel;
+                        }
+                    }
+
                     if (!string.IsNullOrEmpty(sp.ModelPath))
                     {
                         if (isAlpha053 && sp.ModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))

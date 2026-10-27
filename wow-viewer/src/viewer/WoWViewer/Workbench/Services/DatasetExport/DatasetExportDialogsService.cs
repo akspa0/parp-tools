@@ -45,7 +45,7 @@ using static WoWViewer.CaptureAutomationService;
 namespace WoWViewer;
 
 /// <summary>
-/// VLM dataset export, MK harvest (with viewer-validation capture plan), ML finalize and terrain texture-transfer dialogs and jobs.
+/// VLM dataset export, dataset harvest (with viewer-validation capture plan), ML finalize and terrain texture-transfer dialogs and jobs.
 /// Extracted verbatim from <see cref="ViewerApp"/> (Epic 251 U-01). World and app state it
 /// needs comes only through <see cref="IViewerAppHost"/>; the bridge members below keep the
 /// names the moved code used inside ViewerApp, so no moved body was edited.

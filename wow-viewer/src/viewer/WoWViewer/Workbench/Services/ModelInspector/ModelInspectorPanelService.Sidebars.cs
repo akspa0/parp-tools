@@ -255,16 +255,19 @@ internal sealed partial class ModelInspectorPanelService
     {
         if (_renderer is not IModelRenderer modelRenderer || modelRenderer.Animator == null)
         {
-            string rendererType = _renderer?.GetType().Name ?? "null";
-            if (_renderer != null && _renderer is IModelRenderer mr && mr.Animator == null)
+            if (_worldScene == null)
             {
-                ImGui.TextDisabled($"Model loaded, but Animator is null. Renderer: {rendererType}");
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("The renderer exists but has no animation controller. Try loading a model with skeletal animation data.");
-            }
-            else
-            {
-                ImGui.TextDisabled("No animatable model is loaded.");
+                string rendererType = _renderer?.GetType().Name ?? "null";
+                if (_renderer != null && _renderer is IModelRenderer mr && mr.Animator == null)
+                {
+                    ImGui.TextDisabled($"Model loaded, but Animator is null. Renderer: {rendererType}");
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("The renderer exists but has no animation controller. Try loading a model with skeletal animation data.");
+                }
+                else
+                {
+                    ImGui.TextDisabled("No animatable model is loaded.");
+                }
             }
             return;
         }
@@ -638,6 +641,10 @@ internal sealed partial class ModelInspectorPanelService
                     DrawWorldMdxAnimationControls(mdxRenderer.Animator);
                 }
             }
+        }
+        else if (_worldScene != null && _renderer is not IModelRenderer)
+        {
+            SharedUiWidgets.DrawEmptyState("No Animatable Object Selected", "Select a creature, NPC, or animated game object in the world to view and control its animations.");
         }
     }
 

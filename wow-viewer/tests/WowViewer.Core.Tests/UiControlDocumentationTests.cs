@@ -69,7 +69,7 @@ public sealed class UiControlDocumentationTests
     public void IconActions_AreDocumentedByFullName_AndExactSourceLine()
     {
         var found = UiControlScanner.Scan(ViewerRoot).Where(control => control.Kind == "ActionBarIcon").ToList();
-        string[] expected = ["Workspace", "File Browser", "Maps", "Assets", "Taxi", "Capture", "Diagnostics", "Inspector", "World", "Model", "PM4"];
+        string[] expected = ["Workspace", "File Browser", "Maps", "Assets", "Taxi", "Capture", "Diagnostics", "Inspector", "World", "Gossip", "PM4"];
         Assert.Equal(expected.OrderBy(label => label, StringComparer.Ordinal), found.Select(control => control.Label));
         foreach (var control in found)
         {

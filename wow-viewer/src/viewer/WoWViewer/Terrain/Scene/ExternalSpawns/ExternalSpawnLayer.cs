@@ -160,7 +160,11 @@ public sealed class ExternalSpawnLayer
             bool isWmo = rawModelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
 
             string modelPath = isWmo ? rawModelPath : _assets.ResolveCanonicalModelPath(rawModelPath);
-            string key = WorldAssetManager.NormalizeKey(modelPath);
+            string baseKey = WorldAssetManager.NormalizeKey(modelPath);
+            string key = (spawn.CustomTextures != null && spawn.CustomTextures.Length > 0)
+                ? $"{baseKey}#tex:{string.Join(";", spawn.CustomTextures)}"
+                : baseKey;
+
             float orientationRadians = spawn.OrientationWowRadians;
             float yawOffsetRadians = spawn.SpawnType == WorldSpawnType.Creature ? MathF.PI : 0f;
             float finalYawRadians = orientationRadians + yawOffsetRadians;
@@ -173,9 +177,13 @@ public sealed class ExternalSpawnLayer
             var pos = SqlSpawnCoordinateConverter.ToRendererPosition(spawn.PositionWow);
             var (tileX, tileY) = ComputeTileCoordinates(pos);
 
+            Matrix4x4 rotationMatrix = spawn.Rotation.HasValue && spawn.Rotation.Value != Quaternion.Identity
+                ? Matrix4x4.CreateFromQuaternion(spawn.Rotation.Value)
+                : Matrix4x4.CreateRotationZ(finalYawRadians);
+
             if (isWmo)
             {
-                var transform = Matrix4x4.CreateRotationZ(finalYawRadians)
+                var transform = rotationMatrix
                     * Matrix4x4.CreateTranslation(pos);
 
                 Vector3 localMin, localMax, worldMin, worldMax;
@@ -231,7 +239,7 @@ public sealed class ExternalSpawnLayer
             else
             {
                 var transform = Matrix4x4.CreateScale(mdxScale)
-                    * Matrix4x4.CreateRotationZ(finalYawRadians)
+                    * rotationMatrix
                     * Matrix4x4.CreateTranslation(pos);
 
                 Vector3 bbMin, bbMax;

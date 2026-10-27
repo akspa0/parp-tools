@@ -670,7 +670,7 @@ internal sealed partial class MinimapAndStatusService
     {
         if (!TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName))
         {
-            ImGui.TextWrapped("Load a world map or MK dataset project to activate the minimap.");
+            ImGui.TextWrapped("Load a world map or Zarr dataset to activate the minimap.");
             return;
         }
 
@@ -686,7 +686,7 @@ internal sealed partial class MinimapAndStatusService
     {
         if (existingTiles == null || isTileLoaded == null)
         {
-            ImGui.TextWrapped("Load a world map or MK dataset project to activate the minimap.");
+            ImGui.TextWrapped("Load a world map or Zarr dataset to activate the minimap.");
             ImGui.Spacing();
             ImGui.TextDisabled("Once a world is loaded, the minimap will show loaded tiles, support zoom and pan, and allow triple-click teleport.");
             ImGui.Spacing();

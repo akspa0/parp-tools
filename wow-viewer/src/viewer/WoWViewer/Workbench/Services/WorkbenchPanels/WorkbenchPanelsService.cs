@@ -22,14 +22,16 @@ internal sealed partial class WorkbenchPanelsService
         switch (panel)
         {
             case ViewerPanel.Inspector:
-                int inspector = DrawPageCombo("##InspectorPage", ["Context", "Scene Investigation", "MCNK Flags", "World Context"], ui.InspectorPage);
+                int inspector = DrawPageCombo("##InspectorPage", ["Context", "Animations", "Model Info", "Scene Investigation", "MCNK Flags", "World Context"], ui.InspectorPage);
                 if (inspector != ui.InspectorPage) ui.OpenViewer(panel, inspector);
                 switch (inspector)
                 {
                     case 0: DrawUnifiedInspectorContent(); break;
-                    case 1: _investigation.DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null); break;
-                    case 2: _investigation.DrawMcnkFlagOverlayControls(); break;
-                    case 3: DrawInspectorWorldContextContent(); break;
+                    case 1: _modelInspector.DrawModelAnimationsSubTab(); break;
+                    case 2: _modelInspector.DrawModelInfoPanelContent(); _modelInspector.DrawModelActionsSubTab(); _mainMenuBar.DrawModelExportContent(); break;
+                    case 3: _investigation.DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null); break;
+                    case 4: _investigation.DrawMcnkFlagOverlayControls(); break;
+                    case 5: DrawInspectorWorldContextContent(); break;
                 }
                 break;
             case ViewerPanel.World:
@@ -48,15 +50,15 @@ internal sealed partial class WorkbenchPanelsService
                     case 3: _mainMenuBar.DrawWorldExportContent(); break;
                 }
                 break;
-            case ViewerPanel.Model:
-                int model = DrawPageCombo("##ModelPage", ["Info", "Animations", "Actions & Exports"], ui.ModelPage);
-                if (model != ui.ModelPage) ui.OpenViewer(panel, model);
-                switch (model)
-                {
-                    case 0: _modelInspector.DrawModelInfoPanelContent(); break;
-                    case 1: _modelInspector.DrawModelAnimationsSubTab(); break;
-                    case 2: _modelInspector.DrawModelActionsSubTab(); _mainMenuBar.DrawModelExportContent(); break;
-                }
+            case ViewerPanel.Gossip:
+                _sqlSpawnStreaming.DrawGossipPanelContent();
+
+
+
+
+
+
+
                 break;
             case ViewerPanel.PM4:
                 if (_worldScene != null) _pm4Workbench.DrawPm4WorkbenchInspector();
@@ -112,6 +114,14 @@ internal sealed partial class WorkbenchPanelsService
         {
             ImGui.Separator();
             _modelInspector.DrawModelInfoContent();
+        }
+        else if (_worldScene?.Selection.SelectedInstance.HasValue == true && _worldScene.Selection.SelectedObjectType == Terrain.ObjectType.Mdx)
+        {
+            ImGui.Separator();
+            if (SharedUiWidgets.SectionHeader("Model Animations", defaultOpen: true, id: "InspectorModelAnimations"))
+            {
+                _modelInspector.DrawModelAnimationsSubTab();
+            }
         }
     }
 
