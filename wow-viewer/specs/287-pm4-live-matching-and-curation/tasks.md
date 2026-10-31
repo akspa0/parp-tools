@@ -57,9 +57,9 @@
 
 ---
 
-## Phase 3 — Photoshop-Style Texture Layers Workbench & Decomp Tooltips
+## Phase 3 — Photoshop-Style Texture Layers Workbench & Reverse-Engineered Flag Tooltips
 
-**Goal**: Create a dedicated Layers panel with per-layer opacity sliders, alpha mask overlay blend intensity, and decomp-backed tooltips from 4.3.4 decomp.
+**Goal**: Create a dedicated Layers panel with per-layer opacity sliders, alpha mask overlay blend intensity, and Ghidra client analysis tooltips.
 
 - [ ] T015 [P] Update GLSL shader in `TerrainRenderer.cs`:
   - Add `uniform float uLayerOpacity[8];` uniform array.
@@ -73,7 +73,7 @@
   - Render list of resident texture layers (0 to 3, up to 7).
   - Checkbox toggle for visibility + float slider for opacity per layer.
   - "Alpha Mask Overlay" slider ($0.0 \dots 1.0$) to blend raw alpha mask over painted diffuse.
-- [ ] T018 Add verified 4.3.4 decomp tooltips for all `MCLY.Flags` and `EffectId`:
+- [ ] T018 Add Ghidra-verified tooltips for all `MCLY.Flags` and `EffectId`:
   - `0x07` (UV Anim Direction), `0x38` (UV Anim Speed), `0x40` (Anim Enabled), `0x80` (Specular Masking), `0x100` (Alpha Map), `0x200` (Alpha RLE), `0x400` (Cubemap Reflection), `0x8000` (Dynamic Texture), `EffectId` (Ground Clutter Doodads).
 - [ ] T019 Register new controls in `ui-controls.json` and run `Verify-UiReference.ps1`.
 - [ ] T020 Wire Layers toggle button to the top action bar or bottom bar.
@@ -96,3 +96,4 @@
 - [ ] T026 Add audio playback volume and mute controls in the UI.
 - [ ] T027 **Source/test gate**: Run `dotnet build` on `WoWViewer.csproj`; verify 0 errors and record receipt in `evidence/phase4-sky-audio-source.md`.
 - [ ] T028 **Operator runtime gate**: Sweep time of day from 0.0 (midnight) to 0.5 (noon) on a map with `LightSkybox.dbc`; confirm the skybox model remains visible at noon. Walk across zone borders and confirm zone audio playback.
+

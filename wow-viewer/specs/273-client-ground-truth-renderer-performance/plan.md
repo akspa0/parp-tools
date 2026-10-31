@@ -2,13 +2,13 @@
 
 **Feature Branch**: `v0.6.1-dev`
 **Owning Spec**: `wow-viewer/specs/273-client-ground-truth-renderer-performance/spec.md`
-**Ground Truth Source**: `H:\wowdecomps\3.3.5a\wowdecomp-main` (`wowdecomp`)
+**Ground Truth Source**: Ghidra Client Binary Analysis (WoW 3.3.5a)
 
 ---
 
 ## 1. Ground Truth Architecture & Reference Points
 
-The WoW 3.3.5 client (`wowdecomp`) handles massive scale, dense cities, and thousands of doodads efficiently using specific architectural principles:
+The WoW 3.3.5 client binary analysis reveals how massive scale, dense cities, and thousands of doodads are handled efficiently using specific architectural principles:
 
 ### A. WMO Group Classification & Portal Traversal (`WoW/Source/WorldClient/MapObj.cpp`)
 - **Exterior vs Interior Groups**:
@@ -34,7 +34,7 @@ The WoW 3.3.5 client (`wowdecomp`) handles massive scale, dense cities, and thou
   This single block forcibly un-culls all interior groups whose AABBs touch the camera frustum, causing the 80,000+ draw-call disaster in Stormwind and dense settlements.
 
 ### B. Point Light Evaluation & Decoupled Instancing (`CShaderEffect.cpp`, `WorldObjectPassCoordinator.cs`)
-- In `wowdecomp`, local lights are evaluated against object bounds. Placements not within range of any local point light use the standard directional/ambient pass.
+- In Ghidra client binary analysis, local lights are evaluated against object bounds. Placements not within range of any local point light use the standard directional/ambient pass.
 - In `wow-viewer`, `WorldScene.cs:3177` currently evaluates `canBatch` as:
   ```csharp
   bool canBatch = _sceneLightManager.Count == 0 && renderer is IGpuInstancedWmoRenderer gpuRenderer ...
@@ -43,7 +43,7 @@ The WoW 3.3.5 client (`wowdecomp`) handles massive scale, dense cities, and thou
   Furthermore, `WmoRenderer.cs:133` requires `_wmo.Portals.Count == 0`, disabling instancing for any model that possesses portal geometry even if only its exterior shell is drawn.
 
 ### C. Spatial Doodad Submission (`CM2Scene.cpp`, `WorldScene.cs`)
-- In `wowdecomp`, `CM2Scene` only evaluates models resident within the camera's active sector/view volume.
+- In Ghidra client binary analysis, `CM2Scene` only evaluates models resident within the camera's active sector/view volume.
 - In `wow-viewer`, `RebuildSceneLights` loops over all `_mdxInstances` in the entire world every frame (`for (int i = 0; i < _mdxInstances.Count; i++)`), creating large recurring frame stalls.
 
 ---

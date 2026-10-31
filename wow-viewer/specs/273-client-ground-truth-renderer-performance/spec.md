@@ -6,7 +6,7 @@
 
 **Status**: Specified; awaiting phase implementation
 
-**Input**: Operator prompt: *"let's refine our renderer with appropriate stuff from there, since it's in dire need of help, performance is horrific for anything beyond 0.5.3, really. use speckit"* referencing the 3.3.5a decompilation ground truth at `H:\wowdecomps\3.3.5a\wowdecomp-main` (`wowdecomp`).
+**Input**: Operator prompt: *"let's refine our renderer with appropriate stuff from there, since it's in dire need of help, performance is horrific for anything beyond 0.5.3, really. use speckit"* referencing the 3.3.5a Ghidra client binary analysis.
 
 ---
 
@@ -22,7 +22,7 @@ In `wow-viewer`, performance on content beyond 0.5.3 (such as 1.12, 3.3.5, and m
 4. **Terrain Shader & Lighting Discrepancies**:
    Lighting constants, attenuation factors, and texture matrix orientations diverge from the client's unified `SVertexShaderConstants` and `CShaderEffect` pipelines.
 
-The ground-truth C++ client implementation in `H:\wowdecomps\3.3.5a\wowdecomp-main` provides the exact algorithms and data structures used by Blizzard to maintain 60+ FPS across complex WMOs and dense terrain.
+The ground-truth Ghidra client binary analysis provides the exact algorithms and data structures used by Blizzard to maintain 60+ FPS across complex WMOs and dense terrain.
 
 ---
 

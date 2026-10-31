@@ -8,7 +8,7 @@
 
 ## Phase 1 — WMO Portal Occlusion & Interior Group Culling
 
-- [x] **T001**: Audit `WmoPortalVisibilityEvaluator.cs` against `WoW/Source/WorldClient/MapObj.cpp` and `CPortalView.cpp` in `wowdecomp`.
+- [x] **T001**: Audit `WmoPortalVisibilityEvaluator.cs` against Ghidra client binary analysis of `MapObj` and `CPortalView`.
 - [x] **T002**: Classify WMO groups as Exterior (`(flags & 0x2000) == 0`) or Interior (`(flags & 0x2000) != 0`) in `WmoRenderer.cs` and `WmoPortalVisibilityGroup`.
 - [x] **T003**: In `WmoRenderer.UpdateRuntimeVisibility`, remove the unconditional fallback loop (`lines 1813–1819`) that marks all frustum-intersecting groups as visible; restrict frustum-only admission to Exterior groups.
 - [x] **T004**: Ensure Interior groups are admitted strictly when the camera is inside the group or reached via valid portal traversal from an active view.

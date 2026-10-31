@@ -32,8 +32,8 @@
    - When external creature spawns are injected into the scene, `MdxAnimator` defaults to sequence index 0 (`SetSequence(0)`).
    - In models where sequence 0 is `Walk` or `Run`, NPCs appear perpetually running or walking in place. NPCs should default to `Stand` / `Idle` animations.
 
-### 1.2 Ground Effect Foliage Transparency & Fading (Decomp Ground-Truth)
-1. **Decomp Analysis (`H:\wowdecomps\4.3.4\wowdecomp15595-w15595\WoW\Source\WorldClient\DetailDoodad.cpp`)**:
+### 1.2 Ground Effect Foliage Transparency & Fading (Client Binary Analysis Ground-Truth)
+1. **Ghidra Analysis of Client Foliage Rendering (`DetailDoodad`)**:
    - Authentic client render state:
      - `GxRsSet(GxRs_BlendingMode, GxBlend_Alpha)`: Alpha blending is active (`SrcAlpha, OneMinusSrcAlpha`).
      - `GxRsSet(GxRs_AlphaRef, static_cast<uint8_t>(World::detailDoodadAlphaRef))` where `World::detailDoodadAlphaRef = 128` (0.502f cutoff).

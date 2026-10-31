@@ -6,9 +6,9 @@
 
 ---
 
-## Phase 1: Ground Effects Foliage Transparency & Fading (Decomp Ground-Truth)
+## Phase 1: Ground Effects Foliage Transparency & Fading (Client Binary Analysis Ground-Truth)
 
-- [x] **T001**: Align alpha cutout threshold in `ModelRenderer.cs` from `0.15f` to `0.50f` ($128/255$) matching ground-truth `World::detailDoodadAlphaRef = 128` from `H:\wowdecomps\4.3.4\wowdecomp15595-w15595\WoW\Source\WorldClient\DetailDoodad.cpp`.
+- [x] **T001**: Align alpha cutout threshold in `ModelRenderer.cs` from `0.15f` to `0.50f` ($128/255$) matching ground-truth `World::detailDoodadAlphaRef = 128` from Ghidra client binary analysis of `DetailDoodad`.
 - [x] **T002**: Enable alpha blending for fading ground effect instances in `GroundEffectSceneService.cs` and `ModelRenderer.cs` when `fadeAlpha < 0.999f`, eliminating abrupt popping and opaque distance silhouettes.
 - [x] **T003**: Verify ground effect rendering in `WowViewer.Core.Tests` and visual smoke on terrain.
 

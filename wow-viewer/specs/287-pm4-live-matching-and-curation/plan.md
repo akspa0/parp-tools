@@ -26,7 +26,7 @@ This implementation adds four bounded, cohesive subsystems layered cleanly above
    - Adds `uniform float uLayerOpacity[8]` and `uniform float uAlphaMaskBlend` to the terrain fragment shader in `TerrainRenderer.cs`.
    - Modulates layer contribution: `result = mix(result, layerColor, alpha * uLayerOpacity[i])`.
    - Modulates alpha mask debug overlay: `finalColor = mix(finalColor, vec3(alphaDbg), uAlphaMaskBlend)`.
-   - Renders a modern Photoshop-style Layers panel with per-layer thumbnails, toggle checkboxes, opacity sliders, and tooltips decoding 4.3.4 decomp flags.
+   - Renders a modern Photoshop-style Layers panel with per-layer thumbnails, toggle checkboxes, opacity sliders, and tooltips decoding Ghidra client analysis flags.
 
 4. **Skybox & Audio Immersion Corrections**:
    - In `SceneAtmosphere.cs`, removes the `NightVisibility > 0.001f` gating on `_activeLightSkyboxModelKey`, allowing client skybox models (`LightSkybox.dbc`) to render at daytime.
@@ -41,7 +41,7 @@ This implementation adds four bounded, cohesive subsystems layered cleanly above
 |---|---|---|
 | "duplicate nearby objects and match them to their pm4 data" (cliff doodads in `development.wdt`) | Phase 1: `Pm4DoodadDuplicationService` with Inspector action, scale/rotation fitting, and Zarr v60 export | Rewriting core format readers or altering original ADT MODF/MDDF structures directly |
 | "burgandy red color... set chunks' holes flag to 1... group of 2 or more chunks" | Phase 2: `MccvHoleDetectionService` with 2+ contiguous chunk clustering and solid chroma threshold | Blindly holed terrain without adjacency clustering |
-| "toolbar options... toggle buttons... photoshop layers-like opacity/blending... decode texture effects from 4.3.4 decomp" | Phase 3: Dedicated Layers window, `uLayerOpacity`/`uAlphaMaskBlend` shader uniforms, 4.3.4 decomp tooltips | Bloated permanent sidebars; adheres to action-bar popup architecture |
+| "toolbar options... toggle buttons... photoshop layers-like opacity/blending... decode texture effects from Ghidra client analysis" | Phase 3: Dedicated Layers window, `uLayerOpacity`/`uAlphaMaskBlend` shader uniforms, Ghidra-verified tooltips | Bloated permanent sidebars; adheres to action-bar popup architecture |
 | "skyboxes to work... music/audio" | Phase 4: Full-day skybox rendering in `SceneAtmosphere.cs` and zone music trigger | Rewriting audio engine; leverages existing OpenAL/NAudio service |
 
 ---
@@ -75,10 +75,11 @@ This implementation adds four bounded, cohesive subsystems layered cleanly above
 
 - **Phase 3: Texture Layers Workbench & Shader Blending**
   - Add `uLayerOpacity[8]` and `uAlphaMaskBlend` to `TerrainRenderer.cs`.
-  - Implement `TerrainLayersPanelService.cs` with layer thumbnails, opacity sliders, and decomp-backed tooltips.
+  - Implement `TerrainLayersPanelService.cs` with layer thumbnails, opacity sliders, and Ghidra-verified tooltips.
   - Register controls in `ui-controls.json` and verify with `Verify-UiReference.ps1`.
 
 - **Phase 4: Skybox Full-Day Rendering & Audio Immersion**
   - In `SceneAtmosphere.cs`, remove `_skyDome.NightVisibility > 0.001f` gating on skybox backdrop rendering.
   - Preserve DBC/LIT authored sky colors in `_skyDome.UpdateFromLighting`.
   - Connect camera area transitions in `WorldScene` to `AudioService.PlayZoneMusic`.
+

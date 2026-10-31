@@ -4,7 +4,7 @@
 **Origin**: Operator prompt (2026-10-31) regarding:
 1. Live PM4 object duplication and magnetic matching in the viewer (as shown in `development.wdt` tile 35_38 where single M2 objects like `DRAGONBLIGHT_CLIFF_01.M2` have dozens of unmatched red PM4 doodad collision hulls from Blizzard level-designer copy-pasting).
 2. Deriving chunk terrain holes from burgundy-red MCCV / minimap colors representing underside fog holes.
-3. Exposing a Photoshop-style terrain layers toolbar with per-layer opacity, alpha mask overlay blend intensity, and decomp-backed tooltip glossaries (`H:\wowdecomps\4.3.4\wowdecomp15595-w15595`).
+3. Exposing a Photoshop-style terrain layers toolbar with per-layer opacity, alpha mask overlay blend intensity, and Ghidra-verified client binary analysis tooltip glossaries.
 4. Fixing skyboxes to render across the full day cycle (removing the night-only gate in `SceneAtmosphere.cs`) and enabling zone audio/music.
 5. Saving curated merged object placements to a Zarr v60 dataset archive.
 
@@ -30,7 +30,7 @@ When Blizzard rendered minimaps or baked MCCV (vertex colors: 145 BGRA vertices 
 Currently, terrain layer toggles are buried deep inside the "Options" bottom-tab panel (`ViewerChromeService.Options.cs`).
 - The terrain shader (`TerrainRenderer.cs`) only supports binary layer visibility (`uShowLayerMask`).
 - When "Show Alpha Mask" is enabled, it completely replaces the terrain color with grayscale alpha; the user cannot blend the alpha mask over the painted tileset to inspect alignment.
-- Texture layer flags (`MCLY.Flags`) and `EffectId` are opaque to users. Decompilation of the 4.3.4 client (`H:\wowdecomps\4.3.4\wowdecomp15595-w15595`) provides exact definitions for all bits (animation direction/speed, overbright/specular masking, alpha RLE, cubemap reflections, and `GroundEffectTexture.dbc` clutter).
+- Texture layer flags (`MCLY.Flags`) and `EffectId` are opaque to users. Ghidra reverse-engineering analysis of the client binary provides exact definitions for all bits (animation direction/speed, overbright/specular masking, alpha RLE, cubemap reflections, and `GroundEffectTexture.dbc` clutter).
 
 ### 1.4 Skybox & Audio Immersion
 - In `SceneAtmosphere.cs` (line 361), active `LightSkybox.dbc` models are gated behind `if (_skyDome.NightVisibility > 0.001f)`. During daytime, `NightVisibility` is 0, so the client skybox model is never rendered.
@@ -64,14 +64,14 @@ As a level restorer, I want an option to analyze MCCV vertex colors and automati
 - **AC-205**: Chunks whose surface has significant texture diffuse contribution (mixed paint) are excluded.
 - **AC-206**: The operation updates `TerrainChunkData.HoleMask` and rebuilds the chunk mesh indices, rendering visible holes immediately in the viewport.
 
-### User Story 3: Photoshop-Style Texture Layers Workbench & Decomp Tooltips (Priority: P2)
-As a terrain artist, I want a dedicated Layers toolbar with per-layer opacity sliders, alpha mask overlay blend intensity, and decomp-backed tooltips explaining texture effect flags.
+### User Story 3: Photoshop-Style Texture Layers Workbench & Reverse-Engineered Flag Tooltips (Priority: P2)
+As a terrain artist, I want a dedicated Layers toolbar with per-layer opacity sliders, alpha mask overlay blend intensity, and tooltips explaining texture effect flags.
 
 - **AC-301**: A top/bottom toolbar toggle opens a floating/docked **Terrain Layers** panel showing resident layers (0 to 3, up to 7).
 - **AC-302**: Each layer displays its texture filename, `.blp` thumbnail, resolution, and layer flags.
 - **AC-303**: Each layer includes an opacity slider ($0.0 \dots 1.0$), passed to the terrain shader via `uLayerOpacity[8]` uniform to blend layers interactively.
 - **AC-304**: An **"Alpha Mask Overlay"** slider ($0.0 \dots 1.0$) blends the raw MCAL alpha mask over the shaded diffuse texture in real time, allowing visual inspection of texture boundaries.
-- **AC-305**: Hovering over layer flags displays accurate tooltips verified against 4.3.4 decomp:
+- **AC-305**: Hovering over layer flags displays accurate tooltips verified against Ghidra client binary analysis:
   - `0x07`: UV Animation Direction vector.
   - `0x38`: UV Animation Speed (1.0 to 64.0 units/sec).
   - `0x40`: UV Animation Enabled.
@@ -96,3 +96,4 @@ As a user exploring the world, I want skybox models to be visible at noon as wel
 - **AGENTS.md §10 (God-Class Freeze)**: No new members in `WorldScene.cs` or `ViewerApp.cs`. All duplication logic, MCCV hole detection, and layer presentation reside in owned service classes (`Pm4DoodadDuplicationService`, `MccvHoleDetectionService`, `TerrainLayersPanelService`).
 - **AGENTS.md §4 (Do Not Break Format Readers)**: ADT/WMO/M2 readers remain untouched. New placement duplication operates on runtime scene structures and exports through existing writer interfaces.
 - **AGENTS.md §9 (Receipts Required)**: Verification requires real command outputs, test passes, and UI reference verifier green status.
+

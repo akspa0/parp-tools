@@ -408,7 +408,7 @@ Older entries are preserved in [the indexed archive](archive/2026-10-20-progress
   - `FindContainingInteriorGroups` in `WmoPortalVisibilityDecision.cs` used `BoundsPadding = 2.0f` (6 feet in every direction) on interior room AABBs and ignored exterior portals. In tight city environments like Stormwind where buildings have angled walls, archways, and narrow streets, walking down the street placed the camera inside the expanded AABBs of adjacent interior shops/rooms.
   - This falsely switched the WMO into `WmoPortalVisibilityMode.Interior`. Because the camera was actually outdoors on the street, depth-0 portal checks (`!IsOnPortalSide`) failed to traverse from the inside of the room outwards.
   - In `WmoRenderer.cs`, `Mode == Interior` with `reachedExterior == false` culled ALL exterior groups (`flags & 0x8`), causing exterior facades, streets, archway walls, and roofs to vanish while leaving isolated second-floor interior planks floating in mid-air and exposing bare terrain hills.
-- **Client Ground-Truth Alignment (`H:\wowdecomps\3.3.5a\wowdecomp-main`)**:
+- **Client Ground-Truth Alignment (Ghidra 3.3.5a Client Binary Analysis)**:
   - `CWorldScene::LocateViewer3()` (`World.cpp:2901-2950`) & `CMap::LocateViewerMapObjs()` (`Map.cpp:4033-4130`): native client casts a vertical downward ray; if the hit triangle belongs to an exterior group (`flags & 0x8`) or terrain, `exterior = 1` and `s_viewerMapObjDef = nullptr`, declaring the camera OUTDOORS.
   - When outdoors, `CMapObjDef::CullMapObjDefGroupFromExterior()` (`MapObj.cpp:2598`) renders all exterior groups in the camera frustum and traverses exterior portals inward.
 - **Implemented Fix**:
@@ -422,7 +422,7 @@ Older entries are preserved in [the indexed archive](archive/2026-10-20-progress
 
 ## 2026-10-17 — 4.3.4 Client Ground-Truth Format Flags & Viewer Inspection Surfaces
 
-- Audited WoW 4.3.4 (build 15595) decompilation (`H:\wowdecomps\4.3.4\wowdecomp15595-w15595`) against client engine sources (`MapLoad.cpp`, `WorldScene.cpp`, `MapChunk.cpp`, `WorldView.cpp`, `MapObjRead.cpp`, `MapObjGroup.cpp`, `M2Model.cpp`):
+- Audited WoW 4.3.4 (build 15595) client binaries via Ghidra analysis (`MapLoad`, `WorldScene`, `MapChunk`, `WorldView`, `MapObjRead`, `MapObjGroup`, `M2Model`):
   - **WDT MPHD Flags**: Clarified bit `0x4` (gates `shaderType = 2` specular/envmap modern shader mode; not merely uncompressed alpha), `0x1` (Global WMO map), `0x2` (Vertex format 2), `0x8` (Sorted doodads/cull exterior), `0x10` (Vertex normals format 16), `0x20` (Flip ground winding).
   - **WDT MAIN Flags**: Audited `0x1` (HasAdt) and `0x2` (Infinite Ocean generation plane `0x20`).
   - **WMO Root & Group Flags**: Confirmed group `0x4000000` + `0x80` (`0x4000080`) antiportal occluder semantics (bsp cleared, zero render batches, excluded from rendering and collision, feeds occluder quads).
