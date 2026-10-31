@@ -141,56 +141,76 @@ internal sealed partial class Pm4WorkbenchService
         if (!SharedUiWidgets.SectionHeader("PM4 Glossary & Format Reference", defaultOpen: false, id: "Pm4Glossary"))
             return;
 
-        ImGui.PushTextWrapPos(0f);
-        ImGui.TextDisabled(
+        ImGui.TextWrapped(
             "PM4 (per-ADT tile) and PD4 (per-WMO) are server-side navigation-mesh files. " +
             "Authoritative reference: docs/research/pm4-format-reference.md.");
+        ImGui.Spacing();
 
         if (ImGui.TreeNodeEx("Core Surface & Mesh Chunks (MSUR / MSVT / MSVI)##Pm4GlossarySurfaces", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.BulletText("MSUR (32 B) — Walkable floor polygon record:\n" +
-                "  • 0x00 (surface_class): 0x03 = doodad/M2 surface (100%% have 0x1C == 0); 0x10..0x15 = placed WMO/object surfaces stratified by relative height.\n" +
-                "  • 0x01 (msvi_index_count) & 0x14 (MSVI_first_index): polygon fan MSVI[0x14 .. +0x01) into MSVT.\n" +
-                "  • 0x02 (mslk_index_count) & 0x18 (mslk_first_index): contiguous adjacency window MSLK[0x18 .. +0x02).\n" +
-                "  • 0x04..0x0C (normal) & 0x10 (plane_distance): plane equation (-dot(normal, v0) in raw MSVT space).\n" +
-                "  • 0x1C (placement_z): IEEE-754 float equal to the producing MODF/MDDF placement Position.Z (0.0f = unattributed/merged doodad bucket).");
-            ImGui.BulletText("MSVT (12 B) & MSVI (4 B) — Surface mesh vertices (C3Vector, YXZ axis order) and uint32 polygon-fan vertex indices.");
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MSUR (32 B) - Walkable floor polygon record:");
+            ImGui.TextWrapped(
+                "  * 0x00 (surface_class): 0x03 = doodad/M2 surface (100% have 0x1C == 0); 0x10..0x15 = placed WMO/object surfaces stratified by relative height.\n" +
+                "  * 0x01 (msvi_index_count) & 0x14 (MSVI_first_index): polygon fan MSVI[0x14 .. +0x01) into MSVT.\n" +
+                "  * 0x02 (mslk_index_count) & 0x18 (mslk_first_index): contiguous adjacency window MSLK[0x18 .. +0x02).\n" +
+                "  * 0x04..0x0C (normal) & 0x10 (plane_distance): plane equation (-dot(normal, v0) in raw MSVT space).\n" +
+                "  * 0x1C (placement_z): IEEE-754 float equal to the producing MODF/MDDF placement Position.Z (0.0f = unattributed/merged doodad bucket).");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MSVT (12 B) & MSVI (4 B) - Surface mesh:");
+            ImGui.TextWrapped("Surface mesh vertices (C3Vector, YXZ axis order) and uint32 polygon-fan vertex indices.");
             ImGui.TreePop();
         }
 
         if (ImGui.TreeNodeEx("Adjacency, Wall Quads & Contours (MSLK / MSPV / MSPI / MSCN)##Pm4GlossaryLinks", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.BulletText("MSLK (20 B) — Directed surface-adjacency edge owned by a source MSUR:\n" +
-                "  • 0x00 (flags): bit 0 (0x01, 0x11) = open passage across a shared edge (MSPI_first_index == -1); other values carry a vertical wall window in MSPI/MSPV. Bit 4 marks same-tile-only links.\n" +
-                "  • 0x01 (source_edge_index): 0-based source polygon edge ordinal e -> (e, (e + 1) mod count).\n" +
-                "  • 0x04 (object_group_id): spatial/object group ID; equals MPRL.0x04 (98.97%% match).\n" +
-                "  • 0x08..0x0B (MSPI_first_index int24 + MSPI_index_count uint8): window into MSPI.\n" +
-                "  • 0x0C (target_tile): packed tile address 0xFFFF0000 | (tileY << 8) | tileX.\n" +
-                "  • 0x10 (msur_index): target surface index inside target_tile (100%% reciprocal on same-tile links).");
-            ImGui.BulletText("MSPV (12 B) & MSPI (4 B) — Vertical wall-quad vertices (magenta cubes) and indices on blocked/step MSLK edges (98%% are 4-index coplanar vertical quads).");
-            ImGui.BulletText("MSCN (12 B) — Ordered boundary/contour node chains (cyan cubes). C3Vector positions (not normals); nothing in the file indexes MSCN directly.");
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MSLK (20 B) - Directed surface-adjacency edge:");
+            ImGui.TextWrapped(
+                "  * 0x00 (flags): bit 0 (0x01, 0x11) = open passage across a shared edge (MSPI_first_index == -1); other values carry a vertical wall window in MSPI/MSPV. Bit 4 marks same-tile-only links.\n" +
+                "  * 0x01 (source_edge_index): 0-based source polygon edge ordinal e -> (e, (e + 1) mod count).\n" +
+                "  * 0x04 (object_group_id): spatial/object group ID; equals MPRL.0x04 (98.97% match).\n" +
+                "  * 0x08..0x0B (MSPI_first_index int24 + MSPI_index_count uint8): window into MSPI.\n" +
+                "  * 0x0C (target_tile): packed tile address 0xFFFF0000 | (tileY << 8) | tileX.\n" +
+                "  * 0x10 (msur_index): target surface index inside target_tile (100% reciprocal on same-tile links).");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MSPV (12 B) & MSPI (4 B) - Vertical wall quads:");
+            ImGui.TextWrapped("Vertical wall-quad vertices (magenta cubes) and indices on blocked/step MSLK edges (98% are 4-index coplanar vertical quads).");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MSCN (12 B) - Boundary contour chains:");
+            ImGui.TextWrapped("Ordered boundary/contour node chains (cyan cubes). C3Vector positions (not normals); nothing in the file indexes MSCN directly.");
             ImGui.TreePop();
         }
 
-        if (ImGui.TreeNodeEx("Terrain Contact, Header & Destructibles (MPRL / MPRR / MSHD / MDB*)##Pm4GlossaryTerrain"))
+        if (ImGui.TreeNodeEx("Terrain Contact, Header & Destructibles (MPRL / MPRR / MSHD / MDB*)##Pm4GlossaryTerrain", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.BulletText("MPRL (24 B) — Terrain-intersection contact points: 0x00 = per-tile region ID; 0x04 = object_group_id (= MSLK.0x04); position = permuted C3Vector with height in Y; 0x14/0x16 = point counter and flags (0xFFFF / 0x3FFF sentinel).");
-            ImGui.BulletText("MPRR (4 B) — Quadtree spatial index over MPRL in a 768x768 tile grid. Runs have length 4k + 3 (min bound, max bound, MPRL indices, 0xFFFF terminator).");
-            ImGui.BulletText("MSHD (32 B) — Header: 0x00 & 0x08 are clamped world-unit spans (<= 534); 0x04 == 1 marks a tile with no surfaces; 0x0C..0x1C are zero.");
-            ImGui.BulletText("MDBH / MDBI / MDBF / MDOS / MDSF — Destructible-building table and per-surface destruction state links (MDSF maps msur_index -> mdos_index).");
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MPRL (24 B) - Terrain contact points:");
+            ImGui.TextWrapped("Terrain-intersection contact points: 0x00 = per-tile region ID; 0x04 = object_group_id (= MSLK.0x04); position = permuted C3Vector with height in Y; 0x14/0x16 = point counter and flags (0xFFFF / 0x3FFF sentinel).");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MPRR (4 B) - Quadtree spatial index:");
+            ImGui.TextWrapped("Quadtree spatial index over MPRL in a 768x768 tile grid. Runs have length 4k + 3 (min bound, max bound, MPRL indices, 0xFFFF terminator).");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MSHD (32 B) - Tile Header:");
+            ImGui.TextWrapped("Header: 0x00 & 0x08 are clamped world-unit spans (<= 534); 0x04 == 1 marks a tile with no surfaces; 0x0C..0x1C are zero.");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MDBH / MDBI / MDBF / MDOS / MDSF - Destructibles:");
+            ImGui.TextWrapped("Destructible-building table and per-surface destruction state links (MDSF maps msur_index -> mdos_index).");
             ImGui.TreePop();
         }
 
-        if (ImGui.TreeNodeEx("Coordinates & Viewer Terms (CK24 / Part / MscnRef)##Pm4GlossaryViewer"))
+        if (ImGui.TreeNodeEx("Coordinates & Viewer Terms (CK24 / Part / MscnRef)##Pm4GlossaryViewer", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.BulletText("Coordinates — MSVT/MSPV/MSCN use YXZ: world = (17066.666 - x, 17066.666 - y, z). MPRL uses ZXY with height in Y: world = (17066.666 - z, 17066.666 - x, y).");
-            ImGui.BulletText("CK24 (0xXXXXXX) — Viewer grouping key formed from the top 24 bits of MSUR.0x1C (placement_z float). Its high byte ('Ck24Type', e.g. 0x40..0x43) is the IEEE-754 exponent band of the height, NOT an object type enum.");
-            ImGui.BulletText("part / ObjectPartId — Viewer-generated connected-component split ID within a tile + CK24 bucket, not a raw PM4 field.");
-            ImGui.BulletText("MscnRef (legacy label) — Older viewer code called MSUR.0x18 'MscnRef'; measured format analysis proved MSUR.0x18 is mslk_first_index (start of the surface's MSLK window).");
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "Coordinates:");
+            ImGui.TextWrapped("MSVT/MSPV/MSCN use YXZ: world = (17066.666 - x, 17066.666 - y, z). MPRL uses ZXY with height in Y: world = (17066.666 - z, 17066.666 - x, y).");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "CK24 (0xXXXXXX):");
+            ImGui.TextWrapped("Viewer grouping key formed from the top 24 bits of MSUR.0x1C (placement_z float). Its high byte ('Ck24Type', e.g. 0x40..0x43) is the IEEE-754 exponent band of the height, NOT an object type enum.");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "part / ObjectPartId:");
+            ImGui.TextWrapped("Viewer-generated connected-component split ID within a tile + CK24 bucket, not a raw PM4 field.");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MscnRef (legacy label):");
+            ImGui.TextWrapped("Older viewer code called MSUR.0x18 'MscnRef'; measured format analysis proved MSUR.0x18 is mslk_first_index (start of the surface's MSLK window).");
             ImGui.TreePop();
         }
-
-        ImGui.PopTextWrapPos();
     }
 
     internal void DrawPm4OverlayWorkbenchContent()

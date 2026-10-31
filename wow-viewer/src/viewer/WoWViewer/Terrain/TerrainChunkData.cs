@@ -29,10 +29,10 @@ public class TerrainChunkData
     public Vector3[] Normals { get; init; } = Array.Empty<Vector3>();
 
     /// <summary>Hole mask from MCNK header (16-bit, one bit per 2×2 cell group).</summary>
-    public int HoleMask { get; init; }
+    public int HoleMask { get; set; }
 
     /// <summary>Full 64-bit hole mask (1 bit per 1x1 cell, row-major cellY * 8 + cellX). Supports modern high_res_holes.</summary>
-    public ulong HoleMask64 { get; init; }
+    public ulong HoleMask64 { get; set; }
 
     /// <summary>Returns true if the 1x1 cell (0..7, 0..7) is marked as a hole.</summary>
     public bool IsCellHoled(int cellX, int cellY)

@@ -56,7 +56,11 @@ internal sealed partial class AudioPanelService
 
         if (!scene.AreaMusicPlaybackEnabled)
             ImGui.TextDisabled("Zone/WMO music playback is paused/muted; check box or click 'Play Now' to start.");
-        ImGui.Text(scene.AudioMuted ? "Output: MUTED" : "Output: ON");
+        bool isMuted = scene.AudioMuted;
+        if (ImGui.Checkbox("Mute Audio Output", ref isMuted))
+            scene.SetAudioMuted(isMuted);
+        ImGui.SameLine();
+        ImGui.Text(scene.AudioMuted ? "(MUTED)" : "(ON)");
         ImGui.Text($"Resident emitters: {scene.ResidentAudioEmitterCount}  |  Active: {scene.ActiveAudioEmitterCount}");
         ImGui.Text($"SoundEntries rows: {scene.ResolvedAudioSoundEntryCount}  |  SoundWaterType rows: {scene.ResolvedAudioSoundWaterTypeCount}");
 

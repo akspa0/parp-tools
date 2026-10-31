@@ -379,6 +379,9 @@ internal sealed partial class InspectorPayloadsService
         if (inst.CustomTextures is { Length: > 0 })
             actions.Action("copy_skin_path", "Copy Skin Path");
         actions.Action("open_pm4_workbench", "Open in PM4 Tools");
+        actions.Action("fill_pm4_doodads", "Fill PM4 Doodads with Model");
+        if (_pm4DoodadDuplication.CanUndo)
+            actions.Action("undo_pm4_duplication", "Undo PM4 Doodad Fill");
     }
 
     private void BuildStandaloneModelInspector(InspectorContentBuilder builder)
@@ -531,6 +534,25 @@ internal sealed partial class InspectorPayloadsService
 
             case "clear_terrain_chunk_selection":
                 _terrainInspection.ClearSelectedTerrainChunk();
+                break;
+
+            case "fill_pm4_doodads":
+                if (_worldScene?.Selection.SelectedInstance.HasValue == true)
+                {
+                    ObjectInstance selectedInst = _worldScene.Selection.SelectedInstance.Value;
+                    int tileX = selectedInst.TileX;
+                    int tileY = selectedInst.TileY;
+                    if (!selectedInst.HasTileCoordinate && _terrainInspection.TryGetPinnedTerrainChunkInspectionTarget(out var pinnedChunk, out _))
+                    {
+                        tileX = pinnedChunk.TileX;
+                        tileY = pinnedChunk.TileY;
+                    }
+                    _pm4DoodadDuplication.DuplicateModelToUnmatchedPm4Doodads(selectedInst, tileX, tileY);
+                }
+                break;
+
+            case "undo_pm4_duplication":
+                _pm4DoodadDuplication.UndoLastDuplication();
                 break;
 
             case "clear_pm4_selection":

@@ -3061,7 +3061,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         }
 
                         _atmosphere.ResolveActiveFogRange(lighting, fogRecommendationSource);
-                        _skyDome.UpdateFromLighting(lighting.GameTime, lighting.LightDirection);
+                        // Authored DBC/LIT zenith and horizon colors are preserved (Spec 287 Phase 4);
+                        // base solar directions and daytime curves were already initialized above.
                         fogColor = lighting.FogColor;
                         fogStart = lighting.FogStart;
                         fogEnd = lighting.FogEnd;

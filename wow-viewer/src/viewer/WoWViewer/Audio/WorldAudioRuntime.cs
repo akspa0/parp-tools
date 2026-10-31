@@ -71,8 +71,8 @@ public sealed class WorldAudioRuntime : IDisposable
     private Vector3 _listenerPosition;
     private bool _disposed;
     private bool _loggedNoBackend;
-    private bool _worldTriggersEnabled;
-    private bool _areaMusicPlaybackEnabled;
+    private bool _worldTriggersEnabled = true;
+    private bool _areaMusicPlaybackEnabled = true;
 
     public WorldAudioRuntime(IDataSource dataSource)
     {
@@ -203,7 +203,6 @@ public sealed class WorldAudioRuntime : IDisposable
     {
         ThrowIfDisposed();
         StopAll();
-        _worldTriggersEnabled = false;
         _soundEntries = null;
         _soundWaterTypes = null;
         _areaAudioCatalog = null;
@@ -484,7 +483,7 @@ public sealed class WorldAudioRuntime : IDisposable
             return;
         }
 
-        if (_worldTriggersEnabled)
+        if (_worldTriggersEnabled || _areaMusicPlaybackEnabled)
             UpdateAreaMusic(areaId, gameTime, continentId, areaLookup);
         else
         {

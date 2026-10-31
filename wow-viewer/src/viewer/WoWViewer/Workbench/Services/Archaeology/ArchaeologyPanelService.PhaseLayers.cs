@@ -1018,6 +1018,7 @@ internal sealed partial class ArchaeologyPanelService
             try
             {
                 string dir = _projectOutput.EnsureEditorProjectOutputDirectory();
+                Directory.CreateDirectory(dir);
                 string manifestPath = Path.Combine(dir, "cartography-manifest.json");
                 var manifestData = new
                 {

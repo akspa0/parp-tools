@@ -463,6 +463,19 @@ internal sealed partial class TerrainControlsPanelService
         DrawTerrainControlsAdjustmentContent();
 
         ImGui.Separator();
+        if (ImGui.CollapsingHeader("Burgundy MCCV Minimap Holes", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextWrapped("Detects solid burgundy-red underside fog vertex colors (from minimaps/MCCV) and derives chunk hole flags for contiguous clusters of >= 2 chunks.");
+            if (SharedUiWidgets.ActionButton("Derive Holes from Burgundy MCCV", small: true))
+            {
+                if (_terrainManager != null)
+                    _host.MccvHoleDetection.DeriveBurgundyHoles(_terrainManager);
+            }
+            if (_host.MccvHoleDetection.LastStatusMessage != null)
+                ImGui.TextWrapped(_host.MccvHoleDetection.LastStatusMessage);
+        }
+
+        ImGui.Separator();
         ImGui.TextDisabled("Open Terrain Tools, Chunk Clipboard, Terrain Analysis, and MCNK Explorer from the Tools menu.");
     }
 
@@ -754,6 +767,18 @@ internal sealed partial class TerrainControlsPanelService
                 "No terrain loaded",
                 "Load a terrain-backed world map to use the Chunk Clipboard and tile/chunk selection grid.");
             return;
+        }
+
+        if (SharedUiWidgets.SectionHeader("Burgundy MCCV Minimap Holes", defaultOpen: true, id: "EditorTerrainBurgundyHoles"))
+        {
+            ImGui.TextWrapped("Detects solid burgundy-red underside fog vertex colors (from minimaps/MCCV) and derives chunk hole flags for contiguous clusters of >= 2 chunks.");
+            if (SharedUiWidgets.ActionButton("Derive Holes from Burgundy MCCV", small: true))
+            {
+                if (_terrainManager != null)
+                    _host.MccvHoleDetection.DeriveBurgundyHoles(_terrainManager);
+            }
+            if (_host.MccvHoleDetection.LastStatusMessage != null)
+                ImGui.TextWrapped(_host.MccvHoleDetection.LastStatusMessage);
         }
 
         if (SharedUiWidgets.SectionHeader("Chunk Clipboard", defaultOpen: true, id: "EditorTerrainChunkClipboard"))

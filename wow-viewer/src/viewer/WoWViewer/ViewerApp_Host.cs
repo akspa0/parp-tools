@@ -59,6 +59,8 @@ using WowViewer.Core.IO.Terrain;
 using WowViewer.Core.Runtime.World;
 using WoWViewer.UI;
 using WowViewer.Core.Runtime.World.Minimap;
+using WoWViewer.Workbench.Services.TerrainControls;
+using WoWViewer.Workbench.Services.TerrainAnalysis;
 using System.IO;
 using WowViewer.Core.IO.Dbc;
 using System;
@@ -358,6 +360,9 @@ public partial class ViewerApp
     ref bool IViewerAppHost.ArcheologyPlaybackActive => ref _archeologyPlaybackActive;
     ref MapListSortMode IViewerAppHost.MapListSortMode => ref _mapListSortMode;
     Pm4WorkbenchService IViewerAppHost.Pm4Workbench => _pm4Workbench;
+    Pm4DoodadDuplicationService IViewerAppHost.Pm4DoodadDuplication => _pm4DoodadDuplication;
+    TerrainLayersPanelService IViewerAppHost.TerrainLayersPanel => _terrainLayersPanel;
+    MccvHoleDetectionService IViewerAppHost.MccvHoleDetection => _mccvHoleDetection;
     PerfPanelService IViewerAppHost.PerfPanel => _perfPanel;
     HashSet<int> IViewerAppHost.HighlightedStandaloneWmoGroupIndices => _highlightedStandaloneWmoGroupIndices;
     ref int IViewerAppHost.HoveredStandaloneWmoGroupIndex => ref _hoveredStandaloneWmoGroupIndex;

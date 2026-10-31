@@ -173,6 +173,7 @@ internal sealed class ProjectOutputService
             && !string.IsNullOrWhiteSpace(_editorProjectOutputDir)
             && string.Equals(_editorProjectSourceKey, sourceKey, StringComparison.OrdinalIgnoreCase))
         {
+            Directory.CreateDirectory(_editorProjectOutputDir);
             return _editorProjectOutputDir;
         }
 

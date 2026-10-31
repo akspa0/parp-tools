@@ -34,6 +34,26 @@ internal sealed partial class Pm4WorkbenchService
             RunPm4Export(ExportPm4LlmEvidenceBundle);
         if (ImGui.Button("Export Visible Overlay Report"))
             RunPm4Export(ExportPm4OverlayReport);
+        if (ImGui.Button("Save Merged Placements to Zarr v60"))
+            SaveMergedPlacementsToZarr();
+    }
+
+    private void SaveMergedPlacementsToZarr()
+    {
+        try
+        {
+            string outDir = Path.Combine(ExportDir, "zarr_v60");
+            Directory.CreateDirectory(outDir);
+            string map = !string.IsNullOrEmpty(_host.LoadedFileName)
+                ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
+                : "development";
+            string path = _host.Pm4DoodadDuplication.SaveMergedPlacementsToZarr(outDir, map);
+            _statusMessage = $"Saved merged placements to Zarr v60: {path}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Save merged placements failed: {ex.Message}";
+        }
     }
 
     // Include picker/output-root setup failures in the same reporting contract as writer failures.

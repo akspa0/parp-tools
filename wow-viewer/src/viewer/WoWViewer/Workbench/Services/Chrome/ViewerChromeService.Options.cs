@@ -116,6 +116,9 @@ internal sealed partial class ViewerChromeService
     {
         if (terrain != null)
         {
+            if (SharedUiWidgets.ActionButton("Open Layers & Blending Workbench...", small: true))
+                _host.UiManager.OpenLayersWindow();
+            ImGui.Spacing();
             int layerCount = Math.Clamp(terrain.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers);
             for (int layer = 0; layer < layerCount; layer++)
             {
@@ -127,6 +130,14 @@ internal sealed partial class ViewerChromeService
             {
                 for (int layer = 0; layer < layerCount; layer++) terrain.SetShowLayer(layer, true);
             }
+            ImGui.Separator();
+            if (SharedUiWidgets.ActionButton("Derive Holes from Burgundy MCCV", small: true))
+            {
+                if (_terrainManager != null)
+                    _host.MccvHoleDetection.DeriveBurgundyHoles(_terrainManager);
+            }
+            if (_host.MccvHoleDetection.LastStatusMessage != null)
+                ImGui.TextWrapped(_host.MccvHoleDetection.LastStatusMessage);
             if (SharedUiWidgets.ActionButton("Base Only", small: true))
             {
                 for (int layer = 0; layer < layerCount; layer++) terrain.SetShowLayer(layer, layer == 0);

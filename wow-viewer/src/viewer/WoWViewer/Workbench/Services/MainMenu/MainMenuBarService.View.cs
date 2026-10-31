@@ -23,6 +23,9 @@ internal sealed partial class MainMenuBarService
         // Both open the window that already owns the settings: Options holds Display (render
         // quality, lighting, theme, minimap), Overlays, Layers, Grids, Objects, Audio and
         // Simulation; Workspace holds camera, fog and the client source.
+        if (ImGui.MenuItem("Terrain Layers & Blending...")) _shellLayout.OpenLayersWindow();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Open Terrain Layers workbench: per-layer opacity, alpha mask overlay blend, and MCLY flags.");
         if (ImGui.MenuItem("Visual Options...")) _shellLayout.OpenOptions();
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Open Options: render quality, lighting, theme, minimap, overlays, layers, grids and objects.");

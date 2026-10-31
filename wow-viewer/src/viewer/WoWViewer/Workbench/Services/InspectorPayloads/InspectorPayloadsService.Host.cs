@@ -59,6 +59,7 @@ internal sealed partial class InspectorPayloadsService
     private ModelInspectorPanelService _modelInspector => _host.ModelInspector;
     private NavigatorPanelService _navigatorPanel => _host.NavigatorPanel;
     private Pm4WorkbenchService _pm4Workbench => _host.Pm4Workbench;
+    private Pm4DoodadDuplicationService _pm4DoodadDuplication => _host.Pm4DoodadDuplication;
     private ref ISceneRenderer? _renderer => ref _host.Renderer;
     private ref string _selectedObjectType => ref _host.SelectedObjectType;
     private ref string _statusMessage => ref _host.StatusMessage;

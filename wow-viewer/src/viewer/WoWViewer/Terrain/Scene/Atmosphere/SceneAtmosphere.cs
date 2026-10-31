@@ -358,8 +358,8 @@ public sealed class SceneAtmosphere
         Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
     {
         bool renderedActiveClientSky = false;
-        if (_skyDome.NightVisibility > 0.001f
-            && TryGetQueuedMdx(_activeLightSkyboxModelKey ?? string.Empty) is { } lightSkyboxRenderer)
+        // Render client skybox model throughout the full day cycle (Spec 287 Phase 4)
+        if (TryGetQueuedMdx(_activeLightSkyboxModelKey ?? string.Empty) is { } lightSkyboxRenderer)
         {
             lightSkyboxRenderer.UpdateAnimation();
             lightSkyboxRenderer.RenderBackdrop(Matrix4x4.CreateTranslation(cameraPos), view, proj,

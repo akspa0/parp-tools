@@ -65,6 +65,8 @@ using WowViewer.Core.IO.Terrain;
 using System.IO;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.Runtime.World.Minimap;
+using WoWViewer.Workbench.Services.TerrainControls;
+using WoWViewer.Workbench.Services.TerrainAnalysis;
 using static WoWViewer.ViewerApp;
 using static WoWViewer.CaptureAutomationService;
 using static WoWViewer.CameraPathsService;
@@ -385,6 +387,9 @@ internal interface IViewerAppHost
     ref EditorSession? EditorSession { get; }
     ref MapListSortMode MapListSortMode { get; }
     Pm4WorkbenchService Pm4Workbench { get; }
+    Pm4DoodadDuplicationService Pm4DoodadDuplication { get; }
+    TerrainLayersPanelService TerrainLayersPanel { get; }
+    MccvHoleDetectionService MccvHoleDetection { get; }
     PerfPanelService PerfPanel { get; }
     void DrawCapturePanelContent();
     void DrawMapSortModeSelector(string id);

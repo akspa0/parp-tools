@@ -11,8 +11,8 @@ public sealed class TerrainChunkData
     public int ChunkY { get; init; }
     public float[] Heights { get; init; } = [];
     public Vector3[] Normals { get; init; } = [];
-    public int HoleMask { get; init; }
-    public ulong HoleMask64 { get; init; }
+    public int HoleMask { get; set; }
+    public ulong HoleMask64 { get; set; }
 
     public bool IsCellHoled(int cellX, int cellY)
     {

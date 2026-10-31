@@ -993,6 +993,30 @@
       "shortcut": "M",
       "help": "Toggle the fullscreen map.",
       "visible": true
+    },
+    {
+      "id": "derive-holes-from-burgundy-mccv",
+      "label": "Derive Holes from Burgundy MCCV",
+      "region": "Options > Layers",
+      "shortcut": null,
+      "help": "Detect solid burgundy underside fog vertex colors and set chunk hole flags for clusters >= 2.",
+      "visible": true
+    },
+    {
+      "id": "open-layers-blending-workbench",
+      "label": "Open Layers & Blending Workbench...",
+      "region": "Options > Layers",
+      "shortcut": null,
+      "help": "Open the Photoshop-style Terrain Layers and Alpha Blending workbench window.",
+      "visible": true
+    },
+    {
+      "id": "terrain-layers-blending",
+      "label": "Terrain Layers & Blending...",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Open the Terrain Layers and Alpha Blending workbench.",
+      "visible": true
     }
   ]
 }

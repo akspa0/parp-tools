@@ -146,11 +146,15 @@ internal sealed partial class TaxiPanelService
                     }
 
                     bool isSelected = _worldScene.TaxiActors.SelectedTaxiRouteId == entry.Route.PathId;
-                    if (ImGui.Selectable(entry.Label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                    bool clicked = ImGui.Selectable(entry.Label, isSelected, ImGuiSelectableFlags.AllowDoubleClick);
+                    if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                     {
                         _taxiAndAreaPoi.SelectTaxiRoute(entry.Route.PathId, toggle: false);
-                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                            _taxiAndAreaPoi.FocusSelectedTaxi();
+                        _taxiAndAreaPoi.FocusSelectedTaxi();
+                    }
+                    else if (clicked)
+                    {
+                        _taxiAndAreaPoi.SelectTaxiRoute(entry.Route.PathId, toggle: false);
                     }
 
                     if (ImGui.IsItemHovered())

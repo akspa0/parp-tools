@@ -202,6 +202,9 @@ internal sealed partial class ViewerUiManager
     internal void OpenMapsWindow() => _actionBars.OpenMapsWindow();
     internal void CloseMapsWindow() => _actionBars.CloseMapsWindow();
     internal void OpenOptions() => _actionBars.OpenOptionsWindow();
+    internal void OpenLayersWindow() => _actionBars.OpenLayersWindow();
+    internal void ToggleLayersWindow() => _actionBars.ToggleLayersWindow();
+    internal bool IsLayersOpen => _actionBars.IsLayersOpen;
     internal void ToggleOptions() => _actionBars.ToggleOptionsWindow();
     internal void OpenWorkspaceWindow() => _actionBars.OpenWorkspaceWindow();
     internal void OpenDestinationPage(WorkbenchTab destination, int page = -1)

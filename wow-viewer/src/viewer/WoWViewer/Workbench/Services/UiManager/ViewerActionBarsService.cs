@@ -24,13 +24,16 @@ internal sealed class ViewerActionBarsService
     {
         ["workspace"] = new(), ["assets"] = new(), ["taxi"] = new(), ["capture"] = new(),
         ["inspector"] = new(), ["world"] = new(), ["model"] = new(), ["gossip"] = new(), ["pm4"] = new(),
-        ["destination"] = new(), ["maps"] = new(), ["files"] = new(), ["diagnostics"] = new(), ["options"] = new(),
+        ["destination"] = new(), ["maps"] = new(), ["files"] = new(), ["diagnostics"] = new(), ["options"] = new(), ["layers"] = new(),
     };
 
     internal ViewerActionBarsService(IViewerAppHost host) => _host = host;
 
     internal bool IsCaptureOpen => _windows["capture"].Open;
     internal bool IsOptionsOpen => _windows["options"].Open;
+    internal bool IsLayersOpen => _windows["layers"].Open;
+    internal void OpenLayersWindow() => _windows["layers"].Open = true;
+    internal void ToggleLayersWindow() => ToggleWindow("layers");
     internal bool IsMapsOpen => _windows["maps"].Open;
     internal void OpenMapsWindow() => _windows["maps"].Open = true;
     internal void CloseMapsWindow() => _windows["maps"].Open = false;
@@ -131,6 +134,7 @@ internal sealed class ViewerActionBarsService
         DrawToolWindow("maps", "Maps", new(rail + 12f * scale, top), new(520f, 560f), _host.NavigatorPanel.DrawMapsContent);
         DrawToolWindow("diagnostics", "Diagnostics", new(rail + 12f * scale, top), new(520f, 560f), _host.NavigatorPanel.DrawDiagnosticsContent);
         DrawToolWindow("options", "Options", new(rail + 12f * scale, top), new(430f, 560f), _host.ViewerChrome.DrawOptionsContent);
+        DrawToolWindow("layers", "Terrain Layers", new(rail + 12f * scale, top + 130f * scale), new(460f, 540f), _host.TerrainLayersPanel.DrawLayersPanelContent);
         DrawToolWindow("assets", "Asset Browser", new(rail + 12f * scale, top + 40f * scale), new(500f, 650f),
             _host.WorkbenchPanels.DrawAssetsContent);
         DrawToolWindow("taxi", "Taxi & Routes", new(rail + 12f * scale, top + 70f * scale), new(500f, 600f),

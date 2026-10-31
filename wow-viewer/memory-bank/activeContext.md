@@ -1,5 +1,18 @@
 # Active Context — wow-viewer
 
+**Spec 287 Implementation Handoff (2026-10-31):** [Spec 287 PM4 Live Matching, Burgundy MCCV Holes & Texture Layers Workbench](../specs/287-pm4-live-matching-and-curation/spec.md)
+Phases 1–4 source implementation and test gates complete:
+1. **Live PM4 Doodad Duplication**: Centroid alignment, bounding-box extent fitting, UniqueId allocation, live scene injection, undo stack, and Zarr v60 placement export. (3/3 unit tests pass).
+2. **Burgundy MCCV Hole Detection**: Solid underside fog chroma detection ($R \ge 70, G \le 35, B \le 35, \sigma \le 18$), $\ge 2$ connected component cluster filtering, dynamic chunk `HoleMask = 0xFFFF` application, and GPU tile mesh rebuilding. (5/5 unit tests pass).
+3. **Photoshop-Style Texture Layers Workbench**: GLSL `uLayerOpacity[8]` and `uAlphaMaskBlend` fragment shader controls, dedicated "Terrain Layers" tool window and View menu entry, and Ghidra client binary analysis tooltips for `MCLY.Flags` (UV anim, specular, cubemap, dynamic) and `EffectId`.
+4. **24-Hour Skybox & Audio Immersion**: Removed night-only gate in `SceneAtmosphere.cs` enabling client skybox models across the full 24-hour day cycle; preserved authored DBC/LIT zenith and horizon colors; defaulted `WorldAudioRuntime` triggers and zone music streaming to active with interactive mute checkbox.
+5. **UI Hygiene**: `Verify-UiReference.ps1` passes with 0 errors, 0 warnings (127 controls registered). Solution builds cleanly (0 errors).
+[Phase 1 receipt](../specs/287-pm4-live-matching-and-curation/evidence/phase1-duplication-source.md),
+[Phase 2 receipt](../specs/287-pm4-live-matching-and-curation/evidence/phase2-mccv-holes-source.md),
+[Phase 3 receipt](../specs/287-pm4-live-matching-and-curation/evidence/phase3-layers-source.md),
+[Phase 4 receipt](../specs/287-pm4-live-matching-and-curation/evidence/phase4-sky-audio-source.md).
+Owed: Operator runtime gates T008, T014, T022, T028.
+
 **Next lane — CASC streaming (operator-directed 2026-10-22; Spec 275 Phase 0 / CASC-1, uncommitted):**
 TACTSharp's local read maps the whole `data.NNN` archive per file (250–385 µs fixed, ~1.5× at 8 threads).
 `LocalCascArchiveReader` + `CascStorage` fast path (cached handles, stock fallback, first-64 shadow check,
