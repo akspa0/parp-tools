@@ -165,9 +165,7 @@ public sealed class ExternalSpawnLayer
                 ? $"{baseKey}#tex:{string.Join(";", spawn.CustomTextures)}"
                 : baseKey;
 
-            float orientationRadians = spawn.OrientationWowRadians;
-            float yawOffsetRadians = spawn.SpawnType == WorldSpawnType.Creature ? MathF.PI : 0f;
-            float finalYawRadians = orientationRadians + yawOffsetRadians;
+            float finalYawRadians = spawn.OrientationWowRadians;
             float finalYawDegrees = finalYawRadians * (180f / MathF.PI);
             float baseScale = spawn.EffectiveScale > 0 ? spawn.EffectiveScale : 1.0f;
             float mdxScale = baseScale;

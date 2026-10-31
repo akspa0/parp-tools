@@ -589,7 +589,9 @@ public class MdxRenderer : IModelRenderer, IGpuInstancedModelRenderer, ISceneLig
         if (_geosets.Count == 0)
             return;
 
-        HashSet<uint> wantedGroupSet = wantedGroups as HashSet<uint> ?? new HashSet<uint>(wantedGroups);
+        HashSet<uint> wantedGroupSet = ReplaceableTextureResolver.ResolveEffectiveSelectionGroups(
+            wantedGroups,
+            _mdx.Geosets.Select(static g => g.SelectionGroup));
         int hiddenCount = 0;
 
         for (int i = 0; i < _geosets.Count; i++)
@@ -3395,7 +3397,7 @@ void main()
             {
                 1 or 11 or 12 or 13 => new[] { "Bark", "_Bark", "Trunk", "_Trunk", "Skin", "_Skin", "Body", "_Body", "" },
                 2 => new[] { "Leaf", "_Leaf", "Leaves", "_Leaves", "Detail", "_Detail", "Foliage", "_Foliage", "NakedPelvisSkin00_00", "NakedPelvisSkin", "Pelvis", "Underwear", "" },
-                8 => new[] { "NakedPelvisSkin00_00", "NakedPelvisSkin", "NakedTorsoSkin00_00", "PelvisSkin00_00", "Pelvis", "Underwear", "SkinExtra", "_Extra", "" },
+                8 => new[] { "Skin00_00_Extra", "Skin_Extra", "SkinExtra", "_Extra", "NakedPelvisSkin00_00", "NakedPelvisSkin", "NakedTorsoSkin00_00", "PelvisSkin00_00", "Pelvis", "Underwear", "" },
                 _ => new[] { "" }
             };
 
@@ -3474,10 +3476,18 @@ void main()
                             else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 40;
                             if (fname.Contains("detail") || fname.Contains("extra") || fname.Contains("hair") || fname.Contains("facial")) score -= 60;
                         }
-                        else if (replaceableId == 2 || replaceableId == 8)
+                        else if (replaceableId == 2)
                         {
                             if (fname.Contains("pelvis") || fname.Contains("naked") || fname.Contains("underwear")) score += 100;
                             if (fname.Contains("extra") || fname.Contains("detail") || fname.Contains("leaf") || fname.Contains("leaves")) score += 80;
+                            if (fname.StartsWith(modelBaseLower)) score += 50;
+                            else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 30;
+                        }
+                        else if (replaceableId == 8)
+                        {
+                            if (fname.Contains("extra")) score += 120;
+                            if (fname.Contains("detail") || fname.Contains("leaf") || fname.Contains("leaves")) score += 80;
+                            if (fname.Contains("pelvis") || fname.Contains("naked") || fname.Contains("underwear")) score += 60;
                             if (fname.StartsWith(modelBaseLower)) score += 50;
                             else if (fname.StartsWith(folderBaseLower) || fname.StartsWith(strippedBaseLower)) score += 30;
                         }
@@ -3550,8 +3560,9 @@ void main()
         if (_explicitTextureVariations == null || _explicitTextureVariations.Count == 0)
             return null;
 
-        // If exactly 1 explicit texture is provided (e.g. NPC Baked Texture), it covers ReplaceableId 1, 2, and 8 (Hair/Pelvis)
-        if (_explicitTextureVariations.Count == 1 && (replaceableId == 1 || replaceableId == 2 || replaceableId == 8 || replaceableId == 11))
+        // If exactly 1 explicit texture is provided (e.g. NPC Baked Texture), it covers ReplaceableId 1 (Character Body Skin) or 11 (Creature Skin 1).
+        // Do NOT apply the body bake to ReplaceableId 8 (TEX_COMPONENT_SKIN_EXTRA, e.g. Tauren mane/tail/hoof-fur) or ReplaceableId 2.
+        if (_explicitTextureVariations.Count == 1 && (replaceableId == 1 || replaceableId == 11))
         {
             string singleTex = _explicitTextureVariations[0]?.Trim() ?? string.Empty;
             if (!string.IsNullOrEmpty(singleTex))

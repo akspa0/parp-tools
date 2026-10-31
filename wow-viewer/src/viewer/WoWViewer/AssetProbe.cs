@@ -661,11 +661,12 @@ var runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, s
     var mdx = MdxFile.Load(ms);
         ReplaceableTextureResolver? replaceableResolver = TryCreateReplaceableTextureResolver(dataSource, buildVersion);
         int? replaceableDisplayIndex = TrySelectReplaceableDisplayIndex(replaceableResolver, modelVirtualPath, mdx);
+        uint[] modelSelectionGroups = mdx.Geosets.Select(static g => g.SelectionGroup).Distinct().ToArray();
         HashSet<uint>? defaultCharacterSelectionGroups = replaceableResolver?.GetDefaultCharacterSelectionGroups(modelVirtualPath) is IReadOnlyCollection<uint> groups
-            ? new HashSet<uint>(groups)
+            ? ReplaceableTextureResolver.ResolveEffectiveSelectionGroups(groups, modelSelectionGroups)
             : null;
         HashSet<uint>? selectedCharacterSelectionGroups = replaceableResolver?.GetCharacterSelectionGroups(modelVirtualPath, characterHairVariationId, characterFacialVariationId) is IReadOnlyCollection<uint> selectedGroups
-            ? new HashSet<uint>(selectedGroups)
+            ? ReplaceableTextureResolver.ResolveEffectiveSelectionGroups(selectedGroups, modelSelectionGroups)
             : defaultCharacterSelectionGroups;
 
         Console.WriteLine($"[AssetProbe] SharedDetect kind={modelDetection.Kind} version={FormatVersion(modelDetection.Version)}");

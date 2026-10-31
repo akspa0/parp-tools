@@ -1294,7 +1294,9 @@ void main()
 
     private void ApplyCharacterSelectionGroups(IReadOnlyCollection<uint> wantedGroups, string? reasonLabel)
     {
-        HashSet<uint> wantedGroupSet = wantedGroups as HashSet<uint> ?? new HashSet<uint>(wantedGroups);
+        HashSet<uint> wantedGroupSet = ReplaceableTextureResolver.ResolveEffectiveSelectionGroups(
+            wantedGroups,
+            _sections.Select(static s => (uint)s.SkinSectionId));
         int hiddenCount = 0;
 
         for (int i = 0; i < _sections.Count; i++)
