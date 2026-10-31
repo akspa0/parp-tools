@@ -126,6 +126,9 @@ internal sealed class ProjectOutputService
             suffix++;
         }
 
+        // Create the folder itself: callers such as the cartography "Save Composition Manifest"
+        // write straight into it and failed with "Could not find a part of the path".
+        Directory.CreateDirectory(candidate);
         return candidate;
     }
 
