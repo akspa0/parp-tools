@@ -28,6 +28,8 @@ public interface IModelRenderer : ISceneRenderer
 
     IAnimationController? Animator { get; }
 
+    IReadOnlyList<string> LoadedTexturePaths => Array.Empty<string>();
+
     void UpdateAnimation();
 
     void ApplyTextureSamplingSettings();

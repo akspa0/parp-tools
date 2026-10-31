@@ -33,6 +33,7 @@ public struct WorldObjectInstance
     public int? SpawnId;
     public int? DisplayId;
     public uint? FileDataId;
+    public string[]? CustomTextures;
     public int UniqueId;
     public int PlacementEntryIndex;
     public int TileX;

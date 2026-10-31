@@ -748,25 +748,23 @@ internal sealed partial class TerrainControlsPanelService
     internal void DrawTerrainLabSubTab()
     {
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (renderer == null && !HasTerrainOrWorldLoaded())
-        {
-            ImGui.TextDisabled("Load a terrain-backed world to use Terrain Lab.");
-            return;
-        }
-
-        ImGui.TextDisabled("Tile targeting and MCNK/chunk clipboard operations share this experimental surface.");
-        ImGui.Separator();
         if (renderer == null)
         {
-            ImGui.TextDisabled("Terrain renderer is not available for the clipboard or selection map.");
+            SharedUiWidgets.DrawEmptyState(
+                "No terrain loaded",
+                "Load a terrain-backed world map to use the Chunk Clipboard and tile/chunk selection grid.");
             return;
         }
 
-        DrawTerrainWorkbenchSelectionContent(renderer);
-        ImGui.Separator();
-        DrawSharedChunkClipboardSection(renderer, withHeader: true, headerTitle: "Chunk Clipboard + Save");
-        ImGui.Separator();
-        DrawTerrainControlsAdjustmentContent();
+        if (SharedUiWidgets.SectionHeader("Chunk Clipboard", defaultOpen: true, id: "EditorTerrainChunkClipboard"))
+        {
+            _chunkEdit.DrawChunkClipboardContent(renderer);
+        }
+
+        if (SharedUiWidgets.SectionHeader("Tile & Chunk Selection", defaultOpen: true, id: "EditorTerrainSelectionMap"))
+        {
+            DrawTerrainWorkbenchSelectionContent(renderer);
+        }
     }
 
     private bool HasTerrainOrWorldLoaded() => _terrainManager != null || _vlmTerrainManager != null || _worldScene != null;

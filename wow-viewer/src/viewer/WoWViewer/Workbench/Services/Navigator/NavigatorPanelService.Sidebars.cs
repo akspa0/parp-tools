@@ -133,8 +133,7 @@ internal sealed partial class NavigatorPanelService
 
         var sortedMaps = MapListSorting.Sort(_discoveredMaps, _mapListSortMode).ToList();
 
-        float listHeight = MathF.Min(300f, MathF.Max(120f, ImGui.GetContentRegionAvail().Y - 34f));
-        if (ImGui.BeginChild("MapList", new Vector2(0, listHeight), true))
+        if (ImGui.BeginChild("MapList", Vector2.Zero, true))
         {
             var style = ImGui.GetStyle();
             float rowHeight = GetUniformListRowHeight();
@@ -293,12 +292,10 @@ internal sealed partial class NavigatorPanelService
         ImGui.Text($"{_filteredFiles.Count} files");
         ImGui.Separator();
 
-        float remainingH = ImGui.GetContentRegionAvail().Y - reservedFooterHeight;
-        if (_discoveredMaps.Count > 0)
-            remainingH = MathF.Max(remainingH - 360f, 100f);
-        else
-            remainingH = MathF.Max(remainingH, 100f);
-        if (ImGui.BeginChild("FileList", new Vector2(0, remainingH), true))
+        Vector2 fileListSize = reservedFooterHeight > 0f
+            ? new Vector2(0f, -reservedFooterHeight)
+            : Vector2.Zero;
+        if (ImGui.BeginChild("FileList", fileListSize, true))
         {
             float rowHeight = GetUniformListRowHeight();
             GetVisibleListRange(_filteredFiles.Count, rowHeight, out int startIndex, out int endIndex);

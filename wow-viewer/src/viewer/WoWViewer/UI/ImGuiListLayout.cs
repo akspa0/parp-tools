@@ -26,7 +26,7 @@ internal static class ImGuiListLayout
 
     internal static float GetUniformListRowHeight()
     {
-        return MathF.Max(ImGui.GetTextLineHeightWithSpacing(), ImGui.GetFrameHeightWithSpacing());
+        return ImGui.GetTextLineHeightWithSpacing();
     }
 
     internal static void GetVisibleListRange(int itemCount, float rowHeight, out int startIndex, out int endIndex)
@@ -38,10 +38,17 @@ internal static class ImGuiListLayout
             return;
         }
 
+        if (itemCount <= 250)
+        {
+            startIndex = 0;
+            endIndex = itemCount;
+            return;
+        }
+
         float safeRowHeight = MathF.Max(1f, rowHeight);
         float scrollY = ImGui.GetScrollY();
         float windowHeight = ImGui.GetWindowHeight();
-        const int overscan = 4;
+        const int overscan = 6;
 
         startIndex = Math.Max((int)MathF.Floor(scrollY / safeRowHeight) - overscan, 0);
         endIndex = Math.Min((int)MathF.Ceiling((scrollY + windowHeight) / safeRowHeight) + overscan, itemCount);

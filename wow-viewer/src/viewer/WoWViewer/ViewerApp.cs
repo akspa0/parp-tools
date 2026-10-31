@@ -684,7 +684,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                 {
                     bool shift = ImGui.GetIO().KeyShift;
                     var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-                    if (terrainRenderer != null && _chunkToolEnabled)
+                    bool chunkToolActive = _uiManager.Destination == WorkbenchTab.Editor && _chunkToolEnabled;
+                    if (terrainRenderer != null && chunkToolActive)
                     {
                         bool ctrl = ImGui.GetIO().KeyCtrl;
 
@@ -702,7 +703,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
                     if (_worldScene != null)
                         _sceneHoverPick.PickObjectAtMouse(_lastMouseX, _lastMouseY, addPm4ToCollection: shift);
-                    else if (terrainRenderer != null && !shift && !_chunkToolEnabled
+                    else if (terrainRenderer != null && !shift && !chunkToolActive
                         && _terrainQuery.TryPickTerrainChunkUnderMouse(terrainRenderer, out var terrainChunk))
                         _terrainInspection.SelectTerrainChunkFromClick(terrainChunk);
                 }
@@ -751,8 +752,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         // unchanged, and a real change drops the cached cursor model so it re-resolves from the
         // newly opened client instead of staying on the procedural fallback forever.
         _sceneCursorRenderer?.SetDataSource(_dataSource, _texResolver);
-        _imGui.Update((float)dt);
         _uiManager.FlushPendingImGuiMouseButtonEvents();
+        _imGui.Update((float)dt);
         HandleSceneMouseWheelInput();
         // Chrome shortcuts are handled in HandleKeyboardInput from the Silk keyboard; the
         // viewer does not feed key events to ImGui, so the ImGui-based path is not used.
@@ -832,7 +833,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         bool ctrlVDown = ctrlDown && vDown;
         bool cameraPathKeyboardAction = _cameraPaths.HandleCameraPathKeyboardInput(kb, ctrlDown, shiftDown: kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight));
 
-        if (_chunkToolEnabled && canSceneConsumeKeyboard)
+        if (_uiManager.Destination == WorkbenchTab.Editor && _chunkToolEnabled && canSceneConsumeKeyboard)
         {
             var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             if (terrainRenderer != null)
@@ -1405,9 +1406,14 @@ void main() {
             entityHeader = $"Entity: {inst.DisplayName}{sub}{entry}\n";
         }
 
+        string skinLine = inst.CustomTextures is { Length: > 0 }
+            ? $"Skin: {string.Join(", ", inst.CustomTextures)}\n"
+            : "";
+
         _selectedObjectInfo = entityHeader +
             $"{type} [{idx}] {inst.ModelName}\n" +
             $"Path: {inst.ModelPath}\n" +
+            skinLine +
             identityLine +
             $"Local: ({inst.PlacementPosition.X:F1}, {inst.PlacementPosition.Y:F1}, {inst.PlacementPosition.Z:F1})\n" +
             $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +

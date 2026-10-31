@@ -227,7 +227,7 @@ public class AssetCatalogView
 
     private void DrawEntryList()
     {
-        float listHeight = ImGui.GetContentRegionAvail().Y * 0.45f;
+        float listHeight = 240f * MathF.Max(1f, ImGui.GetIO().FontGlobalScale);
         if (ImGui.BeginChild("EntryList", new Vector2(0, listHeight), true))
         {
             // Simple loop — ImGui handles scrolling via BeginChild

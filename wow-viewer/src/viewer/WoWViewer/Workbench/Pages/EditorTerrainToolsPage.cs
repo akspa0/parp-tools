@@ -19,15 +19,6 @@ public sealed class EditorTerrainToolsPage
 
     public void Draw()
     {
-        // Parent injects MainMenuBarService.DrawTerrainFileOperationsContent. No shell type or
-        // broad host dependency is introduced into this destination page.
-        _drawFileOperations?.Invoke();
-        if (SharedUiWidgets.SectionHeader(
-                "Terrain Lab",
-                defaultOpen: true,
-                id: "EditorTerrainToolsLab"))
-        {
-            _context.Host.DrawTerrainLab();
-        }
+        _context.Host.DrawTerrainLab();
     }
 }

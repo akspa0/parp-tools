@@ -189,39 +189,7 @@ internal sealed partial class WorldObjectsPanelService
     {
         if (_worldScene == null) return;
 
-        _placementEditing.DrawSelectedPlacementEditControls();
-        DrawVisualInvestigationToolbox(showWorldObjectRangeControls: true);
-        ImGui.Separator();
-        DrawTerrainChunkInvestigationPanel(defaultOpen: _visualInvestigationMode == VisualInvestigationMode.Adt);
-        ImGui.Separator();
-
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
-
-        ImGui.Separator();
-        _sqlSpawnStreaming.DrawPopulationSubTabContent();
-
-        bool showPm4Overlay = _worldScene.Pm4Overlay.ShowPm4Overlay;
-        if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
-            _worldScene.Pm4Overlay.ShowPm4Overlay = showPm4Overlay;
-        if (ImGui.IsItemHovered() && _worldScene.Pm4Overlay.ShowPm4Overlay)
-            ImGui.SetTooltip(_worldScene.Pm4Overlay.Pm4Status);
-
-        // One PM4 entry point: the Inspector > PM4 page. The old "PM4 Actions" popup
-        // duplicated it and is deleted (Spec 280 T072).
-        if (ImGui.Button("Open PM4 Workbench"))
-            OpenPm4Workbench(_worldScene.Pm4Overlay.HasSelectedPm4Object ? Pm4WorkbenchTab.Selection : Pm4WorkbenchTab.Overlay);
-
-        if (_worldScene.Pm4Overlay.IsPm4Loading)
-            ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Overlay.Pm4Status}");
-        else if (_worldScene.Pm4Overlay.Pm4LoadAttempted)
-            ImGui.TextDisabled($"PM4: {_worldScene.Pm4Overlay.Pm4VisibleObjectCount}/{_worldScene.Pm4Overlay.Pm4ObjectCount} visible objects, {_worldScene.Pm4Overlay.Pm4VisibleLineCount}/{_worldScene.Pm4Overlay.Pm4LineCount} lines, {_worldScene.Pm4Overlay.Pm4VisibleTriangleCount}/{_worldScene.Pm4Overlay.Pm4TriangleCount} tris");
-        else
-            ImGui.TextDisabled("PM4 stays lightweight here. Use the inspector workbench for overlay tuning, object matches, and correlation.");
-        if (_worldScene.Pm4Overlay.Pm4LoadAttempted)
-            ImGui.TextDisabled($"PM4 status: {_worldScene.Pm4Overlay.Pm4Status}");
-        ImGui.TextDisabled("PM4 settings and deep analysis live in Inspector > PM4 Workbench.");
-
-        ImGui.Separator();
 
         // POI toggle — lazy-loaded on first request
         if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
@@ -523,93 +491,6 @@ internal sealed partial class WorldObjectsPanelService
         else if (_worldScene.AreaTriggerLoadAttempted && (_worldScene.AreaTriggerLoader == null || _worldScene.AreaTriggerLoader.Count == 0))
         {
             ImGui.TextDisabled("AreaTriggers: none found");
-        }
-
-        // WMO placements
-        if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
-        {
-            if (ImGui.BeginChild("##WmoPlacements", new Vector2(0, 220f), true))
-            {
-                float rowHeight = GetUniformListRowHeight();
-                GetVisibleListRange(_worldScene.ModfPlacements.Count, rowHeight, out int startIndex, out int endIndex);
-                if (startIndex > 0)
-                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
-
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    var p = _worldScene.ModfPlacements[i];
-                    string name = p.NameIndex < _worldScene.WmoModelNames.Count
-                        ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
-                    string label = $"[{i}] {name}";
-                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
-                    {
-                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        {
-                            _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 50);
-                            _camera.Pitch = -30f;
-                        }
-                    }
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
-                        ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
-                        ImGui.Text($"Flags: 0x{p.Flags:X4}");
-                        ImGui.Text($"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})");
-                        ImGui.EndTooltip();
-                    }
-                }
-
-                if (endIndex < _worldScene.ModfPlacements.Count)
-                    ImGui.Dummy(new Vector2(0, (_worldScene.ModfPlacements.Count - endIndex) * rowHeight));
-
-                ImGui.EndChild();
-            }
-            ImGui.TreePop();
-        }
-
-        // MDX placements (show first 200 to avoid UI lag)
-        int mddfCount = _worldScene.MddfPlacements.Count;
-        int mddfShow = Math.Min(mddfCount, 200);
-        if (mddfCount > 0 && ImGui.TreeNode($"MDX Placements ({mddfCount}{(mddfCount > mddfShow ? $", showing {mddfShow}" : "")})"))
-        {
-            if (ImGui.BeginChild("##MdxPlacements", new Vector2(0, 220f), true))
-            {
-                float rowHeight = GetUniformListRowHeight();
-                GetVisibleListRange(mddfShow, rowHeight, out int startIndex, out int endIndex);
-                if (startIndex > 0)
-                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
-
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    var p = _worldScene.MddfPlacements[i];
-                    string name = p.NameIndex < _worldScene.MdxModelNames.Count
-                        ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
-                    string label = $"[{i}] {name} s={p.Scale:F2}";
-                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
-                    {
-                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        {
-                            _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 20);
-                            _camera.Pitch = -30f;
-                        }
-                    }
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
-                        ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
-                        ImGui.Text($"Scale: {p.Scale:F3}");
-                        ImGui.EndTooltip();
-                    }
-                }
-
-                if (endIndex < mddfShow)
-                    ImGui.Dummy(new Vector2(0, (mddfShow - endIndex) * rowHeight));
-
-                ImGui.EndChild();
-            }
-            ImGui.TreePop();
         }
 
         // Area POI list

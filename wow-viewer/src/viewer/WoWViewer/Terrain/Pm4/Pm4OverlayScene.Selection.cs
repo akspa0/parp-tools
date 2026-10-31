@@ -947,6 +947,12 @@ public sealed partial class Pm4OverlayScene
         TransformBounds(obj.BoundsMin, obj.BoundsMax, geometryTransform, out Vector3 boundsMin, out Vector3 boundsMax);
         transformedCenter = ApplyPm4OverlayTransform(obj.Center, geometryTransform);
 
+        // Far cull: distance from the camera to the nearest point of the world AABB, so large
+        // objects are kept while any part of them is inside the PM4 render distance.
+        Vector3 nearest = Vector3.Clamp(cameraPos, boundsMin, boundsMax);
+        if (!IsWithinPm4RenderDistance(cameraPos, nearest))
+            return false;
+
         float distSq = Vector3.DistanceSquared(cameraPos, transformedCenter);
         if (distSq > NoCullRadiusSq && !_frustumCuller.TestAABB(boundsMin, boundsMax))
             return false;

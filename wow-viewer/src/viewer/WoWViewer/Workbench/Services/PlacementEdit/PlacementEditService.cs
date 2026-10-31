@@ -311,7 +311,7 @@ internal sealed class PlacementEditService
             : status;
     }
 
-    private void ChooseSelectedPlacementSavePath()
+    internal void ChooseSelectedPlacementSavePath()
     {
         if (_worldScene == null || !_worldScene.Selection.SelectedInstance.HasValue)
             return;

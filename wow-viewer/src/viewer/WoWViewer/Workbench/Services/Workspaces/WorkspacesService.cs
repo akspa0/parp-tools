@@ -128,40 +128,7 @@ internal sealed partial class WorkspacesService
             return;
         }
 
-        ImGui.TextWrapped("Terrain actions are live-scene only in the current viewer. Use this workspace to make target and save status explicit.");
-
-        _terrainControlsPanel.DrawSharedChunkClipboardSection(renderer, withHeader: true, headerTitle: "Chunk Clipboard");
-
-        ImGui.Separator();
-        ImGui.Text("Terrain Import / Export");
-        if (ImGui.Button("Export Alpha Atlas"))
-        {
-            _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
-            _wantTerrainExport = true;
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Export Heightmap"))
-        {
-            _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
-            _wantTerrainExport = true;
-        }
-
-        if (ImGui.Button("Import Alpha Folder"))
-        {
-            _terrainImportKind = TerrainImportKind.AlphaFolder;
-            _wantTerrainImport = true;
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Import Heightmaps"))
-        {
-            _terrainImportKind = TerrainImportKind.Heightmap257Folder;
-            _wantTerrainImport = true;
-        }
-
-        ImGui.Separator();
-        _terrainControlsPanel.DrawTerrainControlsContent();
+        ImGui.TextDisabled("Chunk Clipboard and tile selection live in Editor > Terrain Tools; terrain imports and exports live in Editor > Data I/O.");
     }
 
     private void DrawEditorObjectsWorkspace()

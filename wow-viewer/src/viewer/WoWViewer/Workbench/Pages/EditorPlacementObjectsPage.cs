@@ -17,7 +17,7 @@ public sealed class EditorPlacementObjectsPage
         // every other section is collapsed by default so the page does not stack
         // three large panels into one wall of content.
         if (SharedUiWidgets.SectionHeader(
-                "Archaeology Tasks",
+                "Placement Authoring",
                 defaultOpen: true,
                 id: "EditorPlacementTasks"))
         {

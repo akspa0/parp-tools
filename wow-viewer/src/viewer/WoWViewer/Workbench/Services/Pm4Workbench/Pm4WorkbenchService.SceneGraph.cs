@@ -36,22 +36,22 @@ internal sealed partial class Pm4WorkbenchService
 
         if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo d))
         {
+            float placementZ = BitConverter.UInt32BitsToSingle(d.Ck24 << 8);
             ImGui.Separator();
-            ImGui.Text($"Type: 0x{d.Ck24Type:X2}  ObjId: {d.Ck24ObjectId}");
-            ImGui.Text($"MSHD: F00={d.MshdField00}  Region={d.MshdRegionId}  F08={d.MshdField08}");
-            ImGui.Text($"MSLK: group=0x{d.LinkGroupObjectId:X8}  refs={d.LinkedPositionRefCount}");
-            ImGui.Text($"GroupKey: 0x{d.DominantGroupKey:X2}  Attr: 0x{d.DominantAttributeMask:X2}  MscnRef: {d.DominantMscnRefIndex}");
+            ImGui.Text($"Placement Z (MSUR.0x1C): ~= {placementZ:F3}  (CK24 0x{d.Ck24:X6}, exp 0x{d.Ck24Type:X2})");
+            ImGui.Text($"MSHD: F00={d.MshdField00}  Region(0x04)={d.MshdRegionId}  F08={d.MshdField08}");
+            ImGui.Text($"MSLK: group(0x04)=0x{d.LinkGroupObjectId:X8}  linked MPRL refs={d.LinkedPositionRefCount}");
+            ImGui.Text($"MSUR: class(0x00)=0x{d.DominantGroupKey:X2}  mslk_first_index(0x18)={d.DominantMscnRefIndex}");
 
             if (d.DistinctTypeFlags != 0)
             {
                 var tf = new List<string>();
                 for (int bit = 1; bit < 32; bit++)
                     if ((d.DistinctTypeFlags & (1u << bit)) != 0)
-                        tf.Add(bit switch { 0x03 => "m2-top", 0x10 => "floor-int", 0x12 => "ext-solid", _ => $"0x{bit:X2}" });
+                        tf.Add($"0x{bit:X2}");
                 byte gk = d.DominantGroupKey;
-                bool match = (d.DistinctTypeFlags & (1u << gk)) != 0;
-                string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
-                ImGui.Text($"GroupKey={gkl}  TypeFlags: {string.Join(" ", tf)}  {(match ? "MATCH" : "MISMATCH")}");
+                string gkl = gk switch { 0x03 => "0x03 (doodad)", 0x10 => "0x10 (lowest floor)", 0x11 => "0x11 (floor)", 0x12 => "0x12 (floor)", 0x13 => "0x13 (upper floor)", 0x14 => "0x14 (angled)", 0x15 => "0x15 (flat base)", _ => $"0x{gk:X2}" };
+                ImGui.Text($"SurfaceClass={gkl}  MSLK.0x00 flags: {string.Join(", ", tf)}");
             }
 
             if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectResearchInfo(out var ri) && ri.MslkRawEntries.Count > 0)
@@ -229,29 +229,23 @@ internal sealed partial class Pm4WorkbenchService
 
         ImGui.TextDisabled($"Files: {stats.TotalFiles}  MSLK entries: {stats.TotalMslkEntries}");
         ImGui.Separator();
-        ImGui.Text($"Anchor-only links: {stats.AnchorOnlyLinks} ({anchorPct:F1}%)");
-        ImGui.TextDisabled("MspiFirstIndex < 0 — prior art reads these as doodad placements carrying anchors");
-        ImGui.Text($"Path-window links: {stats.PathWindowLinks} ({pathPct:F1}%)");
-        ImGui.TextDisabled("MspiFirstIndex >= 0 — these connect surfaces via MSPI/MSPV path vertices");
+        ImGui.Text($"Open-passage links: {stats.AnchorOnlyLinks} ({anchorPct:F1}%)");
+        ImGui.TextDisabled("MSPI_first_index == -1 (flags 0x01 / 0x11) — shared polygon boundary with no wall geometry");
+        ImGui.Text($"Wall-quad links: {stats.PathWindowLinks} ({pathPct:F1}%)");
+        ImGui.TextDisabled("MSPI_first_index >= 0 — vertical wall/step quads in MSPV/MSPI along source edge MSLK.0x01");
         ImGui.Separator();
         ImGui.Text($"Components with MSLK links: {stats.ComponentsWithLinks} ({linkedPct:F1}%)");
         ImGui.Text($"Components without links: {stats.ComponentsWithoutLinks} ({unlinkedPct:F1}%)");
-        ImGui.TextDisabled($"RefIndex mismatches: {stats.RefIndexMismatches} (MSLK.RefIndex → MSUR bounds failures)");
+        ImGui.TextDisabled($"Cross-tile / unaddressed target indices: {stats.RefIndexMismatches} (resolved via target tile MSLK.0x0C)");
 
         if (ImGui.IsItemHovered())
         {
             ImGui.BeginTooltip();
-            ImGui.Text("MSLK.RefIndex → MSUR is 99.64% resolved (1,268,782 fits / 4,553 misses)");
-            ImGui.Text("but that is a bounds test, not a semantic one.");
-            ImGui.Text("The 4,553 misses are RefIndex values that don't index a valid MSUR entry.");
+            ImGui.Text("MSLK.msur_index addresses a surface in the target tile named by MSLK.0x0C");
+            ImGui.Text("(low byte = tileX, next byte = tileY; 82.5% same-tile, 17.5% adjacent tile).");
+            ImGui.Text("Same-tile links are 100% reciprocal; entries flagged here exceed the source tile's MSUR count.");
             ImGui.EndTooltip();
         }
-
-        ImGui.Separator();
-        ImGui.TextColored(new Vector4(0.8f, 0.9f, 1f, 1f), "Research leads:");
-        ImGui.BulletText("Anchor-only links (53% of 1.27M links) — next place to look for doodad identity");
-        ImGui.BulletText("MSLK.RefIndex semantics — 4,553 entries don't fit MSUR (gap in bounds test)");
-        ImGui.BulletText("MSLK.TypeFlags — 10 distinct values, 19 subtypes (0x03=M2, 0x10=floor, 0x12=wall)");
     }
 
     private void DrawPm4FullSceneOutliner()

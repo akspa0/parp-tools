@@ -213,6 +213,11 @@ public sealed partial class Pm4OverlayScene
     internal float _pm4MspvCubeSize = 1.0f;
     internal float _pm4MscnCubeAlpha = 0.95f;
     internal float _pm4MspvCubeAlpha = 0.95f;
+    // Far-distance cull for PM4 mesh/node geometry (renderer units, camera -> nearest AABB point).
+    // PM4 geometry is rebuilt on the CPU every frame, so this is the main PM4 frame-cost lever.
+    internal float _pm4RenderDistance = 1000f;
+    internal const float Pm4MinRenderDistance = 100f;
+    internal const float Pm4MaxRenderDistance = 4000f;
     internal float _pm4WireframeLineWidth = 2.5f;
     internal bool _pm4RenderNodesAsCubes = true;
     private bool _pm4SplitCk24ByConnectivity;
@@ -507,6 +512,7 @@ public sealed partial class Pm4OverlayScene
     public float Pm4MspvCubeSize { get => _pm4MspvCubeSize; set => _pm4MspvCubeSize = MathF.Max(0.1f, value); }
     public float Pm4MscnCubeAlpha { get => _pm4MscnCubeAlpha; set => _pm4MscnCubeAlpha = Math.Clamp(value, 0.1f, 1f); }
     public float Pm4MspvCubeAlpha { get => _pm4MspvCubeAlpha; set => _pm4MspvCubeAlpha = Math.Clamp(value, 0.1f, 1f); }
+    public float Pm4RenderDistance { get => _pm4RenderDistance; set => _pm4RenderDistance = Math.Clamp(value, Pm4MinRenderDistance, Pm4MaxRenderDistance); }
     public float Pm4WireframeLineWidth { get => _pm4WireframeLineWidth; set => _pm4WireframeLineWidth = MathF.Max(1.0f, value); }
     public bool Pm4RenderNodesAsCubes { get => _pm4RenderNodesAsCubes; set => _pm4RenderNodesAsCubes = value; }
     public bool Pm4SplitCk24ByConnectivity { get => _pm4SplitCk24ByConnectivity; set => _pm4SplitCk24ByConnectivity = value; }
@@ -1823,10 +1829,22 @@ public sealed partial class Pm4OverlayScene
 
     internal bool ShouldRenderPm4Tile(int tileX, int tileY)
     {
-        // PM4 overlay loading is already constrained by the PM4 camera window and object-level
-        // culling. Gating PM4 by terrain AOI slices large structures across adjacent tiles,
-        // which makes multi-tile WMO footprints like Stormwind Harbour disappear in pieces.
-        return true;
+        // PM4 geometry follows the terrain: a PM4 tile is drawn only while its ADT tile is
+        // loaded/rendered (operator direction, 2026-10-31). A multi-tile structure therefore
+        // streams in and out in the same pieces the terrain does. Maps with no streamed ADT
+        // terrain (no tiles loaded at all) keep the old ungated behavior.
+        TerrainManager? terrainManager = _host.TerrainManager;
+        if (terrainManager == null || terrainManager.LoadedTileCount == 0)
+            return true;
+
+        return terrainManager.IsTileLoaded(tileX, tileY);
+    }
+
+    /// <summary>True when a world-space point lies within the PM4 render distance of the camera.</summary>
+    internal bool IsWithinPm4RenderDistance(in Vector3 cameraPos, in Vector3 point)
+    {
+        float maxDistance = _pm4RenderDistance;
+        return Vector3.DistanceSquared(cameraPos, point) <= maxDistance * maxDistance;
     }
 
     internal readonly struct Pm4IndexedSurface

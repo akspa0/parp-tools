@@ -93,7 +93,9 @@ internal sealed partial class TerrainQueryService
         if (renderer == null && !drawCameraPathOverlay)
             return;
 
-        bool drawChunkClipboardOverlay = renderer != null && _chunkClipboardShowOverlay
+        bool drawChunkClipboardOverlay = renderer != null
+            && _shellLayout.Destination == WorkbenchTab.Editor
+            && _chunkClipboardShowOverlay
             && (_selectedChunks.Count > 0 || _chunkClipboardLockedTargetKey != null || _chunkClipboardCopiedKey != null);
         bool drawMcnkOverlay = renderer != null && ShouldDrawMcnkFlagOverlay(renderer);
         if (!drawChunkClipboardOverlay && !drawMcnkOverlay && !drawCameraPathOverlay)

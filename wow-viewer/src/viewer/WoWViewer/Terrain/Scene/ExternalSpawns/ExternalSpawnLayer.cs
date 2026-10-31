@@ -164,6 +164,12 @@ public sealed class ExternalSpawnLayer
             string key = (spawn.CustomTextures != null && spawn.CustomTextures.Length > 0)
                 ? $"{baseKey}#tex:{string.Join(";", spawn.CustomTextures)}"
                 : baseKey;
+            string[]? resolvedSkinPaths = ResolveFullSkinPaths(modelPath, spawn.CustomTextures);
+            string? cleanSubname = string.IsNullOrWhiteSpace(spawn.Subname)
+                || string.Equals(spawn.Subname.Trim(), "NULL", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(spawn.Subname.Trim(), "<NULL>", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : spawn.Subname.Trim();
 
             float finalYawRadians = spawn.OrientationWowRadians;
             float finalYawDegrees = finalYawRadians * (180f / MathF.PI);
@@ -218,11 +224,12 @@ public sealed class ExternalSpawnLayer
                     ModelName = Path.GetFileName(modelPath),
                     ModelPath = modelPath,
                     DisplayName = spawn.Name,
-                    Subname = spawn.Subname,
+                    Subname = cleanSubname,
                     SpawnEntryId = spawn.EntryId,
                     SpawnId = spawn.SpawnId,
                     DisplayId = spawn.DisplayId,
                     FileDataId = spawn.FileDataId,
+                    CustomTextures = resolvedSkinPaths,
                     AssetKind = spawn.SpawnType == WorldSpawnType.Creature ? "NPC Spawn" : "GameObject Spawn",
                     PlacementPosition = pos,
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
@@ -286,11 +293,12 @@ public sealed class ExternalSpawnLayer
                     ModelName = Path.GetFileName(modelPath),
                     ModelPath = modelPath,
                     DisplayName = spawn.Name,
-                    Subname = spawn.Subname,
+                    Subname = cleanSubname,
                     SpawnEntryId = spawn.EntryId,
                     SpawnId = spawn.SpawnId,
                     DisplayId = spawn.DisplayId,
                     FileDataId = spawn.FileDataId,
+                    CustomTextures = resolvedSkinPaths,
                     AssetKind = spawn.SpawnType == WorldSpawnType.Creature ? "NPC Spawn" : "GameObject Spawn",
                     PlacementPosition = pos,
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
@@ -313,6 +321,30 @@ public sealed class ExternalSpawnLayer
             $"SQL spawns injected: {_externalMdxInstances.Count} MDX, {_externalSkyboxInstances.Count} skybox, {_externalWmoInstances.Count} WMO");
 
         _instancesDirty = true;
+    }
+
+    private static string[]? ResolveFullSkinPaths(string modelPath, string[]? customTextures)
+    {
+        if (customTextures == null || customTextures.Length == 0)
+            return null;
+
+        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? string.Empty;
+        var resolved = new List<string>(customTextures.Length);
+        foreach (string raw in customTextures)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                continue;
+
+            string tex = raw.Trim().Replace('/', '\\');
+            if (!tex.Contains('\\') && !string.IsNullOrEmpty(modelDir))
+                tex = $"{modelDir}\\{tex}";
+            if (!tex.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                tex += ".blp";
+
+            resolved.Add(tex);
+        }
+
+        return resolved.Count > 0 ? resolved.ToArray() : null;
     }
 
     private static (int tileX, int tileY) ComputeTileCoordinates(Vector3 rendererPosition)

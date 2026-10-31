@@ -124,8 +124,12 @@ internal sealed partial class ViewerUiManager
         _host.ActiveBottomTabIndex = Math.Clamp(page < 0 ? _pages[(int)Destination] : page, 0, Math.Max(0, count - 1));
         _host.ShowRightSidebar = true;
         // The destination window owns the right side on Editor/Archaeology; close the viewer
-        // dock so the two surfaces cannot overlap.
-        if (destination != WorkbenchTab.Viewer) _rightDockOpen = false;
+        // dock so the two surfaces cannot overlap, and ensure the destination window opens.
+        if (destination != WorkbenchTab.Viewer)
+        {
+            _rightDockOpen = false;
+            _actionBars.OpenDestinationWindow();
+        }
         SaveLayout();
     }
 

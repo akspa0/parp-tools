@@ -22,12 +22,6 @@ public sealed class EditorDataIoPage
             _context.Host.DrawNewMapCreator();
         }
 
-        if (SharedUiWidgets.SectionHeader(
-                "Archaeology Imports",
-                defaultOpen: true,
-                id: "EditorDataIoImportsExports"))
-        {
-            _context.Host.DrawImportsAndExports();
-        }
+        _context.Host.DrawImportsAndExports();
     }
 }

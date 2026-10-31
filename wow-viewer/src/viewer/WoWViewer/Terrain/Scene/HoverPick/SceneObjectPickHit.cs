@@ -20,7 +20,8 @@ public readonly record struct SceneObjectPickHit(
     string? DisplayName = null,
     string? Subname = null,
     int? SpawnId = null,
-    int? DisplayId = null)
+    int? DisplayId = null,
+    string[]? CustomTextures = null)
 {
     public string KindLabel => ObjectType switch
     {

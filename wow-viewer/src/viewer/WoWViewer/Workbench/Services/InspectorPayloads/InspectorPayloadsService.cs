@@ -323,6 +323,18 @@ internal sealed partial class InspectorPayloadsService
 
         var placement = builder.AddSection("Placement");
         placement.Row("Asset", inst.ModelPath, isImportant: true);
+        if (inst.CustomTextures is { Length: > 0 })
+        {
+            if (inst.CustomTextures.Length == 1)
+            {
+                placement.Row("NPC Skin / Bake", inst.CustomTextures[0], isImportant: true);
+            }
+            else
+            {
+                for (int t = 0; t < inst.CustomTextures.Length; t++)
+                    placement.Row($"Skin Texture {t + 1}", inst.CustomTextures[t], isImportant: true);
+            }
+        }
         float wowX = WoWConstants.MapOrigin - inst.PlacementPosition.Y;
         float wowY = WoWConstants.MapOrigin - inst.PlacementPosition.X;
         float wowZ = inst.PlacementPosition.Z;
@@ -335,7 +347,8 @@ internal sealed partial class InspectorPayloadsService
         placement.Row("Bounds", $"Min ({inst.BoundsMin.X:F1}, {inst.BoundsMin.Y:F1}, {inst.BoundsMin.Z:F1}) Max ({inst.BoundsMax.X:F1}, {inst.BoundsMax.Y:F1}, {inst.BoundsMax.Z:F1})");
 
         string normKey = WorldAssetManager.NormalizeKey(inst.ModelPath);
-        IModelRenderer? modelRenderer = _worldScene?.Assets.GetMdx(normKey);
+        string lookupKey = !string.IsNullOrEmpty(inst.ModelKey) ? inst.ModelKey : normKey;
+        IModelRenderer? modelRenderer = _worldScene?.Assets.GetMdx(lookupKey) ?? _worldScene?.Assets.GetMdx(normKey);
         if (modelRenderer != null)
         {
             var animSection = builder.AddSection("Sequences & Mesh");
@@ -350,12 +363,22 @@ internal sealed partial class InspectorPayloadsService
                 uint modelFlags = m2.RuntimeModel.Model.Flags;
                 animSection.Row("Model Flags", $"0x{modelFlags:X4} ({FormatFlagsDescriber.DescribeM2ModelFlags(modelFlags)})");
             }
+
+            IReadOnlyList<string> loadedTextures = modelRenderer.LoadedTexturePaths;
+            if (loadedTextures.Count > 0)
+            {
+                var texSection = builder.AddSection($"Resolved Textures ({loadedTextures.Count})");
+                for (int t = 0; t < loadedTextures.Count; t++)
+                    texSection.Row($"Slot {t}", loadedTextures[t]);
+            }
         }
 
-        builder.AddSection("Model Actions")
+        var actions = builder.AddSection("Model Actions")
             .Action("frame_selection", "Frame in Camera")
-            .Action("copy_asset_path", "Copy Asset Path")
-            .Action("open_pm4_workbench", "Open in PM4 Tools");
+            .Action("copy_asset_path", "Copy Asset Path");
+        if (inst.CustomTextures is { Length: > 0 })
+            actions.Action("copy_skin_path", "Copy Skin Path");
+        actions.Action("open_pm4_workbench", "Open in PM4 Tools");
     }
 
     private void BuildStandaloneModelInspector(InspectorContentBuilder builder)
@@ -410,6 +433,14 @@ internal sealed partial class InspectorPayloadsService
             info.Row("Sequences", $"{seqCount}", isImportant: true);
             info.Row("Current Sequence", $"{currSeq} ({(isPlaying ? "Playing" : "Stopped")})");
             info.Row("Sub-Objects / Geosets", $"{standaloneModel.SubObjectCount}");
+
+            IReadOnlyList<string> loadedTextures = standaloneModel.LoadedTexturePaths;
+            if (loadedTextures.Count > 0)
+            {
+                var texSection = builder.AddSection($"Resolved Textures ({loadedTextures.Count})");
+                for (int t = 0; t < loadedTextures.Count; t++)
+                    texSection.Row($"Slot {t}", loadedTextures[t]);
+            }
         }
 
         builder.AddSection("Actions")
@@ -468,6 +499,14 @@ internal sealed partial class InspectorPayloadsService
                     _navigatorPanel.CopyTextToClipboard(wl.SourcePath, "WL Source Path");
                 else if (!string.IsNullOrEmpty(_loadedFilePath))
                     _navigatorPanel.CopyTextToClipboard(_loadedFilePath, "Model Path");
+                break;
+
+            case "copy_skin_path":
+                if (_worldScene?.Selection.SelectedInstance.HasValue == true
+                    && _worldScene.Selection.SelectedInstance.Value.CustomTextures is { Length: > 0 } skins)
+                {
+                    _navigatorPanel.CopyTextToClipboard(string.Join("; ", skins), "Skin Path");
+                }
                 break;
 
             case "copy_chunk_texture_summary":

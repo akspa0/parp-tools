@@ -292,6 +292,26 @@ public sealed partial class M2Renderer : IModelRenderer, IGpuInstancedModelRende
             : string.Empty;
     }
 
+    public IReadOnlyList<string> LoadedTexturePaths
+    {
+        get
+        {
+            if (_legacyRenderer != null)
+                return _legacyRenderer.LoadedTexturePaths;
+
+            var paths = new List<string>(_loadedTextureCache.Count);
+            foreach (string cacheKey in _loadedTextureCache.Keys)
+            {
+                string[] parts = cacheKey.Split('|');
+                string candidate = parts.Length > 0 ? parts[0] : cacheKey;
+                if (!string.IsNullOrWhiteSpace(candidate) && !paths.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+                    paths.Add(candidate);
+            }
+
+            return paths;
+        }
+    }
+
     public bool GetSubObjectVisible(int index)
     {
         if (_runtimeModel != null && index >= 0 && index < _sectionVisibility.Count)

@@ -58,6 +58,117 @@ internal sealed partial class TaxiPanelService
             return;
         }
 
+        ImGui.Separator();
+        string[] taxiGroupingLabels = { "None", "From Node", "To Node" };
+        ImGui.Text($"Routes ({_worldScene.TaxiActors.TaxiLoader.Routes.Count})");
+        ImGui.SetNextItemWidth(140f);
+        ImGui.Combo("Group By", ref _taxiRouteListGroupingMode, taxiGroupingLabels, taxiGroupingLabels.Length);
+
+        string taxiRouteFilter = _taxiRouteFilter;
+        if (ImGui.InputText("Search Routes", ref taxiRouteFilter, 256))
+            _taxiRouteFilter = taxiRouteFilter;
+
+        var routeEntries = new List<(TaxiPathLoader.TaxiRoute Route, string FromName, string ToName, string Label, string GroupKey)>();
+        foreach (TaxiPathLoader.TaxiRoute route in _worldScene.TaxiActors.TaxiLoader.Routes)
+        {
+            string fromName = _worldScene.TaxiActors.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
+            string toName = _worldScene.TaxiActors.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
+            string label = $"{_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(route.PathId)} ({route.Waypoints.Count} pts)";
+            string searchText = $"{route.PathId} {fromName} {toName} {label}";
+            if (!string.IsNullOrWhiteSpace(_taxiRouteFilter)
+                && !searchText.Contains(_taxiRouteFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string groupKey = _taxiRouteListGroupingMode switch
+            {
+                1 => fromName,
+                2 => toName,
+                _ => string.Empty,
+            };
+
+            routeEntries.Add((route, fromName, toName, label, groupKey));
+        }
+
+        routeEntries.Sort((left, right) =>
+        {
+            if (_taxiRouteListGroupingMode != 0)
+            {
+                int groupCompare = StringComparer.OrdinalIgnoreCase.Compare(left.GroupKey, right.GroupKey);
+                if (groupCompare != 0)
+                    return groupCompare;
+            }
+
+            int primaryCompare = _taxiRouteListGroupingMode switch
+            {
+                1 => StringComparer.OrdinalIgnoreCase.Compare(left.ToName, right.ToName),
+                2 => StringComparer.OrdinalIgnoreCase.Compare(left.FromName, right.FromName),
+                _ => 0,
+            };
+            if (primaryCompare != 0)
+                return primaryCompare;
+
+            return left.Route.PathId.CompareTo(right.Route.PathId);
+        });
+
+        if (routeEntries.Count != _worldScene.TaxiActors.TaxiLoader.Routes.Count)
+            ImGui.TextDisabled($"Showing {routeEntries.Count} of {_worldScene.TaxiActors.TaxiLoader.Routes.Count} routes");
+
+        if (ImGui.BeginChild("##TaxiRouteSidebarList", new Vector2(0, 220f), true))
+        {
+            if (routeEntries.Count == 0)
+            {
+                ImGui.TextDisabled(string.IsNullOrWhiteSpace(_taxiRouteFilter)
+                    ? "No taxi routes are available."
+                    : "No taxi routes match the current search.");
+            }
+            else
+            {
+                Dictionary<string, int>? groupCounts = null;
+                string currentGroupKey = string.Empty;
+                if (_taxiRouteListGroupingMode != 0)
+                {
+                    groupCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var entry in routeEntries)
+                        groupCounts[entry.GroupKey] = groupCounts.TryGetValue(entry.GroupKey, out int count) ? count + 1 : 1;
+                }
+
+                for (int i = 0; i < routeEntries.Count; i++)
+                {
+                    var entry = routeEntries[i];
+                    if (_taxiRouteListGroupingMode != 0 && !string.Equals(currentGroupKey, entry.GroupKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentGroupKey = entry.GroupKey;
+                        if (i > 0)
+                            ImGui.Separator();
+                        ImGui.TextDisabled($"{currentGroupKey} ({groupCounts![currentGroupKey]})");
+                    }
+
+                    bool isSelected = _worldScene.TaxiActors.SelectedTaxiRouteId == entry.Route.PathId;
+                    if (ImGui.Selectable(entry.Label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                    {
+                        _taxiAndAreaPoi.SelectTaxiRoute(entry.Route.PathId, toggle: false);
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                            _taxiAndAreaPoi.FocusSelectedTaxi();
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Cost: {entry.Route.Cost}");
+                        ImGui.Text($"From: {entry.FromName}");
+                        ImGui.Text($"To: {entry.ToName}");
+                        ImGui.Text($"Waypoints: {entry.Route.Waypoints.Count}");
+                        ImGui.Text("Single-click selects the route. Double-click focuses the camera.");
+                        ImGui.EndTooltip();
+                    }
+                }
+            }
+
+            ImGui.EndChild();
+        }
+
         bool hasTaxiSelection = _worldScene.TaxiActors.SelectedTaxiNodeId >= 0 || _worldScene.TaxiActors.SelectedTaxiRouteId >= 0;
         if (hasTaxiSelection && !string.IsNullOrWhiteSpace(_selectedObjectInfo))
         {
@@ -81,6 +192,7 @@ internal sealed partial class TaxiPanelService
             && _taxiRideCameraRouteId == _worldScene.TaxiActors.SelectedTaxiRouteId;
         bool rideCameraActive = _taxiRideCameraEnabled && _taxiRideCameraRouteId >= 0;
 
+        ImGui.SameLine();
         bool canToggleRideCamera = hasSelectedTaxiRoute || _taxiRideCameraEnabled;
         if (!canToggleRideCamera)
             ImGui.BeginDisabled();
@@ -166,7 +278,20 @@ internal sealed partial class TaxiPanelService
             ImGui.TextDisabled($"Saved: {Path.GetFileName(lastCompleted.OutputPath)} ({lastCompleted.DurationSeconds:F1}s)");
         }
 
-        if (ImGui.CollapsingHeader("Flight Playlist & Promo Video Showreel", ImGuiTreeNodeFlags.DefaultOpen))
+        bool showTaxiActors = _worldScene.TaxiActors.ShowTaxiActors;
+        if (ImGui.Checkbox("Show Animated Taxi Actor", ref showTaxiActors))
+            _worldScene.TaxiActors.ShowTaxiActors = showTaxiActors;
+
+        float speedMultiplier = _worldScene.TaxiActors.TaxiActorSpeedMultiplier;
+        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, TaxiActorScene.TaxiActorMinSpeedSetting, TaxiActorScene.TaxiActorMaxSpeedSetting, "%.2f"))
+            _worldScene.TaxiActors.TaxiActorSpeedMultiplier = speedMultiplier;
+        ImGui.TextDisabled("0.10 = 100% speed, 0.01 = 10%, 0.50 = 500%.");
+
+        float scaleMultiplier = _worldScene.TaxiActors.TaxiActorScaleMultiplier;
+        if (ImGui.SliderFloat("Taxi Actor Scale", ref scaleMultiplier, 0.05f, 5f, "%.2fx"))
+            _worldScene.TaxiActors.TaxiActorScaleMultiplier = scaleMultiplier;
+
+        if (ImGui.CollapsingHeader("Flight Playlist & Promo Video Showreel"))
         {
             TaxiPlaylistService playlist = _host.TaxiPlaylist;
             ShowreelOverlayService showreel = _host.ShowreelOverlay;
@@ -300,130 +425,6 @@ internal sealed partial class TaxiPanelService
                     ImGui.TextDisabled(playlist.StatusText);
                 }
             }
-        }
-
-        bool showTaxiActors = _worldScene.TaxiActors.ShowTaxiActors;
-        if (ImGui.Checkbox("Show Animated Taxi Actor", ref showTaxiActors))
-            _worldScene.TaxiActors.ShowTaxiActors = showTaxiActors;
-
-        float speedMultiplier = _worldScene.TaxiActors.TaxiActorSpeedMultiplier;
-        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, TaxiActorScene.TaxiActorMinSpeedSetting, TaxiActorScene.TaxiActorMaxSpeedSetting, "%.2f"))
-            _worldScene.TaxiActors.TaxiActorSpeedMultiplier = speedMultiplier;
-        ImGui.TextDisabled("0.10 = 100% speed, 0.01 = 10%, 0.50 = 500%.");
-
-        float scaleMultiplier = _worldScene.TaxiActors.TaxiActorScaleMultiplier;
-        if (ImGui.SliderFloat("Taxi Actor Scale", ref scaleMultiplier, 0.05f, 5f, "%.2fx"))
-            _worldScene.TaxiActors.TaxiActorScaleMultiplier = scaleMultiplier;
-
-        ImGui.Separator();
-        string[] taxiGroupingLabels = { "None", "From Node", "To Node" };
-        ImGui.Text($"Routes ({_worldScene.TaxiActors.TaxiLoader.Routes.Count})");
-        ImGui.SetNextItemWidth(140f);
-        ImGui.Combo("Group By", ref _taxiRouteListGroupingMode, taxiGroupingLabels, taxiGroupingLabels.Length);
-
-        string taxiRouteFilter = _taxiRouteFilter;
-        if (ImGui.InputText("Search Routes", ref taxiRouteFilter, 256))
-            _taxiRouteFilter = taxiRouteFilter;
-
-        var routeEntries = new List<(TaxiPathLoader.TaxiRoute Route, string FromName, string ToName, string Label, string GroupKey)>();
-        foreach (TaxiPathLoader.TaxiRoute route in _worldScene.TaxiActors.TaxiLoader.Routes)
-        {
-            string fromName = _worldScene.TaxiActors.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
-            string toName = _worldScene.TaxiActors.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
-            string label = $"{_taxiAndAreaPoi.GetTaxiRouteDisplayLabel(route.PathId)} ({route.Waypoints.Count} pts)";
-            string searchText = $"{route.PathId} {fromName} {toName} {label}";
-            if (!string.IsNullOrWhiteSpace(_taxiRouteFilter)
-                && !searchText.Contains(_taxiRouteFilter, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            string groupKey = _taxiRouteListGroupingMode switch
-            {
-                1 => fromName,
-                2 => toName,
-                _ => string.Empty,
-            };
-
-            routeEntries.Add((route, fromName, toName, label, groupKey));
-        }
-
-        routeEntries.Sort((left, right) =>
-        {
-            if (_taxiRouteListGroupingMode != 0)
-            {
-                int groupCompare = StringComparer.OrdinalIgnoreCase.Compare(left.GroupKey, right.GroupKey);
-                if (groupCompare != 0)
-                    return groupCompare;
-            }
-
-            int primaryCompare = _taxiRouteListGroupingMode switch
-            {
-                1 => StringComparer.OrdinalIgnoreCase.Compare(left.ToName, right.ToName),
-                2 => StringComparer.OrdinalIgnoreCase.Compare(left.FromName, right.FromName),
-                _ => 0,
-            };
-            if (primaryCompare != 0)
-                return primaryCompare;
-
-            return left.Route.PathId.CompareTo(right.Route.PathId);
-        });
-
-        if (routeEntries.Count != _worldScene.TaxiActors.TaxiLoader.Routes.Count)
-            ImGui.TextDisabled($"Showing {routeEntries.Count} of {_worldScene.TaxiActors.TaxiLoader.Routes.Count} routes");
-
-        if (ImGui.BeginChild("##TaxiRouteSidebarList", new Vector2(0, 220f), true))
-        {
-            if (routeEntries.Count == 0)
-            {
-                ImGui.TextDisabled(string.IsNullOrWhiteSpace(_taxiRouteFilter)
-                    ? "No taxi routes are available."
-                    : "No taxi routes match the current search.");
-            }
-            else
-            {
-                Dictionary<string, int>? groupCounts = null;
-                string currentGroupKey = string.Empty;
-                if (_taxiRouteListGroupingMode != 0)
-                {
-                    groupCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var entry in routeEntries)
-                        groupCounts[entry.GroupKey] = groupCounts.TryGetValue(entry.GroupKey, out int count) ? count + 1 : 1;
-                }
-
-                for (int i = 0; i < routeEntries.Count; i++)
-                {
-                    var entry = routeEntries[i];
-                    if (_taxiRouteListGroupingMode != 0 && !string.Equals(currentGroupKey, entry.GroupKey, StringComparison.OrdinalIgnoreCase))
-                    {
-                        currentGroupKey = entry.GroupKey;
-                        if (i > 0)
-                            ImGui.Separator();
-                        ImGui.TextDisabled($"{currentGroupKey} ({groupCounts![currentGroupKey]})");
-                    }
-
-                    bool isSelected = _worldScene.TaxiActors.SelectedTaxiRouteId == entry.Route.PathId;
-                    if (ImGui.Selectable(entry.Label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
-                    {
-                        _taxiAndAreaPoi.SelectTaxiRoute(entry.Route.PathId, toggle: true);
-                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                            _taxiAndAreaPoi.FocusSelectedTaxi();
-                    }
-
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text($"Cost: {entry.Route.Cost}");
-                        ImGui.Text($"From: {entry.FromName}");
-                        ImGui.Text($"To: {entry.ToName}");
-                        ImGui.Text($"Waypoints: {entry.Route.Waypoints.Count}");
-                        ImGui.Text("Single-click selects the route. Double-click focuses the camera.");
-                        ImGui.EndTooltip();
-                    }
-                }
-            }
-
-            ImGui.EndChild();
         }
 
         if (_worldScene.TaxiActors.SelectedTaxiNodeId >= 0)

@@ -248,6 +248,10 @@ internal sealed partial class EditorPanelsService
                     selected.PlacementEntryIndex,
                     selected.UniqueId));
         }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Choose Save Path"))
+            _placementEditing.ChooseSelectedPlacementSavePath();
     }
 
     private AdtPlacementKind AuthoringPlacementKind()
@@ -664,57 +668,26 @@ internal sealed partial class EditorPanelsService
 
     internal void DrawArchaeologyEditorTasksSubTab()
     {
-        ImGui.Text("Editor Tasks & Inspector");
-        ImGui.TextDisabled("Select an active editor task to display its specialized inspector.");
+        EnsureEditorHost();
 
         ImGui.TextDisabled($"Target: {_workspaces.GetWorkspaceTargetSummary()}");
         ImGui.TextDisabled($"Save: {_workspaces.GetWorkspaceSaveStatusSummary()}");
 
-        ImGui.Separator();
-
-        // Task selector buttons
-        foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
+        if (_editorSession != null)
         {
-            bool isAvailable = _workspaces.IsEditorTaskAvailable(task);
-            if (!isAvailable)
-                ImGui.BeginDisabled();
-
-            bool isSelected = task == _editorWorkspaceTask;
-            if (isSelected)
-                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.26f, 0.59f, 0.98f, 0.8f));
-
-            if (ImGui.Button(WorkspacesService.GetEditorWorkspaceTaskLabel(task)))
-                _workspaces.SetEditorWorkspaceTask(task);
-
-            if (isSelected)
-                ImGui.PopStyleColor();
-
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            {
-                ImGui.BeginTooltip();
-                ImGui.TextDisabled(WorkspacesService.GetEditorWorkspaceTooltip(task));
-                ImGui.EndTooltip();
-            }
-
-            if (!isAvailable)
-                ImGui.EndDisabled();
-
+            if (ImGui.Button("Undo") && _editorSession.CanUndo)
+                _editorSession.Undo();
             ImGui.SameLine();
+            if (ImGui.Button("Redo") && _editorSession.CanRedo)
+                _editorSession.Redo();
+            ImGui.SameLine();
+            if (ImGui.Button("Save All") && _editorSession.HasUnsavedChanges)
+                _editorSession.SaveAll();
         }
-        ImGui.NewLine();
 
         ImGui.Separator();
-
-        // Active task inspector
-        _workspaces.DrawEditorWorkspaceInspector();
-
-        ImGui.Separator();
-
-        // Collapsible Plugin Host & Placement Authoring
-        if (ImGui.CollapsingHeader("Plugin Host & Placement Authoring"))
-        {
-            DrawEditorContent();
-        }
+        DrawPlacementAuthoringPanel();
+        _host.WorkbenchPanels.DrawSelectedObjectInspectorSection(defaultOpen: false);
     }
 
     // =========================================================================

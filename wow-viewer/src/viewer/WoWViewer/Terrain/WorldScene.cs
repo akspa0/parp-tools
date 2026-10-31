@@ -4024,10 +4024,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             if (!_pm4Overlay.ShouldRenderPm4Object(obj, objectTransform, applyObjectTransform, cameraPos, out _))
                                 continue;
 
-                            Vector3 boundsMin = obj.BoundsMin;
-                            Vector3 boundsMax = obj.BoundsMax;
-                            if (applyObjectTransform)
-                                TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+                            TransformBounds(obj.BoundsMin, obj.BoundsMax, BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform), out Vector3 boundsMin, out Vector3 boundsMax);
 
                             Vector3 boxColor = Pm4ColorObjectBounds;  // light pastel — container
                             if (_pm4Overlay._highlightedPm4ObjectKeys.Contains(objectKey))
@@ -4055,6 +4052,9 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
 
                         foreach (var tileEntry in _pm4Overlay._pm4TileObjects)
                         {
+                            if (!_pm4Overlay.ShouldRenderPm4Tile(tileEntry.Key.tileX, tileEntry.Key.tileY))
+                                continue;
+
                             foreach (Pm4OverlayObject obj in tileEntry.Value)
                             {
                                 if (!_pm4Overlay.ShouldRenderPm4Object(obj))
@@ -4080,11 +4080,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
 
                                 var markerKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId);
                                 Matrix4x4 objTransform = _pm4Overlay.BuildPm4ObjectTransform(markerKey, applyMarkerTransform, markerTransform, out bool applyObj);
+                                if (!_pm4Overlay.ShouldRenderPm4Object(obj, objTransform, applyObj, cameraPos, out _))
+                                    continue;
 
-                                Vector3 bMin = obj.BoundsMin;
-                                Vector3 bMax = obj.BoundsMax;
-                                if (applyObj)
-                                    TransformBounds(bMin, bMax, objTransform, out bMin, out bMax);
+                                TransformBounds(obj.BoundsMin, obj.BoundsMax, BuildPm4GeometryTransform(obj, objTransform, applyObj), out Vector3 bMin, out Vector3 bMax);
 
                                 // A SMALL marker at the object's centre, deliberately not the size of
                                 // the object. An earlier version spanned the object's XY footprint,
@@ -4133,10 +4132,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             if (!_pm4Overlay.ShouldRenderPm4Object(obj, objectTransform, applyObjectTransform, cameraPos, out _))
                                 continue;
 
-                            Vector3 boundsMin = obj.BoundsMin;
-                            Vector3 boundsMax = obj.BoundsMax;
-                            if (applyObjectTransform)
-                                TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+                            TransformBounds(obj.BoundsMin, obj.BoundsMax, BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform), out Vector3 boundsMin, out Vector3 boundsMax);
 
                             if (ck24Groups.TryGetValue(ck24Key, out var existing))
                             {
@@ -4242,10 +4238,11 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             for (int i = 0; i < positionRefs.Count; i++)
                             {
                                 Vector3 marker = applyPm4Transform ? ApplyPm4OverlayTransform(positionRefs[i], pm4Transform) : positionRefs[i];
+                                if (!_pm4Overlay.IsWithinPm4RenderDistance(cameraPos, marker))
+                                    continue;
                                 _bbRenderer.BatchPin(marker, 16f, 3f, Pm4ColorMprl);
+                                _pm4Overlay._pm4VisiblePositionRefCount++;
                             }
-
-                            _pm4Overlay._pm4VisiblePositionRefCount += positionRefs.Count;
                         }
 
                         foreach (Pm4OverlayObject obj in objects)
@@ -4360,9 +4357,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                                 foreach (var kv in _pm4Overlay._pm4TileMscnPoints)
                                 {
                                     var pts = kv.Value;
-                                    if (pts == null) continue;
+                                    if (pts == null || !_pm4Overlay.ShouldRenderPm4Tile(kv.Key.tileX, kv.Key.tileY)) continue;
                                     for (int i = 0; i < pts.Count && mscnDrawn < limit; i++)
                                     {
+                                        if (!_pm4Overlay.IsWithinPm4RenderDistance(cameraPos, pts[i])) continue;
                                         _bbRenderer.BatchSolidCube(pts[i], _pm4Overlay._pm4MscnCubeSize, Pm4ColorMscn, _pm4Overlay._pm4MscnCubeAlpha);
                                         mscnDrawn++;
                                     }
@@ -4376,9 +4374,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                                 foreach (var kv in _pm4Overlay._pm4TileMspvPoints)
                                 {
                                     var pts = kv.Value;
-                                    if (pts == null) continue;
+                                    if (pts == null || !_pm4Overlay.ShouldRenderPm4Tile(kv.Key.tileX, kv.Key.tileY)) continue;
                                     for (int i = 0; i < pts.Count && mspvDrawn < limit; i++)
                                     {
+                                        if (!_pm4Overlay.IsWithinPm4RenderDistance(cameraPos, pts[i])) continue;
                                         _bbRenderer.BatchSolidCube(pts[i], _pm4Overlay._pm4MspvCubeSize, Pm4ColorMspv, _pm4Overlay._pm4MspvCubeAlpha);
                                         mspvDrawn++;
                                     }
@@ -4423,9 +4422,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                                 foreach (var kv in _pm4Overlay._pm4TileMscnPoints)
                                 {
                                     var pts = kv.Value;
-                                    if (pts == null) continue;
+                                    if (pts == null || !_pm4Overlay.ShouldRenderPm4Tile(kv.Key.tileX, kv.Key.tileY)) continue;
                                     for (int i = 0; i < pts.Count && drawn < limit; i++)
                                     {
+                                        if (!_pm4Overlay.IsWithinPm4RenderDistance(cameraPos, pts[i])) continue;
                                         _bbRenderer.BatchPin(pts[i], _pm4Overlay._pm4MscnCubeSize * 2.0f, _pm4Overlay._pm4MscnCubeSize * 0.5f, Pm4ColorMscn);
                                         drawn++;
                                     }
@@ -4443,9 +4443,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                                 foreach (var kv in _pm4Overlay._pm4TileMspvPoints)
                                 {
                                     var pts = kv.Value;
-                                    if (pts == null) continue;
+                                    if (pts == null || !_pm4Overlay.ShouldRenderPm4Tile(kv.Key.tileX, kv.Key.tileY)) continue;
                                     for (int i = 0; i < pts.Count && drawn < limit; i++)
                                     {
+                                        if (!_pm4Overlay.IsWithinPm4RenderDistance(cameraPos, pts[i])) continue;
                                         _bbRenderer.BatchPin(pts[i], _pm4Overlay._pm4MspvCubeSize * 2.0f, _pm4Overlay._pm4MspvCubeSize * 0.5f, Pm4ColorMspv);
                                         drawn++;
                                     }

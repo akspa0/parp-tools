@@ -80,7 +80,6 @@ internal sealed partial class Pm4WorkbenchService
         }
 
         ImGui.TextDisabled("Hover stays lightweight. Click a PM4 object to inspect it here.");
-        ImGui.SetNextItemOpen(true, ImGuiCond.Once);
         DrawPm4GlossarySummary();
 
         if (_pendingPm4WorkbenchTab is { } pending)
@@ -139,20 +138,59 @@ internal sealed partial class Pm4WorkbenchService
 
     private void DrawPm4GlossarySummary()
     {
-        if (!ImGui.CollapsingHeader("PM4 Glossary / Evidence"))
+        if (!SharedUiWidgets.SectionHeader("PM4 Glossary & Format Reference", defaultOpen: false, id: "Pm4Glossary"))
             return;
 
-        ImGui.TextWrapped("PM4/PD4 are server-side navigation-mesh files: walkable surfaces, their adjacency, and what blocks movement. The cyan (MSCN) and magenta (MSPV) cubes are the visible projection of this data. The single authoritative reading is docs/research/pm4-format-reference.md.");
-        ImGui.BulletText("MSUR — 32-byte surface record. 0x01 = MSVI index count; 0x02 = MSLK window count; 0x04/0x08/0x0C = normal; 0x10 = plane distance; 0x14 = MSVI window start; 0x18 = MSLK window start; 0x1C = IEEE-754 float, the producing placement's Z.");
-        ImGui.BulletText("MSLK — the surface-adjacency graph. msur_index names a neighbouring surface in the tile addressed by 0x0C. 0x01 is a zero-based source-edge ordinal. 0x04 is the object-group id and equals MPRL.0x04. A non-empty MSPI window is a vertical wall quad; an empty one is open passage.");
-        ImGui.BulletText("MSCN — ordered connector/boundary node positions. Objects share nodes; nothing in the file indexes MSCN. Visible as the cyan cubes.");
-        ImGui.BulletText("MSPV / MSPI — wall-quad vertices and indices on the blocked subset of MSLK links. Visible as the magenta cubes.");
-        ImGui.BulletText("MSVI / MSVT — mesh indices and vertex positions. A surface is a polygon fan over MSVI[MSUR.0x14 .. + MSUR.0x01) into MSVT.");
-        ImGui.BulletText("MPRL — terrain-contact points. 0x00 is a per-tile region value; 0x04 is the object-group id; position is the only permuted chunk (height is Y).");
-        ImGui.BulletText("MSHD — 32-byte header. 0x00/0x08 are clamped world-unit spans; 0x04 == 1 marks a tile with no surfaces; 0x0C–0x1C are zero.");
-        ImGui.BulletText("part / ObjectPartId — viewer-generated split id from the current overlay build, not a raw PM4 field.");
-        ImGui.BulletText("MSLK Group — dominant MSLK.0x04 in the current viewer object. A grouping hint, not proof of identity.");
-        ImGui.BulletText("PM4 Graph — the viewer's decomposition of the selected object, not a literal raw node graph stored in PM4.");
+        ImGui.PushTextWrapPos(0f);
+        ImGui.TextDisabled(
+            "PM4 (per-ADT tile) and PD4 (per-WMO) are server-side navigation-mesh files. " +
+            "Authoritative reference: docs/research/pm4-format-reference.md.");
+
+        if (ImGui.TreeNodeEx("Core Surface & Mesh Chunks (MSUR / MSVT / MSVI)##Pm4GlossarySurfaces", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.BulletText("MSUR (32 B) — Walkable floor polygon record:\n" +
+                "  • 0x00 (surface_class): 0x03 = doodad/M2 surface (100%% have 0x1C == 0); 0x10..0x15 = placed WMO/object surfaces stratified by relative height.\n" +
+                "  • 0x01 (msvi_index_count) & 0x14 (MSVI_first_index): polygon fan MSVI[0x14 .. +0x01) into MSVT.\n" +
+                "  • 0x02 (mslk_index_count) & 0x18 (mslk_first_index): contiguous adjacency window MSLK[0x18 .. +0x02).\n" +
+                "  • 0x04..0x0C (normal) & 0x10 (plane_distance): plane equation (-dot(normal, v0) in raw MSVT space).\n" +
+                "  • 0x1C (placement_z): IEEE-754 float equal to the producing MODF/MDDF placement Position.Z (0.0f = unattributed/merged doodad bucket).");
+            ImGui.BulletText("MSVT (12 B) & MSVI (4 B) — Surface mesh vertices (C3Vector, YXZ axis order) and uint32 polygon-fan vertex indices.");
+            ImGui.TreePop();
+        }
+
+        if (ImGui.TreeNodeEx("Adjacency, Wall Quads & Contours (MSLK / MSPV / MSPI / MSCN)##Pm4GlossaryLinks", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.BulletText("MSLK (20 B) — Directed surface-adjacency edge owned by a source MSUR:\n" +
+                "  • 0x00 (flags): bit 0 (0x01, 0x11) = open passage across a shared edge (MSPI_first_index == -1); other values carry a vertical wall window in MSPI/MSPV. Bit 4 marks same-tile-only links.\n" +
+                "  • 0x01 (source_edge_index): 0-based source polygon edge ordinal e -> (e, (e + 1) mod count).\n" +
+                "  • 0x04 (object_group_id): spatial/object group ID; equals MPRL.0x04 (98.97%% match).\n" +
+                "  • 0x08..0x0B (MSPI_first_index int24 + MSPI_index_count uint8): window into MSPI.\n" +
+                "  • 0x0C (target_tile): packed tile address 0xFFFF0000 | (tileY << 8) | tileX.\n" +
+                "  • 0x10 (msur_index): target surface index inside target_tile (100%% reciprocal on same-tile links).");
+            ImGui.BulletText("MSPV (12 B) & MSPI (4 B) — Vertical wall-quad vertices (magenta cubes) and indices on blocked/step MSLK edges (98%% are 4-index coplanar vertical quads).");
+            ImGui.BulletText("MSCN (12 B) — Ordered boundary/contour node chains (cyan cubes). C3Vector positions (not normals); nothing in the file indexes MSCN directly.");
+            ImGui.TreePop();
+        }
+
+        if (ImGui.TreeNodeEx("Terrain Contact, Header & Destructibles (MPRL / MPRR / MSHD / MDB*)##Pm4GlossaryTerrain"))
+        {
+            ImGui.BulletText("MPRL (24 B) — Terrain-intersection contact points: 0x00 = per-tile region ID; 0x04 = object_group_id (= MSLK.0x04); position = permuted C3Vector with height in Y; 0x14/0x16 = point counter and flags (0xFFFF / 0x3FFF sentinel).");
+            ImGui.BulletText("MPRR (4 B) — Quadtree spatial index over MPRL in a 768x768 tile grid. Runs have length 4k + 3 (min bound, max bound, MPRL indices, 0xFFFF terminator).");
+            ImGui.BulletText("MSHD (32 B) — Header: 0x00 & 0x08 are clamped world-unit spans (<= 534); 0x04 == 1 marks a tile with no surfaces; 0x0C..0x1C are zero.");
+            ImGui.BulletText("MDBH / MDBI / MDBF / MDOS / MDSF — Destructible-building table and per-surface destruction state links (MDSF maps msur_index -> mdos_index).");
+            ImGui.TreePop();
+        }
+
+        if (ImGui.TreeNodeEx("Coordinates & Viewer Terms (CK24 / Part / MscnRef)##Pm4GlossaryViewer"))
+        {
+            ImGui.BulletText("Coordinates — MSVT/MSPV/MSCN use YXZ: world = (17066.666 - x, 17066.666 - y, z). MPRL uses ZXY with height in Y: world = (17066.666 - z, 17066.666 - x, y).");
+            ImGui.BulletText("CK24 (0xXXXXXX) — Viewer grouping key formed from the top 24 bits of MSUR.0x1C (placement_z float). Its high byte ('Ck24Type', e.g. 0x40..0x43) is the IEEE-754 exponent band of the height, NOT an object type enum.");
+            ImGui.BulletText("part / ObjectPartId — Viewer-generated connected-component split ID within a tile + CK24 bucket, not a raw PM4 field.");
+            ImGui.BulletText("MscnRef (legacy label) — Older viewer code called MSUR.0x18 'MscnRef'; measured format analysis proved MSUR.0x18 is mslk_first_index (start of the surface's MSLK window).");
+            ImGui.TreePop();
+        }
+
+        ImGui.PopTextWrapPos();
     }
 
     internal void DrawPm4OverlayWorkbenchContent()
@@ -168,216 +206,208 @@ internal sealed partial class Pm4WorkbenchService
         if (ImGui.Button("Reload PM4"))
             _worldScene.Pm4Overlay.ReloadPm4Overlay();
 
-
-        ImGui.Separator();
-        ImGui.TextDisabled("Direct PM4/PD4 File Loader (ignores map name and naming rules)");
-        if (SharedUiWidgets.ActionButton("Open Loose PM4 / PD4 File..."))
-            RequestLoosePm4File();
-        if (!string.IsNullOrWhiteSpace(_loosePm4InputPath))
-            ImGui.TextDisabled($"Last loaded: {System.IO.Path.GetFileName(_loosePm4InputPath)}");
-        ImGui.Separator();
-
-        bool showPm4Solid = _worldScene.Pm4Overlay.ShowPm4SolidOverlay;
-        if (ImGui.Checkbox("PM4 Solid Fill", ref showPm4Solid))
-            _worldScene.Pm4Overlay.ShowPm4SolidOverlay = showPm4Solid;
-
-        ImGui.SameLine();
-        bool pm4IgnoreDepth = _worldScene.Pm4Overlay.Pm4OverlayIgnoreDepth;
-        if (ImGui.Checkbox("PM4 X-Ray", ref pm4IgnoreDepth))
-            _worldScene.Pm4Overlay.Pm4OverlayIgnoreDepth = pm4IgnoreDepth;
-
-        ImGui.SameLine();
-        bool showPm4Bounds = _worldScene.Pm4Overlay.ShowPm4ObjectBounds;
-        if (ImGui.Checkbox("PM4 Bounds", ref showPm4Bounds))
-            _worldScene.Pm4Overlay.ShowPm4ObjectBounds = showPm4Bounds;
-
-        ImGui.SameLine();
-        bool showPm4Ck24Bounds = _worldScene.Pm4Overlay.ShowPm4Ck24Bounds;
-        if (ImGui.Checkbox("PM4 CK24 Bounds", ref showPm4Ck24Bounds))
-            _worldScene.Pm4Overlay.ShowPm4Ck24Bounds = showPm4Ck24Bounds;
-
-        bool showRecovered = _worldScene.Pm4Overlay.ShowPm4GeneratedPlacements;
-        if (ImGui.Checkbox("Recovered placements", ref showRecovered))
-            _worldScene.Pm4Overlay.ShowPm4GeneratedPlacements = showRecovered;
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.BeginTooltip();
-            ImGui.TextUnformatted("Placements rebuilt from PM4 geometry, for tiles that have none.");
-            ImGui.TextUnformatted("Position and size are derived; the asset name is a ranked guess.");
-            ImGui.TextUnformatted("Green = tight shape match, amber = loose.");
-            int count = _worldScene.Pm4Overlay.Pm4GeneratedPlacementCount;
-            ImGui.TextUnformatted(count > 0
-                ? $"{count} loaded."
-                : "None loaded - run: pm4 generate-placements");
-            ImGui.EndTooltip();
-        }
-
-        if (showRecovered)
-        {
-            ImGui.SameLine();
-            bool terrainlessOnly = _worldScene.Pm4Overlay.Pm4GeneratedPlacementsTerrainlessOnly;
-            if (ImGui.Checkbox("Terrain-less tiles only", ref terrainlessOnly))
-                _worldScene.Pm4Overlay.Pm4GeneratedPlacementsTerrainlessOnly = terrainlessOnly;
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.BeginTooltip();
-                ImGui.TextUnformatted("Tiles that still have an ADT already draw their real placements.");
-                ImGui.TextUnformatted("Turn this off to compare recovered boxes against those.");
-                ImGui.EndTooltip();
-            }
-        }
-
-        bool showPlacementZ = _worldScene.Pm4Overlay.ShowPm4PlacementZPlane;
-        if (ImGui.Checkbox("Placement Z markers", ref showPlacementZ))
-            _worldScene.Pm4Overlay.ShowPm4PlacementZPlane = showPlacementZ;
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.BeginTooltip();
-            ImGui.TextUnformatted("Marker at the SELECTED object's placement height.");
-            ImGui.TextUnformatted("It should sit at the base of that object.");
-            ImGui.TextUnformatted("Only the height comes from the data; position is the object's centre.");
-            ImGui.EndTooltip();
-        }
-
-        if (showPlacementZ)
-        {
-            ImGui.SameLine();
-            bool allZ = _worldScene.Pm4Overlay.ShowPm4PlacementZForAllObjects;
-            if (ImGui.Checkbox("all objects##Pm4PlacementZAll", ref allZ))
-                _worldScene.Pm4Overlay.ShowPm4PlacementZForAllObjects = allZ;
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.BeginTooltip();
-                ImGui.TextUnformatted("Draws one for every placed object. Expect a field of cubes.");
-                ImGui.EndTooltip();
-            }
-        }
-
-        bool showPm4Refs = _worldScene.Pm4Overlay.ShowPm4PositionRefs;
-        if (ImGui.Checkbox("PM4 MPRL Refs", ref showPm4Refs))
-            _worldScene.Pm4Overlay.ShowPm4PositionRefs = showPm4Refs;
-
-        ImGui.SameLine();
-        bool showPm4Centroids = _worldScene.Pm4Overlay.ShowPm4ObjectCentroids;
-        if (ImGui.Checkbox("PM4 Centroids", ref showPm4Centroids))
-            _worldScene.Pm4Overlay.ShowPm4ObjectCentroids = showPm4Centroids;
-
-        bool showPm4Mscn = _worldScene.Pm4Overlay.ShowPm4MscnNodes;
-        if (ImGui.Checkbox("MSCN Nodes (cyan, per-surface connector anchor)", ref showPm4Mscn))
-            _worldScene.Pm4Overlay.ShowPm4MscnNodes = showPm4Mscn;
-        ImGui.SameLine();
-        bool showPm4Mspv = _worldScene.Pm4Overlay.ShowPm4MspvNodes;
-        if (ImGui.Checkbox("MSPV Nodes (magenta, per-link path vertex)", ref showPm4Mspv))
-            _worldScene.Pm4Overlay.ShowPm4MspvNodes = showPm4Mspv;
-
-        bool renderNodesAsCubes = _worldScene.Pm4Overlay.Pm4RenderNodesAsCubes;
-        if (ImGui.Checkbox("Nodes as Solid Cubes", ref renderNodesAsCubes))
-            _worldScene.Pm4Overlay.Pm4RenderNodesAsCubes = renderNodesAsCubes;
-
-        float mscnSize = _worldScene.Pm4Overlay.Pm4MscnCubeSize;
-        ImGui.SetNextItemWidth(100f);
-        if (ImGui.SliderFloat("MSCN size", ref mscnSize, 0.2f, 4f))
-            _worldScene.Pm4Overlay.Pm4MscnCubeSize = mscnSize;
-        ImGui.SameLine();
-        float mspvSize = _worldScene.Pm4Overlay.Pm4MspvCubeSize;
-        ImGui.SetNextItemWidth(100f);
-        if (ImGui.SliderFloat("MSPV size", ref mspvSize, 0.2f, 4f))
-            _worldScene.Pm4Overlay.Pm4MspvCubeSize = mspvSize;
-
-        ImGui.SameLine();
-        float mscnAlpha = _worldScene.Pm4Overlay.Pm4MscnCubeAlpha;
-        ImGui.SetNextItemWidth(100f);
-        if (ImGui.SliderFloat("MSCN α", ref mscnAlpha, 0.1f, 1f))
-            _worldScene.Pm4Overlay.Pm4MscnCubeAlpha = mscnAlpha;
-        ImGui.SameLine();
-        float mspvAlpha = _worldScene.Pm4Overlay.Pm4MspvCubeAlpha;
-        ImGui.SetNextItemWidth(100f);
-        if (ImGui.SliderFloat("MSPV α", ref mspvAlpha, 0.1f, 1f))
-            _worldScene.Pm4Overlay.Pm4MspvCubeAlpha = mspvAlpha;
-
-        ImGui.SameLine();
-        float lineWidth = _worldScene.Pm4Overlay.Pm4WireframeLineWidth;
-        ImGui.SetNextItemWidth(120f);
-        if (ImGui.SliderFloat("Wire width", ref lineWidth, 1f, 8f))
-            _worldScene.Pm4Overlay.Pm4WireframeLineWidth = lineWidth;
-
-        ImGui.SameLine();
-        bool pm4FlipAllObjY = _worldScene.Pm4Overlay.Pm4FlipAllObjectsY;
-        if (ImGui.Checkbox("Mirror PM4 N/S", ref pm4FlipAllObjY))
-            _worldScene.Pm4Overlay.Pm4FlipAllObjectsY = pm4FlipAllObjY;
-
         ImGui.SameLine();
         if (ImGui.Button("Export Report"))
             ExportPm4OverlayReport();
 
-        // Surface classes, keyed by MSUR._0x00. Measured 2026-08-24 over 309 files with
-        // `pm4 surface-class`; labels carry what each value actually separates. The old
-        // "CK24 0x40 / 0x80 / Other" checkboxes filtered by Ck24Type, which is the EXPONENT BAND of
-        // the placement-Z float - i.e. they filtered by height octave - so they are gone.
-        ImGui.TextDisabled("Surface class (MSUR._0x00)");
-        foreach ((byte cls, string label) in Pm4SurfaceClassLabels)
+        if (SharedUiWidgets.SectionHeader("Loose PM4 / PD4 Loader", defaultOpen: false, id: "Pm4LooseLoader"))
         {
-            bool visible = _worldScene.Pm4Overlay.IsPm4SurfaceClassVisible(cls);
-            if (ImGui.Checkbox(label, ref visible))
-                _worldScene.Pm4Overlay.SetPm4SurfaceClassVisible(cls, visible);
+            ImGui.TextDisabled("Load any .pm4 or .pd4 file directly into the overlay.");
+            if (SharedUiWidgets.ActionButton("Open Loose PM4 / PD4 File..."))
+                RequestLoosePm4File();
+            if (!string.IsNullOrWhiteSpace(_loosePm4InputPath))
+                ImGui.TextDisabled($"Last loaded: {System.IO.Path.GetFileName(_loosePm4InputPath)}");
+        }
+
+        if (SharedUiWidgets.SectionHeader("Display & Geometry Layers", defaultOpen: true, id: "Pm4DisplayLayers"))
+        {
+            bool showPm4Solid = _worldScene.Pm4Overlay.ShowPm4SolidOverlay;
+            if (ImGui.Checkbox("PM4 Solid Fill", ref showPm4Solid))
+                _worldScene.Pm4Overlay.ShowPm4SolidOverlay = showPm4Solid;
+
+            ImGui.SameLine();
+            bool pm4IgnoreDepth = _worldScene.Pm4Overlay.Pm4OverlayIgnoreDepth;
+            if (ImGui.Checkbox("PM4 X-Ray", ref pm4IgnoreDepth))
+                _worldScene.Pm4Overlay.Pm4OverlayIgnoreDepth = pm4IgnoreDepth;
+
+            bool showPm4Bounds = _worldScene.Pm4Overlay.ShowPm4ObjectBounds;
+            if (ImGui.Checkbox("PM4 Bounds", ref showPm4Bounds))
+                _worldScene.Pm4Overlay.ShowPm4ObjectBounds = showPm4Bounds;
+
+            ImGui.SameLine();
+            bool showPm4Ck24Bounds = _worldScene.Pm4Overlay.ShowPm4Ck24Bounds;
+            if (ImGui.Checkbox("PM4 CK24 Bounds", ref showPm4Ck24Bounds))
+                _worldScene.Pm4Overlay.ShowPm4Ck24Bounds = showPm4Ck24Bounds;
+
+            bool showPathWalls = _worldScene.Pm4Overlay.Pm4ShowPathWalls;
+            if (ImGui.Checkbox("Show MSPV/MSPI walls", ref showPathWalls))
+            {
+                _worldScene.Pm4Overlay.Pm4ShowPathWalls = showPathWalls;
+                _worldScene.Pm4Overlay.ReloadPm4Overlay();
+            }
             if (ImGui.IsItemHovered())
             {
-                // TextUnformatted, not Text: these strings carry '%' from measured figures and
-                // ImGui.Text would read it as a printf conversion specifier.
+                ImGui.SetTooltip(
+                    "MSLK path windows drawn as vertical wall quads.\n" +
+                    "Measured over the 616-file development corpus: 98% of windows are 4 indices,\n" +
+                    "99.6% coplanar, and 0 of 598,790 faces have Z as their dominant normal.\n" +
+                    "MSUR is the walkable floors; MSPV/MSPI are the vertical walls/steps between them.");
+            }
+            if (_worldScene.Pm4Overlay.Pm4ShowPathWalls && _worldScene.Pm4Overlay.Pm4LoadAttempted)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled($"({ _worldScene.Pm4Overlay.Pm4WallFaceCount} faces)");
+            }
+
+            bool showPm4Refs = _worldScene.Pm4Overlay.ShowPm4PositionRefs;
+            if (ImGui.Checkbox("PM4 MPRL Refs (terrain contacts)", ref showPm4Refs))
+                _worldScene.Pm4Overlay.ShowPm4PositionRefs = showPm4Refs;
+
+            ImGui.SameLine();
+            bool showPm4Centroids = _worldScene.Pm4Overlay.ShowPm4ObjectCentroids;
+            if (ImGui.Checkbox("PM4 Centroids", ref showPm4Centroids))
+                _worldScene.Pm4Overlay.ShowPm4ObjectCentroids = showPm4Centroids;
+
+            bool showRecovered = _worldScene.Pm4Overlay.ShowPm4GeneratedPlacements;
+            if (ImGui.Checkbox("Recovered placements", ref showRecovered))
+                _worldScene.Pm4Overlay.ShowPm4GeneratedPlacements = showRecovered;
+            if (ImGui.IsItemHovered())
+            {
                 ImGui.BeginTooltip();
-                ImGui.TextUnformatted(Pm4SurfaceClassTooltips[cls]);
-                ImGui.TextUnformatted("Filters by the object's dominant class; cannot isolate one class within an object.");
+                ImGui.TextUnformatted("Placements rebuilt from PM4 geometry for tiles without authored ADT placements.");
+                ImGui.TextUnformatted("Position.Z is exact from MSUR.0x1C; XY bounds and asset name are ranked matches.");
+                int count = _worldScene.Pm4Overlay.Pm4GeneratedPlacementCount;
+                ImGui.TextUnformatted(count > 0
+                    ? $"{count} loaded."
+                    : "None loaded - run: pm4 generate-placements");
                 ImGui.EndTooltip();
             }
-        }
 
-        Pm4OverlayColorMode colorMode = _worldScene.Pm4Overlay.Pm4ColorMode;
-        if (ImGui.BeginCombo("PM4 Color", GetPm4ColorModeLabel(colorMode)))
-        {
-            foreach (Pm4OverlayColorMode mode in Enum.GetValues<Pm4OverlayColorMode>())
+            if (showRecovered)
             {
-                bool isSelected = mode == colorMode;
-                if (ImGui.Selectable(GetPm4ColorModeLabel(mode), isSelected))
-                    _worldScene.Pm4Overlay.Pm4ColorMode = mode;
-                if (isSelected)
-                    ImGui.SetItemDefaultFocus();
+                ImGui.SameLine();
+                bool terrainlessOnly = _worldScene.Pm4Overlay.Pm4GeneratedPlacementsTerrainlessOnly;
+                if (ImGui.Checkbox("Terrain-less tiles only", ref terrainlessOnly))
+                    _worldScene.Pm4Overlay.Pm4GeneratedPlacementsTerrainlessOnly = terrainlessOnly;
             }
 
-            ImGui.EndCombo();
+            bool showPlacementZ = _worldScene.Pm4Overlay.ShowPm4PlacementZPlane;
+            if (ImGui.Checkbox("Placement Z markers (MSUR.0x1C)", ref showPlacementZ))
+                _worldScene.Pm4Overlay.ShowPm4PlacementZPlane = showPlacementZ;
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.TextUnformatted("Draws a height marker at MSUR.0x1C (the producing placement's Position.Z).");
+                ImGui.EndTooltip();
+            }
+
+            if (showPlacementZ)
+            {
+                ImGui.SameLine();
+                bool allZ = _worldScene.Pm4Overlay.ShowPm4PlacementZForAllObjects;
+                if (ImGui.Checkbox("all objects##Pm4PlacementZAll", ref allZ))
+                    _worldScene.Pm4Overlay.ShowPm4PlacementZForAllObjects = allZ;
+            }
         }
 
-        bool splitCk24Connectivity = _worldScene.Pm4Overlay.Pm4SplitCk24ByConnectivity;
-        if (ImGui.Checkbox("Split CK24 by Connectivity", ref splitCk24Connectivity))
+        if (SharedUiWidgets.SectionHeader("Nodes & Wireframe Styling", defaultOpen: false, id: "Pm4NodeStyling"))
         {
-            _worldScene.Pm4Overlay.Pm4SplitCk24ByConnectivity = splitCk24Connectivity;
-            _worldScene.Pm4Overlay.ReloadPm4Overlay();
+            bool showPm4Mscn = _worldScene.Pm4Overlay.ShowPm4MscnNodes;
+            if (ImGui.Checkbox("MSCN Nodes (cyan, boundary/contour chain)", ref showPm4Mscn))
+                _worldScene.Pm4Overlay.ShowPm4MscnNodes = showPm4Mscn;
+
+            bool showPm4Mspv = _worldScene.Pm4Overlay.ShowPm4MspvNodes;
+            if (ImGui.Checkbox("MSPV Nodes (magenta, MSLK wall-quad vertices)", ref showPm4Mspv))
+                _worldScene.Pm4Overlay.ShowPm4MspvNodes = showPm4Mspv;
+
+            bool renderNodesAsCubes = _worldScene.Pm4Overlay.Pm4RenderNodesAsCubes;
+            if (ImGui.Checkbox("Nodes as Solid Cubes", ref renderNodesAsCubes))
+                _worldScene.Pm4Overlay.Pm4RenderNodesAsCubes = renderNodesAsCubes;
+
+            ImGui.SameLine();
+            bool pm4FlipAllObjY = _worldScene.Pm4Overlay.Pm4FlipAllObjectsY;
+            if (ImGui.Checkbox("Mirror PM4 N/S", ref pm4FlipAllObjY))
+                _worldScene.Pm4Overlay.Pm4FlipAllObjectsY = pm4FlipAllObjY;
+
+            float mscnSize = _worldScene.Pm4Overlay.Pm4MscnCubeSize;
+            ImGui.SetNextItemWidth(110f);
+            if (ImGui.SliderFloat("MSCN size", ref mscnSize, 0.2f, 4f))
+                _worldScene.Pm4Overlay.Pm4MscnCubeSize = mscnSize;
+            ImGui.SameLine();
+            float mspvSize = _worldScene.Pm4Overlay.Pm4MspvCubeSize;
+            ImGui.SetNextItemWidth(110f);
+            if (ImGui.SliderFloat("MSPV size", ref mspvSize, 0.2f, 4f))
+                _worldScene.Pm4Overlay.Pm4MspvCubeSize = mspvSize;
+
+            float mscnAlpha = _worldScene.Pm4Overlay.Pm4MscnCubeAlpha;
+            ImGui.SetNextItemWidth(110f);
+            if (ImGui.SliderFloat("MSCN alpha", ref mscnAlpha, 0.1f, 1f))
+                _worldScene.Pm4Overlay.Pm4MscnCubeAlpha = mscnAlpha;
+            ImGui.SameLine();
+            float mspvAlpha = _worldScene.Pm4Overlay.Pm4MspvCubeAlpha;
+            ImGui.SetNextItemWidth(110f);
+            if (ImGui.SliderFloat("MSPV alpha", ref mspvAlpha, 0.1f, 1f))
+                _worldScene.Pm4Overlay.Pm4MspvCubeAlpha = mspvAlpha;
+
+            float lineWidth = _worldScene.Pm4Overlay.Pm4WireframeLineWidth;
+            ImGui.SetNextItemWidth(140f);
+            if (ImGui.SliderFloat("Wireframe width", ref lineWidth, 1f, 8f))
+                _worldScene.Pm4Overlay.Pm4WireframeLineWidth = lineWidth;
+
+            float renderDistance = _worldScene.Pm4Overlay.Pm4RenderDistance;
+            ImGui.SetNextItemWidth(140f);
+            if (ImGui.SliderFloat("PM4 draw distance", ref renderDistance, Pm4OverlayScene.Pm4MinRenderDistance, Pm4OverlayScene.Pm4MaxRenderDistance, "%.0f"))
+                _worldScene.Pm4Overlay.Pm4RenderDistance = renderDistance;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("PM4 mesh, nodes and markers farther than this from the camera are not drawn.\nPM4 tiles are also only drawn while their terrain tile is loaded.");
         }
 
-        bool splitCk24ByMscnRef = _worldScene.Pm4Overlay.Pm4SplitCk24ByMscnRef;
-        if (ImGui.Checkbox("Split CK24 by MscnRef", ref splitCk24ByMscnRef))
+        if (SharedUiWidgets.SectionHeader("Color Mode, Surface Classes & Splitting", defaultOpen: true, id: "Pm4ClassAndColor"))
         {
-            _worldScene.Pm4Overlay.Pm4SplitCk24ByMscnRef = splitCk24ByMscnRef;
-            _worldScene.Pm4Overlay.ReloadPm4Overlay();
-        }
+            Pm4OverlayColorMode colorMode = _worldScene.Pm4Overlay.Pm4ColorMode;
+            if (ImGui.BeginCombo("PM4 Color", GetPm4ColorModeLabel(colorMode)))
+            {
+                foreach (Pm4OverlayColorMode mode in Enum.GetValues<Pm4OverlayColorMode>())
+                {
+                    bool isSelected = mode == colorMode;
+                    if (ImGui.Selectable(GetPm4ColorModeLabel(mode), isSelected))
+                        _worldScene.Pm4Overlay.Pm4ColorMode = mode;
+                    if (isSelected)
+                        ImGui.SetItemDefaultFocus();
+                }
 
-        bool showPathWalls = _worldScene.Pm4Overlay.Pm4ShowPathWalls;
-        if (ImGui.Checkbox("Show MSPV/MSPI walls", ref showPathWalls))
-        {
-            _worldScene.Pm4Overlay.Pm4ShowPathWalls = showPathWalls;
-            _worldScene.Pm4Overlay.ReloadPm4Overlay();
-        }
+                ImGui.EndCombo();
+            }
 
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip(
-                "MSLK path windows drawn as vertical faces.\n" +
-                "Measured over the 616-file development corpus: 98% of windows are exactly 4\n" +
-                "indices, 99.6% coplanar, and none of 598,790 faces has Z as its dominant normal.\n" +
-                "MSUR is the floors; this is the walls between them.");
-        }
+            ImGui.TextDisabled("Surface class filter (MSUR.0x00):");
+            foreach ((byte cls, string label) in Pm4SurfaceClassLabels)
+            {
+                bool visible = _worldScene.Pm4Overlay.IsPm4SurfaceClassVisible(cls);
+                if (ImGui.Checkbox(label, ref visible))
+                    _worldScene.Pm4Overlay.SetPm4SurfaceClassVisible(cls, visible);
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextUnformatted(Pm4SurfaceClassTooltips[cls]);
+                    ImGui.TextUnformatted("Filters by the object's dominant class; cannot isolate one class within an object.");
+                    ImGui.EndTooltip();
+                }
+            }
 
-        if (_worldScene.Pm4Overlay.Pm4ShowPathWalls && _worldScene.Pm4Overlay.Pm4LoadAttempted)
-            ImGui.TextDisabled($"  wall faces: {_worldScene.Pm4Overlay.Pm4WallFaceCount}");
+            bool splitCk24Connectivity = _worldScene.Pm4Overlay.Pm4SplitCk24ByConnectivity;
+            if (ImGui.Checkbox("Split CK24 by Connectivity", ref splitCk24Connectivity))
+            {
+                _worldScene.Pm4Overlay.Pm4SplitCk24ByConnectivity = splitCk24Connectivity;
+                _worldScene.Pm4Overlay.ReloadPm4Overlay();
+            }
+
+            bool splitCk24ByMscnRef = _worldScene.Pm4Overlay.Pm4SplitCk24ByMscnRef;
+            if (ImGui.Checkbox("Split CK24 by MSUR.0x18 (mslk_first_index)", ref splitCk24ByMscnRef))
+            {
+                _worldScene.Pm4Overlay.Pm4SplitCk24ByMscnRef = splitCk24ByMscnRef;
+                _worldScene.Pm4Overlay.ReloadPm4Overlay();
+            }
+        }
 
         if (_worldScene.Pm4Overlay.IsPm4Loading)
             ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Overlay.Pm4Status}");
@@ -432,12 +462,12 @@ internal sealed partial class Pm4WorkbenchService
                 // relative error and is displayed as approximate.
                 float placementZ = BitConverter.UInt32BitsToSingle(debugInfo.Ck24 << 8);
                 ImGui.TextColored(new Vector4(0.55f, 0.85f, 0.55f, 1f),
-                    $"Placement Z ~= {placementZ:F3}   (MSUR._0x1C as float; 'CK24' is a slice of it)");
+                    $"Placement Z ~= {placementZ:F3}   (MSUR.0x1C as float; CK24 is its top 24 bits)");
                 ImGui.TextDisabled($"Surfaces={debugInfo.SurfaceCount}  bounds Z {debugInfo.BoundsMin.Z:F2}..{debugInfo.BoundsMax.Z:F2}  centre ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})");
                 ImGui.TextDisabled($"Raw slice 0x{debugInfo.Ck24:X6} (exponent band 0x{debugInfo.Ck24Type:X2} - NOT a type)");
-                ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
-                ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} MscnRef={debugInfo.DominantMscnRefIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
-                ImGui.TextDisabled($"MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
+                ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region(0x04)={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
+                ImGui.TextDisabled($"SurfaceClass(0x00)=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} MslkFirstIdx(0x18)={debugInfo.DominantMscnRefIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
+                ImGui.TextDisabled($"MSLK Group(0x04)=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
                 if (debugInfo.DistinctTypeFlags != 0)
                 {
                     var tf = new List<string>();

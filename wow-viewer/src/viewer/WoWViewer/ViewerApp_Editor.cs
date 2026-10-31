@@ -54,7 +54,7 @@ public partial class ViewerApp
     void Workbench.Pages.IEditorPageHost.DrawObjectLibrary() => _editorPanels.DrawRosettaObjectLibrarySubTab();
     void Workbench.Pages.IEditorPageHost.DrawPopulation() => _sqlSpawnStreaming.DrawPopulationSubTabContent();
     void Workbench.Pages.IEditorPageHost.DrawTerrainLab() => _terrainControlsPanel.DrawTerrainLabSubTab();
-    void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => _editorPanels.DrawArchaeologyEditorImportsSubTab();
+    void Workbench.Pages.IEditorPageHost.DrawImportsAndExports() => _mainMenuBar.DrawTerrainFileOperationsContent();
     void Workbench.Pages.IEditorPageHost.DrawConverters() => _workbenchPanels.DrawConvertersSubTabContent();
     void Workbench.Pages.IEditorPageHost.DrawNewMapCreator() => _newMapCreatorService.Draw(_editorPanels.LoadGeneratedNewMap);
 

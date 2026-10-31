@@ -3715,6 +3715,23 @@ void main()
     }
 
 
+    public IReadOnlyList<string> LoadedTexturePaths
+    {
+        get
+        {
+            var paths = new List<string>(_textureCacheKeys.Count);
+            foreach (var kvp in _textureCacheKeys.OrderBy(static k => k.Key))
+            {
+                string[] parts = kvp.Value.Split('|');
+                string candidate = parts.Length > 1 ? parts[1] : kvp.Value;
+                if (!string.IsNullOrWhiteSpace(candidate) && !paths.Contains(candidate, StringComparer.OrdinalIgnoreCase))
+                    paths.Add(candidate);
+            }
+
+            return paths;
+        }
+    }
+
     public void Dispose()
     {
         foreach (var gb in _geosets)

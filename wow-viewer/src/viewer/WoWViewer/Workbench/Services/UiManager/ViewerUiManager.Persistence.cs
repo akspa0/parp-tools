@@ -62,6 +62,8 @@ internal sealed partial class ViewerUiManager
                 WorkbenchTab.Archaeology => WorkspaceMode.Archaeology,
                 _ => WorkspaceMode.Viewer,
             };
+            if (Destination != WorkbenchTab.Viewer)
+                _actionBars.OpenDestinationWindow();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {

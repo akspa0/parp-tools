@@ -102,7 +102,7 @@ public sealed class SqlWorldPopulationService : IDisposable
                     MapId = spawn.MapId,
                     SpawnType = isCreature ? WorldSpawnType.Creature : WorldSpawnType.GameObject,
                     Name = entry.Name,
-                    Subname = entry.Subname,
+                    Subname = SanitizeSubname(entry.Subname),
                     ModelPath = entry.ModelPath,
                     Scale = entry.Scale,
                     DisplayScale = entry.DisplayScale,
@@ -175,7 +175,7 @@ public sealed class SqlWorldPopulationService : IDisposable
                     MapId = s.MapId,
                     SpawnType = spawnType,
                     Name = s.Name,
-                    Subname = s.Subname,
+                    Subname = SanitizeSubname(s.Subname),
                     ModelPath = s.ModelPath,
                     DisplayId = s.DisplayId,
                     FileDataId = s.FileDataId,
@@ -209,6 +209,17 @@ public sealed class SqlWorldPopulationService : IDisposable
         }
 
         return filtered;
+    }
+
+    private static string? SanitizeSubname(string? subname)
+    {
+        if (string.IsNullOrWhiteSpace(subname))
+            return null;
+        string trimmed = subname.Trim();
+        if (string.Equals(trimmed, "NULL", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "<NULL>", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return trimmed;
     }
 
     public void Dispose()

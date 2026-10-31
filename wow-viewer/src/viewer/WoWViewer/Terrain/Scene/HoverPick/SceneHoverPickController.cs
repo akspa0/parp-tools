@@ -438,6 +438,11 @@ public sealed class SceneHoverPickController
                 : (hit.UniqueId > 0 ? $"UniqueId: {hit.UniqueId}" : $"Model: {hit.ModelName}");
         }
 
+        if (hit.CustomTextures is { Length: > 0 })
+        {
+            detail = $"Skin: {string.Join(", ", hit.CustomTextures)}\n{detail}";
+        }
+
         return new HoveredAssetInfo(
             assetKind,
             displayName,
@@ -632,7 +637,8 @@ public sealed class SceneHoverPickController
                 instance.DisplayName,
                 instance.Subname,
                 instance.SpawnId,
-                instance.DisplayId));
+                instance.DisplayId,
+                instance.CustomTextures));
         }
     }
 
@@ -861,6 +867,11 @@ public sealed class SceneHoverPickController
             detail = !string.IsNullOrEmpty(inst.DisplayName)
                 ? (inst.UniqueId > 0 ? $"Model: {inst.ModelName}  UniqueId: {inst.UniqueId}" : $"Model: {inst.ModelName}")
                 : (inst.UniqueId > 0 ? $"UniqueId: {inst.UniqueId}" : $"Model: {inst.ModelName}");
+        }
+
+        if (inst.CustomTextures is { Length: > 0 })
+        {
+            detail = $"Skin: {string.Join(", ", inst.CustomTextures)}\n{detail}";
         }
 
         return new HoveredAssetInfo(
