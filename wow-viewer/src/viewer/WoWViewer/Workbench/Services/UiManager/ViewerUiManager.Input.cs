@@ -131,13 +131,23 @@ internal sealed partial class ViewerUiManager
             return;
 
         if (windowSizeChanged)
-            ImGuiControllerWindowResizedMethod?.Invoke(_host.ImGui, new object[] { windowSize });
+        {
+            try
+            {
+                ImGuiControllerWindowResizedMethod?.Invoke(_host.ImGui, new object[] { windowSize });
+            }
+            catch { }
+        }
 
-        ImGuiIOPtr io = ImGui.GetIO();
-        io.DisplaySize = new Vector2(windowSize.X, windowSize.Y);
-        io.DisplayFramebufferScale = new Vector2(
-            windowSize.X > 0 ? (float)framebufferSize.X / windowSize.X : 1f,
-            windowSize.Y > 0 ? (float)framebufferSize.Y / windowSize.Y : 1f);
+        try
+        {
+            ImGuiIOPtr io = ImGui.GetIO();
+            io.DisplaySize = new Vector2(windowSize.X, windowSize.Y);
+            io.DisplayFramebufferScale = new Vector2(
+                windowSize.X > 0 ? (float)framebufferSize.X / windowSize.X : 1f,
+                windowSize.Y > 0 ? (float)framebufferSize.Y / windowSize.Y : 1f);
+        }
+        catch { }
 
         _lastSyncedImGuiWindowSize = windowSize;
         _lastSyncedImGuiFramebufferSize = framebufferSize;

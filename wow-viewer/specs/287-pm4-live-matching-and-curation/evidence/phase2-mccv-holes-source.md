@@ -45,3 +45,4 @@
 | **AC-203 / T010**: MccvHoleDetectionService Analysis & Rebuild | `MccvHoleDetectionService.DeriveBurgundyHoles` iterates loaded tiles, identifies candidates, filters $\ge 2$ clusters, updates `chunk.HoleMask = 0xFFFF` and `chunk.HoleMask64 = ~0UL`, and invokes `terrainManager.ReplaceTileChunksAndRebuild`. | PASS |
 | **AC-204 / T011**: UI Integration in Sidebar & Options | "Derive Holes from Burgundy MCCV" button added in `TerrainControlsPanelService.Sidebars.cs` (under `DrawTerrainControlsContent` and `DrawTerrainLabSubTab`) and in `ViewerChromeService.Options.cs` (under `DrawOptionsLayersContent`). | PASS |
 | **AC-205 / T012**: Live Dynamic GPU Mesh Rebuild | Setting `HoleMask = 0xFFFF` on `TerrainChunkData` causes `TerrainChunkMath.BuildChunkIndices` to emit 0 triangle indices for all holed units when re-meshed via `terrainManager.ReplaceTileChunksAndRebuild`. | PASS |
+

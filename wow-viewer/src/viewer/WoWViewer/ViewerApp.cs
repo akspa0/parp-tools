@@ -641,7 +641,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         opts.Size = new Vector2D<int>(1600, 900);
         opts.Title = ViewerProductName;
         opts.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3));
-        opts.VSync = false; // Disable VSync — let the GPU run uncapped for profiling
+        opts.VSync = true;
 
         _window = Window.Create(opts);
         _window.Load += () => OnLoad(initialArgs);
@@ -986,6 +986,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
     private unsafe void OnRender(double dt)
     {
+        if (_window.Size.X <= 0 || _window.Size.Y <= 0 || _window.FramebufferSize.X <= 0 || _window.FramebufferSize.Y <= 0)
+            return;
         _datasetExportDialogs.PromotePendingMlFinalizeAfterExport();
         _captureAutomation.PromotePendingMkHarvestViewerValidationCapturePlan();
         _captureAutomation.PromotePendingRoofCaptureBatch();
@@ -1044,7 +1046,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         if (hasSceneViewport)
             _gl.Viewport(sceneFramebufferX, sceneFramebufferY, sceneFramebufferWidth, sceneFramebufferHeight);
         else
-            _gl.Viewport(_window.FramebufferSize);
+            _gl.Viewport(0, 0, (uint)Math.Max(1, _window.FramebufferSize.X), (uint)Math.Max(1, _window.FramebufferSize.Y));
 
         float aspect = hasSceneViewport
             ? sceneViewportWidth / Math.Max(sceneViewportHeight, 1f)
@@ -1167,7 +1169,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         }
 
         if (hasSceneViewport)
-            _gl.Viewport(_window.FramebufferSize);
+            _gl.Viewport(0, 0, (uint)Math.Max(1, _window.FramebufferSize.X), (uint)Math.Max(1, _window.FramebufferSize.Y));
 
         _recordingCoordinator.CaptureVideoFrameIfNeeded(includeUi: false, dt);
         _captureAutomation.CompleteCaptureIfReady(includeUi: false);
@@ -1226,7 +1228,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             _sceneHoverPick.RenderSceneCursor(view, proj, sceneViewportX, sceneViewportY, sceneViewportWidth, sceneViewportHeight);
 
             if (hasSceneViewport)
-                _gl.Viewport(_window.FramebufferSize);
+                _gl.Viewport(0, 0, (uint)Math.Max(1, _window.FramebufferSize.X), (uint)Math.Max(1, _window.FramebufferSize.Y));
         }
     }
 
@@ -1266,15 +1268,43 @@ void main() {
             uint vs = _gl.CreateShader(ShaderType.VertexShader);
             _gl.ShaderSource(vs, vertSrc);
             _gl.CompileShader(vs);
+            _gl.GetShader(vs, ShaderParameterName.CompileStatus, out int vsStatus);
+            if (vsStatus == 0)
+            {
+                string log = _gl.GetShaderInfoLog(vs);
+                _gl.DeleteShader(vs);
+                Logging.ViewerLog.Error(Logging.ViewerLog.Category.General, $"[SkyGradient] Vertex shader compile failed: {log}");
+                return;
+            }
+
             uint fs = _gl.CreateShader(ShaderType.FragmentShader);
             _gl.ShaderSource(fs, fragSrc);
             _gl.CompileShader(fs);
+            _gl.GetShader(fs, ShaderParameterName.CompileStatus, out int fsStatus);
+            if (fsStatus == 0)
+            {
+                string log = _gl.GetShaderInfoLog(fs);
+                _gl.DeleteShader(vs);
+                _gl.DeleteShader(fs);
+                Logging.ViewerLog.Error(Logging.ViewerLog.Category.General, $"[SkyGradient] Fragment shader compile failed: {log}");
+                return;
+            }
+
             _skyShader = _gl.CreateProgram();
             _gl.AttachShader(_skyShader, vs);
             _gl.AttachShader(_skyShader, fs);
             _gl.LinkProgram(_skyShader);
+            _gl.GetProgram(_skyShader, ProgramPropertyARB.LinkStatus, out int linkStatus);
             _gl.DeleteShader(vs);
             _gl.DeleteShader(fs);
+            if (linkStatus == 0)
+            {
+                string log = _gl.GetProgramInfoLog(_skyShader);
+                _gl.DeleteProgram(_skyShader);
+                _skyShader = 0;
+                Logging.ViewerLog.Error(Logging.ViewerLog.Category.General, $"[SkyGradient] Shader link failed: {log}");
+                return;
+            }
 
             _skyVao = _gl.GenVertexArray();
             _skyVbo = _gl.GenBuffer();
@@ -1443,12 +1473,18 @@ void main() {
 
     private void OnWindowResize(Vector2D<int> size)
     {
+        if (size.X <= 0 || size.Y <= 0)
+            return;
+
         _uiManager.SyncImGuiWindowMetrics(size, _window.FramebufferSize);
     }
 
     private void OnResize(Vector2D<int> size)
     {
-        _gl.Viewport(size);
+        if (size.X <= 0 || size.Y <= 0)
+            return;
+
+        _gl.Viewport(0, 0, (uint)size.X, (uint)size.Y);
         _uiManager.SyncImGuiWindowMetrics(_window.Size, size);
     }
 

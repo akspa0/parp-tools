@@ -1641,8 +1641,6 @@ uniform float uLocalLightIntensity[8];
 uniform float uLocalLightStart[8];
 uniform float uLocalLightEnd[8];
 uniform float uOpacity;
-uniform float uLayerOpacity[8];
-uniform float uAlphaMaskBlend;
 uniform int uWireframe;
 uniform vec4 uWireframeColor;
 
@@ -1951,6 +1949,8 @@ uniform int uShowLayerMask;
     uniform int uShowAlphaMask;
     uniform int uShowShadowMap;
 uniform float uShadowStrength;
+uniform float uLayerOpacity[8];
+uniform float uAlphaMaskBlend;
 uniform int uShowContours;
 uniform float uContourInterval;
 uniform vec3 uLightColor;
@@ -2102,6 +2102,8 @@ void main() {
 
     if (uShowAlphaMask == 1 && alphaDbg >= 0.0) {
         finalColor = vec3(alphaDbg);
+    } else if (uAlphaMaskBlend > 0.0 && alphaDbg >= 0.0) {
+        finalColor = mix(finalColor, vec3(alphaDbg), clamp(uAlphaMaskBlend, 0.0, 1.0));
     }
 
     if (baseLayerShown) {
