@@ -15,12 +15,12 @@
 
 ## Phase 2: Spatial Index & Fast Ray Picking
 
-- [ ] **T006**: Create `Pm4SpatialIndex.cs` in `WoWViewer/Terrain/Pm4/Services/` storing per-tile and per-object AABBs.
-- [ ] **T007**: Implement hierarchical three-stage ray-cast picking (Tile AABB -> Object AABB -> Möller-Trumbore triangle test).
-- [ ] **T008**: Implement $O(1)$ 3x3 tile neighborhood query in `Pm4SpatialIndex`.
-- [ ] **T009**: Refactor `Pm4OverlayScene.Selection.cs` to delegate ray-picking and spatial lookups to `Pm4SpatialIndex`.
-- [ ] **T010**: Add unit tests in `tests/WowViewer.Core.PM4.Tests/Pm4SpatialIndexTests.cs` verifying ray picking hit detection and tile culling.
-- [ ] **Gate B (Phase 2 Verification)**:
+- [x] **T006**: Create `Pm4SpatialIndex.cs` in `WoWViewer/Terrain/Pm4/Services/` storing per-tile and per-object AABBs.
+- [x] **T007**: Implement hierarchical three-stage ray-cast picking (Tile AABB -> Object AABB -> Möller-Trumbore triangle test).
+- [x] **T008**: Implement $O(1)$ 3x3 tile neighborhood query in `Pm4SpatialIndex`.
+- [x] **T009**: Refactor `Pm4OverlayScene.Selection.cs` to delegate ray-picking and spatial lookups to `Pm4SpatialIndex`.
+- [x] **T010**: Add unit tests in `tests/WowViewer.Core.PM4.Tests/Pm4SpatialIndexTests.cs` verifying ray picking hit detection and tile culling.
+- [x] **Gate B (Phase 2 Verification)**:
   - `dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/ -c Debug --filter "FullyQualifiedName~Pm4SpatialIndex"` passes.
   - Receipt written to `specs/288-pm4-overlay-refactor-and-color-coding/evidence/phase2-spatial-index.md`.
 

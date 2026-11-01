@@ -1550,14 +1550,12 @@ public sealed partial class Pm4OverlayScene
                 int selX = _selectedPm4ObjectKey.Value.tileX;
                 int selY = _selectedPm4ObjectKey.Value.tileY;
 
-                // Restrict peer search to the 3x3 tile neighborhood around the selected object
-                for (int dx = -1; dx <= 1; dx++)
+                // Restrict peer search to the 3x3 tile neighborhood around the selected object via spatial index
+                foreach ((int nX, int nY) in Pm4SpatialIndex.Instance.Get3x3Neighborhood(selX, selY))
                 {
-                    for (int dy = -1; dy <= 1; dy++)
-                    {
-                        var tileKey = (selX + dx, selY + dy);
-                        if (!_pm4TileObjects.TryGetValue(tileKey, out var objects))
-                            continue;
+                    var tileKey = (nX, nY);
+                    if (!_pm4TileObjects.TryGetValue(tileKey, out var objects))
+                        continue;
 
                         for (int i = 0; i < objects.Count; i++)
                         {
@@ -1598,7 +1596,6 @@ public sealed partial class Pm4OverlayScene
                                 sameLinkGroup,
                                 sameMscnRefIndex));
                         }
-                    }
                 }
 
                 if (peers.Count == 0)
