@@ -41,13 +41,13 @@
 
 ## Phase 4: Modernized PM4 Sidebar Workbench
 
-- [ ] **T015**: Create `Pm4WorkbenchSidebarService.cs` in `WoWViewer/Terrain/Pm4/UI/` replacing legacy tab sections with `SharedUiWidgets` layout.
-- [ ] **T016**: Add interactive **Color Palette & Visual Legend** widget with clickable color swatches and active count badges.
-- [ ] **T017**: Add streamlined **Surface Class Filter Matrix** with individual class toggles.
-- [ ] **T018**: Integrate selected object inspection and one-click model duplication actions.
-- [ ] **T019**: Register all new sidebar controls in `eng/ui/ui-reference-inventory.json` and generate updated `UI-REFERENCE.md`.
-- [ ] **T020**: Run `Verify-UiReference.ps1` and ensure 0 errors and 0 warnings.
-- [ ] **Gate D (Phase 4 Verification)**:
+- [x] **T015**: Create `Pm4WorkbenchSidebarService.cs` in `WoWViewer/Terrain/Pm4/UI/` replacing legacy tab sections with `SharedUiWidgets` layout.
+- [x] **T016**: Add interactive **Color Palette & Visual Legend** widget with clickable color swatches and active count badges.
+- [x] **T017**: Add streamlined **Surface Class Filter Matrix** with individual class toggles.
+- [x] **T018**: Integrate selected object inspection and one-click model duplication actions.
+- [x] **T019**: Register all new sidebar controls in `eng/ui/ui-reference-inventory.json` and generate updated `UI-REFERENCE.md`.
+- [x] **T020**: Run `Verify-UiReference.ps1` and ensure 0 errors and 0 warnings.
+- [x] **Gate D (Phase 4 Verification)**:
   - Solution builds cleanly with 0 errors.
   - `pwsh -NoProfile -File wow-viewer/eng/ui/Verify-UiReference.ps1` passes with 0 errors, 0 warnings.
   - Receipt written to `specs/288-pm4-overlay-refactor-and-color-coding/evidence/phase4-sidebar-workbench.md`.

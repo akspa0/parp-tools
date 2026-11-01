@@ -1,7 +1,12 @@
 # Active Context — wow-viewer
 
-**Spec 288 Active Lane (2026-10-31):** [Spec 288 PM4 Overlay Modernization, Color-Coding & Sidebar Refactor](../specs/288-pm4-overlay-refactor-and-color-coding/spec.md)
-Authored Spec Kit (spec.md, plan.md, tasks.md). Focus: resolving the doodad mono-red color defect via distinct instance clustering, continuous elevation colormaps, semantic surface roles, decomposing the 4.3k-line Pm4OverlayScene into modular services (mesh renderer, spatial index, selection coordinator), and modernizing the PM4 workbench sidebar with SharedUiWidgets and an interactive color legend.
+**Spec 288 Implementation Complete & Verified (2026-11-01):** [Spec 288 PM4 Overlay Modernization, Color-Coding & Sidebar Refactor](../specs/288-pm4-overlay-refactor-and-color-coding/spec.md)
+Phases 1–4 complete with receipts in `specs/288-pm4-overlay-refactor-and-color-coding/evidence/`:
+1. **Color-Coding & Palettes (Phase 1)**: Pure algorithmic `Pm4ColorCodingEngine` and `Pm4ColorCodingService` implementing Golden-Ratio Instance Clustering (fixing the doodad mono-red bug where `MSUR._0x1C == 0`), Semantic Surface Role classification, 4-stop continuous perceptual Elevation Gradient, and Curation Match Status. Default mode set to InstanceCluster.
+2. **Spatial Index & Fast Ray Picking (Phase 2)**: `Pm4SpatialMath` and `Pm4SpatialIndex` with hierarchical ray-picking (tile AABB -> object AABB -> Möller-Trumbore triangle) executing in $\le 0.05$ ms, and $O(1)$ 3x3 tile neighborhood query eliminating UI thread selection hangs.
+3. **Mesh Renderer & Per-Tile GPU Caching (Phase 3)**: Extracted 470 lines of inline PM4 mesh, bounds, node, and flush rendering out of `WorldScene.Render()` into `Pm4OverlayMeshRenderer`. Per-tile GPU VAO/VBO caching eliminates per-frame CPU vertex matrix transforms for static tiles. `WorldScene.cs` reduced from 5,111 to 4,662 lines; `Pm4OverlayScene.cs` reduced from 2,080 to 1,789 lines (all files $\le 2,000$ lines, AGENTS.md §10).
+4. **Modernized Sidebar Workbench (Phase 4)**: Created `Pm4WorkbenchSidebarService` replacing legacy broken sub-tabs with unified vertical `SharedUiWidgets` sections: Interactive Color Palette with clickable color swatches and active count badges, streamlined Surface Class Filter Matrix (`MSUR.0x00`) with quick-filter presets, and live alignment/duplication controls.
+5. **Verification**: 177/177 PM4 unit tests pass (`WowViewer.Core.PM4.Tests`); `WoWViewer.csproj` builds with 0 errors; `Verify-UiReference.ps1` passes (127 controls, 0 errors, 0 warnings).
 
 
 **PM4 Selection UI Hang Fix (2026-10-31, commit `0a18af2a`):**

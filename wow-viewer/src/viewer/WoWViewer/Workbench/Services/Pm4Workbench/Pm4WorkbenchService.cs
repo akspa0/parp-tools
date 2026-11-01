@@ -7,6 +7,7 @@ using WoWViewer.Logging;
 using WoWViewer.Terrain;
 using WoWViewer.Workbench;
 using WoWViewer.UI;
+using WoWViewer.Terrain.Pm4.UI;
 using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using static WoWViewer.ViewerApp;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
@@ -112,93 +113,8 @@ internal sealed partial class Pm4WorkbenchService
 
     private void DrawPm4AlignmentWidget()
     {
-        if (!SharedUiWidgets.SectionHeader("Live PM4 Alignment & Magnetization", defaultOpen: true, id: "Pm4AlignmentWidget"))
-            return;
-
-        ImGui.TextWrapped(
-            "Magnetize 2021 reconstructive ADT object placements to Blizzard's authoritative PM4 navmesh collision geometry on-the-fly, " +
-            "using PM4 bounding hulls, centroids, and MSUR.0x1C placement Z as the ground truth template.");
-        ImGui.Spacing();
-
-        var worldScene = _worldScene;
-        if (worldScene == null)
-            return;
-
-        int activeTileX = 0;
-        int activeTileY = 0;
-        bool hasTile = false;
-        ObjectInstance? selectedObj = null;
-
-        if (worldScene.Selection.SelectedInstance.HasValue)
-        {
-            selectedObj = worldScene.Selection.SelectedInstance.Value;
-            if (selectedObj.Value.HasTileCoordinate)
-            {
-                activeTileX = selectedObj.Value.TileX;
-                activeTileY = selectedObj.Value.TileY;
-                hasTile = true;
-            }
-        }
-
-        if (!hasTile && _host.TerrainInspection.TryGetPinnedTerrainChunkInspectionTarget(out var pinnedChunk, out _))
-        {
-            activeTileX = pinnedChunk.TileX;
-            activeTileY = pinnedChunk.TileY;
-            hasTile = true;
-        }
-
-        if (selectedObj.HasValue)
-        {
-            var inst = selectedObj.Value;
-            ImGui.TextColored(new Vector4(0.45f, 0.85f, 0.45f, 1f), $"Selected Object: {inst.ModelName} (#{inst.UniqueId})");
-            if (SharedUiWidgets.ActionButton("Magnetize Selected Object to PM4 Hull"))
-            {
-                _host.Pm4DoodadDuplication.MagnetizePlacementToPm4(inst);
-            }
-            ImGui.SameLine();
-            if (SharedUiWidgets.ActionButton("Fill PM4 Doodad Hulls with Model"))
-            {
-                _host.Pm4DoodadDuplication.DuplicateModelToUnmatchedPm4Doodads(inst, inst.TileX, inst.TileY);
-            }
-        }
-        else
-        {
-            ImGui.TextDisabled("Select an M2 object in the scene to magnetize or duplicate it.");
-        }
-
-        if (hasTile)
-        {
-            if (SharedUiWidgets.ActionButton($"Magnetize All Placements on Tile ({activeTileX}, {activeTileY})"))
-            {
-                _host.Pm4DoodadDuplication.MagnetizeTilePlacementsToPm4(activeTileX, activeTileY);
-            }
-        }
-
-        if (_host.Pm4DoodadDuplication.CanUndo)
-        {
-            ImGui.SameLine();
-            if (SharedUiWidgets.ActionButton("Undo PM4 Operation"))
-            {
-                _host.Pm4DoodadDuplication.UndoLastOperation();
-            }
-        }
-
-        if (SharedUiWidgets.ActionButton("Save Curated Output (Zarr v60)"))
-        {
-            try
-            {
-                string outDir = _host.EnsureEditorProjectOutputDirectory();
-                string map = _host.DataSourceSession.GetCurrentSessionMapName() ?? "development";
-                string savedPath = _host.Pm4DoodadDuplication.SaveMergedPlacementsToZarr(outDir, map);
-                _host.StatusMessage = $"Saved merged dataset to: {savedPath}";
-            }
-            catch (Exception ex)
-            {
-                _host.StatusMessage = $"Save Zarr failed: {ex.Message}";
-            }
-        }
-
-        ImGui.Separator();
+        if (_worldScene != null)
+            Pm4WorkbenchSidebarService.Instance.DrawAlignmentAndDuplication(_worldScene.Pm4Overlay, _host, _worldScene);
     }
 
     private void DrawPm4GlossarySummary()
@@ -285,224 +201,18 @@ internal sealed partial class Pm4WorkbenchService
         if (_worldScene == null)
             return;
 
-        bool showPm4Overlay = _worldScene.Pm4Overlay.ShowPm4Overlay;
-        if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
-            _worldScene.Pm4Overlay.ShowPm4Overlay = showPm4Overlay;
+        Pm4WorkbenchSidebarService.Instance.DrawOverlaySettings(
+            _worldScene.Pm4Overlay,
+            _loosePm4InputPath,
+            RequestLoosePm4File,
+            ExportPm4OverlayReport);
 
-        ImGui.SameLine();
-        if (ImGui.Button("Reload PM4"))
-            _worldScene.Pm4Overlay.ReloadPm4Overlay();
+        Pm4WorkbenchSidebarService.Instance.DrawPaletteAndLegend(
+            _worldScene.Pm4Overlay,
+            GetPm4ColorModeLabel);
 
-        ImGui.SameLine();
-        if (ImGui.Button("Export Report"))
-            ExportPm4OverlayReport();
-
-        if (SharedUiWidgets.SectionHeader("Loose PM4 / PD4 Loader", defaultOpen: false, id: "Pm4LooseLoader"))
-        {
-            ImGui.TextDisabled("Load any .pm4 or .pd4 file directly into the overlay.");
-            if (SharedUiWidgets.ActionButton("Open Loose PM4 / PD4 File..."))
-                RequestLoosePm4File();
-            if (!string.IsNullOrWhiteSpace(_loosePm4InputPath))
-                ImGui.TextDisabled($"Last loaded: {System.IO.Path.GetFileName(_loosePm4InputPath)}");
-        }
-
-        if (SharedUiWidgets.SectionHeader("Display & Geometry Layers", defaultOpen: true, id: "Pm4DisplayLayers"))
-        {
-            bool showPm4Solid = _worldScene.Pm4Overlay.ShowPm4SolidOverlay;
-            if (ImGui.Checkbox("PM4 Solid Fill", ref showPm4Solid))
-                _worldScene.Pm4Overlay.ShowPm4SolidOverlay = showPm4Solid;
-
-            ImGui.SameLine();
-            bool pm4IgnoreDepth = _worldScene.Pm4Overlay.Pm4OverlayIgnoreDepth;
-            if (ImGui.Checkbox("PM4 X-Ray", ref pm4IgnoreDepth))
-                _worldScene.Pm4Overlay.Pm4OverlayIgnoreDepth = pm4IgnoreDepth;
-
-            bool showPm4Bounds = _worldScene.Pm4Overlay.ShowPm4ObjectBounds;
-            if (ImGui.Checkbox("PM4 Bounds", ref showPm4Bounds))
-                _worldScene.Pm4Overlay.ShowPm4ObjectBounds = showPm4Bounds;
-
-            ImGui.SameLine();
-            bool showPm4Ck24Bounds = _worldScene.Pm4Overlay.ShowPm4Ck24Bounds;
-            if (ImGui.Checkbox("PM4 CK24 Bounds", ref showPm4Ck24Bounds))
-                _worldScene.Pm4Overlay.ShowPm4Ck24Bounds = showPm4Ck24Bounds;
-
-            bool showPathWalls = _worldScene.Pm4Overlay.Pm4ShowPathWalls;
-            if (ImGui.Checkbox("Show MSPV/MSPI walls", ref showPathWalls))
-            {
-                _worldScene.Pm4Overlay.Pm4ShowPathWalls = showPathWalls;
-                _worldScene.Pm4Overlay.ReloadPm4Overlay();
-            }
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip(
-                    "MSLK path windows drawn as vertical wall quads.\n" +
-                    "Measured over the 616-file development corpus: 98% of windows are 4 indices,\n" +
-                    "99.6% coplanar, and 0 of 598,790 faces have Z as their dominant normal.\n" +
-                    "MSUR is the walkable floors; MSPV/MSPI are the vertical walls/steps between them.");
-            }
-            if (_worldScene.Pm4Overlay.Pm4ShowPathWalls && _worldScene.Pm4Overlay.Pm4LoadAttempted)
-            {
-                ImGui.SameLine();
-                ImGui.TextDisabled($"({ _worldScene.Pm4Overlay.Pm4WallFaceCount} faces)");
-            }
-
-            bool showPm4Refs = _worldScene.Pm4Overlay.ShowPm4PositionRefs;
-            if (ImGui.Checkbox("PM4 MPRL Refs (terrain contacts)", ref showPm4Refs))
-                _worldScene.Pm4Overlay.ShowPm4PositionRefs = showPm4Refs;
-
-            ImGui.SameLine();
-            bool showPm4Centroids = _worldScene.Pm4Overlay.ShowPm4ObjectCentroids;
-            if (ImGui.Checkbox("PM4 Centroids", ref showPm4Centroids))
-                _worldScene.Pm4Overlay.ShowPm4ObjectCentroids = showPm4Centroids;
-
-            bool gateTerrain = _worldScene.Pm4Overlay.Pm4GateToLoadedTerrain;
-            if (ImGui.Checkbox("Gate PM4 drawing to loaded terrain tiles", ref gateTerrain))
-                _worldScene.Pm4Overlay.Pm4GateToLoadedTerrain = gateTerrain;
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip("When checked, only draws PM4 tiles whose terrain tile is resident.\nLeave unchecked (recommended) to view all PM4 tiles immediately without streaming delay.");
-            }
-
-            bool showRecovered = _worldScene.Pm4Overlay.ShowPm4GeneratedPlacements;
-            if (ImGui.Checkbox("Recovered placements (sidecar)", ref showRecovered))
-                _worldScene.Pm4Overlay.ShowPm4GeneratedPlacements = showRecovered;
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.BeginTooltip();
-                ImGui.TextUnformatted("Displays inferred placement bounding boxes from sidecar data for tiles without authored ADT placements.");
-                ImGui.TextUnformatted("Position.Z is exact from MSUR.0x1C; XY bounds and asset name are ranked matches.");
-                int count = _worldScene.Pm4Overlay.Pm4GeneratedPlacementCount;
-                ImGui.TextUnformatted(count > 0
-                    ? $"{count} recovered placement boxes loaded."
-                    : "No sidecar placement boxes currently loaded.");
-                ImGui.EndTooltip();
-            }
-
-            if (showRecovered)
-            {
-                ImGui.SameLine();
-                bool terrainlessOnly = _worldScene.Pm4Overlay.Pm4GeneratedPlacementsTerrainlessOnly;
-                if (ImGui.Checkbox("Terrain-less tiles only", ref terrainlessOnly))
-                    _worldScene.Pm4Overlay.Pm4GeneratedPlacementsTerrainlessOnly = terrainlessOnly;
-            }
-
-            bool showPlacementZ = _worldScene.Pm4Overlay.ShowPm4PlacementZPlane;
-            if (ImGui.Checkbox("Placement Z markers (MSUR.0x1C)", ref showPlacementZ))
-                _worldScene.Pm4Overlay.ShowPm4PlacementZPlane = showPlacementZ;
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.BeginTooltip();
-                ImGui.TextUnformatted("Draws a height marker at MSUR.0x1C (the producing placement's Position.Z).");
-                ImGui.EndTooltip();
-            }
-
-            if (showPlacementZ)
-            {
-                ImGui.SameLine();
-                bool allZ = _worldScene.Pm4Overlay.ShowPm4PlacementZForAllObjects;
-                if (ImGui.Checkbox("all objects##Pm4PlacementZAll", ref allZ))
-                    _worldScene.Pm4Overlay.ShowPm4PlacementZForAllObjects = allZ;
-            }
-        }
-
-        if (SharedUiWidgets.SectionHeader("Nodes & Wireframe Styling", defaultOpen: false, id: "Pm4NodeStyling"))
-        {
-            bool showPm4Mscn = _worldScene.Pm4Overlay.ShowPm4MscnNodes;
-            if (ImGui.Checkbox("MSCN Nodes (cyan, boundary/contour chain)", ref showPm4Mscn))
-                _worldScene.Pm4Overlay.ShowPm4MscnNodes = showPm4Mscn;
-
-            bool showPm4Mspv = _worldScene.Pm4Overlay.ShowPm4MspvNodes;
-            if (ImGui.Checkbox("MSPV Nodes (magenta, MSLK wall-quad vertices)", ref showPm4Mspv))
-                _worldScene.Pm4Overlay.ShowPm4MspvNodes = showPm4Mspv;
-
-            bool renderNodesAsCubes = _worldScene.Pm4Overlay.Pm4RenderNodesAsCubes;
-            if (ImGui.Checkbox("Nodes as Solid Cubes", ref renderNodesAsCubes))
-                _worldScene.Pm4Overlay.Pm4RenderNodesAsCubes = renderNodesAsCubes;
-
-            ImGui.SameLine();
-            bool pm4FlipAllObjY = _worldScene.Pm4Overlay.Pm4FlipAllObjectsY;
-            if (ImGui.Checkbox("Mirror PM4 N/S", ref pm4FlipAllObjY))
-                _worldScene.Pm4Overlay.Pm4FlipAllObjectsY = pm4FlipAllObjY;
-
-            float mscnSize = _worldScene.Pm4Overlay.Pm4MscnCubeSize;
-            ImGui.SetNextItemWidth(110f);
-            if (ImGui.SliderFloat("MSCN size", ref mscnSize, 0.2f, 4f))
-                _worldScene.Pm4Overlay.Pm4MscnCubeSize = mscnSize;
-            ImGui.SameLine();
-            float mspvSize = _worldScene.Pm4Overlay.Pm4MspvCubeSize;
-            ImGui.SetNextItemWidth(110f);
-            if (ImGui.SliderFloat("MSPV size", ref mspvSize, 0.2f, 4f))
-                _worldScene.Pm4Overlay.Pm4MspvCubeSize = mspvSize;
-
-            float mscnAlpha = _worldScene.Pm4Overlay.Pm4MscnCubeAlpha;
-            ImGui.SetNextItemWidth(110f);
-            if (ImGui.SliderFloat("MSCN alpha", ref mscnAlpha, 0.1f, 1f))
-                _worldScene.Pm4Overlay.Pm4MscnCubeAlpha = mscnAlpha;
-            ImGui.SameLine();
-            float mspvAlpha = _worldScene.Pm4Overlay.Pm4MspvCubeAlpha;
-            ImGui.SetNextItemWidth(110f);
-            if (ImGui.SliderFloat("MSPV alpha", ref mspvAlpha, 0.1f, 1f))
-                _worldScene.Pm4Overlay.Pm4MspvCubeAlpha = mspvAlpha;
-
-            float lineWidth = _worldScene.Pm4Overlay.Pm4WireframeLineWidth;
-            ImGui.SetNextItemWidth(140f);
-            if (ImGui.SliderFloat("Wireframe width", ref lineWidth, 1f, 8f))
-                _worldScene.Pm4Overlay.Pm4WireframeLineWidth = lineWidth;
-
-            float renderDistance = _worldScene.Pm4Overlay.Pm4RenderDistance;
-            ImGui.SetNextItemWidth(140f);
-            if (ImGui.SliderFloat("PM4 draw distance", ref renderDistance, Pm4OverlayScene.Pm4MinRenderDistance, Pm4OverlayScene.Pm4MaxRenderDistance, "%.0f"))
-                _worldScene.Pm4Overlay.Pm4RenderDistance = renderDistance;
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("PM4 mesh, nodes and markers farther than this from the camera are not drawn.\nPM4 tiles are also only drawn while their terrain tile is loaded.");
-        }
-
-        if (SharedUiWidgets.SectionHeader("Color Mode, Surface Classes & Splitting", defaultOpen: true, id: "Pm4ClassAndColor"))
-        {
-            Pm4OverlayColorMode colorMode = _worldScene.Pm4Overlay.Pm4ColorMode;
-            if (ImGui.BeginCombo("PM4 Color", GetPm4ColorModeLabel(colorMode)))
-            {
-                foreach (Pm4OverlayColorMode mode in Enum.GetValues<Pm4OverlayColorMode>())
-                {
-                    bool isSelected = mode == colorMode;
-                    if (ImGui.Selectable(GetPm4ColorModeLabel(mode), isSelected))
-                        _worldScene.Pm4Overlay.Pm4ColorMode = mode;
-                    if (isSelected)
-                        ImGui.SetItemDefaultFocus();
-                }
-
-                ImGui.EndCombo();
-            }
-
-            ImGui.TextDisabled("Surface class filter (MSUR.0x00):");
-            foreach ((byte cls, string label) in Pm4SurfaceClassLabels)
-            {
-                bool visible = _worldScene.Pm4Overlay.IsPm4SurfaceClassVisible(cls);
-                if (ImGui.Checkbox(label, ref visible))
-                    _worldScene.Pm4Overlay.SetPm4SurfaceClassVisible(cls, visible);
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.TextUnformatted(Pm4SurfaceClassTooltips[cls]);
-                    ImGui.TextUnformatted("Filters by the object's dominant class; cannot isolate one class within an object.");
-                    ImGui.EndTooltip();
-                }
-            }
-
-            bool splitCk24Connectivity = _worldScene.Pm4Overlay.Pm4SplitCk24ByConnectivity;
-            if (ImGui.Checkbox("Split CK24 by Connectivity", ref splitCk24Connectivity))
-            {
-                _worldScene.Pm4Overlay.Pm4SplitCk24ByConnectivity = splitCk24Connectivity;
-                _worldScene.Pm4Overlay.ReloadPm4Overlay();
-            }
-
-            bool splitCk24ByMscnRef = _worldScene.Pm4Overlay.Pm4SplitCk24ByMscnRef;
-            if (ImGui.Checkbox("Split CK24 by MSUR.0x18 (mslk_first_index)", ref splitCk24ByMscnRef))
-            {
-                _worldScene.Pm4Overlay.Pm4SplitCk24ByMscnRef = splitCk24ByMscnRef;
-                _worldScene.Pm4Overlay.ReloadPm4Overlay();
-            }
-        }
+        Pm4WorkbenchSidebarService.Instance.DrawSurfaceClassFilterMatrix(
+            _worldScene.Pm4Overlay);
 
         if (_worldScene.Pm4Overlay.IsPm4Loading)
             ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Overlay.Pm4Status}");
@@ -523,8 +233,6 @@ internal sealed partial class Pm4WorkbenchService
                 $"MSUR: {totalMsur} raw | kept: {keptSurfaces} | dropped: short-index={shortIdx}, out-of-range={oorMsvi}, empty={emptyComp}, long-edge-lines={longEdge}");
             ImGui.TextDisabled($"Status: {_worldScene.Pm4Overlay.Pm4Status}");
         }
-
-        DrawPm4ColorLegend("WorkbenchOverlay");
     }
 
     internal void DrawPm4SelectionWorkbenchContent()

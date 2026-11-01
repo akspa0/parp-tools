@@ -70,3 +70,4 @@ dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowView
 ```
 - **Exit Status**: 0
 - **Results**: Passed: 177, Failed: 0, Skipped: 0. Duration: 3m 45s.
+
