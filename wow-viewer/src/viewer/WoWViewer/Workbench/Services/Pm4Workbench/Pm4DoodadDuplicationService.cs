@@ -18,9 +18,75 @@ namespace WoWViewer;
 internal sealed class Pm4DoodadDuplicationService
 {
     private readonly IViewerAppHost _host;
-    private readonly Stack<DuplicationUndoEntry> _undoStack = new();
+    private readonly Stack<IPm4UndoOperation> _undoStack = new();
 
-    public record struct DuplicationUndoEntry(int TileX, int TileY, List<int> AddedUniqueIds);
+    private interface IPm4UndoOperation
+    {
+        bool Execute(IViewerAppHost host);
+    }
+
+    private sealed class DuplicationUndo(int tileX, int tileY, List<int> addedIds) : IPm4UndoOperation
+    {
+        public bool Execute(IViewerAppHost host)
+        {
+            var worldScene = host.WorldScene;
+            if (worldScene == null)
+                return false;
+
+            IPm4OverlayHost pm4Host = worldScene;
+            if (pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out List<ObjectInstance>? tileMdx))
+            {
+                var idSet = new HashSet<int>(addedIds);
+                int removed = tileMdx.RemoveAll(inst => idSet.Contains(inst.UniqueId));
+                pm4Host.RebuildInstanceLists();
+                host.StatusMessage = $"Undid duplication of {removed} instances on tile ({tileX}, {tileY}).";
+                return true;
+            }
+
+            return false;
+        }
+    }
+
+    private sealed class SnapUndo(int tileX, int tileY, List<(int UniqueId, Vector3 Position, Vector3 Rotation, float Scale)> previousStates) : IPm4UndoOperation
+    {
+        public bool Execute(IViewerAppHost host)
+        {
+            var worldScene = host.WorldScene;
+            if (worldScene == null)
+                return false;
+
+            IPm4OverlayHost pm4Host = worldScene;
+            if (pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out List<ObjectInstance>? tileMdx))
+            {
+                var stateMap = new Dictionary<int, (Vector3 Position, Vector3 Rotation, float Scale)>();
+                foreach (var s in previousStates)
+                    stateMap[s.UniqueId] = (s.Position, s.Rotation, s.Scale);
+
+                int restoredCount = 0;
+                for (int i = 0; i < tileMdx.Count; i++)
+                {
+                    var inst = tileMdx[i];
+                    if (stateMap.TryGetValue(inst.UniqueId, out var state))
+                    {
+                        inst.PlacementPosition = state.Position;
+                        inst.PlacementRotation = state.Rotation;
+                        inst.PlacementScale = state.Scale;
+                        inst.Transform = WorldPlacementTransform.Build(inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale);
+                        WorldScene.TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform, out inst.BoundsMin, out inst.BoundsMax);
+                        WorldScene.TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out inst.SelectionLocalBoundsMin, out inst.SelectionLocalBoundsMax);
+                        tileMdx[i] = inst;
+                        restoredCount++;
+                    }
+                }
+
+                pm4Host.RebuildInstanceLists();
+                host.StatusMessage = $"Restored {restoredCount} placements to pre-magnetized state on tile ({tileX}, {tileY}).";
+                return true;
+            }
+
+            return false;
+        }
+    }
 
     public Pm4DoodadDuplicationService(IViewerAppHost host)
     {
@@ -164,37 +230,181 @@ internal sealed class Pm4DoodadDuplicationService
             addedIds.Add(d.UniqueId);
         }
 
-        _undoStack.Push(new DuplicationUndoEntry(targetTileX, targetTileY, addedIds));
+        _undoStack.Push(new DuplicationUndo(targetTileX, targetTileY, addedIds));
         pm4Host.RebuildInstanceLists();
         _host.StatusMessage = $"Duplicated {duplicated.Count} instances of {template.ModelName} into PM4 doodad collision hulls.";
         return duplicated.Count;
     }
 
     /// <summary>
-    /// Undoes the last duplication operation, removing newly added instances and rebuilding scene instance lists.
+    /// Magnetically snaps a single placed M2 object to its nearest PM4 navmesh collision hull.
     /// </summary>
-    public bool UndoLastDuplication()
+    public bool MagnetizePlacementToPm4(ObjectInstance inst, float maxSnapDistance = 35.0f)
     {
-        if (_undoStack.Count == 0)
-            return false;
-
-        var entry = _undoStack.Pop();
         var worldScene = _host.WorldScene;
         if (worldScene == null)
             return false;
 
         IPm4OverlayHost pm4Host = worldScene;
-        if (pm4Host.TileMdxInstances.TryGetValue((entry.TileX, entry.TileY), out List<ObjectInstance>? tileMdx))
+        int tileX = inst.TileX;
+        int tileY = inst.TileY;
+
+        if (!worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((tileX, tileY), out var pm4Objects) || pm4Objects.Count == 0)
         {
-            var idSet = new HashSet<int>(entry.AddedUniqueIds);
-            int removed = tileMdx.RemoveAll(inst => idSet.Contains(inst.UniqueId));
-            pm4Host.RebuildInstanceLists();
-            _host.StatusMessage = $"Undid duplication of {removed} instances on tile ({entry.TileX}, {entry.TileY}).";
-            return true;
+            if (!worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((tileY, tileX), out pm4Objects) || pm4Objects.Count == 0)
+            {
+                _host.StatusMessage = $"No PM4 objects loaded on tile ({tileX}, {tileY}) to magnetize to.";
+                return false;
+            }
         }
 
-        return false;
+        Pm4OverlayObject? bestMatch = null;
+        float bestDist = maxSnapDistance;
+        Vector3 bestCentroid = Vector3.Zero;
+        float bestZ = 0f;
+
+        for (int i = 0; i < pm4Objects.Count; i++)
+        {
+            var obj = pm4Objects[i];
+            Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
+            float dist = Vector3.Distance(centroid, inst.PlacementPosition);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                bestMatch = obj;
+                bestCentroid = centroid;
+                bestZ = obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(obj.Ck24 << 8) : centroid.Z;
+            }
+        }
+
+        if (bestMatch == null)
+        {
+            _host.StatusMessage = $"No PM4 collision hull found within {maxSnapDistance:F0} yds of {inst.ModelName}.";
+            return false;
+        }
+
+        if (Math.Abs(bestZ) < 0.001f || float.IsNaN(bestZ) || float.IsInfinity(bestZ))
+            bestZ = bestCentroid.Z;
+
+        if (!pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx))
+            return false;
+
+        int idx = tileMdx.FindIndex(m => m.UniqueId == inst.UniqueId);
+        if (idx < 0)
+            return false;
+
+        var prev = tileMdx[idx];
+        var undoList = new List<(int, Vector3, Vector3, float)>
+        {
+            (prev.UniqueId, prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale)
+        };
+        _undoStack.Push(new SnapUndo(tileX, tileY, undoList));
+
+        prev.PlacementPosition = new Vector3(bestCentroid.X, bestCentroid.Y, bestZ);
+        prev.Transform = WorldPlacementTransform.Build(prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale);
+        WorldScene.TransformBounds(prev.LocalBoundsMin, prev.LocalBoundsMax, prev.Transform, out prev.BoundsMin, out prev.BoundsMax);
+        WorldScene.TransformBounds(prev.SelectionLocalBoundsMin, prev.SelectionLocalBoundsMax, prev.Transform, out prev.SelectionLocalBoundsMin, out prev.SelectionLocalBoundsMax);
+        tileMdx[idx] = prev;
+
+        pm4Host.RebuildInstanceLists();
+        _host.StatusMessage = $"Magnetized {inst.ModelName} (#{inst.UniqueId}) to PM4 template (delta: {bestDist:F2} yds).";
+        return true;
     }
+
+    /// <summary>
+    /// Magnetically snaps all resident ADT placements on a tile to their nearest PM4 collision hulls.
+    /// </summary>
+    public int MagnetizeTilePlacementsToPm4(int tileX, int tileY, float maxSnapDistance = 25.0f)
+    {
+        var worldScene = _host.WorldScene;
+        if (worldScene == null)
+            return 0;
+
+        IPm4OverlayHost pm4Host = worldScene;
+        if (!worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((tileX, tileY), out var pm4Objects) || pm4Objects.Count == 0)
+        {
+            if (!worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((tileY, tileX), out pm4Objects) || pm4Objects.Count == 0)
+            {
+                _host.StatusMessage = $"No PM4 objects loaded on tile ({tileX}, {tileY}) to magnetize to.";
+                return 0;
+            }
+        }
+
+        if (!pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx) || tileMdx.Count == 0)
+        {
+            _host.StatusMessage = $"No M2 placements resident on tile ({tileX}, {tileY}).";
+            return 0;
+        }
+
+        var undoList = new List<(int, Vector3, Vector3, float)>();
+        int snappedCount = 0;
+
+        for (int i = 0; i < tileMdx.Count; i++)
+        {
+            var inst = tileMdx[i];
+            Pm4OverlayObject? bestMatch = null;
+            float bestDist = maxSnapDistance;
+            Vector3 bestCentroid = Vector3.Zero;
+            float bestZ = 0f;
+
+            for (int p = 0; p < pm4Objects.Count; p++)
+            {
+                var obj = pm4Objects[p];
+                Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
+                float dist = Vector3.Distance(centroid, inst.PlacementPosition);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    bestMatch = obj;
+                    bestCentroid = centroid;
+                    bestZ = obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(obj.Ck24 << 8) : centroid.Z;
+                }
+            }
+
+            if (bestMatch != null && bestDist > 0.05f)
+            {
+                if (Math.Abs(bestZ) < 0.001f || float.IsNaN(bestZ) || float.IsInfinity(bestZ))
+                    bestZ = bestCentroid.Z;
+
+                undoList.Add((inst.UniqueId, inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale));
+                inst.PlacementPosition = new Vector3(bestCentroid.X, bestCentroid.Y, bestZ);
+                inst.Transform = WorldPlacementTransform.Build(inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale);
+                WorldScene.TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform, out inst.BoundsMin, out inst.BoundsMax);
+                WorldScene.TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out inst.SelectionLocalBoundsMin, out inst.SelectionLocalBoundsMax);
+                tileMdx[i] = inst;
+                snappedCount++;
+            }
+        }
+
+        if (snappedCount > 0)
+        {
+            _undoStack.Push(new SnapUndo(tileX, tileY, undoList));
+            pm4Host.RebuildInstanceLists();
+            _host.StatusMessage = $"Magnetized {snappedCount} placements to PM4 collision geometry on tile ({tileX}, {tileY}).";
+        }
+        else
+        {
+            _host.StatusMessage = $"No placements within snap threshold ({maxSnapDistance:F0} yds) on tile ({tileX}, {tileY}).";
+        }
+
+        return snappedCount;
+    }
+
+    /// <summary>
+    /// Undoes the last operation (duplication or magnetization snap).
+    /// </summary>
+    public bool UndoLastOperation()
+    {
+        if (_undoStack.Count == 0)
+            return false;
+
+        return _undoStack.Pop().Execute(_host);
+    }
+
+    /// <summary>
+    /// Legacy alias for UndoLastOperation.
+    /// </summary>
+    public bool UndoLastDuplication() => UndoLastOperation();
 
     /// <summary>
     /// Exports all resident placements to a Zarr v60 dataset archive in the project output folder (T006).

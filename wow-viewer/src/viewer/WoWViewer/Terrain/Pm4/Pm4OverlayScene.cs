@@ -199,6 +199,7 @@ public sealed partial class Pm4OverlayScene
     internal bool _showPm4SolidOverlay = true;
     internal bool _showPm4ObjectBounds;
     internal bool _showPm4Ck24Bounds;
+    internal bool _pm4GateToLoadedTerrain;
     internal bool _showPm4GeneratedPlacements;
     internal bool _pm4GeneratedPlacementsTerrainlessOnly = true;
     internal bool _showPm4PlacementZPlane;
@@ -476,6 +477,12 @@ public sealed partial class Pm4OverlayScene
     public int Pm4GeneratedPlacementCount => Pm4GeneratedPlacements.Count;
 
     public string? Pm4GeneratedPlacementSource => Pm4GeneratedPlacements.SourcePath;
+
+    public bool Pm4GateToLoadedTerrain
+    {
+        get => _pm4GateToLoadedTerrain;
+        set => _pm4GateToLoadedTerrain = value;
+    }
 
     public bool ShowPm4PlacementZPlane { get => _showPm4PlacementZPlane; set => _showPm4PlacementZPlane = value; }
 
@@ -1829,10 +1836,9 @@ public sealed partial class Pm4OverlayScene
 
     internal bool ShouldRenderPm4Tile(int tileX, int tileY)
     {
-        // PM4 geometry follows the terrain: a PM4 tile is drawn only while its ADT tile is
-        // loaded/rendered (operator direction, 2026-10-31). A multi-tile structure therefore
-        // streams in and out in the same pieces the terrain does. Maps with no streamed ADT
-        // terrain (no tiles loaded at all) keep the old ungated behavior.
+        if (!_pm4GateToLoadedTerrain)
+            return true;
+
         TerrainManager? terrainManager = _host.TerrainManager;
         if (terrainManager == null || terrainManager.LoadedTileCount == 0)
             return true;

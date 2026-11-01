@@ -379,9 +379,10 @@ internal sealed partial class InspectorPayloadsService
         if (inst.CustomTextures is { Length: > 0 })
             actions.Action("copy_skin_path", "Copy Skin Path");
         actions.Action("open_pm4_workbench", "Open in PM4 Tools");
+        actions.Action("magnetize_to_pm4", "Magnetize / Snap to PM4 Template");
         actions.Action("fill_pm4_doodads", "Fill PM4 Doodads with Model");
         if (_pm4DoodadDuplication.CanUndo)
-            actions.Action("undo_pm4_duplication", "Undo PM4 Doodad Fill");
+            actions.Action("undo_pm4_duplication", "Undo PM4 Operation");
     }
 
     private void BuildStandaloneModelInspector(InspectorContentBuilder builder)
@@ -534,6 +535,13 @@ internal sealed partial class InspectorPayloadsService
 
             case "clear_terrain_chunk_selection":
                 _terrainInspection.ClearSelectedTerrainChunk();
+                break;
+
+            case "magnetize_to_pm4":
+                if (_worldScene?.Selection.SelectedInstance.HasValue == true)
+                {
+                    _pm4DoodadDuplication.MagnetizePlacementToPm4(_worldScene.Selection.SelectedInstance.Value);
+                }
                 break;
 
             case "fill_pm4_doodads":

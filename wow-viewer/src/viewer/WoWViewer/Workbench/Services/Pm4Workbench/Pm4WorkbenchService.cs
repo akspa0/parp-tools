@@ -9,6 +9,7 @@ using WoWViewer.Workbench;
 using WoWViewer.UI;
 using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using static WoWViewer.ViewerApp;
+using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 
 namespace WoWViewer;
 
@@ -82,58 +83,122 @@ internal sealed partial class Pm4WorkbenchService
         ImGui.TextDisabled("Hover stays lightweight. Click a PM4 object to inspect it here.");
         DrawPm4GlossarySummary();
 
-        if (_pendingPm4WorkbenchTab is { } pending)
+        _pendingPm4WorkbenchTab = null;
+
+        // 1. Core PM4 Overlay & Geometry Layer Controls
+        DrawPm4OverlayWorkbenchContent();
+
+        // 2. Live PM4 Alignment & Magnetization Widget
+        DrawPm4AlignmentWidget();
+
+        // 3. Selected PM4 Object Details & Exports
+        if (SharedUiWidgets.SectionHeader("Selected PM4 Object Details & Exports", defaultOpen: true, id: "Pm4SelectedInspector"))
         {
-            _activePm4TabIndex = pending switch
-            {
-                Pm4WorkbenchTab.Overlay => (int)InspectionPage.Overlay,
-                _ => (int)InspectionPage.Selection,
-            };
-            _pendingPm4WorkbenchTab = null;
+            DrawPm4SelectionWorkbenchContent();
         }
 
-        string[] labels = InspectionPageLabels;
-        _activePm4TabIndex = Math.Clamp(_activePm4TabIndex, 0, labels.Length - 1);
-        if (!ImGui.BeginTabBar("##Pm4WorkbenchTabs"))
+        // 4. PM4 Outliner & Hierarchy
+        if (SharedUiWidgets.SectionHeader("PM4 Outliner & Hierarchy", defaultOpen: false, id: "Pm4OutlinerWidget"))
+        {
+            DrawPm4Outliner();
+        }
+
+        // 5. PM4 Object Groups
+        if (SharedUiWidgets.SectionHeader("PM4 Object Groups", defaultOpen: false, id: "Pm4ObjectGroupsWidget"))
+        {
+            DrawPm4ObjectGroups();
+        }
+    }
+
+    private void DrawPm4AlignmentWidget()
+    {
+        if (!SharedUiWidgets.SectionHeader("Live PM4 Alignment & Magnetization", defaultOpen: true, id: "Pm4AlignmentWidget"))
             return;
 
-        for (int index = 0; index < labels.Length; index++)
+        ImGui.TextWrapped(
+            "Magnetize 2021 reconstructive ADT object placements to Blizzard's authoritative PM4 navmesh collision geometry on-the-fly, " +
+            "using PM4 bounding hulls, centroids, and MSUR.0x1C placement Z as the ground truth template.");
+        ImGui.Spacing();
+
+        var worldScene = _worldScene;
+        if (worldScene == null)
+            return;
+
+        int activeTileX = 0;
+        int activeTileY = 0;
+        bool hasTile = false;
+        ObjectInstance? selectedObj = null;
+
+        if (worldScene.Selection.SelectedInstance.HasValue)
         {
-            ImGuiTabItemFlags flags = _activePm4TabIndex == index
-                ? ImGuiTabItemFlags.SetSelected
-                : ImGuiTabItemFlags.None;
-            bool open = true;
-            if (ImGui.BeginTabItem(labels[index], ref open, flags))
+            selectedObj = worldScene.Selection.SelectedInstance.Value;
+            if (selectedObj.Value.HasTileCoordinate)
             {
-                _activePm4TabIndex = index;
-                DrawPm4TabContent((InspectionPage)index);
-                ImGui.EndTabItem();
+                activeTileX = selectedObj.Value.TileX;
+                activeTileY = selectedObj.Value.TileY;
+                hasTile = true;
             }
         }
 
-        ImGui.EndTabBar();
-    }
-
-    private void DrawPm4TabContent(InspectionPage tab)
-    {
-        switch (tab)
+        if (!hasTile && _host.TerrainInspection.TryGetPinnedTerrainChunkInspectionTarget(out var pinnedChunk, out _))
         {
-            case InspectionPage.Overlay:
-                DrawPm4OverlayWorkbenchContent();
-                break;
-            case InspectionPage.Selection:
-                DrawPm4SelectionWorkbenchContent();
-                break;
-            case InspectionPage.Info:
-                DrawPm4InfoPanelContent();
-                break;
-            case InspectionPage.Outliner:
-                DrawPm4Outliner();
-                break;
-            case InspectionPage.ObjectGroups:
-                DrawPm4ObjectGroups();
-                break;
+            activeTileX = pinnedChunk.TileX;
+            activeTileY = pinnedChunk.TileY;
+            hasTile = true;
         }
+
+        if (selectedObj.HasValue)
+        {
+            var inst = selectedObj.Value;
+            ImGui.TextColored(new Vector4(0.45f, 0.85f, 0.45f, 1f), $"Selected Object: {inst.ModelName} (#{inst.UniqueId})");
+            if (SharedUiWidgets.ActionButton("Magnetize Selected Object to PM4 Hull"))
+            {
+                _host.Pm4DoodadDuplication.MagnetizePlacementToPm4(inst);
+            }
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Fill PM4 Doodad Hulls with Model"))
+            {
+                _host.Pm4DoodadDuplication.DuplicateModelToUnmatchedPm4Doodads(inst, inst.TileX, inst.TileY);
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("Select an M2 object in the scene to magnetize or duplicate it.");
+        }
+
+        if (hasTile)
+        {
+            if (SharedUiWidgets.ActionButton($"Magnetize All Placements on Tile ({activeTileX}, {activeTileY})"))
+            {
+                _host.Pm4DoodadDuplication.MagnetizeTilePlacementsToPm4(activeTileX, activeTileY);
+            }
+        }
+
+        if (_host.Pm4DoodadDuplication.CanUndo)
+        {
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Undo PM4 Operation"))
+            {
+                _host.Pm4DoodadDuplication.UndoLastOperation();
+            }
+        }
+
+        if (SharedUiWidgets.ActionButton("Save Curated Output (Zarr v60)"))
+        {
+            try
+            {
+                string outDir = _host.EnsureEditorProjectOutputDirectory();
+                string map = _host.DataSourceSession.GetCurrentSessionMapName() ?? "development";
+                string savedPath = _host.Pm4DoodadDuplication.SaveMergedPlacementsToZarr(outDir, map);
+                _host.StatusMessage = $"Saved merged dataset to: {savedPath}";
+            }
+            catch (Exception ex)
+            {
+                _host.StatusMessage = $"Save Zarr failed: {ex.Message}";
+            }
+        }
+
+        ImGui.Separator();
     }
 
     private void DrawPm4GlossarySummary()
@@ -141,6 +206,7 @@ internal sealed partial class Pm4WorkbenchService
         if (!SharedUiWidgets.SectionHeader("PM4 Glossary & Format Reference", defaultOpen: false, id: "Pm4Glossary"))
             return;
 
+        ImGui.PushTextWrapPos(0f);
         ImGui.TextWrapped(
             "PM4 (per-ADT tile) and PD4 (per-WMO) are server-side navigation-mesh files. " +
             "Authoritative reference: docs/research/pm4-format-reference.md.");
@@ -211,6 +277,7 @@ internal sealed partial class Pm4WorkbenchService
             ImGui.TextWrapped("Older viewer code called MSUR.0x18 'MscnRef'; measured format analysis proved MSUR.0x18 is mslk_first_index (start of the surface's MSLK window).");
             ImGui.TreePop();
         }
+        ImGui.PopTextWrapPos();
     }
 
     internal void DrawPm4OverlayWorkbenchContent()
@@ -288,18 +355,26 @@ internal sealed partial class Pm4WorkbenchService
             if (ImGui.Checkbox("PM4 Centroids", ref showPm4Centroids))
                 _worldScene.Pm4Overlay.ShowPm4ObjectCentroids = showPm4Centroids;
 
+            bool gateTerrain = _worldScene.Pm4Overlay.Pm4GateToLoadedTerrain;
+            if (ImGui.Checkbox("Gate PM4 drawing to loaded terrain tiles", ref gateTerrain))
+                _worldScene.Pm4Overlay.Pm4GateToLoadedTerrain = gateTerrain;
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("When checked, only draws PM4 tiles whose terrain tile is resident.\nLeave unchecked (recommended) to view all PM4 tiles immediately without streaming delay.");
+            }
+
             bool showRecovered = _worldScene.Pm4Overlay.ShowPm4GeneratedPlacements;
-            if (ImGui.Checkbox("Recovered placements", ref showRecovered))
+            if (ImGui.Checkbox("Recovered placements (sidecar)", ref showRecovered))
                 _worldScene.Pm4Overlay.ShowPm4GeneratedPlacements = showRecovered;
             if (ImGui.IsItemHovered())
             {
                 ImGui.BeginTooltip();
-                ImGui.TextUnformatted("Placements rebuilt from PM4 geometry for tiles without authored ADT placements.");
+                ImGui.TextUnformatted("Displays inferred placement bounding boxes from sidecar data for tiles without authored ADT placements.");
                 ImGui.TextUnformatted("Position.Z is exact from MSUR.0x1C; XY bounds and asset name are ranked matches.");
                 int count = _worldScene.Pm4Overlay.Pm4GeneratedPlacementCount;
                 ImGui.TextUnformatted(count > 0
-                    ? $"{count} loaded."
-                    : "None loaded - run: pm4 generate-placements");
+                    ? $"{count} recovered placement boxes loaded."
+                    : "No sidecar placement boxes currently loaded.");
                 ImGui.EndTooltip();
             }
 
@@ -505,6 +580,16 @@ internal sealed partial class Pm4WorkbenchService
                     string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
                     ImGui.TextDisabled($"GroupKey={gkl} TypeFlags: none");
                 }
+            }
+
+            if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectResearchInfo(out var ri) && ri.MslkRawEntries.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled("MSLK entries ($ri.MslkRawEntries.Count):");
+                foreach (string line in ri.MslkRawEntries.Take(5))
+                    ImGui.TextUnformatted(line);
+                if (ri.MslkRawEntries.Count > 5)
+                    ImGui.TextDisabled("+ $ri.MslkRawEntries.Count - 5 more");
             }
 
             if (ImGui.Button("Clear PM4 Selection"))
