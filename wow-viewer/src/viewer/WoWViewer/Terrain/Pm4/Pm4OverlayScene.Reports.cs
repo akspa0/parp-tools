@@ -1114,6 +1114,10 @@ public sealed partial class Pm4OverlayScene
     {
         return _pm4ColorMode switch
         {
+            Pm4OverlayColorMode.InstanceCluster => Pm4ColorCodingService.Instance.GetInstanceColor(obj, tileKey),
+            Pm4OverlayColorMode.SemanticCategory => Pm4ColorCodingService.Instance.GetSemanticCategoryColor(obj.Ck24Type, obj.DominantGroupKey),
+            Pm4OverlayColorMode.ElevationRamp => Pm4ColorCodingService.Instance.GetElevationColor(obj.PlacementAnchor.Z + obj.Center.Z, _pm4MinObjectZ, _pm4MaxObjectZ),
+            Pm4OverlayColorMode.MatchStatus => Pm4ColorCodingService.Instance.GetMatchStatusColor(false, false, obj.Ck24Type),
             Pm4OverlayColorMode.PlacementZ => ColorFromSeed(obj.Ck24),
             Pm4OverlayColorMode.Population => obj.Ck24 == 0
                 ? new Vector3(0.95f, 0.55f, 0.20f)
@@ -1792,6 +1796,23 @@ public sealed partial class Pm4OverlayScene
     {
         return mode switch
         {
+            Pm4OverlayColorMode.InstanceCluster => $"instance #{value} (spatial hash)",
+            Pm4OverlayColorMode.SemanticCategory => ((byte)value) switch
+            {
+                0x03 => "0x03 — doodad mesh",
+                0x10 => "0x10 — lowest floor",
+                0x11 => "0x11 — standard floor",
+                0x13 => "0x13 — upper floor",
+                0x14 => "0x14 — angled/roof",
+                _ => $"0x{value:X2} — surface",
+            },
+            Pm4OverlayColorMode.ElevationRamp => $"elevation Z {BitConverter.UInt32BitsToSingle(value):F1} yd",
+            Pm4OverlayColorMode.MatchStatus => value switch
+            {
+                1 => "matched ADT placement",
+                2 => "live duplicated model",
+                _ => "unmatched candidate hull",
+            },
             Pm4OverlayColorMode.PlacementZ     => value == 0
                 ? "no placement height (doodad collision)"
                 : $"placement Z {BitConverter.UInt32BitsToSingle(value << 8):F2}",
@@ -1814,6 +1835,10 @@ public sealed partial class Pm4OverlayScene
     {
         return mode switch
         {
+            Pm4OverlayColorMode.InstanceCluster => ColorFromSeed(value),
+            Pm4OverlayColorMode.SemanticCategory => Pm4ColorCodingService.Instance.GetSemanticCategoryColor((byte)value, 0),
+            Pm4OverlayColorMode.ElevationRamp => Pm4ColorCodingService.Instance.GetElevationColor(BitConverter.UInt32BitsToSingle(value), _pm4MinObjectZ, _pm4MaxObjectZ),
+            Pm4OverlayColorMode.MatchStatus => value == 1 ? new Vector3(0.22f, 0.88f, 0.38f) : (value == 2 ? new Vector3(1.0f, 0.82f, 0.10f) : new Vector3(0.95f, 0.38f, 0.28f)),
             Pm4OverlayColorMode.PlacementZ    => ColorFromSeed(value),
             Pm4OverlayColorMode.Population    => value == 0
                 ? new Vector3(0.95f, 0.55f, 0.20f)

@@ -231,7 +231,7 @@ public sealed partial class Pm4OverlayScene
     // coplanar, and not one of 598,790 faces has Z as its dominant normal. The viewer has never
     // drawn them, so half the decoded geometry has been invisible.
     private bool _pm4ShowPathWalls = true;
-    private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.PlacementZ;
+    private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.InstanceCluster;
     internal Vector3 _pm4OverlayTranslation = Vector3.Zero;
     internal Vector3 _pm4OverlayRotationDegrees = Vector3.Zero;
     internal Vector3 _pm4OverlayScale = Vector3.One;

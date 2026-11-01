@@ -147,6 +147,10 @@ internal static class Pm4OverlayColors
     {
         return mode switch
         {
+            Pm4OverlayColorMode.InstanceCluster => (uint)HashCode.Combine(obj.ObjectPartId, (int)MathF.Round(obj.PlacementAnchor.X * 0.2f), (int)MathF.Round(obj.PlacementAnchor.Y * 0.2f)),
+            Pm4OverlayColorMode.SemanticCategory => obj.Ck24Type,
+            Pm4OverlayColorMode.ElevationRamp => BitConverter.SingleToUInt32Bits(obj.PlacementAnchor.Z + obj.Center.Z),
+            Pm4OverlayColorMode.MatchStatus => obj.Ck24Type == 0x03 ? 0u : 1u,
             Pm4OverlayColorMode.PlacementZ   => obj.Ck24,
             Pm4OverlayColorMode.Population    => obj.Ck24 == 0 ? 0u : 1u,
             Pm4OverlayColorMode.MshdRegionId  => obj.MshdRegionId,

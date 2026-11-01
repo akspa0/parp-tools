@@ -89,6 +89,18 @@ namespace WoWViewer.Terrain;
 /// </remarks>
 public enum Pm4OverlayColorMode
 {
+    /// <summary>Distinct hue per object/doodad instance based on spatial hash and part ID (Spec 288 default).</summary>
+    InstanceCluster,
+
+    /// <summary>Semantic role: Doodad collision, WMO lowest floor, upper floor, angled roof, wall, connector.</summary>
+    SemanticCategory,
+
+    /// <summary>Continuous perceptual gradient based on actual world elevation Z.</summary>
+    ElevationRamp,
+
+    /// <summary>Visualizes curation state: Matched with ADT placement, Unmatched candidate, or Duplicated.</summary>
+    MatchStatus,
+
     /// <summary>MSUR._0x1C as a float: the producing placement's Z. Groups WMO objects; every doodad surface is 0.</summary>
     PlacementZ,
 

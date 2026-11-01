@@ -2,12 +2,12 @@
 
 ## Phase 1: Color-Coding Service & Palettes
 
-- [ ] **T001**: Create `Pm4ColorCodingService.cs` in `WoWViewer/Terrain/Pm4/Services/` implementing instance clustering, semantic roles, elevation ramp, and match status.
-- [ ] **T002**: Implement `Pm4ColorPalette` enum and color mapping logic in `Pm4ColorCodingService`.
-- [ ] **T003**: Implement dynamic legend generator `GetLegendEntries(palette)` returning color swatches, labels, and entity counts.
-- [ ] **T004**: Wire `Pm4ColorCodingService` into `Pm4OverlayScene.GetPm4ObjectColor()`.
-- [ ] **T005**: Add unit tests in `tests/WowViewer.Core.PM4.Tests/Pm4ColorCodingServiceTests.cs` validating non-zero instance color variation for doodads (`Ck24 == 0`) and elevation monotonicity.
-- [ ] **Gate A (Phase 1 Verification)**:
+- [x] **T001**: Create `Pm4ColorCodingService.cs` in `WoWViewer/Terrain/Pm4/Services/` implementing instance clustering, semantic roles, elevation ramp, and match status.
+- [x] **T002**: Implement `Pm4ColorPalette` enum and color mapping logic in `Pm4ColorCodingService`.
+- [x] **T003**: Implement dynamic legend generator `GetLegendEntries(palette)` returning color swatches, labels, and entity counts.
+- [x] **T004**: Wire `Pm4ColorCodingService` into `Pm4OverlayScene.GetPm4ObjectColor()`.
+- [x] **T005**: Add unit tests in `tests/WowViewer.Core.PM4.Tests/Pm4ColorCodingServiceTests.cs` validating non-zero instance color variation for doodads (`Ck24 == 0`) and elevation monotonicity.
+- [x] **Gate A (Phase 1 Verification)**:
   - `dotnet test I:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/ -c Debug --filter "FullyQualifiedName~Pm4ColorCodingService"` passes.
   - Receipt written to `specs/288-pm4-overlay-refactor-and-color-coding/evidence/phase1-color-coding.md`.
 
