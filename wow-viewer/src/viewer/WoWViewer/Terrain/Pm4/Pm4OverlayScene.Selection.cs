@@ -160,6 +160,16 @@ public sealed partial class Pm4OverlayScene
             if (!ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
                 continue;
 
+            // Cheap tile AABB rejection to avoid transforming every object in non-intersecting tiles
+            float tileMinX = 17066.666f - (tileKey.tileX + 1) * 533.3333f;
+            float tileMaxX = 17066.666f - tileKey.tileX * 533.3333f;
+            float tileMinY = 17066.666f - (tileKey.tileY + 1) * 533.3333f;
+            float tileMaxY = 17066.666f - tileKey.tileY * 533.3333f;
+            Vector3 tileBMin = new(tileMinX - 10f, tileMinY - 10f, _pm4MinObjectZ - 100f);
+            Vector3 tileBMax = new(tileMaxX + 10f, tileMaxY + 10f, _pm4MaxObjectZ + 100f);
+            if (RayAABBIntersect(rayOrigin, rayDir, tileBMin, tileBMax) < 0f)
+                continue;
+
             foreach (Pm4OverlayObject obj in objects)
             {
                 if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
@@ -217,6 +227,7 @@ public sealed partial class Pm4OverlayScene
     {
         _selectedPm4ObjectKey = null;
         _selectedPm4ObjectGroupKey = null;
+        InvalidateSelectedPm4RegionCache();
     }
 
     public bool SelectPm4ObjectGroupKey(uint regionId, ushort ck24ObjectId)
@@ -229,6 +240,7 @@ public sealed partial class Pm4OverlayScene
                 var key = (tx, ty, ck24, part);
                 _selectedPm4ObjectKey = key;
                 _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(key);
+                InvalidateSelectedPm4RegionCache();
                 return true;
             }
         }
@@ -242,6 +254,7 @@ public sealed partial class Pm4OverlayScene
 
         _selectedPm4ObjectKey = objectKey;
         _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(objectKey);
+        InvalidateSelectedPm4RegionCache();
         return true;
     }
 

@@ -1499,15 +1499,33 @@ public sealed partial class Pm4OverlayScene
                     regions);
             }
 
+            private (int tileX, int tileY, uint ck24, int objectPart)? _cachedSelectedRegionInfoKey;
+            private Pm4SelectedObjectRegionInfo _cachedSelectedRegionInfo;
+
+            public void InvalidateSelectedPm4RegionCache()
+            {
+                _cachedSelectedRegionInfoKey = null;
+            }
+
             public bool TryGetSelectedPm4RegionInfo(out Pm4SelectedObjectRegionInfo info, int maxPeers = 18, int maxTypeBuckets = 4)
             {
+                if (!_selectedPm4ObjectKey.HasValue)
+                {
+                    info = default;
+                    return false;
+                }
+
+                if (_cachedSelectedRegionInfoKey.HasValue && _cachedSelectedRegionInfoKey.Value == _selectedPm4ObjectKey.Value)
+                {
+                    info = _cachedSelectedRegionInfo;
+                    return true;
+                }
+
                 info = default;
                 maxPeers = Math.Max(1, maxPeers);
                 maxTypeBuckets = Math.Max(1, maxTypeBuckets);
 
-                if (!_selectedPm4ObjectKey.HasValue
-                    || !_pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedObject)
-                    || !TryGetPm4ObjectDebugInfo(_selectedPm4ObjectKey.Value, out Pm4ObjectDebugInfo selectedDebug))
+                if (!_pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedObject))
                 {
                     return false;
                 }
@@ -1525,44 +1543,58 @@ public sealed partial class Pm4OverlayScene
                 int totalSurfaceCount = 0;
                 float totalHeight = 0f;
 
-                foreach (((int tileX, int tileY, uint ck24, int objectPart) key, _, Pm4ObjectDebugInfo debug) in EnumerateVisiblePm4OverlayDebugObjects())
+                int selX = _selectedPm4ObjectKey.Value.tileX;
+                int selY = _selectedPm4ObjectKey.Value.tileY;
+
+                // Restrict peer search to the 3x3 tile neighborhood around the selected object
+                for (int dx = -1; dx <= 1; dx++)
                 {
-                    if (debug.MshdRegionId != regionId)
-                        continue;
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        var tileKey = (selX + dx, selY + dy);
+                        if (!_pm4TileObjects.TryGetValue(tileKey, out var objects))
+                            continue;
 
-                    uniqueTiles.Add((key.tileX, key.tileY));
-                    uniqueCk24.Add(debug.Ck24);
-                    uniqueLinkGroups.Add(debug.LinkGroupObjectId);
-                    uniqueMscnRefs.Add(debug.DominantMscnRefIndex);
-                    totalSurfaceCount += debug.SurfaceCount;
-                    totalHeight += debug.Center.Z;
-                    if (typeCounts.TryGetValue(debug.Ck24Type, out int existingTypeCount))
-                        typeCounts[debug.Ck24Type] = existingTypeCount + 1;
-                    else
-                        typeCounts[debug.Ck24Type] = 1;
+                        for (int i = 0; i < objects.Count; i++)
+                        {
+                            Pm4OverlayObject obj = objects[i];
+                            if (obj.MshdRegionId != regionId)
+                                continue;
 
-                    bool sameCk24 = debug.Ck24 == selectedDebug.Ck24;
-                    bool sameLinkGroup = debug.LinkGroupObjectId == selectedDebug.LinkGroupObjectId;
-                    bool sameMscnRefIndex = debug.DominantMscnRefIndex == selectedDebug.DominantMscnRefIndex;
-                    if (sameCk24)
-                        sameCk24Count++;
-                    if (sameLinkGroup)
-                        sameLinkGroupCount++;
-                    if (sameMscnRefIndex)
-                        sameMscnRefCount++;
+                            var key = (tileKey.Item1, tileKey.Item2, obj.Ck24, obj.ObjectPartId);
+                            uniqueTiles.Add((key.Item1, key.Item2));
+                            uniqueCk24.Add(obj.Ck24);
+                            uniqueLinkGroups.Add(obj.LinkGroupObjectId);
+                            uniqueMscnRefs.Add(obj.DominantMscnRefIndex);
+                            totalSurfaceCount += obj.SurfaceCount;
+                            totalHeight += obj.Center.Z;
 
-                    peers.Add(new Pm4RegionPeerSummary(
-                        key,
-                        debug.Ck24Type,
-                        debug.Ck24ObjectId,
-                        debug.SurfaceCount,
-                        debug.LinkGroupObjectId,
-                        debug.DominantMscnRefIndex,
-                        debug.Center,
-                        key == _selectedPm4ObjectKey.Value,
-                        sameCk24,
-                        sameLinkGroup,
-                        sameMscnRefIndex));
+                            if (typeCounts.TryGetValue(obj.Ck24Type, out int existingTypeCount))
+                                typeCounts[obj.Ck24Type] = existingTypeCount + 1;
+                            else
+                                typeCounts[obj.Ck24Type] = 1;
+
+                            bool sameCk24 = obj.Ck24 == selectedObject.Ck24;
+                            bool sameLinkGroup = obj.LinkGroupObjectId == selectedObject.LinkGroupObjectId;
+                            bool sameMscnRefIndex = obj.DominantMscnRefIndex == selectedObject.DominantMscnRefIndex;
+                            if (sameCk24) sameCk24Count++;
+                            if (sameLinkGroup) sameLinkGroupCount++;
+                            if (sameMscnRefIndex) sameMscnRefCount++;
+
+                            peers.Add(new Pm4RegionPeerSummary(
+                                key,
+                                obj.Ck24Type,
+                                obj.Ck24ObjectId,
+                                obj.SurfaceCount,
+                                obj.LinkGroupObjectId,
+                                obj.DominantMscnRefIndex,
+                                obj.Center,
+                                key == _selectedPm4ObjectKey.Value,
+                                sameCk24,
+                                sameLinkGroup,
+                                sameMscnRefIndex));
+                        }
+                    }
                 }
 
                 if (peers.Count == 0)
@@ -1593,6 +1625,9 @@ public sealed partial class Pm4OverlayScene
                     totalHeight / peers.Count,
                     BuildPm4VisibleTypeBuckets(typeCounts, maxTypeBuckets),
                     peerList);
+
+                _cachedSelectedRegionInfoKey = _selectedPm4ObjectKey;
+                _cachedSelectedRegionInfo = info;
                 return true;
             }
 
@@ -1600,6 +1635,9 @@ public sealed partial class Pm4OverlayScene
             {
                 foreach (KeyValuePair<(int tileX, int tileY), List<Pm4OverlayObject>> tileEntry in _pm4TileObjects)
                 {
+                    if (!ShouldRenderPm4Tile(tileEntry.Key.tileX, tileEntry.Key.tileY))
+                        continue;
+
                     List<Pm4OverlayObject> objects = tileEntry.Value;
                     for (int i = 0; i < objects.Count; i++)
                     {

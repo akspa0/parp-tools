@@ -108,6 +108,7 @@ public class TerrainManager : ISceneRenderer
     public int LoadedTileCount => _loadedTiles.Count;
     public int LoadedChunkCount => _terrainRenderer.LoadedChunkCount;
     public bool IsTileLoaded(int tileX, int tileY) => _loadedTiles.ContainsKey((tileX, tileY));
+    public bool TileExists(int tileX, int tileY) => _adapter.TileExists(tileX, tileY);
     public IEnumerable<(int tileX, int tileY)> LoadedTiles => _loadedTiles.Keys;
     public IReadOnlyDictionary<(int, int), TileLoadResult> TileCache => _tileCache;
     public int CameraTileX => _lastCameraTileX;

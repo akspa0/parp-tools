@@ -1836,14 +1836,31 @@ public sealed partial class Pm4OverlayScene
 
     internal bool ShouldRenderPm4Tile(int tileX, int tileY)
     {
-        if (!_pm4GateToLoadedTerrain)
-            return true;
+        // 1. Distance check from camera to tile 2D bounding center
+        if (_host.HasLastRenderedCameraPosition)
+        {
+            Vector3 camPos = _host.LastRenderedCameraPosition;
+            float tileCenterX = 17066.666f - (tileX + 0.5f) * 533.3333f;
+            float tileCenterY = 17066.666f - (tileY + 0.5f) * 533.3333f;
+            float dx = camPos.X - tileCenterX;
+            float dy = camPos.Y - tileCenterY;
+            float maxDist = _pm4RenderDistance + 380f;
+            if ((dx * dx + dy * dy) > (maxDist * maxDist))
+                return false;
+        }
 
-        TerrainManager? terrainManager = _host.TerrainManager;
-        if (terrainManager == null || terrainManager.LoadedTileCount == 0)
-            return true;
+        // 2. Terrain tile gating (if enabled)
+        if (_pm4GateToLoadedTerrain)
+        {
+            TerrainManager? terrainManager = _host.TerrainManager;
+            if (terrainManager != null && terrainManager.LoadedTileCount > 0)
+            {
+                if (terrainManager.TileExists(tileX, tileY) && !terrainManager.IsTileLoaded(tileX, tileY))
+                    return false;
+            }
+        }
 
-        return terrainManager.IsTileLoaded(tileX, tileY);
+        return true;
     }
 
     /// <summary>True when a world-space point lies within the PM4 render distance of the camera.</summary>
