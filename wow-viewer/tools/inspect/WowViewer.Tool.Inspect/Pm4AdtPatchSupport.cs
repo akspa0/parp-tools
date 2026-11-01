@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Text;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
+using WowViewer.Core.PM4.Footprint;
 using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Services;
 
@@ -29,7 +30,7 @@ using WowViewer.Core.PM4.Services;
 /// against what went in. A writer checked only by eye produces plausible rubbish, so the round-trip is
 /// part of the operation rather than a separate test.</para>
 ///
-/// <para>Rotation is not recovered and is written as zero rather than guessed.</para>
+/// <para>Rotation (Yaw) is recovered from 2D PCA orientation of the PM4 footprint convex hull.</para>
 /// </remarks>
 internal static class Pm4AdtPatchSupport
 {
@@ -66,7 +67,7 @@ internal static class Pm4AdtPatchSupport
             if (chunks.Msur.Count == 0)
                 continue;
 
-            Dictionary<uint, (Vector3 Min, Vector3 Max)> objects = ExtractObjects(chunks);
+            Dictionary<uint, PatchObject> objects = ExtractObjects(chunks);
             if (objects.Count == 0)
                 continue;
 
@@ -82,15 +83,15 @@ internal static class Pm4AdtPatchSupport
 
             var rows = new List<PatchRow>();
             int named = 0;
-            foreach ((uint key, (Vector3 min, Vector3 max)) in objects.OrderBy(static o => o.Key))
+            foreach ((uint key, PatchObject obj) in objects.OrderBy(static o => o.Key))
             {
-                string asset = BestCandidate(library, min, max, out double score) ?? Unknown;
+                string asset = BestCandidate(library, obj, out double score) ?? Unknown;
                 if (!asset.Equals(Unknown, StringComparison.OrdinalIgnoreCase))
                     named++;
                 else if (!includeUnknown)
                     continue;
 
-                rows.Add(new PatchRow(asset, min, max, BitConverter.UInt32BitsToSingle(key), score));
+                rows.Add(new PatchRow(asset, obj.Min, obj.Max, obj.Center2D, BitConverter.UInt32BitsToSingle(key), obj.YawDegrees, score));
             }
 
             tiles.Add(new Pm4RestorableTile(
@@ -131,7 +132,16 @@ internal static class Pm4AdtPatchSupport
             [.. tiles.Where(static t => t.Restorable).OrderByDescending(static t => t.MissingObjects)]);
     }
 
-    private readonly record struct PatchRow(string Asset, Vector3 Min, Vector3 Max, float PlacementZ, double Score);
+    private readonly record struct PatchObject(
+        uint Key,
+        Vector3 Min,
+        Vector3 Max,
+        float YawDegrees,
+        float UnrotatedLength,
+        float UnrotatedWidth,
+        Vector2 Center2D);
+
+    private readonly record struct PatchRow(string Asset, Vector3 Min, Vector3 Max, Vector2 Position, float PlacementZ, float YawDegrees, double Score);
 
     /// <summary>
     /// Turns recovered rows into a placement catalog the ADT factory can consume.
@@ -249,7 +259,7 @@ internal static class Pm4AdtPatchSupport
             foreach (AdtWorldModelPlacement row in catalog.WorldModelPlacements)
                 byHeight[BitConverter.SingleToUInt32Bits(row.Position.Z)] = row;
 
-            foreach ((uint key, (Vector3 min, Vector3 max)) in ExtractObjects(chunks))
+            foreach ((uint key, PatchObject obj) in ExtractObjects(chunks))
             {
                 if (!byHeight.TryGetValue(key, out AdtWorldModelPlacement truth))
                     continue;
@@ -264,7 +274,7 @@ internal static class Pm4AdtPatchSupport
                     shapes[name] = list;
                 }
 
-                list.Add(ShapeOf(min, max));
+                list.Add(ShapeOf(obj));
             }
         }
 
@@ -280,9 +290,9 @@ internal static class Pm4AdtPatchSupport
         return library;
     }
 
-    private static string? BestCandidate(Dictionary<string, Vector3> library, Vector3 min, Vector3 max, out double score)
+    private static string? BestCandidate(Dictionary<string, Vector3> library, PatchObject obj, out double score)
     {
-        Vector3 observed = ShapeOf(min, max);
+        Vector3 observed = ShapeOf(obj);
         string? best = null;
         score = double.MaxValue;
 
@@ -299,11 +309,11 @@ internal static class Pm4AdtPatchSupport
         return score <= 0.25 ? best : null;
     }
 
-    private static Vector3 ShapeOf(Vector3 min, Vector3 max)
+    private static Vector3 ShapeOf(PatchObject obj)
     {
-        float dx = MathF.Abs(max.X - min.X);
-        float dy = MathF.Abs(max.Y - min.Y);
-        return new Vector3(MathF.Min(dx, dy), MathF.Max(dx, dy), MathF.Abs(max.Z - min.Z));
+        float l = MathF.Max(obj.UnrotatedLength, 0.01f);
+        float w = MathF.Max(obj.UnrotatedWidth, 0.01f);
+        return new Vector3(MathF.Min(l, w), MathF.Max(l, w), MathF.Abs(obj.Max.Z - obj.Min.Z));
     }
 
     private static double ShapeDistance(Vector3 a, Vector3 b)
@@ -317,10 +327,11 @@ internal static class Pm4AdtPatchSupport
         return Rel(a.X, b.X) + Rel(a.Y, b.Y) + (2.0 * Rel(a.Z, b.Z));
     }
 
-    private static Dictionary<uint, (Vector3 Min, Vector3 Max)> ExtractObjects(Pm4KnownChunkSet chunks)
+    private static Dictionary<uint, PatchObject> ExtractObjects(Pm4KnownChunkSet chunks)
     {
         var lo = new Dictionary<uint, Vector3>();
         var hi = new Dictionary<uint, Vector3>();
+        var points = new Dictionary<uint, List<Vector2>>();
 
         foreach (Pm4MsurEntry surface in chunks.Msur)
         {
@@ -332,6 +343,12 @@ internal static class Pm4AdtPatchSupport
             if (surface.IndexCount == 0 || ve > chunks.Msvi.Count)
                 continue;
 
+            if (!points.TryGetValue(surface.PackedParams, out List<Vector2>? ptList))
+            {
+                ptList = [];
+                points[surface.PackedParams] = ptList;
+            }
+
             for (long v = vs; v < ve; v++)
             {
                 uint vi = chunks.Msvi[(int)v];
@@ -339,6 +356,7 @@ internal static class Pm4AdtPatchSupport
                     continue;
 
                 Vector3 p = Pm4CoordinateService.Pm4LocalToAdtPlacement(chunks.Msvt[(int)vi]);
+                ptList.Add(new Vector2(p.X, p.Y));
                 if (!lo.TryGetValue(surface.PackedParams, out Vector3 cur))
                 {
                     lo[surface.PackedParams] = p;
@@ -351,9 +369,16 @@ internal static class Pm4AdtPatchSupport
             }
         }
 
-        var result = new Dictionary<uint, (Vector3, Vector3)>();
+        var result = new Dictionary<uint, PatchObject>();
         foreach ((uint key, Vector3 min) in lo)
-            result[key] = (min, hi[key]);
+        {
+            Vector3 max = hi[key];
+            List<Vector2> pts = points[key];
+            List<Vector2> hull = Pm4FootprintExtruder.ComputeConvexHull2D(pts);
+            Pm4FootprintExtruder.ComputePrincipalOrientation(hull, out float yaw, out float length, out float width, out Vector2 center);
+            result[key] = new PatchObject(
+                key, min, max, yaw, length, width, center);
+        }
 
         return result;
     }

@@ -1,11 +1,16 @@
 # Active Context — wow-viewer
 
-**Spec 289 Active (2026-11-01):** [Spec 289 PM4 3D Footprint Extrusion & Direct MPQ Matching](../specs/289-pm4-3d-footprint-and-direct-matching/spec.md)
-3D envelope reification and zero-donor asset matching:
-1. **Top-Surface Magnetization & Placement Fix (Phase 1)**: Correcting vertical alignment so doodad placement position $Z$ satisfies $P_Z = Z_{\text{pm4\_top}} - (H_{\text{model\_top}} \cdot s)$, ensuring PM4 collision geometry sits on top of the object rather than trapped underneath at ground level.
-2. **3D Footprint & Synthetic Wall Extrusion (Phase 2)**: Core algorithm in `WowViewer.Core.PM4` extracting top surface 2D perimeter and resolving base elevation $Z_{\text{base}}$ via MPRL (terrain contact points) or Placement-Z (WMOs), generating vertical wall quads.
-3. **Scale-Invariant Geometric Matching (Phase 3)**: Dimensionless aspect ratio signatures ($W/D$, $H/\max(W,D)$) and direct MPQ candidate matching without requiring donor ADTs or Rosetta maps.
-4. **Viewer Workbench Integration (Phase 4)**: Extruded wall rendering in `Pm4OverlayMeshRenderer` and interactive matching probe in `Pm4WorkbenchSidebarService`.
+**Spec 289 Implementation Complete & Verified (2026-11-01):** [Spec 289 PM4 3D Footprint Extrusion & Direct MPQ Matching](../specs/289-pm4-3d-footprint-and-direct-matching/spec.md)
+3D envelope reification, zero-donor asset matching, PCA orientation recovery, and live legend tallying:
+1. **Top-Surface Magnetization & Placement Fix (Phase 1)**: Corrected vertical alignment so doodad placement position $Z$ satisfies $P_Z = Z_{\text{pm4\_top}} - (H_{\text{model\_top}} \cdot s)$, ensuring PM4 collision geometry sits on top of the object rather than trapped underneath at ground level.
+2. **3D Footprint & Synthetic Wall Extrusion (Phase 2)**: Core algorithm in `WowViewer.Core.PM4/Footprint/Pm4FootprintExtruder.cs` computing 2D convex hull via Andrew's monotone chain, 2D PCA principal axes, and base elevation $Z_{\text{base}}$ via MPRL terrain contacts or Placement-Z markers. Synthesizes vertical wall quads closing the 3D footprint prism.
+3. **Scale-Invariant Geometric Matching (Phase 3)**: Dimensionless aspect ratio descriptors ($W/D$, $H/\max(W,D)$) in `Pm4GeometricShapeDescriptor.cs` and direct MPQ candidate matching in `Pm4DirectModelMatcher.cs`. Solves authentic Yaw and accounts for the Warcraft III engine asymmetric pivot heritage ($\vec{P} = \vec{C}_{\text{world}} + R(\text{yaw}) \cdot (-\vec{C}_{\text{local}} \cdot s)$).
+4. **Viewer Workbench Integration (Phase 4)**: Added "PM4 Extruded 3D Footprint Walls" toggle checkbox and "Match PM4 Footprint to Resident Models" action button in `Pm4WorkbenchSidebarService.cs`, wired through `Pm4OverlayMeshRenderer.cs`.
+5. **Generator/Patcher Tooling Upgrade & Legend Tally (Phase 5)**:
+   - Upgraded `Pm4PlacementGeneratorSupport.cs` from naive AABB dimensions to 2D convex hull PCA orientation, enabling rotation-invariant matching and outputting authentic `rotYaw` in placement records.
+   - Upgraded `Pm4AdtPatchSupport.cs` to write authentic PCA Yaw rotations directly into `MODF` (`Rotation.Z`) rather than writing zeros.
+   - Fixed zero-count display in `Pm4ColorCodingService.cs` and `Pm4OverlayScene.Reports.cs` so legend entries dynamically tally visible objects per category.
+6. **Validation**: 183/183 PM4 unit tests pass (`WowViewer.Core.PM4.Tests`); full solution `WowViewer.slnx` builds with 0 errors; `Verify-UiReference.ps1` passes (137 inventory rows, 127 registry entries, 0 errors, 0 warnings). Receipts in `specs/289-pm4-3d-footprint-and-direct-matching/evidence/`.
 
 **Spec 288 Implementation Complete & Verified (2026-11-01):** [Spec 288 PM4 Overlay Modernization, Color-Coding & Sidebar Refactor](../specs/288-pm4-overlay-refactor-and-color-coding/spec.md)
 Phases 1–4 complete with receipts in `specs/288-pm4-overlay-refactor-and-color-coding/evidence/`:

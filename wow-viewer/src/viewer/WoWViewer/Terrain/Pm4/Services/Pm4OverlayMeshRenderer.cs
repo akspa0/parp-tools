@@ -7,6 +7,7 @@ using Silk.NET.OpenGL;
 using WoWViewer.Logging;
 using WoWViewer.Rendering;
 using static WoWViewer.Terrain.Pm4OverlayColors;
+using WowViewer.Core.PM4.Footprint;
 
 namespace WoWViewer.Terrain.Pm4.Services;
 
@@ -74,7 +75,7 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
         var sw = Stopwatch.StartNew();
 
         // ── 1. Bounds & Placement Markers ─────────────────────────────────────
-        if (overlay._showPm4ObjectBounds || overlay._showPm4PlacementZPlane || overlay._showPm4Ck24Bounds)
+        if (overlay._showPm4ObjectBounds || overlay._showPm4PlacementZPlane || overlay._showPm4Ck24Bounds || overlay._showPm4ExtrudedWalls)
         {
             sw.Restart();
             RenderBoundsAndMarkers(bbRenderer, overlay, cameraPos, ref boundsPrepared);
@@ -390,6 +391,55 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
                 };
                 bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, boxColor);
                 boundsPrepared++;
+            }
+        }
+
+        if (overlay._showPm4ExtrudedWalls)
+        {
+            Vector3 wallColor = new(0.35f, 0.90f, 0.85f);
+            foreach (var (tileKey, objects) in overlay._pm4TileObjects)
+            {
+                if (!overlay.ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
+                    continue;
+
+                overlay._pm4TilePositionRefs.TryGetValue(tileKey, out var mprlList);
+
+                foreach (Pm4OverlayObject obj in objects)
+                {
+                    if (!overlay.ShouldRenderPm4ObjectType(obj.Ck24Type))
+                        continue;
+
+                    var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
+                    Matrix4x4 objectTransform = overlay.BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                    if (!overlay.ShouldRenderPm4Object(obj, objectTransform, applyObjectTransform, cameraPos, out _))
+                        continue;
+
+                    Matrix4x4 geomTransform = Pm4OverlayScene.BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform);
+                    var surfaceVerts = new List<Vector3>(obj.Triangles.Count * 3);
+                    for (int t = 0; t < obj.Triangles.Count; t++)
+                    {
+                        surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].A, geomTransform));
+                        surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].B, geomTransform));
+                        surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].C, geomTransform));
+                    }
+
+                    if (surfaceVerts.Count < 3)
+                        continue;
+
+                    float? placementZ = obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(obj.Ck24 << 8) : null;
+                    WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, geomTransform, out Vector3 worldMin, out _);
+
+                    Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
+                    for (int w = 0; w < prism.Walls.Count; w++)
+                    {
+                        Pm4ExtrudedWall wall = prism.Walls[w];
+                        bbRenderer.BatchLine(wall.TopV0, wall.TopV1, wallColor);
+                        bbRenderer.BatchLine(wall.TopV0, wall.BaseV0, wallColor);
+                        bbRenderer.BatchLine(wall.BaseV0, wall.BaseV1, wallColor);
+                        bbRenderer.BatchLine(wall.TopV1, wall.BaseV1, wallColor);
+                        boundsPrepared += 4;
+                    }
+                }
             }
         }
     }

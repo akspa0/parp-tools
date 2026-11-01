@@ -1283,7 +1283,8 @@ public sealed partial class Pm4OverlayScene
 
                     float minZ = float.IsFinite(_pm4MinObjectZ) ? _pm4MinObjectZ : 0f;
                     float maxZ = float.IsFinite(_pm4MaxObjectZ) ? _pm4MaxObjectZ : (minZ + 100f);
-                    var svcEntries = Pm4ColorCodingService.Instance.GetLegendEntries(palette, null, minZ, maxZ);
+                    var visibleObjects = EnumerateVisiblePm4OverlayObjects().Select(static t => t.obj);
+                    var svcEntries = Pm4ColorCodingService.Instance.GetLegendEntries(palette, visibleObjects, minZ, maxZ);
                     var entries = new List<Pm4ColorLegendEntry>(svcEntries.Count);
                     foreach (var e in svcEntries)
                     {

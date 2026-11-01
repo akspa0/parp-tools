@@ -33,3 +33,4 @@ $$\vec{P}_{XY} = \vec{C}_{\text{pm4\_XY}} - \vec{C}_{\text{model\_XY}}$$
 
 ### Criterion Mapping:
 - **AC-001**: Top-aligned magnetization verified in unit tests (`result.WorldBoundsMax.Z == 100.0f` matching target centroid) and compilation of both single and tile magnetization services.
+

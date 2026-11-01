@@ -174,6 +174,7 @@ public sealed partial class Pm4OverlayScene
     internal bool _showPm4SolidOverlay = true;
     internal bool _showPm4ObjectBounds;
     internal bool _showPm4Ck24Bounds;
+    internal bool _showPm4ExtrudedWalls;
     internal bool _pm4GateToLoadedTerrain;
     internal bool _showPm4GeneratedPlacements;
     internal bool _pm4GeneratedPlacementsTerrainlessOnly = true;
@@ -410,6 +411,7 @@ public sealed partial class Pm4OverlayScene
     public bool ShowPm4SolidOverlay { get => _showPm4SolidOverlay; set => _showPm4SolidOverlay = value; }
     public bool ShowPm4ObjectBounds { get => _showPm4ObjectBounds; set => _showPm4ObjectBounds = value; }
     public bool ShowPm4Ck24Bounds { get => _showPm4Ck24Bounds; set => _showPm4Ck24Bounds = value; }
+    public bool ShowPm4ExtrudedWalls { get => _showPm4ExtrudedWalls; set => _showPm4ExtrudedWalls = value; }
 
     /// <summary>
     /// Draws a flat marker at each object's <c>MSUR._0x1C</c> read as a Z height, so the claim that

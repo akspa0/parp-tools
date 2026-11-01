@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Maps;
+using WowViewer.Core.PM4.Footprint;
 using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Services;
 
@@ -77,7 +78,7 @@ internal static class Pm4PlacementGeneratorSupport
             if (chunks.Msur.Count == 0)
                 continue;
 
-            Dictionary<uint, (Vector3 Min, Vector3 Max, int Surfaces)> objects = ExtractObjects(chunks);
+            Dictionary<uint, ExtractedPm4Object> objects = ExtractObjects(chunks);
             if (objects.Count == 0)
                 continue;
 
@@ -89,10 +90,10 @@ internal static class Pm4PlacementGeneratorSupport
             if (hasPlacements) tilesWithExistingPlacements++;
 
             var rows = new List<Pm4GeneratedPlacement>();
-            foreach ((uint key, (Vector3 min, Vector3 max, int surfaces)) in objects.OrderBy(static o => o.Key))
+            foreach ((uint key, ExtractedPm4Object obj) in objects.OrderBy(static o => o.Key))
             {
                 objectsTotal++;
-                Vector3 observed = ShapeOf(min, max);
+                Vector3 observed = ShapeOf(obj);
 
                 // Rank candidates, excluding anything this tile alone taught us.
                 var ranked = new List<(string Name, double Score)>();
@@ -127,12 +128,13 @@ internal static class Pm4PlacementGeneratorSupport
                 rows.Add(new Pm4GeneratedPlacement(
                     $"0x{key:X8}",
                     chosen,
-                    surfaces,
-                    new Pm4Xyz((min.X + max.X) * 0.5f, (min.Y + max.Y) * 0.5f, placementZ),
-                    new Pm4Xyz(min.X, min.Y, min.Z),
-                    new Pm4Xyz(max.X, max.Y, max.Z),
+                    obj.Surfaces,
+                    new Pm4Xyz(obj.Center2D.X, obj.Center2D.Y, placementZ),
+                    new Pm4Xyz(obj.Min.X, obj.Min.Y, obj.Min.Z),
+                    new Pm4Xyz(obj.Max.X, obj.Max.Y, obj.Max.Z),
                     Math.Round(best, 4),
-                    [.. ranked.Take(5).Select(c => new Pm4Candidate(c.Name, Math.Round(c.Score, 4)))]));
+                    [.. ranked.Take(5).Select(c => new Pm4Candidate(c.Name, Math.Round(c.Score, 4)))],
+                    Math.Round(obj.YawDegrees, 2)));
             }
 
             tilesOut.Add(new Pm4GeneratedTile(tileName, tFirst, tSecond, hasTerrain, hasPlacements, rows));
@@ -150,14 +152,14 @@ internal static class Pm4PlacementGeneratorSupport
         // A flat CSV too - the JSON is for tooling, this is for looking at.
         string csvPath = Path.Combine(outputDirectory, "pm4-generated-placements.csv");
         var csv = new StringBuilder();
-        csv.AppendLine("tile,tileFirst,tileSecond,hasTerrain,hasExistingPlacements,objectKey,asset,surfaces,posX,posY,posZ,minX,minY,minZ,maxX,maxY,maxZ,score");
+        csv.AppendLine("tile,tileFirst,tileSecond,hasTerrain,hasExistingPlacements,objectKey,asset,surfaces,posX,posY,posZ,rotYaw,minX,minY,minZ,maxX,maxY,maxZ,score");
         foreach (Pm4GeneratedTile tile in tilesOut)
         {
             foreach (Pm4GeneratedPlacement row in tile.Placements)
             {
                 csv.Append(CultureInfo.InvariantCulture, $"{tile.Tile},{tile.TileFirst},{tile.TileSecond},{tile.HasTerrain},{tile.HasExistingPlacements},");
                 csv.Append(CultureInfo.InvariantCulture, $"{row.ObjectKey},{row.Asset},{row.Surfaces},");
-                csv.Append(CultureInfo.InvariantCulture, $"{row.Position.X:F3},{row.Position.Y:F3},{row.Position.Z:F3},");
+                csv.Append(CultureInfo.InvariantCulture, $"{row.Position.X:F3},{row.Position.Y:F3},{row.Position.Z:F3},{row.RotationYawDegrees:F2},");
                 csv.Append(CultureInfo.InvariantCulture, $"{row.BoundsMin.X:F3},{row.BoundsMin.Y:F3},{row.BoundsMin.Z:F3},");
                 csv.Append(CultureInfo.InvariantCulture, $"{row.BoundsMax.X:F3},{row.BoundsMax.Y:F3},{row.BoundsMax.Z:F3},");
                 csv.AppendLine(row.Score.ToString("F4", CultureInfo.InvariantCulture));
@@ -172,11 +174,12 @@ internal static class Pm4PlacementGeneratorSupport
             objectsTotal, named, unknownNamed, library.Count, confidenceThreshold);
     }
 
-    private static Dictionary<uint, (Vector3 Min, Vector3 Max, int Surfaces)> ExtractObjects(Pm4KnownChunkSet chunks)
+    private static Dictionary<uint, ExtractedPm4Object> ExtractObjects(Pm4KnownChunkSet chunks)
     {
         var lo = new Dictionary<uint, Vector3>();
         var hi = new Dictionary<uint, Vector3>();
         var count = new Dictionary<uint, int>();
+        var points = new Dictionary<uint, List<Vector2>>();
 
         foreach (Pm4MsurEntry surface in chunks.Msur)
         {
@@ -189,6 +192,11 @@ internal static class Pm4PlacementGeneratorSupport
                 continue;
 
             count[surface.PackedParams] = count.GetValueOrDefault(surface.PackedParams) + 1;
+            if (!points.TryGetValue(surface.PackedParams, out List<Vector2>? ptList))
+            {
+                ptList = [];
+                points[surface.PackedParams] = ptList;
+            }
 
             for (long v = vs; v < ve; v++)
             {
@@ -197,6 +205,7 @@ internal static class Pm4PlacementGeneratorSupport
                     continue;
 
                 Vector3 p = Pm4CoordinateService.Pm4LocalToAdtPlacement(chunks.Msvt[(int)vi]);
+                ptList.Add(new Vector2(p.X, p.Y));
                 if (!lo.TryGetValue(surface.PackedParams, out Vector3 cur))
                 {
                     lo[surface.PackedParams] = p;
@@ -209,9 +218,17 @@ internal static class Pm4PlacementGeneratorSupport
             }
         }
 
-        var result = new Dictionary<uint, (Vector3, Vector3, int)>();
+        var result = new Dictionary<uint, ExtractedPm4Object>();
         foreach ((uint key, Vector3 min) in lo)
-            result[key] = (min, hi[key], count.GetValueOrDefault(key));
+        {
+            Vector3 max = hi[key];
+            List<Vector2> pts = points[key];
+            List<Vector2> hull = Pm4FootprintExtruder.ComputeConvexHull2D(pts);
+            Pm4FootprintExtruder.ComputePrincipalOrientation(hull, out float yaw, out float length, out float width, out Vector2 center);
+            result[key] = new ExtractedPm4Object(
+                key, min, max, count.GetValueOrDefault(key),
+                yaw, length, width, center);
+        }
 
         return result;
     }
@@ -248,14 +265,14 @@ internal static class Pm4PlacementGeneratorSupport
                 byHeight[BitConverter.SingleToUInt32Bits(row.Position.Z)] = row;
 
             string tile = Path.GetFileNameWithoutExtension(pm4Path);
-            foreach ((uint key, (Vector3 min, Vector3 max, _)) in ExtractObjects(chunks))
+            foreach ((uint key, ExtractedPm4Object obj) in ExtractObjects(chunks))
             {
                 if (!byHeight.TryGetValue(key, out AdtWorldModelPlacement truth))
                     continue;
 
                 string name = Path.GetFileName(truth.ModelPath);
                 if (!string.IsNullOrWhiteSpace(name))
-                    yield return (name, ShapeOf(min, max), tile);
+                    yield return (name, ShapeOf(obj), tile);
             }
         }
     }
@@ -295,11 +312,11 @@ internal static class Pm4PlacementGeneratorSupport
         }
     }
 
-    private static Vector3 ShapeOf(Vector3 min, Vector3 max)
+    private static Vector3 ShapeOf(ExtractedPm4Object obj)
     {
-        float dx = MathF.Abs(max.X - min.X);
-        float dy = MathF.Abs(max.Y - min.Y);
-        return new Vector3(MathF.Min(dx, dy), MathF.Max(dx, dy), MathF.Abs(max.Z - min.Z));
+        float l = MathF.Max(obj.UnrotatedLength, 0.01f);
+        float w = MathF.Max(obj.UnrotatedWidth, 0.01f);
+        return new Vector3(MathF.Min(l, w), MathF.Max(l, w), MathF.Abs(obj.Max.Z - obj.Min.Z));
     }
 
     private static Vector3? Median(List<Vector3> shapes)
@@ -329,6 +346,16 @@ internal sealed record Pm4Xyz(float X, float Y, float Z);
 
 internal sealed record Pm4Candidate(string Asset, double Score);
 
+internal sealed record ExtractedPm4Object(
+    uint Key,
+    Vector3 Min,
+    Vector3 Max,
+    int Surfaces,
+    float YawDegrees,
+    float UnrotatedLength,
+    float UnrotatedWidth,
+    Vector2 Center2D);
+
 internal sealed record Pm4GeneratedPlacement(
     string ObjectKey,
     string Asset,
@@ -337,7 +364,8 @@ internal sealed record Pm4GeneratedPlacement(
     Pm4Xyz BoundsMin,
     Pm4Xyz BoundsMax,
     double Score,
-    IReadOnlyList<Pm4Candidate> Candidates);
+    IReadOnlyList<Pm4Candidate> Candidates,
+    double RotationYawDegrees = 0);
 
 internal sealed record Pm4GeneratedTile(
     string Tile,

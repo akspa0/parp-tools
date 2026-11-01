@@ -7,6 +7,8 @@ using WoWViewer.Terrain;
 using WoWViewer.Terrain.Pm4;
 using WoWViewer.Terrain.Pm4.Services;
 using WoWViewer.UI;
+using WowViewer.Core.PM4.Footprint;
+using WowViewer.Core.PM4.Matching;
 using WowViewer.Core.Runtime.World;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 
@@ -110,6 +112,16 @@ internal sealed class Pm4WorkbenchSidebarService
             bool showPm4Centroids = overlay.ShowPm4ObjectCentroids;
             if (ImGui.Checkbox("PM4 Centroids", ref showPm4Centroids))
                 overlay.ShowPm4ObjectCentroids = showPm4Centroids;
+
+            bool showExtrudedWalls = overlay.ShowPm4ExtrudedWalls;
+            if (ImGui.Checkbox("PM4 Extruded 3D Footprint Walls", ref showExtrudedWalls))
+                overlay.ShowPm4ExtrudedWalls = showExtrudedWalls;
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(
+                    "Reconstructs synthetic vertical walls by extruding the 2D perimeter of PM4 top surfaces\n" +
+                    "down to MPRL terrain contact elevations or MSUR.0x1C Placement-Z.");
+            }
 
             bool gateTerrain = overlay.Pm4GateToLoadedTerrain;
             if (ImGui.Checkbox("Gate PM4 to loaded terrain tiles", ref gateTerrain))
@@ -371,6 +383,11 @@ internal sealed class Pm4WorkbenchSidebarService
             {
                 host.Pm4DoodadDuplication.DuplicateModelToUnmatchedPm4Doodads(inst, inst.TileX, inst.TileY);
             }
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Match PM4 Footprint to Resident Models"))
+            {
+                MatchSelectedObjectFootprint(overlay, host, worldScene, inst);
+            }
         }
         else
         {
@@ -394,5 +411,83 @@ internal sealed class Pm4WorkbenchSidebarService
             }
         }
     }
-}
 
+    private static void MatchSelectedObjectFootprint(
+        Pm4OverlayScene overlay,
+        IViewerAppHost host,
+        WorldScene worldScene,
+        ObjectInstance inst)
+    {
+        if (!overlay._pm4TileObjects.TryGetValue((inst.TileX, inst.TileY), out var pm4Objects) || pm4Objects.Count == 0)
+        {
+            if (!overlay._pm4TileObjects.TryGetValue((inst.TileY, inst.TileX), out pm4Objects) || pm4Objects.Count == 0)
+            {
+                host.StatusMessage = "No PM4 objects loaded on tile to match footprint.";
+                return;
+            }
+        }
+
+        Pm4OverlayObject? bestMatch = null;
+        float bestDist = 35.0f;
+        for (int i = 0; i < pm4Objects.Count; i++)
+        {
+            var obj = pm4Objects[i];
+            Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
+            float dist = Vector3.Distance(centroid, inst.PlacementPosition);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                bestMatch = obj;
+            }
+        }
+
+        if (bestMatch == null)
+        {
+            host.StatusMessage = "No PM4 collision hull found near selected object.";
+            return;
+        }
+
+        var surfaceVerts = new List<Vector3>(bestMatch.Triangles.Count * 3);
+        for (int t = 0; t < bestMatch.Triangles.Count; t++)
+        {
+            surfaceVerts.Add(Vector3.Transform(bestMatch.Triangles[t].A, bestMatch.BaseTransform));
+            surfaceVerts.Add(Vector3.Transform(bestMatch.Triangles[t].B, bestMatch.BaseTransform));
+            surfaceVerts.Add(Vector3.Transform(bestMatch.Triangles[t].C, bestMatch.BaseTransform));
+        }
+
+        overlay._pm4TilePositionRefs.TryGetValue((inst.TileX, inst.TileY), out var mprlList);
+        float? placementZ = bestMatch.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(bestMatch.Ck24 << 8) : null;
+        WorldScene.TransformBounds(bestMatch.BoundsMin, bestMatch.BoundsMax, bestMatch.BaseTransform, out Vector3 worldMin, out _);
+
+        Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
+
+        var candidates = new List<Pm4ModelCandidate>();
+        var seenModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        IPm4OverlayHost pm4Host = worldScene;
+        foreach (var list in pm4Host.TileMdxInstances.Values)
+        {
+            foreach (var placed in list)
+            {
+                if (seenModels.Add(placed.ModelPath))
+                {
+                    Vector3 min = placed.SelectionBoundsResolved && placed.SelectionLocalBoundsMax != Vector3.Zero ? placed.SelectionLocalBoundsMin : placed.LocalBoundsMin;
+                    Vector3 max = placed.SelectionBoundsResolved && placed.SelectionLocalBoundsMax != Vector3.Zero ? placed.SelectionLocalBoundsMax : placed.LocalBoundsMax;
+                    candidates.Add(Pm4ModelCandidate.Create(placed.ModelPath, "M2", min, max));
+                }
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            host.StatusMessage = "No candidate models resident in scene to match against.";
+            return;
+        }
+
+        var matches = Pm4DirectModelMatcher.MatchPrism(prism, candidates, maxResults: 3);
+        if (matches.Count > 0)
+        {
+            var top = matches[0];
+            host.StatusMessage = $"PM4 Footprint match: {top.Candidate.ModelName} (Score: {top.Score:P1}, Scale: {top.SolvedScale:F2}, Yaw: {top.SolvedRotation.Z:F1}°)";
+        }
+    }
+}

@@ -4276,10 +4276,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.Pm4Bounds,
                         pm4BoundsMs,
-                        _bbRenderer != null && _pm4Overlay._showPm4Overlay && (_pm4Overlay._showPm4ObjectBounds || _pm4Overlay._showPm4Ck24Bounds || _pm4Overlay._showPm4PlacementZPlane),
+                        _bbRenderer != null && _pm4Overlay._showPm4Overlay && (_pm4Overlay._showPm4ObjectBounds || _pm4Overlay._showPm4Ck24Bounds || _pm4Overlay._showPm4PlacementZPlane || _pm4Overlay._showPm4ExtrudedWalls),
                         pm4BoundsPreparedCount,
                         pm4BoundsPreparedCount,
-                        _bbRenderer != null && _pm4Overlay._showPm4Overlay && (_pm4Overlay._showPm4ObjectBounds || _pm4Overlay._showPm4Ck24Bounds || _pm4Overlay._showPm4PlacementZPlane) ? "not_cached" : "disabled");
+                        _bbRenderer != null && _pm4Overlay._showPm4Overlay && (_pm4Overlay._showPm4ObjectBounds || _pm4Overlay._showPm4Ck24Bounds || _pm4Overlay._showPm4PlacementZPlane || _pm4Overlay._showPm4ExtrudedWalls) ? "not_cached" : "disabled");
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.Pm4GeometryPrepare,
                         pm4GeometryPrepareMs,
