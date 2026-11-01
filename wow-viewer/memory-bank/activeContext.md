@@ -1,5 +1,13 @@
 # Active Context — wow-viewer
 
+**PM4 Selection UI Hang Fix (2026-10-31, commit `0a18af2a`):**
+Resolved AppHangTransient on PM4 surface click (which previously froze the UI message loop for >5-10s causing Windows crash dialog).
+1. TryGetSelectedPm4RegionInfo in Pm4OverlayScene.Reports.cs: Cached output by selected object key with explicit invalidation on selection changes; restricted peer search to immediate 3x3 tile neighborhood around the selected object; replaced exhaustive NearestPointDistance position-ref iteration with direct bounding-box metadata lookup from Pm4OverlayObject.
+2. Pm4OverlayScene.Selection.cs: Added tile-level AABB ray intersection test to TryPickPm4ObjectByRay to cull entire non-intersecting tiles before looping objects.
+3. Pm4OverlayScene.cs: Added camera distance culling to ShouldRenderPm4Tile and restricted EnumerateVisiblePm4OverlayObjects to rendered tiles.
+4. Validation: WoWViewer.csproj builds with 0 errors; Pm4DoodadDuplicationTests passes (3/3); Verify-UiReference.ps1 passes (127 controls, 0 errors/warnings).
+
+
 **Spec 287 Implementation Handoff (2026-10-31):** [Spec 287 PM4 Live Matching, Burgundy MCCV Holes & Texture Layers Workbench](../specs/287-pm4-live-matching-and-curation/spec.md)
 Phases 1–4 source implementation and test gates complete:
 1. **Live PM4 Doodad Duplication**: Centroid alignment, bounding-box extent fitting, UniqueId allocation, live scene injection, undo stack, and Zarr v60 placement export. (3/3 unit tests pass).
