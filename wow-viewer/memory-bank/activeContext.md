@@ -1,5 +1,12 @@
 # Active Context — wow-viewer
 
+**Spec 289 Active (2026-11-01):** [Spec 289 PM4 3D Footprint Extrusion & Direct MPQ Matching](../specs/289-pm4-3d-footprint-and-direct-matching/spec.md)
+3D envelope reification and zero-donor asset matching:
+1. **Top-Surface Magnetization & Placement Fix (Phase 1)**: Correcting vertical alignment so doodad placement position $Z$ satisfies $P_Z = Z_{\text{pm4\_top}} - (H_{\text{model\_top}} \cdot s)$, ensuring PM4 collision geometry sits on top of the object rather than trapped underneath at ground level.
+2. **3D Footprint & Synthetic Wall Extrusion (Phase 2)**: Core algorithm in `WowViewer.Core.PM4` extracting top surface 2D perimeter and resolving base elevation $Z_{\text{base}}$ via MPRL (terrain contact points) or Placement-Z (WMOs), generating vertical wall quads.
+3. **Scale-Invariant Geometric Matching (Phase 3)**: Dimensionless aspect ratio signatures ($W/D$, $H/\max(W,D)$) and direct MPQ candidate matching without requiring donor ADTs or Rosetta maps.
+4. **Viewer Workbench Integration (Phase 4)**: Extruded wall rendering in `Pm4OverlayMeshRenderer` and interactive matching probe in `Pm4WorkbenchSidebarService`.
+
 **Spec 288 Implementation Complete & Verified (2026-11-01):** [Spec 288 PM4 Overlay Modernization, Color-Coding & Sidebar Refactor](../specs/288-pm4-overlay-refactor-and-color-coding/spec.md)
 Phases 1–4 complete with receipts in `specs/288-pm4-overlay-refactor-and-color-coding/evidence/`:
 1. **Color-Coding & Palettes (Phase 1)**: Pure algorithmic `Pm4ColorCodingEngine` and `Pm4ColorCodingService` implementing Golden-Ratio Instance Clustering (fixing the doodad mono-red bug where `MSUR._0x1C == 0`), Semantic Surface Role classification, 4-stop continuous perceptual Elevation Gradient, and Curation Match Status. Default mode set to InstanceCluster.

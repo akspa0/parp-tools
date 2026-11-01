@@ -300,7 +300,20 @@ internal sealed class Pm4DoodadDuplicationService
         };
         _undoStack.Push(new SnapUndo(tileX, tileY, undoList));
 
-        prev.PlacementPosition = new Vector3(bestCentroid.X, bestCentroid.Y, bestZ);
+        Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, prev.PlacementRotation, prev.PlacementScale);
+        Vector3 localMin = prev.SelectionBoundsResolved && prev.SelectionLocalBoundsMax != Vector3.Zero
+            ? prev.SelectionLocalBoundsMin
+            : prev.LocalBoundsMin;
+        Vector3 localMax = prev.SelectionBoundsResolved && prev.SelectionLocalBoundsMax != Vector3.Zero
+            ? prev.SelectionLocalBoundsMax
+            : prev.LocalBoundsMax;
+        WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
+
+        float modelTopZ = rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z);
+        float targetPlacementZ = bestCentroid.Z - modelTopZ;
+        Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
+
+        prev.PlacementPosition = new Vector3(bestCentroid.X - rotCenter.X, bestCentroid.Y - rotCenter.Y, targetPlacementZ);
         prev.Transform = WorldPlacementTransform.Build(prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale);
         WorldScene.TransformBounds(prev.LocalBoundsMin, prev.LocalBoundsMax, prev.Transform, out prev.BoundsMin, out prev.BoundsMax);
         WorldScene.TransformBounds(prev.SelectionLocalBoundsMin, prev.SelectionLocalBoundsMax, prev.Transform, out prev.SelectionLocalBoundsMin, out prev.SelectionLocalBoundsMax);
@@ -366,8 +379,21 @@ internal sealed class Pm4DoodadDuplicationService
                 if (Math.Abs(bestZ) < 0.001f || float.IsNaN(bestZ) || float.IsInfinity(bestZ))
                     bestZ = bestCentroid.Z;
 
+                Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, inst.PlacementRotation, inst.PlacementScale);
+                Vector3 localMin = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
+                    ? inst.SelectionLocalBoundsMin
+                    : inst.LocalBoundsMin;
+                Vector3 localMax = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
+                    ? inst.SelectionLocalBoundsMax
+                    : inst.LocalBoundsMax;
+                WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
+
+                float modelTopZ = rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z);
+                float targetPlacementZ = bestCentroid.Z - modelTopZ;
+                Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
+
                 undoList.Add((inst.UniqueId, inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale));
-                inst.PlacementPosition = new Vector3(bestCentroid.X, bestCentroid.Y, bestZ);
+                inst.PlacementPosition = new Vector3(bestCentroid.X - rotCenter.X, bestCentroid.Y - rotCenter.Y, targetPlacementZ);
                 inst.Transform = WorldPlacementTransform.Build(inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale);
                 WorldScene.TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform, out inst.BoundsMin, out inst.BoundsMax);
                 WorldScene.TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out inst.SelectionLocalBoundsMin, out inst.SelectionLocalBoundsMax);

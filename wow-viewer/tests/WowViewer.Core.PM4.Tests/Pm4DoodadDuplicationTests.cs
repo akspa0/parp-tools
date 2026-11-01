@@ -82,8 +82,10 @@ public sealed class Pm4DoodadDuplicationTests
         // Rotation Yaw should match target base rotation (90 degrees)
         Assert.InRange(result.RotationDegrees.Z, 89.9f, 90.1f);
 
-        // Position Z should match target centroid Z
-        Assert.InRange(result.Position.Z, 99.9f, 100.1f);
+        // Position Z places the model's top surface at the PM4 collision height:
+        // Position.Z = WorldCentroid.Z - (LocalBoundsMax.Z * scale) = 100 - (2 * 2) = 96
+        Assert.InRange(result.Position.Z, 95.9f, 96.1f);
+        Assert.InRange(result.WorldBoundsMax.Z, 99.9f, 100.1f);
 
         // Unique ID must be preserved
         Assert.Equal(123456, result.UniqueId);

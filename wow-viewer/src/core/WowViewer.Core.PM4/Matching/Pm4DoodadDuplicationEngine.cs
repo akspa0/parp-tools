@@ -146,17 +146,23 @@ public static class Pm4DoodadDuplicationEngine
         // 5. Magnetically align position to collision mesh centroid
         Vector3 scaledLocalMin = template.LocalBoundsMin * fittedScale;
         Vector3 scaledLocalMax = template.LocalBoundsMax * fittedScale;
+
+        // Doodad PM4 surfaces represent the walkable top surface (MSUR.0x00 == 0x03).
+        // Align the model's top surface to the PM4 collision mesh: P_Z = pm4_top_Z - (model_top * scale).
+        float modelTopZ = scaledLocalMax.Z > 0.01f ? scaledLocalMax.Z : (scaledLocalMax.Z - scaledLocalMin.Z);
+        float topAlignedZ = target.WorldCentroid.Z - modelTopZ;
+
         Vector3 attractedPosition = Pm4UnauthoredPlacementResolver.AttractPositionToPm4Mesh(
             target.WorldCentroid,
-            target.WorldCentroid.Z,
+            topAlignedZ,
             fittedRotation.Z,
             scaledLocalMin,
             scaledLocalMax);
 
         // 6. Compute fitted world bounds
         Vector3 halfSpan = (scaledLocalMax - scaledLocalMin) * 0.5f;
-        Vector3 worldBoundsMin = attractedPosition - halfSpan;
-        Vector3 worldBoundsMax = attractedPosition + halfSpan;
+        Vector3 worldBoundsMin = new(target.WorldCentroid.X - halfSpan.X, target.WorldCentroid.Y - halfSpan.Y, attractedPosition.Z + scaledLocalMin.Z);
+        Vector3 worldBoundsMax = new(target.WorldCentroid.X + halfSpan.X, target.WorldCentroid.Y + halfSpan.Y, target.WorldCentroid.Z);
 
         // 7. Calculate fit score
         float fitScore = 1.0f;

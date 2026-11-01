@@ -997,7 +997,8 @@ public static class Pm4UnauthoredPlacementResolver
         Matrix4x4 rotMatrix = Matrix4x4.CreateRotationZ(MathF.PI) * Matrix4x4.CreateRotationZ(rotZRad);
         Vector3 rotatedCenter = Vector3.Transform(modelCenter, rotMatrix);
 
-        float z = targetZ != 0f ? targetZ : (pm4Centroid.Z - modelCenter.Z);
+        float modelTop = modelBoundsMax.Z > 0.01f ? modelBoundsMax.Z : modelCenter.Z;
+        float z = targetZ != 0f ? targetZ : (pm4Centroid.Z - modelTop);
         return new Vector3(
             pm4Centroid.X - rotatedCenter.X,
             pm4Centroid.Y - rotatedCenter.Y,
