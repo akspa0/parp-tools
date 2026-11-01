@@ -133,38 +133,12 @@ public sealed partial class Pm4OverlayScene
             Vector3 a = Vector3.Transform(triangle.A, transform);
             Vector3 b = Vector3.Transform(triangle.B, transform);
             Vector3 c = Vector3.Transform(triangle.C, transform);
-            float t = RayTriangleIntersect(origin, dir, a, b, c);
+            float t = WowViewer.Core.PM4.Services.Pm4SpatialMath.RayTriangleIntersect(origin, dir, a, b, c);
             if (t >= 0f && (best < 0f || t < best))
                 best = t;
         }
 
         return best;
-    }
-
-    /// <summary>Moller-Trumbore ray/triangle intersection; returns the ray distance or -1.</summary>
-    private static float RayTriangleIntersect(Vector3 origin, Vector3 dir, Vector3 a, Vector3 b, Vector3 c)
-    {
-        const float epsilon = 1e-6f;
-        Vector3 edge1 = b - a;
-        Vector3 edge2 = c - a;
-        Vector3 h = Vector3.Cross(dir, edge2);
-        float det = Vector3.Dot(edge1, h);
-        if (MathF.Abs(det) < epsilon)
-            return -1f;
-
-        float invDet = 1f / det;
-        Vector3 s = origin - a;
-        float u = Vector3.Dot(s, h) * invDet;
-        if (u < 0f || u > 1f)
-            return -1f;
-
-        Vector3 q = Vector3.Cross(s, edge1);
-        float v = Vector3.Dot(dir, q) * invDet;
-        if (v < 0f || u + v > 1f)
-            return -1f;
-
-        float t = Vector3.Dot(edge2, q) * invDet;
-        return t > epsilon ? t : -1f;
     }
     private static void TransformBounds(Vector3 min, Vector3 max, Matrix4x4 m, out Vector3 outMin, out Vector3 outMax)
         => WorldScene.TransformBounds(min, max, m, out outMin, out outMax);
@@ -175,6 +149,7 @@ public sealed partial class Pm4OverlayScene
 
     private static float? JsonFiniteOrNull(float value) => float.IsFinite(value) ? value : null;
     private readonly Pm4OverlayCacheService? _pm4OverlayCacheService;
+    internal Pm4.Services.Pm4OverlayMeshRenderer MeshRenderer { get; } = new();
     // Spec 054: on-disk per-file PM4 overlay cache. Constructed lazily
     // on first PM4 load from the same cache root the per-window cache
     // uses. Holds small per-PM4-file gzip blobs; one entry per file.
@@ -1343,6 +1318,7 @@ public sealed partial class Pm4OverlayScene
 
     private void ClearPm4OverlayRuntimeState()
     {
+        MeshRenderer.InvalidateAll();
         _pm4LoadedCameraWindow = null;
         _pm4CoveredMapTiles.Clear();
         _pm4KnownMapTiles.Clear();
@@ -1917,53 +1893,6 @@ public sealed partial class Pm4OverlayScene
             0f,
             false);
 
-    private void RebuildPm4MergedObjectGroups()
-    {
-        _pm4MergedObjectGroupKeys.Clear();
-
-        var groups = new List<CorePm4ConnectorMergeCandidate>();
-        foreach (var tileEntry in _pm4TileObjects)
-        {
-            foreach (IGrouping<(int tileX, int tileY, uint ck24), Pm4OverlayObject> objectGroup in tileEntry.Value.GroupBy(obj => BuildPm4BaseObjectGroupKey((tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId))))
-            {
-                var baseGroupKey = objectGroup.Key;
-                Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
-                Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
-                bool hasBounds = false;
-                var connectorKeys = new HashSet<CorePm4ConnectorKey>();
-
-                foreach (Pm4OverlayObject obj in objectGroup)
-                {
-                    IncludePointInBounds(obj.BoundsMin, ref boundsMin, ref boundsMax, ref hasBounds);
-                    IncludePointInBounds(obj.BoundsMax, ref boundsMin, ref boundsMax, ref hasBounds);
-
-                    for (int i = 0; i < obj.ConnectorKeys.Count; i++)
-                        connectorKeys.Add(ToCorePm4ConnectorKey(obj.ConnectorKeys[i]));
-                }
-
-                if (!hasBounds)
-                {
-                    boundsMin = Vector3.Zero;
-                    boundsMax = Vector3.Zero;
-                }
-
-                Vector3 center = (boundsMin + boundsMax) * 0.5f;
-                groups.Add(new CorePm4ConnectorMergeCandidate(
-                    new CorePm4ObjectGroupKey(baseGroupKey.tileX, baseGroupKey.tileY, baseGroupKey.ck24),
-                    boundsMin,
-                    boundsMax,
-                    center,
-                    connectorKeys));
-
-                _pm4MergedObjectGroupKeys[baseGroupKey] = baseGroupKey;
-            }
-        }
-
-        IReadOnlyDictionary<CorePm4ObjectGroupKey, CorePm4ObjectGroupKey> mergedGroupMap = CorePm4PlacementMath.BuildMergedGroupMap(groups);
-        foreach ((CorePm4ObjectGroupKey sourceKey, CorePm4ObjectGroupKey mergedKey) in mergedGroupMap)
-            _pm4MergedObjectGroupKeys[(sourceKey.TileX, sourceKey.TileY, sourceKey.Ck24)] = (mergedKey.TileX, mergedKey.TileY, mergedKey.Ck24);
-    }
-
     internal enum Pm4AxisConvention
     {
         XZPlaneYUp,
@@ -1980,47 +1909,6 @@ public sealed partial class Pm4OverlayScene
         _pm4LoadAttempted = false;
         BeginPm4OverlayLoad(ignoreCache: true);
     }
-
-    // ──────────────────────────────────────────────────────────────────────
-    // PM4 color system: light pastels for containers, dark pastels for mesh,
-    // saturated colors reserved for markers/highlights/selection.
-    // See wow-viewer/docs/architecture/pm4-color-palette.md (to be written).
-    // ──────────────────────────────────────────────────────────────────────
-
-    /// <summary>Light pastel — PM4 object bounds (per-object, sub-merged).</summary>
-    internal static readonly Vector3 Pm4ColorObjectBounds = new(1.00f, 0.75f, 0.80f);
-
-    /// <summary>Light pastel — PM4 CK24 bounds (merged across sub-objects).</summary>
-    private static readonly Vector3 Pm4ColorCk24Bounds = new(0.70f, 1.00f, 0.80f);
-
-    /// <summary>Light pastel — selected bounds inner fill.</summary>
-    internal static readonly Vector3 Pm4ColorSelectedBounds = new(1.00f, 1.00f, 0.95f);
-
-    /// <summary>Light pastel — MDDF (M2) instance bounds.</summary>
-    internal static readonly Vector3 Pm4ColorMddfBounds = new(1.00f, 0.70f, 1.00f);
-
-    /// <summary>Light pastel — MODF (WMO) instance bounds.</summary>
-    internal static readonly Vector3 Pm4ColorModfBounds = new(0.75f, 0.95f, 1.00f);
-
-    /// <summary>Dark pastel — PM4 centroid pin (per-object center marker).</summary>
-    internal static readonly Vector3 Pm4ColorCentroid = new(0.70f, 0.55f, 0.50f);
-
-    /// <summary>Saturated — MSCN scene-graph connector anchor. One cube per MSUR surface (placed via MSUR.MscnRefIndex). Bright cyan, distinct from everything else. See wow-viewer/docs/architecture/pm4-chunk-semantics.md.</summary>
-    internal static readonly Vector3 Pm4ColorMscn = new(0.10f, 0.95f, 1.00f);
-
-    /// <summary>Saturated — MSPV path-vertex position. One cube per MSPI index reached from an MSLK link's path-vertex chain. Only present when surfaces are connected via MSLK. Bright magenta, distinct from MSCN and from pastel mesh. See wow-viewer/docs/architecture/pm4-chunk-semantics.md.</summary>
-    internal static readonly Vector3 Pm4ColorMspv = new(1.00f, 0.20f, 0.80f);
-
-    /// <summary>Medium pastel — MPRL position reference pin.</summary>
-    internal static readonly Vector3 Pm4ColorMprl = new(0.40f, 0.80f, 0.85f);
-
-    // Saturated signals (NOT in the pastel family — reserved for interactive signals)
-
-    /// <summary>Saturated — search/highlight match (eyecatching on pastel mesh).</summary>
-    internal static readonly Vector3 Pm4ColorHighlight = new(0.20f, 1.00f, 0.95f);
-
-    /// <summary>Saturated — group selection (THE selection signal — must be unmistakable).</summary>
-    internal static readonly Vector3 Pm4ColorSelection = new(1.00f, 0.95f, 0.20f);
 
     /// <summary>
     /// Per-surface-class visibility, keyed by <c>MSUR._0x00</c>.

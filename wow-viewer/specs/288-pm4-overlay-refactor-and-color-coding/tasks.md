@@ -28,11 +28,11 @@
 
 ## Phase 3: Mesh Renderer & Buffer Decomposition
 
-- [ ] **T011**: Create `Pm4OverlayMeshRenderer.cs` in `WoWViewer/Terrain/Pm4/Services/` managing OpenGL shader programs, VAOs, VBOs, and draw dispatches.
-- [ ] **T012**: Extract wireframe, solid-fill, and MSPV wall rendering from `Pm4OverlayScene.cs` into `Pm4OverlayMeshRenderer`.
-- [ ] **T013**: Implement per-tile geometry buffer caching to avoid per-frame CPU vertex copies for static tiles.
-- [ ] **T014**: Verify `Pm4OverlayScene.cs` and all extracted files are $\le 2,000$ lines conforming to AGENTS.md §10.
-- [ ] **Gate C (Phase 3 Verification)**:
+- [x] **T011**: Create `Pm4OverlayMeshRenderer.cs` in `WoWViewer/Terrain/Pm4/Services/` managing OpenGL shader programs, VAOs, VBOs, and draw dispatches.
+- [x] **T012**: Extract wireframe, solid-fill, and MSPV wall rendering from `Pm4OverlayScene.cs` into `Pm4OverlayMeshRenderer`.
+- [x] **T013**: Implement per-tile geometry buffer caching to avoid per-frame CPU vertex copies for static tiles.
+- [x] **T014**: Verify `Pm4OverlayScene.cs` and all extracted files are $\le 2,000$ lines conforming to AGENTS.md §10.
+- [x] **Gate C (Phase 3 Verification)**:
   - `dotnet build I:/parp/parp-tools/wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug --no-restore` compiles with 0 errors.
   - Line count audit confirms all files $\le 2,000$ lines.
   - Receipt written to `specs/288-pm4-overlay-refactor-and-color-coding/evidence/phase3-renderer-decomposition.md`.

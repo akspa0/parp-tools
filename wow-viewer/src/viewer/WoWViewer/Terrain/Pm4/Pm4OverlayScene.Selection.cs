@@ -1247,4 +1247,51 @@ public sealed partial class Pm4OverlayScene
 
         return transform;
     }
+
+    private void RebuildPm4MergedObjectGroups()
+    {
+        _pm4MergedObjectGroupKeys.Clear();
+
+        var groups = new List<CorePm4ConnectorMergeCandidate>();
+        foreach (var tileEntry in _pm4TileObjects)
+        {
+            foreach (IGrouping<(int tileX, int tileY, uint ck24), Pm4OverlayObject> objectGroup in tileEntry.Value.GroupBy(obj => BuildPm4BaseObjectGroupKey((tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId))))
+            {
+                var baseGroupKey = objectGroup.Key;
+                Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
+                Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
+                bool hasBounds = false;
+                var connectorKeys = new HashSet<CorePm4ConnectorKey>();
+
+                foreach (Pm4OverlayObject obj in objectGroup)
+                {
+                    IncludePointInBounds(obj.BoundsMin, ref boundsMin, ref boundsMax, ref hasBounds);
+                    IncludePointInBounds(obj.BoundsMax, ref boundsMin, ref boundsMax, ref hasBounds);
+
+                    for (int i = 0; i < obj.ConnectorKeys.Count; i++)
+                        connectorKeys.Add(ToCorePm4ConnectorKey(obj.ConnectorKeys[i]));
+                }
+
+                if (!hasBounds)
+                {
+                    boundsMin = Vector3.Zero;
+                    boundsMax = Vector3.Zero;
+                }
+
+                Vector3 center = (boundsMin + boundsMax) * 0.5f;
+                groups.Add(new CorePm4ConnectorMergeCandidate(
+                    new CorePm4ObjectGroupKey(baseGroupKey.tileX, baseGroupKey.tileY, baseGroupKey.ck24),
+                    boundsMin,
+                    boundsMax,
+                    center,
+                    connectorKeys));
+
+                _pm4MergedObjectGroupKeys[baseGroupKey] = baseGroupKey;
+            }
+        }
+
+        IReadOnlyDictionary<CorePm4ObjectGroupKey, CorePm4ObjectGroupKey> mergedGroupMap = CorePm4PlacementMath.BuildMergedGroupMap(groups);
+        foreach ((CorePm4ObjectGroupKey sourceKey, CorePm4ObjectGroupKey mergedKey) in mergedGroupMap)
+            _pm4MergedObjectGroupKeys[(sourceKey.TileX, sourceKey.TileY, sourceKey.Ck24)] = (mergedKey.TileX, mergedKey.TileY, mergedKey.Ck24);
+    }
 }

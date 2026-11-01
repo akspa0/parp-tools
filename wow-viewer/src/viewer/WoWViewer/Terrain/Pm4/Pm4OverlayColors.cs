@@ -1,5 +1,8 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
@@ -85,63 +88,100 @@ namespace WoWViewer.Terrain;
 /// <summary>Pure static PM4 overlay helpers moved verbatim from <c>WorldScene</c> (Epic 251 U-01 E1).</summary>
 internal static class Pm4OverlayColors
 {
+    // ──────────────────────────────────────────────────────────────────────
+    // PM4 color system: light pastels for containers, dark pastels for mesh,
+    // saturated colors reserved for markers/highlights/selection.
+    // ──────────────────────────────────────────────────────────────────────
 
-            internal static IReadOnlyList<Pm4SelectedObjectGraphTypeBucket> BuildTypeBuckets(
-                List<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj)> groupObjects,
-                List<Pm4SelectedObjectGraphLinkNode> linkGroups)
+    /// <summary>Light pastel — PM4 object bounds (per-object, sub-merged).</summary>
+    internal static readonly Vector3 Pm4ColorObjectBounds = new(1.00f, 0.75f, 0.80f);
+
+    /// <summary>Light pastel — PM4 CK24 bounds (merged across sub-objects).</summary>
+    internal static readonly Vector3 Pm4ColorCk24Bounds = new(0.70f, 1.00f, 0.80f);
+
+    /// <summary>Light pastel — selected bounds inner fill.</summary>
+    internal static readonly Vector3 Pm4ColorSelectedBounds = new(1.00f, 1.00f, 0.95f);
+
+    /// <summary>Light pastel — MDDF (M2) instance bounds.</summary>
+    internal static readonly Vector3 Pm4ColorMddfBounds = new(1.00f, 0.70f, 1.00f);
+
+    /// <summary>Light pastel — MODF (WMO) instance bounds.</summary>
+    internal static readonly Vector3 Pm4ColorModfBounds = new(0.75f, 0.95f, 1.00f);
+
+    /// <summary>Dark pastel — PM4 centroid pin (per-object center marker).</summary>
+    internal static readonly Vector3 Pm4ColorCentroid = new(0.70f, 0.55f, 0.50f);
+
+    /// <summary>Saturated — MSCN scene-graph connector anchor. Bright cyan.</summary>
+    internal static readonly Vector3 Pm4ColorMscn = new(0.10f, 0.95f, 1.00f);
+
+    /// <summary>Saturated — MSPV path-vertex position. Bright magenta.</summary>
+    internal static readonly Vector3 Pm4ColorMspv = new(1.00f, 0.20f, 0.80f);
+
+    /// <summary>Medium pastel — MPRL position reference pin.</summary>
+    internal static readonly Vector3 Pm4ColorMprl = new(0.40f, 0.80f, 0.85f);
+
+    /// <summary>Saturated — search/highlight match (eyecatching on pastel mesh).</summary>
+    internal static readonly Vector3 Pm4ColorHighlight = new(0.20f, 1.00f, 0.95f);
+
+    /// <summary>Saturated — group selection (THE selection signal — must be unmistakable).</summary>
+    internal static readonly Vector3 Pm4ColorSelection = new(1.00f, 0.95f, 0.20f);
+
+    internal static IReadOnlyList<Pm4SelectedObjectGraphTypeBucket> BuildTypeBuckets(
+        List<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj)> groupObjects,
+        List<Pm4SelectedObjectGraphLinkNode> linkGroups)
+    {
+        var linkGroupByObjectId = linkGroups.ToDictionary(lg => lg.LinkGroupObjectId);
+
+        var objectsByType = groupObjects
+            .GroupBy(entry => entry.obj.Ck24Type)
+            .OrderBy(g => g.Key);
+
+        var typeBuckets = new List<Pm4SelectedObjectGraphTypeBucket>();
+        foreach (var typeGroup in objectsByType)
+        {
+            byte ck24Type = typeGroup.Key;
+            var typeLinkGroupIds = typeGroup
+                .Select(e => e.obj.LinkGroupObjectId)
+                .Distinct()
+                .OrderBy(id => id);
+
+            var typeLinkGroups = new List<Pm4SelectedObjectGraphLinkNode>();
+            foreach (uint linkGroupId in typeLinkGroupIds)
             {
-                var linkGroupByObjectId = linkGroups.ToDictionary(lg => lg.LinkGroupObjectId);
-
-                var objectsByType = groupObjects
-                    .GroupBy(entry => entry.obj.Ck24Type)
-                    .OrderBy(g => g.Key);
-
-                var typeBuckets = new List<Pm4SelectedObjectGraphTypeBucket>();
-                foreach (var typeGroup in objectsByType)
-                {
-                    byte ck24Type = typeGroup.Key;
-                    var typeLinkGroupIds = typeGroup
-                        .Select(e => e.obj.LinkGroupObjectId)
-                        .Distinct()
-                        .OrderBy(id => id);
-
-                    var typeLinkGroups = new List<Pm4SelectedObjectGraphLinkNode>();
-                    foreach (uint linkGroupId in typeLinkGroupIds)
-                    {
-                        if (linkGroupByObjectId.TryGetValue(linkGroupId, out var linkGroupNode))
-                            typeLinkGroups.Add(linkGroupNode);
-                    }
-
-                    string typeLabel = ck24Type switch
-                    {
-                        0x03 => "M2 top",
-                        0x10 => "interior WMO floor",
-                        0x12 => "exterior WMO solid",
-                        _ => $"0x{ck24Type:X2}",
-                    };
-
-                    typeBuckets.Add(new Pm4SelectedObjectGraphTypeBucket(
-                        ck24Type,
-                        typeLabel,
-                        typeLinkGroups.Count,
-                        typeGroup.Sum(e => e.obj.SurfaceCount),
-                        typeLinkGroups));
-                }
-
-                return typeBuckets;
+                if (linkGroupByObjectId.TryGetValue(linkGroupId, out var linkGroupNode))
+                    typeLinkGroups.Add(linkGroupNode);
             }
 
-            internal static IReadOnlyList<Pm4VisibleTypeBucket> BuildPm4VisibleTypeBuckets(
-                IReadOnlyDictionary<byte, int> typeCounts,
-                int maxTypeBuckets)
+            string typeLabel = ck24Type switch
             {
-                return typeCounts
-                    .OrderByDescending(static entry => entry.Value)
-                    .ThenBy(static entry => entry.Key)
-                    .Take(Math.Max(1, maxTypeBuckets))
-                    .Select(static entry => new Pm4VisibleTypeBucket(entry.Key, entry.Value))
-                    .ToList();
-            }
+                0x03 => "M2 top",
+                0x10 => "interior WMO floor",
+                0x12 => "exterior WMO solid",
+                _ => $"0x{ck24Type:X2}",
+            };
+
+            typeBuckets.Add(new Pm4SelectedObjectGraphTypeBucket(
+                ck24Type,
+                typeLabel,
+                typeLinkGroups.Count,
+                typeGroup.Sum(e => e.obj.SurfaceCount),
+                typeLinkGroups));
+        }
+
+        return typeBuckets;
+    }
+
+    internal static IReadOnlyList<Pm4VisibleTypeBucket> BuildPm4VisibleTypeBuckets(
+        IReadOnlyDictionary<byte, int> typeCounts,
+        int maxTypeBuckets)
+    {
+        return typeCounts
+            .OrderByDescending(static entry => entry.Value)
+            .ThenBy(static entry => entry.Key)
+            .Take(Math.Max(1, maxTypeBuckets))
+            .Select(static entry => new Pm4VisibleTypeBucket(entry.Key, entry.Value))
+            .ToList();
+    }
 
     internal static uint GetPm4LegendValue(Pm4OverlayColorMode mode, Pm4OverlayObject obj)
     {
@@ -206,31 +246,29 @@ internal static class Pm4OverlayColors
 
     internal static Vector3 GetPm4TypeColor(byte ck24Type)
     {
-        // Dark pastels for mesh — Ck24Type is a coarse container classifier
         return ck24Type switch
         {
-            0x40 => new Vector3(0.85f, 0.55f, 0.30f),   // dark pastel orange
-            0x80 => new Vector3(0.80f, 0.40f, 0.25f),   // dark pastel burnt orange
-            _    => new Vector3(0.80f, 0.50f, 0.30f)    // dark pastel amber
+            0x40 => new Vector3(0.85f, 0.55f, 0.30f),
+            0x80 => new Vector3(0.80f, 0.40f, 0.25f),
+            _    => new Vector3(0.80f, 0.50f, 0.30f)
         };
     }
 
     internal static Vector3 GetTypeFlagColor(byte typeFlag)
     {
-        // Dark pastels for known TypeFlags (mesh). Unknown flags use a desaturated seed.
         return typeFlag switch
         {
-            0x03 => new Vector3(0.30f, 0.65f, 0.45f),   // dark pastel green   (M2 top)
-            0x10 => new Vector3(0.30f, 0.55f, 0.65f),   // dark pastel teal    (interior floor)
-            0x12 => new Vector3(0.80f, 0.45f, 0.45f),   // dark pastel rose    (exterior solid)
-            _    => HsvToRgb((typeFlag * 0.19f) % 1.0f, 0.45f, 0.75f),  // desaturated for unknown
+            0x03 => new Vector3(0.30f, 0.65f, 0.45f),
+            0x10 => new Vector3(0.30f, 0.55f, 0.65f),
+            0x12 => new Vector3(0.80f, 0.45f, 0.45f),
+            _    => HsvToRgb((typeFlag * 0.19f) % 1.0f, 0.45f, 0.75f),
         };
     }
 
     internal static Vector3 BlendTypeFlagColors(uint typeFlagsMask)
     {
         if (typeFlagsMask == 0)
-            return new Vector3(0.25f, 0.25f, 0.25f); // gray — no TypeFlags bits set anywhere on this object
+            return new Vector3(0.25f, 0.25f, 0.25f);
 
         Vector3 sum = Vector3.Zero;
         int count = 0;
@@ -240,25 +278,20 @@ internal static class Pm4OverlayColors
             sum += GetTypeFlagColor((byte)(1u << bit));
             count++;
         }
-        return sum / count; // equal-weight additive blend — bit count stays visible
+        return sum / count;
     }
 
     internal static Vector3 GetCk24TypeVsTypeFlagsColor(byte ck24Type, uint typeFlagsMask)
     {
-        // These are the *signals* for the Ck24Type vs TypeFlags diagnostic, not mesh colors.
-        // Use saturated tones so the diagnostic stands out against the pastel mesh.
         if (typeFlagsMask == 0)
-            return new Vector3(0.55f, 0.55f, 0.55f);  // pastel gray — no TypeFlags data
+            return new Vector3(0.55f, 0.55f, 0.55f);
 
-        // Ck24Type of 0 with non-zero TypeFlags = untyped container carrying classified surfaces
         if (ck24Type == 0)
-            return Pm4ColorSelection;  // saturated yellow
+            return Pm4ColorSelection;
 
-        // Check if Ck24Type matches any set TypeFlag
         if ((typeFlagsMask & (1u << ck24Type)) != 0)
-            return new Vector3(0.20f, 0.75f, 0.30f);  // green — match
+            return new Vector3(0.20f, 0.75f, 0.30f);
 
-        // Ck24Type != 0, TypeFlags present, but no match = anomaly
-        return new Vector3(0.85f, 0.20f, 0.20f);       // red — mismatch
+        return new Vector3(0.85f, 0.20f, 0.20f);
     }
 }
