@@ -1,5 +1,9 @@
 # Active Context — wow-viewer
 
+**Spec 288 Active Lane (2026-10-31):** [Spec 288 PM4 Overlay Modernization, Color-Coding & Sidebar Refactor](../specs/288-pm4-overlay-refactor-and-color-coding/spec.md)
+Authored Spec Kit (spec.md, plan.md, tasks.md). Focus: resolving the doodad mono-red color defect via distinct instance clustering, continuous elevation colormaps, semantic surface roles, decomposing the 4.3k-line Pm4OverlayScene into modular services (mesh renderer, spatial index, selection coordinator), and modernizing the PM4 workbench sidebar with SharedUiWidgets and an interactive color legend.
+
+
 **PM4 Selection UI Hang Fix (2026-10-31, commit `0a18af2a`):**
 Resolved AppHangTransient on PM4 surface click (which previously froze the UI message loop for >5-10s causing Windows crash dialog).
 1. TryGetSelectedPm4RegionInfo in Pm4OverlayScene.Reports.cs: Cached output by selected object key with explicit invalidation on selection changes; restricted peer search to immediate 3x3 tile neighborhood around the selected object; replaced exhaustive NearestPointDistance position-ref iteration with direct bounding-box metadata lookup from Pm4OverlayObject.
