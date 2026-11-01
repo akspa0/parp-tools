@@ -27,3 +27,4 @@ internal sealed class Pm4SpatialIndex
         return Pm4SpatialMath.Get3x3Neighborhood(centerTileX, centerTileY);
     }
 }
+

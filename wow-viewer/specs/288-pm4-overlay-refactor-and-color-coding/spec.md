@@ -84,3 +84,4 @@ As a user working with PM4 collision data, I want a standardized, cohesive sideb
 - **Preserve Core IO Readers**: Do not modify raw PM4 chunk decoders in `WowViewer.Core.PM4.IO`. All refactoring is confined to viewer presentation and service layers.
 - **Performance Budget**: Ray picking must execute in $\le 1$ ms; frame rendering with 100k PM4 surfaces must achieve $\ge 60$ FPS on modern GPUs without UI-thread hitches.
 - **Backwards Compatibility**: All existing PM4 CLI tools and dataset exporters continue functioning without modification.
+

@@ -33,3 +33,4 @@ dotnet build I:/parp/parp-tools/wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj
 | **AC-101 (3)** | Elevation Height Gradient | `ComputeElevationColor()` provides a 4-stop continuous perceptual ramp from deep navy to cyan, green, amber, and pale gold. Tested in `ElevationRamp_ProducesContinuousGradientAcrossAltitude`. |
 | **AC-101 (4)** | Curation & Match Status | `ComputeMatchStatusColor()` isolates matched ADT placements (emerald), unmatched candidates (vermilion), and live duplicated models (gold). Tested in `MatchStatus_SeparatesMatchedFromUnmatched`. |
 | **AC-103** | Doodad collision hulls not mono-red | Verified: With default `InstanceCluster`, doodads (`Ck24 == 0`) are assigned distinct contrasting hues based on quantized world anchor coordinates and part indices. |
+

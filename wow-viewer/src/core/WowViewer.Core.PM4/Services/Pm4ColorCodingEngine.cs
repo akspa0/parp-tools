@@ -199,3 +199,4 @@ public sealed class Pm4ColorCodingEngine
         return new Vector3(r + m, g + m, b + m);
     }
 }
+

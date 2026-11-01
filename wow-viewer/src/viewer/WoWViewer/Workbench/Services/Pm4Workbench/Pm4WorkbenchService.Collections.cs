@@ -45,6 +45,10 @@ internal sealed partial class Pm4WorkbenchService
     {
         return mode switch
         {
+            Pm4OverlayColorMode.InstanceCluster => "Instance Cluster (unique contrasting hues)",
+            Pm4OverlayColorMode.SemanticCategory => "Semantic Surface Role (doodad, floors, walls)",
+            Pm4OverlayColorMode.ElevationRamp => "World Elevation Z Gradient",
+            Pm4OverlayColorMode.MatchStatus => "Curation Match Status (ADT vs PM4)",
             Pm4OverlayColorMode.PlacementZ => "Placement Z (MSUR._0x1C as float)",
             Pm4OverlayColorMode.Population => "Population: placed vs doodad",
             Pm4OverlayColorMode.Tile => "Tile",

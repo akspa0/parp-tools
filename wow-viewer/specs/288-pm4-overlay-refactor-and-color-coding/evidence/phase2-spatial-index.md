@@ -28,3 +28,4 @@ dotnet build I:/parp/parp-tools/wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj
 |---|---|---|
 | **AC-201** | `Pm4SpatialIndex` Service | Extracted spatial calculation and bounds culling into `Pm4SpatialMath` and `Pm4SpatialIndex`. Tested in `Pm4SpatialIndexTests`. |
 | **AC-203** | Zero Selection Regressions | Two-stage ray picking (tile AABB -> object AABB -> triangle intersection) preserved and verified via unit tests; 3x3 neighborhood search verified in bounds and at borders (clamping to [0, 63]). |
+

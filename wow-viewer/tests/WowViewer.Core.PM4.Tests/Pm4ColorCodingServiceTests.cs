@@ -65,3 +65,4 @@ public sealed class Pm4ColorCodingServiceTests
         Assert.True(Vector3.Distance(matched, duplicated) > 0.3f);
     }
 }
+

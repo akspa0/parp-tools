@@ -80,3 +80,4 @@ The service provides dedicated coloring strategies:
   - Multi-select surface class filter.
   - Curated duplication actions & live status telemetry.
 - Register controls in `UI-REFERENCE.md` and pass `Verify-UiReference.ps1`.
+

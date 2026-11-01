@@ -1268,6 +1268,37 @@ public sealed partial class Pm4OverlayScene
             {
                 maxEntries = Math.Max(1, maxEntries);
 
+                if (_pm4ColorMode == Pm4OverlayColorMode.InstanceCluster ||
+                    _pm4ColorMode == Pm4OverlayColorMode.SemanticCategory ||
+                    _pm4ColorMode == Pm4OverlayColorMode.ElevationRamp ||
+                    _pm4ColorMode == Pm4OverlayColorMode.MatchStatus)
+                {
+                    Pm4ColorPalette palette = _pm4ColorMode switch
+                    {
+                        Pm4OverlayColorMode.InstanceCluster => Pm4ColorPalette.InstanceCluster,
+                        Pm4OverlayColorMode.SemanticCategory => Pm4ColorPalette.SemanticCategory,
+                        Pm4OverlayColorMode.ElevationRamp => Pm4ColorPalette.ElevationRamp,
+                        _ => Pm4ColorPalette.MatchStatus
+                    };
+
+                    float minZ = float.IsFinite(_pm4MinObjectZ) ? _pm4MinObjectZ : 0f;
+                    float maxZ = float.IsFinite(_pm4MaxObjectZ) ? _pm4MaxObjectZ : (minZ + 100f);
+                    var svcEntries = Pm4ColorCodingService.Instance.GetLegendEntries(palette, null, minZ, maxZ);
+                    var entries = new List<Pm4ColorLegendEntry>(svcEntries.Count);
+                    foreach (var e in svcEntries)
+                    {
+                        entries.Add(new Pm4ColorLegendEntry(e.Label, e.Color, e.Count, false));
+                    }
+                    string desc = _pm4ColorMode switch
+                    {
+                        Pm4OverlayColorMode.InstanceCluster => "Unique contrasting hues per instance/cluster derived from spatial hash.",
+                        Pm4OverlayColorMode.SemanticCategory => "Semantic role classification (doodads, floors, walls, connectors).",
+                        Pm4OverlayColorMode.ElevationRamp => "Continuous 4-stop perceptual gradient by world elevation Z.",
+                        _ => "Curation match status between ADT placements and PM4 collision hulls."
+                    };
+                    return new Pm4ColorLegendInfo(_pm4ColorMode, _pm4ColorMode == Pm4OverlayColorMode.ElevationRamp, desc, entries.Count, entries);
+                }
+
                 if (_pm4ColorMode == Pm4OverlayColorMode.Height)
                 {
                     float minZ = float.IsFinite(_pm4MinObjectZ) ? _pm4MinObjectZ : 0f;
