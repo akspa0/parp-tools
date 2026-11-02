@@ -368,6 +368,15 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
 
                     WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, Pm4OverlayScene.BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform), out Vector3 boundsMin, out Vector3 boundsMax);
 
+                    // When Ck24 == 0 (M2 doodads), render individual object bounds.
+                    // Grouping by Ck24 is only valid for non-zero Ck24 (WMOs), where Ck24 is a unique building identity.
+                    if (obj.Ck24 == 0)
+                    {
+                        bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, new Vector3(0.65f, 0.65f, 0.75f));
+                        boundsPrepared++;
+                        continue;
+                    }
+
                     if (ck24Groups.TryGetValue(ck24Key, out var existing))
                     {
                         ck24Groups[ck24Key] = (Vector3.Min(existing.min, boundsMin), Vector3.Max(existing.max, boundsMax), existing.ck24Type);
@@ -452,7 +461,9 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
                         }
                     }
 
-                    if (surfaceVerts.Count < 3 || groupMaxZ - groupMinZ < 0.05f)
+                                        float spanX = MathF.Abs(groupParts.Max(p => p.BoundsMax.X) - groupParts.Min(p => p.BoundsMin.X));
+                    float spanY = MathF.Abs(groupParts.Max(p => p.BoundsMax.Y) - groupParts.Min(p => p.BoundsMin.Y));
+                    if (surfaceVerts.Count < 3 || groupMaxZ - groupMinZ < 0.05f || spanX > 120f || spanY > 120f)
                         continue;
 
                     Vector3 wallColor = overlay.GetPm4ObjectColor(tileKey, rep);

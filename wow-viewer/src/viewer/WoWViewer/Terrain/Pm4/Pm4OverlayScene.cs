@@ -163,7 +163,7 @@ public sealed partial class Pm4OverlayScene
     internal const int Pm4MaxTrianglesPerTile = int.MaxValue;
     private const int Pm4MaxPositionRefsTotal = int.MaxValue;
     private const int Pm4MaxPositionRefsPerTile = int.MaxValue;
-    internal const float Pm4MaxEdgeLength = 512f;
+    internal const float Pm4MaxEdgeLength = 64f;
     private const int Pm4MinCameraTileRadius = 1;
     private const int Pm4MaxCameraTileRadius = 2;
     private const double Pm4ExpandWindowThresholdMs = 120.0;

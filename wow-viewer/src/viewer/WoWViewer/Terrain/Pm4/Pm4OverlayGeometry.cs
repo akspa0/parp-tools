@@ -395,7 +395,7 @@ internal static class Pm4OverlayGeometry
 
                 foreach (List<MsurEntry> anchorGroup in anchorGroups)
                 {
-                    List<List<MsurEntry>> components = splitCk24ByConnectivity && allowNestedSeedSplits
+                    List<List<MsurEntry>> components = (splitCk24ByConnectivity || seedGroup.RequiresConnectivitySeedSplit)
                         ? SplitSurfaceGroupByConnectivity(pm4, anchorGroup)
                         : new List<List<MsurEntry>> { anchorGroup };
 
@@ -462,6 +462,17 @@ internal static class Pm4OverlayGeometry
                         float averageSurfaceHeight = component.Count > 0 ? component.Average(static surface => surface.Height) : 0f;
                         int totalIndexCount = component.Sum(static surface => surface.IndexCount);
 
+                        Vector3 componentPlacementAnchor = ComputeSurfaceRendererCentroid(
+                            pm4,
+                            component,
+                            tileX,
+                            tileY,
+                            linkedUseTileLocalCoordinates,
+                            ck24AxisConvention,
+                            linkedPlanarTransform,
+                            linkedWorldPivot,
+                            linkedWorldYawCorrection);
+
                         objects.Add(new Pm4OverlayObject(
                             sourcePath,
                             mshdGrouping.Field00,
@@ -481,7 +492,7 @@ internal static class Pm4OverlayGeometry
                             dominantAttributeMask,
                             dominantMscnRefIndex,
                             averageSurfaceHeight,
-                            linkedPlacementAnchor,
+                            componentPlacementAnchor,
                             linkedRendererFrameRotationRadians,
                             linkedPlanarTransform,
                             linkedConnectorKeys));
@@ -572,7 +583,7 @@ internal static class Pm4OverlayGeometry
         }
 
         foreach (List<Pm4IndexedSurface> component in linkedComponents.OrderBy(component => component.Min(entry => entry.SurfaceIndex)))
-            groups.Add(component);
+            groups.AddRange(SplitIndexedSurfaceGroupByConnectivity(pm4, component));
 
         if (unlinked.Count > 0)
             groups.Add(unlinked);
@@ -590,7 +601,7 @@ internal static class Pm4OverlayGeometry
 
         var groups = new List<List<Pm4IndexedSurface>>();
         foreach (List<Pm4IndexedSurface> component in linkedComponents.OrderBy(component => component.Min(entry => entry.SurfaceIndex)))
-            groups.Add(component);
+            groups.AddRange(SplitIndexedSurfaceGroupByConnectivity(pm4, component));
 
         if (unlinked.Count > 0)
             groups.AddRange(SplitIndexedSurfaceGroupByConnectivity(pm4, unlinked));
