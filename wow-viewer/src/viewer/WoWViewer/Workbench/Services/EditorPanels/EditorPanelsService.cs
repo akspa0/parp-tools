@@ -857,7 +857,7 @@ internal sealed partial class EditorPanelsService
             if (k > 0) ImGui.SameLine();
             bool isFilterActive = _rosettaKindFilter == k;
             if (isFilterActive)
-                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.6f, 0.9f, 0.8f));
+                ImGui.PushStyleColor(ImGuiCol.Button, UiTokens.BrassDim);
             if (ImGui.Button(kindFilters[k]))
             {
                 _rosettaKindFilter = k;

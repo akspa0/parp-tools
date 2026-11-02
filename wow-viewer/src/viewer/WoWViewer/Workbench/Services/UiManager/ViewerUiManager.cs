@@ -21,6 +21,9 @@ internal sealed partial class ViewerUiManager
     private bool _chatCollapsed = true;
     private bool _rightDockOpen;
     private float _rightDockWidth = 360f;
+    private bool _leftDockOpen;
+    private float _leftDockWidth = 360f;
+    internal LeftPanel ActiveLeftPanel { get; private set; } = LeftPanel.Workspace;
     private float _appliedFontScale = -1f;
     private float _appliedStyleScale = -1f;
     internal ViewerUiManager(IViewerAppHost host)
@@ -94,7 +97,8 @@ internal sealed partial class ViewerUiManager
         Layout = new UiLayout(display, _host.HideUiChrome, _host.ShowLeftSidebar, _host.ShowRightSidebar,
             _host.LeftSidebarWidth, _host.RightSidebarWidth, false,
             _minimapVisible, _minimapCollapsed, _host.SqlSpawnStreaming.ChatVisible,
-            _chatCollapsed, scale, _rightDockOpen, _rightDockWidth, MeasureFooterRow(fontScale));
+            _chatCollapsed, scale, _rightDockOpen, _rightDockWidth, MeasureFooterRow(fontScale),
+            _leftDockOpen, _leftDockWidth);
     }
 
     /// <summary>
@@ -123,13 +127,7 @@ internal sealed partial class ViewerUiManager
         int count = WorkbenchNavigator.GetPageLabels(destination).Length;
         _host.ActiveBottomTabIndex = Math.Clamp(page < 0 ? _pages[(int)Destination] : page, 0, Math.Max(0, count - 1));
         _host.ShowRightSidebar = true;
-        // The destination window owns the right side on Editor/Archaeology; close the viewer
-        // dock so the two surfaces cannot overlap, and ensure the destination window opens.
-        if (destination != WorkbenchTab.Viewer)
-        {
-            _rightDockOpen = false;
-            _actionBars.OpenDestinationWindow();
-        }
+        _rightDockOpen = true;
         SaveLayout();
     }
 
@@ -180,38 +178,59 @@ internal sealed partial class ViewerUiManager
 
     internal bool RightDockOpen => _rightDockOpen;
 
+    internal void OpenLeftDock(LeftPanel panel)
+    {
+        ActiveLeftPanel = panel;
+        _leftDockOpen = true;
+        _host.ShowLeftSidebar = true;
+        SaveLayout();
+    }
+
+    internal void ToggleLeftDock(LeftPanel panel)
+    {
+        if (_leftDockOpen && ActiveLeftPanel == panel)
+        {
+            _leftDockOpen = false;
+        }
+        else
+        {
+            ActiveLeftPanel = panel;
+            _leftDockOpen = true;
+            _host.ShowLeftSidebar = true;
+        }
+        SaveLayout();
+    }
+
+    internal void CloseLeftDock()
+    {
+        _leftDockOpen = false;
+        SaveLayout();
+    }
+
+    internal bool LeftDockOpen => _leftDockOpen;
+
     internal void OpenSceneTools(int page = 0)
     {
         SceneToolsPage = Math.Clamp(page, 0, 1);
-        SceneToolsVisible = true;
-        Navigate(WorkbenchTab.Viewer);
-        _host.ShowLeftSidebar = true;
-        _actionBars.OpenSceneTool(SceneToolsPage);
+        OpenLeftDock(page == 1 ? LeftPanel.Capture : LeftPanel.Taxi);
     }
 
     internal void ToggleSceneToolsWindow(int page)
     {
         SceneToolsPage = Math.Clamp(page, 0, 1);
-        SceneToolsVisible = true;
-        _host.ShowLeftSidebar = true;
-        _actionBars.ToggleSceneTool(SceneToolsPage);
-        SaveLayout();
+        ToggleLeftDock(page == 1 ? LeftPanel.Capture : LeftPanel.Taxi);
     }
 
-    internal bool IsMapsOpen => _actionBars.IsMapsOpen;
-    internal void OpenMapsWindow() => _actionBars.OpenMapsWindow();
-    internal void CloseMapsWindow() => _actionBars.CloseMapsWindow();
-    internal void OpenOptions() => _actionBars.OpenOptionsWindow();
-    internal void OpenLayersWindow() => _actionBars.OpenLayersWindow();
-    internal void ToggleLayersWindow() => _actionBars.ToggleLayersWindow();
-    internal bool IsLayersOpen => _actionBars.IsLayersOpen;
-    internal void ToggleOptions() => _actionBars.ToggleOptionsWindow();
-    internal void OpenWorkspaceWindow() => _actionBars.OpenWorkspaceWindow();
-    internal void OpenDestinationPage(WorkbenchTab destination, int page = -1)
-    {
-        Navigate(destination, page);
-        _actionBars.OpenDestinationWindow();
-    }
+    internal bool IsMapsOpen => _leftDockOpen && ActiveLeftPanel == LeftPanel.Maps;
+    internal void OpenMapsWindow() => OpenLeftDock(LeftPanel.Maps);
+    internal void CloseMapsWindow() { if (ActiveLeftPanel == LeftPanel.Maps) CloseLeftDock(); }
+    internal void OpenOptions() => OpenLeftDock(LeftPanel.Options);
+    internal void OpenLayersWindow() => OpenLeftDock(LeftPanel.Layers);
+    internal void ToggleLayersWindow() => ToggleLeftDock(LeftPanel.Layers);
+    internal bool IsLayersOpen => _leftDockOpen && ActiveLeftPanel == LeftPanel.Layers;
+    internal void ToggleOptions() => ToggleLeftDock(LeftPanel.Options);
+    internal void OpenWorkspaceWindow() => OpenLeftDock(LeftPanel.Workspace);
+    internal void OpenDestinationPage(WorkbenchTab destination, int page = -1) => Navigate(destination, page);
     internal void SelectDestinationPage(int page)
     {
         int count = WorkbenchNavigator.GetPageLabels(Destination).Length;
@@ -268,6 +287,8 @@ internal sealed partial class ViewerUiManager
                 if (ImGui.BeginMenuBar()) { _host.MainMenuBar.DrawContent(); ImGui.EndMenuBar(); }
             }, ImGuiWindowFlags.MenuBar);
             DrawRegion(UiRegion.LeftSidebar, "##UiLeftSidebar", DrawLeft);
+            DrawRegion(UiRegion.LeftDock, "##UiLeftDock", DrawLeftDock,
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
             DrawRegion(UiRegion.RightSidebar, "##UiRightSidebar", DrawRight);
             DrawRegion(UiRegion.RightDock, "##UiRightDock", DrawRightDock,
                 ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
@@ -381,6 +402,34 @@ internal sealed partial class ViewerUiManager
         _actionBars.DrawLeftBar();
     }
 
+    private void DrawLeftDock()
+    {
+        float scale = MathF.Max(1f, Layout.Scale);
+        float grip = 6f * scale;
+        Vector2 origin = ImGui.GetCursorPos();
+        Vector2 available = ImGui.GetContentRegionAvail();
+
+        ImGui.SetCursorPos(origin);
+        ImGui.BeginChild("##LeftDockBody", new Vector2(MathF.Max(1f, available.X - grip), MathF.Max(1f, available.Y)), false);
+        _host.WorkbenchPanels.DrawLeftContent(ActiveLeftPanel);
+        ImGui.EndChild();
+
+        // A thin splitter on the right edge. Dragging it right widens the dock; the width is
+        // persisted so the operator's choice survives a restart.
+        ImGui.SetCursorPos(origin + new Vector2(available.X - grip, 0f));
+        ImGui.InvisibleButton("##LeftDockSplitter", new Vector2(grip, MathF.Max(1f, available.Y)));
+        bool gripActive = ImGui.IsItemActive();
+        if (ImGui.IsItemHovered() || gripActive)
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+            ImGui.GetWindowDrawList().AddRectFilled(ImGui.GetItemRectMin(), ImGui.GetItemRectMax(),
+                ImGui.ColorConvertFloat4ToU32(UiTokens.BrassDim));
+        }
+        if (gripActive)
+            _leftDockWidth = Math.Clamp(_leftDockWidth + ImGui.GetIO().MouseDelta.X / scale, 240f, 720f);
+        if (ImGui.IsItemDeactivated()) SaveLayout();
+    }
+
     private void DrawRight()
     {
         _actionBars.DrawRightBar();
@@ -399,7 +448,12 @@ internal sealed partial class ViewerUiManager
         // every widget after the selector was laid out below the window and the panels looked dead.
         ImGui.SetCursorPos(origin + new Vector2(grip, 0f));
         ImGui.BeginChild("##RightDockBody", new Vector2(MathF.Max(1f, available.X - grip), MathF.Max(1f, available.Y)), false);
-        _host.WorkbenchPanels.DrawViewerContent(ViewerPanel);
+        if (Destination == WorkbenchTab.Editor)
+            DrawEditorDockContent();
+        else if (Destination == WorkbenchTab.Archaeology)
+            DrawArchaeologyDockContent();
+        else
+            _host.WorkbenchPanels.DrawViewerContent(ViewerPanel);
         ImGui.EndChild();
 
         // A thin splitter on the left edge. Dragging it left widens the dock; the width is
@@ -416,6 +470,27 @@ internal sealed partial class ViewerUiManager
         if (gripActive)
             _rightDockWidth = Math.Clamp(_rightDockWidth - ImGui.GetIO().MouseDelta.X / scale, 240f, 720f);
         if (ImGui.IsItemDeactivated()) SaveLayout();
+    }
+
+    private void DrawEditorDockContent()
+    {
+        string[] pages = WorkbenchNavigator.GetPageLabels(WorkbenchTab.Editor);
+        int page = WorkbenchPanelsService.DrawPageCombo("##EditorDockPage", pages, _host.ActiveBottomTabIndex);
+        if (page != _host.ActiveBottomTabIndex)
+            SelectDestinationPage(page);
+
+        _host.NavigatorPanel.DrawProjectOutputContent();
+        _host.WorkbenchPanels.DrawDestinationContent(WorkbenchTab.Editor);
+    }
+
+    private void DrawArchaeologyDockContent()
+    {
+        string[] pages = WorkbenchNavigator.GetPageLabels(WorkbenchTab.Archaeology);
+        int page = WorkbenchPanelsService.DrawPageCombo("##ArchaeologyDockPage", pages, _host.ActiveBottomTabIndex);
+        if (page != _host.ActiveBottomTabIndex)
+            SelectDestinationPage(page);
+
+        _host.WorkbenchPanels.DrawDestinationContent(WorkbenchTab.Archaeology);
     }
 
     private void DrawBottom()

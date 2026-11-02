@@ -1,5 +1,13 @@
 # Active Context — wow-viewer
 
+**Spec 291 Implementation Complete & Verified (2026-11-02):** [Spec 291 Dual Sidebar Docking, Destination Integration & UI Harmonization](../specs/291-ui-sidebar-consolidation/spec.md)
+Comprehensive UI audit, deduplication, and unification of viewer, editor, options, and archaeology workbenches into anchored dual-dock sidebars:
+1. **Dual Dock Architecture (`UiRegion.LeftDock` & `UiRegion.RightDock`)**: Added `UiRegion.LeftDock` anchored to the left action rail for Workspace, Files, Maps, Assets, Taxi, Capture, Diagnostics, Options, and Layers, eliminating floating tool window clutter over the 3D viewport. Includes interactive edge splitter with persisted width.
+2. **Destination Integration**: Retired the lower-left floating `destination` window. Editor and Archaeology workbenches dock directly inside `UiRegion.RightDock` (and left sidebar) with seamless bottom-bar destination switching.
+3. **Deduplication & Streamlining**: Removed redundant `Pages` button from the bottom action bar; streamlined `ViewerPanel.World` from 4 to 3 pages (replacing duplicate Exports tab with action button linking to `ViewerPanel.Exports`); streamlined Model Info in Inspector; centralized Terrain File Operations (Alpha, Heightmap 257, MCCV) and DAT exports into `ExportWorkbenchService`; cleaned up duplicate capture and vestigial buttons in Archaeology.
+4. **Design System & Registry**: Standardized bespoke styling in `AssetCatalogView.cs`, `ArchaeologyPanelService.PhaseLayers.cs`, and `EditorPanelsService.cs` using `UiTokens`; updated `ui-controls.json` and regenerated `UI-REFERENCE.md`.
+5. **Validation**: `Verify-UiReference.ps1` passed with 0 errors and 0 warnings (139 inventory rows, 129 registry entries); full project build succeeded with 0 errors; all targeted unit tests passed (17 `ViewerFooterLayoutTests`, 5 `UiControlDocumentationTests`). Receipt in `specs/291-ui-sidebar-consolidation/evidence/final-receipt.md`.
+
 **Spec 290 Implementation Complete & Verified (2026-11-01):** [Spec 290 Unified Export Workbench & Panel Docking](../specs/290-unified-export-workbench-and-panel-docking/spec.md)
 Centralized all PM4, World, Model, and ML exports into dedicated right sidebar workbench (`ViewerPanel.Exports`), and repositioned bottom destination windows:
 1. **Consolidated Export Hub (`ExportWorkbenchService`)**: Unifies PM4 collision & navigation exports (JSON, OBJ Set, LLM Evidence Bundle, Visible Overlay Report, Zarr v60 archive, single-object JSON), World & Terrain exports, Model & Asset mesh exports, and Archaeology/ML dataset exports into a single authoritative right-dock panel.

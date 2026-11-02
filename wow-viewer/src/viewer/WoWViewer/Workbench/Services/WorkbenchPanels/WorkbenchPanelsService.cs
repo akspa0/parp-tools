@@ -28,14 +28,20 @@ internal sealed partial class WorkbenchPanelsService
                 {
                     case 0: DrawUnifiedInspectorContent(); break;
                     case 1: _modelInspector.DrawModelAnimationsSubTab(); break;
-                    case 2: _modelInspector.DrawModelInfoPanelContent(); _modelInspector.DrawModelActionsSubTab(); _mainMenuBar.DrawModelExportContent(); break;
+                    case 2:
+                        _modelInspector.DrawModelInfoPanelContent();
+                        _modelInspector.DrawModelActionsSubTab();
+                        ImGui.Spacing();
+                        if (SharedUiWidgets.ActionButton("Open Model Exports..."))
+                            ui.OpenViewer(ViewerPanel.Exports);
+                        break;
                     case 3: _investigation.DrawVisualInvestigationToolbox(showWorldObjectRangeControls: _worldScene != null); break;
                     case 4: _investigation.DrawMcnkFlagOverlayControls(); break;
                     case 5: DrawInspectorWorldContextContent(); break;
                 }
                 break;
             case ViewerPanel.World:
-                int world = DrawPageCombo("##WorldPage", ["Objects", "Placements", "LOD & Budget", "Exports"], ui.WorldPage);
+                int world = DrawPageCombo("##WorldPage", ["Objects", "Placements", "LOD & Budget"], ui.WorldPage);
                 if (world != ui.WorldPage) ui.OpenViewer(panel, world);
                 if (_worldScene == null)
                 {
@@ -46,8 +52,13 @@ internal sealed partial class WorkbenchPanelsService
                 {
                     case 0: _worldObjectsPanel.DrawWorldObjectsPanelContent(); break;
                     case 1: _worldObjectsPanel.DrawWorldPlacementsSubTab(); break;
-                    case 2: DrawWorldLodSubTab(); break;
-                    case 3: _mainMenuBar.DrawWorldExportContent(); break;
+                    case 2:
+                        DrawWorldLodSubTab();
+                        ImGui.Spacing();
+                        if (SharedUiWidgets.ActionButton("Open World Exports..."))
+                            ui.OpenViewer(ViewerPanel.Exports);
+                        break;
+
                 }
                 break;
             case ViewerPanel.Gossip:
@@ -82,6 +93,40 @@ internal sealed partial class WorkbenchPanelsService
             else SharedUiWidgets.DrawEmptyState("No world loaded", "Load a world to use the taxi route tools.");
         }
         else DrawCapturePanelContent();
+    }
+
+    internal void DrawLeftContent(LeftPanel panel)
+    {
+        switch (panel)
+        {
+            case LeftPanel.Workspace:
+                _host.NavigatorPanel.DrawWorkspaceContent();
+                break;
+            case LeftPanel.Files:
+                _host.NavigatorPanel.DrawFilesContent();
+                break;
+            case LeftPanel.Maps:
+                _host.NavigatorPanel.DrawMapsContent();
+                break;
+            case LeftPanel.Assets:
+                DrawAssetsContent();
+                break;
+            case LeftPanel.Taxi:
+                DrawTaxiWindowContent();
+                break;
+            case LeftPanel.Capture:
+                _host.DrawCapturePanelContent();
+                break;
+            case LeftPanel.Diagnostics:
+                _host.NavigatorPanel.DrawDiagnosticsContent();
+                break;
+            case LeftPanel.Options:
+                _host.ViewerChrome.DrawOptionsContent();
+                break;
+            case LeftPanel.Layers:
+                _host.TerrainLayersPanel.DrawLayersPanelContent();
+                break;
+        }
     }
 
     internal void DrawTaxiWindowContent()

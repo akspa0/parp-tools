@@ -29,55 +29,50 @@ internal sealed class ViewerActionBarsService
 
     internal ViewerActionBarsService(IViewerAppHost host) => _host = host;
 
-    internal bool IsCaptureOpen => _windows["capture"].Open;
-    internal bool IsOptionsOpen => _windows["options"].Open;
-    internal bool IsLayersOpen => _windows["layers"].Open;
-    internal void OpenLayersWindow() => _windows["layers"].Open = true;
-    internal void ToggleLayersWindow() => ToggleWindow("layers");
-    internal bool IsMapsOpen => _windows["maps"].Open;
-    internal void OpenMapsWindow() => _windows["maps"].Open = true;
-    internal void CloseMapsWindow() => _windows["maps"].Open = false;
-    internal void OpenOptionsWindow() => _windows["options"].Open = true;
-    internal void ToggleOptionsWindow() => ToggleWindow("options");
+    internal bool IsCaptureOpen => _host.UiManager.LeftDockOpen && _host.UiManager.ActiveLeftPanel == LeftPanel.Capture;
+    internal bool IsOptionsOpen => _host.UiManager.LeftDockOpen && _host.UiManager.ActiveLeftPanel == LeftPanel.Options;
+    internal bool IsLayersOpen => _host.UiManager.LeftDockOpen && _host.UiManager.ActiveLeftPanel == LeftPanel.Layers;
+    internal void OpenLayersWindow() => _host.UiManager.OpenLeftDock(LeftPanel.Layers);
+    internal void ToggleLayersWindow() => _host.UiManager.ToggleLeftDock(LeftPanel.Layers);
+    internal bool IsMapsOpen => _host.UiManager.LeftDockOpen && _host.UiManager.ActiveLeftPanel == LeftPanel.Maps;
+    internal void OpenMapsWindow() => _host.UiManager.OpenLeftDock(LeftPanel.Maps);
+    internal void CloseMapsWindow() { if (_host.UiManager.ActiveLeftPanel == LeftPanel.Maps) _host.UiManager.CloseLeftDock(); }
+    internal void OpenOptionsWindow() => _host.UiManager.OpenLeftDock(LeftPanel.Options);
+    internal void ToggleOptionsWindow() => _host.UiManager.ToggleLeftDock(LeftPanel.Options);
     internal void CloseAll()
     {
-        foreach (var window in _windows.Values) window.Open = false;
+        _host.UiManager.CloseLeftDock();
+        _host.UiManager.CloseRightDock();
     }
 
     internal void OpenViewerPanel(ViewerPanel panel) => _host.UiManager.OpenViewerDock(panel);
 
-    internal void OpenSceneTool(int page)
-    {
-        _windows[page == 1 ? "capture" : "taxi"].Open = true;
-    }
-
-    internal void ToggleSceneTool(int page)
-    {
-        string key = page == 1 ? "capture" : "taxi";
-        _windows[key].Open = !_windows[key].Open;
-    }
+    internal void OpenSceneTool(int page) => _host.UiManager.OpenLeftDock(page == 1 ? LeftPanel.Capture : LeftPanel.Taxi);
+    internal void ToggleSceneTool(int page) => _host.UiManager.ToggleLeftDock(page == 1 ? LeftPanel.Capture : LeftPanel.Taxi);
 
     internal void OpenDestinationWindow()
     {
         if (_host.ActiveTopTab == WorkbenchTab.Viewer)
             OpenViewerPanel(_host.UiManager.ViewerPanel);
         else
-            _windows["destination"].Open = true;
+            _host.UiManager.Navigate(_host.ActiveTopTab);
     }
-    internal void OpenWorkspaceWindow() => _windows["workspace"].Open = true;
+    internal void OpenWorkspaceWindow() => _host.UiManager.OpenLeftDock(LeftPanel.Workspace);
 
     internal void DrawLeftBar()
     {
         float scale = MathF.Max(1f, _host.UiManager.Layout.Scale);
         var size = new Vector2(34f * scale, 34f * scale);
-        DrawActionBarIcon("Workspace", "ActionWorkspace", IconKind.Workspace, size, "Open camera, fog, and source controls", () => ToggleWindow("workspace"));
-        DrawActionBarIcon("File Browser", "ActionFiles", IconKind.Open, size, "Browse files in the active client", () => ToggleWindow("files"));
-        DrawActionBarIcon("Maps", "ActionMaps", IconKind.Maps, size, "Browse maps and choose a spawn point", () => ToggleWindow("maps"));
-        DrawActionBarIcon("Assets", "ActionAssets", IconKind.Assets, size, "Browse and preview assets", () => ToggleWindow("assets"));
+        bool dockOpen = _host.UiManager.LeftDockOpen;
+        LeftPanel active = _host.UiManager.ActiveLeftPanel;
+        DrawActionBarIcon("Workspace", "ActionWorkspace", IconKind.Workspace, size, "Open camera, fog, and source controls", () => _host.UiManager.ToggleLeftDock(LeftPanel.Workspace), dockOpen && active == LeftPanel.Workspace);
+        DrawActionBarIcon("File Browser", "ActionFiles", IconKind.Open, size, "Browse files in the active client", () => _host.UiManager.ToggleLeftDock(LeftPanel.Files), dockOpen && active == LeftPanel.Files);
+        DrawActionBarIcon("Maps", "ActionMaps", IconKind.Maps, size, "Browse maps and choose a spawn point", () => _host.UiManager.ToggleLeftDock(LeftPanel.Maps), dockOpen && active == LeftPanel.Maps);
+        DrawActionBarIcon("Assets", "ActionAssets", IconKind.Assets, size, "Browse and preview assets", () => _host.UiManager.ToggleLeftDock(LeftPanel.Assets), dockOpen && active == LeftPanel.Assets);
         ImGui.Separator();
-        DrawActionBarIcon("Taxi", "ActionTaxi", IconKind.Taxi, size, "Open taxi and route tools", () => _host.UiManager.ToggleSceneToolsWindow(0));
-        DrawActionBarIcon("Capture", "ActionCapture", IconKind.Capture, size, "Open camera and capture tools", () => _host.UiManager.ToggleSceneToolsWindow(1));
-        DrawActionBarIcon("Diagnostics", "ActionDiagnostics", IconKind.Diagnostics, size, "Open runtime statistics, logs, and performance controls", () => ToggleWindow("diagnostics"));
+        DrawActionBarIcon("Taxi", "ActionTaxi", IconKind.Taxi, size, "Open taxi and route tools", () => _host.UiManager.ToggleLeftDock(LeftPanel.Taxi), dockOpen && active == LeftPanel.Taxi);
+        DrawActionBarIcon("Capture", "ActionCapture", IconKind.Capture, size, "Open camera and capture tools", () => _host.UiManager.ToggleLeftDock(LeftPanel.Capture), dockOpen && active == LeftPanel.Capture);
+        DrawActionBarIcon("Diagnostics", "ActionDiagnostics", IconKind.Diagnostics, size, "Open runtime statistics, logs, and performance controls", () => _host.UiManager.ToggleLeftDock(LeftPanel.Diagnostics), dockOpen && active == LeftPanel.Diagnostics);
     }
 
     internal void DrawRightBar()
@@ -112,56 +107,12 @@ internal sealed class ViewerActionBarsService
                 _host.UiManager.Popups.Request(ViewerUiManager.MapSpawnsPopupId);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Choose a map spawn or open population controls");
         }
-
-        FooterItemPlacement pages = fit.Get("bottom-pages");
-        if (pages.Visible)
-        {
-            ImGui.SetCursorPos(new Vector2(originX + pages.X, y));
-            if (ImGui.Button("Pages##BottomPages", new Vector2(pages.Width, height))) OpenDestinationWindow();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open pages for the selected preset");
-        }
         // No bar-toggle buttons: Tab hides all chrome and [ / ] toggle the rails from the keyboard.
     }
 
     internal void DrawToolWindows()
     {
-        float scale = MathF.Max(1f, _host.UiManager.Layout.Scale);
-        Vector2 display = _host.UiManager.DisplaySize;
-        float rail = 44f * scale;
-        float mapHeight = _host.UiManager.MinimapVisible ? _host.UiManager.GetRegionRect(UiRegion.Minimap).Height : 0f;
-        float top = 36f * scale;
-        DrawToolWindow("workspace", "Workspace", new(rail + 12f * scale, top), new(390f, 500f), _host.NavigatorPanel.DrawWorkspaceContent);
-        DrawToolWindow("files", "File Browser", new(rail + 12f * scale, top), new(520f, 560f), _host.NavigatorPanel.DrawFilesContent);
-        DrawToolWindow("maps", "Maps", new(rail + 12f * scale, top), new(520f, 560f), _host.NavigatorPanel.DrawMapsContent);
-        DrawToolWindow("diagnostics", "Diagnostics", new(rail + 12f * scale, top), new(520f, 560f), _host.NavigatorPanel.DrawDiagnosticsContent);
-        DrawToolWindow("options", "Options", new(rail + 12f * scale, top), new(430f, 560f), _host.ViewerChrome.DrawOptionsContent);
-        DrawToolWindow("layers", "Terrain Layers", new(rail + 12f * scale, top + 130f * scale), new(460f, 540f), _host.TerrainLayersPanel.DrawLayersPanelContent);
-        DrawToolWindow("assets", "Asset Browser", new(rail + 12f * scale, top + 40f * scale), new(500f, 650f),
-            _host.WorkbenchPanels.DrawAssetsContent);
-        DrawToolWindow("taxi", "Taxi & Routes", new(rail + 12f * scale, top + 70f * scale), new(500f, 600f),
-            _host.WorkbenchPanels.DrawTaxiWindowContent);
-        DrawToolWindow("capture", "Capture", new(rail + 12f * scale, top + 100f * scale), new(520f, 620f),
-            _host.DrawCapturePanelContent);
-
-        // Inspector/World/Model/PM4 are docked in UiRegion.RightDock, not floating windows.
-        float chatWidth = _host.SqlSpawnStreaming.ChatVisible ? 440f * scale : 0f;
-        float destX = Math.Min(rail + 12f * scale + chatWidth, Math.Max(rail + 12f * scale, display.X - 520f * scale - 50f * scale));
-        float destY = Math.Max(top + 8f * scale, display.Y - 640f * scale);
-        if (_host.ActiveTopTab != WorkbenchTab.Viewer)
-            DrawToolWindow("destination", _host.ActiveTopTab.ToString(), new(destX, destY), new(500f, 600f),
-                DrawDestinationContent);
-    }
-
-    private void DrawDestinationContent()
-    {
-        string[] pages = WorkbenchNavigator.GetPageLabels(_host.ActiveTopTab);
-        int page = WorkbenchPanelsService.DrawPageCombo("##ActionDestinationPage", pages, _host.ActiveBottomTabIndex);
-        if (page != _host.ActiveBottomTabIndex)
-            _host.UiManager.SelectDestinationPage(page);
-
-        if (_host.ActiveTopTab == WorkbenchTab.Editor)
-            _host.NavigatorPanel.DrawProjectOutputContent();
-        _host.WorkbenchPanels.DrawDestinationContent(_host.ActiveTopTab);
+        // Spec 291: all left tools, options, and destinations dock inside UiRegion.LeftDock and UiRegion.RightDock.
     }
 
     private void ToggleWindow(string key) => _windows[key].Open = !_windows[key].Open;

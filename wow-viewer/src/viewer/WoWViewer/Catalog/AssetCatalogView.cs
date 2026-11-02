@@ -131,8 +131,8 @@ public class AssetCatalogView
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(16f, 14f));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 2f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 4f);
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0.04f, 0.05f, 0.09f, 0.985f));
-        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(0.95f, 0.79f, 0.28f, 0.98f));
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, UiTokens.Surface1);
+        ImGui.PushStyleColor(ImGuiCol.Border, UiTokens.Brass);
 
         ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration
             | ImGuiWindowFlags.AlwaysAutoResize

@@ -693,7 +693,7 @@ internal sealed partial class ArchaeologyPanelService
                 break;
 
             case PhaseLayerResolution.Unresolved:
-                ImGui.PushStyleColor(ImGuiCol.Text, 0xFF1A8CFF); // orange
+                ImGui.PushStyleColor(ImGuiCol.Text, UiTokens.Brass);
                 ImGui.TextUnformatted("map not found — the layer contributes nothing");
                 ImGui.PopStyleColor();
                 break;
@@ -740,7 +740,7 @@ internal sealed partial class ArchaeologyPanelService
                 }
                 else
                 {
-                    ImGui.PushStyleColor(ImGuiCol.Text, 0xFF1A8CFF); // orange
+                    ImGui.PushStyleColor(ImGuiCol.Text, UiTokens.Brass);
                     ImGui.TextUnformatted(
                         $"{donor.Count} tiles — none overlap the base map; set an offset, rotate, or align to see anything");
                     ImGui.PopStyleColor();

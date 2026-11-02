@@ -150,6 +150,7 @@ internal sealed class ExportWorkbenchService
     private void DrawWorldExportSection()
     {
         _host.MainMenuBar.DrawWorldExportContent();
+        _host.MainMenuBar.DrawTerrainFileOperationsContent();
     }
 
     private void DrawModelExportSection()

@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace WoWViewer;
 
-internal enum UiRegion { Scene, TopBar, BottomBar, StatusBar, LeftSidebar, RightSidebar, RightDock, Options, Minimap, Chat }
+internal enum UiRegion { Scene, TopBar, BottomBar, StatusBar, LeftSidebar, LeftDock, RightSidebar, RightDock, Options, Minimap, Chat }
 
 internal readonly record struct UiRect(float X, float Y, float Width, float Height)
 {
@@ -46,7 +46,8 @@ internal sealed class UiLayout
     public UiLayout(Vector2 display, bool hidden, bool left, bool right, float leftWidth, float rightWidth,
         bool options = false, bool minimapVisible = true, bool minimapCollapsed = false,
         bool chatVisible = true, bool chatCollapsed = false, float scale = 1f,
-        bool rightDockVisible = false, float rightDockWidth = 360f, float footerRowHeight = 0f)
+        bool rightDockVisible = false, float rightDockWidth = 360f, float footerRowHeight = 0f,
+        bool leftDockVisible = false, float leftDockWidth = 360f)
     {
         float w = float.IsFinite(display.X) ? Math.Max(0, display.X) : 0;
         float h = float.IsFinite(display.Y) ? Math.Max(0, display.Y) : 0;
@@ -88,13 +89,18 @@ internal sealed class UiLayout
         float dockWidth = Math.Clamp(rightDockWidth * s, minDock, maxDock);
         var rightDockRect = new UiRect(Math.Max(0f, w - rw - dockWidth), rightTop, dockWidth, rightHeight);
 
+        // The left dock is the workspace/files/maps/assets/taxi/capture/diagnostics/options home:
+        // to the right of the left icon rail, below top bar, above bottom bars.
+        float leftDockW = Math.Clamp(leftDockWidth * s, minDock, maxDock);
+        var leftDockRect = new UiRect(lw, top, leftDockW, sceneHeight);
+
         // Chat is lower-left game chrome. It is independent of the sidebars and remains readable
         // when either data panel is opened. It overlays the scene instead of stealing its columns.
         float chatDockHeight = chatCollapsed
             ? Math.Min(28f * s, sceneHeight)
             : Math.Min(176f * s, Math.Max(0, sceneHeight * 0.28f));
-        float chatDockX = lw + 10f * s;
-        float chatDockWidth = Math.Min(420f * s, Math.Max(0f, Math.Min(w * 0.34f, w - lw - rw - 20f * s)));
+        float chatDockX = (!hidden && left && leftDockVisible ? lw + leftDockW : lw) + 10f * s;
+        float chatDockWidth = Math.Min(420f * s, Math.Max(0f, Math.Min(w * 0.34f, w - chatDockX - rw - 20f * s)));
         float chatDockY = top + Math.Max(0, sceneHeight - chatDockHeight);
         var chatRect = new UiRect(chatDockX, chatDockY, chatDockWidth, chatDockHeight);
 
@@ -109,6 +115,7 @@ internal sealed class UiLayout
             [UiRegion.StatusBar] = new(new(0, h - status, w, status), true),
             [UiRegion.BottomBar] = new(new(0, h - status - bottom, w, bottom), !hidden),
             [UiRegion.LeftSidebar] = new(new(0, top, lw, sceneHeight), !hidden && left),
+            [UiRegion.LeftDock] = new(leftDockRect, !hidden && left && leftDockVisible),
             [UiRegion.RightSidebar] = new(new(w - rw, rightTop, rw, rightHeight), !hidden && right),
             [UiRegion.RightDock] = new(rightDockRect, !hidden && right && rightDockVisible),
             [UiRegion.Options] = new(new(ox, Math.Max(top, h - status - bottom - oh), ow, oh), !hidden && options),

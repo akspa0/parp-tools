@@ -437,11 +437,6 @@ internal sealed partial class ArchaeologyPanelService
 
     internal void DrawArchaeologyWorkbenchSubTabContent()
     {
-        // Cross-destination navigation only: PM4 is not an archaeology page.
-        if (ImGui.Button("Inspect PM4 in Viewer"))
-            _pm4Workbench.OpenPm4Workbench(Pm4WorkbenchTab.Selection);
-
-        ImGui.Separator();
         switch (_activeBottomTabIndex)
         {
             case 0:
@@ -476,9 +471,6 @@ internal sealed partial class ArchaeologyPanelService
                 DrawArcheologyPlaybackSubTab();
                 ImGui.Separator();
                 DrawArcheologyCaptureSubTab();
-                ImGui.Separator();
-                ImGui.SeparatorText("Camera Paths & Video Capture");
-                DrawCapturePanelContent();
                 break;
             case 4:
                 // Cartography (Spec 222 integration)

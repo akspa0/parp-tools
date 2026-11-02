@@ -123,14 +123,6 @@
       "visible": true
     },
     {
-      "id": "bottom-pages",
-      "label": "Pages",
-      "region": "Bottom action bar",
-      "shortcut": null,
-      "help": "Open the current preset's workbench pages.",
-      "visible": true
-    },
-    {
       "id": "about",
       "label": "About",
       "region": "Top menu > Help",
@@ -651,11 +643,27 @@
       "visible": true
     },
     {
+      "id": "open-model-exports",
+      "label": "Open Model Exports...",
+      "region": "Viewer > Inspector",
+      "shortcut": null,
+      "help": "Open the consolidated Export & Report Workbench for model exports.",
+      "visible": true
+    },
+    {
       "id": "open-selected",
       "label": "Open Selected",
       "region": "Left sidebar > File Browser",
       "shortcut": null,
       "help": "Open the selected file from the data source.",
+      "visible": true
+    },
+    {
+      "id": "open-world-exports",
+      "label": "Open World Exports...",
+      "region": "Viewer > World",
+      "shortcut": null,
+      "help": "Open the consolidated Export & Report Workbench for world exports.",
       "visible": true
     },
     {

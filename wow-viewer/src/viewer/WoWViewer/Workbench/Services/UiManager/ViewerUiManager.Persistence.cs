@@ -7,10 +7,9 @@ namespace WoWViewer;
 
 internal sealed partial class ViewerUiManager
 {
-    // v6 adds the docked right panel and starts the chat collapsed. Sidebars remain compact rails;
-    // chat/minimap are independently positioned game chrome, not columns between sidebars.
-    private const int LayoutVersion = 6;
-    private static readonly string LayoutPath = Path.Combine(SettingsDir, "ui-layout-v6.json");
+    // v7 adds the docked left panel and unifies destinations into sidebars.
+    private const int LayoutVersion = 7;
+    private static readonly string LayoutPath = Path.Combine(SettingsDir, "ui-layout-v7.json");
     private bool _layoutLoaded;
     private readonly int[] _pages = [0, 0, 4];
 
@@ -29,6 +28,9 @@ internal sealed partial class ViewerUiManager
         public bool ChatCollapsed { get; set; } = true;
         public bool RightDockOpen { get; set; }
         public float RightDockWidth { get; set; } = 360f;
+        public bool LeftDockOpen { get; set; }
+        public float LeftDockWidth { get; set; } = 360f;
+        public LeftPanel LeftPanel { get; set; } = LeftPanel.Workspace;
     }
 
     internal void LoadLayout(float width)
@@ -51,6 +53,9 @@ internal sealed partial class ViewerUiManager
             _chatCollapsed = saved.ChatCollapsed;
             _rightDockOpen = saved.RightDockOpen;
             if (float.IsFinite(saved.RightDockWidth)) _rightDockWidth = Math.Clamp(saved.RightDockWidth, 240f, 720f);
+            _leftDockOpen = saved.LeftDockOpen;
+            if (float.IsFinite(saved.LeftDockWidth)) _leftDockWidth = Math.Clamp(saved.LeftDockWidth, 240f, 720f);
+            ActiveLeftPanel = Enum.IsDefined(saved.LeftPanel) ? saved.LeftPanel : LeftPanel.Workspace;
             _host.ActiveTopTab = Enum.IsDefined(saved.Destination) ? saved.Destination : WorkbenchTab.Viewer;
             ViewerPanel = Enum.IsDefined(saved.ViewerPanel) ? saved.ViewerPanel : ViewerPanel.Inspector;
             if (saved.Pages is { Length: 3 })
@@ -62,8 +67,6 @@ internal sealed partial class ViewerUiManager
                 WorkbenchTab.Archaeology => WorkspaceMode.Archaeology,
                 _ => WorkspaceMode.Viewer,
             };
-            if (Destination != WorkbenchTab.Viewer)
-                _actionBars.OpenDestinationWindow();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -83,6 +86,9 @@ internal sealed partial class ViewerUiManager
         _chatCollapsed = true;
         _rightDockOpen = false;
         _rightDockWidth = 360f;
+        _leftDockOpen = false;
+        _leftDockWidth = 360f;
+        ActiveLeftPanel = LeftPanel.Workspace;
         _host.ActiveTopTab = WorkbenchTab.Viewer;
         _host.ActiveBottomTabIndex = 0;
         _host.ActivePm4TabIndex = 0;
@@ -113,6 +119,8 @@ internal sealed partial class ViewerUiManager
                 MinimapVisible = _minimapVisible, MinimapCollapsed = _minimapCollapsed,
                 ChatCollapsed = _chatCollapsed,
                 RightDockOpen = _rightDockOpen, RightDockWidth = _rightDockWidth,
+                LeftDockOpen = _leftDockOpen, LeftDockWidth = _leftDockWidth,
+                LeftPanel = ActiveLeftPanel,
             };
             string pending = LayoutPath + ".pending";
             File.WriteAllText(pending, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true }));
