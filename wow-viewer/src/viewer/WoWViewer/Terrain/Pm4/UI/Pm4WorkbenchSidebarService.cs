@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using ImGuiNET;
+using WoWViewer;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
 using WoWViewer.Terrain.Pm4;
@@ -335,6 +337,9 @@ internal sealed class Pm4WorkbenchSidebarService
         }
     }
 
+    private List<Pm4DirectMatchResult> _activeMatches = new();
+    private uint _activeMatchCk24;
+
     /// <summary>
     /// Renders the Live PM4 Alignment & Model Duplication section (T018).
     /// </summary>
@@ -347,8 +352,8 @@ internal sealed class Pm4WorkbenchSidebarService
             return;
 
         ImGui.TextWrapped(
-            "Magnetize 2021 reconstructive ADT object placements to authoritative PM4 collision hulls on-the-fly, " +
-            "using PM4 bounding hulls, centroids, and MSUR.0x1C placement Z as the ground truth template.");
+            "Magnetize reconstructive ADT object placements to authoritative PM4 collision hulls, " +
+            "pair models to hulls via Key+Click human teaching, and automate footprint placement.");
         ImGui.Spacing();
 
         if (worldScene == null)
@@ -370,6 +375,32 @@ internal sealed class Pm4WorkbenchSidebarService
             }
         }
 
+        (int tileX, int tileY, uint ck24, int objectPart)? selectedPm4Key = overlay.SelectedPm4ObjectKey;
+        Pm4OverlayObject? selectedPm4Obj = null;
+        int pm4TileX = 0;
+        int pm4TileY = 0;
+
+        if (selectedPm4Key.HasValue)
+        {
+            pm4TileX = selectedPm4Key.Value.tileX;
+            pm4TileY = selectedPm4Key.Value.tileY;
+            if (!hasTile)
+            {
+                activeTileX = pm4TileX;
+                activeTileY = pm4TileY;
+                hasTile = true;
+            }
+
+            if (!overlay._pm4ObjectLookup.TryGetValue(selectedPm4Key.Value, out selectedPm4Obj))
+            {
+                if (overlay._pm4TileObjects.TryGetValue((pm4TileX, pm4TileY), out var list))
+                {
+                    selectedPm4Obj = list.FirstOrDefault(o => o.Ck24 == selectedPm4Key.Value.ck24 && o.ObjectPartId == selectedPm4Key.Value.objectPart)
+                                  ?? list.FirstOrDefault(o => o.Ck24 == selectedPm4Key.Value.ck24);
+                }
+            }
+        }
+
         if (!hasTile && host.TerrainInspection.TryGetPinnedTerrainChunkInspectionTarget(out var pinnedChunk, out _))
         {
             activeTileX = pinnedChunk.TileX;
@@ -377,29 +408,119 @@ internal sealed class Pm4WorkbenchSidebarService
             hasTile = true;
         }
 
-        if (selectedObj.HasValue)
+        // Branch 1: Both PM4 Hull AND Scene Model are selected (Human-in-the-loop pairing & teaching)
+        if (selectedObj.HasValue && selectedPm4Obj != null)
         {
             var inst = selectedObj.Value;
-            ImGui.TextColored(new Vector4(0.45f, 0.85f, 0.45f, 1f), $"Selected Object: {inst.ModelName} (#{inst.UniqueId})");
-            if (SharedUiWidgets.ActionButton("Magnetize Selected Object to PM4 Hull"))
+            Vector3 pm4Centroid = Vector3.Transform(selectedPm4Obj.Center, selectedPm4Obj.BaseTransform);
+            float dist = Vector3.Distance(inst.PlacementPosition, pm4Centroid);
+
+            ImGui.TextColored(UiTokens.Brass, "Active Pairing (Human Teaching Mode):");
+            ImGui.BulletText($"Model: {inst.ModelName} (#{inst.UniqueId})");
+            ImGui.BulletText($"PM4 Hull: 0x{selectedPm4Obj.Ck24:X6} (part {selectedPm4Obj.ObjectPartId}, group 0x{selectedPm4Obj.DominantGroupKey:X2}) — {dist:F1} yds away");
+            ImGui.Spacing();
+
+            if (SharedUiWidgets.ActionButton("Align Model to this PM4 Hull (Centroid, Height & Yaw)"))
+            {
+                host.Pm4DoodadDuplication.AlignPlacementToPm4Hull(inst, selectedPm4Obj, pm4TileX, pm4TileY, fitScale: false, out _);
+            }
+
+            if (SharedUiWidgets.ActionButton("Teach & Save Pairing for Automation"))
+            {
+                host.Pm4DoodadDuplication.TeachPairing(selectedPm4Obj, inst, pm4TileX, pm4TileY);
+            }
+
+            var matchingTaught = host.Pm4DoodadDuplication.TaughtPairings.FirstOrDefault(t =>
+                (t.Ck24 != 0 && t.Ck24 == selectedPm4Obj.Ck24) ||
+                (t.Ck24 == 0 && selectedPm4Obj.Ck24 == 0 && t.DominantGroupKey == selectedPm4Obj.DominantGroupKey));
+
+            if (matchingTaught != null && hasTile)
+            {
+                if (SharedUiWidgets.ActionButton($"Apply Taught Rule to All Matching Hulls on Tile ({activeTileX}, {activeTileY})"))
+                {
+                    host.Pm4DoodadDuplication.ApplyTaughtPairingToTile(matchingTaught, activeTileX, activeTileY);
+                }
+            }
+        }
+        // Branch 2: Only PM4 Hull is selected
+        else if (selectedPm4Obj != null)
+        {
+            Vector3 pm4Centroid = Vector3.Transform(selectedPm4Obj.Center, selectedPm4Obj.BaseTransform);
+            ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Hull: 0x{selectedPm4Obj.Ck24:X6} (part {selectedPm4Obj.ObjectPartId})");
+            ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Group: 0x{selectedPm4Obj.DominantGroupKey:X2} | Tris: {selectedPm4Obj.Triangles.Count}");
+            ImGui.Spacing();
+
+            ImGui.TextWrapped("💡 Tip: Ctrl+Click an object in the viewport to pair & align it with this PM4 hull, or match resident models below.");
+            ImGui.Spacing();
+
+            if (SharedUiWidgets.ActionButton("Match this PM4 Footprint to Resident Models"))
+            {
+                MatchPm4Footprint(overlay, host, worldScene, selectedPm4Obj, pm4TileX, pm4TileY);
+            }
+
+            if (_activeMatches.Count > 0 && _activeMatchCk24 == selectedPm4Obj.Ck24)
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(UiTokens.Success, $"Candidate Matches ({_activeMatches.Count}):");
+                for (int i = 0; i < _activeMatches.Count; i++)
+                {
+                    var match = _activeMatches[i];
+                    ImGui.BulletText($"{match.Candidate.ModelName} — Score: {match.Score:P0} (Scale {match.SolvedScale:F2}, Yaw {match.SolvedRotation.Z:F1}°)");
+                    if (SharedUiWidgets.ActionButton($"Spawn {match.Candidate.ModelName} into Hull##spawn_{i}"))
+                    {
+                        host.Pm4DoodadDuplication.SpawnCandidateIntoPm4Hull(selectedPm4Obj, pm4TileX, pm4TileY, match, out _);
+                    }
+                }
+            }
+        }
+        // Branch 3: Only Scene Object is selected
+        else if (selectedObj.HasValue)
+        {
+            var inst = selectedObj.Value;
+            ImGui.TextColored(UiTokens.Success, $"Selected Object: {inst.ModelName} (#{inst.UniqueId})");
+            ImGui.TextDisabled($"Pos: ({inst.PlacementPosition.X:F1}, {inst.PlacementPosition.Y:F1}, {inst.PlacementPosition.Z:F1}) | Tile: ({inst.TileX}, {inst.TileY})");
+            ImGui.Spacing();
+
+            ImGui.TextWrapped("💡 Tip: Click or Ctrl+Click a PM4 collision hull in the viewport to pair it with this model.");
+            ImGui.Spacing();
+
+            if (SharedUiWidgets.ActionButton("Magnetize Selected Object to Nearest PM4 Hull"))
             {
                 host.Pm4DoodadDuplication.MagnetizePlacementToPm4(inst);
             }
-            ImGui.SameLine();
-            if (SharedUiWidgets.ActionButton("Fill PM4 Doodad Hulls with Model"))
+
+            if (SharedUiWidgets.ActionButton("Fill Unmatched PM4 Doodad Hulls with this Model"))
             {
                 host.Pm4DoodadDuplication.DuplicateModelToUnmatchedPm4Doodads(inst, inst.TileX, inst.TileY);
             }
-            ImGui.SameLine();
-            if (SharedUiWidgets.ActionButton("Match PM4 Footprint to Resident Models"))
+
+            if (SharedUiWidgets.ActionButton("Match Nearest PM4 Footprint to Resident Models"))
             {
                 MatchSelectedObjectFootprint(overlay, host, worldScene, inst);
             }
+
+            if (_activeMatches.Count > 0)
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(UiTokens.Success, $"Candidate Matches ({_activeMatches.Count}):");
+                for (int i = 0; i < _activeMatches.Count; i++)
+                {
+                    var match = _activeMatches[i];
+                    ImGui.BulletText($"{match.Candidate.ModelName} — Score: {match.Score:P0} (Scale {match.SolvedScale:F2}, Yaw {match.SolvedRotation.Z:F1}°)");
+                }
+            }
         }
+        // Branch 4: Neither selected
         else
         {
-            ImGui.TextDisabled("Select an object (M2 or WMO) in the scene to magnetize it.");
+            ImGui.TextDisabled("No object or PM4 collision hull selected.");
+            ImGui.Spacing();
+            ImGui.TextWrapped("💡 Human Teaching Workflow: Click a PM4 collision hull in the viewport, then Ctrl+Click a scene model (or vice-versa) to pair, align, and teach.");
         }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
 
         if (hasTile)
         {
@@ -411,60 +532,38 @@ internal sealed class Pm4WorkbenchSidebarService
 
         if (host.Pm4DoodadDuplication.CanUndo)
         {
-            ImGui.SameLine();
-            if (SharedUiWidgets.ActionButton("Undo PM4 Operation"))
+            if (SharedUiWidgets.ActionButton("Undo Last PM4 Operation"))
             {
                 host.Pm4DoodadDuplication.UndoLastOperation();
             }
         }
+
+        if (!string.IsNullOrWhiteSpace(host.Pm4DoodadDuplication.LastOperationMessage))
+        {
+            ImGui.Spacing();
+            SharedUiWidgets.StatusReadout("PM4 Status", host.Pm4DoodadDuplication.LastOperationMessage);
+        }
     }
 
-    private static void MatchSelectedObjectFootprint(
+    private void MatchPm4Footprint(
         Pm4OverlayScene overlay,
         IViewerAppHost host,
         WorldScene worldScene,
-        ObjectInstance inst)
+        Pm4OverlayObject pm4Obj,
+        int pm4TileX,
+        int pm4TileY)
     {
-        if (!overlay._pm4TileObjects.TryGetValue((inst.TileX, inst.TileY), out var pm4Objects) || pm4Objects.Count == 0)
+        var surfaceVerts = new List<Vector3>(pm4Obj.Triangles.Count * 3);
+        for (int t = 0; t < pm4Obj.Triangles.Count; t++)
         {
-            if (!overlay._pm4TileObjects.TryGetValue((inst.TileY, inst.TileX), out pm4Objects) || pm4Objects.Count == 0)
-            {
-                host.StatusMessage = "No PM4 objects loaded on tile to match footprint.";
-                return;
-            }
+            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].A, pm4Obj.BaseTransform));
+            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].B, pm4Obj.BaseTransform));
+            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].C, pm4Obj.BaseTransform));
         }
 
-        Pm4OverlayObject? bestMatch = null;
-        float bestDist = 35.0f;
-        for (int i = 0; i < pm4Objects.Count; i++)
-        {
-            var obj = pm4Objects[i];
-            Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
-            float dist = Vector3.Distance(centroid, inst.PlacementPosition);
-            if (dist < bestDist)
-            {
-                bestDist = dist;
-                bestMatch = obj;
-            }
-        }
-
-        if (bestMatch == null)
-        {
-            host.StatusMessage = "No PM4 collision hull found near selected object.";
-            return;
-        }
-
-        var surfaceVerts = new List<Vector3>(bestMatch.Triangles.Count * 3);
-        for (int t = 0; t < bestMatch.Triangles.Count; t++)
-        {
-            surfaceVerts.Add(Vector3.Transform(bestMatch.Triangles[t].A, bestMatch.BaseTransform));
-            surfaceVerts.Add(Vector3.Transform(bestMatch.Triangles[t].B, bestMatch.BaseTransform));
-            surfaceVerts.Add(Vector3.Transform(bestMatch.Triangles[t].C, bestMatch.BaseTransform));
-        }
-
-        overlay._pm4TilePositionRefs.TryGetValue((inst.TileX, inst.TileY), out var mprlList);
-        float? placementZ = bestMatch.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(bestMatch.Ck24 << 8) : null;
-        WorldScene.TransformBounds(bestMatch.BoundsMin, bestMatch.BoundsMax, bestMatch.BaseTransform, out Vector3 worldMin, out _);
+        overlay._pm4TilePositionRefs.TryGetValue((pm4TileX, pm4TileY), out var mprlList);
+        float? placementZ = pm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(pm4Obj.Ck24 << 8) : null;
+        WorldScene.TransformBounds(pm4Obj.BoundsMin, pm4Obj.BoundsMax, pm4Obj.BaseTransform, out Vector3 worldMin, out _);
 
         Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
 
@@ -486,15 +585,68 @@ internal sealed class Pm4WorkbenchSidebarService
 
         if (candidates.Count == 0)
         {
-            host.StatusMessage = "No candidate models resident in scene to match against.";
+            string noModelsMsg = "No candidate models resident in scene to match against.";
+            host.StatusMessage = noModelsMsg;
+            host.Pm4DoodadDuplication.LastOperationMessage = noModelsMsg;
+            _activeMatches.Clear();
             return;
         }
 
-        var matches = Pm4DirectModelMatcher.MatchPrism(prism, candidates, maxResults: 3);
-        if (matches.Count > 0)
+        _activeMatches = Pm4DirectModelMatcher.MatchPrism(prism, candidates, maxResults: 4);
+        _activeMatchCk24 = pm4Obj.Ck24;
+
+        if (_activeMatches.Count > 0)
         {
-            var top = matches[0];
-            host.StatusMessage = $"PM4 Footprint match: {top.Candidate.ModelName} (Score: {top.Score:P1}, Scale: {top.SolvedScale:F2}, Yaw: {top.SolvedRotation.Z:F1}°)";
+            var top = _activeMatches[0];
+            string msg = $"✓ Found {_activeMatches.Count} match candidates. Best: {top.Candidate.ModelName} (Score: {top.Score:P0}, Scale: {top.SolvedScale:F2}, Yaw: {top.SolvedRotation.Z:F1}°).";
+            host.StatusMessage = msg;
+            host.Pm4DoodadDuplication.LastOperationMessage = msg;
         }
+        else
+        {
+            string msg = "No matching resident models found for this PM4 footprint.";
+            host.StatusMessage = msg;
+            host.Pm4DoodadDuplication.LastOperationMessage = msg;
+        }
+    }
+
+    private void MatchSelectedObjectFootprint(
+        Pm4OverlayScene overlay,
+        IViewerAppHost host,
+        WorldScene worldScene,
+        ObjectInstance inst)
+    {
+        Pm4OverlayObject? bestMatch = null;
+        int bestTx = inst.TileX;
+        int bestTy = inst.TileY;
+        float bestDist = 45.0f;
+
+        foreach (var (tileCoord, objList) in overlay._pm4TileObjects)
+        {
+            for (int i = 0; i < objList.Count; i++)
+            {
+                var obj = objList[i];
+                Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
+                float dist = Vector3.Distance(centroid, inst.PlacementPosition);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    bestMatch = obj;
+                    bestTx = tileCoord.tileX;
+                    bestTy = tileCoord.tileY;
+                }
+            }
+        }
+
+        if (bestMatch == null)
+        {
+            string msg = "No PM4 collision hull found near selected object.";
+            host.StatusMessage = msg;
+            host.Pm4DoodadDuplication.LastOperationMessage = msg;
+            _activeMatches.Clear();
+            return;
+        }
+
+        MatchPm4Footprint(overlay, host, worldScene, bestMatch, bestTx, bestTy);
     }
 }

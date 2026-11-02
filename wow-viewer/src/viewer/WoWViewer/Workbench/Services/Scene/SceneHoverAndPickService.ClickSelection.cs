@@ -102,9 +102,9 @@ internal sealed partial class SceneHoverAndPickService
         if (hoveredInfo is { HasSceneObject: true } hoveredSceneObj)
             AddHoveredSceneObjectClickSelectionCandidate(addedKeys, hoveredSceneObj);
 
-        // If PM4 overlay is on and we hit a PM4 object, skip scene object picking
-        // (PM4 objects are behind scene WMO/M2 visually, so the ray hits both)
-        if (!pm4Hit || !_worldScene.Pm4Overlay.ShowPm4Overlay)
+        // If PM4 overlay is on and we hit a PM4 object, skip scene object picking unless
+        // Ctrl or Alt is held to deliberately select/pair a scene object inside/beside a PM4 hull.
+        if (!pm4Hit || !_worldScene.Pm4Overlay.ShowPm4Overlay || ImGui.GetIO().KeyCtrl || ImGui.GetIO().KeyAlt)
         {
             if (_worldScene.HoverPick.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
             {
@@ -446,7 +446,8 @@ internal sealed partial class SceneHoverAndPickService
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.TaxiActors.ClearTaxiSelection();
-                    _worldScene.Selection.ClearSelection();
+                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt)
+                        _worldScene.Selection.ClearSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     UpdateSelectedPm4ObjectInfo(objectKey);
                 }));
@@ -510,7 +511,8 @@ internal sealed partial class SceneHoverAndPickService
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.TaxiActors.ClearTaxiSelection();
-                    _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
+                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt)
+                        _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     RefreshSelectedWorldObjectInfo();
                 }));
@@ -554,7 +556,8 @@ internal sealed partial class SceneHoverAndPickService
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.TaxiActors.ClearTaxiSelection();
-                    _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
+                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt)
+                        _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     RefreshSelectedWorldObjectInfo();
                 }));
