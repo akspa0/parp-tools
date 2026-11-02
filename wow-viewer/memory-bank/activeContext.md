@@ -1,5 +1,12 @@
 # Active Context — wow-viewer
 
+**Spec 290 Implementation Complete & Verified (2026-11-01):** [Spec 290 Unified Export Workbench & Panel Docking](../specs/290-unified-export-workbench-and-panel-docking/spec.md)
+Centralized all PM4, World, Model, and ML exports into dedicated right sidebar workbench (`ViewerPanel.Exports`), and repositioned bottom destination windows:
+1. **Consolidated Export Hub (`ExportWorkbenchService`)**: Unifies PM4 collision & navigation exports (JSON, OBJ Set, LLM Evidence Bundle, Visible Overlay Report, Zarr v60 archive, single-object JSON), World & Terrain exports, Model & Asset mesh exports, and Archaeology/ML dataset exports into a single authoritative right-dock panel.
+2. **Right Action Rail Integration**: Added `ActionExports` icon button with `IconKind.Export` (upward-arrow tray pictogram) in `ViewerActionBarsService.cs` (`ViewerPanel.Exports`).
+3. **Bottom Destination Repositioning**: Moved `destination` tool window (`Editor`, `Archaeology`, `Pages`) from top-right `(rightX, rightY)` overlapping `UiRegion.RightDock` to the lower-left workspace adjacent to the chat dock (`rail + 12f * scale + chatWidth`), ensuring $>500$ px horizontal clearance so inspection sidebars are never obscured.
+4. **Validation**: `dotnet build WoWViewer.CrossPlatform.csproj` succeeded with 0 errors; `Verify-UiReference.ps1` passed with 138 inventory rows, 128 registry entries, 0 errors, 0 warnings. Receipt in `specs/290-unified-export-workbench-and-panel-docking/evidence/final-receipt.md`.
+
 **Spec 289 Implementation Complete & Verified (2026-11-01):** [Spec 289 PM4 3D Footprint Extrusion & Direct MPQ Matching](../specs/289-pm4-3d-footprint-and-direct-matching/spec.md)
 3D envelope reification, zero-donor asset matching, PCA orientation recovery, and live legend tallying:
 1. **Top-Surface Magnetization & Placement Fix (Phase 1)**: Corrected vertical alignment so doodad placement position $Z$ satisfies $P_Z = Z_{\text{pm4\_top}} - (H_{\text{model\_top}} \cdot s)$, ensuring PM4 collision geometry sits on top of the object rather than trapped underneath at ground level.

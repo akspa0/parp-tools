@@ -38,7 +38,7 @@ internal sealed partial class Pm4WorkbenchService
             SaveMergedPlacementsToZarr();
     }
 
-    private void SaveMergedPlacementsToZarr()
+    internal void SaveMergedPlacementsToZarr()
     {
         try
         {
@@ -57,7 +57,7 @@ internal sealed partial class Pm4WorkbenchService
     }
 
     // Include picker/output-root setup failures in the same reporting contract as writer failures.
-    private void RunPm4Export(Action export)
+    internal void RunPm4Export(Action export)
     {
         try
         {

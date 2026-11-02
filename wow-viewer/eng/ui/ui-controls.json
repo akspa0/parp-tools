@@ -107,6 +107,14 @@
       "visible": true
     },
     {
+      "id": "exports-rail-icon",
+      "label": "Exports",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the consolidated Export & Report Workbench in the right dock.",
+      "visible": true
+    },
+    {
       "id": "bottom-spawns",
       "label": "Spawns",
       "region": "Bottom action bar",

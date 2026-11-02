@@ -360,6 +360,7 @@ public partial class ViewerApp
     ref bool IViewerAppHost.ArcheologyPlaybackActive => ref _archeologyPlaybackActive;
     ref MapListSortMode IViewerAppHost.MapListSortMode => ref _mapListSortMode;
     Pm4WorkbenchService IViewerAppHost.Pm4Workbench => _pm4Workbench;
+    ExportWorkbenchService IViewerAppHost.ExportWorkbench => _exportWorkbench;
     Pm4DoodadDuplicationService IViewerAppHost.Pm4DoodadDuplication => _pm4DoodadDuplication;
     TerrainLayersPanelService IViewerAppHost.TerrainLayersPanel => _terrainLayersPanel;
     MccvHoleDetectionService IViewerAppHost.MccvHoleDetection => _mccvHoleDetection;

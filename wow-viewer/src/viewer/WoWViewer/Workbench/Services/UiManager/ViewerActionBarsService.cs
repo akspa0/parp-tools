@@ -12,7 +12,7 @@ namespace WoWViewer;
 /// </summary>
 internal sealed class ViewerActionBarsService
 {
-    private enum IconKind { Workspace, Open, Assets, Taxi, Capture, Inspector, World, Model, Gossip, Pm4, Maps, Diagnostics }
+    private enum IconKind { Workspace, Open, Assets, Taxi, Capture, Inspector, World, Model, Gossip, Pm4, Maps, Diagnostics, Export }
 
     private sealed class WindowState
     {
@@ -91,6 +91,7 @@ internal sealed class ViewerActionBarsService
         DrawActionBarIcon("World", "ActionWorld", IconKind.World, size, "Inspect objects, placements, and world data", () => _host.UiManager.ToggleRightDock(ViewerPanel.World), dockOpen && active == ViewerPanel.World);
         DrawActionBarIcon("Gossip", "ActionGossip", IconKind.Gossip, size, "Inspect creature gossip, quests, and dialogue", () => _host.UiManager.ToggleRightDock(ViewerPanel.Gossip), dockOpen && active == ViewerPanel.Gossip);
         DrawActionBarIcon("PM4", "ActionPm4", IconKind.Pm4, size, "Inspect PM4 navigation and object data", () => _host.UiManager.ToggleRightDock(ViewerPanel.PM4), dockOpen && active == ViewerPanel.PM4);
+        DrawActionBarIcon("Exports", "ActionExports", IconKind.Export, size, "Export PM4 OBJ/JSON models, placement ledgers, and reports", () => _host.UiManager.ToggleRightDock(ViewerPanel.Exports), dockOpen && active == ViewerPanel.Exports);
     }
 
     /// <summary>
@@ -143,10 +144,11 @@ internal sealed class ViewerActionBarsService
             _host.DrawCapturePanelContent);
 
         // Inspector/World/Model/PM4 are docked in UiRegion.RightDock, not floating windows.
-        float rightX = Math.Max(rail, display.X - rail - 430f * scale - 12f * scale);
-        float rightY = top + mapHeight + 12f * scale;
+        float chatWidth = _host.SqlSpawnStreaming.ChatVisible ? 440f * scale : 0f;
+        float destX = Math.Min(rail + 12f * scale + chatWidth, Math.Max(rail + 12f * scale, display.X - 520f * scale - 50f * scale));
+        float destY = Math.Max(top + 8f * scale, display.Y - 640f * scale);
         if (_host.ActiveTopTab != WorkbenchTab.Viewer)
-            DrawToolWindow("destination", _host.ActiveTopTab.ToString(), new(rightX, rightY), new(500f, 620f),
+            DrawToolWindow("destination", _host.ActiveTopTab.ToString(), new(destX, destY), new(500f, 600f),
                 DrawDestinationContent);
     }
 
@@ -277,6 +279,14 @@ internal sealed class ViewerActionBarsService
                     float x = center.X - half + (i + 0.5f) * unit * 0.18f;
                     draw.AddLine(new(x, center.Y + half), new(x, center.Y + half - (i + 1) * unit * 0.16f), ink, stroke * 2f);
                 }
+                break;
+            case IconKind.Export:
+                draw.AddLine(new(center.X - half, center.Y), new(center.X - half, center.Y + half), ink, stroke);
+                draw.AddLine(new(center.X - half, center.Y + half), new(center.X + half, center.Y + half), ink, stroke);
+                draw.AddLine(new(center.X + half, center.Y + half), new(center.X + half, center.Y), ink, stroke);
+                draw.AddLine(new(center.X, center.Y + half * 0.4f), new(center.X, center.Y - half), ink, stroke);
+                draw.AddLine(new(center.X, center.Y - half), new(center.X - unit * 0.14f, center.Y - half * 0.3f), muted, stroke);
+                draw.AddLine(new(center.X, center.Y - half), new(center.X + unit * 0.14f, center.Y - half * 0.3f), muted, stroke);
                 break;
         }
     }

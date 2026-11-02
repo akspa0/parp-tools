@@ -64,6 +64,9 @@ internal sealed partial class WorkbenchPanelsService
                 if (_worldScene != null) _pm4Workbench.DrawPm4WorkbenchInspector();
                 else SharedUiWidgets.DrawEmptyState("No world loaded", "Load a world to inspect its PM4 navigation surface overlay.");
                 break;
+            case ViewerPanel.Exports:
+                _host.ExportWorkbench.DrawExportPanelContent();
+                break;
         }
     }
     internal void DrawConvertersSubTabContent() => _mainMenuBar.DrawConvertersContent();

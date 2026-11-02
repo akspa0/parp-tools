@@ -387,6 +387,7 @@ internal interface IViewerAppHost
     ref EditorSession? EditorSession { get; }
     ref MapListSortMode MapListSortMode { get; }
     Pm4WorkbenchService Pm4Workbench { get; }
+    ExportWorkbenchService ExportWorkbench { get; }
     Pm4DoodadDuplicationService Pm4DoodadDuplication { get; }
     TerrainLayersPanelService TerrainLayersPanel { get; }
     MccvHoleDetectionService MccvHoleDetection { get; }

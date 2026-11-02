@@ -76,6 +76,7 @@ $help = @{
     'Editor Workspace' = @('Left sidebar > Editor', $null, 'Editor session, undo state and output folder.')
     'Export Loaded DAT Map...' = @('Viewer > World', $null, 'Export the loaded DAT map with the existing exporter.')
     'Export Nearby Tiles as DAT v26 (experimental)' = @('Viewer > World', $null, 'Export nearby tiles as DAT v26 (experimental format path).')
+    'Exports' = @('Right action bar', $null, 'Open or close the consolidated Export & Report Workbench in the right dock.')
     'File Browser' = @('Left sidebar', $null, 'Browse the active data source and open assets.')
     'Fog Objects' = @('Viewer > World', $null, 'Apply distance fog to world objects.')
     'FOV' = @('Viewer > World', $null, 'Camera field of view in degrees.')

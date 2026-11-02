@@ -43,7 +43,8 @@ internal sealed class Pm4WorkbenchSidebarService
         Pm4OverlayScene overlay,
         string loosePm4InputPath,
         Action requestLooseFile,
-        Action exportReport)
+        Action exportReport,
+        Action? openExports = null)
     {
         bool showPm4Overlay = overlay.ShowPm4Overlay;
         if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
@@ -56,6 +57,12 @@ internal sealed class Pm4WorkbenchSidebarService
         ImGui.SameLine();
         if (SharedUiWidgets.ActionButton("Export Report"))
             exportReport();
+        if (openExports != null)
+        {
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Open Exports..."))
+                openExports();
+        }
 
         if (SharedUiWidgets.SectionHeader("Loose PM4 / PD4 Loader", defaultOpen: false, id: "Pm4LooseLoader"))
         {

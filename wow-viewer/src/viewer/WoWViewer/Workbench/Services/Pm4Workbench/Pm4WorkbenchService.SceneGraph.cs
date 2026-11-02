@@ -514,7 +514,7 @@ internal sealed partial class Pm4WorkbenchService
         };
     }
 
-    private void ExportPm4OverlayReport()
+    internal void ExportPm4OverlayReport()
     {
         if (_worldScene == null) return;
 

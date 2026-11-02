@@ -205,7 +205,8 @@ internal sealed partial class Pm4WorkbenchService
             _worldScene.Pm4Overlay,
             _loosePm4InputPath,
             RequestLoosePm4File,
-            ExportPm4OverlayReport);
+            ExportPm4OverlayReport,
+            () => _host.UiManager.OpenViewerDock(ViewerPanel.Exports));
 
         Pm4WorkbenchSidebarService.Instance.DrawPaletteAndLegend(
             _worldScene.Pm4Overlay,
@@ -241,7 +242,11 @@ internal sealed partial class Pm4WorkbenchService
             return;
 
         if (SharedUiWidgets.SectionHeader("PM4 Exports", defaultOpen: false, id: "Pm4InspectionExports"))
+        {
+            if (SharedUiWidgets.ActionButton("Open Export Workbench...##Pm4JumpExport"))
+                _host.UiManager.OpenViewerDock(ViewerPanel.Exports);
             DrawPm4ExportCommandSet();
+        }
 
         if (!_worldScene.Pm4Overlay.HasSelectedPm4Object || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
         {

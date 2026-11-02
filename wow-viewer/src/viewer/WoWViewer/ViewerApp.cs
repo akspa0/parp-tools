@@ -536,6 +536,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly ClientDialogsService _clientDialogs;
     private readonly MainMenuBarService _mainMenuBar;
     private readonly Pm4WorkbenchService _pm4Workbench;
+    private readonly ExportWorkbenchService _exportWorkbench;
     private readonly Pm4DoodadDuplicationService _pm4DoodadDuplication;
     private readonly TerrainLayersPanelService _terrainLayersPanel;
     private readonly MccvHoleDetectionService _mccvHoleDetection;
@@ -599,6 +600,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _clientDialogs = new ClientDialogsService(this);
         _mainMenuBar = new MainMenuBarService(this);
         _pm4Workbench = new Pm4WorkbenchService(this);
+        _exportWorkbench = new ExportWorkbenchService(this);
         _pm4DoodadDuplication = new Pm4DoodadDuplicationService(this);
         _terrainLayersPanel = new TerrainLayersPanelService(this);
         _mccvHoleDetection = new MccvHoleDetectionService();
