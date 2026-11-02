@@ -391,7 +391,7 @@ internal sealed class Pm4WorkbenchSidebarService
         }
         else
         {
-            ImGui.TextDisabled("Select an M2 object in the scene to magnetize or duplicate it.");
+            ImGui.TextDisabled("Select an object (M2 or WMO) in the scene to magnetize it.");
         }
 
         if (hasTile)

@@ -412,7 +412,7 @@ public sealed partial class Pm4OverlayScene
                 if (objects.Count == 0)
                     zeroObjectFiles++;
 
-                if (exportedTiles.TryGetValue((effectiveTileX, effectiveTileY), out List<Pm4OverlayObject>? existingObjects))
+                if (exportedTiles.TryGetValue((fileTileX, fileTileY), out List<Pm4OverlayObject>? existingObjects))
                 {
                     int objectPartOffset = existingObjects.Count;
                     objects = RebasePm4ObjectParts(objects, objectPartOffset);
@@ -420,7 +420,7 @@ public sealed partial class Pm4OverlayScene
                 }
                 else
                 {
-                    exportedTiles[(effectiveTileX, effectiveTileY)] = objects;
+                    exportedTiles[(fileTileX, fileTileY)] = objects;
                 }
 
                 exportedObjectCount += objects.Count;
@@ -483,11 +483,38 @@ public sealed partial class Pm4OverlayScene
             string tileObjPath = Path.Combine(tileDirectory, $"tile_{tileX:D2}_{tileY:D2}.obj");
             File.WriteAllText(tileObjPath, BuildPm4ObjText(objects, tileX, tileY), Encoding.UTF8);
 
+            // Group objects into discrete buckets (combined doodads or unified WMO objects by Ck24)
+            // instead of spamming fragmented individual parts.
+            var doodadParts = new List<Pm4OverlayObject>();
+            var ck24Buckets = new Dictionary<uint, List<Pm4OverlayObject>>();
             foreach (Pm4OverlayObject obj in objects)
             {
-                string fileName = $"ck24_{obj.Ck24:X6}_part_{obj.ObjectPartId:D4}_type_{obj.Ck24Type:X2}_obj_{obj.Ck24ObjectId:D5}.obj";
-                string objectPath = Path.Combine(tileDirectory, fileName);
-                File.WriteAllText(objectPath, BuildPm4ObjText(new[] { obj }, tileX, tileY), Encoding.UTF8);
+                if (obj.Ck24 == 0)
+                {
+                    doodadParts.Add(obj);
+                }
+                else
+                {
+                    if (!ck24Buckets.TryGetValue(obj.Ck24, out var bucketList))
+                    {
+                        bucketList = new List<Pm4OverlayObject>();
+                        ck24Buckets[obj.Ck24] = bucketList;
+                    }
+                    bucketList.Add(obj);
+                }
+            }
+
+            if (doodadParts.Count > 0)
+            {
+                string doodadsPath = Path.Combine(tileDirectory, "doodads.obj");
+                File.WriteAllText(doodadsPath, BuildPm4ObjText(doodadParts, tileX, tileY), Encoding.UTF8);
+            }
+
+            foreach (var (ck24, bucketObjects) in ck24Buckets.OrderBy(static b => b.Key))
+            {
+                byte sampleType = bucketObjects[0].Ck24Type;
+                string objectPath = Path.Combine(tileDirectory, $"object_ck24_{ck24:X6}_type_{sampleType:X2}.obj");
+                File.WriteAllText(objectPath, BuildPm4ObjText(bucketObjects, tileX, tileY), Encoding.UTF8);
             }
 
             tileSummaries.Add(new

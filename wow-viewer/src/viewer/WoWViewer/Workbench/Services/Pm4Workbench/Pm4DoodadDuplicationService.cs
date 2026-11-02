@@ -56,13 +56,13 @@ internal sealed class Pm4DoodadDuplicationService
                 return false;
 
             IPm4OverlayHost pm4Host = worldScene;
+            var stateMap = new Dictionary<int, (Vector3 Position, Vector3 Rotation, float Scale)>();
+            foreach (var s in previousStates)
+                stateMap[s.UniqueId] = (s.Position, s.Rotation, s.Scale);
+
+            int restoredCount = 0;
             if (pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out List<ObjectInstance>? tileMdx))
             {
-                var stateMap = new Dictionary<int, (Vector3 Position, Vector3 Rotation, float Scale)>();
-                foreach (var s in previousStates)
-                    stateMap[s.UniqueId] = (s.Position, s.Rotation, s.Scale);
-
-                int restoredCount = 0;
                 for (int i = 0; i < tileMdx.Count; i++)
                 {
                     var inst = tileMdx[i];
@@ -78,7 +78,29 @@ internal sealed class Pm4DoodadDuplicationService
                         restoredCount++;
                     }
                 }
+            }
 
+            if (pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out List<ObjectInstance>? tileWmo))
+            {
+                for (int i = 0; i < tileWmo.Count; i++)
+                {
+                    var inst = tileWmo[i];
+                    if (stateMap.TryGetValue(inst.UniqueId, out var state))
+                    {
+                        inst.PlacementPosition = state.Position;
+                        inst.PlacementRotation = state.Rotation;
+                        inst.PlacementScale = state.Scale;
+                        inst.Transform = WorldPlacementTransform.Build(inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale);
+                        WorldScene.TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform, out inst.BoundsMin, out inst.BoundsMax);
+                        WorldScene.TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out inst.SelectionLocalBoundsMin, out inst.SelectionLocalBoundsMax);
+                        tileWmo[i] = inst;
+                        restoredCount++;
+                    }
+                }
+            }
+
+            if (restoredCount > 0)
+            {
                 pm4Host.RebuildInstanceLists();
                 host.StatusMessage = $"Restored {restoredCount} placements to pre-magnetized state on tile ({tileX}, {tileY}).";
                 return true;
@@ -236,10 +258,59 @@ internal sealed class Pm4DoodadDuplicationService
         return duplicated.Count;
     }
 
+    private static List<(Vector3 Centroid, Vector3 Min, Vector3 Max, Pm4OverlayObject Rep)> BuildUnifiedPm4Candidates(IReadOnlyList<Pm4OverlayObject> pm4Objects)
+    {
+        var candidates = new List<(Vector3 Centroid, Vector3 Min, Vector3 Max, Pm4OverlayObject Rep)>();
+        var ck24Groups = new Dictionary<uint, List<Pm4OverlayObject>>();
+        var zeroParts = new List<Pm4OverlayObject>();
+
+        for (int p = 0; p < pm4Objects.Count; p++)
+        {
+            var obj = pm4Objects[p];
+            if (obj.Ck24 != 0)
+            {
+                if (!ck24Groups.TryGetValue(obj.Ck24, out var list))
+                {
+                    list = new List<Pm4OverlayObject>();
+                    ck24Groups[obj.Ck24] = list;
+                }
+                list.Add(obj);
+            }
+            else
+            {
+                zeroParts.Add(obj);
+            }
+        }
+
+        foreach (var (_, parts) in ck24Groups)
+        {
+            Vector3 uMin = new(float.MaxValue);
+            Vector3 uMax = new(float.MinValue);
+            for (int i = 0; i < parts.Count; i++)
+            {
+                WorldScene.TransformBounds(parts[i].BoundsMin, parts[i].BoundsMax, parts[i].BaseTransform, out Vector3 bMin, out Vector3 bMax);
+                uMin = Vector3.Min(uMin, bMin);
+                uMax = Vector3.Max(uMax, bMax);
+            }
+            Vector3 uCentroid = (uMin + uMax) * 0.5f;
+            candidates.Add((uCentroid, uMin, uMax, parts[0]));
+        }
+
+        for (int i = 0; i < zeroParts.Count; i++)
+        {
+            var zp = zeroParts[i];
+            WorldScene.TransformBounds(zp.BoundsMin, zp.BoundsMax, zp.BaseTransform, out Vector3 bMin, out Vector3 bMax);
+            Vector3 uCentroid = (bMin + bMax) * 0.5f;
+            candidates.Add((uCentroid, bMin, bMax, zp));
+        }
+
+        return candidates;
+    }
+
     /// <summary>
-    /// Magnetically snaps a single placed M2 object to its nearest PM4 navmesh collision hull.
+    /// Magnetically snaps a single placed M2 or WMO object to its nearest PM4 navmesh collision hull.
     /// </summary>
-    public bool MagnetizePlacementToPm4(ObjectInstance inst, float maxSnapDistance = 35.0f)
+    public bool MagnetizePlacementToPm4(ObjectInstance inst, float maxSnapDistance = 60.0f)
     {
         var worldScene = _host.WorldScene;
         if (worldScene == null)
@@ -258,42 +329,52 @@ internal sealed class Pm4DoodadDuplicationService
             }
         }
 
-        Pm4OverlayObject? bestMatch = null;
-        float bestDist = maxSnapDistance;
-        Vector3 bestCentroid = Vector3.Zero;
-        float bestZ = 0f;
+        bool isWmo = string.Equals(inst.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
+        List<ObjectInstance>? targetList = null;
+        int idx = -1;
 
-        for (int i = 0; i < pm4Objects.Count; i++)
+        if (isWmo && pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo))
         {
-            var obj = pm4Objects[i];
-            Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
-            float dist = Vector3.Distance(centroid, inst.PlacementPosition);
+            idx = tileWmo.FindIndex(m => m.UniqueId == inst.UniqueId);
+            if (idx >= 0)
+                targetList = tileWmo;
+        }
+
+        if (targetList == null && pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx))
+        {
+            idx = tileMdx.FindIndex(m => m.UniqueId == inst.UniqueId);
+            if (idx >= 0)
+                targetList = tileMdx;
+        }
+
+        if (targetList == null || idx < 0)
+        {
+            _host.StatusMessage = $"Could not locate placement #{inst.UniqueId} in resident scene lists.";
+            return false;
+        }
+
+        var candidates = BuildUnifiedPm4Candidates(pm4Objects);
+        (Vector3 Centroid, Vector3 Min, Vector3 Max, Pm4OverlayObject Rep)? bestCandidate = null;
+        float bestDist = maxSnapDistance;
+
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            var c = candidates[i];
+            float dist = Vector2.Distance(new Vector2(c.Centroid.X, c.Centroid.Y), new Vector2(inst.PlacementPosition.X, inst.PlacementPosition.Y));
             if (dist < bestDist)
             {
                 bestDist = dist;
-                bestMatch = obj;
-                bestCentroid = centroid;
-                bestZ = obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(obj.Ck24 << 8) : centroid.Z;
+                bestCandidate = c;
             }
         }
 
-        if (bestMatch == null)
+        if (bestCandidate == null)
         {
             _host.StatusMessage = $"No PM4 collision hull found within {maxSnapDistance:F0} yds of {inst.ModelName}.";
             return false;
         }
 
-        if (Math.Abs(bestZ) < 0.001f || float.IsNaN(bestZ) || float.IsInfinity(bestZ))
-            bestZ = bestCentroid.Z;
-
-        if (!pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx))
-            return false;
-
-        int idx = tileMdx.FindIndex(m => m.UniqueId == inst.UniqueId);
-        if (idx < 0)
-            return false;
-
-        var prev = tileMdx[idx];
+        var prev = targetList[idx];
         var undoList = new List<(int, Vector3, Vector3, float)>
         {
             (prev.UniqueId, prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale)
@@ -308,16 +389,24 @@ internal sealed class Pm4DoodadDuplicationService
             ? prev.SelectionLocalBoundsMax
             : prev.LocalBoundsMax;
         WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
-
-        float modelTopZ = rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z);
-        float targetPlacementZ = bestCentroid.Z - modelTopZ;
         Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
 
-        prev.PlacementPosition = new Vector3(bestCentroid.X - rotCenter.X, bestCentroid.Y - rotCenter.Y, targetPlacementZ);
+        float targetPlacementZ;
+        if (isWmo)
+        {
+            targetPlacementZ = bestCandidate.Value.Min.Z - rotMin.Z;
+        }
+        else
+        {
+            float modelTopZ = rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z);
+            targetPlacementZ = bestCandidate.Value.Max.Z - modelTopZ;
+        }
+
+        prev.PlacementPosition = new Vector3(bestCandidate.Value.Centroid.X - rotCenter.X, bestCandidate.Value.Centroid.Y - rotCenter.Y, targetPlacementZ);
         prev.Transform = WorldPlacementTransform.Build(prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale);
         WorldScene.TransformBounds(prev.LocalBoundsMin, prev.LocalBoundsMax, prev.Transform, out prev.BoundsMin, out prev.BoundsMax);
         WorldScene.TransformBounds(prev.SelectionLocalBoundsMin, prev.SelectionLocalBoundsMax, prev.Transform, out prev.SelectionLocalBoundsMin, out prev.SelectionLocalBoundsMax);
-        tileMdx[idx] = prev;
+        targetList[idx] = prev;
 
         pm4Host.RebuildInstanceLists();
         _host.StatusMessage = $"Magnetized {inst.ModelName} (#{inst.UniqueId}) to PM4 template (delta: {bestDist:F2} yds).";
@@ -325,9 +414,9 @@ internal sealed class Pm4DoodadDuplicationService
     }
 
     /// <summary>
-    /// Magnetically snaps all resident ADT placements on a tile to their nearest PM4 collision hulls.
+    /// Magnetically snaps all resident ADT placements (M2 and WMO) on a tile to their nearest PM4 collision hulls.
     /// </summary>
-    public int MagnetizeTilePlacementsToPm4(int tileX, int tileY, float maxSnapDistance = 25.0f)
+    public int MagnetizeTilePlacementsToPm4(int tileX, int tileY, float maxSnapDistance = 60.0f)
     {
         var worldScene = _host.WorldScene;
         if (worldScene == null)
@@ -343,64 +432,76 @@ internal sealed class Pm4DoodadDuplicationService
             }
         }
 
-        if (!pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx) || tileMdx.Count == 0)
+        pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx);
+        pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo);
+
+        int totalPlacements = (tileMdx?.Count ?? 0) + (tileWmo?.Count ?? 0);
+        if (totalPlacements == 0)
         {
-            _host.StatusMessage = $"No M2 placements resident on tile ({tileX}, {tileY}).";
+            _host.StatusMessage = $"No resident placements found on tile ({tileX}, {tileY}).";
             return 0;
         }
 
+        var candidates = BuildUnifiedPm4Candidates(pm4Objects);
         var undoList = new List<(int, Vector3, Vector3, float)>();
         int snappedCount = 0;
 
-        for (int i = 0; i < tileMdx.Count; i++)
+        void SnapList(List<ObjectInstance>? list, bool isWmo)
         {
-            var inst = tileMdx[i];
-            Pm4OverlayObject? bestMatch = null;
-            float bestDist = maxSnapDistance;
-            Vector3 bestCentroid = Vector3.Zero;
-            float bestZ = 0f;
-
-            for (int p = 0; p < pm4Objects.Count; p++)
+            if (list == null) return;
+            for (int i = 0; i < list.Count; i++)
             {
-                var obj = pm4Objects[p];
-                Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
-                float dist = Vector3.Distance(centroid, inst.PlacementPosition);
-                if (dist < bestDist)
+                var inst = list[i];
+                (Vector3 Centroid, Vector3 Min, Vector3 Max, Pm4OverlayObject Rep)? bestMatch = null;
+                float bestDist = maxSnapDistance;
+
+                for (int p = 0; p < candidates.Count; p++)
                 {
-                    bestDist = dist;
-                    bestMatch = obj;
-                    bestCentroid = centroid;
-                    bestZ = obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(obj.Ck24 << 8) : centroid.Z;
+                    var c = candidates[p];
+                    float dist = Vector2.Distance(new Vector2(c.Centroid.X, c.Centroid.Y), new Vector2(inst.PlacementPosition.X, inst.PlacementPosition.Y));
+                    if (dist < bestDist)
+                    {
+                        bestDist = dist;
+                        bestMatch = c;
+                    }
+                }
+
+                if (bestMatch != null && bestDist > 0.05f)
+                {
+                    Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, inst.PlacementRotation, inst.PlacementScale);
+                    Vector3 localMin = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
+                        ? inst.SelectionLocalBoundsMin
+                        : inst.LocalBoundsMin;
+                    Vector3 localMax = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
+                        ? inst.SelectionLocalBoundsMax
+                        : inst.LocalBoundsMax;
+                    WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
+                    Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
+
+                    float targetPlacementZ;
+                    if (isWmo)
+                    {
+                        targetPlacementZ = bestMatch.Value.Min.Z - rotMin.Z;
+                    }
+                    else
+                    {
+                        float modelTopZ = rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z);
+                        targetPlacementZ = bestMatch.Value.Max.Z - modelTopZ;
+                    }
+
+                    undoList.Add((inst.UniqueId, inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale));
+                    inst.PlacementPosition = new Vector3(bestMatch.Value.Centroid.X - rotCenter.X, bestMatch.Value.Centroid.Y - rotCenter.Y, targetPlacementZ);
+                    inst.Transform = WorldPlacementTransform.Build(inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale);
+                    WorldScene.TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform, out inst.BoundsMin, out inst.BoundsMax);
+                    WorldScene.TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out inst.SelectionLocalBoundsMin, out inst.SelectionLocalBoundsMax);
+                    list[i] = inst;
+                    snappedCount++;
                 }
             }
-
-            if (bestMatch != null && bestDist > 0.05f)
-            {
-                if (Math.Abs(bestZ) < 0.001f || float.IsNaN(bestZ) || float.IsInfinity(bestZ))
-                    bestZ = bestCentroid.Z;
-
-                Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, inst.PlacementRotation, inst.PlacementScale);
-                Vector3 localMin = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
-                    ? inst.SelectionLocalBoundsMin
-                    : inst.LocalBoundsMin;
-                Vector3 localMax = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
-                    ? inst.SelectionLocalBoundsMax
-                    : inst.LocalBoundsMax;
-                WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
-
-                float modelTopZ = rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z);
-                float targetPlacementZ = bestCentroid.Z - modelTopZ;
-                Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
-
-                undoList.Add((inst.UniqueId, inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale));
-                inst.PlacementPosition = new Vector3(bestCentroid.X - rotCenter.X, bestCentroid.Y - rotCenter.Y, targetPlacementZ);
-                inst.Transform = WorldPlacementTransform.Build(inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale);
-                WorldScene.TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform, out inst.BoundsMin, out inst.BoundsMax);
-                WorldScene.TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out inst.SelectionLocalBoundsMin, out inst.SelectionLocalBoundsMax);
-                tileMdx[i] = inst;
-                snappedCount++;
-            }
         }
+
+        SnapList(tileMdx, isWmo: false);
+        SnapList(tileWmo, isWmo: true);
 
         if (snappedCount > 0)
         {

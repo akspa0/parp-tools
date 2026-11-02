@@ -396,40 +396,67 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
 
         if (overlay._showPm4ExtrudedWalls)
         {
-            Vector3 wallColor = new(0.35f, 0.90f, 0.85f);
             foreach (var (tileKey, objects) in overlay._pm4TileObjects)
             {
                 if (!overlay.ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
                     continue;
 
-                overlay._pm4TilePositionRefs.TryGetValue(tileKey, out var mprlList);
-
+                // Group by discrete object: non-zero Ck24 groups all parts of the same WMO,
+                // while zero Ck24 groups by dominant group or part id.
+                var objectGroups = new Dictionary<string, List<Pm4OverlayObject>>();
                 foreach (Pm4OverlayObject obj in objects)
                 {
                     if (!overlay.ShouldRenderPm4ObjectType(obj.Ck24Type))
                         continue;
 
-                    var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
-                    Matrix4x4 objectTransform = overlay.BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
-                    if (!overlay.ShouldRenderPm4Object(obj, objectTransform, applyObjectTransform, cameraPos, out _))
+                    string groupKey = obj.Ck24 != 0
+                        ? $"ck24_{obj.Ck24:X6}"
+                        : $"part_{obj.ObjectPartId}";
+
+                    if (!objectGroups.TryGetValue(groupKey, out var groupList))
+                    {
+                        groupList = new List<Pm4OverlayObject>();
+                        objectGroups[groupKey] = groupList;
+                    }
+                    groupList.Add(obj);
+                }
+
+                foreach (var (_, groupParts) in objectGroups)
+                {
+                    Pm4OverlayObject rep = groupParts[0];
+                    var repKey = (tileKey.tileX, tileKey.tileY, rep.Ck24, rep.ObjectPartId);
+                    Matrix4x4 repObjTransform = overlay.BuildPm4ObjectTransform(repKey, applyPm4Transform, pm4Transform, out bool repApplyObjTransform);
+                    if (!overlay.ShouldRenderPm4Object(rep, repObjTransform, repApplyObjTransform, cameraPos, out _))
                         continue;
 
-                    Matrix4x4 geomTransform = Pm4OverlayScene.BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform);
-                    var surfaceVerts = new List<Vector3>(obj.Triangles.Count * 3);
-                    for (int t = 0; t < obj.Triangles.Count; t++)
+                    var surfaceVerts = new List<Vector3>();
+                    float groupMinZ = float.MaxValue;
+                    float groupMaxZ = float.MinValue;
+
+                    for (int p = 0; p < groupParts.Count; p++)
                     {
-                        surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].A, geomTransform));
-                        surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].B, geomTransform));
-                        surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].C, geomTransform));
+                        Pm4OverlayObject part = groupParts[p];
+                        var partKey = (tileKey.tileX, tileKey.tileY, part.Ck24, part.ObjectPartId);
+                        Matrix4x4 partObjTransform = overlay.BuildPm4ObjectTransform(partKey, applyPm4Transform, pm4Transform, out bool partApplyObjTransform);
+                        Matrix4x4 geomTransform = Pm4OverlayScene.BuildPm4GeometryTransform(part, partObjTransform, partApplyObjTransform);
+
+                        WorldScene.TransformBounds(part.BoundsMin, part.BoundsMax, geomTransform, out Vector3 partMin, out Vector3 partMax);
+                        if (partMin.Z < groupMinZ) groupMinZ = partMin.Z;
+                        if (partMax.Z > groupMaxZ) groupMaxZ = partMax.Z;
+
+                        for (int t = 0; t < part.Triangles.Count; t++)
+                        {
+                            surfaceVerts.Add(Vector3.Transform(part.Triangles[t].A, geomTransform));
+                            surfaceVerts.Add(Vector3.Transform(part.Triangles[t].B, geomTransform));
+                            surfaceVerts.Add(Vector3.Transform(part.Triangles[t].C, geomTransform));
+                        }
                     }
 
-                    if (surfaceVerts.Count < 3)
+                    if (surfaceVerts.Count < 3 || groupMaxZ - groupMinZ < 0.05f)
                         continue;
 
-                    float? placementZ = obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(obj.Ck24 << 8) : null;
-                    WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, geomTransform, out Vector3 worldMin, out _);
-
-                    Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
+                    Vector3 wallColor = overlay.GetPm4ObjectColor(tileKey, rep);
+                    Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, null, null, groupMinZ);
                     for (int w = 0; w < prism.Walls.Count; w++)
                     {
                         Pm4ExtrudedWall wall = prism.Walls[w];
