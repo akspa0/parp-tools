@@ -39,6 +39,42 @@ internal sealed partial class Pm4WorkbenchService
             SaveMergedPlacementsToZarr();
         if (SharedUiWidgets.ActionButton("Patch & Export Monolithic ADTs..."))
             SavePatchedAdts();
+        if (SharedUiWidgets.ActionButton("Save Taught Project..."))
+            SaveTaughtProject();
+        if (SharedUiWidgets.ActionButton("Export Taught Manifest..."))
+            ExportTaughtManifest();
+    }
+
+    internal void SaveTaughtProject()
+    {
+        try
+        {
+            string map = !string.IsNullOrEmpty(_host.LoadedFileName)
+                ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
+                : "development";
+            string path = _host.Pm4DoodadDuplication.SaveTaughtProject(map);
+            _statusMessage = $"✓ Saved {_host.Pm4DoodadDuplication.TaughtPairings.Count} taught pairings to {path}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Save taught project failed: {ex.Message}";
+        }
+    }
+
+    internal void ExportTaughtManifest()
+    {
+        try
+        {
+            string map = !string.IsNullOrEmpty(_host.LoadedFileName)
+                ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
+                : "development";
+            string path = _host.Pm4DoodadDuplication.ExportTaughtPairingsManifest(map);
+            _statusMessage = $"✓ Exported taught manifest to {path}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Export taught manifest failed: {ex.Message}";
+        }
     }
 
     internal void SavePatchedAdts()

@@ -99,5 +99,68 @@ public sealed class Pm4DirectModelMatcherTests
         Assert.InRange(match.SolvedPosition.X, 499.9f, 500.1f);
         Assert.NotEqual(600f, match.SolvedPosition.Y);
     }
+
+    [Fact]
+    public void MatchPrism_EnforcesWmoScaleFixedAtOne_AndPenalizesExtremeSizeMismatch()
+    {
+        // 1. Giant WMO building candidate (60x60x40): e.g. BIG_KEEP.WMO
+        var keepCandidate = Pm4ModelCandidate.Create(
+            @"WORLD\WMO\AZEROTH\BUILDINGS\BIG_KEEP\BIG_KEEP.WMO",
+            "WMO",
+            new Vector3(-30f, -30f, 0f),
+            new Vector3(30f, 30f, 40f));
+
+        // 2. Small doodad prism (2x2 with height 2)
+        var smallPrism = new Pm4FootprintPrism(
+            ConvexHull2D: [new(-1, -1), new(1, -1), new(1, 1), new(-1, 1)],
+            TopZ: 10f,
+            BaseZ: 8f,
+            Height: 2f,
+            Centroid: new Vector3(0f, 0f, 9f),
+            YawDegrees: 0f,
+            UnrotatedLength: 2f,
+            UnrotatedWidth: 2f,
+            Walls: [],
+            WallTriangles: []);
+
+        // Matching giant WMO to small prism:
+        // Must NEVER scale down WMO to 0.35x or 0.03x! SolvedScale MUST be 1.0f.
+        // And score must be penalized to 0 due to extreme size mismatch.
+        var keepMatchesSmall = Pm4DirectModelMatcher.MatchPrism(smallPrism, [keepCandidate]);
+        Assert.Single(keepMatchesSmall);
+        Assert.Equal(1.0f, keepMatchesSmall[0].SolvedScale);
+        Assert.Equal("WMO", keepMatchesSmall[0].Candidate.AssetKind);
+        Assert.Equal(0.0, keepMatchesSmall[0].Score);
+
+        // 3. Appropriate large building prism (60x60 with height 40)
+        var buildingPrism = new Pm4FootprintPrism(
+            ConvexHull2D: [new(-30, -30), new(30, -30), new(30, 30), new(-30, 30)],
+            TopZ: 40f,
+            BaseZ: 0f,
+            Height: 40f,
+            Centroid: new Vector3(0f, 0f, 20f),
+            YawDegrees: 0f,
+            UnrotatedLength: 60f,
+            UnrotatedWidth: 60f,
+            Walls: [],
+            WallTriangles: []);
+
+        var keepMatchesBuilding = Pm4DirectModelMatcher.MatchPrism(buildingPrism, [keepCandidate]);
+        Assert.Single(keepMatchesBuilding);
+        Assert.Equal(1.0f, keepMatchesBuilding[0].SolvedScale);
+        Assert.InRange(keepMatchesBuilding[0].Score, 0.95, 1.0);
+
+        // 4. Small M2 candidate (2x1x1) evaluated against the 60x60 building prism
+        var benchCandidate = Pm4ModelCandidate.Create(
+            @"WORLD\GENERIC\PASSIVEDOODADS\BENCHES\WT_BENCH_01.M2",
+            "M2",
+            new Vector3(-1f, -0.5f, 0f),
+            new Vector3(1f, 0.5f, 1f));
+
+        var benchMatchesBuilding = Pm4DirectModelMatcher.MatchPrism(buildingPrism, [benchCandidate]);
+        Assert.Single(benchMatchesBuilding);
+        // Bench candidate must NOT receive a high score when matching a massive building prism
+        Assert.True(benchMatchesBuilding[0].Score < 0.50, $"Expected bench score < 0.50 against building prism, got {benchMatchesBuilding[0].Score}");
+    }
 }
 

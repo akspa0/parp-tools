@@ -264,6 +264,31 @@ internal sealed class Pm4OverlayObject
         Center = (BoundsMin + BoundsMax) * 0.5f;
     }
 
+    private WowViewer.Core.PM4.Matching.Pm4Geometry3DShapeSignature? _shape3D;
+    public WowViewer.Core.PM4.Matching.Pm4Geometry3DShapeSignature Shape3D
+    {
+        get
+        {
+            if (_shape3D == null)
+            {
+                var triList = new List<(Vector3 A, Vector3 B, Vector3 C)>(Triangles.Count);
+                for (int i = 0; i < Triangles.Count; i++)
+                    triList.Add((Triangles[i].A, Triangles[i].B, Triangles[i].C));
+
+                List<(Vector3 From, Vector3 To)>? lineList = null;
+                if (Lines != null && Lines.Count > 0)
+                {
+                    lineList = new List<(Vector3 From, Vector3 To)>(Lines.Count);
+                    for (int i = 0; i < Lines.Count; i++)
+                        lineList.Add((Lines[i].From, Lines[i].To));
+                }
+
+                _shape3D = WowViewer.Core.PM4.Matching.Pm4Geometry3DShapeSignature.FromGeometry(triList, lineList);
+            }
+            return _shape3D;
+        }
+    }
+
     public string SourcePath { get; }
     public uint MshdField00 { get; }
     public uint MshdRegionId { get; }

@@ -123,6 +123,26 @@ internal sealed class ExportWorkbenchService
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Patch modified ADTs with curated placements (preserving terrain/textures via AdtPlacementEditor, or creating monolithic 3.3.5 ADTs for unauthored tiles).");
 
+        string activeMap = !string.IsNullOrEmpty(_host.LoadedFileName)
+            ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
+            : "development";
+
+        if (SharedUiWidgets.ActionButton("Save Taught Pairings Project##ExportSavePairings"))
+        {
+            string path = _host.Pm4DoodadDuplication.SaveTaughtProject(activeMap);
+            _exportStatusMessage = $"Saved {_host.Pm4DoodadDuplication.TaughtPairings.Count} taught pairings to {path}";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"Saves the current taught pairings to 'output/projects/pm4_pairings/{activeMap}.pairings.json' and syncs the global curation library.");
+
+        if (SharedUiWidgets.ActionButton("Export Taught Pairings Manifest##ExportPairingsManifest"))
+        {
+            string path = _host.Pm4DoodadDuplication.ExportTaughtPairingsManifest(activeMap);
+            _exportStatusMessage = $"Exported taught pairing manifest to {path}";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Exports an authoritative JSON composition manifest of all taught shape rules and footprint statistics.");
+
         // If an object is actively selected in the scene, provide quick single-object details and copy
         if (overlay.SelectedPm4ObjectKey.HasValue)
         {

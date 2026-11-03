@@ -10,6 +10,7 @@ using WowViewer.Core.PM4.Footprint;
 using WowViewer.Core.PM4.Matching;
 using WowViewer.Core.Runtime.World;
 using WoWViewer.Terrain;
+using WoWViewer.Terrain.Pm4;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 
 namespace WoWViewer;
@@ -31,7 +32,10 @@ internal sealed record TaughtPairing(
     DateTime TaughtUtc,
     Vector3 LocalBoundsMin = default,
     Vector3 LocalBoundsMax = default,
-    float YawOffset = 0f);
+    float YawOffset = 0f,
+    float[]? VerticalSliceRadii = null,
+    Vector3 InertiaTensor = default,
+    Vector3 NormalDistribution = default);
 
 /// <summary>
 /// Service providing live PM4 doodad collision matching, duplication, human-in-the-loop teaching,
@@ -45,6 +49,23 @@ internal sealed class Pm4DoodadDuplicationService
 
     public IReadOnlyList<TaughtPairing> TaughtPairings => _taughtPairings;
     public string? LastOperationMessage { get; set; }
+
+    public static bool IsWmoAsset(string? modelPath, string? assetKind = null)
+    {
+        if (!string.IsNullOrEmpty(modelPath) && modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (!string.IsNullOrEmpty(assetKind) && string.Equals(assetKind, "wmo", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
+
+    public static string ResolveAssetKind(string? modelPath, string? assetKind = null)
+    {
+        if (IsWmoAsset(modelPath, assetKind)) return "WMO";
+        if (!string.IsNullOrWhiteSpace(assetKind)) return assetKind;
+        if (!string.IsNullOrEmpty(modelPath) && modelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)) return "M2";
+        return "MDX";
+    }
 
     private interface IPm4UndoOperation
     {
@@ -255,20 +276,30 @@ internal sealed class Pm4DoodadDuplicationService
             return 0;
         }
 
-        // Get existing M2 placements on this tile to reject occupied targets
-        if (!pm4Host.TileMdxInstances.TryGetValue((targetTileX, targetTileY), out List<ObjectInstance>? tileMdx))
-        {
-            tileMdx = new List<ObjectInstance>();
-            pm4Host.TileMdxInstances[(targetTileX, targetTileY)] = tileMdx;
-        }
+        bool isWmo = IsWmoAsset(template.ModelPath, template.AssetKind);
+        float templateScale = isWmo ? 1.0f : template.PlacementScale;
 
-        var existingPositions = new List<Vector3>(tileMdx.Count);
+        // Get existing placements on this tile to reject occupied targets
+        pm4Host.TileMdxInstances.TryGetValue((targetTileX, targetTileY), out List<ObjectInstance>? tileMdx);
+        pm4Host.TileWmoInstances.TryGetValue((targetTileX, targetTileY), out List<ObjectInstance>? tileWmo);
+
+        var existingPositions = new List<Vector3>((tileMdx?.Count ?? 0) + (tileWmo?.Count ?? 0));
         int maxExistingUniqueId = 0;
-        for (int i = 0; i < tileMdx.Count; i++)
+        if (tileMdx != null)
         {
-            existingPositions.Add(tileMdx[i].PlacementPosition);
-            if (tileMdx[i].UniqueId > maxExistingUniqueId)
-                maxExistingUniqueId = tileMdx[i].UniqueId;
+            for (int i = 0; i < tileMdx.Count; i++)
+            {
+                existingPositions.Add(tileMdx[i].PlacementPosition);
+                if (tileMdx[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileMdx[i].UniqueId;
+            }
+        }
+        if (tileWmo != null)
+        {
+            for (int i = 0; i < tileWmo.Count; i++)
+            {
+                existingPositions.Add(tileWmo[i].PlacementPosition);
+                if (tileWmo[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileWmo[i].UniqueId;
+            }
         }
 
         var templateInfo = new ModelTemplateInfo(
@@ -277,7 +308,7 @@ internal sealed class Pm4DoodadDuplicationService
             template.ModelName,
             template.PlacementPosition,
             template.PlacementRotation,
-            template.PlacementScale,
+            templateScale,
             template.LocalBoundsMin,
             template.LocalBoundsMax,
             template.BoundsMin,
@@ -289,7 +320,7 @@ internal sealed class Pm4DoodadDuplicationService
             candidateTargets,
             existingPositions,
             startId,
-            occupancyRadius: 8.0f);
+            occupancyRadius: isWmo ? 16.0f : 8.0f);
 
         if (duplicated.Count == 0)
         {
@@ -303,7 +334,8 @@ internal sealed class Pm4DoodadDuplicationService
         for (int i = 0; i < duplicated.Count; i++)
         {
             DuplicatedDoodadResult d = duplicated[i];
-            Matrix4x4 transform = WorldPlacementTransform.Build(d.Position, d.RotationDegrees, d.Scale);
+            float placementScale = isWmo ? 1.0f : d.Scale;
+            Matrix4x4 transform = WorldPlacementTransform.Build(d.Position, d.RotationDegrees, placementScale);
             WorldScene.TransformBounds(template.LocalBoundsMin, template.LocalBoundsMax, transform, out Vector3 bbMin, out Vector3 bbMax);
             WorldScene.TransformBounds(template.SelectionLocalBoundsMin, template.SelectionLocalBoundsMax, transform, out Vector3 selMin, out Vector3 selMax);
 
@@ -321,22 +353,45 @@ internal sealed class Pm4DoodadDuplicationService
                 SelectionBoundsResolved = template.SelectionBoundsResolved,
                 ModelName = template.ModelName,
                 ModelPath = template.ModelPath,
+                AssetKind = isWmo ? "WMO" : ResolveAssetKind(template.ModelPath, template.AssetKind),
                 PlacementPosition = d.Position,
                 PlacementRotation = d.RotationDegrees,
-                PlacementScale = d.Scale,
+                PlacementScale = placementScale,
                 UniqueId = d.UniqueId,
-                PlacementEntryIndex = tileMdx.Count,
+                PlacementEntryIndex = isWmo ? (tileWmo?.Count ?? 0) : (tileMdx?.Count ?? 0),
                 TileX = targetTileX,
                 TileY = targetTileY,
                 HasTileCoordinate = true
             };
 
-            tileMdx.Add(newInst);
+            if (isWmo)
+            {
+                if (tileWmo == null)
+                {
+                    tileWmo = new List<ObjectInstance>();
+                    pm4Host.TileWmoInstances[(targetTileX, targetTileY)] = tileWmo;
+                }
+                tileWmo.Add(newInst);
+                pm4Host.Assets.QueueWmoLoad(newInst.ModelKey);
+                pm4Host.Assets.PrioritizeWmoLoad(newInst.ModelKey);
+            }
+            else
+            {
+                if (tileMdx == null)
+                {
+                    tileMdx = new List<ObjectInstance>();
+                    pm4Host.TileMdxInstances[(targetTileX, targetTileY)] = tileMdx;
+                }
+                tileMdx.Add(newInst);
+                pm4Host.Assets.QueueMdxLoad(newInst.ModelKey);
+                pm4Host.Assets.PrioritizeMdxLoad(newInst.ModelKey);
+            }
             addedIds.Add(d.UniqueId);
         }
 
         _undoStack.Push(new DuplicationUndo(targetTileX, targetTileY, addedIds));
         pm4Host.RebuildInstanceLists();
+        pm4Host.Assets.ProcessPendingLoads(maxLoads: 64, maxBudgetMs: 100.0);
         string successMsg = $"✓ Duplicated {duplicated.Count} instances of {template.ModelName} into PM4 doodad collision hulls.";
         _host.StatusMessage = successMsg;
         LastOperationMessage = successMsg;
@@ -396,6 +451,57 @@ internal sealed class Pm4DoodadDuplicationService
     }
 
     /// <summary>
+    /// Extracts all surface vertices for a PM4 hull. If the hull belongs to a composite object
+    /// (Ck24 != 0), gathers triangles across all constituent parts in the tile so the full
+    /// building/bridge footprint and centroid are captured.
+    /// </summary>
+    public static List<Vector3> ExtractCompositeSurfaceVertices(
+        WorldScene? worldScene,
+        Pm4OverlayObject pm4Obj,
+        int pm4TileX,
+        int pm4TileY,
+        out float minWorldZ)
+    {
+        var surfaceVerts = new List<Vector3>();
+        minWorldZ = float.MaxValue;
+
+        if (pm4Obj.Ck24 != 0 && worldScene != null &&
+            (worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((pm4TileX, pm4TileY), out var tileObjs) ||
+             worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((pm4TileY, pm4TileX), out tileObjs)))
+        {
+            for (int i = 0; i < tileObjs.Count; i++)
+            {
+                var part = tileObjs[i];
+                if (part.Ck24 == pm4Obj.Ck24)
+                {
+                    WorldScene.TransformBounds(part.BoundsMin, part.BoundsMax, part.BaseTransform, out Vector3 bMin, out _);
+                    if (bMin.Z < minWorldZ) minWorldZ = bMin.Z;
+                    for (int t = 0; t < part.Triangles.Count; t++)
+                    {
+                        surfaceVerts.Add(Vector3.Transform(part.Triangles[t].A, part.BaseTransform));
+                        surfaceVerts.Add(Vector3.Transform(part.Triangles[t].B, part.BaseTransform));
+                        surfaceVerts.Add(Vector3.Transform(part.Triangles[t].C, part.BaseTransform));
+                    }
+                }
+            }
+        }
+
+        if (surfaceVerts.Count == 0)
+        {
+            WorldScene.TransformBounds(pm4Obj.BoundsMin, pm4Obj.BoundsMax, pm4Obj.BaseTransform, out Vector3 bMin, out _);
+            minWorldZ = bMin.Z;
+            for (int t = 0; t < pm4Obj.Triangles.Count; t++)
+            {
+                surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].A, pm4Obj.BaseTransform));
+                surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].B, pm4Obj.BaseTransform));
+                surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].C, pm4Obj.BaseTransform));
+            }
+        }
+
+        return surfaceVerts;
+    }
+
+    /// <summary>
     /// Accurately aligns a placed object to a specific PM4 collision hull, aligning centroid,
     /// top-surface height, and PCA principal Yaw rotation.
     /// </summary>
@@ -416,14 +522,31 @@ internal sealed class Pm4DoodadDuplicationService
         int tileX = inst.TileX;
         int tileY = inst.TileY;
 
-        bool isWmo = string.Equals(inst.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
+        bool isWmo = IsWmoAsset(inst.ModelPath, inst.AssetKind);
         List<ObjectInstance>? targetList = null;
         int idx = -1;
 
-        if (isWmo && pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo))
+        if (isWmo)
         {
-            idx = tileWmo.FindIndex(m => m.UniqueId == inst.UniqueId);
-            if (idx >= 0) targetList = tileWmo;
+            if (pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo))
+            {
+                idx = tileWmo.FindIndex(m => m.UniqueId == inst.UniqueId);
+                if (idx >= 0) targetList = tileWmo;
+            }
+            if (targetList == null || idx < 0)
+            {
+                foreach (var pair in pm4Host.TileWmoInstances)
+                {
+                    idx = pair.Value.FindIndex(m => m.UniqueId == inst.UniqueId);
+                    if (idx >= 0)
+                    {
+                        targetList = pair.Value;
+                        tileX = pair.Key.Item1;
+                        tileY = pair.Key.Item2;
+                        break;
+                    }
+                }
+            }
         }
 
         if (targetList == null && pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx))
@@ -462,48 +585,60 @@ internal sealed class Pm4DoodadDuplicationService
         };
         _undoStack.Push(new SnapUndo(tileX, tileY, undoList));
 
-        var surfaceVerts = new List<Vector3>(pm4Obj.Triangles.Count * 3);
-        for (int t = 0; t < pm4Obj.Triangles.Count; t++)
-        {
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].A, pm4Obj.BaseTransform));
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].B, pm4Obj.BaseTransform));
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].C, pm4Obj.BaseTransform));
-        }
-
+        var surfaceVerts = ExtractCompositeSurfaceVertices(worldScene, pm4Obj, pm4TileX, pm4TileY, out float minWorldZ);
         worldScene.Pm4Overlay._pm4TilePositionRefs.TryGetValue((pm4TileX, pm4TileY), out var mprlList);
         float? placementZ = pm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(pm4Obj.Ck24 << 8) : null;
-        WorldScene.TransformBounds(pm4Obj.BoundsMin, pm4Obj.BoundsMax, pm4Obj.BaseTransform, out Vector3 worldMin, out _);
 
-        Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
+        Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, minWorldZ);
 
         Vector3 localMin = prev.SelectionBoundsResolved && prev.SelectionLocalBoundsMax != Vector3.Zero
             ? prev.SelectionLocalBoundsMin : prev.LocalBoundsMin;
         Vector3 localMax = prev.SelectionBoundsResolved && prev.SelectionLocalBoundsMax != Vector3.Zero
             ? prev.SelectionLocalBoundsMax : prev.LocalBoundsMax;
 
-        var cand = Pm4ModelCandidate.Create(prev.ModelPath, prev.AssetKind ?? "M2", localMin, localMax);
-        var matchResults = Pm4DirectModelMatcher.MatchPrism(prism, [cand], 1);
-
-        float dist;
-        if (matchResults.Count > 0)
+        float? knownYawOffset = null;
+        var taught = _taughtPairings.Find(t =>
+            string.Equals(t.ModelPath, prev.ModelPath, StringComparison.OrdinalIgnoreCase) ||
+            (t.Ck24 != 0 && t.Ck24 == pm4Obj.Ck24));
+        if (taught != null)
         {
-            var match = matchResults[0];
-            dist = Vector3.Distance(prev.PlacementPosition, match.SolvedPosition);
-            prev.PlacementPosition = match.SolvedPosition;
-            prev.PlacementRotation = match.SolvedRotation;
-            if (fitScale) prev.PlacementScale = match.SolvedScale;
+            knownYawOffset = taught.YawOffset;
+        }
+        else if (Pm4PriorKnowledgeDatabase.Instance.TryGetAsset(prev.ModelPath, out var dbAsset) && dbAsset != null && MathF.Abs(dbAsset.YawOffset) > 1e-4f)
+        {
+            knownYawOffset = dbAsset.YawOffset;
+        }
+
+        float candDx = MathF.Abs(localMax.X - localMin.X);
+        float candDy = MathF.Abs(localMax.Y - localMin.Y);
+        float solvedYaw;
+        if (knownYawOffset.HasValue)
+        {
+            solvedYaw = prism.YawDegrees + knownYawOffset.Value;
         }
         else
         {
-            Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, prev.PlacementRotation, prev.PlacementScale);
-            WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
-            Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
-            float modelTopZ = rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z);
-            float targetPlacementZ = isWmo ? prism.BaseZ - rotMin.Z : prism.TopZ - modelTopZ;
-            prev.PlacementPosition = new Vector3(prism.Centroid.X - rotCenter.X, prism.Centroid.Y - rotCenter.Y, targetPlacementZ);
-            prev.PlacementRotation = new Vector3(prev.PlacementRotation.X, prev.PlacementRotation.Y, prism.YawDegrees);
-            dist = Vector3.Distance(inst.PlacementPosition, prev.PlacementPosition);
+            solvedYaw = prism.YawDegrees + (candDy > candDx * 1.15f ? 90f : 0f);
         }
+        while (solvedYaw > 180f) solvedYaw -= 360f;
+        while (solvedYaw < -180f) solvedYaw += 360f;
+
+        var cand = Pm4ModelCandidate.Create(prev.ModelPath, prev.AssetKind ?? "M2", localMin, localMax);
+        var matchResults = Pm4DirectModelMatcher.MatchPrism(prism, [cand], 1);
+
+        float finalScale = isWmo ? 1.0f : (fitScale && matchResults.Count > 0 ? matchResults[0].SolvedScale : prev.PlacementScale);
+        Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, new Vector3(0f, 0f, solvedYaw), finalScale);
+        WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
+        Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
+
+        float targetPlacementZ = isWmo
+            ? prism.BaseZ - rotMin.Z
+            : prism.TopZ - (rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z));
+
+        float dist = Vector3.Distance(prev.PlacementPosition, new Vector3(prism.Centroid.X - rotCenter.X, prism.Centroid.Y - rotCenter.Y, targetPlacementZ));
+        prev.PlacementPosition = new Vector3(prism.Centroid.X - rotCenter.X, prism.Centroid.Y - rotCenter.Y, targetPlacementZ);
+        prev.PlacementRotation = new Vector3(0f, 0f, solvedYaw);
+        prev.PlacementScale = finalScale;
 
         prev.Transform = WorldPlacementTransform.Build(prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale);
         WorldScene.TransformBounds(prev.LocalBoundsMin, prev.LocalBoundsMax, prev.Transform, out prev.BoundsMin, out prev.BoundsMax);
@@ -511,9 +646,101 @@ internal sealed class Pm4DoodadDuplicationService
         targetList[idx] = prev;
 
         pm4Host.RebuildInstanceLists();
+
+        // Automatically detect and log spatial relationship with updated orientation
+        Curation.TryDetectSpatialRelationship(pm4Obj, pm4TileX, pm4TileY, worldScene, out _, prev);
+
         statusMessage = $"✓ Aligned {prev.ModelName} (#{prev.UniqueId}) to PM4 hull 0x{pm4Obj.Ck24:X6} (delta: {dist:F1} yds, yaw: {prev.PlacementRotation.Z:F1}°).";
         _host.StatusMessage = statusMessage;
         LastOperationMessage = statusMessage;
+        return true;
+    }
+
+    /// <summary>
+    /// Rotates a placed scene object in-place around its world centroid by a specified yaw angle delta.
+    /// If an active PM4 hull is selected, updates the taught pairing and spatial relationship.
+    /// </summary>
+    public bool RotatePlacement(ObjectInstance inst, float deltaYawDegrees)
+    {
+        var worldScene = _host.WorldScene;
+        if (worldScene == null) return false;
+        IPm4OverlayHost pm4Host = worldScene;
+
+        int tileX = inst.TileX;
+        int tileY = inst.TileY;
+        bool isWmo = IsWmoAsset(inst.ModelPath, inst.AssetKind);
+        List<ObjectInstance>? targetList = null;
+        int idx = -1;
+
+        if (isWmo && pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo))
+        {
+            idx = tileWmo.FindIndex(m => m.UniqueId == inst.UniqueId);
+            if (idx >= 0) targetList = tileWmo;
+        }
+        if (targetList == null && pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx))
+        {
+            idx = tileMdx.FindIndex(m => m.UniqueId == inst.UniqueId);
+            if (idx >= 0) targetList = tileMdx;
+        }
+        if (targetList == null || idx < 0)
+        {
+            foreach (var pair in pm4Host.TileWmoInstances)
+            {
+                idx = pair.Value.FindIndex(m => m.UniqueId == inst.UniqueId);
+                if (idx >= 0) { targetList = pair.Value; tileX = pair.Key.Item1; tileY = pair.Key.Item2; break; }
+            }
+        }
+        if (targetList == null || idx < 0)
+        {
+            foreach (var pair in pm4Host.TileMdxInstances)
+            {
+                idx = pair.Value.FindIndex(m => m.UniqueId == inst.UniqueId);
+                if (idx >= 0) { targetList = pair.Value; tileX = pair.Key.Item1; tileY = pair.Key.Item2; break; }
+            }
+        }
+
+        if (targetList == null || idx < 0) return false;
+
+        var prev = targetList[idx];
+        _undoStack.Push(new SnapUndo(tileX, tileY, new List<(int, Vector3, Vector3, float)>
+        {
+            (prev.UniqueId, prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale)
+        }));
+
+        float newYaw = prev.PlacementRotation.Z + deltaYawDegrees;
+        while (newYaw > 180f) newYaw -= 360f;
+        while (newYaw < -180f) newYaw += 360f;
+
+        Vector3 currentCentroid = (prev.BoundsMin + prev.BoundsMax) * 0.5f;
+        Vector3 localMin = prev.SelectionBoundsResolved && prev.SelectionLocalBoundsMax != Vector3.Zero ? prev.SelectionLocalBoundsMin : prev.LocalBoundsMin;
+        Vector3 localMax = prev.SelectionBoundsResolved && prev.SelectionLocalBoundsMax != Vector3.Zero ? prev.SelectionLocalBoundsMax : prev.LocalBoundsMax;
+
+        Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, new Vector3(prev.PlacementRotation.X, prev.PlacementRotation.Y, newYaw), prev.PlacementScale);
+        WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
+        Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
+
+        prev.PlacementPosition = new Vector3(currentCentroid.X - rotCenter.X, currentCentroid.Y - rotCenter.Y, prev.PlacementPosition.Z);
+        prev.PlacementRotation = new Vector3(prev.PlacementRotation.X, prev.PlacementRotation.Y, newYaw);
+        prev.Transform = WorldPlacementTransform.Build(prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale);
+        WorldScene.TransformBounds(prev.LocalBoundsMin, prev.LocalBoundsMax, prev.Transform, out prev.BoundsMin, out prev.BoundsMax);
+        WorldScene.TransformBounds(prev.SelectionLocalBoundsMin, prev.SelectionLocalBoundsMax, prev.Transform, out prev.SelectionLocalBoundsMin, out prev.SelectionLocalBoundsMax);
+
+        targetList[idx] = prev;
+        pm4Host.RebuildInstanceLists();
+
+        // Update taught pairing if paired with PM4 object
+        if (worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
+        {
+            var selKey = worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
+            if (worldScene.Pm4Overlay._pm4ObjectLookup.TryGetValue(selKey, out var pm4Obj))
+            {
+                TeachPairing(pm4Obj, prev, selKey.tileX, selKey.tileY);
+            }
+        }
+
+        string msg = $"✓ Rotated {prev.ModelName} (#{prev.UniqueId}) by {deltaYawDegrees:+0;-0}° (Yaw: {newYaw:F1}°).";
+        _host.StatusMessage = msg;
+        LastOperationMessage = msg;
         return true;
     }
 
@@ -528,39 +755,34 @@ internal sealed class Pm4DoodadDuplicationService
         int pm4TileY)
     {
         var worldScene = _host.WorldScene;
-        var surfaceVerts = new List<Vector3>(pm4Obj.Triangles.Count * 3);
-        for (int t = 0; t < pm4Obj.Triangles.Count; t++)
-        {
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].A, pm4Obj.BaseTransform));
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].B, pm4Obj.BaseTransform));
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].C, pm4Obj.BaseTransform));
-        }
-
+        var surfaceVerts = ExtractCompositeSurfaceVertices(worldScene, pm4Obj, pm4TileX, pm4TileY, out float minWorldZ);
         List<Vector3>? mprlList = null;
         if (worldScene != null)
             worldScene.Pm4Overlay._pm4TilePositionRefs.TryGetValue((pm4TileX, pm4TileY), out mprlList);
         float? placementZ = pm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(pm4Obj.Ck24 << 8) : null;
-        WorldScene.TransformBounds(pm4Obj.BoundsMin, pm4Obj.BoundsMax, pm4Obj.BaseTransform, out Vector3 worldMin, out _);
-        Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
+        Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, minWorldZ);
 
         Vector3 localMin = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
             ? inst.SelectionLocalBoundsMin : inst.LocalBoundsMin;
         Vector3 localMax = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
             ? inst.SelectionLocalBoundsMax : inst.LocalBoundsMax;
-        var cand = Pm4ModelCandidate.Create(inst.ModelPath, inst.AssetKind ?? "M2", localMin, localMax);
+        bool isWmo = IsWmoAsset(inst.ModelPath, inst.AssetKind);
+        string assetKind = isWmo ? "WMO" : ResolveAssetKind(inst.ModelPath, inst.AssetKind);
+        var cand = Pm4ModelCandidate.Create(inst.ModelPath, assetKind, localMin, localMax);
         var matchResults = Pm4DirectModelMatcher.MatchPrism(prism, [cand], 1);
-        float scale = matchResults.Count > 0 ? matchResults[0].SolvedScale : inst.PlacementScale;
+        float scale = isWmo ? 1.0f : (matchResults.Count > 0 ? matchResults[0].SolvedScale : inst.PlacementScale);
 
         float yawOffset = inst.PlacementRotation.Z - prism.YawDegrees;
         while (yawOffset > 180f) yawOffset -= 360f;
         while (yawOffset < -180f) yawOffset += 360f;
 
+        var shape3D = pm4Obj.Shape3D;
         var taught = new TaughtPairing(
             pm4Obj.Ck24,
             pm4Obj.DominantGroupKey,
             inst.ModelName,
             inst.ModelPath,
-            inst.AssetKind ?? "M2",
+            assetKind,
             scale,
             prism.YawDegrees,
             prism.UnrotatedLength,
@@ -569,7 +791,10 @@ internal sealed class Pm4DoodadDuplicationService
             DateTime.UtcNow,
             localMin,
             localMax,
-            yawOffset);
+            yawOffset,
+            shape3D.VerticalSliceRadii,
+            shape3D.InertiaTensor,
+            shape3D.NormalDistribution);
 
         _taughtPairings.RemoveAll(t =>
             string.Equals(t.ModelPath, taught.ModelPath, StringComparison.OrdinalIgnoreCase)
@@ -578,7 +803,7 @@ internal sealed class Pm4DoodadDuplicationService
 
         SaveTaughtPairingsToDisk();
 
-        string msg = $"✓ Saved teaching rule: {inst.ModelName} ({inst.AssetKind}) ↔ PM4 {prism.UnrotatedLength:F1}x{prism.UnrotatedWidth:F1}x{prism.Height:F1} yds (scale {scale:F2}, yaw offset {yawOffset:F1}°).";
+        string msg = $"✓ Saved teaching rule: {inst.ModelName} ({assetKind}) ↔ PM4 {prism.UnrotatedLength:F1}x{prism.UnrotatedWidth:F1}x{prism.Height:F1} yds (scale {scale:F2}, yaw offset {yawOffset:F1}°).";
         _host.StatusMessage = msg;
         LastOperationMessage = msg;
         return taught;
@@ -589,6 +814,12 @@ internal sealed class Pm4DoodadDuplicationService
     /// </summary>
     public void TeachPairingExplicit(TaughtPairing taught)
     {
+        bool isWmo = IsWmoAsset(taught.ModelPath, taught.AssetKind);
+        if (isWmo && (taught.SolvedScale != 1.0f || !string.Equals(taught.AssetKind, "WMO", StringComparison.OrdinalIgnoreCase)))
+        {
+            taught = taught with { AssetKind = "WMO", SolvedScale = 1.0f };
+        }
+
         _taughtPairings.RemoveAll(t =>
             string.Equals(t.ModelPath, taught.ModelPath, StringComparison.OrdinalIgnoreCase)
             || (t.Ck24 != 0 && t.Ck24 == taught.Ck24));
@@ -596,35 +827,59 @@ internal sealed class Pm4DoodadDuplicationService
         SaveTaughtPairingsToDisk();
     }
 
+    private string ResolveMapName(string? mapName = null)
+    {
+        if (!string.IsNullOrWhiteSpace(mapName)) return Pm4PairingProjectStore.SanitizeMapName(mapName);
+        if (!string.IsNullOrWhiteSpace(_host.LoadedFileName))
+            return Pm4PairingProjectStore.SanitizeMapName(_host.LoadedFileName);
+        return "development";
+    }
+
+    public string SaveTaughtProject(string? mapName = null)
+    {
+        string map = ResolveMapName(mapName);
+        string path = Pm4PairingProjectStore.SaveProject(map, _taughtPairings);
+        string msg = $"✓ Saved {_taughtPairings.Count} taught pairings to {path}";
+        _host.StatusMessage = msg;
+        LastOperationMessage = msg;
+        return path;
+    }
+
+    public bool LoadTaughtProject(string? mapName, out int count)
+    {
+        string map = ResolveMapName(mapName);
+        if (Pm4PairingProjectStore.LoadProject(map, out var loaded))
+        {
+            _taughtPairings.Clear();
+            _taughtPairings.AddRange(loaded);
+            count = _taughtPairings.Count;
+            string msg = $"✓ Loaded {count} taught pairings for '{map}'";
+            _host.StatusMessage = msg;
+            LastOperationMessage = msg;
+            return true;
+        }
+        count = 0;
+        return false;
+    }
+
+    public string ExportTaughtPairingsManifest(string? mapName = null, string? exportDir = null)
+    {
+        string map = ResolveMapName(mapName);
+        string path = Pm4PairingProjectStore.SaveManifest(map, _taughtPairings, exportDir);
+        string msg = $"✓ Exported taught pairing manifest to {path}";
+        _host.StatusMessage = msg;
+        LastOperationMessage = msg;
+        return path;
+    }
+
     private void SaveTaughtPairingsToDisk()
     {
-        try
-        {
-            string outDir = Path.Combine(Directory.GetCurrentDirectory(), "output", "curation");
-            Directory.CreateDirectory(outDir);
-            string json = JsonSerializer.Serialize(_taughtPairings, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(Path.Combine(outDir, "pm4_taught_pairings.json"), json);
-        }
-        catch { }
+        SaveTaughtProject();
     }
 
     private void LoadTaughtPairingsFromDisk()
     {
-        try
-        {
-            string filePath = Path.Combine(Directory.GetCurrentDirectory(), "output", "curation", "pm4_taught_pairings.json");
-            if (File.Exists(filePath))
-            {
-                string json = File.ReadAllText(filePath);
-                var loaded = JsonSerializer.Deserialize<List<TaughtPairing>>(json);
-                if (loaded != null && loaded.Count > 0)
-                {
-                    _taughtPairings.Clear();
-                    _taughtPairings.AddRange(loaded);
-                }
-            }
-        }
-        catch { }
+        LoadTaughtProject(null, out _);
     }
 
     public bool DeleteTaughtPairing(TaughtPairing pairing)
@@ -661,6 +916,7 @@ internal sealed class Pm4DoodadDuplicationService
             var addedByTile = new Dictionary<(int, int), List<int>> { [(tileX, tileY)] = added };
             _undoStack.Push(new MultiTileDuplicationUndo(addedByTile));
             pm4Host.RebuildInstanceLists();
+            pm4Host.Assets.ProcessPendingLoads(maxLoads: 128, maxBudgetMs: 150.0);
             string msg = $"✓ Populated {added.Count} PM4 hulls matching shape of {taught.ModelName} on tile ({tileX}, {tileY}).";
             _host.StatusMessage = msg;
             LastOperationMessage = msg;
@@ -699,6 +955,7 @@ internal sealed class Pm4DoodadDuplicationService
         {
             _undoStack.Push(new MultiTileDuplicationUndo(addedByTile));
             pm4Host.RebuildInstanceLists();
+            pm4Host.Assets.ProcessPendingLoads(maxLoads: 128, maxBudgetMs: 150.0);
             string msg = $"✓ Populated {totalAdded} PM4 hulls matching shape of {taught.ModelName} across {addedByTile.Count} loaded tiles.";
             _host.StatusMessage = msg;
             LastOperationMessage = msg;
@@ -761,6 +1018,7 @@ internal sealed class Pm4DoodadDuplicationService
         {
             _undoStack.Push(new MultiTileDuplicationUndo(addedByTile));
             pm4Host.RebuildInstanceLists();
+            pm4Host.Assets.ProcessPendingLoads(maxLoads: 128, maxBudgetMs: 150.0);
             string msg = $"✓ Automation complete: Populated {totalAdded} placements using {totalRulesApplied} taught rules across {addedByTile.Count} tiles.";
             _host.StatusMessage = msg;
             LastOperationMessage = msg;
@@ -791,20 +1049,12 @@ internal sealed class Pm4DoodadDuplicationService
         if (_taughtPairings.Count == 0) return null;
 
         var worldScene = _host.WorldScene;
-        var surfaceVerts = new List<Vector3>(pm4Obj.Triangles.Count * 3);
-        for (int t = 0; t < pm4Obj.Triangles.Count; t++)
-        {
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].A, pm4Obj.BaseTransform));
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].B, pm4Obj.BaseTransform));
-            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].C, pm4Obj.BaseTransform));
-        }
-
+        var surfaceVerts = ExtractCompositeSurfaceVertices(worldScene, pm4Obj, pm4TileX, pm4TileY, out float minWorldZ);
         List<Vector3>? mprlList = null;
         if (worldScene != null)
             worldScene.Pm4Overlay._pm4TilePositionRefs.TryGetValue((pm4TileX, pm4TileY), out mprlList);
         float? placementZ = pm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(pm4Obj.Ck24 << 8) : null;
-        WorldScene.TransformBounds(pm4Obj.BoundsMin, pm4Obj.BoundsMax, pm4Obj.BaseTransform, out Vector3 worldMin, out _);
-        Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
+        Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, minWorldZ);
 
         for (int i = 0; i < _taughtPairings.Count; i++)
         {
@@ -815,7 +1065,7 @@ internal sealed class Pm4DoodadDuplicationService
                 ? taught.LocalBoundsMax : new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
             var cand = Pm4ModelCandidate.Create(taught.ModelPath, taught.AssetKind ?? "M2", localMin, localMax);
 
-            if (MatchesTaughtShape(taught, cand, prism, pm4Obj.Ck24, pm4Obj.DominantGroupKey, out solvedScale, out solvedPos, out solvedRot))
+            if (MatchesTaughtShape(taught, cand, prism, pm4Obj.Ck24, pm4Obj.DominantGroupKey, out solvedScale, out solvedPos, out solvedRot, pm4Obj.Shape3D))
             {
                 return taught;
             }
@@ -840,7 +1090,10 @@ internal sealed class Pm4DoodadDuplicationService
         if (worldScene == null) return false;
         IPm4OverlayHost pm4Host = worldScene;
 
-        bool isWmo = string.Equals(taught.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
+        bool isWmo = IsWmoAsset(taught.ModelPath, taught.AssetKind);
+        float actualScale = isWmo ? 1.0f : solvedScale;
+        string assetKind = isWmo ? "WMO" : ResolveAssetKind(taught.ModelPath, taught.AssetKind);
+
         pm4Host.TileMdxInstances.TryGetValue((pm4TileX, pm4TileY), out var tileMdx);
         pm4Host.TileWmoInstances.TryGetValue((pm4TileX, pm4TileY), out var tileWmo);
 
@@ -851,7 +1104,7 @@ internal sealed class Pm4DoodadDuplicationService
             for (int i = 0; i < tileWmo.Count; i++) if (tileWmo[i].UniqueId > maxId) maxId = tileWmo[i].UniqueId;
 
         int newId = Math.Max(Pm4DoodadDuplicationEngine.SyntheticUniqueIdBase, maxId + 1);
-        Matrix4x4 transform = WorldPlacementTransform.Build(solvedPos, solvedRot, solvedScale);
+        Matrix4x4 transform = WorldPlacementTransform.Build(solvedPos, solvedRot, actualScale);
 
         Vector3 localMin = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
             ? taught.LocalBoundsMin : -new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
@@ -871,9 +1124,10 @@ internal sealed class Pm4DoodadDuplicationService
             BoundsResolved = true,
             ModelName = taught.ModelName,
             ModelPath = taught.ModelPath,
+            AssetKind = assetKind,
             PlacementPosition = solvedPos,
             PlacementRotation = solvedRot,
-            PlacementScale = solvedScale,
+            PlacementScale = actualScale,
             UniqueId = newId,
             PlacementEntryIndex = isWmo ? (tileWmo?.Count ?? 0) : (tileMdx?.Count ?? 0),
             TileX = pm4TileX,
@@ -907,7 +1161,7 @@ internal sealed class Pm4DoodadDuplicationService
         var addedByTile = new Dictionary<(int, int), List<int>> { [(pm4TileX, pm4TileY)] = [newId] };
         _undoStack.Push(new MultiTileDuplicationUndo(addedByTile));
         pm4Host.RebuildInstanceLists();
-        pm4Host.Assets.ProcessPendingLoads(maxLoads: 32, maxBudgetMs: 50.0);
+        pm4Host.Assets.ProcessPendingLoads(maxLoads: 64, maxBudgetMs: 100.0);
 
         string msg = $"✓ Spawned taught {taught.ModelName} (#{newId}) into PM4 hull 0x{pm4Obj.Ck24:X6} on tile ({pm4TileX}, {pm4TileY}).";
         _host.StatusMessage = msg;
@@ -923,7 +1177,8 @@ internal sealed class Pm4DoodadDuplicationService
         int tileY,
         IReadOnlyList<Pm4OverlayObject> pm4Objects)
     {
-        bool isWmo = string.Equals(taught.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
+        bool isWmo = IsWmoAsset(taught.ModelPath, taught.AssetKind);
+        string assetKind = isWmo ? "WMO" : ResolveAssetKind(taught.ModelPath, taught.AssetKind);
         pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx);
         pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo);
 
@@ -957,7 +1212,7 @@ internal sealed class Pm4DoodadDuplicationService
             ? taught.LocalBoundsMin : -new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
         Vector3 localMax = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
             ? taught.LocalBoundsMax : new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
-        var cand = Pm4ModelCandidate.Create(taught.ModelPath, taught.AssetKind ?? "M2", localMin, localMax);
+        var cand = Pm4ModelCandidate.Create(taught.ModelPath, assetKind, localMin, localMax);
 
         worldScene.Pm4Overlay._pm4TilePositionRefs.TryGetValue((tileX, tileY), out var mprlList);
 
@@ -991,10 +1246,11 @@ internal sealed class Pm4DoodadDuplicationService
             Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
 
             // 3. Shape match evaluation
-            if (!MatchesTaughtShape(taught, cand, prism, obj.Ck24, obj.DominantGroupKey, out float solvedScale, out Vector3 solvedPos, out Vector3 solvedRot))
+            if (!MatchesTaughtShape(taught, cand, prism, obj.Ck24, obj.DominantGroupKey, out float solvedScale, out Vector3 solvedPos, out Vector3 solvedRot, obj.Shape3D))
                 continue;
 
-            Matrix4x4 transform = WorldPlacementTransform.Build(solvedPos, solvedRot, solvedScale);
+            float actualScale = isWmo ? 1.0f : solvedScale;
+            Matrix4x4 transform = WorldPlacementTransform.Build(solvedPos, solvedRot, actualScale);
             WorldScene.TransformBounds(cand.LocalBoundsMin, cand.LocalBoundsMax, transform, out Vector3 bMin, out Vector3 bMax);
 
             int assignedId = nextId++;
@@ -1009,9 +1265,10 @@ internal sealed class Pm4DoodadDuplicationService
                 BoundsResolved = true,
                 ModelName = taught.ModelName,
                 ModelPath = taught.ModelPath,
+                AssetKind = assetKind,
                 PlacementPosition = solvedPos,
                 PlacementRotation = solvedRot,
-                PlacementScale = solvedScale,
+                PlacementScale = actualScale,
                 UniqueId = assignedId,
                 PlacementEntryIndex = isWmo ? (tileWmo?.Count ?? 0) : (tileMdx?.Count ?? 0),
                 TileX = tileX,
@@ -1028,6 +1285,7 @@ internal sealed class Pm4DoodadDuplicationService
                 }
                 tileWmo.Add(newInst);
                 pm4Host.Assets.QueueWmoLoad(newInst.ModelKey);
+                pm4Host.Assets.PrioritizeWmoLoad(newInst.ModelKey);
             }
             else
             {
@@ -1038,6 +1296,7 @@ internal sealed class Pm4DoodadDuplicationService
                 }
                 tileMdx.Add(newInst);
                 pm4Host.Assets.QueueMdxLoad(newInst.ModelKey);
+                pm4Host.Assets.PrioritizeMdxLoad(newInst.ModelKey);
             }
 
             existingPositions.Add(solvedPos);
@@ -1055,24 +1314,57 @@ internal sealed class Pm4DoodadDuplicationService
         byte dominantGroupKey,
         out float solvedScale,
         out Vector3 solvedPos,
-        out Vector3 solvedRot)
+        out Vector3 solvedRot,
+        Pm4Geometry3DShapeSignature? objShape = null)
     {
-        solvedScale = 1f;
+        bool isWmo = IsWmoAsset(taught.ModelPath, taught.AssetKind);
+        solvedScale = isWmo ? 1.0f : 1.0f;
         solvedPos = default;
         solvedRot = default;
-
-        bool isWmo = string.Equals(taught.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
 
         // M2 doodads generally don't match building floor classes (0x10..0x15) unless taught that way
         if (!isWmo && (dominantGroupKey >= 0x10 && dominantGroupKey <= 0x15) && taught.DominantGroupKey < 0x10)
             return false;
 
+        bool exactCkMatch = taught.Ck24 != 0 && taught.Ck24 == objCk24;
+
         float prismLen = MathF.Max(prism.UnrotatedLength, prism.UnrotatedWidth);
         float prismWid = MathF.Min(prism.UnrotatedLength, prism.UnrotatedWidth);
-        float prismHeight = MathF.Max(0.01f, prism.Height);
-
         float taughtLen = MathF.Max(taught.Length, taught.Width);
         float taughtWid = MathF.Min(taught.Length, taught.Width);
+
+        float prismPlanar = MathF.Sqrt(prismLen * prismLen + prismWid * prismWid);
+        float taughtPlanar = MathF.Sqrt(taughtLen * taughtLen + taughtWid * taughtWid);
+
+        // WMOs have fixed 1:1 scale: reject if PM4 hull footprint size diverges significantly from authentic building
+        if (isWmo && !exactCkMatch)
+        {
+            float sizeRatio = taughtPlanar > 0.01f ? prismPlanar / taughtPlanar : 1.0f;
+            if (sizeRatio < 0.60f || sizeRatio > 1.50f)
+                return false;
+        }
+
+        // 3D Geometry Shape Signature Comparison:
+        // If taught rule includes 3D shape signature (vertical slice profile, inertia moments, normal distribution),
+        // verify that the candidate 3D shape actually conforms to the taught 3D shape.
+        if (taught.VerticalSliceRadii != null && objShape != null && !exactCkMatch)
+        {
+            float dProfile = 0f;
+            for (int b = 0; b < Pm4Geometry3DShapeSignature.VerticalSliceBands; b++)
+            {
+                dProfile += MathF.Abs(taught.VerticalSliceRadii[b] - objShape.VerticalSliceRadii[b]);
+            }
+            dProfile /= Pm4Geometry3DShapeSignature.VerticalSliceBands;
+
+            float dInertia = Vector3.Distance(taught.InertiaTensor, objShape.InertiaTensor);
+            float dNormals = Vector3.Distance(taught.NormalDistribution, objShape.NormalDistribution);
+
+            // Reject if 3D vertical profile, mass distribution, or surface normal angles differ significantly
+            if (dProfile > 0.40f || dInertia > 0.35f || dNormals > 0.40f)
+                return false;
+        }
+
+        float prismHeight = MathF.Max(0.01f, prism.Height);
         float taughtHeight = MathF.Max(0.01f, taught.Height);
 
         float prismAspectXY = prismLen / MathF.Max(0.01f, prismWid);
@@ -1083,16 +1375,13 @@ internal sealed class Pm4DoodadDuplicationService
         float taughtAspectZH = taughtHeight / MathF.Max(0.01f, taughtLen);
         float diffAspectZH = MathF.Abs(prismAspectZH - taughtAspectZH) / MathF.Max(prismAspectZH, taughtAspectZH);
 
-        float prismPlanar = MathF.Sqrt(prismLen * prismLen + prismWid * prismWid);
-        float taughtPlanar = MathF.Sqrt(taughtLen * taughtLen + taughtWid * taughtWid);
         float sizeDiff = MathF.Abs(prismPlanar - taughtPlanar) / MathF.Max(prismPlanar, taughtPlanar);
 
         double shapeScore = Math.Max(0.0, 1.0 - (0.5 * diffAspectXY + 0.3 * diffAspectZH + 0.2 * sizeDiff));
 
-        bool exactCkMatch = taught.Ck24 != 0 && taught.Ck24 == objCk24;
         if (!exactCkMatch)
         {
-            if (diffAspectXY > 0.25f || sizeDiff > 0.45f || shapeScore < 0.70)
+            if (diffAspectXY > 0.25f || (!isWmo && (sizeDiff > 0.45f || shapeScore < 0.70)))
                 return false;
         }
 
@@ -1100,7 +1389,7 @@ internal sealed class Pm4DoodadDuplicationService
         if (matchResults.Count > 0)
         {
             var match = matchResults[0];
-            solvedScale = match.SolvedScale;
+            solvedScale = isWmo ? 1.0f : match.SolvedScale;
             solvedPos = match.SolvedPosition;
 
             float yaw = prism.YawDegrees + taught.YawOffset;
@@ -1146,11 +1435,14 @@ internal sealed class Pm4DoodadDuplicationService
                 if (tileWmo[i].UniqueId > maxId) maxId = tileWmo[i].UniqueId;
         }
 
+        bool isWmo = IsWmoAsset(match.Candidate.ModelPath, match.Candidate.AssetKind);
+        float actualScale = isWmo ? 1.0f : match.SolvedScale;
+        string assetKind = isWmo ? "WMO" : ResolveAssetKind(match.Candidate.ModelPath, match.Candidate.AssetKind);
+
         int newId = Math.Max(Pm4DoodadDuplicationEngine.SyntheticUniqueIdBase, maxId + 1);
-        Matrix4x4 transform = WorldPlacementTransform.Build(match.SolvedPosition, match.SolvedRotation, match.SolvedScale);
+        Matrix4x4 transform = WorldPlacementTransform.Build(match.SolvedPosition, match.SolvedRotation, actualScale);
         WorldScene.TransformBounds(match.Candidate.LocalBoundsMin, match.Candidate.LocalBoundsMax, transform, out Vector3 bMin, out Vector3 bMax);
 
-        bool isWmo = string.Equals(match.Candidate.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
         var newInst = new ObjectInstance
         {
             ModelKey = WorldAssetManager.NormalizeKey(match.Candidate.ModelPath),
@@ -1162,9 +1454,10 @@ internal sealed class Pm4DoodadDuplicationService
             BoundsResolved = true,
             ModelName = match.Candidate.ModelName,
             ModelPath = match.Candidate.ModelPath,
+            AssetKind = assetKind,
             PlacementPosition = match.SolvedPosition,
             PlacementRotation = match.SolvedRotation,
-            PlacementScale = match.SolvedScale,
+            PlacementScale = actualScale,
             UniqueId = newId,
             PlacementEntryIndex = isWmo ? (tileWmo?.Count ?? 0) : (tileMdx?.Count ?? 0),
             TileX = pm4TileX,
@@ -1197,9 +1490,9 @@ internal sealed class Pm4DoodadDuplicationService
 
         _undoStack.Push(new DuplicationUndo(pm4TileX, pm4TileY, [newId]));
         pm4Host.RebuildInstanceLists();
-        pm4Host.Assets.ProcessPendingLoads(maxLoads: 32, maxBudgetMs: 50.0);
+        pm4Host.Assets.ProcessPendingLoads(maxLoads: 64, maxBudgetMs: 100.0);
 
-        statusMessage = $"✓ Spawned {match.Candidate.ModelName} (#{newId}) into PM4 hull 0x{pm4Obj.Ck24:X6} (Score: {match.Score:P0}, Scale: {match.SolvedScale:F2}, Yaw: {match.SolvedRotation.Z:F1}°).";
+        statusMessage = $"✓ Spawned {match.Candidate.ModelName} (#{newId}) into PM4 hull 0x{pm4Obj.Ck24:X6} (Score: {match.Score:P0}, Scale: {actualScale:F2}, Yaw: {match.SolvedRotation.Z:F1}°).";
         _host.StatusMessage = statusMessage;
         LastOperationMessage = statusMessage;
         return true;
@@ -1309,13 +1602,45 @@ internal sealed class Pm4DoodadDuplicationService
 
                 if (bestMatch != null && bestDist > 0.05f)
                 {
-                    Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, inst.PlacementRotation, inst.PlacementScale);
                     Vector3 localMin = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
                         ? inst.SelectionLocalBoundsMin
                         : inst.LocalBoundsMin;
                     Vector3 localMax = inst.SelectionBoundsResolved && inst.SelectionLocalBoundsMax != Vector3.Zero
                         ? inst.SelectionLocalBoundsMax
                         : inst.LocalBoundsMax;
+
+                    float candDx = MathF.Abs(localMax.X - localMin.X);
+                    float candDy = MathF.Abs(localMax.Y - localMin.Y);
+
+                    float? knownYawOffset = null;
+                    var taught = _taughtPairings.Find(t =>
+                        string.Equals(t.ModelPath, inst.ModelPath, StringComparison.OrdinalIgnoreCase) ||
+                        (t.Ck24 != 0 && t.Ck24 == bestMatch.Value.Rep.Ck24));
+                    if (taught != null)
+                    {
+                        knownYawOffset = taught.YawOffset;
+                    }
+                    else if (Pm4PriorKnowledgeDatabase.Instance.TryGetAsset(inst.ModelPath, out var dbAsset) && dbAsset != null && MathF.Abs(dbAsset.YawOffset) > 1e-4f)
+                    {
+                        knownYawOffset = dbAsset.YawOffset;
+                    }
+
+                    var surfVerts = ExtractCompositeSurfaceVertices(worldScene, bestMatch.Value.Rep, bestMatch.Value.TileX, bestMatch.Value.TileY, out float _);
+                    Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfVerts, null, null, bestMatch.Value.Min.Z);
+
+                    float solvedYaw;
+                    if (knownYawOffset.HasValue)
+                    {
+                        solvedYaw = prism.YawDegrees + knownYawOffset.Value;
+                    }
+                    else
+                    {
+                        solvedYaw = prism.YawDegrees + (candDy > candDx * 1.15f ? 90f : 0f);
+                    }
+                    while (solvedYaw > 180f) solvedYaw -= 360f;
+                    while (solvedYaw < -180f) solvedYaw += 360f;
+
+                    Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, new Vector3(0f, 0f, solvedYaw), inst.PlacementScale);
                     WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
                     Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
 
@@ -1332,6 +1657,7 @@ internal sealed class Pm4DoodadDuplicationService
 
                     undoList.Add((inst.UniqueId, inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale));
                     inst.PlacementPosition = new Vector3(bestMatch.Value.Centroid.X - rotCenter.X, bestMatch.Value.Centroid.Y - rotCenter.Y, targetPlacementZ);
+                    inst.PlacementRotation = new Vector3(0f, 0f, solvedYaw);
                     inst.Transform = WorldPlacementTransform.Build(inst.PlacementPosition, inst.PlacementRotation, inst.PlacementScale);
                     WorldScene.TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform, out inst.BoundsMin, out inst.BoundsMax);
                     WorldScene.TransformBounds(inst.SelectionLocalBoundsMin, inst.SelectionLocalBoundsMax, inst.Transform, out inst.SelectionLocalBoundsMin, out inst.SelectionLocalBoundsMax);
@@ -1510,6 +1836,11 @@ internal sealed class Pm4DoodadDuplicationService
                                 inst.PlacementScale));
                             totalPlacementsAdded++;
                         }
+                        else
+                        {
+                            edits.Add(new AdtPlacementMoveEdit(AdtPlacementKind.Model, -1, inst.UniqueId, inst.PlacementPosition));
+                            edits.Add(new AdtPlacementRotateEdit(AdtPlacementKind.Model, -1, inst.UniqueId, inst.PlacementRotation));
+                        }
                     }
                 }
                 if (wmoList != null)
@@ -1526,6 +1857,11 @@ internal sealed class Pm4DoodadDuplicationService
                                 inst.PlacementRotation,
                                 inst.PlacementScale));
                             totalPlacementsAdded++;
+                        }
+                        else
+                        {
+                            edits.Add(new AdtPlacementMoveEdit(AdtPlacementKind.WorldModel, -1, inst.UniqueId, inst.PlacementPosition));
+                            edits.Add(new AdtPlacementRotateEdit(AdtPlacementKind.WorldModel, -1, inst.UniqueId, inst.PlacementRotation));
                         }
                     }
                 }

@@ -336,13 +336,17 @@ public static class AdtPlacementEditor
 
     private static int FindModelIndex(List<MutableModelRow> rows, int entryIndex, int uniqueId)
     {
+        if (entryIndex >= 0 && entryIndex < rows.Count && rows[entryIndex].UniqueId == uniqueId)
+            return entryIndex;
+
+        int byId = rows.FindIndex(r => r.UniqueId == uniqueId);
+        if (byId >= 0)
+            return byId;
+
         if (entryIndex < 0 || entryIndex >= rows.Count)
-            throw new ArgumentOutOfRangeException(nameof(entryIndex), $"MDDF entry index {entryIndex} is outside 0..{rows.Count - 1}.");
+            throw new ArgumentOutOfRangeException(nameof(entryIndex), $"MDDF entry index {entryIndex} is outside 0..{rows.Count - 1} and UniqueId {uniqueId} not found.");
 
-        if (rows[entryIndex].UniqueId != uniqueId)
-            throw new InvalidDataException($"MDDF entry {entryIndex} no longer matches UniqueId {uniqueId}; found {rows[entryIndex].UniqueId}.");
-
-        return entryIndex;
+        throw new InvalidDataException($"MDDF entry {entryIndex} no longer matches UniqueId {uniqueId}; found {rows[entryIndex].UniqueId}.");
     }
 
     private static MutableWmoRow FindWmo(List<MutableWmoRow> rows, int entryIndex, int uniqueId)
@@ -353,13 +357,17 @@ public static class AdtPlacementEditor
 
     private static int FindWmoIndex(List<MutableWmoRow> rows, int entryIndex, int uniqueId)
     {
+        if (entryIndex >= 0 && entryIndex < rows.Count && rows[entryIndex].UniqueId == uniqueId)
+            return entryIndex;
+
+        int byId = rows.FindIndex(r => r.UniqueId == uniqueId);
+        if (byId >= 0)
+            return byId;
+
         if (entryIndex < 0 || entryIndex >= rows.Count)
-            throw new ArgumentOutOfRangeException(nameof(entryIndex), $"MODF entry index {entryIndex} is outside 0..{rows.Count - 1}.");
+            throw new ArgumentOutOfRangeException(nameof(entryIndex), $"MODF entry index {entryIndex} is outside 0..{rows.Count - 1} and UniqueId {uniqueId} not found.");
 
-        if (rows[entryIndex].UniqueId != uniqueId)
-            throw new InvalidDataException($"MODF entry {entryIndex} no longer matches UniqueId {uniqueId}; found {rows[entryIndex].UniqueId}.");
-
-        return entryIndex;
+        throw new InvalidDataException($"MODF entry {entryIndex} no longer matches UniqueId {uniqueId}; found {rows[entryIndex].UniqueId}.");
     }
 
     // --- serialization ---

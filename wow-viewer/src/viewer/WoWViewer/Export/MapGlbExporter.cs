@@ -283,7 +283,7 @@ public static class MapGlbExporter
                 float vChunk = !isInner ? (row / 2) / 8f : (row / 2 + 0.5f) / 8f;
 
                 float uTile = (chunk.ChunkX + uChunk) / 16f;
-                float vTile = 1f - (chunk.ChunkY + vChunk) / 16f;
+                float vTile = (chunk.ChunkY + vChunk) / 16f;
 
                 vertices[i] = new VERTEX(
                     new VertexPositionNormal(pos, normal),

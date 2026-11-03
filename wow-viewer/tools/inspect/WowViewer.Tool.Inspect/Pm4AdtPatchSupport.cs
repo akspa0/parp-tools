@@ -167,8 +167,8 @@ internal static class Pm4AdtPatchSupport
                 Math.Max(nameId, 0),
                 path,
                 nextUniqueId++,
-                new Vector3((row.Min.X + row.Max.X) * 0.5f, (row.Min.Y + row.Max.Y) * 0.5f, row.PlacementZ),
-                Vector3.Zero,
+                new Vector3(row.Position.X, row.Position.Y, row.PlacementZ),
+                new Vector3(0f, 0f, row.YawDegrees),
                 row.Min,
                 row.Max,
                 0));

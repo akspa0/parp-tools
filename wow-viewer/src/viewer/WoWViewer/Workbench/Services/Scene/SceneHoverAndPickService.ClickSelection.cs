@@ -103,8 +103,9 @@ internal sealed partial class SceneHoverAndPickService
             AddHoveredSceneObjectClickSelectionCandidate(addedKeys, hoveredSceneObj);
 
         // If PM4 overlay is on and we hit a PM4 object, skip scene object picking unless
-        // Ctrl or Alt is held to deliberately select/pair a scene object inside/beside a PM4 hull.
-        if (!pm4Hit || !_worldScene.Pm4Overlay.ShowPm4Overlay || ImGui.GetIO().KeyCtrl || ImGui.GetIO().KeyAlt)
+        // Ctrl or Alt is held, or a PM4 hull is already selected (so clicking selects the scene model to pair).
+        bool pm4AlreadySelected = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue;
+        if (!pm4Hit || !_worldScene.Pm4Overlay.ShowPm4Overlay || ImGui.GetIO().KeyCtrl || ImGui.GetIO().KeyAlt || pm4AlreadySelected)
         {
             if (_worldScene.HoverPick.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
             {
@@ -239,6 +240,26 @@ internal sealed partial class SceneHoverAndPickService
                     c.DedupKey != hoveredDedupKey
                     && c.Distance.HasValue
                     && c.Distance.Value > minDistance + globalClusterThreshold);
+            }
+        }
+
+        if (_worldScene.Pm4Overlay.ShowPm4Overlay)
+        {
+            bool hasPm4Cand = _clickSelectionCandidates.Any(c => c.DedupKey.StartsWith("pm4:", StringComparison.OrdinalIgnoreCase));
+            bool hasSceneCand = _clickSelectionCandidates.Any(c => c.DedupKey.StartsWith("scene:", StringComparison.OrdinalIgnoreCase));
+
+            if (hasPm4Cand && hasSceneCand)
+            {
+                // If a PM4 object is already selected, clicking selects the scene model to pair with it.
+                if (_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
+                {
+                    _clickSelectionCandidates.RemoveAll(c => c.DedupKey.StartsWith("pm4:", StringComparison.OrdinalIgnoreCase));
+                }
+                // If a scene object is already selected, clicking selects the PM4 hull to pair with it.
+                else if (_worldScene.Selection.SelectedInstance.HasValue)
+                {
+                    _clickSelectionCandidates.RemoveAll(c => c.DedupKey.StartsWith("scene:", StringComparison.OrdinalIgnoreCase));
+                }
             }
         }
 
@@ -446,7 +467,7 @@ internal sealed partial class SceneHoverAndPickService
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.TaxiActors.ClearTaxiSelection();
-                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt)
+                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt && !_worldScene.Pm4Overlay.ShowPm4Overlay)
                         _worldScene.Selection.ClearSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     UpdateSelectedPm4ObjectInfo(objectKey);
@@ -511,7 +532,7 @@ internal sealed partial class SceneHoverAndPickService
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.TaxiActors.ClearTaxiSelection();
-                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt)
+                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt && !_worldScene.Pm4Overlay.ShowPm4Overlay)
                         _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     RefreshSelectedWorldObjectInfo();
@@ -556,7 +577,7 @@ internal sealed partial class SceneHoverAndPickService
 
                     ClearSelectedWlLiquidBody(clearListIsolation: true);
                     _worldScene.TaxiActors.ClearTaxiSelection();
-                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt)
+                    if (!ImGui.GetIO().KeyCtrl && !ImGui.GetIO().KeyAlt && !_worldScene.Pm4Overlay.ShowPm4Overlay)
                         _worldScene.Pm4Overlay.ClearPm4ObjectSelection();
                     _taxiAndAreaPoi.ClearSelectedAreaPoiInfo();
                     RefreshSelectedWorldObjectInfo();

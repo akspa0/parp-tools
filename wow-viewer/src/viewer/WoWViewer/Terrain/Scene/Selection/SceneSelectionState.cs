@@ -668,6 +668,26 @@ public sealed class SceneSelectionState
         }
     }
 
+    public bool SelectSceneObjectByUniqueId(int uniqueId)
+    {
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        for (int i = 0; i < _wmoInstances.Count; i++)
+        {
+            if (_wmoInstances[i].UniqueId == uniqueId)
+                return SelectSceneObject(ObjectType.Wmo, i);
+        }
+
+        for (int i = 0; i < _mdxInstances.Count; i++)
+        {
+            if (_mdxInstances[i].UniqueId == uniqueId)
+                return SelectSceneObject(ObjectType.Mdx, i);
+        }
+
+        return false;
+    }
+
     public void ClearSelection()
     {
         _selectedObjectType = ObjectType.None;

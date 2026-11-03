@@ -1,5 +1,26 @@
 # Active Context — wow-viewer
 
+**Tile GLB Export Texture Axis Correction (2026-11-03):**
+Resolved horizontal texture inversion on exported terrain tile GLBs:
+1. **glTF 2.0 Texture Coordinate Alignment**: In `MapGlbExporter.BuildTerrainTileMesh`, corrected `vTile` calculation from `1f - (chunk.ChunkY + vChunk) / 16f` to `(chunk.ChunkY + vChunk) / 16f`.
+2. **Root Cause**: The glTF specification defines texture origin $(0, 0)$ at the top-left (North-West) of the image raster with $V$ increasing downwards (South). Inverting $V$ inverted the North-South axis, which in the glTF Y-up conversion maps directly to the 3D $X$ axis ($pos.X = wx$), flipping the texture along the $X$ axis across all exported terrain tiles.
+3. **Validation**: Verified land/water metric jump on exported test tiles (`50_30.glb`), full project build succeeded with 0 errors (`dotnet build WoWViewer.csproj -c Debug`), and all 191 PM4 tests passed.
+
+**PM4 Rotation Alignment, Composite Hull PCA & Real ADT MODF/MDDF Patching (2026-11-03):**
+Resolved object rotation alignment to PM4 navmesh collision hulls and end-to-end ADT chunk generation:
+1. **Composite PM4 Hull Extrusion**: When magnetizing or pairing multi-part composite structures (`Ck24 != 0`), `ExtractCompositeSurfaceVertices` aggregates transformed triangles across all constituent parts in the tile, ensuring PCA orientation, centroid, and bounding dimensions represent the entire building/bridge rather than an isolated sub-part.
+2. **Yaw Orientation & Aspect Ratio Solving**: Corrected yaw derivation in `AlignPlacementToPm4Hull` and `Pm4DirectModelMatcher`. Aligns the model's authored major axis ($X$ vs $Y$) with the PM4 footprint's 2D PCA principal axis (`prism.YawDegrees`) according to `WorldPlacementTransform` rendering conventions ($\text{RotZ}(\pi)$ reversal), seamlessly integrating taught pairing and curated database yaw offsets.
+3. **1-Click In-Place Rotation Controls**: Added `Rotate +90°`, `Rotate -90°`, and `Flip 180°` quick-action buttons in both Model-selected and Paired workbench modes. Rotates placements in-place around their world centroid, recalculates bounds, updates the scene, and automatically re-teaches/persists the corrected `YawOffset` for cross-tile propagation.
+4. **Authentic MODF & MDDF Chunk Generation**: Upgraded `SavePatchedAdts` and `AdtPlacementEditor` to emit `AdtPlacementMoveEdit` and `AdtPlacementRotateEdit` for moved/magnetized resident placements (`inst.UniqueId < SyntheticUniqueIdBase`), and fixed `Pm4AdtPatchSupport` writing `Vector3.Zero` rotations. Full authentic `Position` and `Rotation.Z` (Euler Yaw) are now serialized into binary `MODF` (WMO) and `MDDF` (M2) chunks.
+5. **Validation**: All 8 `AdtPlacementEditorTests` pass; all 4 `Pm4PriorKnowledgeDatabaseTests` pass; full `WoWViewer` application builds with 0 errors.
+
+**PM4 Prior Knowledge Database & On-the-Fly Neighborhood Matching (2026-11-03):**
+Integrated built-in pre-populated correlation database and neighborhood auto-matching for PM4 footprint prisms:
+1. **Prior Knowledge Database (`Pm4PriorKnowledgeDatabase.cs`)**: Pre-indexes verified 3D ground-truth relationships (`pm4_curated_relationships.json`), persistent taught templates (`pm4_taught_pairings.json`), and the 895 whole-map probe models (`object-models-v4-2026-10-20.json`) across 18 architectural and environmental families (`Wintertauren`, `Tauren`, `Bridges`, `Keeps & Castles`, `Towers`, `HumanArchitecture`, `Mines`, `Ships`, etc.).
+2. **On-the-Fly Matching Candidate Pool**: Upgraded `Pm4WorkbenchSidebarService.MatchPm4Footprint` to evaluate candidates from the Prior Knowledge Database and the inspector-selected object in addition to active tile-resident models, solving the empty/mismatched candidate problem when matching large architectural hulls on tiles containing only small doodads.
+3. **Neighborhood & Family UI**: Added source provenance tags (`[Prior DB]` vs `[Resident]`) to match candidate list, and added a collapsible "Same Neighborhood / Family Models" browser to the workbench sidebar for 1-click inspection and pairing.
+4. **Validation**: `WowViewer.Core.PM4` builds with 0 errors; `Pm4PriorKnowledgeDatabaseTests` passes; `Verify-UiReference.ps1` passes with 139 inventory rows, 129 registry entries, 0 errors, 0 warnings.
+
 **Spec 291 Implementation Complete & Verified (2026-11-02):** [Spec 291 Dual Sidebar Docking, Destination Integration & UI Harmonization](../specs/291-ui-sidebar-consolidation/spec.md)
 Comprehensive UI audit, deduplication, and unification of viewer, editor, options, and archaeology workbenches into anchored dual-dock sidebars:
 1. **Dual Dock Architecture (`UiRegion.LeftDock` & `UiRegion.RightDock`)**: Added `UiRegion.LeftDock` anchored to the left action rail for Workspace, Files, Maps, Assets, Taxi, Capture, Diagnostics, Options, and Layers, eliminating floating tool window clutter over the 3D viewport. Includes interactive edge splitter with persisted width.

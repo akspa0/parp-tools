@@ -20,6 +20,14 @@ public sealed record Pm4ModelCandidate(
     public static Pm4ModelCandidate Create(string modelPath, string assetKind, Vector3 localMin, Vector3 localMax)
     {
         string name = Path.GetFileName(modelPath);
+        if (modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase) || string.Equals(assetKind, "wmo", StringComparison.OrdinalIgnoreCase))
+        {
+            assetKind = "WMO";
+        }
+        else if (string.IsNullOrWhiteSpace(assetKind))
+        {
+            assetKind = modelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) ? "M2" : "MDX";
+        }
         var desc = Pm4GeometricShapeDescriptor.FromBounds(localMin, localMax);
         return new Pm4ModelCandidate(modelPath, name, assetKind, localMin, localMax, desc);
     }
@@ -67,31 +75,61 @@ public static class Pm4DirectModelMatcher
             float diffZH = MathF.Abs(prismDesc.AspectZH - candDesc.AspectZH) / MathF.Max(prismDesc.AspectZH, candDesc.AspectZH);
 
             // 2. Solve scale factor
+            // Rule: WMOs represent real architecture (keeps, towers, buildings) and CANNOT be scaled down or up in WoW.
+            // WMO scale is strictly 1.0f. M2 doodads can be fitted to the collision prism within authentic limits.
+            bool isWmo = cand.AssetKind.Equals("wmo", StringComparison.OrdinalIgnoreCase) || cand.ModelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
             float candPlanar = MathF.Sqrt(candDesc.Length * candDesc.Length + candDesc.Width * candDesc.Width);
             float prismPlanar = MathF.Sqrt(prismDesc.Length * prismDesc.Length + prismDesc.Width * prismDesc.Width);
-            float rawScale = candPlanar > 0.01f ? prismPlanar / candPlanar : 1.0f;
-            float scale = Math.Clamp(rawScale, 0.35f, 3.0f);
 
-            // Size mismatch penalty:
-            // Authentic ADT doodads and structures do not deviate by 5x-10x in scale.
-            // When rawScale diverges significantly from 1.0 (e.g. matching a 2-yard bench to a 50-yard bridge),
-            // penalize the score heavily so absurd scale-stretched matches are eliminated.
+            float scale;
             float scalePenalty = 0f;
-            if (rawScale > 2.2f)
-                scalePenalty = MathF.Min(1.0f, (rawScale - 2.2f) / 1.5f);
-            else if (rawScale < 0.45f)
-                scalePenalty = MathF.Min(1.0f, (0.45f - rawScale) / 0.25f);
 
-            if (rawScale > 4.0f || rawScale < 0.2f)
-                scalePenalty = 1.0f;
+            if (isWmo)
+            {
+                scale = 1.0f;
+                float sizeRatio = candPlanar > 0.01f ? prismPlanar / candPlanar : 1.0f;
+                // Penalize size difference against the authentic 1:1 authored building footprint
+                if (sizeRatio < 0.70f || sizeRatio > 1.40f)
+                {
+                    scalePenalty = Math.Clamp(MathF.Abs(1.0f - sizeRatio), 0f, 1f);
+                }
+                if (sizeRatio < 0.40f || sizeRatio > 2.2f)
+                {
+                    scalePenalty = 1.0f;
+                }
+            }
+            else
+            {
+                float rawScale = candPlanar > 0.01f ? prismPlanar / candPlanar : 1.0f;
+                scale = Math.Clamp(rawScale, 0.35f, 3.0f);
 
-            double score = Math.Max(0.0, 1.0 - (0.5 * diffXY + 0.5 * diffZH) - (0.5 * scalePenalty));
+                // Size mismatch penalty for doodads:
+                // Authentic ADT doodads do not deviate by 5x-10x in scale.
+                if (rawScale > 2.2f)
+                    scalePenalty = MathF.Min(1.0f, (rawScale - 2.2f) / 1.5f);
+                else if (rawScale < 0.45f)
+                    scalePenalty = MathF.Min(1.0f, (0.45f - rawScale) / 0.25f);
+
+                if (rawScale > 4.0f || rawScale < 0.2f)
+                    scalePenalty = 1.0f;
+            }
+
+            double baseScore = Math.Max(0.0, 1.0 - (0.5 * diffXY + 0.5 * diffZH));
+            double score;
+            if (scalePenalty >= 1.0f)
+            {
+                score = 0.0;
+            }
+            else
+            {
+                score = baseScore * (1.0 - (double)scalePenalty);
+            }
 
             // Small doodad vs giant structure penalty:
             // A 20+ yard footprint is architectural (bridge, building, wall); small M2 props (candPlanar < 4.0f) should not match it.
             if (prismPlanar > 20.0f && candPlanar < 4.0f && cand.AssetKind.Equals("M2", StringComparison.OrdinalIgnoreCase))
             {
-                score *= 0.5;
+                score = 0.0;
             }
 
             // 3. Solve Yaw angle (aligning candidate local orientation to PM4 principal axis)

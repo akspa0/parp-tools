@@ -17,7 +17,8 @@ internal sealed record SimilarPm4HullInfo(
     Pm4OverlayObject Object,
     float SimilarityScore,
     bool IsExactGeometry,
-    bool IsOccupied);
+    bool IsOccupied,
+    float BestYawOffsetDegrees = 0f);
 
 /// <summary>
 /// A curated spatial relationship between an ADT scene model and a PM4 collision hull.
@@ -39,6 +40,9 @@ internal sealed class CuratedSpatialRelationship
     public float FitConfidence { get; set; }
     public DateTime DetectedUtc { get; set; } = DateTime.UtcNow;
     public bool Verified { get; set; }
+    public float[]? VerticalSliceRadii { get; set; }
+    public Vector3 InertiaTensor { get; set; }
+    public Vector3 NormalDistribution { get; set; }
 
     public CuratedSpatialRelationship() { }
 
@@ -56,7 +60,10 @@ internal sealed class CuratedSpatialRelationship
         Vector3 positionOffset,
         float fitConfidence,
         DateTime detectedUtc,
-        bool verified)
+        bool verified,
+        float[]? verticalSliceRadii = null,
+        Vector3 inertiaTensor = default,
+        Vector3 normalDistribution = default)
     {
         ModelName = modelName;
         ModelPath = modelPath;
@@ -72,6 +79,9 @@ internal sealed class CuratedSpatialRelationship
         FitConfidence = fitConfidence;
         DetectedUtc = detectedUtc;
         Verified = verified;
+        VerticalSliceRadii = verticalSliceRadii;
+        InertiaTensor = inertiaTensor;
+        NormalDistribution = normalDistribution;
     }
 }
 
@@ -101,7 +111,8 @@ internal sealed class Pm4CurationAndSpatialMatchingService
 
     /// <summary>
     /// Identifies similar or same PM4 object shapes across all loaded tiles for a target hull.
-    /// Uses bounding dimensions, aspect ratios, and surface/group metadata in O(1) per hull.
+    /// Uses 3D geometry shape signatures (vertical cross sections, 3D inertia moments,
+    /// surface normal distribution, and 3D Chamfer point set distance).
     /// </summary>
     public IReadOnlyList<SimilarPm4HullInfo> FindSimilarHullsAcrossTiles(
         Pm4OverlayObject target,
@@ -121,15 +132,9 @@ internal sealed class Pm4CurationAndSpatialMatchingService
         _cachedTileCount = tileCount;
         _cachedSimilarHulls.Clear();
 
-        Vector3 targetSize = Vector3.Abs(target.BoundsMax - target.BoundsMin);
-        float targetLen = MathF.Max(targetSize.X, targetSize.Y);
-        float targetWid = MathF.Min(targetSize.X, targetSize.Y);
-        float targetH = MathF.Max(0.01f, targetSize.Z);
-        float targetAspectXY = targetLen / MathF.Max(0.01f, targetWid);
-        float targetAspectZH = targetH / MathF.Max(0.01f, targetLen);
-        float targetPlanar = MathF.Sqrt(targetLen * targetLen + targetWid * targetWid);
-
-        float occRadius = MathF.Max(2.5f, targetWid * 0.75f);
+        var targetShape = target.Shape3D;
+        float maxExtentTarget = MathF.Max(targetShape.Length, targetShape.Height);
+        float occRadius = MathF.Max(2.5f, targetShape.Width * 0.75f);
 
         foreach (var (tileCoord, objects) in worldScene.Pm4Overlay._pm4TileObjects)
         {
@@ -143,38 +148,35 @@ internal sealed class Pm4CurationAndSpatialMatchingService
                     && tileCoord.tileX == sourceTileX && tileCoord.tileY == sourceTileY)
                     continue;
 
-                Vector3 otherSize = Vector3.Abs(other.BoundsMax - other.BoundsMin);
-                float otherLen = MathF.Max(otherSize.X, otherSize.Y);
-                float otherWid = MathF.Min(otherSize.X, otherSize.Y);
-                float otherH = MathF.Max(0.01f, otherSize.Z);
-                float otherAspectXY = otherLen / MathF.Max(0.01f, otherWid);
-                float otherAspectZH = otherH / MathF.Max(0.01f, otherLen);
-                float otherPlanar = MathF.Sqrt(otherLen * otherLen + otherWid * otherWid);
-
                 bool exactCk = target.Ck24 != 0 && target.Ck24 == other.Ck24;
-                bool sameGroup = target.DominantGroupKey == other.DominantGroupKey;
 
-                // Dimension differences normalized by maximum
-                float diffXY = MathF.Abs(otherAspectXY - targetAspectXY) / MathF.Max(otherAspectXY, targetAspectXY);
-                float diffZH = MathF.Abs(otherAspectZH - targetAspectZH) / MathF.Max(otherAspectZH, targetAspectZH);
-                float diffPlanar = MathF.Abs(otherPlanar - targetPlanar) / MathF.Max(otherPlanar, targetPlanar);
-                float diffH = MathF.Abs(otherH - targetH) / MathF.Max(otherH, targetH);
+                var otherShape = other.Shape3D;
+                float maxExtentOther = MathF.Max(otherShape.Length, otherShape.Height);
+                float extentRatio = MathF.Max(maxExtentTarget, maxExtentOther) / MathF.Max(0.1f, MathF.Min(maxExtentTarget, maxExtentOther));
 
-                double score = 1.0 - (0.40 * diffXY + 0.25 * diffZH + 0.25 * diffPlanar + 0.10 * diffH);
-                if (exactCk) score = Math.Max(score, 0.95);
+                // Quick pre-filter: if not exact Ck24 and max extent differs by more than 2.5x, skip Chamfer
+                if (!exactCk && extentRatio > 2.5f)
+                    continue;
 
-                bool isExactGeometry = exactCk || (diffPlanar < 0.08f && diffXY < 0.08f && diffH < 0.10f && sameGroup);
+                float shapeScore = Pm4Geometry3DShapeSignature.Compare3D(targetShape, otherShape, out float bestYawOffset);
+                if (exactCk)
+                {
+                    shapeScore = MathF.Max(shapeScore, 0.95f);
+                }
 
-                if (score >= 0.70 || exactCk)
+                bool isExactGeometry = exactCk || shapeScore >= 0.88f;
+
+                if (shapeScore >= 0.65f || exactCk)
                 {
                     bool isOccupied = IsHullOccupied(worldScene, other, tileCoord.tileX, tileCoord.tileY, occRadius);
                     _cachedSimilarHulls.Add(new SimilarPm4HullInfo(
                         tileCoord.tileX,
                         tileCoord.tileY,
                         other,
-                        (float)Math.Clamp(score, 0.0, 1.0),
+                        shapeScore,
                         isExactGeometry,
-                        isOccupied));
+                        isOccupied,
+                        bestYawOffset));
                 }
             }
         }
@@ -251,8 +253,9 @@ internal sealed class Pm4CurationAndSpatialMatchingService
                 }
             }
 
-            worldScene.TileMdxInstances.TryGetValue((pm4TileX, pm4TileY), out var mdxList);
-            worldScene.TileWmoInstances.TryGetValue((pm4TileX, pm4TileY), out var wmoList);
+            IPm4OverlayHost pm4Host = worldScene;
+            pm4Host.TileMdxInstances.TryGetValue((pm4TileX, pm4TileY), out var mdxList);
+            pm4Host.TileWmoInstances.TryGetValue((pm4TileX, pm4TileY), out var wmoList);
             CheckPlacements(mdxList);
             CheckPlacements(wmoList);
         }
@@ -263,16 +266,10 @@ internal sealed class Pm4CurationAndSpatialMatchingService
             Vector3 posOffset = inst.PlacementPosition - pm4Centroid;
 
             // Extrude footprint prism to compute yaw reference
-            var surfaceVerts = new List<Vector3>(pm4Obj.Triangles.Count * 3);
-            for (int t = 0; t < pm4Obj.Triangles.Count; t++)
-            {
-                surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].A, pm4Obj.BaseTransform));
-                surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].B, pm4Obj.BaseTransform));
-                surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].C, pm4Obj.BaseTransform));
-            }
+            var surfaceVerts = Pm4DoodadDuplicationService.ExtractCompositeSurfaceVertices(worldScene, pm4Obj, pm4TileX, pm4TileY, out float minWorldZ);
             worldScene.Pm4Overlay._pm4TilePositionRefs.TryGetValue((pm4TileX, pm4TileY), out var mprlList);
             float? placementZ = pm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(pm4Obj.Ck24 << 8) : null;
-            Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, pm4Min.Z);
+            Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, minWorldZ);
 
             float yawOffset = inst.PlacementRotation.Z - prism.YawDegrees;
             while (yawOffset > 180f) yawOffset -= 360f;
@@ -289,21 +286,31 @@ internal sealed class Pm4CurationAndSpatialMatchingService
                 return true;
             }
 
-            var rel = new CuratedSpatialRelationship(
-                inst.ModelName,
-                inst.ModelPath,
-                inst.AssetKind ?? "M2",
-                pm4Obj.Ck24,
-                pm4Obj.DominantGroupKey,
-                pm4Len,
-                pm4Wid,
-                pm4H,
-                inst.PlacementScale,
-                yawOffset,
-                posOffset,
-                bestConfidence,
-                DateTime.UtcNow,
-                Verified: explicitInst.HasValue);
+            bool isWmo = Pm4DoodadDuplicationService.IsWmoAsset(inst.ModelPath, inst.AssetKind);
+            string assetKind = isWmo ? "WMO" : Pm4DoodadDuplicationService.ResolveAssetKind(inst.ModelPath, inst.AssetKind);
+            float solvedScale = isWmo ? 1.0f : inst.PlacementScale;
+
+            var shape3D = pm4Obj.Shape3D;
+            var rel = new CuratedSpatialRelationship
+            {
+                ModelName = inst.ModelName,
+                ModelPath = inst.ModelPath,
+                AssetKind = assetKind,
+                Ck24 = pm4Obj.Ck24,
+                DominantGroupKey = pm4Obj.DominantGroupKey,
+                Length = pm4Len,
+                Width = pm4Wid,
+                Height = pm4H,
+                SolvedScale = solvedScale,
+                YawOffset = yawOffset,
+                PositionOffset = posOffset,
+                FitConfidence = bestConfidence,
+                DetectedUtc = DateTime.UtcNow,
+                Verified = explicitInst.HasValue,
+                VerticalSliceRadii = shape3D.VerticalSliceRadii,
+                InertiaTensor = shape3D.InertiaTensor,
+                NormalDistribution = shape3D.NormalDistribution
+            };
 
             _curatedRelationships.RemoveAll(r =>
                 string.Equals(r.ModelPath, rel.ModelPath, StringComparison.OrdinalIgnoreCase) && r.Ck24 == rel.Ck24);
@@ -329,6 +336,10 @@ internal sealed class Pm4CurationAndSpatialMatchingService
         relationship.Verified = true;
         SaveCuratedRelationshipsToDisk();
 
+        bool isWmo = Pm4DoodadDuplicationService.IsWmoAsset(relationship.ModelPath, relationship.AssetKind);
+        float scale = isWmo ? 1.0f : relationship.SolvedScale;
+        string assetKind = isWmo ? "WMO" : Pm4DoodadDuplicationService.ResolveAssetKind(relationship.ModelPath, relationship.AssetKind);
+
         // 1. Ensure a TaughtPairing exists for this relationship in the automation library
         var localMin = -new Vector3(relationship.Length, relationship.Width, relationship.Height) * 0.5f;
         var localMax = new Vector3(relationship.Length, relationship.Width, relationship.Height) * 0.5f;
@@ -338,8 +349,8 @@ internal sealed class Pm4CurationAndSpatialMatchingService
             relationship.DominantGroupKey,
             relationship.ModelName,
             relationship.ModelPath,
-            relationship.AssetKind,
-            relationship.SolvedScale,
+            assetKind,
+            scale,
             0f,
             relationship.Length,
             relationship.Width,
@@ -347,7 +358,10 @@ internal sealed class Pm4CurationAndSpatialMatchingService
             DateTime.UtcNow,
             localMin,
             localMax,
-            relationship.YawOffset);
+            relationship.YawOffset,
+            relationship.VerticalSliceRadii,
+            relationship.InertiaTensor,
+            relationship.NormalDistribution);
 
         _parent.TeachPairingExplicit(taught);
 
@@ -366,15 +380,16 @@ internal sealed class Pm4CurationAndSpatialMatchingService
     {
         Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
         float radiusSq = radius * radius;
+        IPm4OverlayHost pm4Host = worldScene;
 
-        if (worldScene.TileMdxInstances.TryGetValue((tileX, tileY), out var mdxList))
+        if (pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var mdxList))
         {
             for (int i = 0; i < mdxList.Count; i++)
                 if (Vector3.DistanceSquared(mdxList[i].PlacementPosition, centroid) < radiusSq)
                     return true;
         }
 
-        if (worldScene.TileWmoInstances.TryGetValue((tileX, tileY), out var wmoList))
+        if (pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var wmoList))
         {
             for (int i = 0; i < wmoList.Count; i++)
                 if (Vector3.DistanceSquared(wmoList[i].PlacementPosition, centroid) < radiusSq)
@@ -408,7 +423,25 @@ internal sealed class Pm4CurationAndSpatialMatchingService
                 if (loaded != null && loaded.Count > 0)
                 {
                     _curatedRelationships.Clear();
-                    _curatedRelationships.AddRange(loaded);
+                    bool dirty = false;
+                    for (int i = 0; i < loaded.Count; i++)
+                    {
+                        var r = loaded[i];
+                        if (Pm4DoodadDuplicationService.IsWmoAsset(r.ModelPath, r.AssetKind))
+                        {
+                            if (!string.Equals(r.AssetKind, "WMO", StringComparison.OrdinalIgnoreCase) || r.SolvedScale != 1.0f)
+                            {
+                                r.AssetKind = "WMO";
+                                r.SolvedScale = 1.0f;
+                                dirty = true;
+                            }
+                        }
+                        _curatedRelationships.Add(r);
+                    }
+                    if (dirty)
+                    {
+                        SaveCuratedRelationshipsToDisk();
+                    }
                 }
             }
         }

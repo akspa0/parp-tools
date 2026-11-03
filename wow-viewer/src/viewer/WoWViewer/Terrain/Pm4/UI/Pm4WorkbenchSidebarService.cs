@@ -443,7 +443,7 @@ internal sealed class Pm4WorkbenchSidebarService
             ImGui.BulletText($"PM4 Hull: 0x{selectedPm4Obj.Ck24:X6} (part {selectedPm4Obj.ObjectPartId}, group 0x{selectedPm4Obj.DominantGroupKey:X2}) — {dist:F1} yds away");
             if (similarHulls != null)
             {
-                ImGui.BulletText($"Cross-Tile Identified: {similarHulls.Count} matching shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
+                ImGui.BulletText($"Cross-Tile Identified: {similarHulls.Count} matching 3D shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
             }
             ImGui.Spacing();
 
@@ -452,16 +452,39 @@ internal sealed class Pm4WorkbenchSidebarService
                 host.Pm4DoodadDuplication.AlignPlacementToPm4Hull(inst, selectedPm4Obj, pm4TileX, pm4TileY, fitScale: false, out _);
             }
 
+            ImGui.TextDisabled($"Yaw: {inst.PlacementRotation.Z:F1}°");
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Rotate +90°##pair_rot_p90"))
+            {
+                host.Pm4DoodadDuplication.RotatePlacement(inst, 90f);
+            }
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Rotate -90°##pair_rot_m90"))
+            {
+                host.Pm4DoodadDuplication.RotatePlacement(inst, -90f);
+            }
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Flip 180°##pair_rot_180"))
+            {
+                host.Pm4DoodadDuplication.RotatePlacement(inst, 180f);
+            }
+
             // The zero-friction primary automation action:
-            string verifyBtnText = $"✓ Verify & Propagate Across All Loaded Tiles ({unoccupiedHulls} Hulls)##verify_propagate_paired";
+            string verifyBtnText = $"✓ Verify & Propagate 3D Shape Across All Loaded Tiles ({unoccupiedHulls} Hulls)##verify_propagate_paired";
             if (curatedRel != null && SharedUiWidgets.ActionButton(verifyBtnText, unoccupiedHulls > 0))
             {
-                host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(curatedRel, worldScene!, out _, out _);
+                host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(curatedRel, worldScene!, out _);
             }
 
             if (SharedUiWidgets.ActionButton("Teach & Save Pairing Rule Only"))
             {
                 host.Pm4DoodadDuplication.TeachPairing(selectedPm4Obj, inst, pm4TileX, pm4TileY);
+            }
+
+            if (SharedUiWidgets.ActionButton("Clear Selection (Next Pair)##clear_pair_selection"))
+            {
+                worldScene.Selection.ClearSelection();
+                worldScene.Pm4Overlay.ClearPm4ObjectSelection();
             }
         }
         // Branch 2: Only PM4 Hull is selected
@@ -472,7 +495,7 @@ internal sealed class Pm4WorkbenchSidebarService
             ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Group: 0x{selectedPm4Obj.DominantGroupKey:X2} | Tris: {selectedPm4Obj.Triangles.Count}");
             if (similarHulls != null && similarHulls.Count > 0)
             {
-                ImGui.TextColored(UiTokens.Success, $"Cross-Tile Identified: {similarHulls.Count} matching shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
+                ImGui.TextColored(UiTokens.Success, $"Cross-Tile Identified: {similarHulls.Count} matching 3D shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
             }
             ImGui.Spacing();
 
@@ -487,12 +510,12 @@ internal sealed class Pm4WorkbenchSidebarService
                 ImGui.BulletText($"Fit: {spatialRel.FitConfidence:P0} (delta: {spatialRel.PositionOffset.Length():F1} yds, yaw: {spatialRel.YawOffset:F1}°)");
 
                 string propBtnText = spatialRel.Verified
-                    ? $"Propagate Across All Loaded Tiles ({unoccupiedHulls} Hulls)##propagate_all_rel"
-                    : $"✓ Verify & Propagate Across All Tiles ({unoccupiedHulls} Hulls)##verify_propagate_rel";
+                    ? $"Propagate 3D Shape Across All Loaded Tiles ({unoccupiedHulls} Hulls)##propagate_all_rel"
+                    : $"✓ Verify & Propagate 3D Shape Across All Tiles ({unoccupiedHulls} Hulls)##verify_propagate_rel";
 
                 if (SharedUiWidgets.ActionButton(propBtnText, unoccupiedHulls > 0))
                 {
-                    host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(spatialRel, worldScene!, out _, out _);
+                    host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(spatialRel, worldScene!, out _);
                 }
                 ImGui.Spacing();
             }
@@ -514,8 +537,8 @@ internal sealed class Pm4WorkbenchSidebarService
             Vector3 taughtRot = _cachedTaughtRot;
             if (taughtMatch != null)
             {
-                ImGui.TextColored(UiTokens.Success, $"Taught Shape Match: {taughtMatch.ModelName} ({taughtMatch.AssetKind})");
-                if (SharedUiWidgets.ActionButton($"Spawn & Propagate Across All Tiles ({unoccupiedHulls} Hulls)##propagate_taught"))
+                ImGui.TextColored(UiTokens.Success, $"Taught 3D Shape Match: {taughtMatch.ModelName} ({taughtMatch.AssetKind})");
+                if (SharedUiWidgets.ActionButton($"Spawn & Propagate 3D Shape Across All Tiles ({unoccupiedHulls} Hulls)##propagate_taught"))
                 {
                     host.Pm4DoodadDuplication.InstantiateTaughtPairingIntoHull(selectedPm4Obj, pm4TileX, pm4TileY, taughtMatch, taughtScale, taughtPos, taughtRot);
                     host.Pm4DoodadDuplication.ApplyTaughtPairingAcrossAllTiles(taughtMatch);
@@ -527,7 +550,29 @@ internal sealed class Pm4WorkbenchSidebarService
                 ImGui.Spacing();
             }
 
-            ImGui.TextWrapped("💡 Tip: Ctrl+Click an object in the viewport to pair & align it with this PM4 hull, or match resident models below.");
+            // 1-Click pairing with nearby resident scene models
+            var nearbyModels = FindNearbyResidentModels(worldScene, pm4TileX, pm4TileY, pm4Centroid, maxRadius: 100f, maxResults: 3);
+            if (nearbyModels.Count > 0)
+            {
+                ImGui.Spacing();
+                ImGui.TextUnformatted("Nearby Scene Models:");
+                for (int m = 0; m < nearbyModels.Count; m++)
+                {
+                    var (nm, distToPm4) = nearbyModels[m];
+                    if (SharedUiWidgets.ActionButton($"Pair with {nm.ModelName} (#{nm.UniqueId}) — {distToPm4:F1} yds##pair_near_{m}"))
+                    {
+                        worldScene.Selection.SelectSceneObjectByUniqueId(nm.UniqueId);
+                    }
+                }
+            }
+
+            if (SharedUiWidgets.ActionButton("Clear Hull Selection##clear_hull_sel"))
+            {
+                overlay.ClearPm4ObjectSelection();
+            }
+
+            ImGui.Spacing();
+            ImGui.TextWrapped("💡 Tip: Click an object in the viewport to pair & align it with this PM4 hull, or match resident models below.");
             ImGui.Spacing();
 
             if (SharedUiWidgets.ActionButton("Match this PM4 Footprint to Resident Models"))
@@ -542,28 +587,40 @@ internal sealed class Pm4WorkbenchSidebarService
                 for (int i = 0; i < _activeMatches.Count; i++)
                 {
                     var match = _activeMatches[i];
-                    ImGui.BulletText($"{match.Candidate.ModelName} — Score: {match.Score:P0} (Scale {match.SolvedScale:F2}, Yaw {match.SolvedRotation.Z:F1}°)");
+                    bool isFromDb = Pm4PriorKnowledgeDatabase.Instance.TryGetAsset(match.Candidate.ModelPath, out _);
+                    string srcTag = isFromDb ? "[Prior DB]" : "[Resident]";
+                    ImGui.BulletText($"{match.Candidate.ModelName} {srcTag} — Score: {match.Score:P0} (Scale {match.SolvedScale:F2}, Yaw {match.SolvedRotation.Z:F1}°)");
 
-                    if (SharedUiWidgets.ActionButton($"Verify & Propagate Across All Tiles ({unoccupiedHulls} Hulls)##propagate_cand_{i}", unoccupiedHulls > 0))
+                    if (SharedUiWidgets.ActionButton($"Verify & Propagate 3D Shape Across All Tiles ({unoccupiedHulls} Hulls)##propagate_cand_{i}", unoccupiedHulls > 0))
                     {
-                        var rel = new CuratedSpatialRelationship(
-                            match.Candidate.ModelName,
-                            match.Candidate.ModelPath,
-                            match.Candidate.AssetKind,
-                            selectedPm4Obj.Ck24,
-                            selectedPm4Obj.DominantGroupKey,
-                            match.Candidate.Length,
-                            match.Candidate.Width,
-                            match.Candidate.Height,
-                            match.SolvedScale,
-                            match.SolvedRotation.Z - selectedPm4Obj.BaseRotationRadians,
-                            match.SolvedPosition - pm4Centroid,
-                            (float)match.Score,
-                            DateTime.UtcNow,
-                            Verified: true);
+                        var shape3D = selectedPm4Obj.Shape3D;
+                        bool isWmo = Pm4DoodadDuplicationService.IsWmoAsset(match.Candidate.ModelPath, match.Candidate.AssetKind);
+                        string assetKind = isWmo ? "WMO" : Pm4DoodadDuplicationService.ResolveAssetKind(match.Candidate.ModelPath, match.Candidate.AssetKind);
+                        float actualScale = isWmo ? 1.0f : match.SolvedScale;
+
+                        var rel = new CuratedSpatialRelationship
+                        {
+                            ModelName = match.Candidate.ModelName,
+                            ModelPath = match.Candidate.ModelPath,
+                            AssetKind = assetKind,
+                            Ck24 = selectedPm4Obj.Ck24,
+                            DominantGroupKey = selectedPm4Obj.DominantGroupKey,
+                            Length = match.Candidate.Descriptor.Length,
+                            Width = match.Candidate.Descriptor.Width,
+                            Height = match.Candidate.Descriptor.Height,
+                            SolvedScale = actualScale,
+                            YawOffset = match.SolvedRotation.Z - selectedPm4Obj.BaseRotationRadians,
+                            PositionOffset = match.SolvedPosition - pm4Centroid,
+                            FitConfidence = (float)match.Score,
+                            DetectedUtc = DateTime.UtcNow,
+                            Verified = true,
+                            VerticalSliceRadii = shape3D.VerticalSliceRadii,
+                            InertiaTensor = shape3D.InertiaTensor,
+                            NormalDistribution = shape3D.NormalDistribution
+                        };
 
                         host.Pm4DoodadDuplication.SpawnCandidateIntoPm4Hull(selectedPm4Obj, pm4TileX, pm4TileY, match, out _);
-                        host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(rel, worldScene!, out _, out _);
+                        host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(rel, worldScene!, out _);
                     }
 
                     if (SharedUiWidgets.ActionButton($"Spawn into this Hull Only##spawn_{i}"))
@@ -589,6 +646,23 @@ internal sealed class Pm4WorkbenchSidebarService
                 host.Pm4DoodadDuplication.MagnetizePlacementToPm4(inst);
             }
 
+            ImGui.TextDisabled($"Yaw: {inst.PlacementRotation.Z:F1}°");
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Rotate +90°##sel_rot_p90"))
+            {
+                host.Pm4DoodadDuplication.RotatePlacement(inst, 90f);
+            }
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Rotate -90°##sel_rot_m90"))
+            {
+                host.Pm4DoodadDuplication.RotatePlacement(inst, -90f);
+            }
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Flip 180°##sel_rot_180"))
+            {
+                host.Pm4DoodadDuplication.RotatePlacement(inst, 180f);
+            }
+
             if (SharedUiWidgets.ActionButton("Fill Unmatched PM4 Doodad Hulls with this Model"))
             {
                 host.Pm4DoodadDuplication.DuplicateModelToUnmatchedPm4Doodads(inst, inst.TileX, inst.TileY);
@@ -599,6 +673,53 @@ internal sealed class Pm4WorkbenchSidebarService
                 MatchSelectedObjectFootprint(overlay, host, worldScene, inst);
             }
 
+            // 1-Click pairing with nearby PM4 collision hulls
+            var nearbyHulls = FindNearbyPm4Hulls(overlay, inst.TileX, inst.TileY, inst.PlacementPosition, maxRadius: 100f, maxResults: 3);
+            if (nearbyHulls.Count > 0)
+            {
+                ImGui.Spacing();
+                ImGui.TextUnformatted("Nearby PM4 Collision Hulls:");
+                for (int h = 0; h < nearbyHulls.Count; h++)
+                {
+                    var (nh, tx, ty, distToHull) = nearbyHulls[h];
+                    if (SharedUiWidgets.ActionButton($"Pair with PM4 Hull 0x{nh.Ck24:X6} (part {nh.ObjectPartId}) — {distToHull:F1} yds##pair_near_hull_{h}"))
+                    {
+                        overlay.SelectPm4Object((tx, ty, nh.Ck24, nh.ObjectPartId));
+                    }
+                    ImGui.SameLine();
+                    if (SharedUiWidgets.ActionButton($"Snap & Align##align_quick_{h}"))
+                    {
+                        overlay.SelectPm4Object((tx, ty, nh.Ck24, nh.ObjectPartId));
+                        host.Pm4DoodadDuplication.AlignPlacementToPm4Hull(inst, nh, tx, ty, fitScale: false, out _);
+                    }
+                }
+            }
+
+            if (SharedUiWidgets.ActionButton("Clear Model Selection##clear_model_sel"))
+            {
+                worldScene.Selection.ClearSelection();
+            }
+
+            // Same Neighborhood / Family Models from Prior Knowledge Database
+            string family = Pm4PriorKnowledgeDatabase.DetectFamily(inst.ModelPath);
+            var familyAssets = Pm4PriorKnowledgeDatabase.Instance.GetNeighborhoodAssets(inst.ModelPath);
+            if (familyAssets.Count > 0)
+            {
+                ImGui.Spacing();
+                if (ImGui.TreeNodeEx($"Same Neighborhood / Family Models ({family}: {familyAssets.Count})###family_models", ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    for (int f = 0; f < Math.Min(familyAssets.Count, 8); f++)
+                    {
+                        var fa = familyAssets[f];
+                        if (string.Equals(fa.ModelPath, inst.ModelPath, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        ImGui.BulletText($"{fa.ModelName} ({fa.AssetKind})");
+                    }
+                    ImGui.TreePop();
+                }
+            }
+
             if (_activeMatches.Count > 0)
             {
                 ImGui.Spacing();
@@ -606,7 +727,9 @@ internal sealed class Pm4WorkbenchSidebarService
                 for (int i = 0; i < _activeMatches.Count; i++)
                 {
                     var match = _activeMatches[i];
-                    ImGui.BulletText($"{match.Candidate.ModelName} — Score: {match.Score:P0} (Scale {match.SolvedScale:F2}, Yaw {match.SolvedRotation.Z:F1}°)");
+                    bool isFromDb = Pm4PriorKnowledgeDatabase.Instance.TryGetAsset(match.Candidate.ModelPath, out _);
+                    string srcTag = isFromDb ? "[Prior DB]" : "[Resident]";
+                    ImGui.BulletText($"{match.Candidate.ModelName} {srcTag} — Score: {match.Score:P0} (Scale {match.SolvedScale:F2}, Yaw {match.SolvedRotation.Z:F1}°)");
                 }
             }
         }
@@ -624,33 +747,81 @@ internal sealed class Pm4WorkbenchSidebarService
             host.Pm4DoodadDuplication.SavePatchedAdts();
         }
 
-        if (host.Pm4DoodadDuplication.TaughtPairings.Count > 0)
+        string activeMap = !string.IsNullOrEmpty(host.LoadedFileName)
+            ? Path.GetFileNameWithoutExtension(host.LoadedFileName)
+            : "development";
+        bool projectExists = Pm4PairingProjectStore.Exists(activeMap);
+        int taughtCount = host.Pm4DoodadDuplication.TaughtPairings.Count;
+
+        if (taughtCount > 0 || projectExists)
         {
             ImGui.Spacing();
-            if (ImGui.TreeNodeEx($"Taught Shape Library ({host.Pm4DoodadDuplication.TaughtPairings.Count} rules)##Pm4TaughtRules", ImGuiTreeNodeFlags.DefaultOpen))
+            if (ImGui.TreeNodeEx($"Taught Shape Library & Project ({taughtCount} rules)##Pm4TaughtRules", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                ImGui.TextDisabled("Shape-matched model templates for automated cross-tile population.");
-                ImGui.Spacing();
-
-                if (SharedUiWidgets.ActionButton($"Apply All Taught Rules Across All Loaded Tiles ({overlay._pm4TileObjects.Count} tiles)"))
+                ImGui.TextDisabled($"Active Map: '{activeMap}' | {taughtCount} rule(s) in memory");
+                string projectRelPath = $"output/projects/pm4_pairings/{activeMap}.pairings.json";
+                if (projectExists)
                 {
-                    host.Pm4DoodadDuplication.ApplyAllTaughtPairingsAcrossAllTiles();
+                    ImGui.TextColored(UiTokens.Success, $"● Saved project: {projectRelPath}");
+                }
+                else
+                {
+                    ImGui.TextColored(UiTokens.BrassDim, $"○ No map project file (Save writes to {projectRelPath})");
                 }
 
                 ImGui.Spacing();
-                for (int i = 0; i < host.Pm4DoodadDuplication.TaughtPairings.Count; i++)
+                if (SharedUiWidgets.ActionButton("Save Project##Pm4SaveProject"))
                 {
-                    var rule = host.Pm4DoodadDuplication.TaughtPairings[i];
-                    ImGui.BulletText($"{rule.ModelName} ({rule.AssetKind}) — {rule.Length:F1}x{rule.Width:F1}x{rule.Height:F1} yds");
-                    if (SharedUiWidgets.ActionButton($"Apply to All Tiles##rule_apply_{i}"))
+                    host.Pm4DoodadDuplication.SaveTaughtProject(activeMap);
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"Saves the current taught pairings to '{projectRelPath}', updates manifest, and syncs global curation library.");
+
+                ImGui.SameLine();
+                if (SharedUiWidgets.ActionButton("Load Project##Pm4LoadProject"))
+                {
+                    host.Pm4DoodadDuplication.LoadTaughtProject(activeMap, out _);
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"Reloads saved pairings from '{projectRelPath}' (or global library if missing).");
+
+                ImGui.SameLine();
+                if (SharedUiWidgets.ActionButton("Export Manifest##Pm4ExportManifest"))
+                {
+                    host.Pm4DoodadDuplication.ExportTaughtPairingsManifest(activeMap);
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Exports an authoritative JSON composition manifest containing metrics and footprint statistics.");
+
+                if (!string.IsNullOrEmpty(host.Pm4DoodadDuplication.LastOperationMessage))
+                {
+                    ImGui.Spacing();
+                    ImGui.TextColored(UiTokens.Success, host.Pm4DoodadDuplication.LastOperationMessage);
+                }
+
+                if (taughtCount > 0)
+                {
+                    ImGui.Spacing();
+                    if (SharedUiWidgets.ActionButton($"Apply All Taught Rules Across All Loaded Tiles ({overlay._pm4TileObjects.Count} tiles)"))
                     {
-                        host.Pm4DoodadDuplication.ApplyTaughtPairingAcrossAllTiles(rule);
+                        host.Pm4DoodadDuplication.ApplyAllTaughtPairingsAcrossAllTiles();
                     }
-                    ImGui.SameLine();
-                    if (SharedUiWidgets.ActionButton($"Delete##rule_del_{i}"))
+
+                    ImGui.Spacing();
+                    for (int i = 0; i < host.Pm4DoodadDuplication.TaughtPairings.Count; i++)
                     {
-                        host.Pm4DoodadDuplication.DeleteTaughtPairing(rule);
-                        break;
+                        var rule = host.Pm4DoodadDuplication.TaughtPairings[i];
+                        ImGui.BulletText($"{rule.ModelName} ({rule.AssetKind}) — {rule.Length:F1}x{rule.Width:F1}x{rule.Height:F1} yds");
+                        if (SharedUiWidgets.ActionButton($"Apply to All Tiles##rule_apply_{i}"))
+                        {
+                            host.Pm4DoodadDuplication.ApplyTaughtPairingAcrossAllTiles(rule);
+                        }
+                        ImGui.SameLine();
+                        if (SharedUiWidgets.ActionButton($"Delete##rule_del_{i}"))
+                        {
+                            host.Pm4DoodadDuplication.DeleteTaughtPairing(rule);
+                            break;
+                        }
                     }
                 }
                 ImGui.TreePop();
@@ -708,6 +879,19 @@ internal sealed class Pm4WorkbenchSidebarService
 
         var candidates = new List<Pm4ModelCandidate>();
         var seenModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Explicitly include selected scene object if one is currently selected in inspector
+        if (worldScene.Selection.SelectedInstance is { } selectedObjInst)
+        {
+            if (seenModels.Add(selectedObjInst.ModelPath))
+            {
+                Vector3 min = selectedObjInst.SelectionBoundsResolved && selectedObjInst.SelectionLocalBoundsMax != Vector3.Zero ? selectedObjInst.SelectionLocalBoundsMin : selectedObjInst.LocalBoundsMin;
+                Vector3 max = selectedObjInst.SelectionBoundsResolved && selectedObjInst.SelectionLocalBoundsMax != Vector3.Zero ? selectedObjInst.SelectionLocalBoundsMax : selectedObjInst.LocalBoundsMax;
+                candidates.Add(Pm4ModelCandidate.Create(selectedObjInst.ModelPath, selectedObjInst.AssetKind, min, max));
+            }
+        }
+
+        // 2. Models resident in the scene/tile
         IPm4OverlayHost pm4Host = worldScene;
         foreach (var list in pm4Host.TileMdxInstances.Values)
         {
@@ -734,9 +918,21 @@ internal sealed class Pm4WorkbenchSidebarService
             }
         }
 
+        // 3. Pre-populated Prior Knowledge Database candidates (curated, taught, and whole-map harvest)
+        string? targetFamily = worldScene.Selection.SelectedInstance is { } selInst ? Pm4PriorKnowledgeDatabase.DetectFamily(selInst.ModelPath) : null;
+        var dbCandidates = Pm4PriorKnowledgeDatabase.Instance.GetDatabaseCandidates(targetFamily);
+        for (int i = 0; i < dbCandidates.Count; i++)
+        {
+            var dbCand = dbCandidates[i];
+            if (seenModels.Add(dbCand.ModelPath))
+            {
+                candidates.Add(dbCand);
+            }
+        }
+
         if (candidates.Count == 0)
         {
-            string noModelsMsg = "No candidate models resident in scene to match against.";
+            string noModelsMsg = "No candidate models available in scene or prior database.";
             host.StatusMessage = noModelsMsg;
             host.Pm4DoodadDuplication.LastOperationMessage = noModelsMsg;
             _activeMatches.Clear();
@@ -800,5 +996,74 @@ internal sealed class Pm4WorkbenchSidebarService
         }
 
         MatchPm4Footprint(overlay, host, worldScene, bestMatch, bestTx, bestTy);
+    }
+
+    private static List<(ObjectInstance Model, float Distance)> FindNearbyResidentModels(
+        WorldScene worldScene, int tileX, int tileY, Vector3 origin, float maxRadius = 100f, int maxResults = 3)
+    {
+        var results = new List<(ObjectInstance Model, float Distance)>();
+        IPm4OverlayHost pm4Host = worldScene;
+
+        void ScanList(List<ObjectInstance>? list)
+        {
+            if (list == null) return;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var inst = list[i];
+                float d = Vector3.Distance(inst.PlacementPosition, origin);
+                if (d <= maxRadius)
+                    results.Add((inst, d));
+            }
+        }
+
+        if (pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var wmoList)) ScanList(wmoList);
+        if (pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var mdxList)) ScanList(mdxList);
+
+        if (results.Count == 0)
+        {
+            foreach (var pair in pm4Host.TileWmoInstances)
+                if (Math.Abs(pair.Key.Item1 - tileX) <= 1 && Math.Abs(pair.Key.Item2 - tileY) <= 1) ScanList(pair.Value);
+            foreach (var pair in pm4Host.TileMdxInstances)
+                if (Math.Abs(pair.Key.Item1 - tileX) <= 1 && Math.Abs(pair.Key.Item2 - tileY) <= 1) ScanList(pair.Value);
+        }
+
+        results.Sort((a, b) => a.Item2.CompareTo(b.Item2));
+        if (results.Count > maxResults)
+            results.RemoveRange(maxResults, results.Count - maxResults);
+
+        return results;
+    }
+
+    private static List<(Pm4OverlayObject Hull, int TileX, int TileY, float Distance)> FindNearbyPm4Hulls(
+        Pm4OverlayScene overlay, int tileX, int tileY, Vector3 origin, float maxRadius = 100f, int maxResults = 3)
+    {
+        var results = new List<(Pm4OverlayObject Hull, int TileX, int TileY, float Distance)>();
+
+        void ScanList(int tx, int ty, List<Pm4OverlayObject>? list)
+        {
+            if (list == null) return;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var hull = list[i];
+                Vector3 center = Vector3.Transform(hull.Center, hull.BaseTransform);
+                float d = Vector3.Distance(center, origin);
+                if (d <= maxRadius)
+                    results.Add((hull, tx, ty, d));
+            }
+        }
+
+        if (overlay._pm4TileObjects.TryGetValue((tileX, tileY), out var hullList)) ScanList(tileX, tileY, hullList);
+
+        if (results.Count == 0)
+        {
+            foreach (var pair in overlay._pm4TileObjects)
+                if (Math.Abs(pair.Key.Item1 - tileX) <= 1 && Math.Abs(pair.Key.Item2 - tileY) <= 1) ScanList(pair.Key.Item1, pair.Key.Item2, pair.Value);
+        }
+
+        results.Sort((a, b) => a.Item4.CompareTo(b.Item4));
+        if (results.Count > maxResults)
+            results.RemoveRange(maxResults, results.Count - maxResults);
+
+        return results;
     }
 }
