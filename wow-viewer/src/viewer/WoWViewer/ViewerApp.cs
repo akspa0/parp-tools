@@ -644,6 +644,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         opts.Title = ViewerProductName;
         opts.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3));
         opts.VSync = true;
+        opts.FramesPerSecond = 60.0;
+        opts.UpdatesPerSecond = 60.0;
 
         _window = Window.Create(opts);
         _window.Load += () => OnLoad(initialArgs);
@@ -659,6 +661,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private void OnLoad(string[]? initialArgs)
     {
         _gl = _window.CreateOpenGL();
+        _window.VSync = true;
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
         _uiManager.SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
@@ -988,8 +991,28 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
     private unsafe void OnRender(double dt)
     {
-        if (_window.Size.X <= 0 || _window.Size.Y <= 0 || _window.FramebufferSize.X <= 0 || _window.FramebufferSize.Y <= 0)
+        if (_window.WindowState == WindowState.Minimized)
+        {
+            System.Threading.Thread.Sleep(50);
             return;
+        }
+
+        if (_window.Size.X <= 0 || _window.Size.Y <= 0 || _window.FramebufferSize.X <= 0 || _window.FramebufferSize.Y <= 0)
+        {
+            System.Threading.Thread.Sleep(16);
+            return;
+        }
+
+        // Software frame throttle safeguard: prevent uncapped GPU presentation from flooding DWM
+        // if the display driver ignores VSync (common with G-Sync/FreeSync on windowed OpenGL).
+        if (dt < 0.005)
+        {
+            int sleepMs = (int)Math.Ceiling((1.0 / 60.0 - dt) * 1000.0);
+            if (sleepMs > 0 && sleepMs <= 16)
+            {
+                System.Threading.Thread.Sleep(sleepMs);
+            }
+        }
         _datasetExportDialogs.PromotePendingMlFinalizeAfterExport();
         _captureAutomation.PromotePendingMkHarvestViewerValidationCapturePlan();
         _captureAutomation.PromotePendingRoofCaptureBatch();

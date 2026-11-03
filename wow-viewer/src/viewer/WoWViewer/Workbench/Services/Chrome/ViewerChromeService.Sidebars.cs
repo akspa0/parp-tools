@@ -29,12 +29,23 @@ internal sealed partial class ViewerChromeService
     }
 
 
+    private static long _cachedWorkingSet;
+    private static long _cachedPrivateMemory;
+    private static long _lastMemorySampleTicks;
+
     internal void DrawRuntimeStatsPanelContent()
     {
-        using Process process = Process.GetCurrentProcess();
+        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_lastMemorySampleTicks == 0 || (nowTicks - _lastMemorySampleTicks) > System.Diagnostics.Stopwatch.Frequency * 0.5)
+        {
+            _lastMemorySampleTicks = nowTicks;
+            using Process process = Process.GetCurrentProcess();
+            _cachedWorkingSet = process.WorkingSet64;
+            _cachedPrivateMemory = process.PrivateMemorySize64;
+        }
         long managedHeap = GC.GetTotalMemory(forceFullCollection: false);
         long totalAllocated = GC.GetTotalAllocatedBytes(precise: false);
-        ImGui.Text($"Process memory: working={FormatBytes(process.WorkingSet64)}  private={FormatBytes(process.PrivateMemorySize64)}");
+        ImGui.Text($"Process memory: working={FormatBytes(_cachedWorkingSet)}  private={FormatBytes(_cachedPrivateMemory)}");
         ImGui.Text($"Managed heap: live={FormatBytes(managedHeap)}  allocated={FormatBytes(totalAllocated)}  GC={GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)}");
 
         int tiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
