@@ -461,7 +461,7 @@
     {
       "id": "lighting",
       "label": "Lighting",
-      "region": "Options > Display",
+      "region": "Left sidebar > Workspace",
       "shortcut": null,
       "help": "Scene lighting diagnostics and settings.",
       "visible": true

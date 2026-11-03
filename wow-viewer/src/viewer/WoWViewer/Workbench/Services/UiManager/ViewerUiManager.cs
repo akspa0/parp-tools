@@ -318,6 +318,7 @@ internal sealed partial class ViewerUiManager
         // nothing ever rendered the window. It is drawn here, inside the ImGui frame, regardless
         // of chrome visibility because it is a chooser, not chrome.
         _host.WdlPreview.DrawWdlPreviewDialog();
+        _host.ArchaeologyPanel.DonorTilePicker.DrawDialog();
         // Requests can originate from any destination. Drain deferred file operations exactly once.
         _host.MainMenuBar.DrawDeferredActions();
         if (_host.SettingsWindow._showSettingsWindow)

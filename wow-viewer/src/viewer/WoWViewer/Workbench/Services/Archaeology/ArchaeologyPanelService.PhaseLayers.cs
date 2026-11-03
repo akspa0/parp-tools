@@ -937,6 +937,13 @@ internal sealed partial class ArchaeologyPanelService
 
         if (!string.IsNullOrWhiteSpace(_cartographyDonorMap))
         {
+            if (ImGui.Button("Pick Tiles on Map Preview...##btnPickDonorTiles"))
+            {
+                DonorTilePicker.Open(_cartographyDonorMap, terrain.MapName);
+            }
+            ImGui.SameLine();
+            ImGui.TextDisabled("Visual multi-tile picker");
+
             // Coordinate order (2026-09-09 operator report: "it doesn't put the tile at the target
             // xx_yy location"): the operator enters tiles in ADT-NAME order (xx = column W-E, first
             // number of e.g. "Azeroth_28_50"; yy = row N-S). The composition grid is (tileX = row,
@@ -969,9 +976,8 @@ internal sealed partial class ArchaeologyPanelService
                 var layer = new PhaseLayerSettings
                 {
                     MapName = _cartographyDonorMap,
-                    // Internal offsets follow the (tileX = row, tileY = column) grid.
-                    TileOffsetX = _cartographyTargetTileY - _cartographyDonorTileY,
-                    TileOffsetY = _cartographyTargetTileX - _cartographyDonorTileX,
+                    TileOffsetX = 0,
+                    TileOffsetY = 0,
                     UsePlacedTilesOnly = true,
                     Channels = PhaseDataChannel.All,
                     OnlyTakeWhatThePhaseCarries = true,

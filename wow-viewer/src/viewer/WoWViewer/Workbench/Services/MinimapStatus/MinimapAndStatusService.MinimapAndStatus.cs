@@ -88,10 +88,7 @@ internal sealed partial class MinimapAndStatusService
         PhaseLayerSettings layer = worldScene.PhaseLayers[layerIndex];
         if (!layer.Enabled || layer.Resolution != PhaseLayerResolution.Resolved)
             return false;
-        // Placed-tile layers are draggable too (2026-09-09 operator request): dragging one slides
-        // every placement's target by the drag delta, then re-streams on release.
-        if (layer.UsePlacedTilesOnly)
-            return layer.TilePlacements.Count > 0;
+
 
         // Spec 231 Phase 7: GetLayerFootprints already composes rotation/mirror + offset, so the
         // click hit-test is a direct lookup in composed space.
@@ -225,30 +222,8 @@ internal sealed partial class MinimapAndStatusService
                     _footprintDragStartTile.TileY,
                     curTx,
                     curTy);
-                if (_footprintDragPlaced is { Count: > 0 } placed)
-                {
-                    // Move every placement's TARGET by the pointer delta (donor slot fixed), then
-                    // keep the whole-layer offset in sync so channel/absence behavior is unchanged.
-                    int dx = newOffsetX - _footprintDragBaseOffset.OffsetX;
-                    int dy = newOffsetY - _footprintDragBaseOffset.OffsetY;
-                    layer.TilePlacements.Clear();
-                    foreach ((int donorX, int donorY, int targetX, int targetY, bool locked) in placed)
-                    {
-                        layer.TilePlacements.Add(new PhaseTilePlacement(
-                            donorX,
-                            donorY,
-                            Math.Clamp(targetX + dx, 0, 63),
-                            Math.Clamp(targetY + dy, 0, 63),
-                            locked));
-                    }
-                    layer.TileOffsetX = newOffsetX;
-                    layer.TileOffsetY = newOffsetY;
-                }
-                else
-                {
-                    layer.TileOffsetX = newOffsetX;
-                    layer.TileOffsetY = newOffsetY;
-                }
+                layer.TileOffsetX = newOffsetX;
+                layer.TileOffsetY = newOffsetY;
             }
             else if (moved.PanDeltaPixels != Vector2.Zero)
             {

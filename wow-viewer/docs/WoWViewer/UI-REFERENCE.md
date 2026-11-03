@@ -63,6 +63,7 @@ Controls documented: **122**
 | Control | Shortcut | Description |
 |---|---|---|
 | Fog | - | Fog start and end distance for the scene. |
+| Lighting | - | Scene lighting diagnostics and settings. |
 | Open Game Folder... | - | Open a game folder as an MPQ data source. |
 | Return To Last World | - | Return to the last loaded world. |
 | Sky | - | Atmospheric sky dome, sun/moon cycle, and client skybox backdrop controls. |
@@ -93,7 +94,6 @@ Controls documented: **122**
 
 | Control | Shortcut | Description |
 |---|---|---|
-| Lighting | - | Scene lighting diagnostics and settings. |
 | Minimap | - | Show minimap visibility and collapse controls. |
 | Render Quality | - | Render quality settings for the scene. |
 | Theme | - | Viewer colour theme. |

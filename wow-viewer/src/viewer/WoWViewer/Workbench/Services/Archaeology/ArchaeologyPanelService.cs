@@ -52,10 +52,13 @@ namespace WoWViewer;
 internal sealed partial class ArchaeologyPanelService
 {
     private readonly IViewerAppHost _host;
+    private readonly DonorTilePickerService _donorTilePicker;
+    internal DonorTilePickerService DonorTilePicker => _donorTilePicker;
 
     internal ArchaeologyPanelService(IViewerAppHost host)
     {
         _host = host;
+        _donorTilePicker = new DonorTilePickerService(host);
     }
 
     // Host bridge: see ArchaeologyPanelService.Host.cs.

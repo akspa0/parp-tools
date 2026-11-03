@@ -1,5 +1,21 @@
 # Active Context — wow-viewer
 
+**Visual Donor Tile Picker, Placed Tile Offsets & Workspace Lighting (2026-11-03):**
+1. **Interactive Visual Donor Tile Picker (`DonorTilePickerService.cs`)**:
+   - Built interactive visual 64x64 WDL overview dialog (`DonorTilePickerService.cs`) launched from the Archaeology Phase Layers panel.
+   - Allows users to select donor maps, inspect occupied tiles (highlighted in cyan), select single or multi-tile regions via click or drag-box selection (amber highlight), and choose target placement modes (exact match vs custom anchor slot).
+   - Generates and applies `PhaseLayerSettings` with `UsePlacedTilesOnly = true` and configured `TilePlacements`.
+2. **Placed Donor Tile Offsets & Minimap Dragging**:
+   - In `PhaseComposition.cs`, resolved placed donor tile targets through `placement.TargetTileX + layer.TileOffsetX` and `placement.TargetTileY + layer.TileOffsetY`.
+   - Updated `WorldScene.GetLayerFootprints()` and `MinimapAndStatusService` so placed-tile donor layers respect tile offsets during footprint generation and allow interactive click-dragging across the loaded map's minimap.
+3. **Workspace Lighting & LIT Consolidation**:
+   - Moved all lighting controls (ambient, direct, fog range, and LIT loader/status) into `LeftPanel.Workspace` under `Lighting` (`NavigatorPanelService.Sidebars.cs`), removing redundant placement in `Options > Display`.
+   - Registered authoritative home in `ui-controls.json` and synchronized `docs/WoWViewer/UI-REFERENCE.md`; `Verify-UiReference.ps1` passed with 0 errors and 0 warnings.
+4. **Validation**:
+   - Solution `WoWViewer.CrossPlatform` built with 0 errors.
+   - 20/20 `PhaseTileSourceTests` passed (including 2 new tests verifying placed-tile offset resolution and locked claims).
+   - 17/17 `ViewerFooterLayoutTests` passed; 5/5 `UiControlDocumentationTests` passed.
+
 **Diagnostics Left-Dock Integration, Bounding Box Gating & Solid PM4 Color Fix (2026-11-03):**
 1. **Docked Performance & Log Inside Left Sidebar Diagnostics**:
    - Replaced pop-out floating windows (`ImGui.Begin("Performance")` and `ImGui.Begin("Log")`) with embedded segmented tabs (`[ Stats ] [ Performance ] [ Log ]`) within `NavigatorPanelService.Sidebars.cs` under `LeftPanel.Diagnostics`.

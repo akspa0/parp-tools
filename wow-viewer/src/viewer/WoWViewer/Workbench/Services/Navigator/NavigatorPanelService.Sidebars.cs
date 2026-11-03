@@ -38,6 +38,8 @@ internal sealed partial class NavigatorPanelService
         _host.WorkbenchPanels.DrawCameraContent();
         if (SharedUiWidgets.SectionHeader("Fog", defaultOpen: true, id: "WorkspaceFog"))
             _host.DrawAuthoritativeFogControls(showDescription: false);
+        if (SharedUiWidgets.SectionHeader("Lighting", defaultOpen: true, id: "WorkspaceLighting"))
+            _host.LightingPanel.DrawLightingContent();
         if (SharedUiWidgets.SectionHeader("Sky", defaultOpen: true, id: "WorkspaceSky"))
             SkyControls.DrawSkyControlsContent();
     }

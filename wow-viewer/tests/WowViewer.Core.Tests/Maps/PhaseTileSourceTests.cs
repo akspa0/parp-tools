@@ -98,6 +98,46 @@ public sealed class PhaseTileSourceTests
     }
 
     [Fact]
+    public void PlacedTileOnlyMode_AppliesLayerTileOffsets()
+    {
+        var layer = new PhaseLayerSettings
+        {
+            MapName = "Donor",
+            TileOffsetX = 2,
+            TileOffsetY = 3,
+            UsePlacedTilesOnly = true,
+        };
+        layer.TilePlacements.Add(new PhaseTilePlacement(5, 6, 10, 10));
+
+        // Placed anchor at (10, 10) + offset (2, 3) = effective target (12, 13)
+        PhaseTileSource sourceAtEffective = PhaseCompositionPolicy.ResolveTileSource(layer, 12, 13, AllTilesExist);
+        Assert.True(sourceAtEffective.HasSource);
+        Assert.Equal(PhaseTileSourceKind.PerTile, sourceAtEffective.Via);
+        Assert.Equal(5, sourceAtEffective.SourceTileX);
+        Assert.Equal(6, sourceAtEffective.SourceTileY);
+
+        // Old unshifted coordinate (10, 10) should no longer match
+        PhaseTileSource sourceAtOld = PhaseCompositionPolicy.ResolveTileSource(layer, 10, 10, AllTilesExist);
+        Assert.False(sourceAtOld.HasSource);
+    }
+
+    [Fact]
+    public void PlacedTileOnlyMode_LockedPlacement_AccountsForOffsets()
+    {
+        var layer = new PhaseLayerSettings
+        {
+            MapName = "Donor",
+            TileOffsetX = 2,
+            TileOffsetY = 3,
+            UsePlacedTilesOnly = true,
+        };
+        layer.TilePlacements.Add(new PhaseTilePlacement(5, 6, 10, 10, Locked: true));
+
+        Assert.True(PhaseCompositionPolicy.IsTargetLockedByLayer(layer, 12, 13));
+        Assert.False(PhaseCompositionPolicy.IsTargetLockedByLayer(layer, 10, 10));
+    }
+
+    [Fact]
     public void PlacedTileOnlyMode_WithoutPlacements_IsEmpty()
     {
         var layer = new PhaseLayerSettings { MapName = "Donor", UsePlacedTilesOnly = true };

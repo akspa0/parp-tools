@@ -459,7 +459,10 @@ public static class PhaseCompositionPolicy
             if (!placement.IsValid)
                 continue;
 
-            if (placement.TargetTileX == targetX && placement.TargetTileY == targetY)
+            int effectiveTargetX = layer.UsePlacedTilesOnly ? placement.TargetTileX + layer.TileOffsetX : placement.TargetTileX;
+            int effectiveTargetY = layer.UsePlacedTilesOnly ? placement.TargetTileY + layer.TileOffsetY : placement.TargetTileY;
+
+            if (effectiveTargetX == targetX && effectiveTargetY == targetY)
             {
                 claimCount++;
                 selectedPlacement ??= placement;
@@ -519,7 +522,8 @@ public static class PhaseCompositionPolicy
 
         return layer.TilePlacements.Any(placement =>
             placement.IsValid && placement.Locked
-            && placement.TargetTileX == targetX && placement.TargetTileY == targetY);
+            && (layer.UsePlacedTilesOnly ? placement.TargetTileX + layer.TileOffsetX : placement.TargetTileX) == targetX
+            && (layer.UsePlacedTilesOnly ? placement.TargetTileY + layer.TileOffsetY : placement.TargetTileY) == targetY);
     }
 
     /// <summary>

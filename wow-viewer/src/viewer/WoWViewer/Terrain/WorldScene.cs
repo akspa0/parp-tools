@@ -530,7 +530,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
             {
                 IReadOnlyList<(int TileX, int TileY)> placedTargets = layer.TilePlacements
                     .Where(static placement => placement.IsValid)
-                    .Select(static placement => (placement.TargetTileX, placement.TargetTileY))
+                    .Select(placement => (placement.TargetTileX + layer.TileOffsetX, placement.TargetTileY + layer.TileOffsetY))
+                    .Where(static t => t.Item1 >= 0 && t.Item1 <= 63 && t.Item2 >= 0 && t.Item2 <= 63)
                     .Distinct()
                     .ToList();
                 result.Add((layer, placedTargets));

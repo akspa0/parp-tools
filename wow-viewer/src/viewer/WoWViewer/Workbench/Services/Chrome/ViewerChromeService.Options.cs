@@ -18,8 +18,6 @@ internal sealed partial class ViewerChromeService
         {
             if (SharedUiWidgets.DrawSectionHeader("Render Quality", id: "OptionsRenderQuality"))
                 _host.DrawRenderQualityContent();
-            if (SharedUiWidgets.DrawSectionHeader("Lighting", id: "OptionsLighting"))
-                _host.LightingPanel.DrawLightingContent();
             if (SharedUiWidgets.DrawSectionHeader("Theme", id: "OptionsTheme"))
                 _host.Themes.DrawUiThemeSettingsContent();
             if (SharedUiWidgets.DrawSectionHeader("Minimap", id: "OptionsMinimap"))
