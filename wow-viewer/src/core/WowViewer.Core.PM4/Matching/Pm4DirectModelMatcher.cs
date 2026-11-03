@@ -164,7 +164,10 @@ public static class Pm4DirectModelMatcher
             }
             else
             {
-                posZ = prism.BaseZ - (cand.LocalBoundsMin.Z * scale);
+                // WMOs: prism.BaseZ is the authentic placement Z (MODF Position.Z) from MSUR._0x1C.
+                // The local origin (0,0,0) is authored at this placement height; foundation geometry
+                // extends below origin (negative Z) and must not elevate the building.
+                posZ = prism.BaseZ;
             }
 
             Vector3 solvedPos = new(posX, posY, posZ);

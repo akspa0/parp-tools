@@ -32,13 +32,15 @@ internal sealed partial class Pm4WorkbenchService
         }
 
         var key = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
-        ImGui.Text($"Tile ({key.tileX}, {key.tileY})  CK24 0x{key.ck24:X6}  part {key.objectPart}");
+        float keyZ = key.ck24 != 0 ? BitConverter.UInt32BitsToSingle(key.ck24 << 8) : 0f;
+        string keyZStr = key.ck24 != 0 ? $"Object Z {keyZ:F3}" : "Object Z (none)";
+        ImGui.Text($"Tile ({key.tileX}, {key.tileY})  {keyZStr} (raw 0x{key.ck24:X6})  part {key.objectPart}");
 
         if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo d))
         {
             float placementZ = BitConverter.UInt32BitsToSingle(d.Ck24 << 8);
             ImGui.Separator();
-            ImGui.Text($"Placement Z (MSUR.0x1C): ~= {placementZ:F3}  (CK24 0x{d.Ck24:X6}, exp 0x{d.Ck24Type:X2})");
+            ImGui.Text($"Object Z (MSUR.0x1C): ~= {placementZ:F3}  (raw 0x{d.Ck24:X6}, exp 0x{d.Ck24Type:X2})");
             ImGui.Text($"MSHD: F00={d.MshdField00}  Region(0x04)={d.MshdRegionId}  F08={d.MshdField08}");
             ImGui.Text($"MSLK: group(0x04)=0x{d.LinkGroupObjectId:X8}  linked MPRL refs={d.LinkedPositionRefCount}");
             ImGui.Text($"MSUR: class(0x00)=0x{d.DominantGroupKey:X2}  mslk_first_index(0x18)={d.DominantMscnRefIndex}");
@@ -303,7 +305,7 @@ internal sealed partial class Pm4WorkbenchService
             int tileSurfaceCount = tileObjects.Sum(static e => e.surfaceCount);
             int tileCk24Count = byCk24.Count;
 
-            string tileLabel = $"Tile ({tx}, {ty})  [{tileCk24Count} CK24 groups, {tileSurfaceCount} surfaces]";
+            string tileLabel = $"Tile ({tx}, {ty})  [{tileCk24Count} Object Z groups, {tileSurfaceCount} surfaces]";
             if (hasFilter && !tileLabel.ToLowerInvariant().Contains(filterLower))
             {
                 bool childMatch = byCk24.Any(g => Ck24MatchesFilter(g.Key, g.ToList(), filterLower));
@@ -327,7 +329,9 @@ internal sealed partial class Pm4WorkbenchService
                 int partCount = ck24Objects.Count;
 
                 string typeLabel = GetCk24TypeLabel(ck24Type);
-                string ck24Label = $"CK24 0x{ck24:X6}  Type=0x{ck24Type:X2} ({typeLabel})  ObjId={ck24ObjId}  [{partCount} parts, {ck24SurfaceCount} surfaces]  Region={regionId}  MSLK=0x{linkGroupId:X8}";
+                float decodedZ = ck24 != 0 ? BitConverter.UInt32BitsToSingle(ck24 << 8) : 0f;
+                string zStr = ck24 != 0 ? $"Object Z {decodedZ:F3}" : "Object Z (none)";
+                string ck24Label = $"{zStr} (raw 0x{ck24:X6}, exp 0x{ck24Type:X2}) [{partCount} parts, {ck24SurfaceCount} surfaces] Region={regionId} MSLK=0x{linkGroupId:X8}";
 
                 if (hasFilter && !ck24Label.ToLowerInvariant().Contains(filterLower))
                     continue;
@@ -440,7 +444,8 @@ internal sealed partial class Pm4WorkbenchService
         }
 
         // Summary header
-        ImGui.Text($"CK24 0x{graph.Ck24:X6}  Type=0x{graph.Ck24Type:X2}  ObjId={graph.Ck24ObjectId}");
+        float graphZ = graph.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(graph.Ck24 << 8) : 0f;
+        ImGui.Text($"Object Z {graphZ:F3}  (raw 0x{graph.Ck24:X6}, exp 0x{graph.Ck24Type:X2})  ObjId={graph.Ck24ObjectId}");
         ImGui.TextDisabled($"Tile ({graph.SelectedTileX}, {graph.SelectedTileY})  Part {graph.SelectedObjectPartId}");
         ImGui.TextDisabled($"{graph.LinkGroupCount} link groups, {graph.MscnRefGroupCount} mscnRef groups, {graph.PartCount} parts, {graph.SurfaceCount} surfaces, {graph.TotalIndexCount} indices");
         ImGui.Separator();

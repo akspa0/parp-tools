@@ -471,7 +471,7 @@ internal sealed partial class Pm4WorkbenchService
                 {
                     string label = obj.AssetName is not null
                         ? $"{System.IO.Path.GetFileName(obj.AssetName)}  #{obj.UniqueId}"
-                        : $"(unresolved) z={obj.PlacementZ:F3}  0x{obj.Ck24:X6}";
+                        : $"(unresolved) Object Z {obj.PlacementZ:F3} (raw 0x{obj.Ck24:X6})";
 
                     bool selected = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue
                         && _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value.Equals(obj.Key);
@@ -488,7 +488,7 @@ internal sealed partial class Pm4WorkbenchService
                         ImGui.BeginTooltip();
                         ImGui.Text(obj.AssetName ?? "(no asset resolved)");
                         ImGui.TextDisabled($"placement Z = {obj.PlacementZ:F4}   surfaces = {obj.SurfaceCount}");
-                        ImGui.TextDisabled($"CK24 slice 0x{obj.Ck24:X6}  type 0x{obj.Ck24Type:X2}  part {obj.Key.objectPart}");
+                        ImGui.TextDisabled($"Raw MSUR._0x1C 0x{obj.Ck24:X6}  exp 0x{obj.Ck24Type:X2}  part {obj.Key.objectPart}");
                         if (obj.MatchDelta.HasValue)
                             ImGui.TextDisabled($"asset match delta = {obj.MatchDelta.Value:F4}");
                         ImGui.EndTooltip();

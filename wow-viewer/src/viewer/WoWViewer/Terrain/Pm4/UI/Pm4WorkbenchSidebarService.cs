@@ -92,7 +92,7 @@ internal sealed class Pm4WorkbenchSidebarService
 
             ImGui.SameLine();
             bool showPm4Ck24Bounds = overlay.ShowPm4Ck24Bounds;
-            if (ImGui.Checkbox("PM4 CK24 Bounds", ref showPm4Ck24Bounds))
+            if (ImGui.Checkbox("PM4 Object Z Bounds", ref showPm4Ck24Bounds))
                 overlay.ShowPm4Ck24Bounds = showPm4Ck24Bounds;
 
             bool showPathWalls = overlay.Pm4ShowPathWalls;
@@ -323,14 +323,14 @@ internal sealed class Pm4WorkbenchSidebarService
         }
 
         bool splitCk24Conn = overlay.Pm4SplitCk24ByConnectivity;
-        if (ImGui.Checkbox("Split CK24 by Connectivity", ref splitCk24Conn))
+        if (ImGui.Checkbox("Split Object Z by Connectivity", ref splitCk24Conn))
         {
             overlay.Pm4SplitCk24ByConnectivity = splitCk24Conn;
             overlay.ReloadPm4Overlay();
         }
 
         bool splitCk24Mscn = overlay.Pm4SplitCk24ByMscnRef;
-        if (ImGui.Checkbox("Split CK24 by MSUR.0x18 (mslk_first_index)", ref splitCk24Mscn))
+        if (ImGui.Checkbox("Split Object Z by MSUR.0x18 (mslk_first_index)", ref splitCk24Mscn))
         {
             overlay.Pm4SplitCk24ByMscnRef = splitCk24Mscn;
             overlay.ReloadPm4Overlay();
@@ -440,7 +440,9 @@ internal sealed class Pm4WorkbenchSidebarService
 
             ImGui.TextColored(UiTokens.Brass, "✦ Active Human Pairing & Curation:");
             ImGui.BulletText($"Model: {inst.ModelName} (#{inst.UniqueId})");
-            ImGui.BulletText($"PM4 Hull: 0x{selectedPm4Obj.Ck24:X6} (part {selectedPm4Obj.ObjectPartId}, group 0x{selectedPm4Obj.DominantGroupKey:X2}) — {dist:F1} yds away");
+            float hullZ = selectedPm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4Obj.Ck24 << 8) : 0f;
+            string zDisplay = selectedPm4Obj.Ck24 != 0 ? $"Object Z {hullZ:F3}" : "Object Z (none)";
+            ImGui.BulletText($"PM4 Hull: {zDisplay} (part {selectedPm4Obj.ObjectPartId}, group 0x{selectedPm4Obj.DominantGroupKey:X2}) — {dist:F1} yds away");
             if (similarHulls != null)
             {
                 ImGui.BulletText($"Cross-Tile Identified: {similarHulls.Count} matching 3D shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
@@ -452,7 +454,7 @@ internal sealed class Pm4WorkbenchSidebarService
                 host.Pm4DoodadDuplication.AlignPlacementToPm4Hull(inst, selectedPm4Obj, pm4TileX, pm4TileY, fitScale: false, out _);
             }
 
-            ImGui.TextDisabled($"Yaw: {inst.PlacementRotation.Z:F1}°");
+            ImGui.TextDisabled($"Yaw: {inst.PlacementRotation.Z:F1}°  |  Z: {inst.PlacementPosition.Z:F3}");
             ImGui.SameLine();
             if (SharedUiWidgets.ActionButton("Rotate +90°##pair_rot_p90"))
             {
@@ -468,6 +470,15 @@ internal sealed class Pm4WorkbenchSidebarService
             {
                 host.Pm4DoodadDuplication.RotatePlacement(inst, 180f);
             }
+            ImGui.TextDisabled("Nudge Z:");
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("-1 yd##nudge_zm1")) host.Pm4DoodadDuplication.NudgePlacementZ(inst, -1.0f);
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("-0.1##nudge_zm01")) host.Pm4DoodadDuplication.NudgePlacementZ(inst, -0.1f);
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("+0.1##nudge_zp01")) host.Pm4DoodadDuplication.NudgePlacementZ(inst, 0.1f);
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("+1 yd##nudge_zp1")) host.Pm4DoodadDuplication.NudgePlacementZ(inst, 1.0f);
 
             // The zero-friction primary automation action:
             string verifyBtnText = $"✓ Verify & Propagate 3D Shape Across All Loaded Tiles ({unoccupiedHulls} Hulls)##verify_propagate_paired";
@@ -491,7 +502,9 @@ internal sealed class Pm4WorkbenchSidebarService
         else if (selectedPm4Obj != null)
         {
             Vector3 pm4Centroid = Vector3.Transform(selectedPm4Obj.Center, selectedPm4Obj.BaseTransform);
-            ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Hull: 0x{selectedPm4Obj.Ck24:X6} (part {selectedPm4Obj.ObjectPartId})");
+            float hullOnlyZ = selectedPm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4Obj.Ck24 << 8) : 0f;
+            string hullOnlyZDisplay = selectedPm4Obj.Ck24 != 0 ? $"Object Z {hullOnlyZ:F3}" : "Object Z (none)";
+            ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Hull: {hullOnlyZDisplay} (part {selectedPm4Obj.ObjectPartId})");
             ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Group: 0x{selectedPm4Obj.DominantGroupKey:X2} | Tris: {selectedPm4Obj.Triangles.Count}");
             if (similarHulls != null && similarHulls.Count > 0)
             {
@@ -646,7 +659,7 @@ internal sealed class Pm4WorkbenchSidebarService
                 host.Pm4DoodadDuplication.MagnetizePlacementToPm4(inst);
             }
 
-            ImGui.TextDisabled($"Yaw: {inst.PlacementRotation.Z:F1}°");
+            ImGui.TextDisabled($"Yaw: {inst.PlacementRotation.Z:F1}°  |  Z: {inst.PlacementPosition.Z:F3}");
             ImGui.SameLine();
             if (SharedUiWidgets.ActionButton("Rotate +90°##sel_rot_p90"))
             {
@@ -682,7 +695,9 @@ internal sealed class Pm4WorkbenchSidebarService
                 for (int h = 0; h < nearbyHulls.Count; h++)
                 {
                     var (nh, tx, ty, distToHull) = nearbyHulls[h];
-                    if (SharedUiWidgets.ActionButton($"Pair with PM4 Hull 0x{nh.Ck24:X6} (part {nh.ObjectPartId}) — {distToHull:F1} yds##pair_near_hull_{h}"))
+                    float nearZ = nh.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(nh.Ck24 << 8) : 0f;
+                    string nearZDisplay = nh.Ck24 != 0 ? $"Object Z {nearZ:F3}" : "Object Z (none)";
+                    if (SharedUiWidgets.ActionButton($"Pair with PM4 Hull {nearZDisplay} (part {nh.ObjectPartId}) — {distToHull:F1} yds##pair_near_hull_{h}"))
                     {
                         overlay.SelectPm4Object((tx, ty, nh.Ck24, nh.ObjectPartId));
                     }

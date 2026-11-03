@@ -631,9 +631,24 @@ internal sealed class Pm4DoodadDuplicationService
         WorldScene.TransformBounds(localMin, localMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
         Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
 
-        float targetPlacementZ = isWmo
-            ? prism.BaseZ - rotMin.Z
-            : prism.TopZ - (rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z));
+        float targetPlacementZ;
+        if (isWmo)
+        {
+            if (placementZ.HasValue && MathF.Abs(placementZ.Value) > 0.01f)
+            {
+                // MSUR._0x1C (Ck24 << 8) is the authentic producing MODF Position.Z.
+                // Do NOT subtract rotMin.Z; WMO local origin (0,0,0) is authored to align with Position.Z.
+                targetPlacementZ = placementZ.Value;
+            }
+            else
+            {
+                targetPlacementZ = prism.BaseZ;
+            }
+        }
+        else
+        {
+            targetPlacementZ = prism.TopZ - (rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z));
+        }
 
         float dist = Vector3.Distance(prev.PlacementPosition, new Vector3(prism.Centroid.X - rotCenter.X, prism.Centroid.Y - rotCenter.Y, targetPlacementZ));
         prev.PlacementPosition = new Vector3(prism.Centroid.X - rotCenter.X, prism.Centroid.Y - rotCenter.Y, targetPlacementZ);
@@ -650,7 +665,9 @@ internal sealed class Pm4DoodadDuplicationService
         // Automatically detect and log spatial relationship with updated orientation
         Curation.TryDetectSpatialRelationship(pm4Obj, pm4TileX, pm4TileY, worldScene, out _, prev);
 
-        statusMessage = $"✓ Aligned {prev.ModelName} (#{prev.UniqueId}) to PM4 hull 0x{pm4Obj.Ck24:X6} (delta: {dist:F1} yds, yaw: {prev.PlacementRotation.Z:F1}°).";
+        float hullZ = pm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(pm4Obj.Ck24 << 8) : 0f;
+        string hullZStr = pm4Obj.Ck24 != 0 ? $"Object Z {hullZ:F3}" : $"part {pm4Obj.ObjectPartId}";
+        statusMessage = $"✓ Aligned {prev.ModelName} (#{prev.UniqueId}) to PM4 hull {hullZStr} (delta: {dist:F1} yds, yaw: {prev.PlacementRotation.Z:F1}°).";
         _host.StatusMessage = statusMessage;
         LastOperationMessage = statusMessage;
         return true;
@@ -739,6 +756,79 @@ internal sealed class Pm4DoodadDuplicationService
         }
 
         string msg = $"✓ Rotated {prev.ModelName} (#{prev.UniqueId}) by {deltaYawDegrees:+0;-0}° (Yaw: {newYaw:F1}°).";
+        _host.StatusMessage = msg;
+        LastOperationMessage = msg;
+        return true;
+    }
+    /// <summary>
+    /// Nudges a placed scene object along the vertical Z axis by a specified delta in yards.
+    /// Updates the transform, bounding boxes, and propagates to taught pairings.
+    /// </summary>
+    public bool NudgePlacementZ(ObjectInstance inst, float deltaZ)
+    {
+        var worldScene = _host.WorldScene;
+        if (worldScene == null) return false;
+        IPm4OverlayHost pm4Host = worldScene;
+
+        int tileX = inst.TileX;
+        int tileY = inst.TileY;
+        bool isWmo = IsWmoAsset(inst.ModelPath, inst.AssetKind);
+        List<ObjectInstance>? targetList = null;
+        int idx = -1;
+
+        if (isWmo && pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo))
+        {
+            idx = tileWmo.FindIndex(m => m.UniqueId == inst.UniqueId);
+            if (idx >= 0) targetList = tileWmo;
+        }
+        if (targetList == null && pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx))
+        {
+            idx = tileMdx.FindIndex(m => m.UniqueId == inst.UniqueId);
+            if (idx >= 0) targetList = tileMdx;
+        }
+        if (targetList == null || idx < 0)
+        {
+            foreach (var pair in pm4Host.TileWmoInstances)
+            {
+                idx = pair.Value.FindIndex(m => m.UniqueId == inst.UniqueId);
+                if (idx >= 0) { targetList = pair.Value; tileX = pair.Key.Item1; tileY = pair.Key.Item2; break; }
+            }
+        }
+        if (targetList == null || idx < 0)
+        {
+            foreach (var pair in pm4Host.TileMdxInstances)
+            {
+                idx = pair.Value.FindIndex(m => m.UniqueId == inst.UniqueId);
+                if (idx >= 0) { targetList = pair.Value; tileX = pair.Key.Item1; tileY = pair.Key.Item2; break; }
+            }
+        }
+
+        if (targetList == null || idx < 0) return false;
+
+        var prev = targetList[idx];
+        _undoStack.Push(new SnapUndo(tileX, tileY, new List<(int, Vector3, Vector3, float)>
+        {
+            (prev.UniqueId, prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale)
+        }));
+
+        prev.PlacementPosition = new Vector3(prev.PlacementPosition.X, prev.PlacementPosition.Y, prev.PlacementPosition.Z + deltaZ);
+        prev.Transform = WorldPlacementTransform.Build(prev.PlacementPosition, prev.PlacementRotation, prev.PlacementScale);
+        WorldScene.TransformBounds(prev.LocalBoundsMin, prev.LocalBoundsMax, prev.Transform, out prev.BoundsMin, out prev.BoundsMax);
+        WorldScene.TransformBounds(prev.SelectionLocalBoundsMin, prev.SelectionLocalBoundsMax, prev.Transform, out prev.SelectionLocalBoundsMin, out prev.SelectionLocalBoundsMax);
+
+        targetList[idx] = prev;
+        pm4Host.RebuildInstanceLists();
+
+        if (worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
+        {
+            var selKey = worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
+            if (worldScene.Pm4Overlay._pm4ObjectLookup.TryGetValue(selKey, out var pm4Obj))
+            {
+                TeachPairing(pm4Obj, prev, selKey.tileX, selKey.tileY);
+            }
+        }
+
+        string msg = $"✓ Nudged {prev.ModelName} (#{prev.UniqueId}) Z by {deltaZ:+0.00;-0.00} yd (Z: {prev.PlacementPosition.Z:F3}).";
         _host.StatusMessage = msg;
         LastOperationMessage = msg;
         return true;
@@ -1647,7 +1737,18 @@ internal sealed class Pm4DoodadDuplicationService
                     float targetPlacementZ;
                     if (isWmo)
                     {
-                        targetPlacementZ = bestMatch.Value.Min.Z - rotMin.Z;
+                        float? placementZ = bestMatch.Value.Rep.Ck24 != 0
+                            ? BitConverter.UInt32BitsToSingle(bestMatch.Value.Rep.Ck24 << 8)
+                            : null;
+
+                        if (placementZ.HasValue && MathF.Abs(placementZ.Value) > 0.01f)
+                        {
+                            targetPlacementZ = placementZ.Value;
+                        }
+                        else
+                        {
+                            targetPlacementZ = bestMatch.Value.Min.Z;
+                        }
                     }
                     else
                     {

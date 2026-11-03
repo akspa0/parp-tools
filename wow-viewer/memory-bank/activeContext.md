@@ -1,5 +1,18 @@
 # Active Context — wow-viewer
 
+**WMO Alignment Z Elevation Fix & Ck24 "Object Z" UI Relabeling (2026-11-03):**
+1. **WMO Alignment & Placement-Z Resolution**:
+   - Fixed vertical displacement when aligning WMOs to PM4 hulls in `Pm4DoodadDuplicationService.AlignPlacementToPm4Hull`, `MagnetizeAllPlacementsOnTile`, and `Pm4DirectModelMatcher.MatchPrism`.
+   - Root cause: code previously subtracted `rotMin.Z` (the negative foundation depth, e.g. -16.14 yd) from `prism.BaseZ` (`placementZ.Value`), which pushed buildings 16+ yards into the sky. WMO local origin (0,0,0) is authored directly at `MODF.Position.Z`, so `targetPlacementZ` now aligns directly to `placementZ.Value` (or `prism.BaseZ`).
+   - Added `NudgePlacementZ(ObjectInstance, float deltaZ)` and responsive interactive UI nudge buttons (`[-1 yd]`, `[-0.1]`, `[+0.1]`, `[+1 yd]`) beside the rotation controls in `Pm4WorkbenchSidebarService.cs`.
+2. **Relabeled CK24 to "Object Z" with Decoded Elevation**:
+   - Renamed user-facing "CK24" labels to "Object Z" across the UI, displaying the decoded IEEE-754 Z float elevation (e.g. `Object Z 47.160` instead of `0x423CA4`).
+   - Updated pairing inspection, nearby hull recommendations, scene graph tree nodes, hover tooltips, and inspector panels to present decoded Object Z as coordinate data rather than an object identity enum.
+3. **Validation**:
+   - Solution `WoWViewer.CrossPlatform` built with 0 errors.
+   - 191/191 PM4 tests passed in `WowViewer.Core.PM4.Tests`.
+   - `Verify-UiReference.ps1` passed (133 inventory rows, 122 registry entries, 0 errors, 0 warnings).
+
 **Visual Donor Tile Picker, Placed Tile Offsets & Workspace Lighting (2026-11-03):**
 1. **Interactive Visual Donor Tile Picker (`DonorTilePickerService.cs`)**:
    - Built interactive visual 64x64 WDL overview dialog (`DonorTilePickerService.cs`) launched from the Archaeology Phase Layers panel.

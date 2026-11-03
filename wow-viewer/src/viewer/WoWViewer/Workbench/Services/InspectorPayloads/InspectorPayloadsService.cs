@@ -53,7 +53,7 @@ internal sealed partial class InspectorPayloadsService
                 var idSection = builder.AddSection("PM4 Object Identity");
                 idSection.Row("Tile", $"({pm4Key.tileX}, {pm4Key.tileY})", isImportant: true);
                 idSection.Row("Viewer Part", $"{pm4Key.objectPart}");
-                idSection.Row("Placement Z", debug.Ck24 == 0 ? "none" : $"{z:F3} yd", isImportant: true);
+                idSection.Row("Object Z", debug.Ck24 == 0 ? "none" : $"{z:F3} yd", isImportant: true);
                 idSection.Row("Surface Class", $"0x{debug.DominantGroupKey:X2}", isImportant: true);
                 idSection.Row("MSHD Region", $"{debug.MshdRegionId}");
                 idSection.Row("Dominant MSCN Ref", $"{debug.DominantMscnRefIndex}");
@@ -68,6 +68,7 @@ internal sealed partial class InspectorPayloadsService
                 builder.AddSection("PM4 Object Identity")
                     .Row("Tile", $"({pm4Key.tileX}, {pm4Key.tileY})", isImportant: true)
                     .Row("Viewer Part", $"{pm4Key.objectPart}")
+                    .Row("Object Z", pm4Key.ck24 == 0 ? "none" : $"{BitConverter.UInt32BitsToSingle(pm4Key.ck24 << 8):F3} yd", isImportant: true)
                     .Row("Raw MSUR._0x1C", $"0x{pm4Key.ck24:X6}");
             }
 
