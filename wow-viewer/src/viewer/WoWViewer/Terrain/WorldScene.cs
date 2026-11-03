@@ -3721,7 +3721,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         // never produce a box. On full-map scenes that scan was the dominant
                         // overlay cost. Keep selected bounds independent, but consume the
                         // visibility frame for the global debug boxes.
-                        if ((_showSelectedObjectBounds || _showBoundingBoxes || _externalSpawns.ShowSpawnBoundingBoxesOnly || _pm4Overlay._showPm4ObjectBounds) && _bbRenderer != null)
+                        if ((_showSelectedObjectBounds || _showBoundingBoxes || _pm4Overlay._showPm4ObjectBounds) && _bbRenderer != null)
                         {
                 // Depth test ON so boxes behind terrain/objects are hidden,
                 // depth write OFF so box lines don't occlude models
@@ -3929,7 +3929,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         }
                     }
 
-                    if (_showBoundingBoxes || _externalSpawns.ShowSpawnBoundingBoxesOnly)
+                    if (_showBoundingBoxes)
                     {
                         var adapter = _terrainManager.Adapter;
                         if (!_renderDiagPrinted)
@@ -4271,10 +4271,10 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.SelectionBounds,
                         selectionBoundsMs,
-                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes || _externalSpawns.ShowSpawnBoundingBoxesOnly),
+                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes),
                         selectionBoundsPreparedCount,
                         selectionBoundsPreparedCount,
-                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes || _externalSpawns.ShowSpawnBoundingBoxesOnly) ? "not_cached" : "disabled");
+                        _bbRenderer != null && (_showSelectedObjectBounds || _showBoundingBoxes) ? "not_cached" : "disabled");
                     frame.SetOverlayOwner(
                         WorldOverlayOwners.Pm4Bounds,
                         pm4BoundsMs,

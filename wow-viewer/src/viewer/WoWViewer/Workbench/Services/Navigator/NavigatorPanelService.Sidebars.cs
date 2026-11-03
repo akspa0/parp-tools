@@ -23,6 +23,8 @@ namespace WoWViewer;
 // name in the moved code resolves exactly as it did there.
 internal sealed partial class NavigatorPanelService
 {
+    private SkyControlsService? _skyControls;
+    private SkyControlsService SkyControls => _skyControls ??= new SkyControlsService(_host);
 
     internal void DrawWorkspaceContent()
     {
@@ -36,6 +38,8 @@ internal sealed partial class NavigatorPanelService
         _host.WorkbenchPanels.DrawCameraContent();
         if (SharedUiWidgets.SectionHeader("Fog", defaultOpen: true, id: "WorkspaceFog"))
             _host.DrawAuthoritativeFogControls(showDescription: false);
+        if (SharedUiWidgets.SectionHeader("Sky", defaultOpen: true, id: "WorkspaceSky"))
+            SkyControls.DrawSkyControlsContent();
     }
 
     internal void DrawMapsContent()
@@ -47,12 +51,56 @@ internal sealed partial class NavigatorPanelService
 
     internal void DrawFilesContent() => DrawFileBrowserContent();
 
+    public enum DiagnosticsTab
+    {
+        Stats,
+        Performance,
+        Log
+    }
+
+    private DiagnosticsTab _diagnosticsTab = DiagnosticsTab.Stats;
+
     internal void DrawDiagnosticsContent()
     {
-        if (SharedUiWidgets.ActionButton("Log")) _host.ShowLogViewer = !_host.ShowLogViewer;
+        if (_host.ShowPerfWindow)
+        {
+            _diagnosticsTab = DiagnosticsTab.Performance;
+            _host.ShowPerfWindow = false;
+        }
+        else if (_host.ShowLogViewer)
+        {
+            _diagnosticsTab = DiagnosticsTab.Log;
+            _host.ShowLogViewer = false;
+        }
+
+        bool isStats = _diagnosticsTab == DiagnosticsTab.Stats;
+        bool isPerf = _diagnosticsTab == DiagnosticsTab.Performance;
+        bool isLog = _diagnosticsTab == DiagnosticsTab.Log;
+
+        if (SharedUiWidgets.ActionButton("Stats", enabled: !isStats, help: "Runtime memory, asset cache, and scene graph statistics", small: true))
+            _diagnosticsTab = DiagnosticsTab.Stats;
         ImGui.SameLine();
-        if (SharedUiWidgets.ActionButton("Performance")) _host.ShowPerfWindow = !_host.ShowPerfWindow;
-        _host.ViewerChrome.DrawRuntimeStatsPanelContent();
+        if (SharedUiWidgets.ActionButton("Performance", enabled: !isPerf, help: "Frame timing history, hitch detection, and submission efficiency", small: true))
+            _diagnosticsTab = DiagnosticsTab.Performance;
+        ImGui.SameLine();
+        if (SharedUiWidgets.ActionButton("Log", enabled: !isLog, help: "Live logging and trace messages", small: true))
+            _diagnosticsTab = DiagnosticsTab.Log;
+
+        ImGui.Separator();
+
+        switch (_diagnosticsTab)
+        {
+            case DiagnosticsTab.Performance:
+                _host.PerfPanel.DrawPerfContent();
+                break;
+            case DiagnosticsTab.Log:
+                _host.DrawLogViewerContent();
+                break;
+            case DiagnosticsTab.Stats:
+            default:
+                _host.ViewerChrome.DrawRuntimeStatsPanelContent();
+                break;
+        }
     }
 
     internal void DrawProjectOutputContent()

@@ -61,18 +61,18 @@ public sealed class Pm4ColorCodingEngine
         uint hash;
         if (ck24 != 0)
         {
-            hash = HashCodeCombine(ck24, (uint)objectPartId, (uint)tileX, (uint)tileY);
+            hash = HashCodeCombine(ck24, 0x517cc1b7u, 0u, 0u);
         }
         else
         {
-            int quantizedX = (int)MathF.Round(worldAnchor.X * 0.2f);
-            int quantizedY = (int)MathF.Round(worldAnchor.Y * 0.2f);
-            int quantizedZ = (int)MathF.Round(worldAnchor.Z * 0.2f);
+            int quantizedX = (int)MathF.Round(worldAnchor.X * 0.08f);
+            int quantizedY = (int)MathF.Round(worldAnchor.Y * 0.08f);
+            int quantizedZ = (int)MathF.Round(worldAnchor.Z * 0.08f);
             hash = HashCodeCombine(
-                (uint)HashCode.Combine(tileX, tileY, objectPartId),
                 (uint)quantizedX,
                 (uint)quantizedY,
-                (uint)(quantizedZ ^ (surfaceCount * 31)));
+                (uint)quantizedZ,
+                0x9e3779b9u);
         }
 
         uint golden = hash * 2654435761u;

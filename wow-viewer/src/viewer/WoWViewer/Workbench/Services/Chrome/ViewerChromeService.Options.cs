@@ -34,10 +34,6 @@ internal sealed partial class ViewerChromeService
             DrawOptionsGridsContent(terrain);
         if (SharedUiWidgets.DrawSectionHeader("Objects", id: "OptionsObjects"))
             DrawOptionsObjectsContent();
-        if (SharedUiWidgets.DrawSectionHeader("Audio", id: "OptionsAudio"))
-            _host.AudioPanel.DrawAudioContent();
-        if (SharedUiWidgets.DrawSectionHeader("Simulation", id: "OptionsSimulation"))
-            DrawOptionsSimulationContent();
 
         ImGui.PopID();
     }
@@ -109,66 +105,19 @@ internal sealed partial class ViewerChromeService
             ImGui.Checkbox("Group Names", ref _standaloneWmoGroupLabelsAllEnabled);
         }
         if (terrain == null && liquid == null && _worldScene == null && _renderer is not WmoRenderer)
-            SharedUiWidgets.CompactStatus("Load terrain or a WMO to inspect overlays.");
+            SharedUiWidgets.DrawEmptyState("No active overlays", "Load terrain or a WMO to inspect overlays.");
     }
 
     private void DrawOptionsLayersContent(TerrainRenderer? terrain)
     {
-        if (terrain != null)
-        {
-            if (SharedUiWidgets.ActionButton("Open Layers & Blending Workbench...", small: true))
-                _host.UiManager.OpenLayersWindow();
-            ImGui.Spacing();
-            int layerCount = Math.Clamp(terrain.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers);
-            for (int layer = 0; layer < layerCount; layer++)
-            {
-                bool visible = terrain.GetShowLayer(layer);
-                if (ImGui.Checkbox(layer == 0 ? "Base Layer (L0)" : $"Layer {layer} (L{layer})", ref visible))
-                    terrain.SetShowLayer(layer, visible);
-            }
-            if (SharedUiWidgets.ActionButton("All Layers", small: true))
-            {
-                for (int layer = 0; layer < layerCount; layer++) terrain.SetShowLayer(layer, true);
-            }
-            ImGui.Separator();
-            if (SharedUiWidgets.ActionButton("Derive Holes from Burgundy MCCV", small: true))
-            {
-                if (_terrainManager != null)
-                    _host.MccvHoleDetection.DeriveBurgundyHoles(_terrainManager);
-            }
-            if (_host.MccvHoleDetection.LastStatusMessage != null)
-                ImGui.TextWrapped(_host.MccvHoleDetection.LastStatusMessage);
-            if (SharedUiWidgets.ActionButton("Base Only", small: true))
-            {
-                for (int layer = 0; layer < layerCount; layer++) terrain.SetShowLayer(layer, layer == 0);
-            }
-            if (SharedUiWidgets.ActionButton("Hide All", small: true))
-            {
-                for (int layer = 0; layer < layerCount; layer++) terrain.SetShowLayer(layer, false);
-            }
-
-            bool holes = !(_terrainManager?.IgnoreTerrainHolesGlobally
-                ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally ?? false);
-            if (ImGui.Checkbox("Holes", ref holes)
-                && _terrainControlsPanel.SetIgnoreTerrainHolesGlobally(!holes))
-                _statusMessage = holes ? "Terrain hole masking enabled." : "Terrain hole masking disabled.";
-        }
-        else
-        {
-            SharedUiWidgets.CompactStatus("Load terrain to control texture layers and holes.");
-        }
-        if (_worldScene != null)
-        {
-            bool wdl = _worldScene.ShowWdlTerrain;
-            if (ImGui.Checkbox("WDL", ref wdl)) _worldScene.ShowWdlTerrain = wdl;
-        }
+        _host.TerrainLayersPanel.DrawLayersPanelContent();
     }
 
     private static void DrawOptionsGridsContent(TerrainRenderer? terrain)
     {
         if (terrain == null)
         {
-            SharedUiWidgets.CompactStatus("Load terrain to control grids.");
+            SharedUiWidgets.DrawEmptyState("No active grids", "Load terrain to control tile, chunk, and cell grids.");
             return;
         }
         bool tiles = terrain.ShowTileGrid;
@@ -236,20 +185,7 @@ internal sealed partial class ViewerChromeService
                     _sceneCursorRenderer.ReloadCursorModel();
             }
         }
-    }
-
-    private void DrawOptionsSimulationContent()
-    {
-        // Auto-Stream is private to SqlSpawnStreamingService. Its chat control remains
-        // authoritative until the parent provides an existing-state content/accessor API.
-        SharedUiWidgets.CompactStatus("Auto-Stream is available in the chat population controls.");
-        if (_worldScene == null)
-        {
-            SharedUiWidgets.CompactStatus("Load a world to control spawn bounding boxes.");
-            return;
-        }
-        bool spawnsOnly = _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly;
-        if (ImGui.Checkbox("Spawn BBs Only", ref spawnsOnly))
-            _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly;
+        if (_worldScene == null && _renderer == null && _loadedWmo == null && _loadedMdx == null)
+            SharedUiWidgets.DrawEmptyState("No objects loaded", "Load a world or object to configure transparency and wireframe.");
     }
 }

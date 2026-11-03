@@ -78,6 +78,9 @@ internal sealed partial class WorkbenchPanelsService
             case ViewerPanel.Exports:
                 _host.ExportWorkbench.DrawExportPanelContent();
                 break;
+            case ViewerPanel.Spawns:
+                _host.SqlSpawnStreaming.DrawMapSpawnsContent();
+                break;
         }
     }
     internal void DrawConvertersSubTabContent() => _mainMenuBar.DrawConvertersContent();
@@ -125,6 +128,9 @@ internal sealed partial class WorkbenchPanelsService
                 break;
             case LeftPanel.Layers:
                 _host.TerrainLayersPanel.DrawLayersPanelContent();
+                break;
+            case LeftPanel.Audio:
+                _host.AudioPanel.DrawAudioContent();
                 break;
         }
     }
@@ -384,7 +390,7 @@ internal sealed partial class WorkbenchPanelsService
             ImGui.SameLine();
             bool spawnsOnly = _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly;
             if (ImGui.Checkbox("Spawn BBs Only", ref spawnsOnly))
-                _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly;
+                { _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly; if (spawnsOnly) _worldScene.ShowBoundingBoxes = true; }
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Only render bounding boxes for SQL-spawned NPCs and GameObjects, hiding static MDDF/MODF boxes.");
 

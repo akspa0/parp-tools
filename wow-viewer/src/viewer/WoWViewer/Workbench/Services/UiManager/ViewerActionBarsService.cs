@@ -12,7 +12,7 @@ namespace WoWViewer;
 /// </summary>
 internal sealed class ViewerActionBarsService
 {
-    private enum IconKind { Workspace, Open, Assets, Taxi, Capture, Inspector, World, Model, Gossip, Pm4, Maps, Diagnostics, Export }
+    private enum IconKind { Workspace, Open, Assets, Taxi, Capture, Inspector, World, Model, Gossip, Pm4, Maps, Diagnostics, Export, Audio, Spawns, Layers }
 
     private sealed class WindowState
     {
@@ -69,10 +69,12 @@ internal sealed class ViewerActionBarsService
         DrawActionBarIcon("File Browser", "ActionFiles", IconKind.Open, size, "Browse files in the active client", () => _host.UiManager.ToggleLeftDock(LeftPanel.Files), dockOpen && active == LeftPanel.Files);
         DrawActionBarIcon("Maps", "ActionMaps", IconKind.Maps, size, "Browse maps and choose a spawn point", () => _host.UiManager.ToggleLeftDock(LeftPanel.Maps), dockOpen && active == LeftPanel.Maps);
         DrawActionBarIcon("Assets", "ActionAssets", IconKind.Assets, size, "Browse and preview assets", () => _host.UiManager.ToggleLeftDock(LeftPanel.Assets), dockOpen && active == LeftPanel.Assets);
+        DrawActionBarIcon("Layers", "ActionLayers", IconKind.Layers, size, "Open texture layers, alpha masks, and opacity blending workbench", () => _host.UiManager.ToggleLeftDock(LeftPanel.Layers), dockOpen && active == LeftPanel.Layers);
         ImGui.Separator();
         DrawActionBarIcon("Taxi", "ActionTaxi", IconKind.Taxi, size, "Open taxi and route tools", () => _host.UiManager.ToggleLeftDock(LeftPanel.Taxi), dockOpen && active == LeftPanel.Taxi);
         DrawActionBarIcon("Capture", "ActionCapture", IconKind.Capture, size, "Open camera and capture tools", () => _host.UiManager.ToggleLeftDock(LeftPanel.Capture), dockOpen && active == LeftPanel.Capture);
         DrawActionBarIcon("Diagnostics", "ActionDiagnostics", IconKind.Diagnostics, size, "Open runtime statistics, logs, and performance controls", () => _host.UiManager.ToggleLeftDock(LeftPanel.Diagnostics), dockOpen && active == LeftPanel.Diagnostics);
+        DrawActionBarIcon("Audio", "ActionAudio", IconKind.Audio, size, "Open audio controls, volumes, and emitter diagnostics", () => _host.UiManager.ToggleLeftDock(LeftPanel.Audio), dockOpen && active == LeftPanel.Audio);
     }
 
     internal void DrawRightBar()
@@ -87,6 +89,7 @@ internal sealed class ViewerActionBarsService
         DrawActionBarIcon("Gossip", "ActionGossip", IconKind.Gossip, size, "Inspect creature gossip, quests, and dialogue", () => _host.UiManager.ToggleRightDock(ViewerPanel.Gossip), dockOpen && active == ViewerPanel.Gossip);
         DrawActionBarIcon("PM4", "ActionPm4", IconKind.Pm4, size, "Inspect PM4 navigation and object data", () => _host.UiManager.ToggleRightDock(ViewerPanel.PM4), dockOpen && active == ViewerPanel.PM4);
         DrawActionBarIcon("Exports", "ActionExports", IconKind.Export, size, "Export PM4 OBJ/JSON models, placement ledgers, and reports", () => _host.UiManager.ToggleRightDock(ViewerPanel.Exports), dockOpen && active == ViewerPanel.Exports);
+        DrawActionBarIcon("Spawns", "ActionSpawns", IconKind.Spawns, size, "Browse map spawns and population points", () => _host.UiManager.ToggleRightDock(ViewerPanel.Spawns), dockOpen && active == ViewerPanel.Spawns);
     }
 
     /// <summary>
@@ -231,6 +234,19 @@ internal sealed class ViewerActionBarsService
                     draw.AddLine(new(x, center.Y + half), new(x, center.Y + half - (i + 1) * unit * 0.16f), ink, stroke * 2f);
                 }
                 break;
+            case IconKind.Audio:
+                draw.AddRect(new(center.X - half, center.Y - half * 0.4f), new(center.X - half * 0.3f, center.Y + half * 0.4f), ink, 0f, ImDrawFlags.None, stroke);
+                draw.AddLine(new(center.X - half * 0.3f, center.Y - half * 0.4f), new(center.X + half * 0.2f, center.Y - half * 0.8f), ink, stroke);
+                draw.AddLine(new(center.X + half * 0.2f, center.Y - half * 0.8f), new(center.X + half * 0.2f, center.Y + half * 0.8f), ink, stroke);
+                draw.AddLine(new(center.X + half * 0.2f, center.Y + half * 0.8f), new(center.X - half * 0.3f, center.Y + half * 0.4f), ink, stroke);
+                draw.AddLine(new(center.X + half * 0.5f, center.Y - half * 0.4f), new(center.X + half * 0.5f, center.Y + half * 0.4f), muted, stroke);
+                draw.AddLine(new(center.X + half * 0.8f, center.Y - half * 0.7f), new(center.X + half * 0.8f, center.Y + half * 0.7f), muted, stroke);
+                break;
+            case IconKind.Spawns:
+                draw.AddCircle(new(center.X, center.Y - half * 0.3f), half * 0.5f, ink, 12, stroke);
+                draw.AddLine(new(center.X, center.Y + half * 0.2f), new(center.X, center.Y + half), ink, stroke);
+                draw.AddLine(new(center.X - half * 0.4f, center.Y - half * 0.3f), new(center.X + half * 0.4f, center.Y - half * 0.3f), muted, stroke);
+                break;
             case IconKind.Export:
                 draw.AddLine(new(center.X - half, center.Y), new(center.X - half, center.Y + half), ink, stroke);
                 draw.AddLine(new(center.X - half, center.Y + half), new(center.X + half, center.Y + half), ink, stroke);
@@ -238,6 +254,11 @@ internal sealed class ViewerActionBarsService
                 draw.AddLine(new(center.X, center.Y + half * 0.4f), new(center.X, center.Y - half), ink, stroke);
                 draw.AddLine(new(center.X, center.Y - half), new(center.X - unit * 0.14f, center.Y - half * 0.3f), muted, stroke);
                 draw.AddLine(new(center.X, center.Y - half), new(center.X + unit * 0.14f, center.Y - half * 0.3f), muted, stroke);
+                break;
+            case IconKind.Layers:
+                draw.AddRect(new(center.X - half * 0.9f, center.Y - half * 0.8f), new(center.X + half * 0.5f, center.Y - half * 0.1f), muted, 0f, ImDrawFlags.None, stroke);
+                draw.AddRect(new(center.X - half * 0.7f, center.Y - half * 0.4f), new(center.X + half * 0.7f, center.Y + half * 0.3f), muted, 0f, ImDrawFlags.None, stroke);
+                draw.AddRect(new(center.X - half * 0.5f, center.Y), new(center.X + half * 0.9f, center.Y + half * 0.7f), ink, 0f, ImDrawFlags.None, stroke);
                 break;
         }
     }

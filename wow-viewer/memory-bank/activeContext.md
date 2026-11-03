@@ -1,5 +1,40 @@
 # Active Context — wow-viewer
 
+**Diagnostics Left-Dock Integration, Bounding Box Gating & Solid PM4 Color Fix (2026-11-03):**
+1. **Docked Performance & Log Inside Left Sidebar Diagnostics**:
+   - Replaced pop-out floating windows (`ImGui.Begin("Performance")` and `ImGui.Begin("Log")`) with embedded segmented tabs (`[ Stats ] [ Performance ] [ Log ]`) within `NavigatorPanelService.Sidebars.cs` under `LeftPanel.Diagnostics`.
+   - External triggers (`ShowPerfWindow`, `ShowLogViewer`) cleanly switch active dock to `LeftPanel.Diagnostics` and select the appropriate tab.
+   - Registered `stats` control in `ui-controls.json` and synchronized `docs/WoWViewer/UI-REFERENCE.md`; `Verify-UiReference.ps1` passed with 0 errors and 0 warnings.
+2. **Fixed Persistent Yellow Bounding Boxes**:
+   - In `ExternalSpawnLayer.cs`, defaulted `ShowSpawnBoundingBoxesOnly` to `false` and corrected `IsSpawn(in ObjectInstance inst)`: removed `!string.IsNullOrEmpty(inst.AssetKind)` which previously caused every resident world doodad/WMO to be treated as a spawn.
+   - In `WorldScene.cs`, strictly gated bounding box rendering on `_showBoundingBoxes`.
+3. **Restored Solid-Color PM4 Geometry**:
+   - In `Pm4ColorCodingEngine.cs`, removed `(uint)objectPartId` from the hash in `ComputeInstanceColor`. Multi-part WMOs and doodad connectivity splits now evaluate to identical solid colors per instance rather than multicolored patchwork polygons.
+4. **Validation**:
+   - Solution `WoWViewer.CrossPlatform` built with 0 errors.
+   - 191/191 PM4 tests passed (`WowViewer.Core.PM4.Tests`).
+   - 22/22 UI and Footer tests passed (`WowViewer.Core.Tests`).
+   - `Verify-UiReference.ps1` passed (133 inventory rows, 122 registry entries, 0 errors, 0 warnings).
+
+**Spec 292 Refinement — PM4 Bottom Toggle, Drop-Up Layers Menu & LeftDock Photoshop Layers (2026-11-03):** [Spec 292](../specs/292-ui-bottom-bar-toggles-audio-sky/spec.md)
+Refined UI layout following operator direction to eliminate arbitrary scene toggles from the bottom bar and adhere all panels to sidebars:
+1. **Streamlined Bottom Bar (`BottomBarService.cs`)**:
+   - Preserved `[x] PM4` as the single essential scene toggle on the bottom bar.
+   - Replaced all 8 unwanted scene checkboxes with a `Layers & Opacity` drop-up menu right on the bottom bar, providing quick sliders for Alpha Mask Overlay blending (0.00-1.00), channel combo, resident layer opacities (L0-L7), quick reset/preset buttons, and a link to the full workbench.
+   - Retained the 4 mode buttons (`Viewer`, `Editor`, `Archaeology`, `Options`).
+2. **LeftDock Photoshop Layers Integration**:
+   - Added `Layers` icon (`IconKind.Layers`) with stacked-layer pictogram to the Left Action Rail in `ViewerActionBarsService.cs` for 1-click access to `UiRegion.LeftDock`.
+   - Merged the full Photoshop-style layer controls (`TerrainLayersPanelService.cs`) directly into `Options > Layers` (`ViewerChromeService.Options.cs`), including per-layer opacity sliders, alpha overlay blending, Ghidra MCLY flags decoding, global Holes masking, Burgundy MCCV hole derivation, and WDL terrain toggle.
+   - Added clean empty states with a direct "Browse Maps..." button when no terrain is loaded.
+3. **Dual Sidebar Dock Adhesion**:
+   - All panels and views adhere strictly to `UiRegion.LeftDock` or `UiRegion.RightDock` — zero floating or unanchored windows over the viewport.
+4. **Validation**:
+   - `Verify-UiReference.ps1` passed with 0 errors and 0 warnings (132 inventory rows, 121 registry entries).
+   - Solution `WowViewer.slnx` built with 0 errors (`dotnet build -c Debug`).
+   - 17/17 `ViewerFooterLayoutTests` passed; 5/5 `UiControlDocumentationTests` passed. Receipt in `specs/292-ui-bottom-bar-toggles-audio-sky/evidence/final-receipt.md`.
+
+
+
 **Tile GLB Export Texture Axis Correction (2026-11-03):**
 Resolved horizontal texture inversion on exported terrain tile GLBs:
 1. **glTF 2.0 Texture Coordinate Alignment**: In `MapGlbExporter.BuildTerrainTileMesh`, corrected `vTile` calculation from `1f - (chunk.ChunkY + vChunk) / 16f` to `(chunk.ChunkY + vChunk) / 16f`.

@@ -95,6 +95,7 @@ public class TerrainRenderer : IDisposable
             return mask;
         }
     }
+    public bool ShowTerrain { get; set; } = true;
     public bool UseWorldUvForDiffuse { get; set; } = true;
     public bool ShowChunkGrid { get; set; }
     public bool ShowTileGrid { get; set; }
@@ -503,7 +504,7 @@ public class TerrainRenderer : IDisposable
         LastFrameBindTextureCalls = 0;
         LastFrameBindTextureSkips = 0;
 
-        if (_tiles.Count == 0 && _chunks.Count == 0)
+        if (!ShowTerrain || (_tiles.Count == 0 && _chunks.Count == 0))
             return;
 
         if (_alphaSamplingDirty)

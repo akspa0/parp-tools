@@ -120,7 +120,7 @@ public sealed class ExternalSpawnLayer
     public bool ColorSpawnBoundingBoxes { get; set; } = true;
 
     /// <summary>Toggle whether to show bounding boxes exclusively for NPC and GameObject spawns, suppressing general world doodad boxes.</summary>
-    public bool ShowSpawnBoundingBoxesOnly { get; set; } = true;
+    public bool ShowSpawnBoundingBoxesOnly { get; set; } = false;
 
     /// <summary>Vibrant lime green for NPC spawn bounding boxes.</summary>
     public static readonly Vector3 ColorNpcSpawnBounds = new(0.25f, 0.95f, 0.35f);
@@ -135,7 +135,7 @@ public sealed class ExternalSpawnLayer
         string.Equals(inst.AssetKind, "GameObject Spawn", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsSpawn(in ObjectInstance inst) =>
-        inst.SpawnEntryId.HasValue || !string.IsNullOrEmpty(inst.AssetKind);
+        inst.SpawnEntryId.HasValue || inst.SpawnId != 0 || IsNpcSpawn(in inst) || IsGameObjectSpawn(in inst);
 
     public void ClearExternalSpawns()
     {

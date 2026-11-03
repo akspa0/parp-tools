@@ -19,11 +19,12 @@ public sealed class ViewerFooterLayoutTests
 
     private static List<FooterItemMeasure> BottomItems(float scale) => new()
     {
-        new FooterItemMeasure("preset-Viewer", 82f * scale, 64f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("preset-Editor", 82f * scale, 64f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("preset-Archaeology", 120f * scale, 64f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("bottom-spawns", 78f * scale, 56f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("bottom-options", 76f * scale, 56f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-pm4", 62f * scale, 48f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("dropup-layers", 120f * scale, 92f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("mode-viewer", 76f * scale, 58f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("mode-editor", 74f * scale, 56f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("mode-archaeology", 104f * scale, 80f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("mode-options", 76f * scale, 58f * scale, FooterItemPriority.Essential),
     };
 
     [Theory]

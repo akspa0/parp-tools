@@ -11,6 +11,13 @@ namespace WoWViewer.Rendering;
 /// Renders a hemisphere with time-of-day color gradient before terrain (depth write OFF).
 /// Colors driven by TerrainLighting: zenith color at top, horizon/fog color at edges.
 /// </summary>
+public enum SkySource
+{
+    Auto,
+    ProceduralDome,
+    SkyModel
+}
+
 public class SkyDomeRenderer : IDisposable
 {
     private readonly GL _gl;
@@ -30,6 +37,13 @@ public class SkyDomeRenderer : IDisposable
     /// Night visibility driven by the same sun-height curve as the native-style moon pass.
     /// </summary>
     public float NightVisibility => _moonVisibility;
+
+    public bool ShowSun { get; set; } = true;
+    public bool ShowMoon { get; set; } = true;
+    public bool ShowStars { get; set; } = true;
+    public bool ShowClouds { get; set; } = true;
+    public bool CustomColorOverrides { get; set; }
+    public SkySource SkySource { get; set; } = SkySource.Auto;
 
     // Sky colors (set externally from TerrainLighting)
     public Vector3 ZenithColor { get; set; } = new(0.3f, 0.5f, 0.9f);   // deep blue
@@ -65,8 +79,10 @@ public class SkyDomeRenderer : IDisposable
             ? Vector3.Normalize(sunDirection)
             : TerrainSolarDirection.Evaluate(gameTime);
         _moonDirection = Vector3.Normalize(new Vector3(-_sunDirection.X, -_sunDirection.Y, MathF.Abs(_sunDirection.Z)));
-        _sunVisibility = SmoothVisibility(dayFactor, 0.08f, 0.25f);
-        _moonVisibility = SmoothVisibility(1f - dayFactor, 0.10f, 0.35f);
+        _sunVisibility = ShowSun ? SmoothVisibility(dayFactor, 0.08f, 0.25f) : 0f;
+        _moonVisibility = ShowMoon ? SmoothVisibility(1f - dayFactor, 0.10f, 0.35f) : 0f;
+
+        if (CustomColorOverrides) return;
 
         // Zenith: dark blue at night, sky blue at day
         ZenithColor = Vector3.Lerp(
@@ -117,8 +133,8 @@ public class SkyDomeRenderer : IDisposable
         _gl.Uniform3(_uMoonDirection, _moonDirection.X, _moonDirection.Y, _moonDirection.Z);
         _gl.Uniform3(_uSunColor, 1.0f, 0.86f, 0.58f);
         _gl.Uniform3(_uMoonColor, 0.62f, 0.72f, 1.0f);
-        _gl.Uniform1(_uSunVisibility, _sunVisibility);
-        _gl.Uniform1(_uMoonVisibility, _moonVisibility);
+        _gl.Uniform1(_uSunVisibility, ShowSun ? _sunVisibility : 0f);
+        _gl.Uniform1(_uMoonVisibility, ShowMoon ? _moonVisibility : 0f);
 
         _gl.BindVertexArray(_vao);
         _gl.DrawElements(PrimitiveType.Triangles, (uint)_indexCount, DrawElementsType.UnsignedShort, null);

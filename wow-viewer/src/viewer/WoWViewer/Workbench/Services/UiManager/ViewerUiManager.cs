@@ -26,11 +26,15 @@ internal sealed partial class ViewerUiManager
     internal LeftPanel ActiveLeftPanel { get; private set; } = LeftPanel.Workspace;
     private float _appliedFontScale = -1f;
     private float _appliedStyleScale = -1f;
+    private readonly BottomBarService _bottomBar;
+    internal BottomBarService BottomBar => _bottomBar;
+
     internal ViewerUiManager(IViewerAppHost host)
     {
         _host = host;
         _actionBars = new ViewerActionBarsService(host);
         ViewPreferences = new ViewPreferencesService(host);
+        _bottomBar = new BottomBarService(host);
         // Resolve the provider at draw time: the manager is constructed before the
         // minimap/status service, so capturing the delegate here would bind a null target.
         StatusContent = () => host.MinimapAndStatus.DrawStatusContent();
@@ -410,7 +414,7 @@ internal sealed partial class ViewerUiManager
         Vector2 available = ImGui.GetContentRegionAvail();
 
         ImGui.SetCursorPos(origin);
-        ImGui.BeginChild("##LeftDockBody", new Vector2(MathF.Max(1f, available.X - grip), MathF.Max(1f, available.Y)), false);
+        ImGui.BeginChild($"##LeftDockBody_{ActiveLeftPanel}", new Vector2(MathF.Max(1f, available.X - grip), MathF.Max(1f, available.Y)), false, ImGuiWindowFlags.AlwaysVerticalScrollbar);
         _host.WorkbenchPanels.DrawLeftContent(ActiveLeftPanel);
         ImGui.EndChild();
 
@@ -446,8 +450,15 @@ internal sealed partial class ViewerUiManager
         // and the splitter is submitted last as an overlay on the left edge: a full-height item
         // on the same line as the page selector made ImGui's line height the whole window, so
         // every widget after the selector was laid out below the window and the panels looked dead.
+        string rightChildId = Destination switch
+        {
+            WorkbenchTab.Editor => $"##RightDockBody_Editor_{_host.ActiveBottomTabIndex}",
+            WorkbenchTab.Archaeology => $"##RightDockBody_Archaeology_{_host.ActiveBottomTabIndex}",
+            _ => $"##RightDockBody_Viewer_{ViewerPanel}_{WorldPage}_{InspectorPage}",
+        };
+
         ImGui.SetCursorPos(origin + new Vector2(grip, 0f));
-        ImGui.BeginChild("##RightDockBody", new Vector2(MathF.Max(1f, available.X - grip), MathF.Max(1f, available.Y)), false);
+        ImGui.BeginChild(rightChildId, new Vector2(MathF.Max(1f, available.X - grip), MathF.Max(1f, available.Y)), false, ImGuiWindowFlags.AlwaysVerticalScrollbar);
         if (Destination == WorkbenchTab.Editor)
             DrawEditorDockContent();
         else if (Destination == WorkbenchTab.Archaeology)
@@ -496,44 +507,7 @@ internal sealed partial class ViewerUiManager
     private void DrawBottom()
     {
         float scale = MathF.Max(1f, Layout.Scale);
-        // Standard button height: the region is sized from the same measurement (UiLayout footer
-        // row), so the row always fits. Tab hides every bar, so there are no bar-toggle buttons here.
-        float height = ImGui.GetFrameHeight();
-
-        // Measure every item first, then place it. The old code drew left-to-right and let the
-        // window scroll, so a long label or a narrow client pushed Options off-screen.
-        var items = new List<FooterItemMeasure>();
-        foreach (WorkbenchTab destination in Enum.GetValues<WorkbenchTab>())
-            items.Add(MeasureFooterButton($"preset-{destination}", DestinationLabel(destination), scale));
-        items.Add(MeasureFooterButton("bottom-spawns", "Spawns", scale));
-        items.Add(MeasureFooterButton("bottom-pages", "Pages", scale));
-        items.Add(MeasureFooterButton("bottom-options", "Options", scale));
-
-        FooterFitResult fit = ViewerFooterLayout.Fit(GetRegionRect(UiRegion.BottomBar), scale, items);
-        float originX = ImGui.GetCursorPosX();
-        float y = ImGui.GetCursorPosY();
-
-        foreach (WorkbenchTab destination in Enum.GetValues<WorkbenchTab>())
-        {
-            FooterItemPlacement placement = fit.Get($"preset-{destination}");
-            if (!placement.Visible) continue;
-            ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
-            if (ImGui.Button($"{DestinationLabel(destination)}##Preset_{destination}", new Vector2(placement.Width, height)))
-            {
-                Navigate(destination);
-                if (destination != WorkbenchTab.Viewer) _actionBars.OpenDestinationWindow();
-            }
-        }
-
-        _actionBars.DrawBottomActions(fit, originX, y);
-
-        FooterItemPlacement options = fit.Get("bottom-options");
-        if (options.Visible)
-        {
-            ImGui.SetCursorPos(new Vector2(originX + options.X, y));
-            if (ImGui.Button("Options##BottomOptions", new Vector2(options.Width, height))) ToggleOptions();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open display, rendering, and viewer options");
-        }
+        _bottomBar.DrawBottom(GetRegionRect(UiRegion.BottomBar), scale);
     }
 
     /// <summary>A footer button sized to its label plus a small click margin, compacting to 80%.</summary>
@@ -609,19 +583,9 @@ internal sealed partial class ViewerUiManager
 
     private void DrawDiagnosticsWindows()
     {
-        if (_host.ShowLogViewer)
+        if (_host.ShowLogViewer || _host.ShowPerfWindow)
         {
-            SharedUiWidgets.PushSurfaceStyle();
-            if (ImGui.Begin("Log", ref _host.ShowLogViewer, ImGuiWindowFlags.NoSavedSettings)) _host.DrawLogViewerContent();
-            ImGui.End();
-            SharedUiWidgets.PopSurfaceStyle();
-        }
-        if (_host.ShowPerfWindow)
-        {
-            SharedUiWidgets.PushSurfaceStyle();
-            if (ImGui.Begin("Performance", ref _host.ShowPerfWindow, ImGuiWindowFlags.NoSavedSettings)) _host.PerfPanel.DrawPerfContent();
-            ImGui.End();
-            SharedUiWidgets.PopSurfaceStyle();
+            OpenLeftDock(LeftPanel.Diagnostics);
         }
     }
 }

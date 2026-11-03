@@ -9,8 +9,8 @@ namespace WoWViewer.Workbench.Services.TerrainControls;
 
 /// <summary>
 /// Photoshop-style Terrain Layers workbench providing per-layer opacity sliders,
-/// alpha mask overlay blending, and Ghidra client binary analysis tooltips decoding
-/// MCLY flags and ground effect clutter IDs (Spec 287 Phase 3).
+/// alpha mask overlay blending, holes control, and Ghidra client binary analysis tooltips
+/// decoding MCLY flags and ground effect clutter IDs (Spec 287 Phase 3).
 /// </summary>
 internal sealed class TerrainLayersPanelService
 {
@@ -33,6 +33,10 @@ internal sealed class TerrainLayersPanelService
             SharedUiWidgets.DrawEmptyState(
                 "No terrain loaded",
                 "Load a terrain-backed world map to inspect texture layers, adjust per-layer opacities, and blend alpha masks.");
+            if (SharedUiWidgets.ActionButton("Browse Maps...", small: true))
+            {
+                _host.UiManager.OpenLeftDock(LeftPanel.Maps);
+            }
             return;
         }
 
@@ -143,7 +147,36 @@ internal sealed class TerrainLayersPanelService
 
         ImGui.Separator();
 
-        // 3. Reverse-Engineered Format Reference & Decoding
+        // 3. Terrain Holes & WDL
+        if (SharedUiWidgets.SectionHeader("Terrain Holes & WDL", defaultOpen: true, id: "LayersHolesHeader"))
+        {
+            bool holes = !(_host.TerrainManager?.IgnoreTerrainHolesGlobally
+                ?? _host.VlmTerrainManager?.IgnoreTerrainHolesGlobally ?? false);
+            if (ImGui.Checkbox("Holes##TerrainHolesCheckbox", ref holes)
+                && _host.TerrainControlsPanel.SetIgnoreTerrainHolesGlobally(!holes))
+            {
+            }
+
+            ImGui.SameLine();
+            if (_host.WorldScene != null)
+            {
+                bool wdl = _host.WorldScene.ShowWdlTerrain;
+                if (ImGui.Checkbox("WDL##WdlTerrainCheckbox", ref wdl))
+                    _host.WorldScene.ShowWdlTerrain = wdl;
+            }
+
+            if (SharedUiWidgets.ActionButton("Derive Holes from Burgundy MCCV", small: true))
+            {
+                if (_host.TerrainManager != null)
+                    _host.MccvHoleDetection.DeriveBurgundyHoles(_host.TerrainManager);
+            }
+            if (_host.MccvHoleDetection.LastStatusMessage != null)
+                ImGui.TextWrapped(_host.MccvHoleDetection.LastStatusMessage);
+        }
+
+        ImGui.Separator();
+
+        // 4. Reverse-Engineered Format Reference & Decoding
         if (SharedUiWidgets.SectionHeader("MCLY Flags & Ground Clutter Decoding", defaultOpen: false, id: "LayersGhidraDecodingHeader"))
         {
             ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "Ghidra Client Binary Analysis: MCLY & EffectId Ground Truth");
@@ -160,6 +193,92 @@ internal sealed class TerrainLayersPanelService
                 "* 0x0400 (FLAG_CUBEMAP_REFLECTION): Reflects active skybox / cubemap on the surface.\n" +
                 "* 0x8000 (FLAG_DYNAMIC_TEXTURE): Client animated dynamic texture surface.\n\n" +
                 "* EffectId: GroundEffectTexture.dbc / GroundEffectDoodad.dbc record ID. Drives procedural 3D detail mesh instances (grass, flowers, rocks) spawned on this layer's alpha weights.");
+        }
+    }
+
+    public void DrawQuickLayersPopup(TerrainRenderer? terrain)
+    {
+        if (terrain == null)
+        {
+            ImGui.TextDisabled("No terrain loaded");
+            ImGui.TextUnformatted("Load a terrain map to adjust texture layers and alpha masks.");
+            ImGui.Spacing();
+            if (ImGui.Button("Browse Maps...##QuickBrowseMaps"))
+            {
+                _host.UiManager.OpenLeftDock(LeftPanel.Maps);
+                ImGui.CloseCurrentPopup();
+            }
+            return;
+        }
+
+        ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "Alpha Masks & Layer Opacities");
+        ImGui.Separator();
+
+        // Alpha Mask Overlay
+        float alphaBlend = terrain.AlphaMaskBlend;
+        ImGui.SetNextItemWidth(150f);
+        if (ImGui.SliderFloat("Alpha Overlay##QuickAlphaBlend", ref alphaBlend, 0f, 1f, "%.2f"))
+        {
+            terrain.AlphaMaskBlend = Math.Clamp(alphaBlend, 0f, 1f);
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Reset##ResetQuickAlpha"))
+        {
+            terrain.AlphaMaskBlend = 0f;
+        }
+
+        int alphaChannel = terrain.AlphaMaskChannel;
+        string[] channelLabels = { "All Combined", "L1 Alpha", "L2 Alpha", "L3 Alpha", "L4 Alpha", "L5 Alpha", "L6 Alpha", "L7 Alpha" };
+        int maxLayers = Math.Clamp(terrain.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers);
+        ImGui.SetNextItemWidth(150f);
+        if (ImGui.Combo("Channel##QuickAlphaChannel", ref alphaChannel, channelLabels, Math.Min(maxLayers, channelLabels.Length)))
+        {
+            terrain.AlphaMaskChannel = alphaChannel;
+        }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("Texture Layers Stack:");
+        for (int layer = 0; layer < maxLayers; layer++)
+        {
+            ImGui.PushID($"QuickLayer_{layer}");
+            bool visible = terrain.GetShowLayer(layer);
+            if (ImGui.Checkbox(layer == 0 ? "Base (L0)" : $"L{layer}", ref visible))
+            {
+                terrain.SetShowLayer(layer, visible);
+            }
+            ImGui.SameLine();
+            float opacity = terrain.LayerOpacities[layer];
+            ImGui.SetNextItemWidth(120f);
+            if (ImGui.SliderFloat("##Opacity", ref opacity, 0f, 1f, "%.2f"))
+            {
+                terrain.LayerOpacities[layer] = Math.Clamp(opacity, 0f, 1f);
+            }
+            ImGui.SameLine();
+            ImGui.TextDisabled(layer == 0 ? "Base Diffuse" : $"Layer {layer}");
+            ImGui.PopID();
+        }
+
+        ImGui.Spacing();
+        if (ImGui.SmallButton("All 100%##QuickAll100"))
+        {
+            for (int i = 0; i < 8; i++) { terrain.LayerOpacities[i] = 1f; terrain.SetShowLayer(i, true); }
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Base Only##QuickBaseOnly"))
+        {
+            for (int i = 0; i < 8; i++) { terrain.SetShowLayer(i, i == 0); terrain.LayerOpacities[i] = 1f; }
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Hide All##QuickHideAll"))
+        {
+            for (int i = 0; i < 8; i++) { terrain.SetShowLayer(i, false); }
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Open Full Layers Workbench...##QuickOpenFull"))
+        {
+            _host.UiManager.OpenLeftDock(LeftPanel.Layers);
+            ImGui.CloseCurrentPopup();
         }
     }
 
@@ -186,4 +305,3 @@ internal sealed class TerrainLayersPanelService
         }
     }
 }
-

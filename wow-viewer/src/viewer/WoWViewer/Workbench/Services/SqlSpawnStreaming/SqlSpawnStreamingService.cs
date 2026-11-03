@@ -971,7 +971,7 @@ internal sealed class SqlSpawnStreamingService
         ImGui.SameLine();
         bool spawnsOnly = _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly;
         if (ImGui.Checkbox("Show Spawn BBs Only", ref spawnsOnly))
-            _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly;
+            { _worldScene.ExternalSpawns.ShowSpawnBoundingBoxesOnly = spawnsOnly; if (spawnsOnly) _worldScene.ShowBoundingBoxes = true; }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Only render bounding boxes for SQL-spawned NPCs and GameObjects, hiding static MDDF/MODF boxes.");
 

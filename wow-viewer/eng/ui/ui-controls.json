@@ -147,14 +147,6 @@
       "visible": true
     },
     {
-      "id": "all-layers",
-      "label": "All Layers",
-      "region": "Options > Layers",
-      "shortcut": null,
-      "help": "Show every terrain layer at once.",
-      "visible": true
-    },
-    {
       "id": "alpha",
       "label": "Alpha",
       "region": "Options > Overlays",
@@ -200,22 +192,6 @@
       "region": "Viewer > World",
       "shortcut": null,
       "help": "Advance the world time of day on the in-game day cycle.",
-      "visible": true
-    },
-    {
-      "id": "base-layer-l0",
-      "label": "Base Layer (L0)",
-      "region": "Options > Layers",
-      "shortcut": null,
-      "help": "Show the base terrain layer (L0).",
-      "visible": true
-    },
-    {
-      "id": "base-only",
-      "label": "Base Only",
-      "region": "Options > Layers",
-      "shortcut": null,
-      "help": "Show only the base terrain layer.",
       "visible": true
     },
     {
@@ -419,27 +395,11 @@
       "visible": true
     },
     {
-      "id": "hide-all",
-      "label": "Hide All",
-      "region": "Options > Layers",
-      "shortcut": null,
-      "help": "Hide every terrain layer.",
-      "visible": true
-    },
-    {
       "id": "hide-ui-chrome",
       "label": "Hide UI Chrome",
       "region": "Top menu > View",
       "shortcut": "Tab",
       "help": "Hide or show all viewer chrome.",
-      "visible": true
-    },
-    {
-      "id": "holes",
-      "label": "Holes",
-      "region": "Options > Layers",
-      "shortcut": null,
-      "help": "Mask terrain holes (missing chunks) in the render.",
       "visible": true
     },
     {
@@ -667,14 +627,6 @@
       "visible": true
     },
     {
-      "id": "options",
-      "label": "Options",
-      "region": "Bottom bar",
-      "shortcut": null,
-      "help": "Open the options sub-menu next to the chat.",
-      "visible": true
-    },
-    {
       "id": "overlays",
       "label": "Overlays",
       "region": "Options",
@@ -867,19 +819,19 @@
       "visible": true
     },
     {
-      "id": "simulation",
-      "label": "Simulation",
-      "region": "Options",
-      "shortcut": null,
-      "help": "Population streaming and spawn display settings.",
-      "visible": true
-    },
-    {
       "id": "spawn-bbs-only",
       "label": "Spawn BBs Only",
       "region": "Options > Simulation",
       "shortcut": null,
       "help": "Show bounding boxes for spawns only.",
+      "visible": true
+    },
+    {
+      "id": "stats",
+      "label": "Stats",
+      "region": "Left sidebar > Diagnostics",
+      "shortcut": null,
+      "help": "Show runtime memory, asset cache, and scene graph statistics.",
       "visible": true
     },
     {
@@ -928,14 +880,6 @@
       "region": "Left sidebar > File Browser",
       "shortcut": null,
       "help": "Use the selected path as the taxi actor model override.",
-      "visible": true
-    },
-    {
-      "id": "wdl",
-      "label": "WDL",
-      "region": "Options > Layers",
-      "shortcut": null,
-      "help": "Show the WDL terrain layer in the viewport.",
       "visible": true
     },
     {
@@ -1011,27 +955,27 @@
       "visible": true
     },
     {
-      "id": "derive-holes-from-burgundy-mccv",
-      "label": "Derive Holes from Burgundy MCCV",
-      "region": "Options > Layers",
-      "shortcut": null,
-      "help": "Detect solid burgundy underside fog vertex colors and set chunk hole flags for clusters >= 2.",
-      "visible": true
-    },
-    {
-      "id": "open-layers-blending-workbench",
-      "label": "Open Layers & Blending Workbench...",
-      "region": "Options > Layers",
-      "shortcut": null,
-      "help": "Open the Photoshop-style Terrain Layers and Alpha Blending workbench window.",
-      "visible": true
-    },
-    {
       "id": "terrain-layers-blending",
       "label": "Terrain Layers & Blending...",
       "region": "Top menu > View",
       "shortcut": null,
       "help": "Open the Terrain Layers and Alpha Blending workbench.",
+      "visible": true
+    },
+    {
+      "id": "sky-controls",
+      "label": "Sky",
+      "region": "Left sidebar > Workspace",
+      "shortcut": null,
+      "help": "Atmospheric sky dome, sun/moon cycle, and client skybox backdrop controls.",
+      "visible": true
+    },
+    {
+      "id": "layers-and-opacity",
+      "label": "Layers & Opacity",
+      "region": "Bottom bar",
+      "shortcut": null,
+      "help": "Quick drop-up menu to adjust terrain layer opacities and alpha mask overlay blending.",
       "visible": true
     }
   ]

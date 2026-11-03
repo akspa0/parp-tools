@@ -110,6 +110,8 @@ public sealed class SceneAtmosphere
     private bool _clientStarsProbeComplete;
     private string? _clientStarsFallbackModelPath;
     private string? _activeLightSkyboxSourcePath;
+    public string? ActiveLightSkyboxSourcePath => _activeLightSkyboxSourcePath;
+    public bool HasActiveLightSkybox => !string.IsNullOrWhiteSpace(_activeLightSkyboxSourcePath);
     private string? _activeLightSkyboxModelKey;
 
     // DBC Lighting
@@ -353,6 +355,9 @@ public sealed class SceneAtmosphere
                 $"No usable Light DBC profile exists for map {mapId}; LIT is enabled automatically.");
         }
     }
+
+    public bool ShowStars { get; set; } = true;
+    public bool ShowClouds { get; set; } = true;
 
     internal void RenderSkyboxBackdrop(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
         Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
