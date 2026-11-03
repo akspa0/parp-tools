@@ -5,6 +5,7 @@ using System.Globalization;
 using ImGuiNET;
 using WoWViewer.Logging;
 using WoWViewer.Terrain;
+using WoWViewer.UI;
 using WoWViewer.Workbench;
 using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using static WoWViewer.ViewerApp;
@@ -36,6 +37,21 @@ internal sealed partial class Pm4WorkbenchService
             RunPm4Export(ExportPm4OverlayReport);
         if (ImGui.Button("Save Merged Placements to Zarr v60"))
             SaveMergedPlacementsToZarr();
+        if (SharedUiWidgets.ActionButton("Patch & Export Monolithic ADTs..."))
+            SavePatchedAdts();
+    }
+
+    internal void SavePatchedAdts()
+    {
+        try
+        {
+            var res = _host.Pm4DoodadDuplication.SavePatchedAdts();
+            _statusMessage = $"✓ Saved {res.tilesWritten} patched ADTs to {res.outDir} ({res.placementsAdded} placements).";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Save patched ADTs failed: {ex.Message}";
+        }
     }
 
     internal void SaveMergedPlacementsToZarr()

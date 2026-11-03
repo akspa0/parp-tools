@@ -339,6 +339,12 @@ internal sealed class Pm4WorkbenchSidebarService
 
     private List<Pm4DirectMatchResult> _activeMatches = new();
     private uint _activeMatchCk24;
+    private (int tileX, int tileY, uint ck24, int objectPart)? _cachedTaughtMatchKey;
+    private int _cachedTaughtMatchRuleCount = -1;
+    private TaughtPairing? _cachedTaughtMatch;
+    private float _cachedTaughtScale;
+    private Vector3 _cachedTaughtPos;
+    private Vector3 _cachedTaughtRot;
 
     /// <summary>
     /// Renders the Live PM4 Alignment & Model Duplication section (T018).
@@ -408,6 +414,19 @@ internal sealed class Pm4WorkbenchSidebarService
             hasTile = true;
         }
 
+        // Automatic cross-tile PM4 shape identification:
+        // Whenever a PM4 hull is selected, instantly find similar/same shapes across all loaded tiles.
+        IReadOnlyList<SimilarPm4HullInfo>? similarHulls = null;
+        int distinctTiles = 0;
+        int unoccupiedHulls = 0;
+        if (selectedPm4Obj != null)
+        {
+            similarHulls = host.Pm4DoodadDuplication.Curation.FindSimilarHullsAcrossTiles(
+                selectedPm4Obj, pm4TileX, pm4TileY, worldScene);
+            distinctTiles = similarHulls.Select(h => (h.TileX, h.TileY)).Distinct().Count();
+            unoccupiedHulls = similarHulls.Count(h => !h.IsOccupied);
+        }
+
         // Branch 1: Both PM4 Hull AND Scene Model are selected (Human-in-the-loop pairing & teaching)
         if (selectedObj.HasValue && selectedPm4Obj != null)
         {
@@ -415,9 +434,17 @@ internal sealed class Pm4WorkbenchSidebarService
             Vector3 pm4Centroid = Vector3.Transform(selectedPm4Obj.Center, selectedPm4Obj.BaseTransform);
             float dist = Vector3.Distance(inst.PlacementPosition, pm4Centroid);
 
-            ImGui.TextColored(UiTokens.Brass, "Active Pairing (Human Teaching Mode):");
+            // Log / ensure curated relationship
+            host.Pm4DoodadDuplication.Curation.TryDetectSpatialRelationship(
+                selectedPm4Obj, pm4TileX, pm4TileY, worldScene, out var curatedRel, inst);
+
+            ImGui.TextColored(UiTokens.Brass, "✦ Active Human Pairing & Curation:");
             ImGui.BulletText($"Model: {inst.ModelName} (#{inst.UniqueId})");
             ImGui.BulletText($"PM4 Hull: 0x{selectedPm4Obj.Ck24:X6} (part {selectedPm4Obj.ObjectPartId}, group 0x{selectedPm4Obj.DominantGroupKey:X2}) — {dist:F1} yds away");
+            if (similarHulls != null)
+            {
+                ImGui.BulletText($"Cross-Tile Identified: {similarHulls.Count} matching shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
+            }
             ImGui.Spacing();
 
             if (SharedUiWidgets.ActionButton("Align Model to this PM4 Hull (Centroid, Height & Yaw)"))
@@ -425,21 +452,16 @@ internal sealed class Pm4WorkbenchSidebarService
                 host.Pm4DoodadDuplication.AlignPlacementToPm4Hull(inst, selectedPm4Obj, pm4TileX, pm4TileY, fitScale: false, out _);
             }
 
-            if (SharedUiWidgets.ActionButton("Teach & Save Pairing for Automation"))
+            // The zero-friction primary automation action:
+            string verifyBtnText = $"✓ Verify & Propagate Across All Loaded Tiles ({unoccupiedHulls} Hulls)##verify_propagate_paired";
+            if (curatedRel != null && SharedUiWidgets.ActionButton(verifyBtnText, unoccupiedHulls > 0))
             {
-                host.Pm4DoodadDuplication.TeachPairing(selectedPm4Obj, inst, pm4TileX, pm4TileY);
+                host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(curatedRel, worldScene!, out _, out _);
             }
 
-            var matchingTaught = host.Pm4DoodadDuplication.TaughtPairings.FirstOrDefault(t =>
-                (t.Ck24 != 0 && t.Ck24 == selectedPm4Obj.Ck24) ||
-                (t.Ck24 == 0 && selectedPm4Obj.Ck24 == 0 && t.DominantGroupKey == selectedPm4Obj.DominantGroupKey));
-
-            if (matchingTaught != null && hasTile)
+            if (SharedUiWidgets.ActionButton("Teach & Save Pairing Rule Only"))
             {
-                if (SharedUiWidgets.ActionButton($"Apply Taught Rule to All Matching Hulls on Tile ({activeTileX}, {activeTileY})"))
-                {
-                    host.Pm4DoodadDuplication.ApplyTaughtPairingToTile(matchingTaught, activeTileX, activeTileY);
-                }
+                host.Pm4DoodadDuplication.TeachPairing(selectedPm4Obj, inst, pm4TileX, pm4TileY);
             }
         }
         // Branch 2: Only PM4 Hull is selected
@@ -448,7 +470,62 @@ internal sealed class Pm4WorkbenchSidebarService
             Vector3 pm4Centroid = Vector3.Transform(selectedPm4Obj.Center, selectedPm4Obj.BaseTransform);
             ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Hull: 0x{selectedPm4Obj.Ck24:X6} (part {selectedPm4Obj.ObjectPartId})");
             ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Group: 0x{selectedPm4Obj.DominantGroupKey:X2} | Tris: {selectedPm4Obj.Triangles.Count}");
+            if (similarHulls != null && similarHulls.Count > 0)
+            {
+                ImGui.TextColored(UiTokens.Success, $"Cross-Tile Identified: {similarHulls.Count} matching shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
+            }
             ImGui.Spacing();
+
+            // Automatic spatial relationship detection with resident ADT models
+            bool hasSpatialRel = host.Pm4DoodadDuplication.Curation.TryDetectSpatialRelationship(
+                selectedPm4Obj, pm4TileX, pm4TileY, worldScene, out var spatialRel);
+
+            if (hasSpatialRel && spatialRel != null)
+            {
+                ImGui.TextColored(UiTokens.Brass, spatialRel.Verified ? "✓ Verified Spatial Relationship:" : "✦ Spatial Relationship Detected & Logged:");
+                ImGui.BulletText($"Model: {spatialRel.ModelName} ({spatialRel.AssetKind})");
+                ImGui.BulletText($"Fit: {spatialRel.FitConfidence:P0} (delta: {spatialRel.PositionOffset.Length():F1} yds, yaw: {spatialRel.YawOffset:F1}°)");
+
+                string propBtnText = spatialRel.Verified
+                    ? $"Propagate Across All Loaded Tiles ({unoccupiedHulls} Hulls)##propagate_all_rel"
+                    : $"✓ Verify & Propagate Across All Tiles ({unoccupiedHulls} Hulls)##verify_propagate_rel";
+
+                if (SharedUiWidgets.ActionButton(propBtnText, unoccupiedHulls > 0))
+                {
+                    host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(spatialRel, worldScene!, out _, out _);
+                }
+                ImGui.Spacing();
+            }
+
+            var currKey = (pm4TileX, pm4TileY, selectedPm4Obj.Ck24, selectedPm4Obj.ObjectPartId);
+            int ruleCount = host.Pm4DoodadDuplication.TaughtPairings.Count;
+            if (_cachedTaughtMatchKey != currKey || _cachedTaughtMatchRuleCount != ruleCount)
+            {
+                _cachedTaughtMatchKey = currKey;
+                _cachedTaughtMatchRuleCount = ruleCount;
+                _cachedTaughtMatch = host.Pm4DoodadDuplication.FindMatchingTaughtRule(
+                    selectedPm4Obj, pm4TileX, pm4TileY,
+                    out _cachedTaughtScale, out _cachedTaughtPos, out _cachedTaughtRot);
+            }
+
+            var taughtMatch = _cachedTaughtMatch;
+            float taughtScale = _cachedTaughtScale;
+            Vector3 taughtPos = _cachedTaughtPos;
+            Vector3 taughtRot = _cachedTaughtRot;
+            if (taughtMatch != null)
+            {
+                ImGui.TextColored(UiTokens.Success, $"Taught Shape Match: {taughtMatch.ModelName} ({taughtMatch.AssetKind})");
+                if (SharedUiWidgets.ActionButton($"Spawn & Propagate Across All Tiles ({unoccupiedHulls} Hulls)##propagate_taught"))
+                {
+                    host.Pm4DoodadDuplication.InstantiateTaughtPairingIntoHull(selectedPm4Obj, pm4TileX, pm4TileY, taughtMatch, taughtScale, taughtPos, taughtRot);
+                    host.Pm4DoodadDuplication.ApplyTaughtPairingAcrossAllTiles(taughtMatch);
+                }
+                if (SharedUiWidgets.ActionButton($"Spawn into this Hull Only##spawn_taught_single"))
+                {
+                    host.Pm4DoodadDuplication.InstantiateTaughtPairingIntoHull(selectedPm4Obj, pm4TileX, pm4TileY, taughtMatch, taughtScale, taughtPos, taughtRot);
+                }
+                ImGui.Spacing();
+            }
 
             ImGui.TextWrapped("💡 Tip: Ctrl+Click an object in the viewport to pair & align it with this PM4 hull, or match resident models below.");
             ImGui.Spacing();
@@ -466,7 +543,30 @@ internal sealed class Pm4WorkbenchSidebarService
                 {
                     var match = _activeMatches[i];
                     ImGui.BulletText($"{match.Candidate.ModelName} — Score: {match.Score:P0} (Scale {match.SolvedScale:F2}, Yaw {match.SolvedRotation.Z:F1}°)");
-                    if (SharedUiWidgets.ActionButton($"Spawn {match.Candidate.ModelName} into Hull##spawn_{i}"))
+
+                    if (SharedUiWidgets.ActionButton($"Verify & Propagate Across All Tiles ({unoccupiedHulls} Hulls)##propagate_cand_{i}", unoccupiedHulls > 0))
+                    {
+                        var rel = new CuratedSpatialRelationship(
+                            match.Candidate.ModelName,
+                            match.Candidate.ModelPath,
+                            match.Candidate.AssetKind,
+                            selectedPm4Obj.Ck24,
+                            selectedPm4Obj.DominantGroupKey,
+                            match.Candidate.Length,
+                            match.Candidate.Width,
+                            match.Candidate.Height,
+                            match.SolvedScale,
+                            match.SolvedRotation.Z - selectedPm4Obj.BaseRotationRadians,
+                            match.SolvedPosition - pm4Centroid,
+                            (float)match.Score,
+                            DateTime.UtcNow,
+                            Verified: true);
+
+                        host.Pm4DoodadDuplication.SpawnCandidateIntoPm4Hull(selectedPm4Obj, pm4TileX, pm4TileY, match, out _);
+                        host.Pm4DoodadDuplication.Curation.VerifyAndPropagateAcrossAllTiles(rel, worldScene!, out _, out _);
+                    }
+
+                    if (SharedUiWidgets.ActionButton($"Spawn into this Hull Only##spawn_{i}"))
                     {
                         host.Pm4DoodadDuplication.SpawnCandidateIntoPm4Hull(selectedPm4Obj, pm4TileX, pm4TileY, match, out _);
                     }
@@ -516,6 +616,45 @@ internal sealed class Pm4WorkbenchSidebarService
             ImGui.TextDisabled("No object or PM4 collision hull selected.");
             ImGui.Spacing();
             ImGui.TextWrapped("💡 Human Teaching Workflow: Click a PM4 collision hull in the viewport, then Ctrl+Click a scene model (or vice-versa) to pair, align, and teach.");
+        }
+
+        ImGui.Spacing();
+        if (SharedUiWidgets.ActionButton("Patch & Export Monolithic ADTs to Output Folder..."))
+        {
+            host.Pm4DoodadDuplication.SavePatchedAdts();
+        }
+
+        if (host.Pm4DoodadDuplication.TaughtPairings.Count > 0)
+        {
+            ImGui.Spacing();
+            if (ImGui.TreeNodeEx($"Taught Shape Library ({host.Pm4DoodadDuplication.TaughtPairings.Count} rules)##Pm4TaughtRules", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.TextDisabled("Shape-matched model templates for automated cross-tile population.");
+                ImGui.Spacing();
+
+                if (SharedUiWidgets.ActionButton($"Apply All Taught Rules Across All Loaded Tiles ({overlay._pm4TileObjects.Count} tiles)"))
+                {
+                    host.Pm4DoodadDuplication.ApplyAllTaughtPairingsAcrossAllTiles();
+                }
+
+                ImGui.Spacing();
+                for (int i = 0; i < host.Pm4DoodadDuplication.TaughtPairings.Count; i++)
+                {
+                    var rule = host.Pm4DoodadDuplication.TaughtPairings[i];
+                    ImGui.BulletText($"{rule.ModelName} ({rule.AssetKind}) — {rule.Length:F1}x{rule.Width:F1}x{rule.Height:F1} yds");
+                    if (SharedUiWidgets.ActionButton($"Apply to All Tiles##rule_apply_{i}"))
+                    {
+                        host.Pm4DoodadDuplication.ApplyTaughtPairingAcrossAllTiles(rule);
+                    }
+                    ImGui.SameLine();
+                    if (SharedUiWidgets.ActionButton($"Delete##rule_del_{i}"))
+                    {
+                        host.Pm4DoodadDuplication.DeleteTaughtPairing(rule);
+                        break;
+                    }
+                }
+                ImGui.TreePop();
+            }
         }
 
         ImGui.Spacing();
@@ -582,6 +721,18 @@ internal sealed class Pm4WorkbenchSidebarService
                 }
             }
         }
+        foreach (var list in pm4Host.TileWmoInstances.Values)
+        {
+            foreach (var placed in list)
+            {
+                if (seenModels.Add(placed.ModelPath))
+                {
+                    Vector3 min = placed.SelectionBoundsResolved && placed.SelectionLocalBoundsMax != Vector3.Zero ? placed.SelectionLocalBoundsMin : placed.LocalBoundsMin;
+                    Vector3 max = placed.SelectionBoundsResolved && placed.SelectionLocalBoundsMax != Vector3.Zero ? placed.SelectionLocalBoundsMax : placed.LocalBoundsMax;
+                    candidates.Add(Pm4ModelCandidate.Create(placed.ModelPath, "WMO", min, max));
+                }
+            }
+        }
 
         if (candidates.Count == 0)
         {
@@ -592,7 +743,8 @@ internal sealed class Pm4WorkbenchSidebarService
             return;
         }
 
-        _activeMatches = Pm4DirectModelMatcher.MatchPrism(prism, candidates, maxResults: 4);
+        var rawMatches = Pm4DirectModelMatcher.MatchPrism(prism, candidates, maxResults: 8);
+        _activeMatches = rawMatches.Where(m => m.Score >= 0.40 && m.SolvedScale <= 3.0f).Take(4).ToList();
         _activeMatchCk24 = pm4Obj.Ck24;
 
         if (_activeMatches.Count > 0)

@@ -127,18 +127,40 @@ public sealed partial class Pm4OverlayScene
     /// </summary>
     private static float RayTrianglesIntersect(Vector3 origin, Vector3 dir, List<Pm4Triangle> triangles, Matrix4x4 transform)
     {
-        float best = -1f;
-        foreach (Pm4Triangle triangle in triangles)
+        if (triangles == null || triangles.Count == 0)
+            return -1f;
+
+        if (Matrix4x4.Invert(transform, out Matrix4x4 invTransform))
         {
-            Vector3 a = Vector3.Transform(triangle.A, transform);
-            Vector3 b = Vector3.Transform(triangle.B, transform);
-            Vector3 c = Vector3.Transform(triangle.C, transform);
-            float t = WowViewer.Core.PM4.Services.Pm4SpatialMath.RayTriangleIntersect(origin, dir, a, b, c);
-            if (t >= 0f && (best < 0f || t < best))
-                best = t;
+            Vector3 localOrigin = Vector3.Transform(origin, invTransform);
+            Vector3 localTarget = Vector3.Transform(origin + dir, invTransform);
+            Vector3 localDir = localTarget - localOrigin;
+
+            float best = -1f;
+            for (int i = 0; i < triangles.Count; i++)
+            {
+                var tr = triangles[i];
+                float t = WowViewer.Core.PM4.Services.Pm4SpatialMath.RayTriangleIntersect(localOrigin, localDir, tr.A, tr.B, tr.C);
+                if (t >= 0f && (best < 0f || t < best))
+                    best = t;
+            }
+            return best;
         }
 
-        return best;
+        // Fallback for non-invertible transform matrix
+        float fallbackBest = -1f;
+        for (int i = 0; i < triangles.Count; i++)
+        {
+            var tr = triangles[i];
+            Vector3 a = Vector3.Transform(tr.A, transform);
+            Vector3 b = Vector3.Transform(tr.B, transform);
+            Vector3 c = Vector3.Transform(tr.C, transform);
+            float t = WowViewer.Core.PM4.Services.Pm4SpatialMath.RayTriangleIntersect(origin, dir, a, b, c);
+            if (t >= 0f && (fallbackBest < 0f || t < fallbackBest))
+                fallbackBest = t;
+        }
+
+        return fallbackBest;
     }
     private static void TransformBounds(Vector3 min, Vector3 max, Matrix4x4 m, out Vector3 outMin, out Vector3 outMax)
         => WorldScene.TransformBounds(min, max, m, out outMin, out outMax);

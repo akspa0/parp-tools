@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Text.Json;
+using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Maps;
 using WowViewer.Core.PM4.Footprint;
 using WowViewer.Core.PM4.Matching;
 using WowViewer.Core.Runtime.World;
@@ -26,7 +28,10 @@ internal sealed record TaughtPairing(
     float Length,
     float Width,
     float Height,
-    DateTime TaughtUtc);
+    DateTime TaughtUtc,
+    Vector3 LocalBoundsMin = default,
+    Vector3 LocalBoundsMax = default,
+    float YawOffset = 0f);
 
 /// <summary>
 /// Service providing live PM4 doodad collision matching, duplication, human-in-the-loop teaching,
@@ -46,6 +51,43 @@ internal sealed class Pm4DoodadDuplicationService
         bool Execute(IViewerAppHost host);
     }
 
+    private sealed class MultiTileDuplicationUndo(Dictionary<(int tileX, int tileY), List<int>> addedByTile) : IPm4UndoOperation
+    {
+        public bool Execute(IViewerAppHost host)
+        {
+            var worldScene = host.WorldScene;
+            if (worldScene == null)
+                return false;
+
+            IPm4OverlayHost pm4Host = worldScene;
+            int totalRemoved = 0;
+
+            foreach (var ((tileX, tileY), addedIds) in addedByTile)
+            {
+                var idSet = new HashSet<int>(addedIds);
+                if (pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx))
+                {
+                    totalRemoved += tileMdx.RemoveAll(inst => idSet.Contains(inst.UniqueId));
+                }
+                if (pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo))
+                {
+                    totalRemoved += tileWmo.RemoveAll(inst => idSet.Contains(inst.UniqueId));
+                }
+            }
+
+            if (totalRemoved > 0)
+            {
+                pm4Host.RebuildInstanceLists();
+                string msg = $"Undid population of {totalRemoved} instances across {addedByTile.Count} tiles.";
+                host.StatusMessage = msg;
+                host.Pm4DoodadDuplication.LastOperationMessage = msg;
+                return true;
+            }
+
+            return false;
+        }
+    }
+
     private sealed class DuplicationUndo(int tileX, int tileY, List<int> addedIds) : IPm4UndoOperation
     {
         public bool Execute(IViewerAppHost host)
@@ -55,10 +97,20 @@ internal sealed class Pm4DoodadDuplicationService
                 return false;
 
             IPm4OverlayHost pm4Host = worldScene;
+            int removed = 0;
+            var idSet = new HashSet<int>(addedIds);
+
             if (pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out List<ObjectInstance>? tileMdx))
             {
-                var idSet = new HashSet<int>(addedIds);
-                int removed = tileMdx.RemoveAll(inst => idSet.Contains(inst.UniqueId));
+                removed += tileMdx.RemoveAll(inst => idSet.Contains(inst.UniqueId));
+            }
+            if (pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out List<ObjectInstance>? tileWmo))
+            {
+                removed += tileWmo.RemoveAll(inst => idSet.Contains(inst.UniqueId));
+            }
+
+            if (removed > 0)
+            {
                 pm4Host.RebuildInstanceLists();
                 string msg = $"Undid duplication of {removed} instances on tile ({tileX}, {tileY}).";
                 host.StatusMessage = msg;
@@ -135,9 +187,13 @@ internal sealed class Pm4DoodadDuplicationService
         }
     }
 
+    public Pm4CurationAndSpatialMatchingService Curation { get; }
+
     public Pm4DoodadDuplicationService(IViewerAppHost host)
     {
         _host = host;
+        Curation = new Pm4CurationAndSpatialMatchingService(host, this);
+        LoadTaughtPairingsFromDisk();
     }
 
     public bool CanUndo => _undoStack.Count > 0;
@@ -495,6 +551,10 @@ internal sealed class Pm4DoodadDuplicationService
         var matchResults = Pm4DirectModelMatcher.MatchPrism(prism, [cand], 1);
         float scale = matchResults.Count > 0 ? matchResults[0].SolvedScale : inst.PlacementScale;
 
+        float yawOffset = inst.PlacementRotation.Z - prism.YawDegrees;
+        while (yawOffset > 180f) yawOffset -= 360f;
+        while (yawOffset < -180f) yawOffset += 360f;
+
         var taught = new TaughtPairing(
             pm4Obj.Ck24,
             pm4Obj.DominantGroupKey,
@@ -506,11 +566,38 @@ internal sealed class Pm4DoodadDuplicationService
             prism.UnrotatedLength,
             prism.UnrotatedWidth,
             prism.Height,
-            DateTime.UtcNow);
+            DateTime.UtcNow,
+            localMin,
+            localMax,
+            yawOffset);
 
-        _taughtPairings.RemoveAll(t => t.Ck24 != 0 && t.Ck24 == taught.Ck24);
+        _taughtPairings.RemoveAll(t =>
+            string.Equals(t.ModelPath, taught.ModelPath, StringComparison.OrdinalIgnoreCase)
+            || (t.Ck24 != 0 && t.Ck24 == taught.Ck24));
         _taughtPairings.Add(taught);
 
+        SaveTaughtPairingsToDisk();
+
+        string msg = $"✓ Saved teaching rule: {inst.ModelName} ({inst.AssetKind}) ↔ PM4 {prism.UnrotatedLength:F1}x{prism.UnrotatedWidth:F1}x{prism.Height:F1} yds (scale {scale:F2}, yaw offset {yawOffset:F1}°).";
+        _host.StatusMessage = msg;
+        LastOperationMessage = msg;
+        return taught;
+    }
+
+    /// <summary>
+    /// Explicitly registers or updates a verified human-taught pairing rule and saves it to disk.
+    /// </summary>
+    public void TeachPairingExplicit(TaughtPairing taught)
+    {
+        _taughtPairings.RemoveAll(t =>
+            string.Equals(t.ModelPath, taught.ModelPath, StringComparison.OrdinalIgnoreCase)
+            || (t.Ck24 != 0 && t.Ck24 == taught.Ck24));
+        _taughtPairings.Add(taught);
+        SaveTaughtPairingsToDisk();
+    }
+
+    private void SaveTaughtPairingsToDisk()
+    {
         try
         {
             string outDir = Path.Combine(Directory.GetCurrentDirectory(), "output", "curation");
@@ -519,11 +606,38 @@ internal sealed class Pm4DoodadDuplicationService
             File.WriteAllText(Path.Combine(outDir, "pm4_taught_pairings.json"), json);
         }
         catch { }
+    }
 
-        string msg = $"✓ Saved teaching rule: PM4 0x{pm4Obj.Ck24:X6} ({pm4Obj.DominantGroupKey:X2}) -> {inst.ModelName} (scale {scale:F2}, yaw {prism.YawDegrees:F1}°).";
-        _host.StatusMessage = msg;
-        LastOperationMessage = msg;
-        return taught;
+    private void LoadTaughtPairingsFromDisk()
+    {
+        try
+        {
+            string filePath = Path.Combine(Directory.GetCurrentDirectory(), "output", "curation", "pm4_taught_pairings.json");
+            if (File.Exists(filePath))
+            {
+                string json = File.ReadAllText(filePath);
+                var loaded = JsonSerializer.Deserialize<List<TaughtPairing>>(json);
+                if (loaded != null && loaded.Count > 0)
+                {
+                    _taughtPairings.Clear();
+                    _taughtPairings.AddRange(loaded);
+                }
+            }
+        }
+        catch { }
+    }
+
+    public bool DeleteTaughtPairing(TaughtPairing pairing)
+    {
+        if (_taughtPairings.Remove(pairing))
+        {
+            SaveTaughtPairingsToDisk();
+            string msg = $"Deleted taught rule for {pairing.ModelName}.";
+            _host.StatusMessage = msg;
+            LastOperationMessage = msg;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -541,35 +655,322 @@ internal sealed class Pm4DoodadDuplicationService
                 return 0;
         }
 
-        if (!pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx))
+        var added = PopulateTileFromTaughtPairing(pm4Host, worldScene, taught, tileX, tileY, pm4Objects);
+        if (added.Count > 0)
         {
-            tileMdx = new List<ObjectInstance>();
-            pm4Host.TileMdxInstances[(tileX, tileY)] = tileMdx;
+            var addedByTile = new Dictionary<(int, int), List<int>> { [(tileX, tileY)] = added };
+            _undoStack.Push(new MultiTileDuplicationUndo(addedByTile));
+            pm4Host.RebuildInstanceLists();
+            string msg = $"✓ Populated {added.Count} PM4 hulls matching shape of {taught.ModelName} on tile ({tileX}, {tileY}).";
+            _host.StatusMessage = msg;
+            LastOperationMessage = msg;
+            return added.Count;
         }
 
-        int maxExistingUniqueId = 0;
-        var existingPositions = new List<Vector3>(tileMdx.Count);
-        for (int i = 0; i < tileMdx.Count; i++)
+        string failMsg = $"No unoccupied PM4 hulls matching shape of {taught.ModelName} on tile ({tileX}, {tileY}).";
+        _host.StatusMessage = failMsg;
+        LastOperationMessage = failMsg;
+        return 0;
+    }
+
+    /// <summary>
+    /// Applies a human-taught pairing to all matching unoccupied PM4 hulls across ALL loaded tiles.
+    /// </summary>
+    public int ApplyTaughtPairingAcrossAllTiles(TaughtPairing taught)
+    {
+        var worldScene = _host.WorldScene;
+        if (worldScene == null) return 0;
+        IPm4OverlayHost pm4Host = worldScene;
+
+        var addedByTile = new Dictionary<(int tileX, int tileY), List<int>>();
+
+        foreach (var (tileCoord, pm4Objects) in worldScene.Pm4Overlay._pm4TileObjects)
         {
-            existingPositions.Add(tileMdx[i].PlacementPosition);
-            if (tileMdx[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileMdx[i].UniqueId;
+            if (pm4Objects == null || pm4Objects.Count == 0) continue;
+            var tileAdded = PopulateTileFromTaughtPairing(pm4Host, worldScene, taught, tileCoord.tileX, tileCoord.tileY, pm4Objects);
+            if (tileAdded.Count > 0)
+            {
+                addedByTile[tileCoord] = tileAdded;
+            }
+        }
+
+        int totalAdded = addedByTile.Values.Sum(v => v.Count);
+        if (totalAdded > 0)
+        {
+            _undoStack.Push(new MultiTileDuplicationUndo(addedByTile));
+            pm4Host.RebuildInstanceLists();
+            string msg = $"✓ Populated {totalAdded} PM4 hulls matching shape of {taught.ModelName} across {addedByTile.Count} loaded tiles.";
+            _host.StatusMessage = msg;
+            LastOperationMessage = msg;
+            return totalAdded;
+        }
+
+        string failMsg = $"No unoccupied PM4 hulls matching shape of {taught.ModelName} found across {worldScene.Pm4Overlay._pm4TileObjects.Count} loaded tiles.";
+        _host.StatusMessage = failMsg;
+        LastOperationMessage = failMsg;
+        return 0;
+    }
+
+    /// <summary>
+    /// Applies ALL saved human-taught pairings to all matching unoccupied PM4 hulls across ALL loaded tiles.
+    /// </summary>
+    public int ApplyAllTaughtPairingsAcrossAllTiles()
+    {
+        var worldScene = _host.WorldScene;
+        if (worldScene == null || _taughtPairings.Count == 0)
+        {
+            string emptyMsg = _taughtPairings.Count == 0
+                ? "No taught pairings saved yet. Pair a PM4 hull and model to teach one first."
+                : "No active world scene.";
+            _host.StatusMessage = emptyMsg;
+            LastOperationMessage = emptyMsg;
+            return 0;
+        }
+
+        IPm4OverlayHost pm4Host = worldScene;
+        var addedByTile = new Dictionary<(int tileX, int tileY), List<int>>();
+        int totalRulesApplied = 0;
+
+        for (int r = 0; r < _taughtPairings.Count; r++)
+        {
+            var taught = _taughtPairings[r];
+            int ruleAddedCount = 0;
+
+            foreach (var (tileCoord, pm4Objects) in worldScene.Pm4Overlay._pm4TileObjects)
+            {
+                if (pm4Objects == null || pm4Objects.Count == 0) continue;
+                var tileAdded = PopulateTileFromTaughtPairing(pm4Host, worldScene, taught, tileCoord.tileX, tileCoord.tileY, pm4Objects);
+                if (tileAdded.Count > 0)
+                {
+                    if (!addedByTile.TryGetValue(tileCoord, out var list))
+                    {
+                        list = new List<int>();
+                        addedByTile[tileCoord] = list;
+                    }
+                    list.AddRange(tileAdded);
+                    ruleAddedCount += tileAdded.Count;
+                }
+            }
+
+            if (ruleAddedCount > 0)
+                totalRulesApplied++;
+        }
+
+        int totalAdded = addedByTile.Values.Sum(v => v.Count);
+        if (totalAdded > 0)
+        {
+            _undoStack.Push(new MultiTileDuplicationUndo(addedByTile));
+            pm4Host.RebuildInstanceLists();
+            string msg = $"✓ Automation complete: Populated {totalAdded} placements using {totalRulesApplied} taught rules across {addedByTile.Count} tiles.";
+            _host.StatusMessage = msg;
+            LastOperationMessage = msg;
+            return totalAdded;
+        }
+
+        string failMsg = $"No matching unoccupied PM4 hulls found for any of the {_taughtPairings.Count} taught rules across loaded tiles.";
+        _host.StatusMessage = failMsg;
+        LastOperationMessage = failMsg;
+        return 0;
+    }
+
+    /// <summary>
+    /// Checks whether an arbitrary PM4 hull on any tile matches any taught pairing rule.
+    /// </summary>
+    public TaughtPairing? FindMatchingTaughtRule(
+        Pm4OverlayObject pm4Obj,
+        int pm4TileX,
+        int pm4TileY,
+        out float solvedScale,
+        out Vector3 solvedPos,
+        out Vector3 solvedRot)
+    {
+        solvedScale = 1f;
+        solvedPos = default;
+        solvedRot = default;
+
+        if (_taughtPairings.Count == 0) return null;
+
+        var worldScene = _host.WorldScene;
+        var surfaceVerts = new List<Vector3>(pm4Obj.Triangles.Count * 3);
+        for (int t = 0; t < pm4Obj.Triangles.Count; t++)
+        {
+            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].A, pm4Obj.BaseTransform));
+            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].B, pm4Obj.BaseTransform));
+            surfaceVerts.Add(Vector3.Transform(pm4Obj.Triangles[t].C, pm4Obj.BaseTransform));
+        }
+
+        List<Vector3>? mprlList = null;
+        if (worldScene != null)
+            worldScene.Pm4Overlay._pm4TilePositionRefs.TryGetValue((pm4TileX, pm4TileY), out mprlList);
+        float? placementZ = pm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(pm4Obj.Ck24 << 8) : null;
+        WorldScene.TransformBounds(pm4Obj.BoundsMin, pm4Obj.BoundsMax, pm4Obj.BaseTransform, out Vector3 worldMin, out _);
+        Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
+
+        for (int i = 0; i < _taughtPairings.Count; i++)
+        {
+            var taught = _taughtPairings[i];
+            Vector3 localMin = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
+                ? taught.LocalBoundsMin : -new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
+            Vector3 localMax = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
+                ? taught.LocalBoundsMax : new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
+            var cand = Pm4ModelCandidate.Create(taught.ModelPath, taught.AssetKind ?? "M2", localMin, localMax);
+
+            if (MatchesTaughtShape(taught, cand, prism, pm4Obj.Ck24, pm4Obj.DominantGroupKey, out solvedScale, out solvedPos, out solvedRot))
+            {
+                return taught;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Instantiates a taught pairing directly into a PM4 hull.
+    /// </summary>
+    public bool InstantiateTaughtPairingIntoHull(
+        Pm4OverlayObject pm4Obj,
+        int pm4TileX,
+        int pm4TileY,
+        TaughtPairing taught,
+        float solvedScale,
+        Vector3 solvedPos,
+        Vector3 solvedRot)
+    {
+        var worldScene = _host.WorldScene;
+        if (worldScene == null) return false;
+        IPm4OverlayHost pm4Host = worldScene;
+
+        bool isWmo = string.Equals(taught.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
+        pm4Host.TileMdxInstances.TryGetValue((pm4TileX, pm4TileY), out var tileMdx);
+        pm4Host.TileWmoInstances.TryGetValue((pm4TileX, pm4TileY), out var tileWmo);
+
+        int maxId = 0;
+        if (tileMdx != null)
+            for (int i = 0; i < tileMdx.Count; i++) if (tileMdx[i].UniqueId > maxId) maxId = tileMdx[i].UniqueId;
+        if (tileWmo != null)
+            for (int i = 0; i < tileWmo.Count; i++) if (tileWmo[i].UniqueId > maxId) maxId = tileWmo[i].UniqueId;
+
+        int newId = Math.Max(Pm4DoodadDuplicationEngine.SyntheticUniqueIdBase, maxId + 1);
+        Matrix4x4 transform = WorldPlacementTransform.Build(solvedPos, solvedRot, solvedScale);
+
+        Vector3 localMin = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
+            ? taught.LocalBoundsMin : -new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
+        Vector3 localMax = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
+            ? taught.LocalBoundsMax : new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
+
+        WorldScene.TransformBounds(localMin, localMax, transform, out Vector3 bMin, out Vector3 bMax);
+
+        var newInst = new ObjectInstance
+        {
+            ModelKey = WorldAssetManager.NormalizeKey(taught.ModelPath),
+            Transform = transform,
+            BoundsMin = bMin,
+            BoundsMax = bMax,
+            LocalBoundsMin = localMin,
+            LocalBoundsMax = localMax,
+            BoundsResolved = true,
+            ModelName = taught.ModelName,
+            ModelPath = taught.ModelPath,
+            PlacementPosition = solvedPos,
+            PlacementRotation = solvedRot,
+            PlacementScale = solvedScale,
+            UniqueId = newId,
+            PlacementEntryIndex = isWmo ? (tileWmo?.Count ?? 0) : (tileMdx?.Count ?? 0),
+            TileX = pm4TileX,
+            TileY = pm4TileY,
+            HasTileCoordinate = true
+        };
+
+        if (isWmo)
+        {
+            if (tileWmo == null)
+            {
+                tileWmo = new List<ObjectInstance>();
+                pm4Host.TileWmoInstances[(pm4TileX, pm4TileY)] = tileWmo;
+            }
+            tileWmo.Add(newInst);
+            pm4Host.Assets.QueueWmoLoad(newInst.ModelKey);
+            pm4Host.Assets.PrioritizeWmoLoad(newInst.ModelKey);
+        }
+        else
+        {
+            if (tileMdx == null)
+            {
+                tileMdx = new List<ObjectInstance>();
+                pm4Host.TileMdxInstances[(pm4TileX, pm4TileY)] = tileMdx;
+            }
+            tileMdx.Add(newInst);
+            pm4Host.Assets.QueueMdxLoad(newInst.ModelKey);
+            pm4Host.Assets.PrioritizeMdxLoad(newInst.ModelKey);
+        }
+
+        var addedByTile = new Dictionary<(int, int), List<int>> { [(pm4TileX, pm4TileY)] = [newId] };
+        _undoStack.Push(new MultiTileDuplicationUndo(addedByTile));
+        pm4Host.RebuildInstanceLists();
+        pm4Host.Assets.ProcessPendingLoads(maxLoads: 32, maxBudgetMs: 50.0);
+
+        string msg = $"✓ Spawned taught {taught.ModelName} (#{newId}) into PM4 hull 0x{pm4Obj.Ck24:X6} on tile ({pm4TileX}, {pm4TileY}).";
+        _host.StatusMessage = msg;
+        LastOperationMessage = msg;
+        return true;
+    }
+
+    private List<int> PopulateTileFromTaughtPairing(
+        IPm4OverlayHost pm4Host,
+        WorldScene worldScene,
+        TaughtPairing taught,
+        int tileX,
+        int tileY,
+        IReadOnlyList<Pm4OverlayObject> pm4Objects)
+    {
+        bool isWmo = string.Equals(taught.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
+        pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx);
+        pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo);
+
+        int maxExistingUniqueId = 0;
+        var existingPositions = new List<Vector3>((tileMdx?.Count ?? 0) + (tileWmo?.Count ?? 0));
+
+        if (tileMdx != null)
+        {
+            for (int i = 0; i < tileMdx.Count; i++)
+            {
+                existingPositions.Add(tileMdx[i].PlacementPosition);
+                if (tileMdx[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileMdx[i].UniqueId;
+            }
+        }
+        if (tileWmo != null)
+        {
+            for (int i = 0; i < tileWmo.Count; i++)
+            {
+                existingPositions.Add(tileWmo[i].PlacementPosition);
+                if (tileWmo[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileWmo[i].UniqueId;
+            }
         }
 
         int nextId = Math.Max(Pm4DoodadDuplicationEngine.SyntheticUniqueIdBase, maxExistingUniqueId + 1);
         var addedIds = new List<int>();
 
+        float occRadius = Math.Max(2.5f, Math.Min(taught.Width, taught.Length) * 0.75f);
+        float occRadiusSq = occRadius * occRadius;
+
+        Vector3 localMin = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
+            ? taught.LocalBoundsMin : -new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
+        Vector3 localMax = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
+            ? taught.LocalBoundsMax : new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
+        var cand = Pm4ModelCandidate.Create(taught.ModelPath, taught.AssetKind ?? "M2", localMin, localMax);
+
+        worldScene.Pm4Overlay._pm4TilePositionRefs.TryGetValue((tileX, tileY), out var mprlList);
+
         for (int i = 0; i < pm4Objects.Count; i++)
         {
             var obj = pm4Objects[i];
-            bool matches = (taught.Ck24 != 0 && obj.Ck24 == taught.Ck24)
-                || (taught.Ck24 == 0 && obj.Ck24 == 0 && obj.DominantGroupKey == taught.DominantGroupKey);
-            if (!matches) continue;
 
+            // 1. Centroid & occupancy check
             Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
             bool occupied = false;
             for (int e = 0; e < existingPositions.Count; e++)
             {
-                if (Vector3.DistanceSquared(centroid, existingPositions[e]) < 8.0f * 8.0f)
+                if (Vector3.DistanceSquared(centroid, existingPositions[e]) < occRadiusSq)
                 {
                     occupied = true;
                     break;
@@ -577,6 +978,7 @@ internal sealed class Pm4DoodadDuplicationService
             }
             if (occupied) continue;
 
+            // 2. Extrude candidate footprint prism
             var surfaceVerts = new List<Vector3>(obj.Triangles.Count * 3);
             for (int t = 0; t < obj.Triangles.Count; t++)
             {
@@ -584,17 +986,15 @@ internal sealed class Pm4DoodadDuplicationService
                 surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].B, obj.BaseTransform));
                 surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].C, obj.BaseTransform));
             }
-            worldScene.Pm4Overlay._pm4TilePositionRefs.TryGetValue((tileX, tileY), out var mprlList);
             float? placementZ = obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(obj.Ck24 << 8) : null;
             WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, obj.BaseTransform, out Vector3 worldMin, out _);
             Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
 
-            var cand = Pm4ModelCandidate.Create(taught.ModelPath, taught.AssetKind, -new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f, new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f);
-            var matchResults = Pm4DirectModelMatcher.MatchPrism(prism, [cand], 1);
-            if (matchResults.Count == 0) continue;
+            // 3. Shape match evaluation
+            if (!MatchesTaughtShape(taught, cand, prism, obj.Ck24, obj.DominantGroupKey, out float solvedScale, out Vector3 solvedPos, out Vector3 solvedRot))
+                continue;
 
-            var match = matchResults[0];
-            Matrix4x4 transform = WorldPlacementTransform.Build(match.SolvedPosition, match.SolvedRotation, match.SolvedScale);
+            Matrix4x4 transform = WorldPlacementTransform.Build(solvedPos, solvedRot, solvedScale);
             WorldScene.TransformBounds(cand.LocalBoundsMin, cand.LocalBoundsMax, transform, out Vector3 bMin, out Vector3 bMax);
 
             int assignedId = nextId++;
@@ -609,34 +1009,108 @@ internal sealed class Pm4DoodadDuplicationService
                 BoundsResolved = true,
                 ModelName = taught.ModelName,
                 ModelPath = taught.ModelPath,
-                PlacementPosition = match.SolvedPosition,
-                PlacementRotation = match.SolvedRotation,
-                PlacementScale = match.SolvedScale,
+                PlacementPosition = solvedPos,
+                PlacementRotation = solvedRot,
+                PlacementScale = solvedScale,
                 UniqueId = assignedId,
-                PlacementEntryIndex = tileMdx.Count,
+                PlacementEntryIndex = isWmo ? (tileWmo?.Count ?? 0) : (tileMdx?.Count ?? 0),
                 TileX = tileX,
                 TileY = tileY,
                 HasTileCoordinate = true
             };
-            tileMdx.Add(newInst);
-            existingPositions.Add(match.SolvedPosition);
+
+            if (isWmo)
+            {
+                if (tileWmo == null)
+                {
+                    tileWmo = new List<ObjectInstance>();
+                    pm4Host.TileWmoInstances[(tileX, tileY)] = tileWmo;
+                }
+                tileWmo.Add(newInst);
+                pm4Host.Assets.QueueWmoLoad(newInst.ModelKey);
+            }
+            else
+            {
+                if (tileMdx == null)
+                {
+                    tileMdx = new List<ObjectInstance>();
+                    pm4Host.TileMdxInstances[(tileX, tileY)] = tileMdx;
+                }
+                tileMdx.Add(newInst);
+                pm4Host.Assets.QueueMdxLoad(newInst.ModelKey);
+            }
+
+            existingPositions.Add(solvedPos);
             addedIds.Add(assignedId);
         }
 
-        if (addedIds.Count > 0)
+        return addedIds;
+    }
+
+    private static bool MatchesTaughtShape(
+        TaughtPairing taught,
+        Pm4ModelCandidate cand,
+        Pm4FootprintPrism prism,
+        uint objCk24,
+        byte dominantGroupKey,
+        out float solvedScale,
+        out Vector3 solvedPos,
+        out Vector3 solvedRot)
+    {
+        solvedScale = 1f;
+        solvedPos = default;
+        solvedRot = default;
+
+        bool isWmo = string.Equals(taught.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
+
+        // M2 doodads generally don't match building floor classes (0x10..0x15) unless taught that way
+        if (!isWmo && (dominantGroupKey >= 0x10 && dominantGroupKey <= 0x15) && taught.DominantGroupKey < 0x10)
+            return false;
+
+        float prismLen = MathF.Max(prism.UnrotatedLength, prism.UnrotatedWidth);
+        float prismWid = MathF.Min(prism.UnrotatedLength, prism.UnrotatedWidth);
+        float prismHeight = MathF.Max(0.01f, prism.Height);
+
+        float taughtLen = MathF.Max(taught.Length, taught.Width);
+        float taughtWid = MathF.Min(taught.Length, taught.Width);
+        float taughtHeight = MathF.Max(0.01f, taught.Height);
+
+        float prismAspectXY = prismLen / MathF.Max(0.01f, prismWid);
+        float taughtAspectXY = taughtLen / MathF.Max(0.01f, taughtWid);
+        float diffAspectXY = MathF.Abs(prismAspectXY - taughtAspectXY) / MathF.Max(prismAspectXY, taughtAspectXY);
+
+        float prismAspectZH = prismHeight / MathF.Max(0.01f, prismLen);
+        float taughtAspectZH = taughtHeight / MathF.Max(0.01f, taughtLen);
+        float diffAspectZH = MathF.Abs(prismAspectZH - taughtAspectZH) / MathF.Max(prismAspectZH, taughtAspectZH);
+
+        float prismPlanar = MathF.Sqrt(prismLen * prismLen + prismWid * prismWid);
+        float taughtPlanar = MathF.Sqrt(taughtLen * taughtLen + taughtWid * taughtWid);
+        float sizeDiff = MathF.Abs(prismPlanar - taughtPlanar) / MathF.Max(prismPlanar, taughtPlanar);
+
+        double shapeScore = Math.Max(0.0, 1.0 - (0.5 * diffAspectXY + 0.3 * diffAspectZH + 0.2 * sizeDiff));
+
+        bool exactCkMatch = taught.Ck24 != 0 && taught.Ck24 == objCk24;
+        if (!exactCkMatch)
         {
-            _undoStack.Push(new DuplicationUndo(tileX, tileY, addedIds));
-            pm4Host.RebuildInstanceLists();
-            string msg = $"✓ Populated {addedIds.Count} PM4 hulls matching 0x{taught.Ck24:X6} with {taught.ModelName} on tile ({tileX}, {tileY}).";
-            _host.StatusMessage = msg;
-            LastOperationMessage = msg;
-            return addedIds.Count;
+            if (diffAspectXY > 0.25f || sizeDiff > 0.45f || shapeScore < 0.70)
+                return false;
         }
 
-        string failMsg = $"No unoccupied PM4 hulls matching 0x{taught.Ck24:X6} on tile ({tileX}, {tileY}).";
-        _host.StatusMessage = failMsg;
-        LastOperationMessage = failMsg;
-        return 0;
+        var matchResults = Pm4DirectModelMatcher.MatchPrism(prism, [cand], 1);
+        if (matchResults.Count > 0)
+        {
+            var match = matchResults[0];
+            solvedScale = match.SolvedScale;
+            solvedPos = match.SolvedPosition;
+
+            float yaw = prism.YawDegrees + taught.YawOffset;
+            while (yaw > 180f) yaw -= 360f;
+            while (yaw < -180f) yaw += 360f;
+            solvedRot = new Vector3(0f, 0f, yaw);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -657,20 +1131,26 @@ internal sealed class Pm4DoodadDuplicationService
         }
 
         IPm4OverlayHost pm4Host = worldScene;
-        if (!pm4Host.TileMdxInstances.TryGetValue((pm4TileX, pm4TileY), out var tileMdx))
-        {
-            tileMdx = new List<ObjectInstance>();
-            pm4Host.TileMdxInstances[(pm4TileX, pm4TileY)] = tileMdx;
-        }
+        pm4Host.TileMdxInstances.TryGetValue((pm4TileX, pm4TileY), out var tileMdx);
+        pm4Host.TileWmoInstances.TryGetValue((pm4TileX, pm4TileY), out var tileWmo);
 
         int maxId = 0;
-        for (int i = 0; i < tileMdx.Count; i++)
-            if (tileMdx[i].UniqueId > maxId) maxId = tileMdx[i].UniqueId;
+        if (tileMdx != null)
+        {
+            for (int i = 0; i < tileMdx.Count; i++)
+                if (tileMdx[i].UniqueId > maxId) maxId = tileMdx[i].UniqueId;
+        }
+        if (tileWmo != null)
+        {
+            for (int i = 0; i < tileWmo.Count; i++)
+                if (tileWmo[i].UniqueId > maxId) maxId = tileWmo[i].UniqueId;
+        }
 
         int newId = Math.Max(Pm4DoodadDuplicationEngine.SyntheticUniqueIdBase, maxId + 1);
         Matrix4x4 transform = WorldPlacementTransform.Build(match.SolvedPosition, match.SolvedRotation, match.SolvedScale);
         WorldScene.TransformBounds(match.Candidate.LocalBoundsMin, match.Candidate.LocalBoundsMax, transform, out Vector3 bMin, out Vector3 bMax);
 
+        bool isWmo = string.Equals(match.Candidate.AssetKind, "wmo", StringComparison.OrdinalIgnoreCase);
         var newInst = new ObjectInstance
         {
             ModelKey = WorldAssetManager.NormalizeKey(match.Candidate.ModelPath),
@@ -686,15 +1166,38 @@ internal sealed class Pm4DoodadDuplicationService
             PlacementRotation = match.SolvedRotation,
             PlacementScale = match.SolvedScale,
             UniqueId = newId,
-            PlacementEntryIndex = tileMdx.Count,
+            PlacementEntryIndex = isWmo ? (tileWmo?.Count ?? 0) : (tileMdx?.Count ?? 0),
             TileX = pm4TileX,
             TileY = pm4TileY,
             HasTileCoordinate = true
         };
 
-        tileMdx.Add(newInst);
+        if (isWmo)
+        {
+            if (tileWmo == null)
+            {
+                tileWmo = new List<ObjectInstance>();
+                pm4Host.TileWmoInstances[(pm4TileX, pm4TileY)] = tileWmo;
+            }
+            tileWmo.Add(newInst);
+            pm4Host.Assets.QueueWmoLoad(newInst.ModelKey);
+            pm4Host.Assets.PrioritizeWmoLoad(newInst.ModelKey);
+        }
+        else
+        {
+            if (tileMdx == null)
+            {
+                tileMdx = new List<ObjectInstance>();
+                pm4Host.TileMdxInstances[(pm4TileX, pm4TileY)] = tileMdx;
+            }
+            tileMdx.Add(newInst);
+            pm4Host.Assets.QueueMdxLoad(newInst.ModelKey);
+            pm4Host.Assets.PrioritizeMdxLoad(newInst.ModelKey);
+        }
+
         _undoStack.Push(new DuplicationUndo(pm4TileX, pm4TileY, [newId]));
         pm4Host.RebuildInstanceLists();
+        pm4Host.Assets.ProcessPendingLoads(maxLoads: 32, maxBudgetMs: 50.0);
 
         statusMessage = $"✓ Spawned {match.Candidate.ModelName} (#{newId}) into PM4 hull 0x{pm4Obj.Ck24:X6} (Score: {match.Score:P0}, Scale: {match.SolvedScale:F2}, Yaw: {match.SolvedRotation.Z:F1}°).";
         _host.StatusMessage = statusMessage;
@@ -937,5 +1440,162 @@ internal sealed class Pm4DoodadDuplicationService
 
         _host.StatusMessage = $"Saved curated placements to Zarr v60 store: {storeName}";
         return storePath;
+    }
+
+    /// <summary>
+    /// Patches modified ADT tiles with the current curated placements and saves them to an output folder.
+    /// Preserves existing terrain/textures where source ADTs exist via AdtPlacementEditor,
+    /// or synthesizes clean monolithic LK ADTs for blank/unauthored development tiles via BlankAdtFactory and LkAdtWriter.
+    /// </summary>
+    public (int tilesWritten, int placementsAdded, string outDir) SavePatchedAdts(string? targetFolder = null, string? mapName = null)
+    {
+        var worldScene = _host.WorldScene;
+        if (worldScene == null)
+            throw new InvalidOperationException("No active world scene to export.");
+
+        IPm4OverlayHost pm4Host = worldScene;
+        string resolvedMap = !string.IsNullOrEmpty(mapName)
+            ? mapName
+            : (!string.IsNullOrEmpty(_host.LoadedFileName) ? Path.GetFileNameWithoutExtension(_host.LoadedFileName) : "development");
+
+        string outDir = targetFolder ?? Path.Combine(Directory.GetCurrentDirectory(), "output", "patched_adts", resolvedMap);
+        Directory.CreateDirectory(outDir);
+
+        var tilesToPatch = new HashSet<(int, int)>();
+        foreach (var key in pm4Host.TileMdxInstances.Keys) tilesToPatch.Add(key);
+        foreach (var key in pm4Host.TileWmoInstances.Keys) tilesToPatch.Add(key);
+
+        int totalTilesWritten = 0;
+        int totalPlacementsAdded = 0;
+
+        foreach ((int tx, int ty) in tilesToPatch)
+        {
+            pm4Host.TileMdxInstances.TryGetValue((tx, ty), out var mdxList);
+            pm4Host.TileWmoInstances.TryGetValue((tx, ty), out var wmoList);
+
+            int mdxCount = mdxList?.Count ?? 0;
+            int wmoCount = wmoList?.Count ?? 0;
+            if (mdxCount == 0 && wmoCount == 0) continue;
+
+            string tileStem = $"{resolvedMap}_{tx}_{ty}";
+            string outAdtPath = Path.Combine(outDir, $"{tileStem}.adt");
+            string virtualAdtPath = $"World\\Maps\\{resolvedMap}\\{tileStem}.adt";
+
+            byte[]? baseBytes = null;
+            if (_host.DataSource != null)
+            {
+                baseBytes = _host.DataSource.ReadFile(virtualAdtPath);
+                if (baseBytes == null || baseBytes.Length == 0)
+                {
+                    string altPath = $"World/Maps/{resolvedMap}/{tileStem}.adt";
+                    baseBytes = _host.DataSource.ReadFile(altPath);
+                }
+            }
+
+            if (baseBytes != null && baseBytes.Length > 0)
+            {
+                var edits = new List<AdtPlacementEdit>();
+                if (mdxList != null)
+                {
+                    for (int i = 0; i < mdxList.Count; i++)
+                    {
+                        var inst = mdxList[i];
+                        if (inst.UniqueId >= Pm4DoodadDuplicationEngine.SyntheticUniqueIdBase)
+                        {
+                            edits.Add(new AdtPlacementAddEdit(
+                                AdtPlacementKind.Model,
+                                inst.ModelPath,
+                                inst.PlacementPosition,
+                                inst.PlacementRotation,
+                                inst.PlacementScale));
+                            totalPlacementsAdded++;
+                        }
+                    }
+                }
+                if (wmoList != null)
+                {
+                    for (int i = 0; i < wmoList.Count; i++)
+                    {
+                        var inst = wmoList[i];
+                        if (inst.UniqueId >= Pm4DoodadDuplicationEngine.SyntheticUniqueIdBase)
+                        {
+                            edits.Add(new AdtPlacementAddEdit(
+                                AdtPlacementKind.WorldModel,
+                                inst.ModelPath,
+                                inst.PlacementPosition,
+                                inst.PlacementRotation,
+                                inst.PlacementScale));
+                            totalPlacementsAdded++;
+                        }
+                    }
+                }
+
+                if (edits.Count > 0)
+                {
+                    var result = AdtPlacementEditor.Apply(baseBytes, virtualAdtPath, edits);
+                    File.WriteAllBytes(outAdtPath, result.Bytes);
+                    totalTilesWritten++;
+                }
+            }
+            else
+            {
+                var modelNames = new List<string>();
+                var wmoNames = new List<string>();
+                var modelPlacements = new List<AdtModelPlacement>();
+                var wmoPlacements = new List<AdtWorldModelPlacement>();
+
+                int nextUid = 1;
+                if (mdxList != null)
+                {
+                    foreach (var inst in mdxList)
+                    {
+                        int nameIdx = modelNames.IndexOf(inst.ModelPath);
+                        if (nameIdx < 0) { nameIdx = modelNames.Count; modelNames.Add(inst.ModelPath); }
+                        modelPlacements.Add(new AdtModelPlacement(
+                            nameIdx,
+                            inst.ModelPath,
+                            inst.UniqueId > 0 ? inst.UniqueId : nextUid++,
+                            inst.PlacementPosition,
+                            inst.PlacementRotation,
+                            inst.PlacementScale));
+                        totalPlacementsAdded++;
+                    }
+                }
+
+                if (wmoList != null)
+                {
+                    foreach (var inst in wmoList)
+                    {
+                        int nameIdx = wmoNames.IndexOf(inst.ModelPath);
+                        if (nameIdx < 0) { nameIdx = wmoNames.Count; wmoNames.Add(inst.ModelPath); }
+                        ushort scaleUshort = (ushort)Math.Clamp((int)MathF.Round(inst.PlacementScale * 1024f), 0, 65535);
+                        wmoPlacements.Add(new AdtWorldModelPlacement(
+                            nameIdx,
+                            inst.ModelPath,
+                            inst.UniqueId > 0 ? inst.UniqueId : nextUid++,
+                            inst.PlacementPosition,
+                            inst.PlacementRotation,
+                            inst.BoundsMin,
+                            inst.BoundsMax,
+                            Flags: 0,
+                            DoodadSet: 0,
+                            NameSet: 0,
+                            Scale: scaleUshort));
+                        totalPlacementsAdded++;
+                    }
+                }
+
+                var catalog = new AdtPlacementCatalog(outAdtPath, MapFileKind.Adt, modelNames, wmoNames, modelPlacements, wmoPlacements);
+                var blank = BlankAdtFactory.CreateBlank(resolvedMap, tx, ty);
+                var populated = BlankAdtFactory.WithPlacements(blank, catalog);
+                LkAdtWriter.Write(outAdtPath, populated);
+                totalTilesWritten++;
+            }
+        }
+
+        string msg = $"✓ Saved {totalTilesWritten} patched ADT files to {outDir} ({totalPlacementsAdded} placements).";
+        _host.StatusMessage = msg;
+        LastOperationMessage = msg;
+        return (totalTilesWritten, totalPlacementsAdded, outDir);
     }
 }

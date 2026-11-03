@@ -109,7 +109,7 @@ internal sealed class TerrainTileIoService
         int exported = 0;
         foreach (var (tileX, tileY) in tiles)
         {
-            string outPath = Path.Combine(outDir, $"{_terrainManager.MapName}_{tileX:D2}_{tileY:D2}.glb");
+            string outPath = Path.Combine(outDir, $"{_terrainManager.MapName}_{tileY:D2}_{tileX:D2}.glb");
             MapGlbExporter.ExportTile(_terrainManager, _dataSource, _md5Index, tileX, tileY, outPath, includePlacements: true);
             exported++;
         }

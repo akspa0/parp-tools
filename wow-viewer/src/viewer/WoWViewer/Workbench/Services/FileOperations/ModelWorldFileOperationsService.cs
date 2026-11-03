@@ -14,6 +14,8 @@ internal sealed class ModelWorldFileOperationsService
 {
     private readonly IViewerAppHost _host;
     private TerrainTileScope _worldScope = TerrainTileScope.CurrentTile;
+    private bool _combineMultiTileGlb = true;
+    private bool _bareCoordFilenames = true;
 
     internal ModelWorldFileOperationsService(IViewerAppHost host) => _host = host;
 
@@ -36,6 +38,13 @@ internal sealed class ModelWorldFileOperationsService
         ImGui.RadioButton("Loaded tiles##world_export", ref scope, (int)TerrainTileScope.LoadedTiles);
         ImGui.RadioButton("Whole map##world_export", ref scope, (int)TerrainTileScope.WholeMap);
         _worldScope = (TerrainTileScope)scope;
+
+        if (_worldScope != TerrainTileScope.CurrentTile)
+        {
+            ImGui.Checkbox("Combine into single scene GLB##world_export_combine", ref _combineMultiTileGlb);
+        }
+        ImGui.Checkbox("Use XX_YY filename format (e.g. 26_39.glb)##world_export_bare", ref _bareCoordFilenames);
+
         bool canExport = _host.TerrainManager != null;
         if (SharedUiWidgets.ActionButton("Export Terrain + Objects GLB...", canExport)) RequestWorldExport(_worldScope, false);
         if (SharedUiWidgets.ActionButton("Export Terrain Collision GLB...", canExport)) RequestWorldExport(_worldScope, true);
@@ -115,8 +124,34 @@ internal sealed class ModelWorldFileOperationsService
             var tiles = _host.TerrainTileIo.GetTileScopeList(scope).ToArray();
             if (tiles.Length == 0) throw new InvalidOperationException("No tiles in scope.");
             Directory.CreateDirectory(ExportDir);
+
             bool single = scope == TerrainTileScope.CurrentTile;
+            bool combine = !single && _combineMultiTileGlb;
+
+            if (combine)
+            {
+                _host.StatusMessage = $"Select combined GLB output for {tiles.Length} tile(s); cancel leaves files unchanged.";
+                string defaultCombinedName = $"{terrain.MapName}_loaded_{tiles.Length}tiles{(collision ? ".collision" : "")}.glb";
+
+                ImGuiPathPicker.Instance.Open("Export World GLB (Combined)", ImGuiPathPickerMode.SaveFile,
+                    ExportDir, ".glb",
+                    path => FileOperationReporter.Run("World GLB export", path, () =>
+                    {
+                        if (!ReferenceEquals(terrain, _host.TerrainManager) || !ReferenceEquals(source, _host.DataSource))
+                            throw new InvalidOperationException("The world changed while the picker was open.");
+                        MapGlbExporter.ExportTilesCombined(terrain, source, _host.Md5Index, tiles, path, includePlacements: !collision);
+                        FileOperationReporter.RequireWrittenFile(path);
+                        return 1;
+                    }, message => _host.StatusMessage = message),
+                    defaultCombinedName);
+                return;
+            }
+
             _host.StatusMessage = $"Select GLB output for {tiles.Length} tile(s); cancel leaves files unchanged.";
+            string singleDefaultName = _bareCoordFilenames
+                ? $"{tiles[0].tileY:D2}_{tiles[0].tileX:D2}{(collision ? ".collision" : "")}.glb"
+                : $"{terrain.MapName}_{tiles[0].tileY:D2}_{tiles[0].tileX:D2}{(collision ? ".collision" : "")}.glb";
+
             ImGuiPathPicker.Instance.Open("Export World GLB", single ? ImGuiPathPickerMode.SaveFile : ImGuiPathPickerMode.OpenFolder,
                 ExportDir, single ? ".glb" : null,
                 path => FileOperationReporter.Run("World GLB export", path, () =>
@@ -126,14 +161,18 @@ internal sealed class ModelWorldFileOperationsService
                     int written = 0;
                     foreach (var (x, y) in tiles)
                     {
-                        string output = single ? path : Path.Combine(path, $"{terrain.MapName}_{x:D2}_{y:D2}{(collision ? ".collision" : "")}.glb");
+                        // Note: Blizzard tile coordinate format is XX_YY where XX is column (y) and YY is row (x).
+                        string fileName = _bareCoordFilenames
+                            ? $"{y:D2}_{x:D2}{(collision ? ".collision" : "")}.glb"
+                            : $"{terrain.MapName}_{y:D2}_{x:D2}{(collision ? ".collision" : "")}.glb";
+                        string output = single ? path : Path.Combine(path, fileName);
                         MapGlbExporter.ExportTile(terrain, source, _host.Md5Index, x, y, output, includePlacements: !collision);
                         FileOperationReporter.RequireWrittenFile(output);
                         written++;
                     }
                     return written;
                 }, message => _host.StatusMessage = message),
-                single ? $"{terrain.MapName}_{tiles[0].tileX:D2}_{tiles[0].tileY:D2}{(collision ? ".collision" : "")}.glb" : null);
+                single ? singleDefaultName : null);
         }
         catch (Exception ex)
         {

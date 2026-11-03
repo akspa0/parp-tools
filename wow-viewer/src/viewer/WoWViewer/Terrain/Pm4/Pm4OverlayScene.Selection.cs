@@ -118,11 +118,15 @@ public sealed partial class Pm4OverlayScene
         {
             _selectedPm4ObjectKey = bestKey;
             _selectedPm4ObjectGroupKey = bestGroupKey;
+            InvalidateSelectedPm4RegionCache();
+            InvalidateSelectedPm4ResearchCache();
             return true;
         }
 
         _selectedPm4ObjectKey = null;
         _selectedPm4ObjectGroupKey = null;
+        InvalidateSelectedPm4RegionCache();
+        InvalidateSelectedPm4ResearchCache();
         return false;
     }
 
@@ -228,6 +232,7 @@ public sealed partial class Pm4OverlayScene
         _selectedPm4ObjectKey = null;
         _selectedPm4ObjectGroupKey = null;
         InvalidateSelectedPm4RegionCache();
+        InvalidateSelectedPm4ResearchCache();
     }
 
     public bool SelectPm4ObjectGroupKey(uint regionId, ushort ck24ObjectId)
@@ -241,6 +246,7 @@ public sealed partial class Pm4OverlayScene
                 _selectedPm4ObjectKey = key;
                 _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(key);
                 InvalidateSelectedPm4RegionCache();
+                InvalidateSelectedPm4ResearchCache();
                 return true;
             }
         }
@@ -255,6 +261,7 @@ public sealed partial class Pm4OverlayScene
         _selectedPm4ObjectKey = objectKey;
         _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(objectKey);
         InvalidateSelectedPm4RegionCache();
+        InvalidateSelectedPm4ResearchCache();
         return true;
     }
 
@@ -347,16 +354,42 @@ public sealed partial class Pm4OverlayScene
         return TryGetPm4ObjectDebugInfo(_selectedPm4ObjectKey.Value, out info);
     }
 
+    private (int tileX, int tileY, uint ck24, int objectPart)? _cachedSelectedResearchInfoKey;
+    private Pm4SelectedObjectResearchInfo _cachedSelectedResearchInfo;
+    private bool _cachedSelectedResearchInfoValid;
+
+    public void InvalidateSelectedPm4ResearchCache()
+    {
+        _cachedSelectedResearchInfoKey = null;
+    }
+
     public bool TryGetSelectedPm4ObjectResearchInfo(out Pm4SelectedObjectResearchInfo info)
     {
-        info = default;
         if (!_selectedPm4ObjectKey.HasValue)
+        {
+            info = default;
             return false;
+        }
 
+        if (_cachedSelectedResearchInfoKey.HasValue && _cachedSelectedResearchInfoKey.Value == _selectedPm4ObjectKey.Value)
+        {
+            info = _cachedSelectedResearchInfo;
+            return _cachedSelectedResearchInfoValid;
+        }
+
+        bool ok = ComputeSelectedPm4ObjectResearchInfo(_selectedPm4ObjectKey.Value, out info);
+        _cachedSelectedResearchInfoKey = _selectedPm4ObjectKey;
+        _cachedSelectedResearchInfo = info;
+        _cachedSelectedResearchInfoValid = ok;
+        return ok;
+    }
+
+    private bool ComputeSelectedPm4ObjectResearchInfo((int tileX, int tileY, uint ck24, int objectPart) objectKey, out Pm4SelectedObjectResearchInfo info)
+    {
+        info = default;
         bool profile = Pm4Profiling.Enabled;
         long researchStartTicks = profile ? s_pm4ResearchSw.ElapsedTicks : 0;
 
-        var objectKey = _selectedPm4ObjectKey.Value;
         if (!_pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? obj))
             return false;
 
@@ -366,36 +399,7 @@ public sealed partial class Pm4OverlayScene
         if (!TryGetPm4ResearchContext(obj.SourcePath, out Pm4ResearchContext? context) || context == null)
             return false;
 
-        List<Pm4ResearchHypothesisMatch> allMatches = context.HypothesisReport.Objects
-            .Where(hypothesis => hypothesis.Ck24 == obj.Ck24)
-            .Select(hypothesis => new Pm4ResearchHypothesisMatch(
-                hypothesis.Family,
-                hypothesis.FamilyObjectIndex,
-                hypothesis.SurfaceCount,
-                hypothesis.TotalIndexCount,
-                hypothesis.MscnRefIndices.Count,
-                hypothesis.GroupKeys.Count,
-                hypothesis.MslkGroupObjectIds.Count,
-                hypothesis.DominantLinkGroupObjectId,
-                hypothesis.MprlFootprint.LinkedRefCount,
-                hypothesis.MprlFootprint.LinkedInBoundsCount,
-                hypothesis.PlacementComparison.CoordinateMode,
-                hypothesis.PlacementComparison.PlanarTransform,
-                hypothesis.PlacementComparison.FrameYawDegrees,
-                hypothesis.PlacementComparison.MprlHeadingMeanDegrees,
-                hypothesis.PlacementComparison.HeadingDeltaDegrees,
-                ComputePm4ResearchMatchScore(obj, hypothesis)))
-            .OrderBy(match => match.SimilarityScore)
-            .ThenBy(match => match.Family)
-            .ThenBy(match => match.FamilyObjectIndex)
-            .ToList();
-
-        int invalidRefIndexCount = context.DecodeAudit.ReferenceAudits
-            .Where(static audit => audit.Name == "MSLK.RefIndex->MSUR")
-            .Select(static audit => audit.InvalidCount)
-            .FirstOrDefault();
-
-        // Extract raw MSHD header fields
+        // Extract raw MSHD header fields and MSLK entries directly from the decoded document without triggering expensive hierarchy analysis
         string? mshdRawFields = null;
         IReadOnlyList<string>? mslkRawEntries = null;
         if (context.RawDocument != null)
@@ -422,17 +426,17 @@ public sealed partial class Pm4OverlayScene
 
         info = new Pm4SelectedObjectResearchInfo(
             obj.SourcePath,
-            context.Snapshot.Version,
-            context.Snapshot.MslkCount,
-            context.Snapshot.MsurCount,
-            context.Snapshot.MscnCount,
-            context.Snapshot.MprlCount,
-            invalidRefIndexCount,
-            context.HypothesisReport.TotalHypothesisCount,
-            allMatches.Count,
-            context.Snapshot.Diagnostics.Count,
-            context.Snapshot.Diagnostics.Take(3).ToList(),
-            allMatches.Take(8).ToList(),
+            context.RawDocument?.Version ?? 0,
+            context.RawDocument?.KnownChunks.Mslk.Count ?? 0,
+            context.RawDocument?.KnownChunks.Msur.Count ?? 0,
+            context.RawDocument?.KnownChunks.Mscn.Count ?? 0,
+            context.RawDocument?.KnownChunks.Mprl.Count ?? 0,
+            invalidRefIndexCount: 0,
+            totalHypothesisCount: 0,
+            matchingCk24HypothesisCount: 0,
+            diagnosticCount: context.RawDocument?.Diagnostics.Count ?? 0,
+            diagnostics: context.RawDocument?.Diagnostics ?? Array.Empty<string>(),
+            topMatches: Array.Empty<Pm4ResearchHypothesisMatch>(),
             mshdRawFields,
             mslkRawEntries);
 
@@ -445,11 +449,10 @@ public sealed partial class Pm4OverlayScene
             if (elapsedMs > s_pm4ResearchMaxMs) s_pm4ResearchMaxMs = elapsedMs;
             s_pm4ResearchReportCount++;
             int mslkLines = mslkRawEntries?.Count ?? 0;
-            int matchesCount = allMatches.Count;
             if (elapsedMs >= 50.0 || s_pm4ResearchReportCount >= 200)
             {
                 ViewerLog.Info(ViewerLog.Category.Terrain,
-                    $"[PM4-PROFILE] TryGetSelectedPm4ObjectResearchInfo: call={s_pm4ResearchCallCount} last={elapsedMs:0.0}ms max={s_pm4ResearchMaxMs:0.0}ms avg={s_pm4ResearchTotalMs / s_pm4ResearchCallCount:0.0}ms matches={matchesCount} mslkLines={mslkLines} mslkTotal={context.RawDocument?.KnownChunks.Mslk.Count ?? 0}");
+                    $"[PM4-PROFILE] TryGetSelectedPm4ObjectResearchInfo: call={s_pm4ResearchCallCount} last={elapsedMs:0.0}ms max={s_pm4ResearchMaxMs:0.0}ms avg={s_pm4ResearchTotalMs / s_pm4ResearchCallCount:0.0}ms mslkLines={mslkLines} mslkTotal={context.RawDocument?.KnownChunks.Mslk.Count ?? 0}");
                 s_pm4ResearchReportCount = 0;
             }
         }
@@ -565,9 +568,9 @@ public sealed partial class Pm4OverlayScene
             Pm4File researchFile = CorePm4DocumentReader.Read(bytes, sourcePath);
             context = new Pm4ResearchContext(
                 sourcePath,
-                CorePm4ResearchSnapshotBuilder.CreateSnapshot(researchFile),
-                CorePm4ResearchAuditAnalyzer.Analyze(researchFile),
-                CorePm4ResearchHierarchyAnalyzer.Analyze(researchFile),
+                () => CorePm4ResearchSnapshotBuilder.CreateSnapshot(researchFile),
+                () => CorePm4ResearchAuditAnalyzer.Analyze(researchFile),
+                () => CorePm4ResearchHierarchyAnalyzer.Analyze(researchFile),
                 researchFile);
             _pm4ResearchBySourcePath[sourcePath] = context;
             return true;
@@ -586,17 +589,17 @@ public sealed partial class Pm4OverlayScene
         if (_dataSource == null)
             return null;
 
-        // Collect unique source paths for objects on this tile
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (objectKey, obj) in _pm4ObjectLookup)
+        if (_pm4TileObjects.TryGetValue(tileKey, out var objects) && objects.Count > 0)
         {
-            if (objectKey.tileX == tileKey.tileX && objectKey.tileY == tileKey.tileY
-                && !string.IsNullOrWhiteSpace(obj.SourcePath)
-                && seenPaths.Add(obj.SourcePath))
+            for (int i = 0; i < objects.Count; i++)
             {
-                byte[]? bytes = _dataSource.ReadFile(obj.SourcePath);
-                if (bytes != null && bytes.Length > 0)
-                    return bytes;
+                string? path = objects[i].SourcePath;
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    byte[]? bytes = _dataSource.ReadFile(path);
+                    if (bytes != null && bytes.Length > 0)
+                        return bytes;
+                }
             }
         }
 

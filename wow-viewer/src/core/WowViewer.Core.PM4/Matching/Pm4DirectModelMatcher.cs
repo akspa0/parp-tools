@@ -66,12 +66,33 @@ public static class Pm4DirectModelMatcher
             float diffXY = MathF.Abs(prismDesc.AspectXY - candDesc.AspectXY) / MathF.Max(prismDesc.AspectXY, candDesc.AspectXY);
             float diffZH = MathF.Abs(prismDesc.AspectZH - candDesc.AspectZH) / MathF.Max(prismDesc.AspectZH, candDesc.AspectZH);
 
-            double score = Math.Max(0.0, 1.0 - (0.5 * diffXY + 0.5 * diffZH));
-
             // 2. Solve scale factor
             float candPlanar = MathF.Sqrt(candDesc.Length * candDesc.Length + candDesc.Width * candDesc.Width);
             float prismPlanar = MathF.Sqrt(prismDesc.Length * prismDesc.Length + prismDesc.Width * prismDesc.Width);
-            float scale = candPlanar > 0.01f ? Math.Clamp(prismPlanar / candPlanar, 0.1f, 10.0f) : 1.0f;
+            float rawScale = candPlanar > 0.01f ? prismPlanar / candPlanar : 1.0f;
+            float scale = Math.Clamp(rawScale, 0.35f, 3.0f);
+
+            // Size mismatch penalty:
+            // Authentic ADT doodads and structures do not deviate by 5x-10x in scale.
+            // When rawScale diverges significantly from 1.0 (e.g. matching a 2-yard bench to a 50-yard bridge),
+            // penalize the score heavily so absurd scale-stretched matches are eliminated.
+            float scalePenalty = 0f;
+            if (rawScale > 2.2f)
+                scalePenalty = MathF.Min(1.0f, (rawScale - 2.2f) / 1.5f);
+            else if (rawScale < 0.45f)
+                scalePenalty = MathF.Min(1.0f, (0.45f - rawScale) / 0.25f);
+
+            if (rawScale > 4.0f || rawScale < 0.2f)
+                scalePenalty = 1.0f;
+
+            double score = Math.Max(0.0, 1.0 - (0.5 * diffXY + 0.5 * diffZH) - (0.5 * scalePenalty));
+
+            // Small doodad vs giant structure penalty:
+            // A 20+ yard footprint is architectural (bridge, building, wall); small M2 props (candPlanar < 4.0f) should not match it.
+            if (prismPlanar > 20.0f && candPlanar < 4.0f && cand.AssetKind.Equals("M2", StringComparison.OrdinalIgnoreCase))
+            {
+                score *= 0.5;
+            }
 
             // 3. Solve Yaw angle (aligning candidate local orientation to PM4 principal axis)
             float yawDegrees = prism.YawDegrees;

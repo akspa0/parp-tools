@@ -40,16 +40,18 @@ public static class MapGlbExporter
         // Terrain
         if (result.Chunks.Count > 0)
         {
-            var terrainMesh = BuildTerrainTileMesh(tileX, tileY, result.Chunks, terrain.MapName, dataSource, md5Index);
+            var terrainMesh = BuildTerrainTileMesh(terrain, tileX, tileY, result.Chunks, dataSource, md5Index);
             if (terrainMesh != null)
             {
                 scene.AddRigidMesh(terrainMesh, Matrix4x4.Identity);
             }
         }
 
-        if (includePlacements)
+        if (includePlacements && dataSource != null)
         {
-            AddPlacements(scene, terrain.Adapter, result, dataSource);
+            var mdxMeshCache = new Dictionary<string, MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>?>(StringComparer.OrdinalIgnoreCase);
+            var wmoMeshCache = new Dictionary<string, MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>?>(StringComparer.OrdinalIgnoreCase);
+            AddTilePlacements(scene, terrain.Adapter, tileX, tileY, result, dataSource, terrain.Adapter.MdxModelNames, terrain.Adapter.WmoModelNames, mdxMeshCache, wmoMeshCache);
         }
 
         var model = scene.ToGltf2();
@@ -60,25 +62,81 @@ public static class MapGlbExporter
             $"(chunks={result.Chunks.Count}, mddf={result.MddfPlacements.Count}, modf={result.ModfPlacements.Count})");
     }
 
-    private static void AddPlacements(SceneBuilder scene, ITerrainAdapter adapter, TileLoadResult result, IDataSource? dataSource)
+    public static void ExportTilesCombined(
+        TerrainManager terrain,
+        IDataSource? dataSource,
+        Md5TranslateIndex? md5Index,
+        IReadOnlyList<(int tileX, int tileY)> tiles,
+        string outputPath,
+        bool includePlacements = true)
     {
-        // A DAT folder can be opened with no client data source; the terrain still exports, but
-        // placements need model bytes, so skip them rather than throw.
-        if (dataSource is null)
-            return;
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
 
-        var mdxNames = adapter.MdxModelNames;
-        var wmoNames = adapter.WmoModelNames;
+        var scene = new SceneBuilder();
 
         var mdxMeshCache = new Dictionary<string, MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>?>(StringComparer.OrdinalIgnoreCase);
         var wmoMeshCache = new Dictionary<string, MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>?>(StringComparer.OrdinalIgnoreCase);
 
-        // NOTE: WorldScene applies an extra 180° Z correction for its renderer pipeline.
-        // For GLB export we omit that correction, since we are not doing the same winding flips.
+        var adapter = terrain.Adapter;
+        var mdxNames = adapter.MdxModelNames;
+        var wmoNames = adapter.WmoModelNames;
 
+        int totalChunks = 0;
+        int totalMddf = 0;
+        int totalModf = 0;
+
+        foreach (var (tileX, tileY) in tiles)
+        {
+            var result = terrain.GetOrLoadTileLoadResult(tileX, tileY);
+            totalChunks += result.Chunks.Count;
+
+            if (result.Chunks.Count > 0)
+            {
+                var terrainMesh = BuildTerrainTileMesh(terrain, tileX, tileY, result.Chunks, dataSource, md5Index);
+                if (terrainMesh != null)
+                {
+                    scene.AddRigidMesh(terrainMesh, Matrix4x4.Identity);
+                }
+            }
+
+            if (includePlacements && dataSource != null)
+            {
+                AddTilePlacements(scene, adapter, tileX, tileY, result, dataSource, mdxNames, wmoNames, mdxMeshCache, wmoMeshCache);
+                totalMddf += result.MddfPlacements.Count;
+                totalModf += result.ModfPlacements.Count;
+            }
+        }
+
+        var model = scene.ToGltf2();
+        model.SaveGLB(outputPath);
+
+        ViewerLog.Important(ViewerLog.Category.General,
+            $"[MapGlbExporter] Exported combined scene ({tiles.Count} tiles) to {outputPath} (chunks={totalChunks}, mddf={totalMddf}, modf={totalModf})");
+    }
+
+    private static void AddTilePlacements(
+        SceneBuilder scene,
+        ITerrainAdapter adapter,
+        int tileX,
+        int tileY,
+        TileLoadResult result,
+        IDataSource dataSource,
+        IReadOnlyList<string> mdxNames,
+        IReadOnlyList<string> wmoNames,
+        Dictionary<string, MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>?> mdxMeshCache,
+        Dictionary<string, MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>?> wmoMeshCache)
+    {
         foreach (var p in result.MddfPlacements)
         {
             if ((uint)p.NameIndex >= (uint)mdxNames.Count) continue;
+
+            // Spanned object containment check: only instantiate placements that belong to this home tile in ADT space.
+            if (WorldScene.TryGetTerrainChunkKey(p.Position.X, p.Position.Y, out var homeTileKey)
+                && (homeTileKey.tileX != tileX || homeTileKey.tileY != tileY)
+                && adapter.TileExists(homeTileKey.tileX, homeTileKey.tileY))
+            {
+                continue;
+            }
 
             string modelPath = mdxNames[p.NameIndex];
             string key = WorldAssetManager.NormalizeKey(modelPath);
@@ -93,7 +151,7 @@ public static class MapGlbExporter
 
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
 
-            // Same axis swap/negation as WorldScene for Alpha MDDF.
+            // Same axis swap and negation convention as WorldPlacementTransform for MDDF
             float rx = -p.Rotation.Y * MathF.PI / 180f;
             float ry = -p.Rotation.X * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
@@ -111,6 +169,14 @@ public static class MapGlbExporter
         {
             if ((uint)p.NameIndex >= (uint)wmoNames.Count) continue;
 
+            // Spanned object containment check: only instantiate placements that belong to this home tile in ADT space.
+            if (WorldScene.TryGetTerrainChunkKey(p.Position.X, p.Position.Y, out var homeTileKey)
+                && (homeTileKey.tileX != tileX || homeTileKey.tileY != tileY)
+                && adapter.TileExists(homeTileKey.tileX, homeTileKey.tileY))
+            {
+                continue;
+            }
+
             string modelPath = wmoNames[p.NameIndex];
             string key = WorldAssetManager.NormalizeKey(modelPath);
 
@@ -122,8 +188,9 @@ public static class MapGlbExporter
 
             if (wmoMesh == null) continue;
 
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
+            // WMO placement orientation in renderer space: same axis swap and negation as MDDF
+            float rx = -p.Rotation.Y * MathF.PI / 180f;
+            float ry = -p.Rotation.X * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
             var transformZup = Matrix4x4.CreateRotationX(rx)
@@ -146,10 +213,10 @@ public static class MapGlbExporter
     }
 
     private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? BuildTerrainTileMesh(
+        TerrainManager terrain,
         int tileX,
         int tileY,
         IReadOnlyList<TerrainChunkData> chunks,
-        string mapName,
         IDataSource? dataSource,
         Md5TranslateIndex? md5Index)
     {
@@ -157,7 +224,7 @@ public static class MapGlbExporter
         var terrainMat = new MaterialBuilder("terrain");
         terrainMat.WithDoubleSide(true);
 
-        byte[]? minimapPng = dataSource is null ? null : TryLoadMinimapPngBytes(dataSource, md5Index, mapName, tileX, tileY);
+        byte[]? minimapPng = TryResolveTileTexturePngBytes(terrain, dataSource, md5Index, tileX, tileY);
         if (minimapPng != null)
         {
             terrainMat.WithBaseColor(new SharpGLTF.Memory.MemoryImage(minimapPng));
@@ -246,36 +313,130 @@ public static class MapGlbExporter
 
     private static Vector3 ZupToYup(float x, float y, float z) => new(x, z, -y);
 
-    private static byte[]? TryLoadMinimapPngBytes(
+    private static byte[]? TryResolveTileTexturePngBytes(
+        TerrainManager terrain,
         IDataSource? dataSource,
         Md5TranslateIndex? md5Index,
-        string mapName,
         int tileX,
         int tileY)
     {
-        if (dataSource is null)
-            return null;
+        // In terrain adapters: tileX is row (YY), tileY is col (XX).
+        // In standard minimap file paths: coordinates are map{col}_{row} / {map}_{col}_{row}.
+        int col = tileY;
+        int row = tileX;
 
-        string plainPath = MinimapService.GetMinimapTilePath(mapName, tileX, tileY);
-
-        byte[]? data = null;
-
-        if (md5Index != null)
+        // 1. Check active phase/donor layers covering this tile (from top to bottom of stack)
+        if (terrain.PhaseLayers.Count > 0)
         {
-            var normalized = md5Index.Normalize(plainPath);
-            if (md5Index.PlainToHash.TryGetValue(normalized, out string? hashedPath))
+            for (int i = terrain.PhaseLayers.Count - 1; i >= 0; i--)
             {
-                data = dataSource.ReadFile(hashedPath) ?? dataSource.ReadFile(hashedPath.Replace('/', '\\'));
+                var layer = terrain.PhaseLayers[i];
+                if (!layer.Enabled || string.IsNullOrWhiteSpace(layer.MapName) || layer.Channels == WowViewer.Core.Maps.PhaseDataChannel.None)
+                    continue;
+
+                var source = WowViewer.Core.Maps.PhaseCompositionPolicy.ResolveTileSource(layer, tileX, tileY, (sx, sy) => true);
+                if (source.HasSource)
+                {
+                    int donorCol = source.SourceTileY;
+                    int donorRow = source.SourceTileX;
+
+                    byte[]? donorPng = TryLoadMinimapPng(dataSource, md5Index, layer.MapName, donorCol, donorRow);
+                    if (donorPng != null)
+                        return donorPng;
+                }
             }
         }
 
-        data ??= dataSource.ReadFile(plainPath) ?? dataSource.ReadFile(plainPath.Replace('/', '\\'));
+        // 2. Check base map in dataSource
+        byte[]? basePng = TryLoadMinimapPng(dataSource, md5Index, terrain.MapName, col, row);
+        if (basePng != null)
+            return basePng;
 
-        if (data == null || data.Length == 0)
+        // 3. Check disk file candidates (common for development map and extracted assets)
+        string[] diskDirectories = [
+            Path.Combine("wow-viewer", "test_data", "development", "World", "Textures", "Minimap"),
+            Path.Combine("wow-viewer", "test_data", "original_development", "World", "Textures", "Minimap"),
+            Path.Combine("wow-viewer", "test_data", "original_development", "textures", "minimap", terrain.MapName.ToLowerInvariant()),
+            Path.Combine(AppContext.BaseDirectory, "output", "cache", "minimap", terrain.MapName),
+            Path.Combine("test_data", "development", "World", "Textures", "Minimap"),
+            Path.Combine("test_data", "original_development", "World", "Textures", "Minimap"),
+        ];
+
+        string[] filePatterns = [
+            $"{terrain.MapName}_{col}_{row}.png",
+            $"{terrain.MapName}_{row}_{col}.png",
+            $"{terrain.MapName}_{col:D2}_{row:D2}.png",
+            $"{terrain.MapName}_{row:D2}_{col:D2}.png",
+            $"map{col:D2}_{row:D2}.png",
+            $"map{col:D2}_{row:D2}.blp",
+        ];
+
+        foreach (var dir in diskDirectories)
+        {
+            if (!Directory.Exists(dir)) continue;
+            foreach (var pattern in filePatterns)
+            {
+                string candidate = Path.Combine(dir, pattern);
+                if (File.Exists(candidate))
+                {
+                    try
+                    {
+                        byte[] fileBytes = File.ReadAllBytes(candidate);
+                        if (candidate.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                            return BlpToPngBytes(fileBytes);
+                        return fileBytes;
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static byte[]? TryLoadMinimapPng(
+        IDataSource? dataSource,
+        Md5TranslateIndex? md5Index,
+        string mapName,
+        int col,
+        int row)
+    {
+        if (dataSource is null || string.IsNullOrWhiteSpace(mapName))
             return null;
 
-        // Minimap tiles are typically BLP.
-        return BlpToPngBytes(data);
+        // Try standard BLP and PNG minimap paths
+        string[] candidatePaths = [
+            $"textures/minimap/{mapName.ToLowerInvariant()}/map{col:D2}_{row:D2}.blp",
+            $"textures/minimap/{mapName.ToLowerInvariant()}/map{row:D2}_{col:D2}.blp",
+            $"World/Textures/Minimap/{mapName}_{col}_{row}.png",
+            $"World/Textures/Minimap/{mapName}_{col:D2}_{row:D2}.png",
+            $"World/Textures/Minimap/{mapName}_{row}_{col}.png",
+            $"World/Textures/Minimap/{mapName}_{row:D2}_{col:D2}.png",
+        ];
+
+        foreach (var plainPath in candidatePaths)
+        {
+            byte[]? data = null;
+            if (md5Index != null)
+            {
+                var normalized = md5Index.Normalize(plainPath);
+                if (md5Index.PlainToHash.TryGetValue(normalized, out string? hashedPath))
+                {
+                    data = dataSource.ReadFile(hashedPath) ?? dataSource.ReadFile(hashedPath.Replace('/', '\\'));
+                }
+            }
+
+            data ??= dataSource.ReadFile(plainPath) ?? dataSource.ReadFile(plainPath.Replace('/', '\\'));
+
+            if (data != null && data.Length > 0)
+            {
+                if (plainPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                    return data;
+                return BlpToPngBytes(data);
+            }
+        }
+
+        return null;
     }
 
     private static byte[]? BlpToPngBytes(byte[] blpData)

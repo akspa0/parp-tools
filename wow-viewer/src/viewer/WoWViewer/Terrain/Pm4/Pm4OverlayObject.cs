@@ -376,23 +376,42 @@ internal sealed class Pm4OverlayObject
 
 internal sealed class Pm4ResearchContext
 {
+    private readonly Lazy<CorePm4ExplorationSnapshot> _lazySnapshot;
+    private readonly Lazy<CorePm4DecodeAuditReport> _lazyDecodeAudit;
+    private readonly Lazy<CorePm4TileObjectHypothesisReport> _lazyHypothesisReport;
+
+    public Pm4ResearchContext(
+        string sourcePath,
+        Func<CorePm4ExplorationSnapshot> snapshotFactory,
+        Func<CorePm4DecodeAuditReport> decodeAuditFactory,
+        Func<CorePm4TileObjectHypothesisReport> hypothesisReportFactory,
+        Pm4File? rawDocument = null)
+    {
+        SourcePath = sourcePath;
+        _lazySnapshot = new Lazy<CorePm4ExplorationSnapshot>(snapshotFactory);
+        _lazyDecodeAudit = new Lazy<CorePm4DecodeAuditReport>(decodeAuditFactory);
+        _lazyHypothesisReport = new Lazy<CorePm4TileObjectHypothesisReport>(hypothesisReportFactory);
+        RawDocument = rawDocument;
+    }
+
     public Pm4ResearchContext(
         string sourcePath,
         CorePm4ExplorationSnapshot snapshot,
         CorePm4DecodeAuditReport decodeAudit,
         CorePm4TileObjectHypothesisReport hypothesisReport,
         Pm4File? rawDocument = null)
+        : this(
+            sourcePath,
+            () => snapshot,
+            () => decodeAudit,
+            () => hypothesisReport,
+            rawDocument)
     {
-        SourcePath = sourcePath;
-        Snapshot = snapshot;
-        DecodeAudit = decodeAudit;
-        HypothesisReport = hypothesisReport;
-        RawDocument = rawDocument;
     }
 
     public string SourcePath { get; }
-    public CorePm4ExplorationSnapshot Snapshot { get; }
-    public CorePm4DecodeAuditReport DecodeAudit { get; }
-    public CorePm4TileObjectHypothesisReport HypothesisReport { get; }
+    public CorePm4ExplorationSnapshot Snapshot => _lazySnapshot.Value;
+    public CorePm4DecodeAuditReport DecodeAudit => _lazyDecodeAudit.Value;
+    public CorePm4TileObjectHypothesisReport HypothesisReport => _lazyHypothesisReport.Value;
     public Pm4File? RawDocument { get; }
 }

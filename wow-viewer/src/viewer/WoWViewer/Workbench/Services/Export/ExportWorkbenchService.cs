@@ -115,6 +115,14 @@ internal sealed class ExportWorkbenchService
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Archive resident ADT and magnetized PM4 placements into an authentic Zarr v60 store.");
 
+        if (SharedUiWidgets.ActionButton("Patch & Export Monolithic ADTs##Pm4ExportAdt"))
+        {
+            var res = _host.Pm4DoodadDuplication.SavePatchedAdts();
+            _exportStatusMessage = $"Saved {res.tilesWritten} patched ADTs to {res.outDir} ({res.placementsAdded} placements).";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Patch modified ADTs with curated placements (preserving terrain/textures via AdtPlacementEditor, or creating monolithic 3.3.5 ADTs for unauthored tiles).");
+
         // If an object is actively selected in the scene, provide quick single-object details and copy
         if (overlay.SelectedPm4ObjectKey.HasValue)
         {

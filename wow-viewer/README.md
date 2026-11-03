@@ -1,6 +1,6 @@
 # WoWViewer Toolkit (`wow-viewer`)
 
-The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data. **Current development version: v0.6.1-dev**, following the first stable v0.6.0 release. Coverage includes clients **0.5.3 – 0.11**; working support across **1.x – 4.x**; **5.0.1 tested**; and modern CASC tested on **WoW: Forever** (`wow_classic_beta` 1.60.1, build 703xx+, based on 11.2.7). The 12.x M2 path is Warcraft.NET-backed; support remains format/build-specific.
+The primary development and runtime workspace for `parp-tools`. This project provides a library-first .NET 10 architecture for parsing, inspecting, rendering, and reconciling World of Warcraft client data. **Current development version: v0.7.0-dev**, following the v0.6 release line. Coverage includes clients **0.5.3 – 0.11**; working support across **1.x – 4.x**; **5.0.1 tested**; and modern CASC tested on **WoW: Forever** (`wow_classic_beta` 1.60.1, build 703xx+, based on 11.2.7). The 12.x M2 path is Warcraft.NET-backed; support remains format/build-specific.
 
 > **Bring your own data.** parp-tools ships no game data. Point it at your own client install, MPQ set, CASC install or extracted map folder.
 
@@ -20,7 +20,7 @@ An interactive desktop viewer built with Silk.NET, OpenGL, and ImGui:
 - **Dynamic Lighting & Skies**: Native Alpha 0.5.3 2,880-unit world clock, Light DBC fallback, LIT profiles, and fog.
 - **Positional Audio**: OpenAL runtime with resident MCSE / MCNK positional emitters and `SoundEntries` preview.
 - **Camera Path Authoring**: Full timeline keyframing, roll control, JSON project save/load, and native `.m2` camera export.
-- **PM4 Inspection**: PM4 overlay, selection, object info, outliner and object groups in the Viewer's PM4 sidebar surface. PM4 object matching, alignment and reconciliation are offline work in the museum ADT patcher tool, not viewer surfaces.
+- **Live PM4 Alignment & Curation Workbench**: Real-time PM4 collision mesh overlay with surface class filtering (doodads, interior floors, angled surfaces, bases), live hull magnetization against MSUR ground truth, interactive human-in-the-loop pairing & shape teaching (Ctrl+Click to pair ADT objects to PM4 collision hulls), cross-tile taught shape recognition & automated placement propagation, and multi-format export (JSON, OBJ, LLM evidence bundles, Zarr v60). Non-blocking lazy research context evaluation and per-frame geometry caching ensure instant selection and 60+ FPS navigation.
 - **Cartography Composition**: Multi-layer map composition with donor tiles, placement locks, rotation/mirror, Z transform, WDL edge-snap, and project save/load.
 - **Map Save & New Map Creator**: A New Map creator service exists; **saving composed/merged maps to Alpha 0.5.3 WDT / LK v18 ADT is not implemented yet**.
 
@@ -107,26 +107,24 @@ dotnet run --project wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.T
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  WoWViewer v0.6.1-dev                                           [_][□][X]   │
+│  WoWViewer v0.7.0-dev                                           [_][□][X]   │
 │  File   View   Help                                         ┌────────────┐  │
 │                                                             │  MINIMAP   │  │
 │                                                             └────────────┘  │
 ├──────────────┬───────────────────────────────────────────────┬──────────────┤
 │ LEFT SIDEBAR │                                               │ RIGHT SIDEBAR│
-│ (destination)│               3D VIEWPORT                     │ (destination)│
+│ (Navigation) │               3D VIEWPORT                     │ (Curate/Tool)│
 │              │                                               │              │
-│ • Workspace  │  [WASD + Mouse Fly Camera]                    │ Viewer:      │
-│ • World      │                                               │  Inspector   │
-│   Overview   │  [Bounded Terrain Stream Ring: Radius 2-3]    │  World       │
-│ • File       │                                               │  Model       │
-│   Browser    │  [Dynamic Lighting, Sky & Fog]                │  PM4         │
-│ • + destination sections                                     │ Editor/      │
-│              │                                               │  Archaeology │
-│              │                                               │  page picker │
+│ • Workspace  │  [WASD + Mouse Fly Camera]                    │ • Inspector  │
+│ • World Nav  │                                               │ • PM4 Curate │
+│ • Spawns/NPC │  [Bounded Terrain Stream Ring: Radius 2-3]    │ • Align/Pair │
+│ • Archaeology│                                               │ • Exports    │
+│ • Layers     │  [Dynamic Lighting, Sky & Fog]                │ • Placement  │
+│ • Bookmarks  │                                               │ • Doodad Dup │
 ├──────────────┴───────────────────────────────────────────────┴──────────────┤
 │ Chat (bottom-left)                                             [Options ▾]  │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ Viewer │ Editor │ Archaeology │ Options                       FPS / ms      │
+│ Viewer │ Editor │ Archaeology │ Spawns │ Options              FPS / ms      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ Status bar: coordinates, tile, facing, audio, runtime stats                 │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -176,7 +174,7 @@ Alpha 0.5.3–0.5.5 uses a distinct monolithic WDT map format; later clients use
 | **Later legacy** | Through 5.0.1 | **5.0.1 tested; overall partial** | Format-family coverage varies across later legacy builds |
 | **Modern CASC** | WoW: Forever 1.60.1 (build 703xx+) | **Tested** | `wow_classic_beta` is 11.2.7-based; `MAID`/`MDID` terrain, FileDataID placements, `MD21` M2, `GFID`/`MODI` WMO, DB2, and DAT v26 terrain project files; 12.x M2 parsing uses Warcraft.NET |
 
-**Support summary (v0.6.1-dev):** 0.5.3–0.11 complete; client coverage works across 1.x–4.x; later 0.12–5.x is partial, with 5.0.1 tested; modern CASC tested on WoW: Forever 1.60.1 (11.2.7-based, build 703xx+).
+**Support summary (v0.7.0-dev):** 0.5.3–0.11 complete; client coverage works across 1.x–4.x; later 0.12–5.x is partial, with 5.0.1 tested; modern CASC tested on WoW: Forever 1.60.1 (11.2.7-based, build 703xx+).
 
 The M2 reader path for 12.x data uses Warcraft.NET; per-format and per-build validation remains distinct from the tested 1.60.1 and 703xx+ builds.
 
