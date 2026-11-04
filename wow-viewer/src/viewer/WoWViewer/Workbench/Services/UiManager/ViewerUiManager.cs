@@ -184,6 +184,9 @@ internal sealed partial class ViewerUiManager
 
     internal void OpenLeftDock(LeftPanel panel)
     {
+        // Idempotent: DrawDiagnosticsWindows calls this every frame while a diagnostics flag is
+        // set, and a repeated open must not rewrite the layout file or churn state per frame.
+        if (_leftDockOpen && ActiveLeftPanel == panel && _host.ShowLeftSidebar) return;
         ActiveLeftPanel = panel;
         _leftDockOpen = true;
         _host.ShowLeftSidebar = true;

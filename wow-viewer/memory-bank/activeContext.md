@@ -1,5 +1,25 @@
 # Active Context — wow-viewer
 
+**UI Flicker ROOT CAUSE — ImGui NewFrame/EndFrame desync (2026-11-04):**
+Operator reported seizure-inducing whole-UI strobing + dead input + 2 CTDs beginning around
+`d346cf24`. Windows Event Log (.NET Runtime 1026, 01:03 + 01:31) captured both crashes: AVs in
+`igEndMenu` / `igBeginPopupModal` = **ImGui window-stack corruption**. Root cause: `_imGui.Update()`
+(NewFrame) ran in `OnUpdate` while `_imGui.Render()` (EndFrame) ran in `OnRender`; `2b3762d3`'s
+independent 60/60 schedules make Silk.NET invoke the callbacks on different cycles, so widget code
+regularly ran outside a begun frame — survivable corruption = the strobe; deep corruption = the
+crashes. Pacing Render inside OnRender (earlier attempts) desynced further → "overdrive". Fixed:
+1. **ImGui frame bound to OnRender** (`ViewerApp`): `_imGui.Update` moved from OnUpdate to just
+   before the UI block in OnRender; `DrawUI` + `ImGuiPathPicker.Draw` in try/finally around
+   `_imGui.Render()` — NewFrame/EndFrame always paired; a throwing widget closes the frame.
+2. Even present cadence (~60 FPS Stopwatch target, hybrid sleep+spin, `timeBeginPeriod(1)`).
+3. `OpenLeftDock` idempotent; `SaveLayout` skips byte-identical rewrites (no per-frame disk I/O).
+4. TEMPORARY `UiOscilloscope` (on by default, `PARP_UI_OSCILLOSCOPE=0` opts out) logs per-frame
+   state/rects/draw-data to `output/settings/ui-oscilloscope.log` — **remove after operator
+   confirms the fix**.
+Validation: build 0 errors; 22/22 focused UI tests pass. **Owed:** operator run — exercise File
+menu + panels; confirm stable/interactive; oscilloscope log verifies cadence + catches any
+residual toggle. Amendment: [Spec 292](../specs/292-ui-bottom-bar-toggles-audio-sky/spec.md).
+
 **WMO Alignment Z Elevation Fix & Ck24 "Object Z" UI Relabeling (2026-11-03):**
 1. **WMO Alignment & Placement-Z Resolution**:
    - Fixed vertical displacement when aligning WMOs to PM4 hulls in `Pm4DoodadDuplicationService.AlignPlacementToPm4Hull`, `MagnetizeAllPlacementsOnTile`, and `Pm4DirectModelMatcher.MatchPrism`.

@@ -10,7 +10,9 @@ internal sealed partial class ViewerUiManager
     // v7 adds the docked left panel and unifies destinations into sidebars.
     private const int LayoutVersion = 7;
     private static readonly string LayoutPath = Path.Combine(SettingsDir, "ui-layout-v7.json");
+    private static readonly JsonSerializerOptions LayoutJsonOptions = new() { WriteIndented = true };
     private bool _layoutLoaded;
+    private string? _lastSavedLayoutJson;
     private readonly int[] _pages = [0, 0, 4];
 
     internal sealed class SavedLayout
@@ -122,9 +124,14 @@ internal sealed partial class ViewerUiManager
                 LeftDockOpen = _leftDockOpen, LeftDockWidth = _leftDockWidth,
                 LeftPanel = ActiveLeftPanel,
             };
+            string json = JsonSerializer.Serialize(saved, LayoutJsonOptions);
+            // Per-frame callers (e.g. the diagnostics redirect) must not hit disk every frame:
+            // skip the write when the document is byte-identical to the last one saved.
+            if (json == _lastSavedLayoutJson) return;
             string pending = LayoutPath + ".pending";
-            File.WriteAllText(pending, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(pending, json);
             File.Move(pending, LayoutPath, overwrite: true);
+            _lastSavedLayoutJson = json;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

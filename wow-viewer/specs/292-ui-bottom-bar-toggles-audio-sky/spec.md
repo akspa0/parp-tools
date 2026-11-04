@@ -37,3 +37,41 @@ Renderer sky rewrite, new audio engine features, PM4/export work.
 
 Sky "source = Sky model" assumes MPQ sky M2/MDX models can be listed and rendered. Phase 1 inventory verifies this; if unsupported, that option ships disabled and is reported.
 
+## Amendment 2026-11-04 — operator-reported flicker defect (post-landing): ROOT CAUSE FOUND
+
+The operator reported the whole UI strobing/flickering and being unresponsive, beginning around
+commit `d346cf24` (this spec's landing), with two crashes-to-desktop. Windows Event Log (.NET
+Runtime 1026, 2026-11-04 01:03 and 01:31) captured both crashes: unhandled access violations at
+`ImGuiNative.igEndMenu` (from `MainMenuBarService.DrawContent`) and `ImGuiNative.igBeginPopupModal`
+(from `ImGuiPathPicker.Draw`) — **ImGui window-stack corruption**, not two unrelated bugs.
+
+**Root cause:** the ImGui frame was split across callbacks — `_imGui.Update()` (ImGui `NewFrame`)
+ran in `ViewerApp.OnUpdate` while `_imGui.Render()` (EndFrame) ran in `ViewerApp.OnRender`. Commit
+`2b3762d3` set independent 60 Hz schedules for both callbacks (`FramesPerSecond`/`UpdatesPerSecond`),
+so Silk.NET invokes them on different cycles; widget code then regularly ran outside a begun frame.
+Survivable corruption rendered widgets into wrong windows — the strobing, unusable UI — and the
+corrupted stack eventually crashed in random ImGui entry points. This also explains why pacing
+Render inside OnRender (this session's earlier cadence attempts) amplified the flicker: it
+desynchronized Render from Update further.
+
+**Fixes in code this date:**
+1. **ImGui frame bound to OnRender** (`ViewerApp`): `_imGui.Update((float)dt)` moved from OnUpdate
+   to immediately before the UI block in OnRender, with `DrawUI` + `ImGuiPathPicker.Draw` wrapped
+   in try/finally around `_imGui.Render()` — NewFrame/EndFrame are now always paired inside one
+   callback, and a throwing widget closes the frame instead of terminating the process.
+2. **Presentation cadence** (`ViewerApp.OnRender`): unconditional Stopwatch-targeted even ~60 FPS
+   cadence (hybrid 1 ms sleep + short spin, no dt gate, no catch-up bursts) + `timeBeginPeriod(1)`
+   on Windows; keeps swaps clear of the DWM composition race when VSync is not pacing.
+3. **Per-frame I/O removed** (`ViewerUiManager`): `OpenLeftDock` made idempotent (was re-entered
+   per frame by `DrawDiagnosticsWindows` while a diagnostics flag was set); `SaveLayout` skips
+   byte-identical rewrites.
+4. **Temporary diagnostic** (`UiOscilloscope`, on by default, `PARP_UI_OSCILLOSCOPE=0` opts out):
+   per-frame shell-state/rect/draw-data logging to `output/settings/ui-oscilloscope.log`; remove
+   once the operator confirms the fix.
+
+Verification: solution build 0 errors; 22/22 focused UI tests pass. Runtime flicker/crash
+resolution is operator-owned (§9.2): rebuild, launch, exercise the File menu and panels, confirm
+stable and interactive; the oscilloscope log verifies cadence and flags any residual per-frame
+toggle. Residual uncertainty: if strobing persists on this build, the log discriminates the
+remaining cause (content-level toggle vs scene-side) in the same run.
+

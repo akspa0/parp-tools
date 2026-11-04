@@ -662,6 +662,15 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     {
         _gl = _window.CreateOpenGL();
         _window.VSync = true;
+        // 1 ms system timer resolution so the OnRender cadence wait sleeps in ~1 ms steps
+        // instead of the ~15.6 ms default granularity. The OS reverts this at process exit.
+        if (OperatingSystem.IsWindows())
+            timeBeginPeriod(1);
+        // TEMPORARY DIAGNOSTIC (UI flicker hunt): logs per-frame shell state, layout rects and
+        // ImGui draw-data sizes to output/settings/ui-oscilloscope.log. On by default during
+        // the flicker investigation; PARP_UI_OSCILLOSCOPE=0 opts out.
+        if (Environment.GetEnvironmentVariable("PARP_UI_OSCILLOSCOPE") != "0")
+            _uiOscilloscope = new UiOscilloscope();
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
         _uiManager.SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
@@ -766,7 +775,8 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         // newly opened client instead of staying on the procedural fallback forever.
         _sceneCursorRenderer?.SetDataSource(_dataSource, _texResolver);
         _uiManager.FlushPendingImGuiMouseButtonEvents();
-        _imGui.Update((float)dt);
+        // ImGui NewFrame moved to OnRender, paired with _imGui.Render there — see the note in
+        // OnRender. Running it on the update schedule desynced the ImGui frame from rendering.
         HandleSceneMouseWheelInput();
         // Chrome shortcuts are handled in HandleKeyboardInput from the Silk keyboard; the
         // viewer does not feed key events to ImGui, so the ImGui-based path is not used.
@@ -989,6 +999,18 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         }
     }
 
+    // Presentation cadence (see OnRender): paces frame starts to an even interval regardless
+    // of VSync state, because an uncapped OpenGL swap stream races DWM composition on Windows.
+    private readonly System.Diagnostics.Stopwatch _presentClock = System.Diagnostics.Stopwatch.StartNew();
+    private long _nextPresentTargetTicks;
+
+    [System.Runtime.InteropServices.DllImport("winmm.dll")]
+    private static extern void timeBeginPeriod(uint msPeriod);
+
+    // TEMPORARY DIAGNOSTIC (UI flicker hunt): PARP_UI_OSCILLOSCOPE=1 enables per-frame state
+    // logging; remove together with UiOscilloscope once the flicker root cause is fixed.
+    private UiOscilloscope? _uiOscilloscope;
+
     private unsafe void OnRender(double dt)
     {
         if (_window.WindowState == WindowState.Minimized)
@@ -1003,15 +1025,43 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
             return;
         }
 
-        // Software frame throttle safeguard: prevent uncapped GPU presentation from flooding DWM
-        // if the display driver ignores VSync (common with G-Sync/FreeSync on windowed OpenGL).
-        if (dt < 0.005)
+        _uiOscilloscope?.SampleState(
+            _hideUiChrome, _showLeftSidebar, _showRightSidebar,
+            _uiManager.LeftDockOpen, _uiManager.RightDockOpen,
+            (int)_uiManager.ActiveLeftPanel, (int)_uiManager.ViewerPanel, (int)_uiManager.Destination, _activeBottomTabIndex,
+            _loadingScreen?.IsActive ?? false, _fullscreenMinimap, _sqlSpawnStreaming.ChatVisible,
+            _uiManager.TryGetSceneViewportRect(out float oscSceneX, out float oscSceneY, out float oscSceneW, out float oscSceneH),
+            oscSceneX, oscSceneY, oscSceneW, oscSceneH,
+            _uiManager.GetRegionRect(UiRegion.LeftDock), _uiManager.GetRegionRect(UiRegion.RightDock),
+            (float)_currentFps, (float)(dt * 1000.0));
+
+        // Presentation cadence safeguard: pace frame starts to an even ~60 FPS interval
+        // regardless of VSync state. An uncapped OpenGL swap stream races DWM composition on
+        // Windows and can present just-cleared or half-drawn buffers between composition
+        // cycles, which reads as whole-window flicker; an even cadence keeps swaps clear of
+        // that race. When VSync is working, SwapBuffers already blocks to vblank and this
+        // wait adds nothing. The previous dt-gated version flapped: after any throttled frame
+        // dt exceeded the gate, the limiter disengaged and reset, producing alternating
+        // throttled and unthrottled presents — itself an irregular, flicker-amplifying pattern.
         {
-            int sleepMs = (int)Math.Ceiling((1.0 / 60.0 - dt) * 1000.0);
-            if (sleepMs > 0 && sleepMs <= 16)
+            const double minPresentIntervalSeconds = 1.0 / 60.0;
+            long frequency = System.Diagnostics.Stopwatch.Frequency;
+            long minIntervalTicks = (long)(minPresentIntervalSeconds * frequency);
+            long nowTicks = _presentClock.ElapsedTicks;
+            if (_nextPresentTargetTicks == 0)
+                _nextPresentTargetTicks = nowTicks;
+            while (_presentClock.ElapsedTicks < _nextPresentTargetTicks)
             {
-                System.Threading.Thread.Sleep(sleepMs);
+                double remainingMs = (_nextPresentTargetTicks - _presentClock.ElapsedTicks) * 1000.0 / frequency;
+                if (remainingMs > 2.5)
+                    System.Threading.Thread.Sleep(1);
+                else
+                    System.Threading.Thread.SpinWait(32);
             }
+            // Never catch up: after a slow frame the next target starts from now, so a burst
+            // of immediate frames cannot follow a late one.
+            _nextPresentTargetTicks = Math.Max(_nextPresentTargetTicks + minIntervalTicks,
+                _presentClock.ElapsedTicks + minIntervalTicks);
         }
         _datasetExportDialogs.PromotePendingMlFinalizeAfterExport();
         _captureAutomation.PromotePendingMkHarvestViewerValidationCapturePlan();
@@ -1225,11 +1275,26 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                 }
             }
 
-            DrawUI();
-            // The in-app path picker is a global modal: drive it every frame so it works from any
-            // surface, independent of which panel opened it.
-            ImGuiPathPicker.Instance.Draw();
-            _imGui.Render();
+            // The ImGui frame is bound to THIS callback: NewFrame here, EndFrame in Render below,
+            // always paired inside OnRender. It previously lived in OnUpdate, and Silk.NET's
+            // independent update/render schedules (the 60/60 caps) invoke the two callbacks on
+            // different cycles — widget code then ran outside a begun frame, corrupting the
+            // ImGui stack. That corruption was the UI flicker, and it crashed in igEndMenu /
+            // igBeginPopupModal (Windows Event Log, 2026-11-04 01:03 and 01:31).
+            _imGui.Update((float)dt);
+            try
+            {
+                DrawUI();
+                // The in-app path picker is a global modal: drive it every frame so it works from
+                // any surface, independent of which panel opened it.
+                ImGuiPathPicker.Instance.Draw();
+            }
+            finally
+            {
+                // Close the frame even if a widget threw: one recovered frame beats process
+                // termination, and the next frame starts from a clean stack.
+                _imGui.Render();
+            }
         }
 
         _recordingCoordinator.CaptureVideoFrameIfNeeded(includeUi: true, dt);
@@ -1254,6 +1319,12 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
 
             if (hasSceneViewport)
                 _gl.Viewport(0, 0, (uint)Math.Max(1, _window.FramebufferSize.X), (uint)Math.Max(1, _window.FramebufferSize.Y));
+        }
+
+        if (ViewerUiManager.HasImGuiContext())
+        {
+            ImDrawDataPtr oscDrawData = ImGui.GetDrawData();
+            _uiOscilloscope?.SampleDrawData(oscDrawData.TotalVtxCount, oscDrawData.TotalIdxCount, oscDrawData.CmdListsCount);
         }
     }
 
