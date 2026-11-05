@@ -7,6 +7,12 @@
 - UI registry/reference clean (166 labels, 0 warnings); footer tests 30/30 pass; full solution build 0 errors (266 warnings, redirected output).
 - Receipt: [`bottom-toolbar-reversion-2026-11-05.md`](../specs/292-ui-bottom-bar-toggles-audio-sky/evidence/bottom-toolbar-reversion-2026-11-05.md). Operator real-client visual/restart verification remains owed.
 
+## 2026-11-05 — Spec 295 Phase 0–1 core
+
+- Added `Pm4CentroidCalibration` (signed offset, apply-once, invert, reset), `Pm4ShapeMatchAnalysisService` (ranked proposals, confidence, unmatched/low-confidence, batch conflicts, measurement harness), and `Pm4ShapeLibraryHealth`.
+- 6 focused tests pass; real-tile calibration measurement and all UI/review/batch work remain.
+- Receipt: [`phase0-1-core-2026-11-05.md`](../specs/295-pm4-visual-shape-library/evidence/phase0-1-core-2026-11-05.md).
+
 ## 2026-11-05 — Spec 293 donor picker minimap surface and chunk editing
 
 - The donor tile picker now draws each visible tile from the client minimap (`MinimapRenderer.GetTileTexture`) instead of the WDL heightmap preview, so donor selection is recognizable by roads, buildings, and biome.

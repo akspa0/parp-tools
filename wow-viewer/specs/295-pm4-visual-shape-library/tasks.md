@@ -5,18 +5,18 @@
 
 ## Phase 1 — Setup and measurement
 
-- [ ] T001 [P] Add a validation-tile measurement harness that reports the signed X/Y/Z offset between each proposed model footprint center and its hull footprint center in `wow-viewer/tests/WowViewer.Core.Tests/PM4/Pm4CentroidCalibrationTests.cs`.
+- [x] T001 [P] Add a validation-tile measurement harness that reports the signed X/Y/Z offset between each proposed model footprint center and its hull footprint center in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4ShapeMatchAnalysisService.cs`. Receipt: [`evidence/phase0-1-core-2026-11-05.md`](evidence/phase0-1-core-2026-11-05.md).
 - [ ] T002 [P] Record the measured -X offset and the validation tile/client fingerprint in `wow-viewer/specs/295-pm4-visual-shape-library/evidence/centroid-measurement-2026-11-05.md`.
-- [ ] T003 Define `Pm4CentroidCalibration` (signed offset, source note, reset, apply-once semantics) in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4CentroidCalibration.cs`.
-- [ ] T004 Add unit tests for calibration apply, idempotence, sign, and reset in `wow-viewer/tests/WowViewer.Core.Tests/PM4/Pm4CentroidCalibrationTests.cs`.
+- [x] T003 Define `Pm4CentroidCalibration` (signed offset, source note, reset, apply-once semantics) in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4CentroidCalibration.cs`. Receipt: [`evidence/phase0-1-core-2026-11-05.md`](evidence/phase0-1-core-2026-11-05.md).
+- [x] T004 Add unit tests for calibration apply, idempotence, sign, and reset in `wow-viewer/tests/WowViewer.Core.Tests/PM4/Pm4ShapeMatchAnalysisServiceTests.cs`. Receipt: [`evidence/phase0-1-core-2026-11-05.md`](evidence/phase0-1-core-2026-11-05.md).
 
 ## Phase 2 — Foundational core analysis
 
-- [ ] T005 Define `Pm4ShapeCandidate`, `Pm4ShapeMatchProposal`, and `Pm4ShapeMatchDecision` records in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4ShapeMatchModels.cs`.
-- [ ] T006 Implement `Pm4ShapeMatchAnalysisService` with ranked candidates, confidence, unmatched/low-confidence classification, and calibration application in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4ShapeMatchAnalysisService.cs`.
-- [ ] T007 Add conflict detection for multiple hulls claiming one object in `Pm4ShapeMatchAnalysisService`.
-- [ ] T008 Add focused tests for ranking, threshold behavior, conflict detection, and degenerate hulls in `wow-viewer/tests/WowViewer.Core.Tests/PM4/Pm4ShapeMatchAnalysisServiceTests.cs`.
-- [ ] T009 Add a shape-library health check that marks missing/unreadable assets in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4ShapeLibraryHealth.cs`.
+- [x] T005 Define `Pm4ShapeCandidate`, `Pm4ShapeMatchProposal`, and `Pm4ShapeMatchDecision` records in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4ShapeMatchModels.cs`. Receipt: [`evidence/phase0-1-core-2026-11-05.md`](evidence/phase0-1-core-2026-11-05.md).
+- [x] T006 Implement `Pm4ShapeMatchAnalysisService` with ranked candidates, confidence, unmatched/low-confidence classification, and calibration application in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4ShapeMatchAnalysisService.cs`. Receipt: [`evidence/phase0-1-core-2026-11-05.md`](evidence/phase0-1-core-2026-11-05.md).
+- [x] T007 Add conflict detection for multiple hulls claiming one object in `Pm4ShapeMatchAnalysisService`. Receipt: [`evidence/phase0-1-core-2026-11-05.md`](evidence/phase0-1-core-2026-11-05.md).
+- [x] T008 Add focused tests for ranking, threshold behavior, conflict detection, and degenerate hulls in `wow-viewer/tests/WowViewer.Core.Tests/PM4/Pm4ShapeMatchAnalysisServiceTests.cs`. Receipt: [`evidence/phase0-1-core-2026-11-05.md`](evidence/phase0-1-core-2026-11-05.md).
+- [x] T009 Add a shape-library health check that marks missing/unreadable assets in `wow-viewer/src/core/WowViewer.Core.PM4/Matching/Pm4ShapeLibraryHealth.cs`. Receipt: [`evidence/phase0-1-core-2026-11-05.md`](evidence/phase0-1-core-2026-11-05.md).
 
 ## Phase 3 — User Story 1: Visual shape library (P1)
 
