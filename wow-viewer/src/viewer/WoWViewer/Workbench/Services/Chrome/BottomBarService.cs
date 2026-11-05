@@ -20,6 +20,7 @@ internal sealed class BottomBarService
     private WorldScene? _lastAppliedScene;
     private string _lastAppliedMap = string.Empty;
     private int _lastAppliedLayerCount = -1;
+    private bool _showLayerPopup;
 
     internal bool BottomToggleLiquidWater { get; set; } = true;
     internal bool BottomToggleLiquidOcean { get; set; } = true;
@@ -147,24 +148,14 @@ internal sealed class BottomBarService
             "toggle-doodads", "toggle-wmos", "toggle-terrain", "toggle-pm4",
             "toggle-tile-grid", "toggle-chunk-grid", "toggle-cell-grid", "toggle-audio-mute",
         ];
-        var items = new List<FooterItemMeasure>(toggleIds.Length + layerCount + alphaLayerCount + 2);
+        var items = new List<FooterItemMeasure>(toggleIds.Length + 3);
         for (int index = 0; index < toggleIds.Length; index++)
         {
             float width = ImGui.CalcTextSize(toggleLabels[index]).X + ImGui.GetFrameHeight() + 5f;
             items.Add(new FooterItemMeasure(toggleIds[index], width, width, FooterItemPriority.Essential));
         }
-        for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
-        {
-            string label = $"L{layerIndex}";
-            float width = ImGui.CalcTextSize(label).X + ImGui.GetFrameHeight() + 5f;
-            items.Add(new FooterItemMeasure($"toggle-layer-{layerIndex}", width, width, FooterItemPriority.Essential));
-        }
-        for (int channel = 1; channel <= alphaLayerCount; channel++)
-        {
-            string label = $"A{channel}";
-            float width = ImGui.CalcTextSize(label).X + ImGui.GetFrameHeight() + 5f;
-            items.Add(new FooterItemMeasure($"alpha-channel-{channel}", width, width, FooterItemPriority.Essential));
-        }
+        float layersWidth = ImGui.CalcTextSize("Layers").X + ImGui.GetFrameHeight() + 5f;
+        items.Add(new FooterItemMeasure("layers", layersWidth, layersWidth, FooterItemPriority.Essential));
         float m2LabelWidth = ImGui.CalcTextSize("M2/MDX Opacity").X;
         float wmoLabelWidth = ImGui.CalcTextSize("WMO Opacity").X;
         items.Add(new FooterItemMeasure("opacity-m2", m2LabelWidth + 70f * scale, m2LabelWidth + 54f * scale, FooterItemPriority.Essential));
@@ -284,64 +275,77 @@ internal sealed class BottomBarService
             scene?.SetAudioMuted(v);
         }, "Mute or unmute world audio output.");
 
-        for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
+        FooterItemPlacement layersPlacement = fit.Get("layers");
+        if (layersPlacement.Visible)
         {
-            int layer = layerIndex;
-            string itemId = $"toggle-layer-{layer}";
-            FooterItemPlacement placement = fit.Get(itemId);
-            if (!placement.Visible) continue;
-            ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
-            bool visible = terrainRenderer?.GetShowLayer(layer) ?? true;
-            bool changed = layer switch
-            {
-                0 => ImGui.Checkbox("L0##toggle-layer-0", ref visible),
-                1 => ImGui.Checkbox("L1##toggle-layer-1", ref visible),
-                2 => ImGui.Checkbox("L2##toggle-layer-2", ref visible),
-                3 => ImGui.Checkbox("L3##toggle-layer-3", ref visible),
-                4 => ImGui.Checkbox("L4##toggle-layer-4", ref visible),
-                5 => ImGui.Checkbox("L5##toggle-layer-5", ref visible),
-                6 => ImGui.Checkbox("L6##toggle-layer-6", ref visible),
-                _ => ImGui.Checkbox("L7##toggle-layer-7", ref visible),
-            };
-            if (changed)
-            {
-                terrainRenderer?.SetShowLayer(layer, visible);
-                _host.Settings.SaveViewerSettings();
-            }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Toggle texture layer {layer}.");
+            ImGui.SetCursorPos(new Vector2(originX + layersPlacement.X, y));
+            if (ImGui.Button("Layers##bottom-layers", new Vector2(layersPlacement.Width, 0f)))
+                _showLayerPopup = true;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Open per-layer visibility and alpha-channel controls.");
         }
 
-        for (int channel = 1; channel <= alphaLayerCount; channel++)
+        if (_showLayerPopup)
         {
-            int alphaChannel = channel;
-            string itemId = $"alpha-channel-{channel}";
-            FooterItemPlacement placement = fit.Get(itemId);
-            if (!placement.Visible) continue;
-            ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
-            bool alphaSelected = terrainRenderer is not null
-                ? terrainRenderer.ShowAlphaMask && terrainRenderer.AlphaMaskChannel == channel
-                : BottomToggleAlphaMask && BottomAlphaMaskChannel == channel;
-            bool clicked = channel switch
+            ImGui.SetNextWindowSize(new Vector2(380f * scale, 460f * scale), ImGuiCond.FirstUseEver);
+            if (ImGui.Begin("Layer Controls###BottomLayerPopup", ref _showLayerPopup))
             {
-                1 => ImGui.Selectable("A1##alpha-channel-1", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
-                2 => ImGui.Selectable("A2##alpha-channel-2", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
-                3 => ImGui.Selectable("A3##alpha-channel-3", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
-                4 => ImGui.Selectable("A4##alpha-channel-4", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
-                5 => ImGui.Selectable("A5##alpha-channel-5", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
-                6 => ImGui.Selectable("A6##alpha-channel-6", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
-                _ => ImGui.Selectable("A7##alpha-channel-7", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
-            };
-            if (clicked)
-            {
-                bool showAlpha = !alphaSelected;
-                BottomToggleAlphaMask = showAlpha;
-                BottomAlphaMaskChannel = alphaChannel;
-                ApplyAlphaState(terrainManager?.Renderer, showAlpha, alphaChannel);
-                if (vlmTerrain?.Renderer != terrainManager?.Renderer)
-                    ApplyAlphaState(vlmTerrain?.Renderer, showAlpha, alphaChannel);
-                _host.Settings.SaveViewerSettings();
+                ImGui.TextDisabled($"{layerCount} resident layer(s), {alphaLayerCount} alpha channel(s)");
+                for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
+                {
+                    int layer = layerIndex;
+                    bool visible = terrainRenderer?.GetShowLayer(layer) ?? true;
+                    if (ImGui.Checkbox($"L{layer}##popup-layer-{layer}", ref visible))
+                    {
+                        terrainRenderer?.SetShowLayer(layer, visible);
+                        _host.Settings.SaveViewerSettings();
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"Details##popup-layer-details-{layer}"))
+                        ImGui.OpenPopup($"layer-detail-{layer}");
+                    if (ImGui.BeginPopup($"layer-detail-{layer}"))
+                    {
+                        ImGui.TextUnformatted($"Layer {layer}");
+                        bool detailVisible = terrainRenderer?.GetShowLayer(layer) ?? true;
+                        if (ImGui.Checkbox("Visible##popup-layer-detail-visible", ref detailVisible))
+                        {
+                            terrainRenderer?.SetShowLayer(layer, detailVisible);
+                            _host.Settings.SaveViewerSettings();
+                        }
+                        if (layer > 0 && ImGui.Button("Show alpha map##popup-layer-detail-alpha"))
+                        {
+                            int channel = Math.Clamp(layer, 1, Math.Max(1, alphaLayerCount));
+                            BottomToggleAlphaMask = true;
+                            BottomAlphaMaskChannel = channel;
+                            ApplyAlphaState(terrainManager?.Renderer, true, channel);
+                            if (vlmTerrain?.Renderer != terrainManager?.Renderer)
+                                ApplyAlphaState(vlmTerrain?.Renderer, true, channel);
+                            _host.Settings.SaveViewerSettings();
+                        }
+                        ImGui.EndPopup();
+                    }
+                }
+
+                ImGui.Separator();
+                for (int channel = 1; channel <= alphaLayerCount; channel++)
+                {
+                    int alphaChannel = channel;
+                    bool selected = terrainRenderer is not null
+                        ? terrainRenderer.ShowAlphaMask && terrainRenderer.AlphaMaskChannel == channel
+                        : BottomToggleAlphaMask && BottomAlphaMaskChannel == channel;
+                    if (ImGui.Selectable($"A{channel}##popup-alpha-channel-{channel}", selected))
+                    {
+                        bool showAlpha = !selected;
+                        BottomToggleAlphaMask = showAlpha;
+                        BottomAlphaMaskChannel = alphaChannel;
+                        ApplyAlphaState(terrainManager?.Renderer, showAlpha, alphaChannel);
+                        if (vlmTerrain?.Renderer != terrainManager?.Renderer)
+                            ApplyAlphaState(vlmTerrain?.Renderer, showAlpha, alphaChannel);
+                        _host.Settings.SaveViewerSettings();
+                    }
+                }
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(alphaSelected ? $"Alpha channel {alphaChannel} is active. Click to turn the overlay off." : $"Show the alpha map for texture layer {alphaChannel}.");
+            ImGui.End();
         }
 
         DrawOpacity("opacity-m2", M2Renderer.GlobalOpacity, value =>

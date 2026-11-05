@@ -88,7 +88,7 @@ internal sealed class ViewerActionBarsService
         DrawActionBarIcon("World", "ActionWorld", IconKind.World, size, "Inspect objects, placements, and world data", () => _host.UiManager.ToggleRightDock(ViewerPanel.World), dockOpen && active == ViewerPanel.World);
         DrawActionBarIcon("Gossip", "ActionGossip", IconKind.Gossip, size, "Inspect creature gossip, quests, and dialogue", () => _host.UiManager.ToggleRightDock(ViewerPanel.Gossip), dockOpen && active == ViewerPanel.Gossip);
         DrawActionBarIcon("PM4", "ActionPm4", IconKind.Pm4, size, "Inspect PM4 navigation and object data", () => _host.UiManager.ToggleRightDock(ViewerPanel.PM4), dockOpen && active == ViewerPanel.PM4);
-        DrawActionBarIcon("Archaeology", "ActionArchaeology", IconKind.Archaeology, size, "Open the Archaeology workbench (weak signal, stratigraphy, layers, cartography)", () => _host.UiManager.ToggleRightDock(ViewerPanel.Archaeology), dockOpen && active == ViewerPanel.Archaeology);
+        DrawActionBarIcon("Reconstruction", "ActionReconstruction", IconKind.Archaeology, size, "Open the Reconstruction Workbench map layers panel", () => _host.UiManager.ToggleRightDock(ViewerPanel.Reconstruction), dockOpen && active == ViewerPanel.Reconstruction);
         DrawActionBarIcon("Exports", "ActionExports", IconKind.Export, size, "Export PM4 OBJ/JSON models, placement ledgers, and reports", () => _host.UiManager.ToggleRightDock(ViewerPanel.Exports), dockOpen && active == ViewerPanel.Exports);
         DrawActionBarIcon("Spawns", "ActionSpawns", IconKind.Spawns, size, "Browse map spawns and population points", () => _host.UiManager.ToggleRightDock(ViewerPanel.Spawns), dockOpen && active == ViewerPanel.Spawns);
     }

@@ -40,6 +40,9 @@ The normal `bin` outputs are held by the operator's running viewer (`ParpToolsWo
 | Separate liquid-family controls | Water/Ocean/Magma/Slime toggles drive `LiquidRenderer` per-family flags for MCLQ/MH2O and WL* meshes and `WmoRenderer` MLIQ family flags. |
 | A1–An select one channel and enable the overlay | Seven selected-state `Selectable` controls apply one `AlphaMaskChannel` at a time and the shared `ShowAlphaMask` flag; clicking the selected channel disables the overlay. |
 | Retain the other scene toggles and both opacity sliders | Draw code retains Doodads, WMOs, Terrain, PM4, separate Tile/Chunk/Cell grid toggles, Mute, M2/MDX opacity, and WMO opacity. |
+| Layer/alpha controls scale beyond eight | The toolbar now has one **Layers** button; its popup lists the resident layers, opens a per-layer detail popup, and lists alpha channels. No fixed L0–L7/A1–A7 row remains. |
+| Reconstruction Workbench routing | The right action bar's **Reconstruction** button opens `ViewerPanel.Reconstruction`, which draws the map-layer stack; the old Archaeology panel remains available through its own destination. |
+| Skybox models are selectable | `SceneAtmosphere.AvailableSkyboxModels` merges LightSkybox DBC names with every `.mdx`/`.m2` under `World\Skybox`; the Sky panel combo uses that list. |
 | One Mute control, muted by default | Status-bar audio button removed; `WorldScene._audioMuted` and the settings default are true. |
 | Persist state | Viewer settings load/save include the four liquid families and alpha overlay/channel; the legacy single Water value migrates. |
 | Registry/reference and layout checks | UI verifier passes with zero warnings; 30 focused footer tests pass; viewer compile has zero errors. |

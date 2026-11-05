@@ -107,11 +107,11 @@
       "visible": true
     },
     {
-      "id": "archaeology-rail-icon",
-      "label": "Archaeology",
+      "id": "reconstruction-rail-icon",
+      "label": "Reconstruction",
       "region": "Right action bar",
       "shortcut": null,
-      "help": "Open or close the Archaeology workbench (weak signal, stratigraphy, layers, cartography) in the right dock.",
+      "help": "Open or close the Reconstruction Workbench map layers panel in the right dock.",
       "visible": true
     },
     {
@@ -1227,123 +1227,27 @@
       "visible": true
     },
     {
-      "id": "bottom-layer-0",
-      "label": "L0",
-      "region": "Bottom toolbar > Layers",
+      "id": "bottom-layers-button",
+      "label": "Layers",
+      "region": "Bottom toolbar",
       "shortcut": null,
-      "help": "Quick-toggle the base terrain texture layer.",
+      "help": "Open the layer controls popup: per-layer visibility, per-layer detail popups, and alpha-channel selection.",
       "visible": true
     },
     {
-      "id": "bottom-layer-1",
-      "label": "L1",
-      "region": "Bottom toolbar > Layers",
+      "id": "bottom-layer-detail-visible",
+      "label": "Visible",
+      "region": "Bottom toolbar > Layers > Layer detail",
       "shortcut": null,
-      "help": "Quick-toggle resident terrain texture layer 1.",
+      "help": "Toggle visibility for the selected terrain texture layer.",
       "visible": true
     },
     {
-      "id": "bottom-layer-2",
-      "label": "L2",
-      "region": "Bottom toolbar > Layers",
+      "id": "bottom-layer-detail-alpha",
+      "label": "Show alpha map",
+      "region": "Bottom toolbar > Layers > Layer detail",
       "shortcut": null,
-      "help": "Quick-toggle resident terrain texture layer 2.",
-      "visible": true
-    },
-    {
-      "id": "bottom-layer-3",
-      "label": "L3",
-      "region": "Bottom toolbar > Layers",
-      "shortcut": null,
-      "help": "Quick-toggle resident terrain texture layer 3.",
-      "visible": true
-    },
-    {
-      "id": "bottom-layer-4",
-      "label": "L4",
-      "region": "Bottom toolbar > Layers",
-      "shortcut": null,
-      "help": "Quick-toggle resident terrain texture layer 4 when present.",
-      "visible": true
-    },
-    {
-      "id": "bottom-layer-5",
-      "label": "L5",
-      "region": "Bottom toolbar > Layers",
-      "shortcut": null,
-      "help": "Quick-toggle resident terrain texture layer 5 when present.",
-      "visible": true
-    },
-    {
-      "id": "bottom-layer-6",
-      "label": "L6",
-      "region": "Bottom toolbar > Layers",
-      "shortcut": null,
-      "help": "Quick-toggle resident terrain texture layer 6 when present.",
-      "visible": true
-    },
-    {
-      "id": "bottom-layer-7",
-      "label": "L7",
-      "region": "Bottom toolbar > Layers",
-      "shortcut": null,
-      "help": "Quick-toggle resident terrain texture layer 7 when present.",
-      "visible": true
-    },
-    {
-      "id": "bottom-alpha-channel-1",
-      "label": "A1",
-      "region": "Bottom toolbar > Alpha channels",
-      "shortcut": null,
-      "help": "Select alpha channel 1 and enable its overlay; click again to turn the overlay off.",
-      "visible": true
-    },
-    {
-      "id": "bottom-alpha-channel-2",
-      "label": "A2",
-      "region": "Bottom toolbar > Alpha channels",
-      "shortcut": null,
-      "help": "Select alpha channel 2 and enable its overlay; click again to turn the overlay off.",
-      "visible": true
-    },
-    {
-      "id": "bottom-alpha-channel-3",
-      "label": "A3",
-      "region": "Bottom toolbar > Alpha channels",
-      "shortcut": null,
-      "help": "Select alpha channel 3 and enable its overlay; click again to turn the overlay off.",
-      "visible": true
-    },
-    {
-      "id": "bottom-alpha-channel-4",
-      "label": "A4",
-      "region": "Bottom toolbar > Alpha channels",
-      "shortcut": null,
-      "help": "Select alpha channel 4 and enable its overlay; click again to turn the overlay off.",
-      "visible": true
-    },
-    {
-      "id": "bottom-alpha-channel-5",
-      "label": "A5",
-      "region": "Bottom toolbar > Alpha channels",
-      "shortcut": null,
-      "help": "Select alpha channel 5 and enable its overlay; click again to turn the overlay off.",
-      "visible": true
-    },
-    {
-      "id": "bottom-alpha-channel-6",
-      "label": "A6",
-      "region": "Bottom toolbar > Alpha channels",
-      "shortcut": null,
-      "help": "Select alpha channel 6 and enable its overlay; click again to turn the overlay off.",
-      "visible": true
-    },
-    {
-      "id": "bottom-alpha-channel-7",
-      "label": "A7",
-      "region": "Bottom toolbar > Alpha channels",
-      "shortcut": null,
-      "help": "Select alpha channel 7 and enable its overlay; click again to turn the overlay off.",
+      "help": "Enable the alpha-mask overlay for the selected terrain texture layer.",
       "visible": true
     }
   ]

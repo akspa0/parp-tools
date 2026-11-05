@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
@@ -120,6 +121,47 @@ public sealed class SceneAtmosphere
 
     /// <summary>Skybox model names available in the exact-build LightSkybox table.</summary>
     public IReadOnlyList<string> SkyboxNames => _lightService?.SkyboxNames ?? Array.Empty<string>();
+
+    private IReadOnlyList<string>? _availableSkyboxModels;
+
+    /// <summary>
+    /// Every skybox model the active client actually ships: the LightSkybox DBC names plus
+    /// loose/archived models under World\Skybox. The DBC alone omits models that exist in the
+    /// client but are not referenced by the current zone, which is why the selector looked empty.
+    /// </summary>
+    public IReadOnlyList<string> AvailableSkyboxModels
+    {
+        get
+        {
+            if (_availableSkyboxModels is not null)
+                return _availableSkyboxModels;
+
+            var models = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string name in SkyboxNames)
+            {
+                if (!string.IsNullOrWhiteSpace(name))
+                    models.Add(name);
+            }
+
+            if (_dataSource is not null)
+            {
+                foreach (string extension in new[] { ".mdx", ".m2" })
+                {
+                    foreach (string path in _dataSource.GetFileList(extension))
+                    {
+                        if (path.Contains("\\skybox\\", StringComparison.OrdinalIgnoreCase)
+                            || path.Contains("/skybox/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            models.Add(path);
+                        }
+                    }
+                }
+            }
+
+            _availableSkyboxModels = models.ToList();
+            return _availableSkyboxModels;
+        }
+    }
 
     /// <summary>Forces a specific skybox model (or null to return to automatic selection).</summary>
     internal void SetManualSkyboxModel(string? modelPath)

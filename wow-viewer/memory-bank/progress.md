@@ -1,5 +1,12 @@
 # Progress — wow-viewer
 
+## 2026-11-05 — Spec 292 layer popups, Reconstruction routing, skybox enumeration
+
+- Replaced the fixed L0–L7/A1–A7 toolbar row with a single **Layers** button and a popup that lists resident layers, opens per-layer detail popups, and selects alpha channels.
+- The right action bar's **Reconstruction** button now opens `ViewerPanel.Reconstruction`, which draws the map-layer stack; the old Archaeology panel remains a separate destination.
+- The Sky panel's skybox combo now enumerates every `.mdx`/`.m2` under `World\Skybox` in addition to LightSkybox DBC names.
+- Verification: viewer compile 0 errors; footer tests 30/30; UI registry 156/156 clean.
+
 ## 2026-11-05 — Spec 292 bottom-toolbar correction
 
 - Corrected the toolbar to exclude Sky/Fog and show Water/Ocean/Magma/Slime, Doodads/WMOs/Terrain/PM4, separate Tile/Chunk/Cell grid toggles, and Mute; resident-terrain L0–Ln, one A1–An selector per non-base layer, and both opacity sliders. A<n> selects one channel and enables the shared overlay; clicking the active selector disables it. Texture Masks remains absent.

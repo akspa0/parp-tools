@@ -87,6 +87,12 @@ internal sealed partial class WorkbenchPanelsService
                 if (archaeologyPage != ui.ArchaeologyPage) ui.ArchaeologyPage = archaeologyPage;
                 _archaeologyPanel.DrawArchaeologyWorkbenchSubTabContent(ui.ArchaeologyPage);
                 break;
+            case ViewerPanel.Reconstruction:
+                if (_host.TerrainManager is { } reconstructionTerrain)
+                    _archaeologyPanel.DrawMapLayersContent(reconstructionTerrain);
+                else
+                    ImGui.TextDisabled("Load a map to edit its layer stack.");
+                break;
         }
     }
     internal void DrawConvertersSubTabContent() => _mainMenuBar.DrawConvertersContent();

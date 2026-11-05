@@ -858,6 +858,9 @@ internal sealed partial class ArchaeologyPanelService
             DrawCartographySaveMergedSubTab(terrain);
     }
 
+    /// <summary>Reconstruction Workbench entry point for the map-layer stack.</summary>
+    internal void DrawMapLayersContent(TerrainManager terrain) => DrawCartographyLayersContent(terrain);
+
     private void DrawCartographyLayersContent(TerrainManager terrain)
     {
         ImGui.TextWrapped(

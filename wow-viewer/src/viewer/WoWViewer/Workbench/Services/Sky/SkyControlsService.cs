@@ -59,8 +59,9 @@ internal sealed class SkyControlsService
         else
             ImGui.TextDisabled("Client model: Procedural fallback");
 
-        // 2b. Skybox model selector — the operator can force any client skybox.
-        IReadOnlyList<string> skyboxNames = atmosphere.SkyboxNames;
+        // 2b. Skybox model selector — the operator can force any client skybox, including
+        // models that exist under World\Skybox but are not referenced by the current zone DBC.
+        IReadOnlyList<string> skyboxNames = atmosphere.AvailableSkyboxModels;
         string currentSkybox = atmosphere.ManualSkyboxModelPath ?? string.Empty;
         string skyboxPreview = string.IsNullOrWhiteSpace(currentSkybox)
             ? "Auto (Light DBC / stars)"
