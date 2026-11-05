@@ -71,7 +71,10 @@ As a user working with the editor or archaeology tools alongside 3D scene inspec
 ### User Story 3: UI Standardization & Verification (Priority: P2)
 As a maintainer of the viewer UI system, I want all new controls and layouts registered in the UI control catalog so that `Verify-UiReference.ps1` passes with zero errors and zero warnings.
 
-- **AC-301**: All new UI buttons and controls in `ExportWorkbenchService` are registered in `eng/ui/ui-reference-inventory.json`.
+- **AC-301**: All new UI buttons and controls in `ExportWorkbenchService` are registered in `eng/ui/ui-controls.json`.
 - **AC-302**: `pwsh -File wow-viewer/eng/ui/Verify-UiReference.ps1` passes with 0 errors and 0 warnings.
 - **AC-303**: All new source files remain $\le 2,000$ lines.
 
+### Documentation correction — 2026-11-05
+
+AC-301's inventory path is corrected to the existing canonical `eng/ui/ui-controls.json`; the former `ui-reference-inventory.json` path does not exist. This corrects the registry filename only and does not change the accepted UI behavior or scope.

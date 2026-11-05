@@ -6,14 +6,17 @@ This document is the authoritative reference for any path that appears in wow-vi
 
 ## Quick Reference
 
-> **Verified 2026-09-23:** the environment-variable overrides this document used to list
+> **Verified 2026-11-05:** the environment-variable overrides this document used to list
 > (`WOWVIEWER_WORKSPACE`, `WOWVIEWER_CACHE`, `WOWVIEWER_DATASETS`, `WOWVIEWER_TMP`,
 > `WOWVIEWER_TEST_DATA`, `WOWVIEWER_STAGED_CLIENTS`, `WOWARCHIVE_MOUNT`) are **not implemented** —
-> no C# or Python code reads them. Paths are set by explicit CLI arguments or UI pickers, or fall back
-> to conventions. Some viewer outputs resolve relative to the app base directory (`bin/…`), not the
+> no C# or Python code reads them. Data paths are set by explicit CLI arguments or UI pickers, or fall
+> back to conventions. Some viewer outputs resolve relative to the app base directory (`bin/…`), not the
 > workspace: the PM4 overlay cache (`Pm4OverlayCacheService`) and the export directory (Epic 250 E-03).
-> Environment variables actually read: `WOWVIEWER_PM4_PROFILE` and the `PARP_*` debug flags
-> (`PARP_MDX_TEXTURE_DIAG`, `PARP_M2_ENABLE_ANIMATION`, `PARP_M2_FORCE_SOLID`, `PARP_MDX_DEBUG`).
+> Relevant environment variables actually read include `WOWVIEWER_PM4_PROFILE`, the specific
+> `WOWVIEWER_WDLREAD_DLL` harvester shim-DLL override, `PARP_CASC_FAST_READS` (set to `0` to disable
+> CASC local fast reads), `PARP_UI_OSCILLOSCOPE` (temporary UI diagnostic; set to `0` to opt out), and
+> the debug flags `PARP_MDX_TEXTURE_DIAG`, `PARP_M2_ENABLE_ANIMATION`, `PARP_M2_FORCE_SOLID`,
+> `PARP_MDX_DEBUG`. These do not provide general workspace/cache/dataset path overrides.
 
 | What | Conventional location | How to change it |
 |------|------------------|----------|
@@ -131,8 +134,10 @@ When a wow-viewer tool or library needs a path, it resolves in this order:
 2. Convention-based default (workspace-relative for tools; some viewer outputs are app-base-relative,
    see the note under Quick Reference).
 
-There is no environment-variable layer today (verified 2026-09-23); an override mechanism would be new
-scope and needs an operator-approved spec item.
+There is no **general path** environment-variable layer today (verified 2026-11-05). The
+`WOWVIEWER_WDLREAD_DLL` variable only overrides a specific harvester shim DLL; it does not override
+workspace, client, cache, dataset, or scratch roots. Adding general path overrides would be new scope
+and needs an operator-approved spec item.
 
 There is no automatic fallback to a hardcoded absolute path. If an override is unset and the default is missing, the operation fails with a clear "path not found" error rather than silently substituting a stale root.
 

@@ -28,7 +28,7 @@ a code blocker.
 
 ## P0 — Baseline and guardrails
 
-- [x] T001 Record the baseline build and test result on `280-ui-rework`.
+- [ ] T001 Record the baseline build and test result on `280-ui-rework`.
   - Command: `dotnet build wow-viewer/WowViewer.slnx -c Debug`
   - Command: `dotnet test wow-viewer/WowViewer.slnx -c Debug`
   - Receipt: `evidence/p0-build.log` (build, 0 errors), `evidence/p0-test.log`

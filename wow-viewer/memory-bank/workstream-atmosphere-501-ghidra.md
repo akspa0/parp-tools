@@ -171,20 +171,20 @@ era-gate the behaviour**, carrying provenance and flagging unknown builds — ne
 mechanism was present earlier. Establishing what 0.5.3 actually did is separate work against the
 0.5.3 binary, and the difference between the two is the finding, not an inconvenience.
 
-## Consumed by
+## Current ownership
 
-- **Spec 214** — physics / Domino (owns the physics decode + implementation).
-- **Spec 215** — weather (owns `MapWeather`, `Weather.dbc`, precipitation, `Lightning`).
-- **Spec 160** — skybox rendering: `DNSky.cpp`, `DNOverrideSky.cpp`, `DNClouds.cpp`, `LightSkybox.dbc`.
-- **Spec 147** — fog coverage: `MaterialFog.cpp`, `PassFogCombine.cpp`.
-- **Spec 143** — lighting parity: the `Light`/`LightParams`/`LightData` chain and
-  `DayNight::CZoneLight`.
+Since the 2026-09-23 Spec Kit reconciliation, this shared evidence feeds **Epic 249** (sky/fog/lighting)
+and **Epic 252** (physics W-20, weather W-21). Specs 143, 147, 160, 214, and 215 are archived
+historical owners; follow the current epic/spec registry for scheduled implementation work. This note
+supplies evidence and does not authorize implementation by itself.
 
-Those three specs keep ownership of their implementations. This note supplies evidence; it does not
-supersede them.
+## Evidence boundary — subsystem-specific
 
-## What has NOT been done
-
-Nothing here is decompiled yet. These are string anchors, xref counts, RTTI names and DBC filenames —
-enough to aim the work and size it, and nothing more. No structure layout, field offset, update
-order, or integration step has been recovered. Do not cite this note as evidence for any of those.
+- The physics adapter and `.phys` sidecar format have follow-up decode results recorded in the earlier
+  physics section and archived Spec 214 evidence. It is incorrect to characterize this entire note as
+  “not decompiled.”
+- For the atmosphere/weather portion, the listed source anchors, strings, RTTI names, and DBC filenames
+  are reconnaissance, not a complete decode. Record layouts, most field offsets, full update order,
+  and viewer integration still require evidence in the owning spec.
+- **None of the 5.0.1 findings establish 0.5.3 behavior.** The Alpha client needs its own binary
+  evidence; carry build provenance and era-gate any implementation.

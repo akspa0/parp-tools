@@ -71,7 +71,6 @@ In `ViewerActionBarsService.DrawToolWindows()`:
 - Verify resolution scaling and non-overlap with `UiRegion.RightDock`.
 
 ### Phase 4: UI Reference Catalog & Regression Verification
-- Update `eng/ui/ui-reference-inventory.json`.
+- Update `eng/ui/ui-controls.json`.
 - Run `pwsh -File wow-viewer/eng/ui/Verify-UiReference.ps1`.
 - Verify compilation with 0 errors and 0 warnings.
-

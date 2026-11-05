@@ -1,0 +1,302 @@
+# Workstream — PM4 decode
+
+> **Owner since 2026-09-23:** Epic 253 (PM4) — [253-epic-pm4-navmesh-research](../specs/253-epic-pm4-navmesh-research/spec.md). Spec numbers below refer to archived specs under `specs/archived/` (reconciliation-2026-09-23).
+
+Owner specs: 130 (remaining decode), 131 (scene graph / doodads), epic-pm4-restoration.
+Historical baseline: 2026-08-04, branch `131-pm4-scene-graph-doodads`. Latest continuation: 2026-10-20.
+
+This file is the durable home for PM4 decode findings. `activeContext.md` links here and stays
+short; put detail here, not there.
+
+## Current format reference and remaining-decode owner
+
+Operator selected [Spec 279](../specs/279-decode-pm4-format/spec.md), branch `279-decode-pm4-format`,
+for full comprehension/writeup/remaining unknowns. Read the [current format reference](../docs/research/pm4-format-reference.md)
+before historical claims below. Phase 0 covers all 16 parsed signatures and 17 unknown groups.
+Sub-step [2A](../specs/279-decode-pm4-format/evidence/phase-2a-edge-ordinal-2026-10-20.md) identifies
+raw MSLK +0x01 as a source-edge ordinal in this corpus: all 1,273,335 in range; 674,013 selected
+boundary matches vs shifted control 137; auxiliary plane corroboration 536,142 vs 3,120.
+Direct +0x04 geometric-point readings tested do not identify a role. Next 2B tests reciprocal-edge
+value identity/reuse without selecting reverse records by the tested value. No asset ownership follows.
+Phase 1's [all-map raw +0x04 test](../specs/279-decode-pm4-format/evidence/phase-1-raw-04-2026-10-20.md)
+rejects a general reverse-link pointer: 1,603 full window/back-reference hits; source MSCN/MSLK/MSVI
+range fits all 100%, so no alternative semantic domain is selected. 502 structured files carry
+full MVER 0x3010; 114 are empty. Point-node identity and M2 ownership remain unresolved.
+
+## 2026-10-20 — authority correction and sparse-M2 measurements
+
+**Latest measured correction:** [structural foundations](../specs/270-pm4-object-association-ledger-and-placement/evidence/structural-foundations-2026-10-20.md).
+All 616 files were read; MSUR +0x18/+0x02 is an exact MSLK start/count relationship for this corpus.
+MSLK +0x0C low/next bytes address target tile X/Y; +0x10 indexes that tile's surfaces. Not every
+reference is file-local. 15,773 cross-tile links; 14,659 resolve with zero addressed index overruns.
+Paired 10,222 records yield 9,748 addressed vs 15 wrong-local reciprocal pairs. All 1,257,562
+same-tile addressed links reciprocate; 0x01/0x11 are geometric boundary-neighbor candidates.
+This corrects file-local graph assumptions in earlier instruments, **not** all remaining semantics.
+32 focused tests pass; only research audit/probes changed. Editor-authored route points (operator
+screenshot evidence, not newly inspected) remain distinct from the generated surface graph; their
+chunk identity and any source-object ownership partition are still unknown.
+
+**Latest instrument:** [whole-map context receipt](../specs/270-pm4-object-association-ledger-and-placement/evidence/map-context-instrument-2026-10-20.md)
+and [operator usage](../specs/270-pm4-object-association-ledger-and-placement/evidence/map-context-usage.md).
+Ten map-level partition hypotheses preserve all MSUR/MSLK entries, raw attrMask/group/type incidence,
+window controls, anchor/orphan links, geometry coincidences and scaled-family candidates. Full
+decoded chunks are retained for later interpretation; Museum placements retain paths/transforms/scales
+including unpaired tiles. **No full-map run or semantic decode yet.** 25 focused tests pass.
+File-backed operator tile pools constrain candidates without changing scores. WL import retained
+70 names/11 recognized aliases; names are hints, not tile footprints. Existing WMO matching unchanged.
+
+**Operator correction:** old research began in the ChatGPT 3.5 era and may contain coincidences.
+The historical “settled” labels below are not current proof or permission to change the working
+WMO path. M2 has substantially less surviving pathfinding geometry; investigate that directly.
+
+Five paired files were measured with existing readers unchanged; [Spec 270 receipt](../specs/270-pm4-object-association-ledger-and-placement/evidence/investigation-2026-10-20.md)
+contains input hashes, methods, controls, caveats and reproducible commands. On M2-only 16_33,
+170/234 unkeyed components have ≤4 triangles; default edge/area bins yield 171 distinct histograms
+(205 with 0.25 bins, not validated identity accuracy). Nearness to an M2 origin is 233/234 within
+24 yards, but the reflected-position control still reaches 192/234. Do not quote proximity as
+asset-match precision. Components can contain terrain and are not proven individual M2s.
+
+Current keyed-M2 routing also contradicts real paired-file observations: 16 groups routed as M2
+have bit-exact-Z/footprint WMO candidates. In 50_38 the two authored wall-post WMOs share the raw
+word used by four keyed surfaces; the test's “zero WMOs” premise is false. This is local evidence,
+not a complete field decode or unique object identity. WMO production behavior was not changed.
+
+**Further operator correction:** all PM4s must be read as a whole-map object. Existing WMO matching
+is ~70% accurate (operator-reported); important context may remain undecoded in already parsed
+chunks. The five-file probe only diagnoses local ambiguity, not complete M2 object boundaries or
+map-wide matching accuracy. Next: retain and audit whole-map cross-file/chunk context before
+revisiting isolated fragments. Four focused tests pass; none proves a real PM4-to-M2 asset match.
+
+## Historical findings — previously labeled “settled”; revalidation required
+
+### The coordinate transform
+
+MSVT is stored in **ADT placement space**: a distance-from-origin coordinate, exactly like a raw
+MDDF position, with its two horizontal fields in the **opposite order** to MDDF's
+(`MSVT.X == MDDF.rawY`, `MSVT.Y == MDDF.rawX`). Per-axis subtraction, **no axis swap**:
+
+```text
+placement = (17066.666 - MSVT.X, 17066.666 - MSVT.Y, MSVT.Z)
+```
+
+Evidence: over the 179 development tiles with both a PM4 and a correctly named `_obj0.adt`,
+**55,978 of 60,560 (92.4%)** MDDF/MODF positions fall inside their paired PM4's footprint. The
+unswapped reading scores **412/60,560 (0.7%)** and is eliminated.
+
+Earlier "absolute world with swapped axes" readings came from bounds fits, which prove only which
+**band** a value is in — a reflection about the map centre maps a band onto a band. The raw band
+measurement still reproduces (309/309: X in the band of the filename's SECOND number, Y in the
+FIRST). What was wrong was reading a distance-from-origin band as a map tile index. **The map tile
+index is `31 - band`.**
+
+`Pm4PlacementMath.ConvertPm4VertexToWorld` is **correct — do not touch it**. It emits an
+intermediate space the viewer finishes with `renderer = (MapOrigin - world.Y, MapOrigin - world.X,
+world.Z)`; composing the two reproduces the transform above, so its axis swap is cancelled by the
+renderer's. The 7 `PlacementMath_*` tests defending it are right.
+
+### Region-scoped coordinate frames — REFUTED
+
+`pm4 bounds-audit --by-region` over 1,895 CK24 objects / 309 files / 207 regions: 1,877 objects on
+one frame, 1,892 with zero tile displacement, 61 of 62 multi-file regions homogeneous. No frame
+family table exists.
+
+`MSHD.Field04` is a **per-file** header value, so "objects in one region fail alike" and "objects in
+one file fail alike" were always the same observation — the hypothesis was unfalsifiable on the
+evidence that motivated it. Regions are still real authored areas (245 is the ~2006 Sholazar
+prototype zone); they are simply not a coordinate frame key.
+
+### The placement fitter was the bug — removed from the render path
+
+`Pm4PlacementMath`'s MPRL-scored per-object fitter was overriding the canonical frame two ways:
+
+- `ResolveCoordinateMode` picked `TileLocal` for data that is never tile-local, then added tile
+  offsets to absolute coordinates. 18 objects, including the human tents.
+- `TryComputeWorldYawCorrectionRadians` rotated 974 of 1,895 objects by 15–45°. Disproven by
+  `pm4 yaw-evidence` against MODF world boxes over the 127 objects whose box can see a rotation
+  (each proven by a 45° control): containment **93.3% canonical / 88.2% with yaw / 79.0% control**,
+  hurting 96 and helping 3. `WG_GATE01.WMO` dropped 100% → 50%.
+
+`WorldScene.ResolveCk24CoordinateModeResolution` now returns a constant canonical resolution and
+`WorldScene.ResolvePlacementSolution` uses the identity planar transform with zero yaw, keeping the
+real world centroid as the pivot. **`Pm4PlacementMath` is deliberately untouched** — all 16
+`PlacementMath_*` tests still pass; the render path just stopped asking it to fit anything.
+
+**Confirmed working in the viewer 2026-08-04**: tiles aligned, tents correctly identified, rotated
+walls and buildings now correct.
+
+### CK24 is an asset-class key
+
+`pm4 doodad-split`, over the 179 tiles with ADT ground truth:
+
+- **A keyed (non-zero) CK24 is one placed WMO.** 47 tiles carry no WMO placements and **none** of
+  them carries a keyed object — 47 chances to falsify, zero failures. Keyed count equals WMO
+  placement count exactly on 136/179 tiles and within ±1 on 163. Totals 1,045 vs 1,113. 99.3% of
+  keyed objects sit inside a MODF box, against 16.5% of CK24 0.
+- **CK24 0 is not an object.** Every one of the 170 tiles that has one has **exactly one**: it is
+  the per-tile remainder holding everything that is not a keyed WMO. Some hold 1,000+ surfaces.
+
+### CK24 0 splits into per-doodad components
+
+`pm4 component-identity` builds components from geometry alone — surfaces welded through shared
+vertex positions at epsilon 0.25, no field involved — then checks them against MDDF:
+
+- **20,113 components; 19,124 (95.1%) land within 24 units of an MDDF placement.** Closest matches
+  are at distance **0.00** with extents matching the model (brazier 3.9×3.9×0.6, planter 4.1×3.9).
+- 0.339 components per MDDF placement. That shortfall is **expected, not a failure**: most M2
+  doodads generate no collision at all.
+
+### MSLK.GroupObjectId is the per-doodad identity
+
+Scored on purity (constant within a component) **and** distinctness (that value used by no other
+component on the tile):
+
+| field | purity | distinctness | values/tile |
+|---|---|---|---|
+| **MSLK.GroupObjectId** | 16.6% | **99.9%** | 11 |
+| MSLK.LinkId | 60.7% | 0.3% | 1 |
+| MSLK.TypeFlags | 34.0% | 1.3% | 3 |
+| MSUR.GroupKey | 100.0% | 0.0% | 1 |
+| MSUR.AttributeMask | 59.7% | 1.1% | 4 |
+
+3,343 of GroupObjectId's 3,345 pure components carry a value no other component on the tile uses.
+
+**Distinctness is the load-bearing half.** `MSUR.GroupKey` is 100% pure and would have read as a
+perfect separator, but takes 9 values across the whole corpus — a class enum. `MSLK.LinkId` is
+60.7% pure and effectively constant per tile. Purity alone cannot tell an identity from a constant.
+
+### Other settled facts
+
+- **MSPV/MSPI is a vertical planar quad mesh** — the walls between MSUR floors. 98.05% of MSLK path
+  windows hold exactly 4 indices, 99.6% coplanar, zero of 598,790 faces Z-dominant against MSUR's
+  91.7%. Polyline and triangle-list eliminated.
+- **MSPV, MSVT and MSCN share one chunk frame. MPRL is the only permuted chunk** — its third axis is
+  MSVT's first.
+- **MSUR surfaces are triangle fans.** The April 2025 export is fully accounted for: 15,096 verts =
+  MSPV + MSVT, 7,382 faces = Σ(IndexCount − 2). MSPI contributed no faces then, so the connective
+  geometry was never decoded in any era.
+- **MPRR structural hypothesis eliminated** — no chunk's entry count matches the sentinel-delimited
+  run count (best MPRL, 5/502 files). 94% of 3,171,410 runs are exactly length 3 (75.5%) or 7
+  (18.5%): small fixed-shape records, not a bulk index stream.
+
+## Open
+
+- **Component coverage.** 34.4% of components have no MSLK link at all and only 16.6% are pure on
+  GroupObjectId, so it names a minority. The anchor-only MSLK entries (`MspiFirstIndex < 0`, 53% of
+  1.27M links) are the next place to look — prior art reads them as doodad placements carrying
+  group ids and anchors.
+- **MPRR.** The length-3 and length-7 record shapes are undecoded. The editor screenshots (below)
+  show dashed inter-polygon links, which is the right shape for a navmesh adjacency graph.
+- **MSCN** as a co-equal connective-geometry candidate is still untested. `MSUR._0x18 → MSCN`
+  resolves 98.8% but reaches only 34.5% of MSCN points.
+- **Does `MSHD.Field04` index something outside the PM4** — a master region table, DBC, or
+  server-side list?
+- **Viewer performance.** The overlay builds and draws all 9,207 objects regardless of camera
+  position. It must cull per tile using the existing ADT Detail Tiles budget.
+
+## Viewer changes (2026-08-04)
+
+### PM4 Scene Graph panel restored as a full scene outliner
+
+The dedicated `Pm4SceneGraph` panel (ShellPanelId.Pm4SceneGraph) now shows a **Blender-style
+outliner** with two modes selectable via a combo box:
+
+**Full Scene mode** (default): all PM4 objects organized by tile → CK24 → Part, with MSLK
+GroupObjectId and linked MPRL ref counts shown at each CK24 level. Click any item to select it
+and frame the camera. Includes a search/filter text box and right-click context menu with
+"Select All Parts" and "Frame All Parts" options.
+
+**Selected Object mode**: the existing detailed graph decomposition (TypeBucket → LinkGroup →
+MscnRef → Part), now with a summary header showing CK24, type, object id, and aggregate counts.
+
+### MSLK Linking Summary
+
+A new collapsible section at the top of the Full Scene panel computes and displays corpus-wide
+MSLK linking statistics from all loaded PM4 research contexts:
+
+- **Anchor-only links**: count and percentage of MSLK entries with `MspiFirstIndex < 0` (53% of
+  ~1.27M links per prior measurement). These are the next place to look for doodad identity.
+- **Path-window links**: count and percentage of entries with `MspiFirstIndex >= 0` (actual
+  geometry connections via MSPI/MSPV).
+- **Component coverage**: CK24 groups (components) with and without MSLK links, matching the
+  34.4% unlinked measurement from `pm4 component-identity`.
+- **RefIndex mismatches**: MSLK.RefIndex values that don't index a valid MSUR entry.
+- **Research leads**: three bullet points calling out the next open questions.
+
+### New public API on WorldScene
+
+- `GetPm4TileObjectSummaries()` — returns flat tuple-based summaries of all PM4 objects per tile
+  for the outliner. No access to internal `Pm4OverlayObject` type required.
+- `SelectPm4ObjectByKey(int tileX, int tileY, uint ck24, int objectPart)` — direct selection
+  by the full object key, without needing a region or CK24 object id lookup.
+- `GetPm4MslkLinkingStats()` — computes MSLK linking statistics across all loaded PM4 research
+  contexts. Returns a `Pm4MslkLinkingStats` struct.
+- `Pm4MslkLinkingStats` — public readonly struct with `TotalFiles`, `TotalMslkEntries`,
+  `AnchorOnlyLinks`, `PathWindowLinks`, `TotalComponents`, `ComponentsWithLinks`,
+  `ComponentsWithoutLinks`, `RefIndexMismatches`.
+
+## Historical screenshot interpretations — not confirmed chunk mappings
+
+**2026-10-20 operator clarification:** pathing points laid down for NPC movement may be the only
+directly displayed/authored pathfinding layer in WoWEdit. The historical descriptions below do not
+establish which PM4 chunks the editor displays. Do not promote those old labels to decoded facts;
+the current pass has not independently re-inspected the screenshots.
+
+User-supplied screenshots of the editor rendering this data, with the Karazhan Crypts WMO loaded in
+the same scene for comparison:
+
+- Grey filled polygons are walkable MSUR surfaces; the finely striped band is a **staircase, one
+  thin polygon per tread** — which is why MSUR runs to 518K surfaces.
+- **Red edges** appear at platform lips and drop-offs — almost certainly the MSPV/MSPI vertical
+  quads.
+- Cyan vertical tick marks, one per surface region; identity unknown.
+- White dashed lines link polygons — candidate MPRR adjacency.
+- **Candelabras, cobwebs and banners have no nav polygons beneath them.** Decorative M2s contribute
+  nothing. This is the constraint that makes 0.339 components per placement the expected result.
+
+## Traps
+
+- **Post-transform caches.** Two disk caches store geometry *after* the placement transform, so a
+  cached tile replays whatever placement was in effect when written. Both must be bumped together
+  for any change to placement semantics even when the byte layout is unchanged: tile overlay
+  (`PM4C`, `Pm4OverlayCacheService.CacheVersion`) and per-file (`PM4F`,
+  `Pm4PerFileCacheService.EntryVersion`), both now **9**. Root:
+  `<app bin>/output/cache/pm4-overlay/<id>/`. This cost a full round of "still broken" on a fix that
+  was already correct.
+- **ADT and PM4 name their tiles differently.** PM4 zero-pads (`development_01_00.pm4`), ADT does
+  not (`development_1_0_obj0.adt`). The old `GetObj0PathForPm4` built a padded name that exists for
+  **none** of the 616 corpus files though 411 have a companion. Use
+  `Pm4CoordinateService.TryGetObj0PathForPm4`, which returns null rather than letting callers fall
+  back to an arbitrary tile. **`Pm4CollisionDumper` still falls back to the first `*_obj0.adt` in
+  the folder** and should be fixed.
+- **Bounds fits prove bands, not axes.** They cannot see a reflection. Three sessions were lost to
+  this.
+- **When one chunk renders correctly and another does not in the same file, the difference is the
+  code path, not the data.** Comparing MSCN's render path against MSUR's found in minutes what
+  bounds analysis could not.
+- **Purity without distinctness is a false positive generator.** See `MSUR.GroupKey` above.
+- **Detector power must be shown before a null result is believed.** The legacy
+  `trianglesOnly` counter is zero by construction. `pm4 connective-geometry --verify-detector` and
+  `pm4 yaw-evidence`'s 45° control exist for this reason.
+
+## Commands
+
+All take `--input`/`-i` (PM4 dir) and `--output`/`-o` (JSON; otherwise stdout).
+
+| command | what it answers |
+|---|---|
+| `pm4 bounds-audit` | per-tile MSVT bounds and spill |
+| `pm4 bounds-audit --by-region` | is the coordinate frame region-scoped? (no) |
+| `pm4 yaw-evidence` | does the fitted yaw help or hurt? (hurts) |
+| `pm4 doodad-split` | does CK24 partition by asset class? (yes — keyed = WMO) |
+| `pm4 component-identity` | what splits the CK24 0 remainder? (geometry; id is GroupObjectId) |
+| `pm4 connective-geometry` | what is MSPV/MSPI? (vertical quad mesh) |
+| `pm4 mprr` | MPRR domain sweep and run structure |
+
+`doodad-split` and `component-identity` also take `--placements <dir>` for the companion
+`_obj0.adt` files, defaulting to `--input`. Reports land in `output/pm4-decode/`.
+
+## Test state
+
+`WowViewer.Core.PM4.Tests`: 102 passed, 1 failed —
+`Pm4RegionObjectGrouperTests.AnalyzeDirectory_DevelopmentCorpus_NonEmptyRegionsHaveObjects`,
+**pre-existing**, confirmed failing at baseline.

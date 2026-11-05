@@ -2,16 +2,16 @@
 
 ## Phase 1: Core Models & Stratigraphy Engines (WowViewer.Core)
 
-- [x] **T001**: Create `UniqueIdChronologyModels.cs` in `src/core/WowViewer.Core/Archaeology/`:
+- [ ] **T001**: Create `UniqueIdChronologyModels.cs` in `src/core/WowViewer.Core/Archaeology/`:
   - `UniqueIdRecord`: unified placement contract (M2, WMO, Creature, GameObject).
   - `UniqueIdLayerSummary`: detected work layers.
   - `MapStratigraphyProfile`: quantile statistics, layer breakdown, tile distribution.
   - `MapDivergenceReport`: shared placement count, percentage, divergence boundary ($UID_{div}$), inherited vs post-fork lists.
-- [x] **T002**: Implement `UniqueIdStratigraphyEngine.cs` in `src/core/WowViewer.Core/Archaeology/`:
+- [ ] **T002**: Implement `UniqueIdStratigraphyEngine.cs` in `src/core/WowViewer.Core/Archaeology/`:
   - Calculate quantiles ($p_{10}, p_{25}, \text{median}, p_{75}, p_{90}$).
   - Cluster sequential IDs into distinct layers by adaptive gap thresholds.
   - Aggregate per-tile age and density summaries.
-- [x] **T003**: Implement `CrossMapDivergenceEngine.cs` in `src/core/WowViewer.Core/Archaeology/`:
+- [ ] **T003**: Implement `CrossMapDivergenceEngine.cs` in `src/core/WowViewer.Core/Archaeology/`:
   - Spatial hash cell matching ($\le 0.5\text{ units}$) + model identity matching.
   - Compute $UID_{div}$ branching threshold.
   - Classify placements into `InheritedOverworld` vs `PostForkAuthored`.
@@ -20,7 +20,7 @@
 
 ## Phase 2: CLI Profiler & Divergence Reporter (WowViewer.Tool.Inspect)
 
-- [x] **T004**: Implement `MapStratigraphySupport.cs` and wire `map stratigraphy` in `Program.cs`:
+- [ ] **T004**: Implement `MapStratigraphySupport.cs` and wire `map stratigraphy` in `Program.cs`:
   - Support inputs from ADT/WDT files and JSON population partitions.
   - Support `--divergence --target <mapId> --ref <mapId>` to identify fork points.
   - Emit JSON reports to `output/reports/stratigraphy/`.
@@ -29,7 +29,7 @@
 
 ## Phase 3: In-Viewer Archaeology Workbench (WoWViewer)
 
-- [x] **T005**: Enhance `ArchaeologyPanelService.Sidebars.cs`:
+- [ ] **T005**: Enhance `ArchaeologyPanelService.Sidebars.cs`:
   - Add Map Stratigraphy & Divergence summary display.
   - Add smooth Time Machine slider scrubbing with percentage and era indicators.
   - Quick-jump milestone buttons ($p_{10}, p_{25}, \text{median}, p_{75}, p_{90}, 100\%$).
@@ -39,11 +39,11 @@
 
 ## Phase 4: Verification, Tests & Receipts
 
-- [x] **T006**: Author comprehensive unit tests in `tests/WowViewer.Core.Tests/UniqueIdStratigraphyTests.cs`:
+- [ ] **T006**: Author comprehensive unit tests in `tests/WowViewer.Core.Tests/UniqueIdStratigraphyTests.cs`:
   - Quantile computation and layer clustering.
   - Cross-map spatial twin matching and divergence calculation.
   - Test on real Map 451 and Map 0 data fixtures.
-- [x] **T007**: Update `specs/STATUS.md` and `memory-bank/activeContext.md` with §9.2 receipts.
+- [ ] **T007**: Update `specs/STATUS.md` and `memory-bank/activeContext.md` with §9.2 receipts.
 
 ---
 

@@ -45,7 +45,7 @@
 - [x] **T016**: Add interactive **Color Palette & Visual Legend** widget with clickable color swatches and active count badges.
 - [x] **T017**: Add streamlined **Surface Class Filter Matrix** with individual class toggles.
 - [x] **T018**: Integrate selected object inspection and one-click model duplication actions.
-- [x] **T019**: Register all new sidebar controls in `eng/ui/ui-reference-inventory.json` and generate updated `UI-REFERENCE.md`.
+- [ ] **T019**: Register all new sidebar controls in `eng/ui/ui-controls.json` and generate updated `UI-REFERENCE.md`.
 - [x] **T020**: Run `Verify-UiReference.ps1` and ensure 0 errors and 0 warnings.
 - [x] **Gate D (Phase 4 Verification)**:
   - Solution builds cleanly with 0 errors.

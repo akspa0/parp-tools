@@ -173,7 +173,10 @@ the spec in the same change or add a dated amendment note. Code and spec agree a
   `specs/archived/224-speckit-governance/evidence/`).
 
 **Cleanup ledger**
-- Last cleanup: 2026-09-23 — full reconciliation (operator-directed): 137 specs audited against code;
+- Last cleanup: 2026-11-05 — monthly active-registry audit: 46 epic/spec entries audited; 37
+  receipt-less or unsupported checks reset; 0 specs archived. Receipt:
+  `wow-viewer/specs/251-epic-viewer-ux-and-code-health/evidence/cleanup-2026-11-05.md`.
+- Previous: 2026-09-23 — full reconciliation (operator-directed): 137 specs audited against code;
   16 complete, 104 folded, 13 superseded, 4 cold; all archived to `specs/archived/` and replaced by
   Epics 248–254; backlog awaiting operator triage in `specs/TRIAGE.md`. Receipt:
   `specs/archived/reconciliation-2026-09-23/README.md`.
@@ -184,7 +187,7 @@ the spec in the same change or add a dated amendment note. Code and spec agree a
   "receipt not in evidence/"); **223 had 16 receipt-less pre-§9.2 checks un-checked** (T101–T107,
   Gate A, T201, T202, T301, T302, Gate B, T401, T501, T502) and listed for operator decision.
   See `specs/archived/224-speckit-governance/evidence/cleanup-2026-09-11.md`.
-- Next cleanup due: 2026-10-01 (monthly cadence)
+- Next cleanup due: 2026-12-01 (monthly cadence)
 
 ---
 

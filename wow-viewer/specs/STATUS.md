@@ -71,6 +71,13 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 | [291 Dual Sidebar Docking, Destination Integration & UI Harmonization](291-ui-sidebar-consolidation/spec.md) | Introduce `UiRegion.LeftDock` for left tools and options; integrate Editor and Archaeology into docked sidebars; eliminate floating destination window; deduplicate bottom bar (`Pages`), World/Model exports, and vestigial buttons; replace bespoke styling with `SharedUiWidgets` | Complete & Verified (2026-11-02); all 4 phases implemented; build 0 errors, UI reference 139/129 passed, 22 unit tests passed; receipt in `evidence/final-receipt.md` |
 | [292 Bottom-Bar Toggles, Mode Sidebars, Audio Panel & Sky Controls](292-ui-bottom-bar-toggles-audio-sky/spec.md) | 9 quick scene toggles on bottom bar, 4 destination mode switches, dual-dock sidebar routing (Viewer/Options left, Editor/Archaeology/Spawns right), Pages & Profiles removed, dedicated LeftDock Audio panel, Workspace Skybox controls, and scroll jumping fix | Complete & Verified (2026-11-03); all 6 phases implemented; build 0 errors, UI reference 138/128 passed, 22 unit tests passed; receipt in `evidence/final-receipt.md` |
 
+## Registry additions — 2026-11-05
+
+| Spec | Scope | Status |
+|---|---|---|
+| [268 Quilt Canvas Terrain Reconstruction & MCAL Deciphering](268-quilt-canvas-terrain-and-mcal-reconstruction/spec.md) | Multi-tile quilt stitching, MCAL layer deciphering, WDL macro-trestle synthesis, inches-scale refinement, and monolithic ADT/mesh materialization | Phases 1–5 reported complete (2026-10-09); receipt in `evidence/receipt-spec268.md`; measured seam and mesh outputs recorded there. No separate operator visual gate is recorded in the task ledger. |
+| [293 Layer-Driven ADT Restoration Workbench](293-layer-driven-adt-restoration/tasks.md) | Draft workbench; currently authorized slice is zoomable donor tile picker, per-selection/per-tile Z settings, and placed-tile label clarity | Phase 1 source/build receipt recorded 2026-11-05 in `tasks.md`; operator visual/save-load proof owed. Full workbench scope remains draft and requires operator review. |
+
 ## Operator verification owed on shipped code
 
 Each epic's `tasks.md` carries a **verification sweep** (V-tasks): proof-only checks on code that
@@ -80,9 +87,11 @@ buttons).
 
 ## Release line
 
-`eng/Version.props` = `0.6.1` / `0.6.1-dev` on active `v0.6.1-dev`. Latest stable: reissued `v0.6.0.1` (2026-10-14; eight split/deduplicated ZIP assets); operator map-load verification remains owed; base stable: `v0.6.0` on `main` (2026-10-11).
+`eng/Version.props` = `0.7.0` / `0.7.0-dev` on active branch `v0.7.0-dev` (verified 2026-11-05). Latest stable: reissued `v0.6.0.1` (2026-10-14; eight split/deduplicated ZIP assets); operator map-load verification remains owed; base stable: `v0.6.0` on `main` (2026-10-11).
 The v0.6 theme — modern data access + experimental terrain formats — maps to items F-01…F-12 (Epic 248)
-and R-01, R-02, R-10 (Epic 249). Release scope for v0.6.1 is set by Spec 271 Phase B and operator triage.
+and R-01, R-02, R-10 (Epic 249). Integrated Help / Image Guide follow-up remains tracked by Spec 271; current release scope is set by the active epic triage and release planning.
+
+**Version sync (2026-11-05):** `eng/Version.props` and the active branch are `0.7.0-dev` / `v0.7.0-dev`. Older references to `v0.6.1-dev` in Spec 271's historical Phase B planning text are superseded; Phase B remains queued, not shipped.
 
 ## Status rules
 
@@ -93,4 +102,10 @@ and R-01, R-02, R-10 (Epic 249). Release scope for v0.6.1 is set by Spec 271 Pha
   epic item whose `plan.md` adopts it by link.
 - New work: add an item to the owning epic (operator-approved wording, §9.1) or, for a genuinely new
   area, a new spec number ≥ 255 registered here. Follow AGENTS.md §9–11.
-- Monthly `speckit-cleanup` audits the epics' checked tasks; next due 2026-10-01.
+- Monthly `speckit-cleanup` audits all registered active epic/spec task ledgers; next due 2026-12-01.
+
+## 2026-11-05 cleanup reconciliation
+
+- Spec 268 (previously omitted) and the authorized Phase 1 slice of draft Spec 293 (previously unregistered) are now represented above. Spec 293 has no approved full `spec.md`/`plan.md`; only its bounded operator-requested task slice is in scope.
+- Receipt/symbol audit reset 37 previously checked tasks: Spec 259 Phase 2–3 (T006–T013), Spec 265 T001–T007/T010 (referenced receipt is absent), Spec 266 T266-01–T266-10 (inline notes lack the complete §9.2 receipt), Spec 277 T001–T007 (no criterion-to-evidence matrix), Spec 280 T001 (referenced `evidence/p0-baseline.md` is absent), and Spec 288 T019 (named inventory file did not exist and the receipt's changed-file list omitted the actual registry). Historical implementation/results are not deleted; the owning tasks must receive compliant evidence before being checked again.
+- No spec was archived: closed/operator-gate state was not unambiguous for all otherwise complete entries.
