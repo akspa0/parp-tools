@@ -39,7 +39,6 @@ internal sealed class SkyControlsService
         if (ImGui.Checkbox("Enable Sky##SkyEnabled", ref skyEnabled))
         {
             scene.ShowSky = skyEnabled;
-            _host.UiManager.BottomBar.BottomToggleSky = skyEnabled;
             _host.Settings.SaveViewerSettings();
         }
 

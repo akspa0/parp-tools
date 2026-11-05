@@ -23,12 +23,17 @@ zoomable donor tile picker and per-tile settings, so that slice is authorized.
 ### T003 — Build verification
 - [x] `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.CrossPlatform.csproj -c Debug --nologo -v minimal` → exit 0, 0 errors.
 
+### T004 — Donor picker uses minimap art, not the WDL heightmap preview (operator request 2026-11-05)
+- [x] The 64×64 donor surface draws each visible tile from `MinimapRenderer.GetTileTexture(donorMap, col, row)`.
+- [x] Tiles without a minimap texture render as a neutral placeholder instead of a heightmap.
+- [x] Zoom/pan, hover, selection, and drag-box mapping are unchanged.
+
 ## Receipt — 2026-11-05
 
 ### Files changed
 | File | Change |
 |---|---|
-| `wow-viewer/src/viewer/WoWViewer/Workbench/Services/Archaeology/DonorTilePickerService.cs` | Added `_zoom`/`_pan`/`_panDragStart`/`_panAtDragStart`/`_selectionZOffset`/`_selectionZScale`; zoom/pan controls; zoom-aware texture UV crop; zoom-aware hover/grid/selection/drag-box mapping; `SetZoom`, `ClampPan`, `VisibleTileRangeText`; selection settings tree; placements now carry `ZOffset`/`ZScale`. |
+| `wow-viewer/src/viewer/WoWViewer/Workbench/Services/Archaeology/DonorTilePickerService.cs` | Added `_zoom`/`_pan`/`_panDragStart`/`_panAtDragStart`/`_selectionZOffset`/`_selectionZScale`; zoom/pan controls; zoom-aware hover/grid/selection/drag-box mapping; `SetZoom`, `ClampPan`, `VisibleTileRangeText`; selection settings tree; placements now carry `ZOffset`/`ZScale`. T004 replaces the single WDL heightmap preview with per-tile minimap textures from `MinimapRenderer`. |
 | `wow-viewer/src/viewer/WoWViewer/Workbench/Services/Archaeology/ArchaeologyPanelService.PhaseLayers.cs` | Placed-tile checkbox label now names the target; tooltip explains donor→target; secondary text shows `donor XX_YY → placed over target XX_YY`. |
 
 ### Verification commands
@@ -40,6 +45,7 @@ zoomable donor tile picker and per-tile settings, so that slice is authorized.
 | Criterion | Evidence |
 |---|---|
 | **AC-007** (zoomable picker + XX_YY tooltips) | Implemented in `DonorTilePickerService.DrawDialog`: wheel zoom anchored on cursor, pan, Fit, visible-range readout, hover tooltip. **Runtime/visual proof owed** — operator must run the viewer on a real map. |
+| **T004** (minimap donor surface) | `DonorTilePickerService.DrawDialog` now draws visible tiles with `MinimapRenderer.GetTileTexture(_donorMap, col, row)`; the WDL heightmap preview is no longer used for the picker surface. **Runtime/visual proof owed** — operator must confirm the donor map is recognizable. |
 | **AC-008** (include/exclude per placed tile) | Implemented in `ArchaeologyPanelService.PhaseLayers.cs`; `PhaseTilePlacement.Included` honored by `ResolveTileSource`/`IsTargetLockedByLayer`; persisted in `PhaseTilePlacementDto`. **Runtime proof owed** — toggle a placed tile and save/load. |
 | **AC-008b** (per-tile Z offset/scale) | Implemented in `ArchaeologyPanelService.PhaseLayers.cs` and `DonorTilePickerService` selection settings; `PhaseLayerZ.Apply` combines layer + per-tile transforms; persisted. **Runtime proof owed** — adjust a per-tile Z offset and confirm only that tile moves. |
 | **AC-015** (SharedUiWidgets + inventory registration) | New picker controls are inside the modal donor-tile dialog (not a sidebar surface); the Cartography placed-tile controls use `SharedUiWidgets.SetNextItemWidth`. Inventory registration for the modal is tracked under the full workbench phase. |

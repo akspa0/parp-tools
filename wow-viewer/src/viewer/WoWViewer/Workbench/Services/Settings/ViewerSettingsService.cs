@@ -154,15 +154,21 @@ internal sealed class ViewerSettingsService
                 return;
 
             BottomBarService bottomBar = _host.UiManager.BottomBar;
-            bottomBar.BottomToggleSky = settings.BottomToggleSky;
-            bottomBar.BottomToggleFog = settings.BottomToggleFog;
-            bottomBar.BottomToggleWater = settings.BottomToggleWater;
+            // Legacy single "Water" toggle: a saved false meant every liquid family was hidden.
+            bool legacyLiquidsVisible = settings.BottomToggleWater;
+            bottomBar.BottomToggleLiquidWater = settings.BottomToggleLiquidWater && legacyLiquidsVisible;
+            bottomBar.BottomToggleLiquidOcean = settings.BottomToggleLiquidOcean && legacyLiquidsVisible;
+            bottomBar.BottomToggleLiquidMagma = settings.BottomToggleLiquidMagma && legacyLiquidsVisible;
+            bottomBar.BottomToggleLiquidSlime = settings.BottomToggleLiquidSlime && legacyLiquidsVisible;
             bottomBar.BottomToggleDoodads = settings.BottomToggleDoodads;
             bottomBar.BottomToggleWmos = settings.BottomToggleWmos;
             bottomBar.BottomToggleTerrain = settings.BottomToggleTerrain;
             bottomBar.BottomTogglePm4 = settings.BottomTogglePm4;
             bottomBar.BottomToggleGrid = settings.BottomToggleGrid;
             bottomBar.BottomToggleAudioMute = settings.BottomToggleAudioMute;
+            bottomBar.BottomToggleAlphaMask = settings.BottomToggleAlphaMask;
+            bottomBar.BottomAlphaMaskChannel = Math.Clamp(
+                settings.BottomAlphaMaskChannel, 1, TerrainTileMeshBuilder.MaxLayers - 1);
 
             _uiTheme = Enum.IsDefined(typeof(UiThemeKind), settings.UiTheme)
                 ? (UiThemeKind)settings.UiTheme
@@ -408,15 +414,22 @@ internal sealed class ViewerSettingsService
                 WireframeLineWidth = WireframeOverlaySettings.LineWidth,
                 WireframeBaseIntensity = WireframeOverlaySettings.BaseIntensity,
                 WireframeFollowModelOpacity = WireframeOverlaySettings.FollowModelOpacity,
-                BottomToggleSky = _host.UiManager.BottomBar.BottomToggleSky,
-                BottomToggleFog = _host.UiManager.BottomBar.BottomToggleFog,
-                BottomToggleWater = _host.UiManager.BottomBar.BottomToggleWater,
+                BottomToggleWater = _host.UiManager.BottomBar.BottomToggleLiquidWater
+                    || _host.UiManager.BottomBar.BottomToggleLiquidOcean
+                    || _host.UiManager.BottomBar.BottomToggleLiquidMagma
+                    || _host.UiManager.BottomBar.BottomToggleLiquidSlime,
+                BottomToggleLiquidWater = _host.UiManager.BottomBar.BottomToggleLiquidWater,
+                BottomToggleLiquidOcean = _host.UiManager.BottomBar.BottomToggleLiquidOcean,
+                BottomToggleLiquidMagma = _host.UiManager.BottomBar.BottomToggleLiquidMagma,
+                BottomToggleLiquidSlime = _host.UiManager.BottomBar.BottomToggleLiquidSlime,
                 BottomToggleDoodads = _host.UiManager.BottomBar.BottomToggleDoodads,
                 BottomToggleWmos = _host.UiManager.BottomBar.BottomToggleWmos,
                 BottomToggleTerrain = _host.UiManager.BottomBar.BottomToggleTerrain,
                 BottomTogglePm4 = _host.UiManager.BottomBar.BottomTogglePm4,
                 BottomToggleGrid = _host.UiManager.BottomBar.BottomToggleGrid,
                 BottomToggleAudioMute = _host.UiManager.BottomBar.BottomToggleAudioMute,
+                BottomToggleAlphaMask = _host.UiManager.BottomBar.BottomToggleAlphaMask,
+                BottomAlphaMaskChannel = _host.UiManager.BottomBar.BottomAlphaMaskChannel,
                 CursorStyle = (int)(_sceneCursorRenderer?.Style ?? CursorStyle.ClassicOSArrow),
                 CursorScale = _sceneCursorRenderer?.UserScale ?? 1.0f,
                 LastGameFolderPath = _lastGameFolderPath,
@@ -583,15 +596,19 @@ internal sealed class ViewerSettingsService
         public float WireframeLineWidth { get; set; } = 1.0f;
         public float WireframeBaseIntensity { get; set; } = 0.75f;
         public bool WireframeFollowModelOpacity { get; set; } = true;
-        public bool BottomToggleSky { get; set; } = true;
-        public bool BottomToggleFog { get; set; } = true;
         public bool BottomToggleWater { get; set; } = true;
+        public bool BottomToggleLiquidWater { get; set; } = true;
+        public bool BottomToggleLiquidOcean { get; set; } = true;
+        public bool BottomToggleLiquidMagma { get; set; } = true;
+        public bool BottomToggleLiquidSlime { get; set; } = true;
         public bool BottomToggleDoodads { get; set; } = true;
         public bool BottomToggleWmos { get; set; } = true;
         public bool BottomToggleTerrain { get; set; } = true;
         public bool BottomTogglePm4 { get; set; }
         public bool BottomToggleGrid { get; set; }
-        public bool BottomToggleAudioMute { get; set; }
+        public bool BottomToggleAudioMute { get; set; } = true;
+        public bool BottomToggleAlphaMask { get; set; }
+        public int BottomAlphaMaskChannel { get; set; } = 1;
         public int CursorStyle { get; set; } = (int)Rendering.CursorStyle.ClassicOSArrow;
         public float CursorScale { get; set; } = 1.0f;
         public string? LastGameFolderPath { get; set; }

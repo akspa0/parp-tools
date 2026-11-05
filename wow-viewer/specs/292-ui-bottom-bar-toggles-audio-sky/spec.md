@@ -1,6 +1,6 @@
 # Spec 292 — Bottom-Bar Toggles, Mode Sidebars, Audio Panel & Sky Controls
 
-**Status:** Original scope implemented 2026-11-03; operator amendment implemented 2026-11-05. Real-client visual confirmation remains owed.
+**Status:** Original scope implemented 2026-11-03; bottom-toolbar correction implemented 2026-11-05. Real-client visual confirmation remains owed.
 **Origin:** Operator request 2026-11-03 (wording preserved below). Follows Spec 291.
 
 ## Operator requirements (verbatim intent)
@@ -37,13 +37,15 @@ Renderer sky rewrite, new audio engine features, PM4/export work.
 
 Sky "source = Sky model" assumes MPQ sky M2/MDX models can be listed and rendered. Phase 1 inventory verifies this; if unsupported, that option ships disabled and is reported.
 
-## Amendment 2026-11-05 — Restore scene toggles and model opacity on the bottom toolbar
+## Amendment 2026-11-05 — Correct the bottom toolbar controls
 
-**Operator direction:** restore the scene toggles and the MDX/M2 and WMO opacity controls to the bottom toolbar, and remove the Texture Masks button from that toolbar.
+**Operator direction (latest):** “Remove Sky/Fog; add A1–A7 buttons that select one Alpha channel at a time and turn the overlay on. Keep L0–L7 visibility toggles, the other scene toggles, and both opacity sliders.” Follow-up: “auto-adjust the number of layers and alpha masks to show, based on the actual terrain loaded”; “We have MCLQ/MH2O AND WL* data for 'water', but it's not always water, it's sometimes slime and lava. We have no separate controls for different liquidtypes”; “why the fuck is there a mute button on this bar and the bottom bar? have mute turned on by default.”
 
-This amendment supersedes the 2026-11-03 receipt's decision to replace the eight scene toggles with a Layers & Opacity drop-up. The bottom toolbar MUST show the nine scene toggles named in the original requirement (Sky, Fog, Water, Doodads, WMOs, Terrain, PM4, Grid, Audio mute) plus separate MDX/M2 and WMO opacity sliders. Remove the Texture Masks button from the toolbar. Preserve the existing quick L0–L7 (resident layers) and Alpha checkboxes; detailed per-layer texture/alpha controls remain in the Layers sidebar. Toggles and opacity values continue to use viewer settings persistence.
+This supersedes the preceding toolbar interpretation. The bottom toolbar shows per-liquid-family toggles (Water, Ocean, Magma, Slime), Doodads, WMOs, Terrain, PM4, Grid, and Mute; L0–Ln visibility toggles sized to the resident terrain's actual maximum layer count; one A1–An alpha selector per non-base layer; and separate M2/MDX and WMO opacity sliders. Selecting A<n> selects that renderer alpha channel and enables the alpha overlay; clicking the active A<n> again turns the overlay off. Sky/Fog and Texture Masks are not bottom-toolbar controls. The Workspace sky controls and Layers sidebar remain in their existing homes. Persist the alpha overlay-enabled flag and selected channel along with the existing toolbar settings.
 
-Verification: `ui-controls.json`/`UI-REFERENCE.md` remain synchronized and `Verify-UiReference.ps1` passes; focused tests and a solution build pass. Runtime visibility/opacity interaction remains operator-owned under §9.2.
+Liquid families are filtered in both terrain liquid sources (MCLQ/MH2O and WL*) and WMO MLIQ groups. The status bar no longer duplicates the Mute control; the bottom toolbar is the single quick Mute toggle, and audio starts muted by default.
+
+The UI registry/reference, focused footer tests, and solution build must validate the corrected control set. Real-client visual and restart/persistence proof remains operator-owned under §9.2.
 
 ## Amendment 2026-11-04 — operator-reported flicker defect (post-landing): ROOT CAUSE FOUND
 

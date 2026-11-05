@@ -1,10 +1,16 @@
 # Progress — wow-viewer
 
-## 2026-11-05 — Spec 292 bottom-toolbar reversion
+## 2026-11-05 — Spec 292 bottom-toolbar correction
 
-- Restored the nine scene toggles (Sky/Fog/Water/Doodads/WMOs/Terrain/PM4/Grid/Mute), added persisted M2/MDX and WMO opacity sliders, retained L0–L7/Alpha quick checks, and removed the Texture Masks bottom-bar button.
-- Persisted the nine quick-toggle values in viewer settings and apply them when a scene/map activates. UI registry/reference clean; 18/18 footer tests pass; full solution build succeeds with 0 errors (206 warnings).
+- Corrected the toolbar to exclude Sky/Fog and show Water/Ocean/Magma/Slime, Doodads/WMOs/Terrain/PM4/Grid/Mute, resident-terrain L0–Ln, one A1–An selector per non-base layer, and both opacity sliders. A<n> selects one channel and enables the shared overlay; clicking the active selector disables it. Texture Masks remains absent.
+- Liquid families filter MCLQ/MH2O, WL*, and WMO MLIQ meshes independently. The status-bar Mute duplicate is removed and audio starts muted. Alpha/liquid state persists in viewer settings.
+- UI registry/reference clean (166 labels, 0 warnings); footer tests 30/30 pass; full solution build 0 errors (266 warnings, redirected output).
 - Receipt: [`bottom-toolbar-reversion-2026-11-05.md`](../specs/292-ui-bottom-bar-toggles-audio-sky/evidence/bottom-toolbar-reversion-2026-11-05.md). Operator real-client visual/restart verification remains owed.
+
+## 2026-11-05 — Spec 293 donor picker minimap surface
+
+- The donor tile picker now draws each visible tile from the client minimap (`MinimapRenderer.GetTileTexture`) instead of the WDL heightmap preview, so donor selection is recognizable by roads, buildings, and biome.
+- Viewer compile 0 errors; operator visual proof remains owed.
 
 ## 2026-11-05 — Spec 294 Phases 3–4 manual curation and persistence
 

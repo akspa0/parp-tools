@@ -157,9 +157,9 @@
     {
       "id": "alpha",
       "label": "Alpha",
-      "region": "Bottom toolbar / Options > Layers",
+      "region": "Options > Layers",
       "shortcut": null,
-      "help": "Quick-toggle the terrain alpha-mask overlay; detailed texture/alpha settings are in Layers.",
+      "help": "Toggle the terrain alpha-mask overlay; detailed texture/alpha settings are in Layers.",
       "visible": true
     },
     {
@@ -373,9 +373,9 @@
     {
       "id": "fog",
       "label": "Fog",
-      "region": "Bottom toolbar / Left sidebar > Workspace",
+      "region": "Left sidebar > Workspace",
       "shortcut": null,
-      "help": "Quick-toggle object fog from the bottom toolbar; set fog start/end in Workspace.",
+      "help": "Configure workspace object fog settings.",
       "visible": true
     },
     {
@@ -973,9 +973,9 @@
     {
       "id": "sky-controls",
       "label": "Sky",
-      "region": "Bottom toolbar / Left sidebar > Workspace",
+      "region": "Left sidebar > Workspace",
       "shortcut": null,
-      "help": "Quick-toggle the sky from the bottom toolbar; configure the sky dome, sun/moon cycle, and backdrop in Workspace.",
+      "help": "Configure sky visibility, source, and appearance in Workspace.",
       "visible": true
     },
     {
@@ -1123,11 +1123,35 @@
       "visible": true
     },
     {
-      "id": "bottom-water-toggle",
+      "id": "bottom-liquid-water-toggle",
       "label": "Water",
       "region": "Bottom toolbar",
       "shortcut": null,
-      "help": "Toggle terrain liquids, WMO-group liquids, and loose world liquids.",
+      "help": "Show MCLQ/MH2O and WL* water and river liquid.",
+      "visible": true
+    },
+    {
+      "id": "bottom-liquid-ocean-toggle",
+      "label": "Ocean",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Show MCLQ/MH2O and WL* ocean liquid.",
+      "visible": true
+    },
+    {
+      "id": "bottom-liquid-magma-toggle",
+      "label": "Magma",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Show MCLQ/MH2O and WL* magma and lava liquid.",
+      "visible": true
+    },
+    {
+      "id": "bottom-liquid-slime-toggle",
+      "label": "Slime",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Show MCLQ/MH2O and WL* slime liquid.",
       "visible": true
     },
     {
@@ -1248,6 +1272,62 @@
       "region": "Bottom toolbar > Layers",
       "shortcut": null,
       "help": "Quick-toggle resident terrain texture layer 7 when present.",
+      "visible": true
+    },
+    {
+      "id": "bottom-alpha-channel-1",
+      "label": "A1",
+      "region": "Bottom toolbar > Alpha channels",
+      "shortcut": null,
+      "help": "Select alpha channel 1 and enable its overlay; click again to turn the overlay off.",
+      "visible": true
+    },
+    {
+      "id": "bottom-alpha-channel-2",
+      "label": "A2",
+      "region": "Bottom toolbar > Alpha channels",
+      "shortcut": null,
+      "help": "Select alpha channel 2 and enable its overlay; click again to turn the overlay off.",
+      "visible": true
+    },
+    {
+      "id": "bottom-alpha-channel-3",
+      "label": "A3",
+      "region": "Bottom toolbar > Alpha channels",
+      "shortcut": null,
+      "help": "Select alpha channel 3 and enable its overlay; click again to turn the overlay off.",
+      "visible": true
+    },
+    {
+      "id": "bottom-alpha-channel-4",
+      "label": "A4",
+      "region": "Bottom toolbar > Alpha channels",
+      "shortcut": null,
+      "help": "Select alpha channel 4 and enable its overlay; click again to turn the overlay off.",
+      "visible": true
+    },
+    {
+      "id": "bottom-alpha-channel-5",
+      "label": "A5",
+      "region": "Bottom toolbar > Alpha channels",
+      "shortcut": null,
+      "help": "Select alpha channel 5 and enable its overlay; click again to turn the overlay off.",
+      "visible": true
+    },
+    {
+      "id": "bottom-alpha-channel-6",
+      "label": "A6",
+      "region": "Bottom toolbar > Alpha channels",
+      "shortcut": null,
+      "help": "Select alpha channel 6 and enable its overlay; click again to turn the overlay off.",
+      "visible": true
+    },
+    {
+      "id": "bottom-alpha-channel-7",
+      "label": "A7",
+      "region": "Bottom toolbar > Alpha channels",
+      "shortcut": null,
+      "help": "Select alpha channel 7 and enable its overlay; click again to turn the overlay off.",
       "visible": true
     }
   ]

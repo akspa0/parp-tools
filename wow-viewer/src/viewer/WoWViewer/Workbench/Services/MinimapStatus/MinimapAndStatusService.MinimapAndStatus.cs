@@ -476,35 +476,9 @@ internal sealed partial class MinimapAndStatusService
         FooterDiagnosticsSnapshot snapshot = BuildDiagnosticsSnapshot();
         float scale = MathF.Max(1f, _host.UiManager.Layout.Scale);
 
-        // Centre the plain text on the same baseline as the audio button, so the one-row bar
-        // reads as a single aligned line.
+        // The bottom toolbar owns the quick Mute toggle; the status bar stays read-only so the
+        // same setting does not appear twice in the shell.
         ImGui.AlignTextToFramePadding();
-
-        if (_worldScene is not null)
-        {
-            bool muted = _worldScene.AudioMuted;
-            ImGui.PushStyleColor(ImGuiCol.Button, muted
-                ? new Vector4(0.42f, 0.18f, 0.12f, 1f)
-                : new Vector4(0.12f, 0.38f, 0.20f, 1f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, muted
-                ? new Vector4(0.58f, 0.24f, 0.14f, 1f)
-                : new Vector4(0.18f, 0.52f, 0.28f, 1f));
-            string audioLabel = muted ? "AUDIO: MUTED" : "AUDIO: ON";
-            if (ImGui.Button(audioLabel))
-            {
-                _worldScene.SetAudioMuted(!muted);
-                _statusMessage = muted
-                    ? "Audio output enabled."
-                    : "Audio output muted.";
-            }
-
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip(muted
-                    ? "Click to unmute all viewer audio output."
-                    : "Click to mute all viewer audio output.");
-            ImGui.PopStyleColor(2);
-            ImGui.SameLine();
-        }
 
         string leftText = snapshot.LeftText;
         float leftEnd = 0f;

@@ -640,7 +640,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
     private int _mapId = -1;
     private WorldAudioRuntime? _audioRuntime;
     private AreaLookupResult? _currentAreaLookup;
-    private bool _audioMuted;
+    private bool _audioMuted = true;
     private bool _showAudioEmitterMarkers;
     public string AudioStatus => _audioRuntime?.Status ?? "Audio runtime not configured.";
     public string AudioLastDiagnostic => _audioRuntime?.LastDiagnostic ?? "Audio runtime not configured.";
