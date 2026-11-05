@@ -2,7 +2,7 @@
 
 ## 2026-11-05 — Spec 292 bottom-toolbar correction
 
-- Corrected the toolbar to exclude Sky/Fog and show Water/Ocean/Magma/Slime, Doodads/WMOs/Terrain/PM4/Grid/Mute, resident-terrain L0–Ln, one A1–An selector per non-base layer, and both opacity sliders. A<n> selects one channel and enables the shared overlay; clicking the active selector disables it. Texture Masks remains absent.
+- Corrected the toolbar to exclude Sky/Fog and show Water/Ocean/Magma/Slime, Doodads/WMOs/Terrain/PM4, separate Tile/Chunk/Cell grid toggles, and Mute; resident-terrain L0–Ln, one A1–An selector per non-base layer, and both opacity sliders. A<n> selects one channel and enables the shared overlay; clicking the active selector disables it. Texture Masks remains absent.
 - Liquid families filter MCLQ/MH2O, WL*, and WMO MLIQ meshes independently. The status-bar Mute duplicate is removed and audio starts muted. Alpha/liquid state persists in viewer settings.
 - UI registry/reference clean (166 labels, 0 warnings); footer tests 30/30 pass; full solution build 0 errors (266 warnings, redirected output).
 - Receipt: [`bottom-toolbar-reversion-2026-11-05.md`](../specs/292-ui-bottom-bar-toggles-audio-sky/evidence/bottom-toolbar-reversion-2026-11-05.md). Operator real-client visual/restart verification remains owed.

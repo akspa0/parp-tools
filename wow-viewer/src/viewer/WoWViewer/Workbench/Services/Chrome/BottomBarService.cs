@@ -29,7 +29,9 @@ internal sealed class BottomBarService
     internal bool BottomToggleWmos { get; set; } = true;
     internal bool BottomToggleTerrain { get; set; } = true;
     internal bool BottomTogglePm4 { get; set; }
-    internal bool BottomToggleGrid { get; set; }
+    internal bool BottomToggleTileGrid { get; set; }
+    internal bool BottomToggleChunkGrid { get; set; }
+    internal bool BottomToggleCellGrid { get; set; }
     internal bool BottomToggleAudioMute { get; set; } = true;
     internal bool BottomToggleAlphaMask { get; set; }
     internal int BottomAlphaMaskChannel { get; set; } = 1;
@@ -53,13 +55,13 @@ internal sealed class BottomBarService
         if (terrainManager is not null)
         {
             terrainManager.TerrainVisible = BottomToggleTerrain;
-            ApplyGridToggle(terrainManager.Renderer, BottomToggleGrid);
+            ApplyGridToggles(terrainManager.Renderer);
         }
 
         if (vlmTerrain is not null)
         {
             vlmTerrain.TerrainVisible = BottomToggleTerrain;
-            ApplyGridToggle(vlmTerrain.Renderer, BottomToggleGrid);
+            ApplyGridToggles(vlmTerrain.Renderer);
         }
 
         ApplyLiquidState(scene, terrainManager?.LiquidRenderer, vlmTerrain?.LiquidRenderer);
@@ -90,14 +92,14 @@ internal sealed class BottomBarService
         if (terrainManager is not null)
         {
             BottomToggleTerrain = terrainManager.TerrainVisible;
-            BottomToggleGrid = ReadGridToggle(terrainManager.Renderer);
+            CaptureGridToggles(terrainManager.Renderer);
             CaptureLiquidState(terrainManager.LiquidRenderer);
         }
 
         if (vlmTerrain is not null)
         {
             BottomToggleTerrain &= vlmTerrain.TerrainVisible;
-            BottomToggleGrid |= ReadGridToggle(vlmTerrain.Renderer);
+            CaptureGridToggles(vlmTerrain.Renderer);
             CaptureLiquidState(vlmTerrain.LiquidRenderer);
         }
 
@@ -138,11 +140,12 @@ internal sealed class BottomBarService
             _lastAppliedLayerCount = layerCount;
         }
 
-        string[] toggleLabels = ["Water", "Ocean", "Magma", "Slime", "Doodads", "WMOs", "Terrain", "PM4", "Grid", "Mute"];
+        string[] toggleLabels = ["Water", "Ocean", "Magma", "Slime", "Doodads", "WMOs", "Terrain", "PM4", "Tile", "Chunk", "Cell", "Mute"];
         string[] toggleIds =
         [
             "toggle-liquid-water", "toggle-liquid-ocean", "toggle-liquid-magma", "toggle-liquid-slime",
-            "toggle-doodads", "toggle-wmos", "toggle-terrain", "toggle-pm4", "toggle-grid", "toggle-audio-mute",
+            "toggle-doodads", "toggle-wmos", "toggle-terrain", "toggle-pm4",
+            "toggle-tile-grid", "toggle-chunk-grid", "toggle-cell-grid", "toggle-audio-mute",
         ];
         var items = new List<FooterItemMeasure>(toggleIds.Length + layerCount + alphaLayerCount + 2);
         for (int index = 0; index < toggleIds.Length; index++)
@@ -187,7 +190,9 @@ internal sealed class BottomBarService
                 "toggle-wmos" => ImGui.Checkbox("WMOs##toggle-wmos", ref val),
                 "toggle-terrain" => ImGui.Checkbox("Terrain##toggle-terrain", ref val),
                 "toggle-pm4" => ImGui.Checkbox("PM4##toggle-pm4", ref val),
-                "toggle-grid" => ImGui.Checkbox("Grid##toggle-grid", ref val),
+                "toggle-tile-grid" => ImGui.Checkbox("Tile##toggle-tile-grid", ref val),
+                "toggle-chunk-grid" => ImGui.Checkbox("Chunk##toggle-chunk-grid", ref val),
+                "toggle-cell-grid" => ImGui.Checkbox("Cell##toggle-cell-grid", ref val),
                 _ => ImGui.Checkbox("Mute##toggle-audio-mute", ref val),
             };
             if (changed)
@@ -249,14 +254,29 @@ internal sealed class BottomBarService
             if (scene is not null) scene.Pm4Overlay.ShowPm4Overlay = v;
         }, "Toggle the PM4 navigation geometry overlay.");
 
-        bool gridVisible = terrainRenderer is null ? BottomToggleGrid : ReadGridToggle(terrainRenderer);
-        DrawToggle("toggle-grid", gridVisible, v =>
+        DrawToggle("toggle-tile-grid", terrainRenderer?.ShowTileGrid ?? BottomToggleTileGrid, v =>
         {
-            BottomToggleGrid = v;
-            ApplyGridToggle(terrainManager?.Renderer, v);
-            if (vlmTerrain?.Renderer != terrainManager?.Renderer)
-                ApplyGridToggle(vlmTerrain?.Renderer, v);
-        }, "Toggle tile, chunk, and cell grid overlays.");
+            BottomToggleTileGrid = v;
+            if (terrainManager?.Renderer is { } renderer) renderer.ShowTileGrid = v;
+            if (vlmTerrain?.Renderer is { } vlmRenderer && vlmRenderer != terrainManager?.Renderer)
+                vlmRenderer.ShowTileGrid = v;
+        }, "Toggle the tile-boundary grid overlay.");
+
+        DrawToggle("toggle-chunk-grid", terrainRenderer?.ShowChunkGrid ?? BottomToggleChunkGrid, v =>
+        {
+            BottomToggleChunkGrid = v;
+            if (terrainManager?.Renderer is { } renderer) renderer.ShowChunkGrid = v;
+            if (vlmTerrain?.Renderer is { } vlmRenderer && vlmRenderer != terrainManager?.Renderer)
+                vlmRenderer.ShowChunkGrid = v;
+        }, "Toggle the chunk-boundary grid overlay.");
+
+        DrawToggle("toggle-cell-grid", terrainRenderer?.ShowCellGrid ?? BottomToggleCellGrid, v =>
+        {
+            BottomToggleCellGrid = v;
+            if (terrainManager?.Renderer is { } renderer) renderer.ShowCellGrid = v;
+            if (vlmTerrain?.Renderer is { } vlmRenderer && vlmRenderer != terrainManager?.Renderer)
+                vlmRenderer.ShowCellGrid = v;
+        }, "Toggle the cell-boundary grid overlay.");
 
         DrawToggle("toggle-audio-mute", scene?.AudioMuted ?? BottomToggleAudioMute, v =>
         {
@@ -389,8 +409,20 @@ internal sealed class BottomBarService
         BottomToggleLiquidSlime &= renderer.ShowSlimeLiquid;
     }
 
-    private static bool ReadGridToggle(TerrainRenderer renderer)
-        => renderer.ShowTileGrid || renderer.ShowChunkGrid || renderer.ShowCellGrid;
+    private void ApplyGridToggles(TerrainRenderer? renderer)
+    {
+        if (renderer is null) return;
+        renderer.ShowTileGrid = BottomToggleTileGrid;
+        renderer.ShowChunkGrid = BottomToggleChunkGrid;
+        renderer.ShowCellGrid = BottomToggleCellGrid;
+    }
+
+    private void CaptureGridToggles(TerrainRenderer renderer)
+    {
+        BottomToggleTileGrid = renderer.ShowTileGrid;
+        BottomToggleChunkGrid = renderer.ShowChunkGrid;
+        BottomToggleCellGrid = renderer.ShowCellGrid;
+    }
 
     private static void ApplyAlphaState(TerrainRenderer? renderer, bool show, int channel)
     {
@@ -399,11 +431,4 @@ internal sealed class BottomBarService
         renderer.ShowAlphaMask = show;
     }
 
-    private static void ApplyGridToggle(TerrainRenderer? renderer, bool enabled)
-    {
-        if (renderer is null) return;
-        renderer.ShowTileGrid = enabled;
-        renderer.ShowChunkGrid = enabled;
-        renderer.ShowCellGrid = enabled;
-    }
 }

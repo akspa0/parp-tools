@@ -1179,11 +1179,27 @@
       "visible": true
     },
     {
-      "id": "bottom-grid-toggle",
-      "label": "Grid",
+      "id": "bottom-tile-grid-toggle",
+      "label": "Tile",
       "region": "Bottom toolbar",
       "shortcut": null,
-      "help": "Toggle tile, chunk, and cell grid overlays.",
+      "help": "Toggle the tile-boundary grid overlay.",
+      "visible": true
+    },
+    {
+      "id": "bottom-chunk-grid-toggle",
+      "label": "Chunk",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle the chunk-boundary grid overlay.",
+      "visible": true
+    },
+    {
+      "id": "bottom-cell-grid-toggle",
+      "label": "Cell",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle the cell-boundary grid overlay.",
       "visible": true
     },
     {

@@ -164,7 +164,10 @@ internal sealed class ViewerSettingsService
             bottomBar.BottomToggleWmos = settings.BottomToggleWmos;
             bottomBar.BottomToggleTerrain = settings.BottomToggleTerrain;
             bottomBar.BottomTogglePm4 = settings.BottomTogglePm4;
-            bottomBar.BottomToggleGrid = settings.BottomToggleGrid;
+            // Legacy single Grid toggle: a saved value applied to all three overlays.
+            bottomBar.BottomToggleTileGrid = settings.BottomToggleTileGrid && settings.BottomToggleGrid;
+            bottomBar.BottomToggleChunkGrid = settings.BottomToggleChunkGrid && settings.BottomToggleGrid;
+            bottomBar.BottomToggleCellGrid = settings.BottomToggleCellGrid && settings.BottomToggleGrid;
             bottomBar.BottomToggleAudioMute = settings.BottomToggleAudioMute;
             bottomBar.BottomToggleAlphaMask = settings.BottomToggleAlphaMask;
             bottomBar.BottomAlphaMaskChannel = Math.Clamp(
@@ -426,7 +429,12 @@ internal sealed class ViewerSettingsService
                 BottomToggleWmos = _host.UiManager.BottomBar.BottomToggleWmos,
                 BottomToggleTerrain = _host.UiManager.BottomBar.BottomToggleTerrain,
                 BottomTogglePm4 = _host.UiManager.BottomBar.BottomTogglePm4,
-                BottomToggleGrid = _host.UiManager.BottomBar.BottomToggleGrid,
+                BottomToggleGrid = _host.UiManager.BottomBar.BottomToggleTileGrid
+                    || _host.UiManager.BottomBar.BottomToggleChunkGrid
+                    || _host.UiManager.BottomBar.BottomToggleCellGrid,
+                BottomToggleTileGrid = _host.UiManager.BottomBar.BottomToggleTileGrid,
+                BottomToggleChunkGrid = _host.UiManager.BottomBar.BottomToggleChunkGrid,
+                BottomToggleCellGrid = _host.UiManager.BottomBar.BottomToggleCellGrid,
                 BottomToggleAudioMute = _host.UiManager.BottomBar.BottomToggleAudioMute,
                 BottomToggleAlphaMask = _host.UiManager.BottomBar.BottomToggleAlphaMask,
                 BottomAlphaMaskChannel = _host.UiManager.BottomBar.BottomAlphaMaskChannel,
@@ -606,6 +614,9 @@ internal sealed class ViewerSettingsService
         public bool BottomToggleTerrain { get; set; } = true;
         public bool BottomTogglePm4 { get; set; }
         public bool BottomToggleGrid { get; set; }
+        public bool BottomToggleTileGrid { get; set; }
+        public bool BottomToggleChunkGrid { get; set; }
+        public bool BottomToggleCellGrid { get; set; }
         public bool BottomToggleAudioMute { get; set; } = true;
         public bool BottomToggleAlphaMask { get; set; }
         public int BottomAlphaMaskChannel { get; set; } = 1;

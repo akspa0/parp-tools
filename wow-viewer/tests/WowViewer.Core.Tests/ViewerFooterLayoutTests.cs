@@ -29,7 +29,9 @@ public sealed class ViewerFooterLayoutTests
             new("toggle-wmos", 60f * scale, 54f * scale, FooterItemPriority.Essential),
             new("toggle-terrain", 72f * scale, 64f * scale, FooterItemPriority.Essential),
             new("toggle-pm4", 60f * scale, 54f * scale, FooterItemPriority.Essential),
-            new("toggle-grid", 56f * scale, 50f * scale, FooterItemPriority.Essential),
+            new("toggle-tile-grid", 56f * scale, 50f * scale, FooterItemPriority.Essential),
+            new("toggle-chunk-grid", 56f * scale, 50f * scale, FooterItemPriority.Essential),
+            new("toggle-cell-grid", 56f * scale, 50f * scale, FooterItemPriority.Essential),
             new("toggle-audio-mute", 58f * scale, 52f * scale, FooterItemPriority.Essential),
         };
 

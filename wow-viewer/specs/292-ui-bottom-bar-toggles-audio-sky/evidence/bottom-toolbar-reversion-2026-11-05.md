@@ -39,7 +39,7 @@ The normal `bin` outputs are held by the operator's running viewer (`ParpToolsWo
 | Auto-size L/A controls to the loaded terrain | `BottomBarControlPolicy.ResolveLayerCount` uses `TerrainRenderer.MaxResidentLayerCount`; `ResolveAlphaChannelCount` is `layers - 1`; tests cover 0, 4, and 8 layers. |
 | Separate liquid-family controls | Water/Ocean/Magma/Slime toggles drive `LiquidRenderer` per-family flags for MCLQ/MH2O and WL* meshes and `WmoRenderer` MLIQ family flags. |
 | A1–An select one channel and enable the overlay | Seven selected-state `Selectable` controls apply one `AlphaMaskChannel` at a time and the shared `ShowAlphaMask` flag; clicking the selected channel disables the overlay. |
-| Retain the other scene toggles and both opacity sliders | Draw code retains Doodads, WMOs, Terrain, PM4, Grid, Mute, M2/MDX opacity, and WMO opacity. |
+| Retain the other scene toggles and both opacity sliders | Draw code retains Doodads, WMOs, Terrain, PM4, separate Tile/Chunk/Cell grid toggles, Mute, M2/MDX opacity, and WMO opacity. |
 | One Mute control, muted by default | Status-bar audio button removed; `WorldScene._audioMuted` and the settings default are true. |
 | Persist state | Viewer settings load/save include the four liquid families and alpha overlay/channel; the legacy single Water value migrates. |
 | Registry/reference and layout checks | UI verifier passes with zero warnings; 30 focused footer tests pass; viewer compile has zero errors. |
