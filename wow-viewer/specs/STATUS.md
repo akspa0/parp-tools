@@ -75,6 +75,7 @@ approach. TRIAGE.md opens with the measured "we thought we had it" gaps and a qu
 
 | Spec | Scope | Status |
 |---|---|---|
+| [294 Spatial Donor Transforms and Manual PM4 Curation](294-spatial-curation/spec.md) | Arbitrary-angle donor-tile group transforms, manual object placement, and explicit PM4 hull associations | Specified on `294-spatial-curation`; quality checklist passes after operator clarifications (2026-11-05); ready for planning. No plan/tasks/code yet. |
 | [268 Quilt Canvas Terrain Reconstruction & MCAL Deciphering](268-quilt-canvas-terrain-and-mcal-reconstruction/spec.md) | Multi-tile quilt stitching, MCAL layer deciphering, WDL macro-trestle synthesis, inches-scale refinement, and monolithic ADT/mesh materialization | Phases 1–5 reported complete (2026-10-09); receipt in `evidence/receipt-spec268.md`; measured seam and mesh outputs recorded there. No separate operator visual gate is recorded in the task ledger. |
 | [293 Layer-Driven ADT Restoration Workbench](293-layer-driven-adt-restoration/tasks.md) | Draft workbench; currently authorized slice is zoomable donor tile picker, per-selection/per-tile Z settings, and placed-tile label clarity | Phase 1 source/build receipt recorded 2026-11-05 in `tasks.md`; operator visual/save-load proof owed. Full workbench scope remains draft and requires operator review. |
 
