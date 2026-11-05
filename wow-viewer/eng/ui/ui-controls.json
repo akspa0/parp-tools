@@ -101,9 +101,9 @@
     {
       "id": "pm4-rail-icon",
       "label": "PM4",
-      "region": "Right action bar",
+      "region": "Bottom toolbar / Right action bar",
       "shortcut": null,
-      "help": "Open or close the PM4 inspection window.",
+      "help": "Toggle the PM4 overlay from the bottom toolbar or open the PM4 workbench from the action bar.",
       "visible": true
     },
     {
@@ -157,9 +157,9 @@
     {
       "id": "alpha",
       "label": "Alpha",
-      "region": "Options > Overlays",
+      "region": "Bottom toolbar / Options > Layers",
       "shortcut": null,
-      "help": "Show the terrain alpha (opacity) map overlay.",
+      "help": "Quick-toggle the terrain alpha-mask overlay; detailed texture/alpha settings are in Layers.",
       "visible": true
     },
     {
@@ -373,9 +373,9 @@
     {
       "id": "fog",
       "label": "Fog",
-      "region": "Left sidebar > Workspace",
+      "region": "Bottom toolbar / Left sidebar > Workspace",
       "shortcut": null,
-      "help": "Fog start and end distance for the scene.",
+      "help": "Quick-toggle object fog from the bottom toolbar; set fog start/end in Workspace.",
       "visible": true
     },
     {
@@ -973,9 +973,281 @@
     {
       "id": "sky-controls",
       "label": "Sky",
-      "region": "Left sidebar > Workspace",
+      "region": "Bottom toolbar / Left sidebar > Workspace",
       "shortcut": null,
-      "help": "Atmospheric sky dome, sun/moon cycle, and client skybox backdrop controls.",
+      "help": "Quick-toggle the sky from the bottom toolbar; configure the sky dome, sun/moon cycle, and backdrop in Workspace.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform",
+      "label": "Donor group transform",
+      "region": "Right sidebar > Archaeology > Phase layers",
+      "shortcut": null,
+      "help": "Preview, accept, cancel, undo, and redo rigid transforms of multi-tile donor groups.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-preview",
+      "label": "Preview group transform",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Compute a non-destructive preview of a donor group transform.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-accept",
+      "label": "Accept group transform",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Commit the valid preview to the layer and add it to undo history.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-cancel",
+      "label": "Cancel transform preview",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Discard the preview without changing the layer or donor source.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-undo",
+      "label": "Undo group transform",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Restore the previous accepted group placement.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-redo",
+      "label": "Redo group transform",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Reapply the most recently undone group placement.",
+      "visible": true
+    },
+    {
+      "id": "manual-object-placement",
+      "label": "Manual object placement",
+      "region": "Right sidebar > PM4 > Live Alignment > Manual Curation",
+      "shortcut": null,
+      "help": "Move and yaw-adjust a selected object in the live scene, then record its curation snapshot without writing source map files.",
+      "visible": true
+    },
+    {
+      "id": "manual-placement-apply-position",
+      "label": "Apply manual position",
+      "region": "Right sidebar > PM4 > Manual object placement",
+      "shortcut": null,
+      "help": "Apply the selected object's edited world position to the live scene and curation snapshot.",
+      "visible": true
+    },
+    {
+      "id": "manual-placement-apply-yaw",
+      "label": "Apply manual yaw",
+      "region": "Right sidebar > PM4 > Manual object placement",
+      "shortcut": null,
+      "help": "Apply an arbitrary yaw to the selected object in the live scene and curation snapshot.",
+      "visible": true
+    },
+    {
+      "id": "manual-placement-record",
+      "label": "Record selected placement",
+      "region": "Right sidebar > PM4 > Manual object placement",
+      "shortcut": null,
+      "help": "Add or refresh the selected tile-scoped object snapshot in the manual curation project.",
+      "visible": true
+    },
+    {
+      "id": "manual-object-hull-curation",
+      "label": "Manual object to PM4 hull curation",
+      "region": "Right sidebar > PM4 > Live Alignment",
+      "shortcut": null,
+      "help": "Create, inspect, explicitly replace, or remove user-authored object-to-hull associations.",
+      "visible": true
+    },
+    {
+      "id": "manual-pair-create",
+      "label": "Pair selected object with hull",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Create an explicit association between the selected object placement and selected PM4 hull.",
+      "visible": true
+    },
+    {
+      "id": "manual-pair-replace",
+      "label": "Replace with selected hull",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Explicitly replace this object's current hull association with the selected hull.",
+      "visible": true
+    },
+    {
+      "id": "manual-pair-remove",
+      "label": "Remove association",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Remove this explicit curation association without deleting either member.",
+      "visible": true
+    },
+    {
+      "id": "manual-curation-save",
+      "label": "Save manual curation project",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Save curated placements and PM4 hull associations to a separate project file, not source map files.",
+      "visible": true
+    },
+    {
+      "id": "manual-curation-reload",
+      "label": "Reload manual curation project",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Reload saved curation-only placement snapshots and explicit PM4 associations.",
+      "visible": true
+    },
+    {
+      "id": "manual-catalog-placement",
+      "label": "Place selected catalog model on hull tile",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Create a curation-only placement at the selected hull tile using the current client Asset Catalog entry.",
+      "visible": true
+    },
+    {
+      "id": "manual-pair-saved-placement",
+      "label": "Pair saved placement with selected hull",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Explicitly associate an already recorded manual placement with the selected PM4 hull.",
+      "visible": true
+    },
+    {
+      "id": "bottom-water-toggle",
+      "label": "Water",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle terrain liquids, WMO-group liquids, and loose world liquids.",
+      "visible": true
+    },
+    {
+      "id": "bottom-doodads-toggle",
+      "label": "Doodads",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle M2/MDX doodad visibility.",
+      "visible": true
+    },
+    {
+      "id": "bottom-wmos-toggle",
+      "label": "WMOs",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle WMO visibility.",
+      "visible": true
+    },
+    {
+      "id": "bottom-terrain-toggle",
+      "label": "Terrain",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle terrain tiles and WDL far terrain.",
+      "visible": true
+    },
+    {
+      "id": "bottom-grid-toggle",
+      "label": "Grid",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle tile, chunk, and cell grid overlays.",
+      "visible": true
+    },
+    {
+      "id": "bottom-mute-toggle",
+      "label": "Mute",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Mute or unmute world audio output.",
+      "visible": true
+    },
+    {
+      "id": "bottom-m2-mdx-opacity",
+      "label": "M2/MDX Opacity",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Adjust opacity for M2 and MDX models together.",
+      "visible": true
+    },
+    {
+      "id": "bottom-wmo-opacity",
+      "label": "WMO Opacity",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Adjust WMO opacity.",
+      "visible": true
+    },
+    {
+      "id": "bottom-layer-0",
+      "label": "L0",
+      "region": "Bottom toolbar > Layers",
+      "shortcut": null,
+      "help": "Quick-toggle the base terrain texture layer.",
+      "visible": true
+    },
+    {
+      "id": "bottom-layer-1",
+      "label": "L1",
+      "region": "Bottom toolbar > Layers",
+      "shortcut": null,
+      "help": "Quick-toggle resident terrain texture layer 1.",
+      "visible": true
+    },
+    {
+      "id": "bottom-layer-2",
+      "label": "L2",
+      "region": "Bottom toolbar > Layers",
+      "shortcut": null,
+      "help": "Quick-toggle resident terrain texture layer 2.",
+      "visible": true
+    },
+    {
+      "id": "bottom-layer-3",
+      "label": "L3",
+      "region": "Bottom toolbar > Layers",
+      "shortcut": null,
+      "help": "Quick-toggle resident terrain texture layer 3.",
+      "visible": true
+    },
+    {
+      "id": "bottom-layer-4",
+      "label": "L4",
+      "region": "Bottom toolbar > Layers",
+      "shortcut": null,
+      "help": "Quick-toggle resident terrain texture layer 4 when present.",
+      "visible": true
+    },
+    {
+      "id": "bottom-layer-5",
+      "label": "L5",
+      "region": "Bottom toolbar > Layers",
+      "shortcut": null,
+      "help": "Quick-toggle resident terrain texture layer 5 when present.",
+      "visible": true
+    },
+    {
+      "id": "bottom-layer-6",
+      "label": "L6",
+      "region": "Bottom toolbar > Layers",
+      "shortcut": null,
+      "help": "Quick-toggle resident terrain texture layer 6 when present.",
+      "visible": true
+    },
+    {
+      "id": "bottom-layer-7",
+      "label": "L7",
+      "region": "Bottom toolbar > Layers",
+      "shortcut": null,
+      "help": "Quick-toggle resident terrain texture layer 7 when present.",
       "visible": true
     }
   ]

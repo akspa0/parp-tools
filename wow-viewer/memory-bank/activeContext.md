@@ -4,14 +4,16 @@
 
 ## Current handoff
 
+- **Spec 294 — Spatial donor transforms and manual PM4 curation:** implementation Phases 1–4 complete. Receipts: [`Phase 1`](../specs/294-spatial-curation/evidence/phase1-core-transform-2026-11-05.md), [`Phase 2`](../specs/294-spatial-curation/evidence/phase2-group-transform-ui-2026-11-05.md), [`Phases 3–4`](../specs/294-spatial-curation/evidence/phase3-4-manual-curation-persistence-2026-11-05.md). Next is operator real-client verification of group preview/undo, manual catalog placement/pairing, curation save/reopen, and unchanged source-map hashes.
 - **Spec 293 — Restoration Workbench, Phase 1:** zoom/pan, tile-range/hover readout, drag selection, and selection Z offset/scale are implemented. Build receipt is in [`tasks.md`](../specs/293-layer-driven-adt-restoration/tasks.md). Operator proof remains: exercise picker, place tiles, adjust Z, save/reload. The full workbench is still draft and requires operator review.
 - **Spec 289 — PM4 duplicate-on-match:** occupancy now uses world-space bounds, checks both tile-key orientations, and prevents duplicate same-model spawns by default. Receipt: [`2026-11-05-duplicate-on-match-occupancy.md`](../specs/289-pm4-3d-footprint-and-direct-matching/evidence/2026-11-05-duplicate-on-match-occupancy.md). Operator proof remains on an already-paired real-client tile.
 - **Spec 292 — UI frame stability:** NewFrame/EndFrame are paired in `OnRender`; temporary `UiOscilloscope` diagnostics are present. Operator must run the viewer, exercise menus/panels, and confirm stable input/rendering before the diagnostic is removed.
+- **Spec 292 — bottom-toolbar reversion:** restored nine scene toggles plus M2/MDX and WMO opacity sliders, removed the Texture Masks toolbar button, retained L0–L7/Alpha quick checks, and persisted toggles. Receipt: [`bottom-toolbar-reversion-2026-11-05.md`](../specs/292-ui-bottom-bar-toggles-audio-sky/evidence/bottom-toolbar-reversion-2026-11-05.md). Operator visual/restart proof remains owed.
 - **Epic 249 / 251 P1 handoff:** R-10 performance capture and U-01 moved-surface smoke remain operator-owned. Spec 255 W0–W7 smoke is also owed. See the status router for current gating and ordering.
 
 ## Next bounded action
 
-Operator runs the current viewer against the configured test client: first verify Spec 293 picker/save-load and Spec 289 no-duplicate behavior; in the same session exercise the Spec 292 menu/panel stability probe. Record build, client fingerprint, observed result, and artifacts in each owning spec. Do not infer these runtime gates from build/tests.
+Operator runs the current viewer against the configured test client to verify Spec 294 group transforms, manual placement/pairing, save/reopen, and unchanged source-map hashes; separately verify Spec 293 picker/save-load and Spec 289 no-duplicate behavior, then exercise the Spec 292 menu/panel stability probe. Record build, client fingerprint, observed result, and artifacts in each owning spec. Do not infer runtime gates from build/tests.
 
 ## Plan and history routing
 

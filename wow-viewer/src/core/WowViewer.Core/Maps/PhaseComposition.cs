@@ -100,6 +100,13 @@ public sealed class PhaseLayerSettings
     /// <inheritdoc cref="RotationOriginTileX"/>
     public float RotationOriginTileY { get; set; } = -1f;
 
+    /// <summary>
+    /// Spec 294: exact authored donor-group transform metadata. The current per-tile target mappings
+    /// are grid-snapped; this keeps the requested arbitrary angle/pivot/translation available for
+    /// project persistence and review without resampling terrain channels.
+    /// </summary>
+    public DonorGroupTransform? GroupTransform { get; set; }
+
     /// <summary>Mirror this layer's content along the horizontal axis. Exact-grid involution.</summary>
     public bool MirrorHorizontal { get; set; }
 
@@ -203,6 +210,7 @@ public sealed class PhaseLayerSettings
             RotationDegrees = RotationDegrees,
             RotationOriginTileX = RotationOriginTileX,
             RotationOriginTileY = RotationOriginTileY,
+            GroupTransform = GroupTransform,
             MirrorHorizontal = MirrorHorizontal,
             MirrorVertical = MirrorVertical,
             UsePlacedTilesOnly = UsePlacedTilesOnly,

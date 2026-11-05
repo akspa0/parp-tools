@@ -34,6 +34,7 @@ using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WowViewer.Core.IO.Converters;
 using WoWViewer.Workbench;
+using WoWViewer.Workbench.Services.WorkbenchPanels;
 using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
 using CoreMdxGeometryFile = WowViewer.Core.Mdx.MdxGeometryFile;
 using CoreMdxSummary = WowViewer.Core.Mdx.MdxSummary;
@@ -53,12 +54,14 @@ internal sealed partial class ArchaeologyPanelService
 {
     private readonly IViewerAppHost _host;
     private readonly DonorTilePickerService _donorTilePicker;
+    private readonly DonorGroupTransformWorkbenchService _donorGroupTransformWorkbench;
     internal DonorTilePickerService DonorTilePicker => _donorTilePicker;
 
     internal ArchaeologyPanelService(IViewerAppHost host)
     {
         _host = host;
         _donorTilePicker = new DonorTilePickerService(host);
+        _donorGroupTransformWorkbench = new DonorGroupTransformWorkbenchService();
     }
 
     // Host bridge: see ArchaeologyPanelService.Host.cs.

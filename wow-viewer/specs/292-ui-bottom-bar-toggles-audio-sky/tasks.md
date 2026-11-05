@@ -29,3 +29,8 @@ Receipt: [`evidence/final-receipt.md`](evidence/final-receipt.md)
 ## Phase 6 — Verification
 - [x] T060 Update `ui-controls.json` + `UI-REFERENCE.md`; `Verify-UiReference.ps1` (receipt in `evidence/final-receipt.md`)
 - [x] T061 Build + tests; operator screenshot proof (AC-1/2/5/6/7) (receipt in `evidence/final-receipt.md`)
+
+## Phase 7 — Operator-directed bottom-toolbar reversion (2026-11-05)
+- [x] T070 Restore all nine quick scene toggles and add separate M2/MDX and WMO opacity sliders to the bottom toolbar; remove the Texture Masks toolbar button. Receipt: [`evidence/bottom-toolbar-reversion-2026-11-05.md`](evidence/bottom-toolbar-reversion-2026-11-05.md).
+- [x] T071 Persist all nine toggle states in `viewer_settings.json`; preserve opacity persistence and apply saved toggle state to each newly loaded scene. Receipt: [`evidence/bottom-toolbar-reversion-2026-11-05.md`](evidence/bottom-toolbar-reversion-2026-11-05.md).
+- [x] T072 Update `ui-controls.json` and `UI-REFERENCE.md`; `Verify-UiReference.ps1`, focused footer tests, and the solution build pass. Operator real-client visual confirmation remains owed. Receipt: [`evidence/bottom-toolbar-reversion-2026-11-05.md`](evidence/bottom-toolbar-reversion-2026-11-05.md).

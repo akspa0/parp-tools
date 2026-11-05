@@ -153,6 +153,17 @@ internal sealed class ViewerSettingsService
             if (settings == null)
                 return;
 
+            BottomBarService bottomBar = _host.UiManager.BottomBar;
+            bottomBar.BottomToggleSky = settings.BottomToggleSky;
+            bottomBar.BottomToggleFog = settings.BottomToggleFog;
+            bottomBar.BottomToggleWater = settings.BottomToggleWater;
+            bottomBar.BottomToggleDoodads = settings.BottomToggleDoodads;
+            bottomBar.BottomToggleWmos = settings.BottomToggleWmos;
+            bottomBar.BottomToggleTerrain = settings.BottomToggleTerrain;
+            bottomBar.BottomTogglePm4 = settings.BottomTogglePm4;
+            bottomBar.BottomToggleGrid = settings.BottomToggleGrid;
+            bottomBar.BottomToggleAudioMute = settings.BottomToggleAudioMute;
+
             _uiTheme = Enum.IsDefined(typeof(UiThemeKind), settings.UiTheme)
                 ? (UiThemeKind)settings.UiTheme
                 : UiThemeKind.ModernSlate;
@@ -376,6 +387,11 @@ internal sealed class ViewerSettingsService
         {
             Directory.CreateDirectory(SettingsDir);
 
+            _host.UiManager.BottomBar.CaptureSceneState(
+                _host.WorldScene,
+                _host.TerrainManager,
+                _host.VlmTerrainManager);
+
             var settings = new ViewerSettings
             {
                 UiTheme = (int)_uiTheme,
@@ -392,6 +408,15 @@ internal sealed class ViewerSettingsService
                 WireframeLineWidth = WireframeOverlaySettings.LineWidth,
                 WireframeBaseIntensity = WireframeOverlaySettings.BaseIntensity,
                 WireframeFollowModelOpacity = WireframeOverlaySettings.FollowModelOpacity,
+                BottomToggleSky = _host.UiManager.BottomBar.BottomToggleSky,
+                BottomToggleFog = _host.UiManager.BottomBar.BottomToggleFog,
+                BottomToggleWater = _host.UiManager.BottomBar.BottomToggleWater,
+                BottomToggleDoodads = _host.UiManager.BottomBar.BottomToggleDoodads,
+                BottomToggleWmos = _host.UiManager.BottomBar.BottomToggleWmos,
+                BottomToggleTerrain = _host.UiManager.BottomBar.BottomToggleTerrain,
+                BottomTogglePm4 = _host.UiManager.BottomBar.BottomTogglePm4,
+                BottomToggleGrid = _host.UiManager.BottomBar.BottomToggleGrid,
+                BottomToggleAudioMute = _host.UiManager.BottomBar.BottomToggleAudioMute,
                 CursorStyle = (int)(_sceneCursorRenderer?.Style ?? CursorStyle.ClassicOSArrow),
                 CursorScale = _sceneCursorRenderer?.UserScale ?? 1.0f,
                 LastGameFolderPath = _lastGameFolderPath,
@@ -558,6 +583,15 @@ internal sealed class ViewerSettingsService
         public float WireframeLineWidth { get; set; } = 1.0f;
         public float WireframeBaseIntensity { get; set; } = 0.75f;
         public bool WireframeFollowModelOpacity { get; set; } = true;
+        public bool BottomToggleSky { get; set; } = true;
+        public bool BottomToggleFog { get; set; } = true;
+        public bool BottomToggleWater { get; set; } = true;
+        public bool BottomToggleDoodads { get; set; } = true;
+        public bool BottomToggleWmos { get; set; } = true;
+        public bool BottomToggleTerrain { get; set; } = true;
+        public bool BottomTogglePm4 { get; set; }
+        public bool BottomToggleGrid { get; set; }
+        public bool BottomToggleAudioMute { get; set; }
         public int CursorStyle { get; set; } = (int)Rendering.CursorStyle.ClassicOSArrow;
         public float CursorScale { get; set; } = 1.0f;
         public string? LastGameFolderPath { get; set; }

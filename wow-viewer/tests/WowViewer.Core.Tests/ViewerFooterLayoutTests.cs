@@ -19,18 +19,36 @@ public sealed class ViewerFooterLayoutTests
 
     private static List<FooterItemMeasure> BottomItems(float scale) => new()
     {
-        new FooterItemMeasure("toggle-pm4", 62f * scale, 48f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("dropup-layers", 120f * scale, 92f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("mode-viewer", 76f * scale, 58f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("mode-editor", 74f * scale, 56f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("mode-archaeology", 104f * scale, 80f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("mode-options", 76f * scale, 58f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-sky", 54f * scale, 48f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-fog", 54f * scale, 48f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-water", 64f * scale, 56f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-doodads", 78f * scale, 68f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-wmos", 60f * scale, 54f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-terrain", 72f * scale, 64f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-pm4", 60f * scale, 54f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-grid", 56f * scale, 50f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-audio-mute", 58f * scale, 52f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("toggle-layer-0", 46f * scale, 42f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("toggle-layer-1", 46f * scale, 42f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("toggle-layer-2", 46f * scale, 42f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("toggle-layer-3", 46f * scale, 42f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("toggle-layer-4", 46f * scale, 42f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("toggle-layer-5", 46f * scale, 42f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("toggle-layer-6", 46f * scale, 42f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("toggle-layer-7", 46f * scale, 42f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("toggle-alpha", 74f * scale, 64f * scale, FooterItemPriority.Secondary),
+        new FooterItemMeasure("opacity-m2", 200f * scale, 160f * scale, FooterItemPriority.Essential),
+        new FooterItemMeasure("opacity-wmo", 180f * scale, 145f * scale, FooterItemPriority.Essential),
     };
+
+    private static bool IsBottomBarEssential(FooterItemPlacement placement)
+        => !placement.Id.StartsWith("toggle-layer-", StringComparison.Ordinal) && placement.Id != "toggle-alpha";
 
     [Theory]
     [InlineData(1920, 1080)]
     [InlineData(2560, 1440)]
     [InlineData(3840, 2160)]
+    [InlineData(1280, 720)]
     public void BottomBar_FitsInsideItsRegionAtCommonResolutions(int width, int height)
     {
         UiLayout layout = LayoutFor(width, height);
@@ -43,7 +61,7 @@ public sealed class ViewerFooterLayoutTests
         Assert.True(fit.ContentWidth <= available + 0.5f);
         foreach (FooterItemPlacement placement in fit.Placements)
         {
-            Assert.True(placement.Visible);
+            if (IsBottomBarEssential(placement)) Assert.True(placement.Visible);
             Assert.True(placement.X >= 0f);
             Assert.True(placement.X + placement.Width <= available + 0.5f);
         }
@@ -63,7 +81,7 @@ public sealed class ViewerFooterLayoutTests
         FooterFitResult fit = ViewerFooterLayout.Fit(region, scale, BottomItems(scale));
 
         Assert.True(fit.ContentWidth <= available + 0.5f);
-        Assert.All(fit.Placements, placement => Assert.True(placement.Visible));
+        Assert.All(fit.Placements.Where(IsBottomBarEssential), placement => Assert.True(placement.Visible));
     }
 
     [Fact]

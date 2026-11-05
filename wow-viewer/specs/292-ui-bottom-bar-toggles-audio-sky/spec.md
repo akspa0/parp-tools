@@ -1,6 +1,6 @@
 # Spec 292 — Bottom-Bar Toggles, Mode Sidebars, Audio Panel & Sky Controls
 
-**Status:** DRAFT — awaiting operator approval (AGENTS.md §9.1). No code written.
+**Status:** Original scope implemented 2026-11-03; operator amendment implemented 2026-11-05. Real-client visual confirmation remains owed.
 **Origin:** Operator request 2026-11-03 (wording preserved below). Follows Spec 291.
 
 ## Operator requirements (verbatim intent)
@@ -36,6 +36,14 @@ Renderer sky rewrite, new audio engine features, PM4/export work.
 ## Open item for operator
 
 Sky "source = Sky model" assumes MPQ sky M2/MDX models can be listed and rendered. Phase 1 inventory verifies this; if unsupported, that option ships disabled and is reported.
+
+## Amendment 2026-11-05 — Restore scene toggles and model opacity on the bottom toolbar
+
+**Operator direction:** restore the scene toggles and the MDX/M2 and WMO opacity controls to the bottom toolbar, and remove the Texture Masks button from that toolbar.
+
+This amendment supersedes the 2026-11-03 receipt's decision to replace the eight scene toggles with a Layers & Opacity drop-up. The bottom toolbar MUST show the nine scene toggles named in the original requirement (Sky, Fog, Water, Doodads, WMOs, Terrain, PM4, Grid, Audio mute) plus separate MDX/M2 and WMO opacity sliders. Remove the Texture Masks button from the toolbar. Preserve the existing quick L0–L7 (resident layers) and Alpha checkboxes; detailed per-layer texture/alpha controls remain in the Layers sidebar. Toggles and opacity values continue to use viewer settings persistence.
+
+Verification: `ui-controls.json`/`UI-REFERENCE.md` remain synchronized and `Verify-UiReference.ps1` passes; focused tests and a solution build pass. Runtime visibility/opacity interaction remains operator-owned under §9.2.
 
 ## Amendment 2026-11-04 — operator-reported flicker defect (post-landing): ROOT CAUSE FOUND
 
@@ -74,4 +82,3 @@ resolution is operator-owned (§9.2): rebuild, launch, exercise the File menu an
 stable and interactive; the oscilloscope log verifies cadence and flags any residual per-frame
 toggle. Residual uncertainty: if strobing persists on this build, the log discriminates the
 remaining cause (content-level toggle vs scene-side) in the same run.
-

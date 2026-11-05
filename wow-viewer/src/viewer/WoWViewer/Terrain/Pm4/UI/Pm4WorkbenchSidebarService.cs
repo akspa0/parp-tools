@@ -9,8 +9,10 @@ using WoWViewer.Terrain;
 using WoWViewer.Terrain.Pm4;
 using WoWViewer.Terrain.Pm4.Services;
 using WoWViewer.UI;
+using WoWViewer.Workbench.Services.WorkbenchPanels;
 using WowViewer.Core.PM4.Footprint;
 using WowViewer.Core.PM4.Matching;
+using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.World;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 
@@ -24,6 +26,7 @@ namespace WoWViewer.Terrain.Pm4.UI;
 internal sealed class Pm4WorkbenchSidebarService
 {
     public static readonly Pm4WorkbenchSidebarService Instance = new();
+    private readonly ManualCurationWorkbenchService _manualCuration = new();
 
     private static readonly (byte Value, string Label, string Tooltip)[] SurfaceClassEntries =
     [
@@ -365,6 +368,9 @@ internal sealed class Pm4WorkbenchSidebarService
         if (worldScene == null)
             return;
 
+        string mapName = ManualCurationWorkbenchService.NormalizeMapName(host.LoadedFileName);
+        _manualCuration.ApplyProjectToScene(mapName, worldScene);
+
         int activeTileX = 0;
         int activeTileY = 0;
         bool hasTile = false;
@@ -491,6 +497,15 @@ internal sealed class Pm4WorkbenchSidebarService
             {
                 host.Pm4DoodadDuplication.TeachPairing(selectedPm4Obj, inst, pm4TileX, pm4TileY);
             }
+
+            _manualCuration.DrawPlacementEditor(mapName, host, worldScene, inst);
+            _manualCuration.DrawAssociationEditor(
+                mapName,
+                inst,
+                new Pm4HullIdentity(pm4TileX, pm4TileY, selectedPm4Obj.Ck24,
+                    selectedPm4Obj.ObjectPartId, selectedPm4Obj.LinkGroupObjectId),
+                host.CatalogView?.SelectedEntry,
+                pm4Centroid);
 
             if (SharedUiWidgets.ActionButton("Clear Selection (Next Pair)##clear_pair_selection"))
             {
@@ -640,8 +655,17 @@ internal sealed class Pm4WorkbenchSidebarService
                     {
                         host.Pm4DoodadDuplication.SpawnCandidateIntoPm4Hull(selectedPm4Obj, pm4TileX, pm4TileY, match, out _);
                     }
+
                 }
             }
+
+            _manualCuration.DrawAssociationEditor(
+                mapName,
+                null,
+                new Pm4HullIdentity(pm4TileX, pm4TileY, selectedPm4Obj.Ck24,
+                    selectedPm4Obj.ObjectPartId, selectedPm4Obj.LinkGroupObjectId),
+                host.CatalogView?.SelectedEntry,
+                pm4Centroid);
         }
         // Branch 3: Only Scene Object is selected
         else if (selectedObj.HasValue)
@@ -714,6 +738,9 @@ internal sealed class Pm4WorkbenchSidebarService
             {
                 worldScene.Selection.ClearSelection();
             }
+
+            _manualCuration.DrawPlacementEditor(mapName, host, worldScene, inst);
+            _manualCuration.DrawAssociationEditor(mapName, inst, null);
 
             // Same Neighborhood / Family Models from Prior Knowledge Database
             string family = Pm4PriorKnowledgeDatabase.DetectFamily(inst.ModelPath);
