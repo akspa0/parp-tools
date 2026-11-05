@@ -54,6 +54,17 @@ public sealed record DuplicatedDoodadResult(
     float FitScore);
 
 /// <summary>
+/// World-space bounds of an already-placed model instance, used for hull occupancy tests.
+/// <see cref="BoundsResolved"/> is false when the instance's world bounds have not been computed
+/// yet; in that case only <see cref="Origin"/> is trustworthy.
+/// </summary>
+public readonly record struct PlacementBounds(
+    Vector3 Min,
+    Vector3 Max,
+    Vector3 Origin,
+    bool BoundsResolved);
+
+/// <summary>
 /// Mathematical and spatial engine for duplicating existing model instances to fill unmatched
 /// PM4 doodad collision hulls (e.g. repeated cliff rocks in development.wdt 35_38).
 /// </summary>
@@ -95,6 +106,79 @@ public static class Pm4DoodadDuplicationEngine
             {
                 unmatched.Add(target);
             }
+        }
+
+        return unmatched;
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="target"/> already has a model assigned/paired.
+    /// </summary>
+    /// <remarks>
+    /// Occupancy is tested against world-space AABBs, not hull-centroid-to-model-origin distance.
+    /// WMO and most M2 placement origins sit at the model base rather than the hull centroid, so an
+    /// origin-distance test routinely reports an already-paired hull as free and spawns a duplicate
+    /// copy. AABB intersection in all three axes is the correct "this hull already contains an
+    /// object" semantic. Placements whose bounds are not resolved fall back to origin distance.
+    /// </remarks>
+    public static bool IsTargetOccupied(
+        Pm4DoodadTarget target,
+        IReadOnlyList<PlacementBounds> placements,
+        float originFallbackRadius = DefaultOccupancyRadius)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (placements == null || placements.Count == 0)
+            return false;
+
+        float radiusSq = originFallbackRadius * originFallbackRadius;
+
+        for (int i = 0; i < placements.Count; i++)
+        {
+            PlacementBounds p = placements[i];
+            if (p.BoundsResolved)
+            {
+                if (OverlapsAabb(target.BoundsMin, target.BoundsMax, p.Min, p.Max))
+                    return true;
+            }
+            else if (Vector3.DistanceSquared(target.WorldCentroid, p.Origin) < radiusSq)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when two world-space AABBs intersect on all three axes (with a small epsilon so
+    /// touching faces count as overlap).
+    /// </summary>
+    private static bool OverlapsAabb(Vector3 aMin, Vector3 aMax, Vector3 bMin, Vector3 bMax)
+    {
+        const float epsilon = 0.05f;
+        return aMin.X - epsilon <= bMax.X && aMax.X + epsilon >= bMin.X
+            && aMin.Y - epsilon <= bMax.Y && aMax.Y + epsilon >= bMin.Y
+            && aMin.Z - epsilon <= bMax.Z && aMax.Z + epsilon >= bMin.Z;
+    }
+
+    /// <summary>
+    /// Filters candidate PM4 targets using world-space bounds occupancy (see
+    /// <see cref="IsTargetOccupied"/>). Prefer this overload over the origin-distance one.
+    /// </summary>
+    public static List<Pm4DoodadTarget> FindUnmatchedTargets(
+        IReadOnlyList<Pm4DoodadTarget> candidates,
+        IReadOnlyList<PlacementBounds> placements,
+        float originFallbackRadius = DefaultOccupancyRadius)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        if (placements == null || placements.Count == 0)
+            return [.. candidates];
+
+        var unmatched = new List<Pm4DoodadTarget>(candidates.Count);
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            if (!IsTargetOccupied(candidates[i], placements, originFallbackRadius))
+                unmatched.Add(candidates[i]);
         }
 
         return unmatched;
@@ -226,6 +310,30 @@ public static class Pm4DoodadDuplicationEngine
         float occupancyRadius = DefaultOccupancyRadius)
     {
         List<Pm4DoodadTarget> unmatched = FindUnmatchedTargets(candidates, existingPlacements, occupancyRadius);
+        var results = new List<DuplicatedDoodadResult>(unmatched.Count);
+
+        int currentUniqueId = startUniqueId > 0 ? startUniqueId : SyntheticUniqueIdBase;
+        for (int i = 0; i < unmatched.Count; i++)
+        {
+            results.Add(FitModelToTarget(template, unmatched[i], currentUniqueId++));
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Duplicates a model template across all unmatched candidate PM4 targets using world-space
+    /// bounds occupancy. This is the overload that prevents duplicate copies on hulls that already
+    /// have an assigned/paired model.
+    /// </summary>
+    public static List<DuplicatedDoodadResult> DuplicateAcrossTargets(
+        ModelTemplateInfo template,
+        IReadOnlyList<Pm4DoodadTarget> candidates,
+        IReadOnlyList<PlacementBounds> placements,
+        int startUniqueId,
+        float originFallbackRadius = DefaultOccupancyRadius)
+    {
+        List<Pm4DoodadTarget> unmatched = FindUnmatchedTargets(candidates, placements, originFallbackRadius);
         var results = new List<DuplicatedDoodadResult>(unmatched.Count);
 
         int currentUniqueId = startUniqueId > 0 ? startUniqueId : SyntheticUniqueIdBase;

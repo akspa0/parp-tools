@@ -220,6 +220,97 @@ internal sealed class Pm4DoodadDuplicationService
     public bool CanUndo => _undoStack.Count > 0;
 
     /// <summary>
+    /// Collects world-space bounds for every placement on a tile, including the transposed tile key
+    /// (PM4 tiles are sometimes keyed with swapped coordinates). Used to detect hulls that already
+    /// have an assigned/paired model so matching does not spawn duplicate copies.
+    /// </summary>
+    private static List<PlacementBounds> BuildPlacementBounds(IPm4OverlayHost pm4Host, int tileX, int tileY)
+    {
+        var result = new List<PlacementBounds>();
+        Collect(tileX, tileY);
+        if (tileX != tileY)
+            Collect(tileY, tileX);
+        return result;
+
+        void Collect(int tx, int ty)
+        {
+            if (pm4Host.TileMdxInstances.TryGetValue((tx, ty), out var mdx) && mdx != null)
+            {
+                for (int i = 0; i < mdx.Count; i++)
+                    result.Add(new PlacementBounds(mdx[i].BoundsMin, mdx[i].BoundsMax, mdx[i].PlacementPosition, mdx[i].BoundsResolved));
+            }
+
+            if (pm4Host.TileWmoInstances.TryGetValue((tx, ty), out var wmo) && wmo != null)
+            {
+                for (int i = 0; i < wmo.Count; i++)
+                    result.Add(new PlacementBounds(wmo[i].BoundsMin, wmo[i].BoundsMax, wmo[i].PlacementPosition, wmo[i].BoundsResolved));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds a world-space <see cref="Pm4DoodadTarget"/> from a PM4 overlay object.
+    /// </summary>
+    private static Pm4DoodadTarget BuildTarget(Pm4OverlayObject obj, int tileX, int tileY)
+    {
+        WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, obj.BaseTransform, out Vector3 hullMin, out Vector3 hullMax);
+        return new Pm4DoodadTarget(
+            tileX,
+            tileY,
+            obj.Ck24,
+            obj.ObjectPartId,
+            Vector3.Transform(obj.Center, obj.BaseTransform),
+            hullMin,
+            hullMax,
+            obj.BaseRotationRadians,
+            obj.DominantGroupKey);
+    }
+
+    /// <summary>
+    /// True when the hull already contains a placement of the same model path. Blocks duplicate
+    /// explicit spawns while still allowing different models in a multi-model hull.
+    /// </summary>
+    private static bool HullHasSameModel(IPm4OverlayHost pm4Host, Pm4OverlayObject obj, int tileX, int tileY, string? modelPath)
+    {
+        if (string.IsNullOrEmpty(modelPath))
+            return false;
+
+        var target = BuildTarget(obj, tileX, tileY);
+        bool sameModel = false;
+
+        void Check(List<ObjectInstance>? list)
+        {
+            if (list == null || sameModel) return;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var inst = list[i];
+                if (!string.Equals(inst.ModelPath, modelPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var pb = new PlacementBounds(inst.BoundsMin, inst.BoundsMax, inst.PlacementPosition, inst.BoundsResolved);
+                if (Pm4DoodadDuplicationEngine.IsTargetOccupied(target, [pb]))
+                {
+                    sameModel = true;
+                    return;
+                }
+            }
+        }
+
+        pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var mdx);
+        pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var wmo);
+        Check(mdx);
+        Check(wmo);
+        if (!sameModel && tileX != tileY)
+        {
+            pm4Host.TileMdxInstances.TryGetValue((tileY, tileX), out var mdxT);
+            pm4Host.TileWmoInstances.TryGetValue((tileY, tileX), out var wmoT);
+            Check(mdxT);
+            Check(wmoT);
+        }
+
+        return sameModel;
+    }
+
+    /// <summary>
     /// Duplicates a template model instance into all unmatched PM4 doodad collision hulls on the specified tile.
     /// </summary>
     public int DuplicateModelToUnmatchedPm4Doodads(ObjectInstance template, int tileX, int tileY, float searchRadius = 150f)
@@ -292,27 +383,23 @@ internal sealed class Pm4DoodadDuplicationService
         bool isWmo = IsWmoAsset(template.ModelPath, template.AssetKind);
         float templateScale = isWmo ? 1.0f : template.PlacementScale;
 
-        // Get existing placements on this tile to reject occupied targets
+        // Get existing placements on this tile to reject occupied targets. Bounds-based occupancy
+        // (not origin distance) is required: WMO/M2 origins sit at the model base, so an
+        // origin-distance test misses already-paired hulls and spawns duplicate copies.
         pm4Host.TileMdxInstances.TryGetValue((targetTileX, targetTileY), out List<ObjectInstance>? tileMdx);
         pm4Host.TileWmoInstances.TryGetValue((targetTileX, targetTileY), out List<ObjectInstance>? tileWmo);
 
-        var existingPositions = new List<Vector3>((tileMdx?.Count ?? 0) + (tileWmo?.Count ?? 0));
+        var placementBounds = BuildPlacementBounds(pm4Host, targetTileX, targetTileY);
         int maxExistingUniqueId = 0;
         if (tileMdx != null)
         {
             for (int i = 0; i < tileMdx.Count; i++)
-            {
-                existingPositions.Add(tileMdx[i].PlacementPosition);
                 if (tileMdx[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileMdx[i].UniqueId;
-            }
         }
         if (tileWmo != null)
         {
             for (int i = 0; i < tileWmo.Count; i++)
-            {
-                existingPositions.Add(tileWmo[i].PlacementPosition);
                 if (tileWmo[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileWmo[i].UniqueId;
-            }
         }
 
         var templateInfo = new ModelTemplateInfo(
@@ -331,9 +418,9 @@ internal sealed class Pm4DoodadDuplicationService
         List<DuplicatedDoodadResult> duplicated = Pm4DoodadDuplicationEngine.DuplicateAcrossTargets(
             templateInfo,
             candidateTargets,
-            existingPositions,
+            placementBounds,
             startId,
-            occupancyRadius: isWmo ? 16.0f : 8.0f);
+            originFallbackRadius: isWmo ? 16.0f : 8.0f);
 
         if (duplicated.Count == 0)
         {
@@ -1187,11 +1274,20 @@ internal sealed class Pm4DoodadDuplicationService
         TaughtPairing taught,
         float solvedScale,
         Vector3 solvedPos,
-        Vector3 solvedRot)
+        Vector3 solvedRot,
+        bool force = false)
     {
         var worldScene = _host.WorldScene;
         if (worldScene == null) return false;
         IPm4OverlayHost pm4Host = worldScene;
+
+        if (!force && HullHasSameModel(pm4Host, pm4Obj, pm4TileX, pm4TileY, taught.ModelPath))
+        {
+            string dupMsg = $"PM4 hull 0x{pm4Obj.Ck24:X6} already has {taught.ModelName} assigned; skipped duplicate spawn.";
+            _host.StatusMessage = dupMsg;
+            LastOperationMessage = dupMsg;
+            return false;
+        }
 
         bool isWmo = IsWmoAsset(taught.ModelPath, taught.AssetKind);
         float actualScale = isWmo ? 1.0f : solvedScale;
@@ -1286,30 +1382,23 @@ internal sealed class Pm4DoodadDuplicationService
         pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo);
 
         int maxExistingUniqueId = 0;
-        var existingPositions = new List<Vector3>((tileMdx?.Count ?? 0) + (tileWmo?.Count ?? 0));
+        var placementBounds = BuildPlacementBounds(pm4Host, tileX, tileY);
 
         if (tileMdx != null)
         {
             for (int i = 0; i < tileMdx.Count; i++)
-            {
-                existingPositions.Add(tileMdx[i].PlacementPosition);
                 if (tileMdx[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileMdx[i].UniqueId;
-            }
         }
         if (tileWmo != null)
         {
             for (int i = 0; i < tileWmo.Count; i++)
-            {
-                existingPositions.Add(tileWmo[i].PlacementPosition);
                 if (tileWmo[i].UniqueId > maxExistingUniqueId) maxExistingUniqueId = tileWmo[i].UniqueId;
-            }
         }
 
         int nextId = Math.Max(Pm4DoodadDuplicationEngine.SyntheticUniqueIdBase, maxExistingUniqueId + 1);
         var addedIds = new List<int>();
 
         float occRadius = Math.Max(2.5f, Math.Min(taught.Width, taught.Length) * 0.75f);
-        float occRadiusSq = occRadius * occRadius;
 
         Vector3 localMin = taught.LocalBoundsMin != Vector3.Zero || taught.LocalBoundsMax != Vector3.Zero
             ? taught.LocalBoundsMin : -new Vector3(taught.Length, taught.Width, taught.Height) * 0.5f;
@@ -1323,18 +1412,13 @@ internal sealed class Pm4DoodadDuplicationService
         {
             var obj = pm4Objects[i];
 
-            // 1. Centroid & occupancy check
-            Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
-            bool occupied = false;
-            for (int e = 0; e < existingPositions.Count; e++)
-            {
-                if (Vector3.DistanceSquared(centroid, existingPositions[e]) < occRadiusSq)
-                {
-                    occupied = true;
-                    break;
-                }
-            }
-            if (occupied) continue;
+            // 1. Occupancy check: skip hulls that already have an assigned/paired model.
+            // Compare world-space bounds, not hull centroid vs model origin — WMO/M2 origins sit
+            // at the base and are routinely far from the hull centroid, which caused duplicate
+            // spawns on hulls that were already paired.
+            var target = BuildTarget(obj, tileX, tileY);
+            if (Pm4DoodadDuplicationEngine.IsTargetOccupied(target, placementBounds, occRadius))
+                continue;
 
             // 2. Extrude candidate footprint prism
             var surfaceVerts = new List<Vector3>(obj.Triangles.Count * 3);
@@ -1345,8 +1429,7 @@ internal sealed class Pm4DoodadDuplicationService
                 surfaceVerts.Add(Vector3.Transform(obj.Triangles[t].C, obj.BaseTransform));
             }
             float? placementZ = obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(obj.Ck24 << 8) : null;
-            WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, obj.BaseTransform, out Vector3 worldMin, out _);
-            Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, worldMin.Z);
+            Pm4FootprintPrism prism = Pm4FootprintExtruder.ExtrudeFootprint(surfaceVerts, mprlList, placementZ, target.BoundsMin.Z);
 
             // 3. Shape match evaluation
             if (!MatchesTaughtShape(taught, cand, prism, obj.Ck24, obj.DominantGroupKey, out float solvedScale, out Vector3 solvedPos, out Vector3 solvedRot, obj.Shape3D))
@@ -1402,7 +1485,7 @@ internal sealed class Pm4DoodadDuplicationService
                 pm4Host.Assets.PrioritizeMdxLoad(newInst.ModelKey);
             }
 
-            existingPositions.Add(solvedPos);
+            placementBounds.Add(new PlacementBounds(bMin, bMax, solvedPos, true));
             addedIds.Add(assignedId);
         }
 
@@ -1533,7 +1616,8 @@ internal sealed class Pm4DoodadDuplicationService
         int pm4TileX,
         int pm4TileY,
         Pm4DirectMatchResult match,
-        out string statusMessage)
+        out string statusMessage,
+        bool force = false)
     {
         var worldScene = _host.WorldScene;
         if (worldScene == null)
@@ -1543,6 +1627,15 @@ internal sealed class Pm4DoodadDuplicationService
         }
 
         IPm4OverlayHost pm4Host = worldScene;
+
+        if (!force && HullHasSameModel(pm4Host, pm4Obj, pm4TileX, pm4TileY, match.Candidate.ModelPath))
+        {
+            statusMessage = $"PM4 hull 0x{pm4Obj.Ck24:X6} already has {match.Candidate.ModelName} assigned; skipped duplicate spawn.";
+            _host.StatusMessage = statusMessage;
+            LastOperationMessage = statusMessage;
+            return false;
+        }
+
         pm4Host.TileMdxInstances.TryGetValue((pm4TileX, pm4TileY), out var tileMdx);
         pm4Host.TileWmoInstances.TryGetValue((pm4TileX, pm4TileY), out var tileWmo);
 

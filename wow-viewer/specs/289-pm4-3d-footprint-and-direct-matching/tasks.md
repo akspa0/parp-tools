@@ -44,3 +44,25 @@ targets now receive world-space bounds/vertices. Receipt:
 duplication/matcher/extrusion tests). Visual confirmation on real client data remains
 operator-owned.
 
+## Amendment 2026-11-05 — duplicate copies on already-paired hulls (operator-reported)
+
+Operator report: "matching things got me multiple copies even when the pm4 already has an object
+assigned/paired."
+
+Root cause: every duplication/matching path tested hull occupancy by comparing the hull's world
+**centroid** to each placement's **`PlacementPosition`** (model origin). WMO/M2 origins sit at the
+model base, not the hull centroid, so paired hulls measured as free. Secondary defects: only the
+same tile key was scanned (transposed keys missed); `SpawnCandidateIntoPm4Hull` /
+`InstantiateTaughtPairingIntoHull` had no guard and "Verify & Propagate" spawns then propagates
+into the same hull; the occupancy radius came from the taught model, not the hull.
+
+Fix: `Pm4DoodadDuplicationEngine` gained `PlacementBounds` + `IsTargetOccupied` (world-space AABB
+intersection, origin fallback only for unresolved bounds) and bounds-based
+`FindUnmatchedTargets`/`DuplicateAcrossTargets` overloads. `Pm4DoodadDuplicationService` now
+collects placements from both tile keys, uses bounds occupancy in taught-pairing population and
+bulk duplication, and blocks a second copy of the same model in explicit spawns (`force` opt-out).
+`Pm4CurationAndSpatialMatchingService.IsHullOccupied` uses the same test so the UI counter matches
+spawn behaviour. Receipt:
+`evidence/2026-11-05-duplicate-on-match-occupancy.md` (build exit 0; 6/6 focused PM4 duplication
+tests, 3 new). Visual confirmation on real client data remains operator-owned.
+

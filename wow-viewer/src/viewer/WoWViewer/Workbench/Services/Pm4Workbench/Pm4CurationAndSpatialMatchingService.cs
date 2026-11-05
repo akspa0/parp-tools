@@ -378,25 +378,40 @@ internal sealed class Pm4CurationAndSpatialMatchingService
 
     private static bool IsHullOccupied(WorldScene worldScene, Pm4OverlayObject obj, int tileX, int tileY, float radius)
     {
-        Vector3 centroid = Vector3.Transform(obj.Center, obj.BaseTransform);
-        float radiusSq = radius * radius;
         IPm4OverlayHost pm4Host = worldScene;
+        WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, obj.BaseTransform, out Vector3 hullMin, out Vector3 hullMax);
+        var target = new Pm4DoodadTarget(
+            tileX,
+            tileY,
+            obj.Ck24,
+            obj.ObjectPartId,
+            Vector3.Transform(obj.Center, obj.BaseTransform),
+            hullMin,
+            hullMax,
+            obj.BaseRotationRadians,
+            obj.DominantGroupKey);
 
-        if (pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var mdxList))
+        var placements = new List<PlacementBounds>();
+        Collect(tileX, tileY);
+        if (tileX != tileY)
+            Collect(tileY, tileX);
+
+        return Pm4DoodadDuplicationEngine.IsTargetOccupied(target, placements, radius);
+
+        void Collect(int tx, int ty)
         {
-            for (int i = 0; i < mdxList.Count; i++)
-                if (Vector3.DistanceSquared(mdxList[i].PlacementPosition, centroid) < radiusSq)
-                    return true;
-        }
+            if (pm4Host.TileMdxInstances.TryGetValue((tx, ty), out var mdxList) && mdxList != null)
+            {
+                for (int i = 0; i < mdxList.Count; i++)
+                    placements.Add(new PlacementBounds(mdxList[i].BoundsMin, mdxList[i].BoundsMax, mdxList[i].PlacementPosition, mdxList[i].BoundsResolved));
+            }
 
-        if (pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var wmoList))
-        {
-            for (int i = 0; i < wmoList.Count; i++)
-                if (Vector3.DistanceSquared(wmoList[i].PlacementPosition, centroid) < radiusSq)
-                    return true;
+            if (pm4Host.TileWmoInstances.TryGetValue((tx, ty), out var wmoList) && wmoList != null)
+            {
+                for (int i = 0; i < wmoList.Count; i++)
+                    placements.Add(new PlacementBounds(wmoList[i].BoundsMin, wmoList[i].BoundsMax, wmoList[i].PlacementPosition, wmoList[i].BoundsResolved));
+            }
         }
-
-        return false;
     }
 
     private void SaveCuratedRelationshipsToDisk()

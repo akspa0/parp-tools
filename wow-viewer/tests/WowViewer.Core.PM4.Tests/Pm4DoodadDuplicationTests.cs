@@ -128,5 +128,103 @@ public sealed class Pm4DoodadDuplicationTests
         Assert.Equal(2000001, results[1].UniqueId);
         Assert.Equal(2000002, results[2].UniqueId);
     }
+
+    [Fact]
+    public void IsTargetOccupied_DetectsPairedHullWhenModelOriginIsOffsetFromCentroid()
+    {
+        // Hull centroid (100,200,50) with 10x10x10 world bounds.
+        var target = new Pm4DoodadTarget(
+            35, 38, 0u, 1,
+            new Vector3(100f, 200f, 50f),
+            new Vector3(95f, 195f, 45f),
+            new Vector3(105f, 205f, 55f),
+            0f, 0x03);
+
+        // WMO placement origin sits at the model base corner (90,190,45) — ~15 yds from the hull
+        // centroid, so the old origin-distance test reported the hull as free and spawned a
+        // duplicate. Its world bounds still overlap the hull, which is the correct "already
+        // paired" signal.
+        var placement = new PlacementBounds(
+            new Vector3(90f, 190f, 45f),
+            new Vector3(110f, 210f, 55f),
+            new Vector3(90f, 190f, 45f),
+            BoundsResolved: true);
+
+        Assert.True(Pm4DoodadDuplicationEngine.IsTargetOccupied(target, [placement], originFallbackRadius: 8f));
+    }
+
+    [Fact]
+    public void FindUnmatchedTargets_BoundsOverload_RejectsOccupiedHullAndKeepsFreeHull()
+    {
+        var occupied = new Pm4DoodadTarget(
+            35, 38, 0u, 1,
+            new Vector3(100f, 200f, 50f),
+            new Vector3(95f, 195f, 45f),
+            new Vector3(105f, 205f, 55f),
+            0f, 0x03);
+
+        var free = new Pm4DoodadTarget(
+            35, 38, 0u, 2,
+            new Vector3(300f, 400f, 50f),
+            new Vector3(295f, 395f, 45f),
+            new Vector3(305f, 405f, 55f),
+            0f, 0x03);
+
+        var placements = new List<PlacementBounds>
+        {
+            new(new Vector3(90f, 190f, 45f), new Vector3(110f, 210f, 55f), new Vector3(90f, 190f, 45f), true)
+        };
+
+        List<Pm4DoodadTarget> unmatched = Pm4DoodadDuplicationEngine.FindUnmatchedTargets(
+            new List<Pm4DoodadTarget> { occupied, free }, placements);
+
+        Assert.Single(unmatched);
+        Assert.Equal(2, unmatched[0].ObjectPartId);
+    }
+
+    [Fact]
+    public void DuplicateAcrossTargets_BoundsOverload_DoesNotDuplicateOnPairedHull()
+    {
+        var template = new ModelTemplateInfo(
+            @"WORLD\GENERIC\CLIFF.M2",
+            "cliff",
+            "CLIFF.M2",
+            Position: Vector3.Zero,
+            RotationDegrees: Vector3.Zero,
+            Scale: 1.0f,
+            LocalBoundsMin: new Vector3(-2f),
+            LocalBoundsMax: new Vector3(2f),
+            WorldBoundsMin: new Vector3(-2f),
+            WorldBoundsMax: new Vector3(2f));
+
+        var occupied = new Pm4DoodadTarget(
+            35, 38, 0u, 1,
+            new Vector3(100f, 200f, 50f),
+            new Vector3(95f, 195f, 45f),
+            new Vector3(105f, 205f, 55f),
+            0f, 0x03);
+
+        var free = new Pm4DoodadTarget(
+            35, 38, 0u, 2,
+            new Vector3(300f, 400f, 50f),
+            new Vector3(295f, 395f, 45f),
+            new Vector3(305f, 405f, 55f),
+            0f, 0x03);
+
+        var placements = new List<PlacementBounds>
+        {
+            new(new Vector3(90f, 190f, 45f), new Vector3(110f, 210f, 55f), new Vector3(90f, 190f, 45f), true)
+        };
+
+        List<DuplicatedDoodadResult> results = Pm4DoodadDuplicationEngine.DuplicateAcrossTargets(
+            template,
+            new List<Pm4DoodadTarget> { occupied, free },
+            placements,
+            startUniqueId: 2000000);
+
+        Assert.Single(results);
+        Assert.Equal(2, results[0].ObjectPartId);
+        Assert.Equal(2000000, results[0].UniqueId);
+    }
 }
 
