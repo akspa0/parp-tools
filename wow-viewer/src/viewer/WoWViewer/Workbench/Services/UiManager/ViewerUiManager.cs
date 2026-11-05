@@ -24,6 +24,9 @@ internal sealed partial class ViewerUiManager
     private bool _leftDockOpen;
     private float _leftDockWidth = 360f;
     internal LeftPanel ActiveLeftPanel { get; private set; } = LeftPanel.Workspace;
+
+    /// <summary>Selected page inside the right-dock Archaeology panel (independent of the Viewer pages).</summary>
+    internal int ArchaeologyPage { get; set; }
     private float _appliedFontScale = -1f;
     private float _appliedStyleScale = -1f;
     private readonly BottomBarService _bottomBar;
@@ -83,19 +86,21 @@ internal sealed partial class ViewerUiManager
 
         // FontGlobalScale scales glyphs but not the style metrics, so at 4K the text grew while
         // line spacing, frame padding and scrollbars stayed at 1080p sizes and every line
-        // overlapped the next. Scale the metrics with the same factor.
-        if (MathF.Abs(scale - _appliedStyleScale) > 0.001f)
+        // overlapped the next. Scale the metrics with the SAME factor as the font (user scale
+        // times display scale), not the display scale alone — otherwise raising the text size
+        // grew the glyphs but left the rows and input boxes at their old height.
+        if (MathF.Abs(fontScale - _appliedStyleScale) > 0.001f)
         {
             var style = ImGui.GetStyle();
-            style.ItemSpacing = new Vector2(8f, 4f) * scale;
-            style.ItemInnerSpacing = new Vector2(4f, 4f) * scale;
-            style.FramePadding = new Vector2(6f, 3f) * scale;
-            style.CellPadding = new Vector2(4f, 2f) * scale;
-            style.ScrollbarSize = 14f * scale;
-            style.GrabMinSize = 10f * scale;
-            style.IndentSpacing = 21f * scale;
-            style.SeparatorTextBorderSize = MathF.Max(1f, scale);
-            _appliedStyleScale = scale;
+            style.ItemSpacing = new Vector2(8f, 4f) * fontScale;
+            style.ItemInnerSpacing = new Vector2(4f, 4f) * fontScale;
+            style.FramePadding = new Vector2(6f, 3f) * fontScale;
+            style.CellPadding = new Vector2(4f, 2f) * fontScale;
+            style.ScrollbarSize = 14f * fontScale;
+            style.GrabMinSize = 10f * fontScale;
+            style.IndentSpacing = 21f * fontScale;
+            style.SeparatorTextBorderSize = MathF.Max(1f, fontScale);
+            _appliedStyleScale = fontScale;
         }
 
         Layout = new UiLayout(display, _host.HideUiChrome, _host.ShowLeftSidebar, _host.ShowRightSidebar,

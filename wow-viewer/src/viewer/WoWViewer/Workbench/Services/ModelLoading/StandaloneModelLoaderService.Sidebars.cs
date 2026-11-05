@@ -71,7 +71,7 @@ internal sealed partial class StandaloneModelLoaderService
     private static bool DrawStandaloneCharacterVariationCombo(string label, string comboId, IReadOnlyList<int> variationIds, ref int selectedVariationId)
     {
         ImGui.Text(label);
-        ImGui.SetNextItemWidth(-1);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
 
         string preview = selectedVariationId >= 0
             ? $"VariationId {selectedVariationId}"

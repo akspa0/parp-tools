@@ -618,7 +618,7 @@ internal sealed partial class TerrainControlsPanelService
             int anchorModeIndex = (int)_stratigraphyAnchorMode;
             string[] anchorModeLabels = ["Lowest Z (Floor)", "Highest Z (Ceiling / Inverted)", "Mean Z", "Neighbor Edge", "WDL Lattice", "Custom Datum"];
             if (anchorModeIndex >= anchorModeLabels.Length) anchorModeIndex = 0;
-            ImGui.SetNextItemWidth(220f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(220f);
             if (ImGui.Combo("Anchor Datum", ref anchorModeIndex, anchorModeLabels, anchorModeLabels.Length))
             {
                 _stratigraphyAnchorMode = (WowViewer.Core.Runtime.World.Terrain.Stratigraphy.StratigraphyAnchorMode)anchorModeIndex;
@@ -649,7 +649,7 @@ internal sealed partial class TerrainControlsPanelService
             if (_stratigraphyUseWdlMagnetization)
             {
                 float strength = _stratigraphyWdlMagnetizationStrength;
-                ImGui.SetNextItemWidth(180f);
+                WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(180f);
                 if (ImGui.SliderFloat("WDL Magnet Strength", ref strength, 0f, 1f, "%.2f"))
                 {
                     _stratigraphyWdlMagnetizationStrength = strength;
@@ -693,7 +693,7 @@ internal sealed partial class TerrainControlsPanelService
 
         // 1. Direct High-Precision Numeric Input
         float factor = _terrainWeakSignalRestoreManualFactor;
-        ImGui.SetNextItemWidth(140f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(140f);
         if (ImGui.InputFloat("##StratigraphyFactorInput", ref factor, 0.1f, 1.0f, "%.4fx"))
         {
             SetStratigraphyFactor(factor);
@@ -717,7 +717,7 @@ internal sealed partial class TerrainControlsPanelService
 
         // 2. Wide Logarithmic Slider (1x to 512x)
         factor = _terrainWeakSignalRestoreManualFactor;
-        ImGui.SetNextItemWidth(-1f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1f);
         if (ImGui.SliderFloat("##StratigraphyFactorSlider", ref factor, 1f, 512f, "Slider: %.3fx", ImGuiSliderFlags.Logarithmic))
         {
             SetStratigraphyFactor(factor);

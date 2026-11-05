@@ -104,7 +104,7 @@ internal sealed partial class SynthesizedMinimapExportService
         ImGui.Separator();
 
         ImGui.Text("Client root:");
-        ImGui.SetNextItemWidth(-88);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-88);
         ImGui.InputText("##synthmin_client", ref _synthesizedMinimapClientRoot, 1024);
         ImGui.SameLine();
         if (ImGui.Button("Browse##synthmin_client"))
@@ -126,13 +126,13 @@ internal sealed partial class SynthesizedMinimapExportService
         if (isCascRoot)
         {
             ImGui.Text("CASC products (comma-separated, first = game version):");
-            ImGui.SetNextItemWidth(-1);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
             ImGui.InputText("##synthmin_casc_products", ref _synthesizedMinimapCascProducts, 256);
             ImGui.Checkbox("Fetch missing files from Blizzard's CDN##synthmin_cdn", ref _synthesizedMinimapCdnFill);
         }
 
         ImGui.Text("Map name:");
-        ImGui.SetNextItemWidth(-1);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
         ImGui.InputText("##synthmin_map", ref _synthesizedMinimapMapName, 256);
 
         // Use SliderInt (not InputInt) for hour/minute: sliders commit the value to the
@@ -142,17 +142,17 @@ internal sealed partial class SynthesizedMinimapExportService
         _synthesizedMinimapHour = Math.Clamp(_synthesizedMinimapHour, 0, 23);
         _synthesizedMinimapMinute = Math.Clamp(_synthesizedMinimapMinute, 0, 59);
         ImGui.Text("Time of day:");
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.SliderInt("Hour", ref _synthesizedMinimapHour, 0, 23, "%02d");
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.SliderInt("Minute", ref _synthesizedMinimapMinute, 0, 59, "%02d");
         _synthesizedMinimapTimeHours = new TimeOfDayClock(_synthesizedMinimapHour, _synthesizedMinimapMinute).Hours;
         ImGui.SameLine();
         ImGui.TextDisabled("midnight 00:00 · noon 12:00");
 
         ImGui.Text("Tile resolution:");
-        ImGui.SetNextItemWidth(160);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(160);
         ImGui.InputInt("##synthmin_resolution", ref _synthesizedMinimapResolution);
         _synthesizedMinimapResolution = Math.Clamp(_synthesizedMinimapResolution, 1, 4096);
 
@@ -197,7 +197,7 @@ internal sealed partial class SynthesizedMinimapExportService
         }
 
         ImGui.Text("Output directory:");
-        ImGui.SetNextItemWidth(-88);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-88);
         ImGui.InputText("##synthmin_output", ref _synthesizedMinimapOutputDirectory, 1024);
         ImGui.SameLine();
         if (ImGui.Button("Browse##synthmin_output"))

@@ -159,7 +159,7 @@ internal sealed partial class AudioPanelService
         int[] residentIds = scene.ResidentAudioSoundEntryIds.ToArray();
         if (residentIds.Length > 0)
         {
-            ImGui.SetNextItemWidth(-1f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1f);
             if (ImGui.BeginCombo("Resident emitter", $"SoundEntries {_audioPreviewSoundEntryId}"))
             {
                 foreach (int id in residentIds)
@@ -175,7 +175,7 @@ internal sealed partial class AudioPanelService
             }
         }
 
-        ImGui.SetNextItemWidth(-1f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1f);
         ImGui.InputInt("SoundEntries ID", ref _audioPreviewSoundEntryId);
         _audioPreviewSoundEntryId = Math.Max(0, _audioPreviewSoundEntryId);
         ImGui.Checkbox("Loop preview", ref _audioPreviewLoop);

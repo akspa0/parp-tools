@@ -13,6 +13,7 @@ public sealed class LightDbcCatalog
     private readonly ImmutableDictionary<int, LightDbcIntBandRecord> _intBands;
     private readonly ImmutableDictionary<int, LightDbcFloatBandRecord> _floatBands;
     private readonly ImmutableDictionary<int, LightDbcSkyboxRecord> _skyboxes;
+    private readonly ImmutableArray<string> _skyboxNames;
 
     private LightDbcCatalog(
         string build,
@@ -31,6 +32,12 @@ public sealed class LightDbcCatalog
         _intBands = intBands;
         _floatBands = floatBands;
         _skyboxes = skyboxes;
+        _skyboxNames = skyboxes.Values
+            .Select(static skybox => skybox.Name)
+            .Where(static name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static name => name, StringComparer.OrdinalIgnoreCase)
+            .ToImmutableArray();
         SourceHashes = sourceHashes;
         BandCountRecoveries = bandCountRecoveries;
         MissingSkyboxReferences = missingSkyboxReferences;
@@ -57,6 +64,9 @@ public sealed class LightDbcCatalog
     public int LightFloatBandRecordCount => _floatBands.Count;
 
     public int LightSkyboxRecordCount => _skyboxes.Count;
+
+    /// <summary>Distinct skybox model names from the exact-build LightSkybox table, sorted for a picker.</summary>
+    public ImmutableArray<string> SkyboxNames => _skyboxNames;
 
     public static LightDbcCatalog Create(
         string exactBuild,

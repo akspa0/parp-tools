@@ -64,13 +64,14 @@ public sealed class Pm4DoodadDuplicationTests
             WorldBoundsMin: new Vector3(95f, 195f, 48f),
             WorldBoundsMax: new Vector3(105f, 205f, 52f));
 
-        // PM4 target hull is 20x20 in XY plane (2x the model scale)
+        // PM4 target hull is 20x20 in XY plane (2x the model scale), world-space bounds
+        // centered on the centroid: hull top Z = 104, hull floor Z = 96.
         // Base rotation = 90 degrees (PI / 2 radians)
         var target = new Pm4DoodadTarget(
             35, 38, 0u, 10,
             WorldCentroid: new Vector3(500f, 600f, 100f),
-            BoundsMin: new Vector3(-10f, -10f, -4f),
-            BoundsMax: new Vector3(10f, 10f, 4f),
+            BoundsMin: new Vector3(490f, 590f, 96f),
+            BoundsMax: new Vector3(510f, 610f, 104f),
             BaseRotationRadians: MathF.PI * 0.5f,
             DominantGroupKey: 0x03);
 
@@ -79,13 +80,14 @@ public sealed class Pm4DoodadDuplicationTests
         // Expected scale is approx 2.0 (since target planar span is 20*sqrt(2) and model is 10*sqrt(2))
         Assert.InRange(result.Scale, 1.95f, 2.05f);
 
-        // Rotation Yaw should match target base rotation (90 degrees)
+        // Rotation Yaw should match target base rotation (90 degrees); the model is square
+        // in XY (10x10), so no long-axis correction applies.
         Assert.InRange(result.RotationDegrees.Z, 89.9f, 90.1f);
 
-        // Position Z places the model's top surface at the PM4 collision height:
-        // Position.Z = WorldCentroid.Z - (LocalBoundsMax.Z * scale) = 100 - (2 * 2) = 96
-        Assert.InRange(result.Position.Z, 95.9f, 96.1f);
-        Assert.InRange(result.WorldBoundsMax.Z, 99.9f, 100.1f);
+        // T001 top-alignment: Position.Z = hull_top - (LocalBoundsMax.Z * scale) = 104 - (2 * 2) = 100
+        Assert.InRange(result.Position.Z, 99.9f, 100.1f);
+        // The fitted model's top surface reaches the hull top: 100 + (2 * 2) = 104
+        Assert.InRange(result.WorldBoundsMax.Z, 103.9f, 104.1f);
 
         // Unique ID must be preserved
         Assert.Equal(123456, result.UniqueId);

@@ -182,7 +182,7 @@ internal sealed class ConverterDialogsService
             if (_mapConvertDirection == 0)
             {
                 ImGui.Text("Source Alpha 0.5.3 WDT:");
-                ImGui.SetNextItemWidth(-80);
+                WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
                 ImGui.InputText("##a2l_src", ref _mapConvertSourcePath, 512);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse##a2l_src"))
@@ -212,7 +212,7 @@ internal sealed class ConverterDialogsService
             else
             {
                 ImGui.Text("Source split-ADT WDT:");
-                ImGui.SetNextItemWidth(-80);
+                WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
                 ImGui.InputText("##l2a_src", ref _mapConvertSourcePath, 512);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse##l2a_src"))
@@ -234,7 +234,7 @@ internal sealed class ConverterDialogsService
                 }
 
                 ImGui.Text("Split ADT Directory (containing MapName_X_Y.adt roots):");
-                ImGui.SetNextItemWidth(-80);
+                WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
                 ImGui.InputText("##l2a_mapdir", ref _mapConvertLkMapDir, 512);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse##l2a_dir"))
@@ -254,7 +254,7 @@ internal sealed class ConverterDialogsService
                 if (_mapConvertTargetFormat == MapConversionTargetFormat.LkAdtV18)
                 {
                     ImGui.Text("Split ADT client root (required for the split-to-LK command):");
-                    ImGui.SetNextItemWidth(-80);
+                    WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
                     ImGui.InputText("##split_client_root", ref _mapConvertSplitClientRoot, 512);
                     ImGui.SameLine();
                     if (ImGui.Button("Browse##split_client_root"))
@@ -272,7 +272,7 @@ internal sealed class ConverterDialogsService
                     }
 
                     ImGui.Text("Split ADT map name:");
-                    ImGui.SetNextItemWidth(-1);
+                    WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
                     ImGui.InputText("##split_map_name", ref _mapConvertSplitMapName, 256);
                 }
 
@@ -282,7 +282,7 @@ internal sealed class ConverterDialogsService
 
             ImGui.Spacing();
             ImGui.Text("Project Output Root:");
-            ImGui.SetNextItemWidth(-80);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
             if (ImGui.InputText("##mapconv_project_root", ref _projectOutputRootDir, 512))
                 HandleProjectOutputRootChanged();
             ImGui.SameLine();
@@ -314,7 +314,7 @@ internal sealed class ConverterDialogsService
             if (_mapConvertDirection == 0 && _mapConvertTargetFormat == MapConversionTargetFormat.LkAdtV18)
             {
                 ImGui.Text("Area Crosswalk CSV (optional):");
-                ImGui.SetNextItemWidth(-80);
+                WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
                 ImGui.InputText("##area_crosswalk", ref _areaCrosswalkPath, 512);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse##area_crosswalk"))
@@ -628,7 +628,7 @@ internal sealed class ConverterDialogsService
             }
 
             ImGui.Text("Source WMO:");
-            ImGui.SetNextItemWidth(-80);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
             ImGui.InputText("##wmo_src", ref _wmoConvertSourcePath, 512);
             ImGui.SameLine();
             if (ImGui.Button("Browse##wmo_src"))
@@ -654,7 +654,7 @@ internal sealed class ConverterDialogsService
                 _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
 
             ImGui.Text("Output Folder:");
-            ImGui.SetNextItemWidth(-80);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
             ImGui.InputText("##wmo_out_dir", ref _wmoConvertOutputPath, 512);
             ImGui.SameLine();
             if (ImGui.Button("Browse##wmo_out_dir"))
@@ -681,7 +681,7 @@ internal sealed class ConverterDialogsService
             }
 
             ImGui.Text("Resolved Output File:");
-            ImGui.SetNextItemWidth(-1);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
             ImGui.BeginDisabled();
             ImGui.InputText("##wmo_out", ref outputRootPath, 512);
             ImGui.EndDisabled();

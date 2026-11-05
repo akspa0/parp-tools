@@ -71,7 +71,7 @@ internal sealed partial class PerfPanelService
 
         WorldRenderFrameHistorySnapshot snapshot = _frameHistorySnapshot;
 
-        ImGui.SetNextItemWidth(140f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(140f);
         ImGui.SliderFloat("Hitch threshold (ms)", ref _frameHistoryHitchThresholdMs, 8f, 100f, "%.1f");
 
         if (snapshot.FrameCount == 0)
@@ -272,7 +272,7 @@ internal sealed partial class PerfPanelService
             ImGui.TextWrapped(
                 "Stall one frame by a known amount. If it does not appear above at that magnitude, "
                 + "this view is not trustworthy and no measurement taken from it counts.");
-            ImGui.SetNextItemWidth(120f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120f);
             float stallMs = (float)_frameHistoryInjectStallMs;
             if (ImGui.SliderFloat("Stall (ms)", ref stallMs, 50f, 1000f, "%.0f"))
                 _frameHistoryInjectStallMs = stallMs;

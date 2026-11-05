@@ -134,7 +134,7 @@ internal sealed class DatasetExportDialogsService
 
             // Client Path
             ImGui.Text("Client Data Path:");
-            ImGui.SetNextItemWidth(-80);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
             string prevClient = _vlmClientPath;
             ImGui.InputText("##vlmClient", ref _vlmClientPath, 512);
             ImGui.SameLine();
@@ -154,7 +154,7 @@ internal sealed class DatasetExportDialogsService
 
             // Map Name
             ImGui.Text("Map Name:");
-            ImGui.SetNextItemWidth(-1);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
             string prevMap = _vlmMapName;
             ImGui.InputText("##vlmMap", ref _vlmMapName, 128);
             ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f),
@@ -169,7 +169,7 @@ internal sealed class DatasetExportDialogsService
 
             // Output Directory
             ImGui.Text("Output Directory:");
-            ImGui.SetNextItemWidth(-80);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
             string prevOutputDir = _vlmOutputDir;
             ImGui.InputText("##vlmOutput", ref _vlmOutputDir, 512);
             ImGui.SameLine();
@@ -196,7 +196,7 @@ internal sealed class DatasetExportDialogsService
 
             // Tile Limit
             ImGui.Text("Tile Limit (0 = all):");
-            ImGui.SetNextItemWidth(120);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
             ImGui.InputInt("##vlmLimit", ref _vlmTileLimit);
             if (_vlmTileLimit < 0) _vlmTileLimit = 0;
 
@@ -334,7 +334,7 @@ internal sealed class DatasetExportDialogsService
             ImGui.Spacing();
 
             ImGui.Text("Source Map Directory:");
-            ImGui.SetNextItemWidth(-80);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
             ImGui.InputText("##ttt_source", ref _terrainTransferSourceDir, 512);
             ImGui.SameLine();
             if (ImGui.Button("Browse##ttt_source"))
@@ -352,7 +352,7 @@ internal sealed class DatasetExportDialogsService
             }
 
             ImGui.Text("Target Map Directory:");
-            ImGui.SetNextItemWidth(-80);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
             ImGui.InputText("##ttt_target", ref _terrainTransferTargetDir, 512);
             ImGui.SameLine();
             if (ImGui.Button("Browse##ttt_target"))
@@ -370,7 +370,7 @@ internal sealed class DatasetExportDialogsService
             }
 
             ImGui.Text("Output Directory:");
-            ImGui.SetNextItemWidth(-80);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
             ImGui.InputText("##ttt_output", ref _terrainTransferOutputDir, 512);
             ImGui.SameLine();
             if (ImGui.Button("Browse##ttt_output"))
@@ -432,7 +432,7 @@ internal sealed class DatasetExportDialogsService
             ImGui.Checkbox("Holes", ref _terrainTransferCopyHoles);
 
             ImGui.Text("Summary Manifest Path (optional):");
-            ImGui.SetNextItemWidth(-1);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
             ImGui.InputText("##ttt_manifest", ref _terrainTransferManifestPath, 512);
 
             ImGui.Spacing();

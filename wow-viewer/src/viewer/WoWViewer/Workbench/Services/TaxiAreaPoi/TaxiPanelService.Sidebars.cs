@@ -61,7 +61,7 @@ internal sealed partial class TaxiPanelService
         ImGui.Separator();
         string[] taxiGroupingLabels = { "None", "From Node", "To Node" };
         ImGui.Text($"Routes ({_worldScene.TaxiActors.TaxiLoader.Routes.Count})");
-        ImGui.SetNextItemWidth(140f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(140f);
         ImGui.Combo("Group By", ref _taxiRouteListGroupingMode, taxiGroupingLabels, taxiGroupingLabels.Length);
 
         string taxiRouteFilter = _taxiRouteFilter;

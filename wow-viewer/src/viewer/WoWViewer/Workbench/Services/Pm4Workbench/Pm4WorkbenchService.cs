@@ -402,7 +402,7 @@ internal sealed partial class Pm4WorkbenchService
             return;
         }
 
-        ImGui.SetNextItemWidth(240f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(240f);
         ImGui.InputText("Filter##Pm4Outliner", ref _pm4OutlinerFilter, 128);
         ImGui.SameLine();
         ImGui.Checkbox("Named only##Pm4Outliner", ref _pm4OutlinerNamedOnly);
@@ -539,7 +539,7 @@ internal sealed partial class Pm4WorkbenchService
         }
         IReadOnlyList<WowViewer.Core.PM4.Research.Pm4ObjectGroupEntry> groups = _pm4ObjectGroupCache;
 
-        ImGui.SetNextItemWidth(240f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(240f);
         ImGui.InputText("Filter##Pm4ObjectGroups", ref _pm4ObjectGroupFilter, 128);
         ImGui.SameLine();
         ImGui.Checkbox("Consistent only##Pm4ObjectGroups", ref _pm4ObjectGroupConsistentOnly);

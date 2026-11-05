@@ -214,6 +214,13 @@ public static class Pm4FootprintExtruder
         length = MathF.Max(0.01f, maxL - minL);
         width = MathF.Max(0.01f, maxW - minW);
 
+        // The vertex mean is biased toward vertex clusters on irregular footprints (L-shapes,
+        // wings, bridges), which shifted every placement solved against prism.Centroid off the
+        // hull's visual center on X/Y. Use the oriented bounding box center instead: the
+        // midpoint of the principal-axis projections. Identical to the mean for symmetric
+        // shapes, unbiased for everything else.
+        center += axisL * ((minL + maxL) * 0.5f) + axisW * ((minW + maxW) * 0.5f);
+
         // Ensure length >= width (canonicalize primary axis as the longer dimension)
         if (width > length)
         {

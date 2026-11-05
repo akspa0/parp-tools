@@ -23,9 +23,9 @@ internal sealed partial class MainMenuBarService
         // Both open the window that already owns the settings: Options holds Display (render
         // quality, lighting, theme, minimap), Overlays, Layers, Grids, Objects, Audio and
         // Simulation; Workspace holds camera, fog and the client source.
-        if (ImGui.MenuItem("Terrain Layers & Blending...")) _shellLayout.OpenLayersWindow();
+        if (ImGui.MenuItem("Texture Masks & Blending...")) _shellLayout.OpenLayersWindow();
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Open Terrain Layers workbench: per-layer opacity, alpha mask overlay blend, and MCLY flags.");
+            ImGui.SetTooltip("Open the Texture Masks panel: per-layer visibility and opacity, alpha-mask overlay blend, and MCLY flags.");
         if (ImGui.MenuItem("Visual Options...")) _shellLayout.OpenOptions();
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Open Options: render quality, lighting, theme, minimap, overlays, layers, grids and objects.");
@@ -54,7 +54,7 @@ internal sealed partial class MainMenuBarService
         if (!ImGui.BeginMenu("Text Size")) return;
 
         float scale = view.UserScale;
-        ImGui.SetNextItemWidth(160f * _shellLayout.Layout.Scale);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(160f * _shellLayout.Layout.Scale);
         if (ImGui.SliderFloat("Text Scale", ref scale, ViewPreferencePolicy.MinUserScale, ViewPreferencePolicy.MaxUserScale, "%.2fx"))
             view.SetUserScale(scale);
         // Apply on every drag step, write the settings file once when the drag ends.

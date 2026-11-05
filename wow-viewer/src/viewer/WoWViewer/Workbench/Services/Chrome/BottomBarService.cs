@@ -10,9 +10,10 @@ using WoWViewer.Workbench;
 namespace WoWViewer;
 
 /// <summary>
-/// Persistent bottom bar service hosting quick-toggle PM4 checkbox,
-/// drop-up Alpha Masks & Layer Opacities menu, and 4 destination mode switches
-/// (Viewer, Editor, Archaeology, Options).
+/// Persistent bottom bar service hosting the quick toggles the operator asked for:
+/// PM4 overlay, one visibility toggle per texture layer, the alpha-mask toggle, and a
+/// button that opens the Texture Masks panel. Destination switching lives in the
+/// sidebars/action rails, not here.
 /// </summary>
 internal sealed class BottomBarService
 {
@@ -47,17 +48,20 @@ internal sealed class BottomBarService
         WorldScene? scene = _host.WorldScene;
         TerrainManager? terrainManager = _host.TerrainManager;
         VlmTerrainManager? vlmTerrain = _host.VlmTerrainManager;
-        ViewerUiManager ui = _host.UiManager;
+
+        TerrainRenderer? layerTerrain = terrainManager?.Renderer ?? vlmTerrain?.Renderer;
+        int layerCount = layerTerrain != null
+            ? Math.Clamp(layerTerrain.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers)
+            : 4;
 
         var items = new List<FooterItemMeasure>
         {
             new("toggle-pm4", 62f * scale, 48f * scale, FooterItemPriority.Essential),
-            new("dropup-layers", 120f * scale, 92f * scale, FooterItemPriority.Essential),
-            new("mode-viewer", 76f * scale, 58f * scale, FooterItemPriority.Essential),
-            new("mode-editor", 74f * scale, 56f * scale, FooterItemPriority.Essential),
-            new("mode-archaeology", 104f * scale, 80f * scale, FooterItemPriority.Essential),
-            new("mode-options", 76f * scale, 58f * scale, FooterItemPriority.Essential),
         };
+        for (int i = 0; i < layerCount; i++)
+            items.Add(new($"toggle-layer-{i}", 46f * scale, 40f * scale, FooterItemPriority.Essential));
+        items.Add(new("toggle-alpha", 74f * scale, 58f * scale, FooterItemPriority.Essential));
+        items.Add(new("open-texture-masks", 120f * scale, 92f * scale, FooterItemPriority.Essential));
 
         FooterFitResult fit = ViewerFooterLayout.Fit(region, scale, items);
         float originX = ImGui.GetCursorPosX();
@@ -77,27 +81,6 @@ internal sealed class BottomBarService
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
         }
 
-        void DrawModeButton(string id, string label, bool active, Action onClick, string tooltip)
-        {
-            FooterItemPlacement placement = fit.Get(id);
-            if (!placement.Visible) return;
-            ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
-            if (active)
-            {
-                ImGui.PushStyleColor(ImGuiCol.Button, UiTokens.BrassDim);
-                ImGui.PushStyleColor(ImGuiCol.Text, UiTokens.Text);
-            }
-            if (ImGui.Button($"{label}##{id}", new Vector2(placement.Width, height)))
-            {
-                onClick();
-            }
-            if (active)
-            {
-                ImGui.PopStyleColor(2);
-            }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
-        }
-
         // 1. PM4 quick toggle
         bool pm4Val = scene?.Pm4Overlay?.ShowPm4Overlay ?? BottomTogglePm4;
         DrawToggle("toggle-pm4", "PM4", pm4Val, v =>
@@ -106,51 +89,36 @@ internal sealed class BottomBarService
             if (scene?.Pm4Overlay != null) scene.Pm4Overlay.ShowPm4Overlay = v;
         }, "Toggle PM4 pre-release navigation geometry overlay");
 
-        // 2. Drop-up Layers & Opacity button
-        FooterItemPlacement layersPlacement = fit.Get("dropup-layers");
-        if (layersPlacement.Visible)
+        // 2. One visibility toggle per texture layer (L0 = base, then overlays).
+        for (int i = 0; i < layerCount; i++)
         {
-            ImGui.SetCursorPos(new Vector2(originX + layersPlacement.X, y));
-            if (ImGui.Button("Layers & Opacity##dropup-layers", new Vector2(layersPlacement.Width, height)))
+            int layer = i;
+            bool visible = layerTerrain?.GetShowLayer(layer) ?? true;
+            DrawToggle($"toggle-layer-{layer}", layer == 0 ? "L0" : $"L{layer}", visible, v =>
             {
-                ImGui.OpenPopup("BottomLayersDropupPopup");
-            }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Quick drop-up: Alpha masks blend, layer opacities, and Photoshop-style blending");
-
-            if (ImGui.BeginPopup("BottomLayersDropupPopup"))
-            {
-                TerrainRenderer? terrain = terrainManager?.Renderer ?? vlmTerrain?.Renderer;
-                _host.TerrainLayersPanel.DrawQuickLayersPopup(terrain);
-                ImGui.EndPopup();
-            }
+                layerTerrain?.SetShowLayer(layer, v);
+            }, layer == 0
+                ? "Toggle the base terrain texture layer"
+                : $"Toggle terrain texture layer {layer}");
         }
 
-        // 3. 4 Mode switches: Viewer, Editor, Archaeology, Options
-        bool isViewer = ui.Destination == WorkbenchTab.Viewer;
-        bool isEditor = ui.Destination == WorkbenchTab.Editor;
-        bool isArchaeology = ui.Destination == WorkbenchTab.Archaeology;
-        bool isOptions = ui.LeftDockOpen && ui.ActiveLeftPanel == LeftPanel.Options;
-
-        DrawModeButton("mode-viewer", "Viewer", isViewer, () =>
+        // 3. Alpha mask overlay toggle
+        bool alphaOn = layerTerrain?.ShowAlphaMask ?? false;
+        DrawToggle("toggle-alpha", "Alpha", alphaOn, v =>
         {
-            ui.Navigate(WorkbenchTab.Viewer);
-            ui.OpenViewerDock(ui.ViewerPanel);
-        }, "Switch to Viewer mode (Inspector / World / PM4 / Exports)");
+            if (layerTerrain != null) layerTerrain.ShowAlphaMask = v;
+        }, "Show or hide the terrain alpha-mask overlay");
 
-        DrawModeButton("mode-editor", "Editor", isEditor, () =>
+        // 4. Texture Masks panel button (per-layer opacity, blending, channel detail).
+        FooterItemPlacement masksPlacement = fit.Get("open-texture-masks");
+        if (masksPlacement.Visible)
         {
-            ui.Navigate(WorkbenchTab.Editor);
-        }, "Switch to Editor mode (Placement / Terrain Tools / Data I/O / Converters)");
+            ImGui.SetCursorPos(new Vector2(originX + masksPlacement.X, y));
+            if (ImGui.Button("Texture Masks##open-texture-masks", new Vector2(masksPlacement.Width, height)))
+                _host.UiManager.OpenLeftDock(LeftPanel.Layers);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Open the Texture Masks panel: per-layer opacity, alpha-mask blending, and channel detail");
+        }
 
-        DrawModeButton("mode-archaeology", "Archaeology", isArchaeology, () =>
-        {
-            ui.Navigate(WorkbenchTab.Archaeology);
-        }, "Switch to Archaeology mode (Timeline / Layers / Provenance)");
-
-        DrawModeButton("mode-options", "Options", isOptions, () =>
-        {
-            ui.ToggleOptions();
-        }, "Toggle Options panel in left sidebar");
     }
 }

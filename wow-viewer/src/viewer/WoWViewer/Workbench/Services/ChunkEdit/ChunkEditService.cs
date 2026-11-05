@@ -836,7 +836,7 @@ internal sealed class ChunkEditService
         ImGui.Checkbox("Include Alpha/Shadow", ref _chunkClipboardIncludeAlphaShadow);
         ImGui.Checkbox("Include Textures", ref _chunkClipboardIncludeTextures);
 
-        ImGui.SetNextItemWidth(160f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(160f);
         string[] rotLabels = { "0°", "90°", "180°", "270°" };
         ImGui.Combo("Paste Rotation", ref _chunkClipboardSelectionRotation, rotLabels, rotLabels.Length);
 

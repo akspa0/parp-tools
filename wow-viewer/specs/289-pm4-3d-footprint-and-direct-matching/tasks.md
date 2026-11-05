@@ -30,3 +30,17 @@
 - [x] **T015**: Upgrade `Pm4AdtPatchSupport.cs` to write authentic PCA-derived yaw rotations and WC3 asymmetric pivot offsets into `MODF`.
 - [x] **GATE-5**: Verification with unit tests and full compilation across all projects. (Receipt: `evidence/phase5-tooling-and-tally.md`)
 
+## Amendment 2026-11-04 — Phase 1 alignment defect corrections (operator-reported)
+
+Operator report: matched/placed (magnetized/duplicated) models do not line up with PM4 hulls.
+Audit of the placement-solving paths found T001's top-alignment formula was not actually
+implemented in `FitModelToTarget` (it used the hull vertical **center**, sinking duplicates by
+half the hull height), plus three further defects: taught-pairing positions solved for the
++90° heuristic yaw while the taught yaw was applied (off-hull drift), no model long-axis yaw
+correction in duplication (crosswise placement), and WMO duplication solving position at a
+fitted scale the caller then overrode to 1.0. All four corrected in the same pass; duplication
+targets now receive world-space bounds/vertices. Receipt:
+`evidence/2026-11-04-alignment-defect-fixes.md` (build exit 0; 10/10 PM4
+duplication/matcher/extrusion tests). Visual confirmation on real client data remains
+operator-owned.
+

@@ -124,7 +124,7 @@ internal sealed class ImGuiPathPicker
         }
 
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(-80f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80f);
         if (ImGui.InputText("##PathBar", ref _pathInputBuffer, 512, ImGuiInputTextFlags.EnterReturnsTrue))
         {
             NavigateToInputPath();
@@ -137,7 +137,7 @@ internal sealed class ImGuiPathPicker
         }
 
         // Search in directory & New Folder button
-        ImGui.SetNextItemWidth(240f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(240f);
         ImGui.InputTextWithHint("##SearchFilter", "Filter current directory...", ref _searchFilter, 64);
 
         if (_mode == ImGuiPathPickerMode.OpenFolder || _mode == ImGuiPathPickerMode.SaveFile)
@@ -153,7 +153,7 @@ internal sealed class ImGuiPathPicker
         if (_showNewFolderInput)
         {
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(160f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(160f);
             ImGui.InputText("##NewFolderName", ref _newFolderBuffer, 64);
             ImGui.SameLine();
             if (ImGui.SmallButton("Create"))
@@ -245,7 +245,7 @@ internal sealed class ImGuiPathPicker
         {
             ImGui.Text("File name:");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(MathF.Max(200f, ImGui.GetContentRegionAvail().X - 230f));
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(MathF.Max(200f, ImGui.GetContentRegionAvail().X - 230f));
             ImGui.InputText("##PathPickerFileName", ref _fileName, 512);
             ImGui.Spacing();
         }

@@ -8,8 +8,8 @@ using WoWViewer.UI;
 namespace WoWViewer.Workbench.Services.TerrainControls;
 
 /// <summary>
-/// Photoshop-style Terrain Layers workbench providing per-layer opacity sliders,
-/// alpha mask overlay blending, holes control, and Ghidra client binary analysis tooltips
+/// Texture Masks workbench providing per-layer visibility and opacity,
+/// alpha-mask overlay blending, holes control, and Ghidra client binary analysis tooltips
 /// decoding MCLY flags and ground effect clutter IDs (Spec 287 Phase 3).
 /// </summary>
 internal sealed class TerrainLayersPanelService
@@ -22,7 +22,7 @@ internal sealed class TerrainLayersPanelService
     }
 
     /// <summary>
-    /// Draws the complete Photoshop-style Layers workbench content.
+    /// Draws the complete Texture Masks workbench content.
     /// </summary>
     public void DrawLayersPanelContent()
     {
@@ -42,7 +42,7 @@ internal sealed class TerrainLayersPanelService
 
         int maxLayers = Math.Clamp(terrain.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers);
 
-        ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "Photoshop-Style Layer Blending");
+        ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "Texture Mask Blending");
         ImGui.TextDisabled("Adjust individual layer opacity multipliers and blend raw alpha masks over diffuse terrain.");
         ImGui.Separator();
 
@@ -50,7 +50,7 @@ internal sealed class TerrainLayersPanelService
         if (SharedUiWidgets.SectionHeader("Alpha Mask Overlay Blending", defaultOpen: true, id: "LayersAlphaBlendHeader"))
         {
             float alphaBlend = terrain.AlphaMaskBlend;
-            ImGui.SetNextItemWidth(180f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(180f);
             if (ImGui.SliderFloat("Alpha Overlay##AlphaMaskBlendSlider", ref alphaBlend, 0f, 1f, "%.2f"))
             {
                 terrain.AlphaMaskBlend = Math.Clamp(alphaBlend, 0f, 1f);
@@ -61,7 +61,7 @@ internal sealed class TerrainLayersPanelService
                     "Blends raw grayscale alpha mask directly over painted terrain diffuse.\n" +
                     "0.0 = Pure diffuse tileset\n" +
                     "1.0 = Pure grayscale alpha mask\n" +
-                    "0.5 = 50% split showing both simultaneously (Photoshop overlay style)");
+                    "0.5 = 50% split showing both simultaneously (overlay style)");
             }
 
             ImGui.SameLine();
@@ -72,7 +72,7 @@ internal sealed class TerrainLayersPanelService
 
             int alphaChannel = terrain.AlphaMaskChannel;
             string[] channelLabels = { "All Combined (Product)", "Layer 1 Alpha", "Layer 2 Alpha", "Layer 3 Alpha", "Layer 4 Alpha", "Layer 5 Alpha", "Layer 6 Alpha", "Layer 7 Alpha" };
-            ImGui.SetNextItemWidth(200f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(200f);
             if (ImGui.Combo("Channel##AlphaMaskChannelCombo", ref alphaChannel, channelLabels, Math.Min(maxLayers, channelLabels.Length)))
             {
                 terrain.AlphaMaskChannel = alphaChannel;
@@ -102,7 +102,7 @@ internal sealed class TerrainLayersPanelService
 
                 ImGui.SameLine();
                 float opacity = terrain.LayerOpacities[layer];
-                ImGui.SetNextItemWidth(140f);
+                WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(140f);
                 if (ImGui.SliderFloat("##Opacity", ref opacity, 0f, 1f, "%.2f"))
                 {
                     terrain.LayerOpacities[layer] = Math.Clamp(opacity, 0f, 1f);
@@ -216,7 +216,7 @@ internal sealed class TerrainLayersPanelService
 
         // Alpha Mask Overlay
         float alphaBlend = terrain.AlphaMaskBlend;
-        ImGui.SetNextItemWidth(150f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(150f);
         if (ImGui.SliderFloat("Alpha Overlay##QuickAlphaBlend", ref alphaBlend, 0f, 1f, "%.2f"))
         {
             terrain.AlphaMaskBlend = Math.Clamp(alphaBlend, 0f, 1f);
@@ -230,7 +230,7 @@ internal sealed class TerrainLayersPanelService
         int alphaChannel = terrain.AlphaMaskChannel;
         string[] channelLabels = { "All Combined", "L1 Alpha", "L2 Alpha", "L3 Alpha", "L4 Alpha", "L5 Alpha", "L6 Alpha", "L7 Alpha" };
         int maxLayers = Math.Clamp(terrain.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers);
-        ImGui.SetNextItemWidth(150f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(150f);
         if (ImGui.Combo("Channel##QuickAlphaChannel", ref alphaChannel, channelLabels, Math.Min(maxLayers, channelLabels.Length)))
         {
             terrain.AlphaMaskChannel = alphaChannel;
@@ -248,7 +248,7 @@ internal sealed class TerrainLayersPanelService
             }
             ImGui.SameLine();
             float opacity = terrain.LayerOpacities[layer];
-            ImGui.SetNextItemWidth(120f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120f);
             if (ImGui.SliderFloat("##Opacity", ref opacity, 0f, 1f, "%.2f"))
             {
                 terrain.LayerOpacities[layer] = Math.Clamp(opacity, 0f, 1f);

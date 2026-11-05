@@ -518,7 +518,7 @@ internal sealed partial class EditorPanelsService
 
             ImGui.Checkbox("Include Doodads & WMOs", ref _chunkManipulatorIncludePlacements);
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(120f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120f);
             string[] rotLabels = ["0°", "90°", "180°", "270°"];
             ImGui.Combo("Rotation", ref _chunkManipulatorRotationIdx, rotLabels, rotLabels.Length);
 
@@ -869,7 +869,7 @@ internal sealed partial class EditorPanelsService
 
         ImGui.SameLine();
         string[] sortOptions = ["Name", "Volume \u2193", "Footprint \u2193"];
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         if (ImGui.Combo("Sort##rosetta_sort", ref _rosettaSizeSort, sortOptions, sortOptions.Length))
         {
             _rosettaListPage = 0;

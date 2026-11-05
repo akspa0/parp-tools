@@ -113,6 +113,23 @@ public sealed class SceneAtmosphere
     public string? ActiveLightSkyboxSourcePath => _activeLightSkyboxSourcePath;
     public bool HasActiveLightSkybox => !string.IsNullOrWhiteSpace(_activeLightSkyboxSourcePath);
     private string? _activeLightSkyboxModelKey;
+    private string? _manualSkyboxModelPath;
+
+    /// <summary>Operator-selected skybox model; null means follow the Light DBC / stars fallback.</summary>
+    public string? ManualSkyboxModelPath => _manualSkyboxModelPath;
+
+    /// <summary>Skybox model names available in the exact-build LightSkybox table.</summary>
+    public IReadOnlyList<string> SkyboxNames => _lightService?.SkyboxNames ?? Array.Empty<string>();
+
+    /// <summary>Forces a specific skybox model (or null to return to automatic selection).</summary>
+    internal void SetManualSkyboxModel(string? modelPath)
+    {
+        _manualSkyboxModelPath = string.IsNullOrWhiteSpace(modelPath) ? null : modelPath.Trim();
+        // Force re-evaluation even when the resolved path is unchanged.
+        _activeLightSkyboxSourcePath = null;
+        _activeLightSkyboxModelKey = null;
+        UpdateActiveSkyboxModel();
+    }
 
     // DBC Lighting
     internal LightService? _lightService;
@@ -423,10 +440,19 @@ public sealed class SceneAtmosphere
 
     internal void UpdateActiveSkyboxModel()
     {
-        string? sourcePath = _lightService?.ActiveSkyboxModelPath;
-        sourcePath = ResolveClientSkyboxPath(sourcePath);
-        if (string.IsNullOrWhiteSpace(sourcePath))
-            sourcePath = ResolveClientStarsFallback();
+        string? sourcePath;
+        if (!string.IsNullOrWhiteSpace(_manualSkyboxModelPath))
+        {
+            // Operator override wins; do not silently fall back to stars when it fails to resolve.
+            sourcePath = ResolveClientSkyboxPath(_manualSkyboxModelPath);
+        }
+        else
+        {
+            sourcePath = _lightService?.ActiveSkyboxModelPath;
+            sourcePath = ResolveClientSkyboxPath(sourcePath);
+            if (string.IsNullOrWhiteSpace(sourcePath))
+                sourcePath = ResolveClientStarsFallback();
+        }
 
         if (string.Equals(sourcePath, _activeLightSkyboxSourcePath, StringComparison.OrdinalIgnoreCase))
             return;

@@ -54,6 +54,13 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
         in Vector3 cameraPos,
         out Pm4RenderTimingStats stats)
     {
+        // Per-frame visible tallies: reset before accumulating. These were only cleared on
+        // load/clear, so the sidebar counters grew without bound every frame.
+        overlay._pm4VisibleObjectCount = 0;
+        overlay._pm4VisibleLineCount = 0;
+        overlay._pm4VisibleTriangleCount = 0;
+        overlay._pm4VisiblePositionRefCount = 0;
+
         if (_disposed || !overlay._showPm4Overlay || overlay._pm4TileObjects.Count == 0)
         {
             stats = default;

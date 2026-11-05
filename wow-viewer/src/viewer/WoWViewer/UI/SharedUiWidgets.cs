@@ -20,6 +20,20 @@ public static class SharedUiWidgets
     private static readonly Vector4 ImportantColor = new(1f, 0.85f, 0.4f, 1f);
     private static readonly Vector4 StatusColor = new(0.62f, 0.82f, 0.92f, 1f);
 
+    /// <summary>
+    /// Sets the next item width in logical units, scaled by the effective font scale.
+    /// ImGui's <c>SetNextItemWidth</c> takes raw pixels, so a fixed 120px box stayed 120px
+    /// while the text grew with the UI scale — numeric fields clipped their digits. Positive
+    /// widths scale directly; negative widths (fill-to-edge minus an inset) scale the inset.
+    /// </summary>
+    public static void SetNextItemWidth(float logicalWidth)
+    {
+        float scale = ImGui.GetIO().FontGlobalScale;
+        if (!float.IsFinite(scale) || scale <= 0f)
+            scale = 1f;
+        ImGui.SetNextItemWidth(logicalWidth * scale);
+    }
+
     /// <summary>One button of a <see cref="DrawButtonRow"/>.</summary>
     public readonly record struct ButtonSpec(
         string Label,

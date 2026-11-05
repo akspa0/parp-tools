@@ -48,6 +48,10 @@ public class LightService
     /// </summary>
     public string? ActiveSkyboxModelPath { get; private set; }
     public string Source { get; private set; } = "not loaded";
+
+    /// <summary>Skybox model names available in the exact-build LightSkybox table.</summary>
+    public IReadOnlyList<string> SkyboxNames =>
+        _classicCatalog is { } catalog ? catalog.SkyboxNames : Array.Empty<string>();
     public string Status { get; private set; } = "Lighting database not loaded.";
     public int BandCountRecoveryCount => _classicCatalog?.BandCountRecoveries.Length ?? 0;
     public int MissingOptionalSkyboxCount => _classicCatalog?.MissingSkyboxReferences.Length ?? 0;

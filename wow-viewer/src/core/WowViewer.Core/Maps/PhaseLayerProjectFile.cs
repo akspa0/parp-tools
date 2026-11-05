@@ -118,6 +118,9 @@ public sealed class PhaseLayerProjectEntry
             TargetTileX = placement.TargetTileX,
             TargetTileY = placement.TargetTileY,
             Locked = placement.Locked,
+            Included = placement.Included,
+            ZOffset = placement.ZOffset,
+            ZScale = placement.ZScale,
         }).ToList(),
     };
 
@@ -147,7 +150,8 @@ public sealed class PhaseLayerProjectEntry
         };
         foreach (PhaseTilePlacementDto placement in TilePlacements)
             layer.TilePlacements.Add(new PhaseTilePlacement(
-                placement.DonorTileX, placement.DonorTileY, placement.TargetTileX, placement.TargetTileY, placement.Locked));
+                placement.DonorTileX, placement.DonorTileY, placement.TargetTileX, placement.TargetTileY,
+                placement.Locked, placement.Included, placement.ZOffset, placement.ZScale));
         return layer;
     }
 }
@@ -161,4 +165,13 @@ public sealed class PhaseTilePlacementDto
 
     /// <summary>Spec 232 FR-14: blocks later layers from replacing this target tile.</summary>
     public bool Locked { get; set; }
+
+    /// <summary>Spec 293: operator include/exclude for this placed tile (default true).</summary>
+    public bool Included { get; set; } = true;
+
+    /// <summary>Spec 293: per-tile world-Z offset applied on top of the layer's.</summary>
+    public float ZOffset { get; set; }
+
+    /// <summary>Spec 293: per-tile world-Z scale applied on top of the layer's.</summary>
+    public float ZScale { get; set; } = 1f;
 }

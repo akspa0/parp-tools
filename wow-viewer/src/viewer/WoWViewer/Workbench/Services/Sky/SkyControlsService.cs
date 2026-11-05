@@ -60,6 +60,44 @@ internal sealed class SkyControlsService
         else
             ImGui.TextDisabled("Client model: Procedural fallback");
 
+        // 2b. Skybox model selector — the operator can force any client skybox.
+        IReadOnlyList<string> skyboxNames = atmosphere.SkyboxNames;
+        string currentSkybox = atmosphere.ManualSkyboxModelPath ?? string.Empty;
+        string skyboxPreview = string.IsNullOrWhiteSpace(currentSkybox)
+            ? "Auto (Light DBC / stars)"
+            : currentSkybox;
+        SharedUiWidgets.SetNextItemWidth(-1f);
+        if (ImGui.BeginCombo("Skybox Model##SkyboxModel", skyboxPreview))
+        {
+            if (ImGui.Selectable("Auto (Light DBC / stars)##SkyboxAuto", string.IsNullOrWhiteSpace(currentSkybox)))
+                atmosphere.SetManualSkyboxModel(null);
+            for (int i = 0; i < skyboxNames.Count; i++)
+            {
+                string name = skyboxNames[i];
+                bool selected = string.Equals(name, currentSkybox, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable($"{name}##SkyboxPick{i}", selected))
+                    atmosphere.SetManualSkyboxModel(name);
+            }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Choose which client skybox model to display. Auto follows the Light DBC for the current zone.");
+
+        // Manual path for a skybox that is not in the DBC list.
+        string manualSkybox = currentSkybox;
+        SharedUiWidgets.SetNextItemWidth(-80f);
+        if (ImGui.InputTextWithHint("##SkyboxManualPath", "World\\Skybox\\...", ref manualSkybox, 512,
+                ImGuiInputTextFlags.EnterReturnsTrue))
+        {
+            atmosphere.SetManualSkyboxModel(manualSkybox);
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Apply##SkyboxApply"))
+            atmosphere.SetManualSkyboxModel(manualSkybox);
+        ImGui.SameLine();
+        if (ImGui.Button("Auto##SkyboxClear"))
+            atmosphere.SetManualSkyboxModel(null);
+
         ImGui.Separator();
         ImGui.Text("Time of Day & Sun Cycle");
 

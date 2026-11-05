@@ -19,10 +19,10 @@ namespace WowViewer.Core.PM4.Caching;
 /// <see cref="Pm4PerFileCacheEntry.LastWriteTicks"/> are recorded at
 /// write time and compared at read time; a mismatch is treated as a miss.
 ///
-/// The reader/writer pair uses magic <c>PM4F</c> and version <c>8</c>.
+/// The reader/writer pair uses magic <c>PM4F</c> and version <c>9</c>.
 /// This intentionally diverges from the per-window PM4 overlay cache
-/// (magic <c>PM4C</c>, version <c>7</c>) so the two layers do not collide
-/// on disk.
+/// (magic <c>PM4C</c>, version <c>9</c>) so the two layers do not collide
+/// on disk. Spec 130 bumped both to 9 in the same change.
 /// </summary>
 public sealed class Pm4PerFileCacheService
 {

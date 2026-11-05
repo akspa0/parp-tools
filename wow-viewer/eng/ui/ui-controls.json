@@ -107,6 +107,14 @@
       "visible": true
     },
     {
+      "id": "archaeology-rail-icon",
+      "label": "Archaeology",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the Archaeology workbench (weak signal, stratigraphy, layers, cartography) in the right dock.",
+      "visible": true
+    },
+    {
       "id": "exports-rail-icon",
       "label": "Exports",
       "region": "Right action bar",
@@ -443,11 +451,11 @@
       "visible": true
     },
     {
-      "id": "layers",
-      "label": "Layers",
+      "id": "texture-masks",
+      "label": "Texture Masks",
       "region": "Options",
       "shortcut": null,
-      "help": "Terrain layer visibility and WDL overlay.",
+      "help": "Texture layer visibility, alpha-mask blending, and WDL overlay.",
       "visible": true
     },
     {
@@ -955,11 +963,11 @@
       "visible": true
     },
     {
-      "id": "terrain-layers-blending",
-      "label": "Terrain Layers & Blending...",
+      "id": "texture-masks-blending",
+      "label": "Texture Masks & Blending...",
       "region": "Top menu > View",
       "shortcut": null,
-      "help": "Open the Terrain Layers and Alpha Blending workbench.",
+      "help": "Open the Texture Masks panel: per-layer visibility and opacity, alpha-mask blending, and MCLY flags.",
       "visible": true
     },
     {
@@ -968,14 +976,6 @@
       "region": "Left sidebar > Workspace",
       "shortcut": null,
       "help": "Atmospheric sky dome, sun/moon cycle, and client skybox backdrop controls.",
-      "visible": true
-    },
-    {
-      "id": "layers-and-opacity",
-      "label": "Layers & Opacity",
-      "region": "Bottom bar",
-      "shortcut": null,
-      "help": "Quick drop-up menu to adjust terrain layer opacities and alpha mask overlay blending.",
       "visible": true
     }
   ]

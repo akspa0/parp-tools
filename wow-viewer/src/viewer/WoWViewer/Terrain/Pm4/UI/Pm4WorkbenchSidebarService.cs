@@ -183,32 +183,32 @@ internal sealed class Pm4WorkbenchSidebarService
                 overlay.Pm4FlipAllObjectsY = pm4FlipAllObjY;
 
             float mscnSize = overlay.Pm4MscnCubeSize;
-            ImGui.SetNextItemWidth(110f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(110f);
             if (ImGui.SliderFloat("MSCN size", ref mscnSize, 0.2f, 4f))
                 overlay.Pm4MscnCubeSize = mscnSize;
             ImGui.SameLine();
             float mspvSize = overlay.Pm4MspvCubeSize;
-            ImGui.SetNextItemWidth(110f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(110f);
             if (ImGui.SliderFloat("MSPV size", ref mspvSize, 0.2f, 4f))
                 overlay.Pm4MspvCubeSize = mspvSize;
 
             float mscnAlpha = overlay.Pm4MscnCubeAlpha;
-            ImGui.SetNextItemWidth(110f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(110f);
             if (ImGui.SliderFloat("MSCN alpha", ref mscnAlpha, 0.1f, 1f))
                 overlay.Pm4MscnCubeAlpha = mscnAlpha;
             ImGui.SameLine();
             float mspvAlpha = overlay.Pm4MspvCubeAlpha;
-            ImGui.SetNextItemWidth(110f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(110f);
             if (ImGui.SliderFloat("MSPV alpha", ref mspvAlpha, 0.1f, 1f))
                 overlay.Pm4MspvCubeAlpha = mspvAlpha;
 
             float lineWidth = overlay.Pm4WireframeLineWidth;
-            ImGui.SetNextItemWidth(140f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(140f);
             if (ImGui.SliderFloat("Wireframe width", ref lineWidth, 1f, 8f))
                 overlay.Pm4WireframeLineWidth = lineWidth;
 
             float renderDistance = overlay.Pm4RenderDistance;
-            ImGui.SetNextItemWidth(140f);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(140f);
             if (ImGui.SliderFloat("PM4 draw distance", ref renderDistance, Pm4OverlayScene.Pm4MinRenderDistance, Pm4OverlayScene.Pm4MaxRenderDistance, "%.0f"))
                 overlay.Pm4RenderDistance = renderDistance;
         }

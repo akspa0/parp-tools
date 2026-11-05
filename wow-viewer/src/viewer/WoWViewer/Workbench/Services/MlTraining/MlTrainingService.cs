@@ -460,11 +460,11 @@ internal sealed partial class MlTrainingService
         ImGui.Spacing();
 
         ImGui.Text("Python Executable:");
-        ImGui.SetNextItemWidth(-1);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
         ImGui.InputText("##mlTrainingPython", ref _mlTrainingPythonExecutable, 512);
 
         ImGui.Text("train_v7.py Path:");
-        ImGui.SetNextItemWidth(-80);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
         ImGui.InputText("##mlTrainingScript", ref _mlTrainingScriptPath, 1024);
         ImGui.SameLine();
         if (ImGui.Button("Browse##mlTrainingScript"))
@@ -527,7 +527,7 @@ internal sealed partial class MlTrainingService
         ImGui.InputTextMultiline("##mlTrainingExcludeMaps", ref _mlTrainingExcludeMapsText, 1024, new Vector2(-1, 54));
 
         ImGui.Text("Output Directory:");
-        ImGui.SetNextItemWidth(-80);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
         ImGui.InputText("##mlTrainingOutput", ref _mlTrainingOutputDir, 1024);
         ImGui.SameLine();
         if (ImGui.Button("Browse##mlTrainingOutput"))
@@ -545,7 +545,7 @@ internal sealed partial class MlTrainingService
         }
 
         ImGui.Text("Resume Checkpoint (optional):");
-        ImGui.SetNextItemWidth(-80);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
         ImGui.InputText("##mlTrainingResume", ref _mlTrainingResumeCheckpointPath, 1024);
         ImGui.SameLine();
         if (ImGui.Button("Browse##mlTrainingResume"))
@@ -564,34 +564,34 @@ internal sealed partial class MlTrainingService
 
         ImGui.Separator();
         ImGui.Text("Training Parameters:");
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.InputInt("Batch Size", ref _mlTrainingBatchSize);
         _mlTrainingBatchSize = Math.Max(1, _mlTrainingBatchSize);
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.InputInt("Epochs", ref _mlTrainingEpochs);
         _mlTrainingEpochs = Math.Max(1, _mlTrainingEpochs);
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.InputInt("Patience", ref _mlTrainingPatience);
         _mlTrainingPatience = Math.Max(1, _mlTrainingPatience);
 
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.InputFloat("Learning Rate", ref _mlTrainingLearningRate, 0.0f, 0.0f, "%.6f");
         _mlTrainingLearningRate = MathF.Max(1e-7f, _mlTrainingLearningRate);
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.InputFloat("Val Fraction", ref _mlTrainingValFraction, 0.0f, 0.0f, "%.3f");
         _mlTrainingValFraction = Math.Clamp(_mlTrainingValFraction, 0.01f, 0.5f);
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.InputInt("Spatial Group", ref _mlTrainingSpatialGroupSize);
         _mlTrainingSpatialGroupSize = Math.Max(1, _mlTrainingSpatialGroupSize);
 
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.InputInt("Seed", ref _mlTrainingSeed);
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120);
         ImGui.InputInt("Limit", ref _mlTrainingLimit);
         _mlTrainingLimit = Math.Max(0, _mlTrainingLimit);
         ImGui.SameLine();

@@ -285,7 +285,7 @@ internal sealed partial class ModelInspectorPanelService
             : "None";
 
         ImGui.Text("Sequence");
-        ImGui.SetNextItemWidth(-1);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
         if (ImGui.BeginCombo("##AnimSequence", currentSeqName))
         {
             for (int s = 0; s < animator.Sequences.Count; s++)
@@ -368,7 +368,7 @@ internal sealed partial class ModelInspectorPanelService
 
         // Timeline slider
         ImGui.Separator();
-        ImGui.SetNextItemWidth(-1);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1);
         if (ImGui.SliderFloat("##Timeline", ref currentRel, 0, duration, $"Frame: {currentAbs:F0} / {seqEnd:F0}"))
         {
             animator.IsPlaying = false;

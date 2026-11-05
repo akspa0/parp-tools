@@ -34,6 +34,42 @@ public sealed class Pm4FootprintExtrusionTests
     }
 
     [Fact]
+    public void ComputePrincipalOrientation_CenterIsOrientedBoundingBoxCenterNotVertexMean()
+    {
+        // L-shaped footprint: the vertex mean is (4, 4), pulled toward the dense corner
+        // cluster, but the hull's minimal oriented bounding box (PCA frame, rotated -45
+        // degrees for this shape) is centered at (3, 3) — which also matches the polygon
+        // area centroid (~3.2, 3.2) far better than the mean. The returned center must be
+        // the OBB center, not the vertex mean: placement paths solve
+        // position = prism.Centroid - rotCenter, so a biased centroid shifts every aligned
+        // model off the hull on X/Y.
+        var lShape = new List<Vector2>
+        {
+            new(0f, 0f),
+            new(10f, 0f),
+            new(10f, 2f),
+            new(2f, 2f),
+            new(2f, 10f),
+            new(0f, 10f),
+        };
+
+        Pm4FootprintExtruder.ComputePrincipalOrientation(
+            lShape,
+            out _,
+            out float length,
+            out float width,
+            out Vector2 center);
+
+        // OBB center of the L-shape is (3, 3); the vertex mean would be (4, 4).
+        Assert.InRange(center.X, 2.9f, 3.1f);
+        Assert.InRange(center.Y, 2.9f, 3.1f);
+
+        // Full extents are still 10 x 10 (the OBB spans both arms of the L).
+        Assert.InRange(length, 13.9f, 14.4f);
+        Assert.InRange(width, 8.4f, 8.6f);
+    }
+
+    [Fact]
     public void ComputePrincipalOrientation_RecoversUnrotatedDimensionsAndYaw()
     {
         // Construct a 20x10 rectangle centered at (100, 200) rotated by 45 degrees

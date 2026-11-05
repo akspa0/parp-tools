@@ -258,16 +258,29 @@ internal sealed class Pm4DoodadDuplicationService
             if (searchRadius > 0f && Vector3.Distance(worldCentroid, template.PlacementPosition) > searchRadius)
                 continue;
 
+            // Target bounds must be world-space: FitModelToTarget solves Z against
+            // BoundsMax.Z (hull top) / BoundsMin.Z (hull floor), and its PCA yaw path
+            // consumes world vertices.
+            WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, obj.BaseTransform, out Vector3 worldMin, out Vector3 worldMax);
+            var worldVerts = new List<Vector3>(obj.Triangles.Count * 3);
+            for (int t = 0; t < obj.Triangles.Count; t++)
+            {
+                worldVerts.Add(Vector3.Transform(obj.Triangles[t].A, obj.BaseTransform));
+                worldVerts.Add(Vector3.Transform(obj.Triangles[t].B, obj.BaseTransform));
+                worldVerts.Add(Vector3.Transform(obj.Triangles[t].C, obj.BaseTransform));
+            }
+
             candidateTargets.Add(new Pm4DoodadTarget(
                 targetTileX,
                 targetTileY,
                 obj.Ck24,
                 obj.ObjectPartId,
                 worldCentroid,
-                obj.BoundsMin,
-                obj.BoundsMax,
+                worldMin,
+                worldMax,
                 obj.BaseRotationRadians,
-                obj.DominantGroupKey));
+                obj.DominantGroupKey,
+                worldVerts));
         }
 
         if (candidateTargets.Count == 0)
@@ -1480,11 +1493,31 @@ internal sealed class Pm4DoodadDuplicationService
         {
             var match = matchResults[0];
             solvedScale = isWmo ? 1.0f : match.SolvedScale;
-            solvedPos = match.SolvedPosition;
 
+            // MatchPrism solves SolvedPosition for its +90° heuristic yaw, but the applied
+            // rotation is the taught yaw offset. Re-solve the position for the final taught
+            // yaw so the rotated model center lands exactly on the hull centroid (same math
+            // as AlignPlacementToPm4Hull); otherwise taught placements drift off-hull.
             float yaw = prism.YawDegrees + taught.YawOffset;
             while (yaw > 180f) yaw -= 360f;
             while (yaw < -180f) yaw += 360f;
+
+            Matrix4x4 unpositioned = WorldPlacementTransform.Build(Vector3.Zero, new Vector3(0f, 0f, yaw), solvedScale);
+            WorldScene.TransformBounds(cand.LocalBoundsMin, cand.LocalBoundsMax, unpositioned, out Vector3 rotMin, out Vector3 rotMax);
+            Vector3 rotCenter = (rotMin + rotMax) * 0.5f;
+
+            float posZ;
+            if (isWmo)
+            {
+                float? hullPlacementZ = objCk24 != 0 ? BitConverter.UInt32BitsToSingle(objCk24 << 8) : null;
+                posZ = hullPlacementZ.HasValue && MathF.Abs(hullPlacementZ.Value) > 0.01f ? hullPlacementZ.Value : prism.BaseZ;
+            }
+            else
+            {
+                posZ = prism.TopZ - (rotMax.Z > 0.01f ? rotMax.Z : MathF.Max(0.01f, rotMax.Z - rotMin.Z));
+            }
+
+            solvedPos = new Vector3(prism.Centroid.X - rotCenter.X, prism.Centroid.Y - rotCenter.Y, posZ);
             solvedRot = new Vector3(0f, 0f, yaw);
             return true;
         }

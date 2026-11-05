@@ -337,21 +337,68 @@ internal sealed partial class ArchaeologyPanelService
 
             if (layer.TilePlacements.Count > 0)
             {
-                ImGui.TextUnformatted("Placed target locks");
+                ImGui.TextUnformatted("Placed tiles");
                 for (int placementIndex = 0; placementIndex < layer.TilePlacements.Count; placementIndex++)
                 {
                     PhaseTilePlacement placement = layer.TilePlacements[placementIndex];
-                    bool placementLocked = placement.Locked;
+                    ImGui.PushID(placementIndex);
+
+                    // Spec 293: include/exclude this placed tile without deleting the mapping.
+                    bool included = placement.Included;
                     // Labels print in ADT-name order (xx_yy = column_row) to match the status bar.
-                    if (ImGui.Checkbox($"Lock target {placement.TargetTileY:D2}_{placement.TargetTileX:D2}##placedLock{placementIndex}", ref placementLocked))
+                    if (ImGui.Checkbox($"Include {placement.TargetTileY:D2}_{placement.TargetTileX:D2}", ref included))
+                    {
+                        layer.TilePlacements[placementIndex] = placement with { Included = included };
+                        dirty = true;
+                    }
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Uncheck to exclude this placed tile from the layer. The mapping is kept so it can be re-included later.");
+
+                    ImGui.SameLine();
+                    bool placementLocked = placement.Locked;
+                    if (ImGui.Checkbox("Lock", ref placementLocked))
                     {
                         layer.TilePlacements[placementIndex] = placement with { Locked = placementLocked };
                         dirty = true;
                     }
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("When locked, later layers cannot replace this target tile. The lock is saved in the layer project and marked L on the minimap.");
+
                     ImGui.SameLine();
                     ImGui.TextDisabled($"donor {placement.DonorTileY:D2}_{placement.DonorTileX:D2}");
+
+                    // Spec 293: per-tile Z adjustment on top of the layer's.
+                    if (ImGui.TreeNode($"Per-tile settings##placedSettings{placementIndex}"))
+                    {
+                        float tileZOffset = placement.ZOffset;
+                        SharedUiWidgets.SetNextItemWidth(120f);
+                        if (ImGui.InputFloat("Z offset##placedZOffset", ref tileZOffset, 0.1f, 1f, "%.2f"))
+                        {
+                            layer.TilePlacements[placementIndex] = placement with { ZOffset = tileZOffset };
+                            dirty = true;
+                        }
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip("Vertical offset for this tile only, applied on top of the layer's Z offset.");
+
+                        float tileZScale = placement.ZScale;
+                        SharedUiWidgets.SetNextItemWidth(120f);
+                        if (ImGui.InputFloat("Z scale##placedZScale", ref tileZScale, 0.01f, 0.1f, "%.3f"))
+                        {
+                            layer.TilePlacements[placementIndex] = placement with { ZScale = tileZScale };
+                            dirty = true;
+                        }
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip("Vertical scale for this tile only, multiplied with the layer's Z scale.");
+
+                        if (ImGui.SmallButton("Reset##placedZReset"))
+                        {
+                            layer.TilePlacements[placementIndex] = placement with { ZOffset = 0f, ZScale = 1f };
+                            dirty = true;
+                        }
+                        ImGui.TreePop();
+                    }
+
+                    ImGui.PopID();
                 }
             }
 
@@ -407,7 +454,7 @@ internal sealed partial class ArchaeologyPanelService
                 ImGui.GetFontSize() * 4f);
 
             ImGui.TextUnformatted("Tile offset X (row, N-S)");
-            ImGui.SetNextItemWidth(inputWidth);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(inputWidth);
             if (ImGui.InputInt("##tileOffsetX", ref offsetX, 1))
             {
                 layer.TileOffsetX = Math.Clamp(offsetX, -63, 63);
@@ -417,7 +464,7 @@ internal sealed partial class ArchaeologyPanelService
                 ImGui.SetTooltip("Row offset (North-South, engine tileX). Positive moves the layer's content toward higher tile X.");
 
             ImGui.TextUnformatted("Tile offset Y (column, W-E)");
-            ImGui.SetNextItemWidth(inputWidth);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(inputWidth);
             if (ImGui.InputInt("##tileOffsetY", ref offsetY, 1))
             {
                 layer.TileOffsetY = Math.Clamp(offsetY, -63, 63);
@@ -442,7 +489,7 @@ internal sealed partial class ArchaeologyPanelService
             // offset/rotation.
             ImGui.TextUnformatted("Cell fine-tune (1 cell = 1/16 tile)");
             int cellOffsetX = layer.CellOffsetX;
-            ImGui.SetNextItemWidth(inputWidth);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(inputWidth);
             if (ImGui.InputInt("##cellOffsetX", ref cellOffsetX, 1))
             {
                 layer.CellOffsetX = Math.Clamp(cellOffsetX, -15, 15);
@@ -452,7 +499,7 @@ internal sealed partial class ArchaeologyPanelService
                 ImGui.SetTooltip("Fine nudge along the north-south axis, in terrain cells. Moves the composed content without changing which donor tile the bulk of the tile comes from.");
             ImGui.SameLine();
             int cellOffsetY = layer.CellOffsetY;
-            ImGui.SetNextItemWidth(inputWidth);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(inputWidth);
             if (ImGui.InputInt("##cellOffsetY", ref cellOffsetY, 1))
             {
                 layer.CellOffsetY = Math.Clamp(cellOffsetY, -15, 15);
@@ -475,7 +522,7 @@ internal sealed partial class ArchaeologyPanelService
             // a cut tile so it meets the terrain it lands beside (e.g. Teldrassil on Kalimdor).
             ImGui.TextUnformatted("Z offset / scale");
             float zOffset = layer.ZOffset;
-            ImGui.SetNextItemWidth(inputWidth);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(inputWidth);
             if (ImGui.InputFloat("##layerZOffset", ref zOffset, 1f, 10f, "%.1f"))
             {
                 layer.ZOffset = zOffset;
@@ -485,7 +532,7 @@ internal sealed partial class ArchaeologyPanelService
                 ImGui.SetTooltip("World-Z translation (yards) applied to this layer's terrain, liquids, and object heights. Positive raises the tile.");
             ImGui.SameLine();
             float zScale = layer.ZScale;
-            ImGui.SetNextItemWidth(inputWidth);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(inputWidth);
             if (ImGui.InputFloat("##layerZScale", ref zScale, 0.01f, 0.1f, "%.3f"))
             {
                 layer.ZScale = Math.Clamp(zScale, 0.01f, 100f);
@@ -506,7 +553,7 @@ internal sealed partial class ArchaeologyPanelService
             // Z nudge.
             ImGui.TextUnformatted("WDL edge-snap (magnetic)");
             float edgeBlend = layer.EdgeBlendWdl;
-            ImGui.SetNextItemWidth(inputWidth);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(inputWidth);
             if (ImGui.SliderFloat("##layerEdgeBlend", ref edgeBlend, 0f, 1f, "%.2f"))
             {
                 layer.EdgeBlendWdl = edgeBlend;
@@ -951,19 +998,19 @@ internal sealed partial class ArchaeologyPanelService
             // swapped used to land the tile on the diagonal mirror of the requested location.
             ImGui.TextWrapped("Tiles are named xx_yy (xx = column W-E, yy = row N-S), matching the status bar.");
             ImGui.Text("Donor Tile:");
-            ImGui.SetNextItemWidth(100);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(100);
             ImGui.InputInt("xx (col)##donorX", ref _cartographyDonorTileX);
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(100);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(100);
             ImGui.InputInt("yy (row)##donorY", ref _cartographyDonorTileY);
             _cartographyDonorTileX = Math.Clamp(_cartographyDonorTileX, 0, 63);
             _cartographyDonorTileY = Math.Clamp(_cartographyDonorTileY, 0, 63);
 
             ImGui.Text("Target Tile:");
-            ImGui.SetNextItemWidth(100);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(100);
             ImGui.InputInt("xx (col)##targetX", ref _cartographyTargetTileX);
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(100);
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(100);
             ImGui.InputInt("yy (row)##targetY", ref _cartographyTargetTileY);
             _cartographyTargetTileX = Math.Clamp(_cartographyTargetTileX, 0, 63);
             _cartographyTargetTileY = Math.Clamp(_cartographyTargetTileY, 0, 63);

@@ -122,7 +122,7 @@ internal sealed partial class TerrainAnalysisService
             _ => 0,
         };
         string[] hiddenScopeLabels = { "Loaded tiles", "Whole map", "Current tile" };
-        ImGui.SetNextItemWidth(180f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(180f);
         if (ImGui.Combo("Candidate Source", ref hiddenScopeIndex, hiddenScopeLabels, hiddenScopeLabels.Length))
         {
             _terrainAnalysisHiddenScope = hiddenScopeIndex switch
@@ -133,10 +133,10 @@ internal sealed partial class TerrainAnalysisService
             };
         }
 
-        ImGui.SetNextItemWidth(120f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120f);
         ImGui.InputInt("Offset X", ref _terrainAnalysisHiddenCompareOffsetX);
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(120f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120f);
         ImGui.InputInt("Offset Y", ref _terrainAnalysisHiddenCompareOffsetY);
         ImGui.SameLine();
         if (ImGui.SmallButton("Use 2 Tiles South"))
@@ -145,11 +145,11 @@ internal sealed partial class TerrainAnalysisService
             _terrainAnalysisHiddenCompareOffsetY = 2;
         }
 
-        ImGui.SetNextItemWidth(220f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(220f);
         ImGui.SliderFloat("Min Similarity", ref _terrainAnalysisHiddenMinSimilarity, 0.50f, 0.999f, "%.3f");
-        ImGui.SetNextItemWidth(220f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(220f);
         ImGui.SliderFloat("Max Visibility Ratio", ref _terrainAnalysisHiddenMaxVisibilityRatio, 0.005f, 0.250f, "%.3f");
-        ImGui.SetNextItemWidth(220f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(220f);
         ImGui.SliderInt("Max Results", ref _terrainAnalysisHiddenMaxResults, 1, 100);
 
         if (ImGui.Button("Scan Tiles"))

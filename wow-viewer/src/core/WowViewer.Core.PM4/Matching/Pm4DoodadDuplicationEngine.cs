@@ -126,9 +126,12 @@ public static class Pm4DoodadDuplicationEngine
             modelPlanarSize = worldPlanar / MathF.Max(0.01f, template.Scale);
         }
 
-        // 3. Compute scale factor
+        // 3. Compute scale factor. WMOs are authored 1:1 architecture and must never be
+        // rescaled (same rule as Pm4DirectModelMatcher); the caller places them at scale 1.0,
+        // so the position solve below must use 1.0 too.
+        bool isWmoTemplate = template.ModelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
         float fittedScale = template.Scale;
-        if (modelPlanarSize > 0.01f && targetPlanarSize > 0.01f)
+        if (!isWmoTemplate && modelPlanarSize > 0.01f && targetPlanarSize > 0.01f)
         {
             float rawRatio = targetPlanarSize / modelPlanarSize;
             fittedScale = Math.Clamp(rawRatio, 0.1f, 10.0f);
@@ -141,6 +144,17 @@ public static class Pm4DoodadDuplicationEngine
             yawDegrees = Pm4UnauthoredPlacementResolver.ComputeFootprintYawDegrees(verts);
         }
 
+        // Align the model's long axis with the hull principal axis (same 1.15 rule as
+        // AlignPlacementToPm4Hull and Pm4DirectModelMatcher so all three paths agree);
+        // without it, Y-long models duplicate crosswise into the hull.
+        Vector3 modelSpan = template.LocalBoundsMax - template.LocalBoundsMin;
+        if (MathF.Abs(modelSpan.Y) > MathF.Abs(modelSpan.X) * 1.15f)
+        {
+            yawDegrees += 90f;
+            while (yawDegrees > 180f) yawDegrees -= 360f;
+            while (yawDegrees < -180f) yawDegrees += 360f;
+        }
+
         Vector3 fittedRotation = new(template.RotationDegrees.X, template.RotationDegrees.Y, yawDegrees);
 
         // 5. Magnetically align position to collision mesh centroid
@@ -148,13 +162,24 @@ public static class Pm4DoodadDuplicationEngine
         Vector3 scaledLocalMax = template.LocalBoundsMax * fittedScale;
 
         // Doodad PM4 surfaces represent the walkable top surface (MSUR.0x00 == 0x03).
-        // Align the model's top surface to the PM4 collision mesh: P_Z = pm4_top_Z - (model_top * scale).
-        float modelTopZ = scaledLocalMax.Z > 0.01f ? scaledLocalMax.Z : (scaledLocalMax.Z - scaledLocalMin.Z);
-        float topAlignedZ = target.WorldCentroid.Z - modelTopZ;
+        // T001 contract: P_Z = Z_pm4_top - (H_local_top * s). Target bounds are world-space
+        // (the caller transforms them by BaseTransform), so BoundsMax.Z is the hull top and
+        // BoundsMin.Z the hull floor. WMOs are the exception: their local origin is authored
+        // at the placement Z with foundation geometry extending below it, so they base-align.
+        float targetZ;
+        if (isWmoTemplate)
+        {
+            targetZ = target.BoundsMin.Z;
+        }
+        else
+        {
+            float modelTopZ = scaledLocalMax.Z > 0.01f ? scaledLocalMax.Z : (scaledLocalMax.Z - scaledLocalMin.Z);
+            targetZ = target.BoundsMax.Z - modelTopZ;
+        }
 
         Vector3 attractedPosition = Pm4UnauthoredPlacementResolver.AttractPositionToPm4Mesh(
             target.WorldCentroid,
-            topAlignedZ,
+            targetZ,
             fittedRotation.Z,
             scaledLocalMin,
             scaledLocalMax);
@@ -162,7 +187,7 @@ public static class Pm4DoodadDuplicationEngine
         // 6. Compute fitted world bounds
         Vector3 halfSpan = (scaledLocalMax - scaledLocalMin) * 0.5f;
         Vector3 worldBoundsMin = new(target.WorldCentroid.X - halfSpan.X, target.WorldCentroid.Y - halfSpan.Y, attractedPosition.Z + scaledLocalMin.Z);
-        Vector3 worldBoundsMax = new(target.WorldCentroid.X + halfSpan.X, target.WorldCentroid.Y + halfSpan.Y, target.WorldCentroid.Z);
+        Vector3 worldBoundsMax = new(target.WorldCentroid.X + halfSpan.X, target.WorldCentroid.Y + halfSpan.Y, attractedPosition.Z + scaledLocalMax.Z);
 
         // 7. Calculate fit score
         float fitScore = 1.0f;

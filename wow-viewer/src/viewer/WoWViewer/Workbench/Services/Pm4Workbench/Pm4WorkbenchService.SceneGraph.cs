@@ -283,7 +283,7 @@ internal sealed partial class Pm4WorkbenchService
         ImGui.TextDisabled($"Total: {allObjects.Count} objects across {byTile.Count} tiles");
 
         // Search filter
-        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
         ImGui.InputText("##Pm4SceneFilter", ref _pm4SceneFilter, 256);
         bool hasFilter = !string.IsNullOrWhiteSpace(_pm4SceneFilter);
         string filterLower = hasFilter ? _pm4SceneFilter.ToLowerInvariant() : "";

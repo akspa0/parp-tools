@@ -515,7 +515,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             if ((source.SourceTileX != tileX || source.SourceTileY != tileY || layer.HasTileOffset || layer.HasCellOffset) && !phase.Result.PlacementsPreTransformed)
                 TranslatePhasePlacements(phase, source.SourceTileX, source.SourceTileY, tileX, tileY, layer);
 
-            MergePhaseTile(parent, phase, layer, tileX, tileY);
+            MergePhaseTile(parent, phase, layer, tileX, tileY, source);
         }
 
         PublishTileTextures(tileX, tileY, parent.Textures);
@@ -763,10 +763,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
     /// saying nothing about objects and the base map's survive.
     /// </para>
     /// </remarks>
-    private void MergePhaseTile(ParsedTileSource parent, ParsedTileSource phase, PhaseLayerSettings layer, int tileX, int tileY)
+    private void MergePhaseTile(ParsedTileSource parent, ParsedTileSource phase, PhaseLayerSettings layer, int tileX, int tileY, PhaseTileSource source)
     {
         // Operator directive 2026-09-09: per-layer world-Z offset/scale on contributed content.
-        PhaseLayerZ.Apply(layer, phase.Result);
+        // Spec 293: a per-tile placement may add its own Z offset/scale on top of the layer's.
+        PhaseLayerZ.Apply(layer, phase.Result, source.ZOffset, source.ZScale);
 
         // Spec 232 T064: magnetic WDL edge-snap on footprint-boundary tile edges.
         if (layer.EdgeBlendWdl > 0f && (layer.Channels & PhaseDataChannel.Heightmap) != 0)

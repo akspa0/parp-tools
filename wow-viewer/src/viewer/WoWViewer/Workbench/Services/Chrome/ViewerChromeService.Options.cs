@@ -26,7 +26,7 @@ internal sealed partial class ViewerChromeService
 
         if (SharedUiWidgets.DrawSectionHeader("Overlays", id: "OptionsOverlays"))
             DrawOptionsOverlaysContent(terrain, liquid);
-        if (SharedUiWidgets.DrawSectionHeader("Layers", id: "OptionsLayers"))
+        if (SharedUiWidgets.DrawSectionHeader("Texture Masks", id: "OptionsLayers"))
             DrawOptionsLayersContent(terrain);
         if (SharedUiWidgets.DrawSectionHeader("Grids", id: "OptionsGrids"))
             DrawOptionsGridsContent(terrain);

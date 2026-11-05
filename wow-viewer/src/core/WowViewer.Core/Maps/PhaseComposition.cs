@@ -456,7 +456,7 @@ public static class PhaseCompositionPolicy
         for (int i = layer.TilePlacements.Count - 1; i >= 0; i--)
         {
             PhaseTilePlacement placement = layer.TilePlacements[i];
-            if (!placement.IsValid)
+            if (!placement.Contributes)
                 continue;
 
             int effectiveTargetX = layer.UsePlacedTilesOnly ? placement.TargetTileX + layer.TileOffsetX : placement.TargetTileX;
@@ -481,7 +481,9 @@ public static class PhaseCompositionPolicy
                 PhaseTileSourceKind.PerTile,
                 ComposeTileTransforms(layer),
                 ResolveRotationApproximation(layer),
-                claimCount);
+                claimCount,
+                selected.ZOffset,
+                selected.ZScale);
         }
 
         // Spec 232 FR-13: a picker-created layer is an explicit placement set, not a shifted
@@ -521,7 +523,7 @@ public static class PhaseCompositionPolicy
         ArgumentNullException.ThrowIfNull(layer);
 
         return layer.TilePlacements.Any(placement =>
-            placement.IsValid && placement.Locked
+            placement.Contributes && placement.Locked
             && (layer.UsePlacedTilesOnly ? placement.TargetTileX + layer.TileOffsetX : placement.TargetTileX) == targetX
             && (layer.UsePlacedTilesOnly ? placement.TargetTileY + layer.TileOffsetY : placement.TargetTileY) == targetY);
     }
@@ -772,11 +774,21 @@ public readonly record struct PhaseTilePlacement(
     int DonorTileY,
     int TargetTileX,
     int TargetTileY,
-    bool Locked = false)
+    bool Locked = false,
+    bool Included = true,
+    float ZOffset = 0f,
+    float ZScale = 1f)
 {
     public bool IsValid =>
         DonorTileX is >= 0 and < 64 && DonorTileY is >= 0 and < 64 &&
         TargetTileX is >= 0 and < 64 && TargetTileY is >= 0 and < 64;
+
+    /// <summary>True when this placement contributes to the layer (operator include/exclude).</summary>
+    public bool Contributes => IsValid && Included;
+
+    /// <summary>True when this placement carries a per-tile Z adjustment.</summary>
+    public bool HasZAdjustment =>
+        MathF.Abs(ZScale - 1f) > 1e-6f || MathF.Abs(ZOffset) > 1e-6f;
 }
 
 /// <summary>The result of resolving which donor tile fills a base-map target tile.</summary>
@@ -794,7 +806,9 @@ public readonly record struct PhaseTileSource(
     PhaseTileSourceKind Via,
     IReadOnlyList<TileTransformKind> Transforms,
     PhaseRotationApproximation Approximation,
-    int TargetClaimCount)
+    int TargetClaimCount,
+    float ZOffset = 0f,
+    float ZScale = 1f)
 {
     public bool HasConflict => TargetClaimCount > 1;
 

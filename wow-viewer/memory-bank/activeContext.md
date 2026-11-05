@@ -1,5 +1,45 @@
 # Active Context — wow-viewer
 
+**PM4 Hull X-Axis Fix — footprint center bias (2026-11-04, follow-up):**
+Operator re-tested after the first alignment pass: still off on X. The transform solve
+(`position = centroid − rotCenter`, same `WorldPlacementTransform.Build` incl. the `RotZ(PI)`
+half-turn used by the renderer) was verified exact — the bias was in the target point:
+[`ComputePrincipalOrientation`](../src/core/WowViewer.Core.PM4/Footprint/Pm4FootprintExtruder.cs)
+returned the **mean of hull vertices** as the footprint center, which is pulled toward vertex
+clusters on irregular footprints (L-shapes, wings, bridges). Every placement solved against
+`prism.Centroid` inherited that X/Y bias; symmetric test rectangles (mean == center) never
+caught it. Fixed: the function now returns the **oriented bounding box center** (midpoint of
+the principal-axis projections) — identical to the mean for symmetric shapes, unbiased
+otherwise. Regression test added (L-shape: vertex mean (4,4) vs OBB center (3,3), matching the
+polygon area centroid). All placement paths (align, taught pairing, bulk magnetize,
+duplication, generator/patcher tools) flow through this single center. Validation: test build
+0 errors (full-solution build blocked only by the running viewer holding the DLL — MSB3027
+file lock, not a compile error); 11/11 focused PM4 tests pass. Receipt:
+[Spec 289 evidence/2026-11-04-alignment-defect-fixes.md](../specs/289-pm4-3d-footprint-and-direct-matching/evidence/2026-11-04-alignment-defect-fixes.md).
+**Owed:** operator visual re-test of align/duplicate/magnetize on X.
+
+**PM4 Hull Alignment Defect Fixes — duplication & taught pairing (2026-11-04):**
+Operator report: matched/placed (magnetized/duplicated) models don't line up with PM4 hulls.
+Audit found four defects; all fixed in one pass:
+1. **Duplication Z used hull center, not top** — `FitModelToTarget` solved `P_Z = WorldCentroid.Z − modelTop`
+   (sinking duplicates by half the hull height) despite the T001 top-alignment contract. Now
+   `P_Z = BoundsMax.Z − modelTop` with world-space target bounds; WMOs base-align to `BoundsMin.Z`.
+2. **Taught-pairing position/rotation yaw mismatch** — `MatchesTaughtShape` took the position from
+   `MatchPrism` (solved for the +90° heuristic yaw) but applied rotation `prism.Yaw + taught.YawOffset`;
+   any taught offset ≠ heuristic drifted placements off-hull. Position now re-solved for the final
+   taught yaw (same `rotCenter` math as `AlignPlacementToPm4Hull`).
+3. **No long-axis yaw correction in duplication** — same 1.15 span rule as the align/matcher paths
+   added to `FitModelToTarget`; caller now feeds world triangle verts so PCA yaw engages.
+4. **WMO duplication scale mismatch** — engine forced to scale 1.0 for `.wmo` templates (caller
+   overrode to 1.0 but position was solved at the fitted ratio).
+Also: duplication targets now get world-space bounds (were mixed local-bounds/world-centroid);
+stale PM4F doc comment corrected (both caches v9 — no cache bump needed; fixes touch placement
+solving, not cached hull geometry). `AlignPlacementToPm4Hull`/`MagnetizeTilePlacementsToPm4`
+verified internally consistent — unchanged. Validation: build 0 errors; 10/10 focused PM4
+duplication/matcher/extrusion tests. Receipt:
+[Spec 289 evidence/2026-11-04-alignment-defect-fixes.md](../specs/289-pm4-3d-footprint-and-direct-matching/evidence/2026-11-04-alignment-defect-fixes.md).
+**Owed:** operator visual pass — duplicate into hulls + magnetize a tile, confirm flush seating.
+
 **UI Flicker ROOT CAUSE — ImGui NewFrame/EndFrame desync (2026-11-04):**
 Operator reported seizure-inducing whole-UI strobing + dead input + 2 CTDs beginning around
 `d346cf24`. Windows Event Log (.NET Runtime 1026, 01:03 + 01:31) captured both crashes: AVs in

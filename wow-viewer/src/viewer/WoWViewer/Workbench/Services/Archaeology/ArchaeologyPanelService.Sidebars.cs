@@ -435,9 +435,11 @@ internal sealed partial class ArchaeologyPanelService
         ImGui.TextDisabled($"Video recording: {(_archeologyApplyToVideoRecording ? $"playback @ {_archeologyPlaybackSpeed:F0}/s" : "no playback")}");
     }
 
-    internal void DrawArchaeologyWorkbenchSubTabContent()
+    internal void DrawArchaeologyWorkbenchSubTabContent() => DrawArchaeologyWorkbenchSubTabContent(_activeBottomTabIndex);
+
+    internal void DrawArchaeologyWorkbenchSubTabContent(int page)
     {
-        switch (_activeBottomTabIndex)
+        switch (page)
         {
             case 0:
                 // New Weak Signal & Temporal Stratigraphy Tooling

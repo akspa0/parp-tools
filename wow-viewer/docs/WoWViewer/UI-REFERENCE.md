@@ -10,11 +10,6 @@ Controls documented: **122**
 | Control | Shortcut | Description |
 |---|---|---|
 | Spawns | - | Open the map spawn and population window. |
-## Bottom bar
-
-| Control | Shortcut | Description |
-|---|---|---|
-| Layers & Opacity | - | Quick drop-up menu to adjust terrain layer opacities and alpha mask overlay blending. |
 ## Chat
 
 | Control | Shortcut | Description |
@@ -82,9 +77,9 @@ Controls documented: **122**
 |---|---|---|
 | Display | - | Render quality, lighting and theme settings. |
 | Grids | - | Terrain tile, chunk and cell grid overlays. |
-| Layers | - | Terrain layer visibility and WDL overlay. |
 | Objects | - | Object transparency, wireframes, animation and 3D cursor. |
 | Overlays | - | Surface overlays: alpha, shadows, MCCV, contours, liquid, WL, BBs, PM4. |
+| Texture Masks | - | Texture layer visibility, alpha-mask blending, and WDL overlay. |
 ## Options > Audio
 
 | Control | Shortcut | Description |
@@ -150,6 +145,7 @@ Controls documented: **122**
 
 | Control | Shortcut | Description |
 |---|---|---|
+| Archaeology | - | Open or close the Archaeology workbench (weak signal, stratigraphy, layers, cartography) in the right dock. |
 | Exports | - | Open or close the consolidated Export & Report Workbench in the right dock. |
 | Gossip | - | Open or close the Gossip and quests dialogue window in the right sidebar. |
 | Inspector | - | Open or close the selected-asset Inspector window. |
@@ -189,7 +185,7 @@ Controls documented: **122**
 | Reset Layout Only | - | Restore the default panel layout and close tool windows. Text size and the loaded client/map are unchanged. |
 | Reset Text Size Only | - | Return the user text size to 100%. Layout and the loaded client/map are unchanged; high-resolution displays keep their automatic sizing. |
 | Right Sidebar | `]` | Show or hide the right sidebar. |
-| Terrain Layers & Blending... | - | Open the Terrain Layers and Alpha Blending workbench. |
+| Texture Masks & Blending... | - | Open the Texture Masks panel: per-layer visibility and opacity, alpha-mask blending, and MCLY flags. |
 | Visual Options... | - | Open Options: render quality, lighting, theme, minimap, overlays, layers, grids, objects, audio and simulation. |
 ## Top menu > View > Text Size
 

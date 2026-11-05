@@ -81,6 +81,12 @@ internal sealed partial class WorkbenchPanelsService
             case ViewerPanel.Spawns:
                 _host.SqlSpawnStreaming.DrawMapSpawnsContent();
                 break;
+            case ViewerPanel.Archaeology:
+                string[] archaeologyPages = WorkbenchNavigator.GetPageLabels(WorkbenchTab.Archaeology);
+                int archaeologyPage = DrawPageCombo("##ArchaeologyPanelPage", archaeologyPages, ui.ArchaeologyPage);
+                if (archaeologyPage != ui.ArchaeologyPage) ui.ArchaeologyPage = archaeologyPage;
+                _archaeologyPanel.DrawArchaeologyWorkbenchSubTabContent(ui.ArchaeologyPage);
+                break;
         }
     }
     internal void DrawConvertersSubTabContent() => _mainMenuBar.DrawConvertersContent();
@@ -452,7 +458,7 @@ internal sealed partial class WorkbenchPanelsService
             return 0;
 
         int selected = Math.Clamp(activeIndex, 0, labels.Length - 1);
-        ImGui.SetNextItemWidth(-1f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1f);
         if (ImGui.BeginCombo(id, labels[selected]))
         {
             for (int i = 0; i < labels.Length; i++)

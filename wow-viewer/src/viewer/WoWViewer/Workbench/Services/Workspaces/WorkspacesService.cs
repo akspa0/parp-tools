@@ -216,7 +216,7 @@ internal sealed partial class WorkspacesService
         ImGui.Separator();
         ImGui.Text("Project Output");
         ImGui.TextDisabled("Editor saves and map conversions write into timestamped project folders under this root.");
-        ImGui.SetNextItemWidth(-80);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-80);
         if (ImGui.InputText("##projectOutputRoot", ref _projectOutputRootDir, 512))
             _projectOutput.HandleProjectOutputRootChanged();
         ImGui.SameLine();

@@ -12,7 +12,7 @@ namespace WoWViewer;
 /// </summary>
 internal sealed class ViewerActionBarsService
 {
-    private enum IconKind { Workspace, Open, Assets, Taxi, Capture, Inspector, World, Model, Gossip, Pm4, Maps, Diagnostics, Export, Audio, Spawns, Layers }
+    private enum IconKind { Workspace, Open, Assets, Taxi, Capture, Inspector, World, Model, Gossip, Pm4, Maps, Diagnostics, Export, Audio, Spawns, Layers, Archaeology }
 
     private sealed class WindowState
     {
@@ -69,7 +69,7 @@ internal sealed class ViewerActionBarsService
         DrawActionBarIcon("File Browser", "ActionFiles", IconKind.Open, size, "Browse files in the active client", () => _host.UiManager.ToggleLeftDock(LeftPanel.Files), dockOpen && active == LeftPanel.Files);
         DrawActionBarIcon("Maps", "ActionMaps", IconKind.Maps, size, "Browse maps and choose a spawn point", () => _host.UiManager.ToggleLeftDock(LeftPanel.Maps), dockOpen && active == LeftPanel.Maps);
         DrawActionBarIcon("Assets", "ActionAssets", IconKind.Assets, size, "Browse and preview assets", () => _host.UiManager.ToggleLeftDock(LeftPanel.Assets), dockOpen && active == LeftPanel.Assets);
-        DrawActionBarIcon("Layers", "ActionLayers", IconKind.Layers, size, "Open texture layers, alpha masks, and opacity blending workbench", () => _host.UiManager.ToggleLeftDock(LeftPanel.Layers), dockOpen && active == LeftPanel.Layers);
+        DrawActionBarIcon("Texture Masks", "ActionLayers", IconKind.Layers, size, "Open the Texture Masks panel: per-layer visibility, opacity, and alpha-mask blending", () => _host.UiManager.ToggleLeftDock(LeftPanel.Layers), dockOpen && active == LeftPanel.Layers);
         ImGui.Separator();
         DrawActionBarIcon("Taxi", "ActionTaxi", IconKind.Taxi, size, "Open taxi and route tools", () => _host.UiManager.ToggleLeftDock(LeftPanel.Taxi), dockOpen && active == LeftPanel.Taxi);
         DrawActionBarIcon("Capture", "ActionCapture", IconKind.Capture, size, "Open camera and capture tools", () => _host.UiManager.ToggleLeftDock(LeftPanel.Capture), dockOpen && active == LeftPanel.Capture);
@@ -88,6 +88,7 @@ internal sealed class ViewerActionBarsService
         DrawActionBarIcon("World", "ActionWorld", IconKind.World, size, "Inspect objects, placements, and world data", () => _host.UiManager.ToggleRightDock(ViewerPanel.World), dockOpen && active == ViewerPanel.World);
         DrawActionBarIcon("Gossip", "ActionGossip", IconKind.Gossip, size, "Inspect creature gossip, quests, and dialogue", () => _host.UiManager.ToggleRightDock(ViewerPanel.Gossip), dockOpen && active == ViewerPanel.Gossip);
         DrawActionBarIcon("PM4", "ActionPm4", IconKind.Pm4, size, "Inspect PM4 navigation and object data", () => _host.UiManager.ToggleRightDock(ViewerPanel.PM4), dockOpen && active == ViewerPanel.PM4);
+        DrawActionBarIcon("Archaeology", "ActionArchaeology", IconKind.Archaeology, size, "Open the Archaeology workbench (weak signal, stratigraphy, layers, cartography)", () => _host.UiManager.ToggleRightDock(ViewerPanel.Archaeology), dockOpen && active == ViewerPanel.Archaeology);
         DrawActionBarIcon("Exports", "ActionExports", IconKind.Export, size, "Export PM4 OBJ/JSON models, placement ledgers, and reports", () => _host.UiManager.ToggleRightDock(ViewerPanel.Exports), dockOpen && active == ViewerPanel.Exports);
         DrawActionBarIcon("Spawns", "ActionSpawns", IconKind.Spawns, size, "Browse map spawns and population points", () => _host.UiManager.ToggleRightDock(ViewerPanel.Spawns), dockOpen && active == ViewerPanel.Spawns);
     }
@@ -259,6 +260,14 @@ internal sealed class ViewerActionBarsService
                 draw.AddRect(new(center.X - half * 0.9f, center.Y - half * 0.8f), new(center.X + half * 0.5f, center.Y - half * 0.1f), muted, 0f, ImDrawFlags.None, stroke);
                 draw.AddRect(new(center.X - half * 0.7f, center.Y - half * 0.4f), new(center.X + half * 0.7f, center.Y + half * 0.3f), muted, 0f, ImDrawFlags.None, stroke);
                 draw.AddRect(new(center.X - half * 0.5f, center.Y), new(center.X + half * 0.9f, center.Y + half * 0.7f), ink, 0f, ImDrawFlags.None, stroke);
+                break;
+            case IconKind.Archaeology:
+                // Trowel over a stratigraphy column: three stacked strata with a diagonal tool.
+                draw.AddLine(new(center.X - half, center.Y + half * 0.2f), new(center.X + half * 0.2f, center.Y + half * 0.2f), muted, stroke);
+                draw.AddLine(new(center.X - half, center.Y + half * 0.6f), new(center.X + half * 0.2f, center.Y + half * 0.6f), muted, stroke);
+                draw.AddLine(new(center.X - half, center.Y + half), new(center.X + half * 0.2f, center.Y + half), muted, stroke);
+                draw.AddLine(new(center.X + half * 0.1f, center.Y - half), new(center.X + half, center.Y - half * 0.1f), ink, stroke * 1.4f);
+                draw.AddCircleFilled(new(center.X + half * 0.1f, center.Y - half), unit * 0.07f, ink, 8);
                 break;
         }
     }

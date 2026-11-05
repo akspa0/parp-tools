@@ -24,8 +24,8 @@ internal sealed partial class ViewerChromeService
                 ImGui.SetTooltip("Toggle textures for WMO objects. Uncheck to render untextured clay geometry.");
 
             float wmoOpacity = WmoRenderer.GlobalOpacity * 100f;
-            if (sliderWidth > 0f) ImGui.SetNextItemWidth(sliderWidth);
-            else ImGui.SetNextItemWidth(-1f);
+            if (sliderWidth > 0f) WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(sliderWidth);
+            else WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1f);
             if (SharedUiWidgets.DrawCompactSlider($"WMO Opacity##pop_wmo_{idSuffix}", ref wmoOpacity, 0f, 100f, "%.0f%%"))
                 WmoRenderer.GlobalOpacity = Math.Clamp(wmoOpacity / 100f, 0f, 1f);
             if (ImGui.IsItemDeactivatedAfterEdit())
@@ -41,8 +41,8 @@ internal sealed partial class ViewerChromeService
             ImGui.Spacing();
             SharedUiWidgets.SectionTitle("Collision Walls");
             float wallOpacity = WmoRenderer.CollisionWallOpacity * 100f;
-            if (sliderWidth > 0f) ImGui.SetNextItemWidth(sliderWidth);
-            else ImGui.SetNextItemWidth(-1f);
+            if (sliderWidth > 0f) WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(sliderWidth);
+            else WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1f);
             if (SharedUiWidgets.DrawCompactSlider($"Wall Opacity##pop_wall_{idSuffix}", ref wallOpacity, 0f, 100f, "%.0f%%"))
                 WmoRenderer.CollisionWallOpacity = Math.Clamp(wallOpacity / 100f, 0f, 1f);
             if (ImGui.IsItemDeactivatedAfterEdit())
@@ -61,8 +61,8 @@ internal sealed partial class ViewerChromeService
         {
             SharedUiWidgets.SectionTitle("M2 & MDX Doodads / Models");
             float m2Opacity = M2Renderer.GlobalOpacity * 100f;
-            if (sliderWidth > 0f) ImGui.SetNextItemWidth(sliderWidth);
-            else ImGui.SetNextItemWidth(-1f);
+            if (sliderWidth > 0f) WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(sliderWidth);
+            else WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(-1f);
             if (SharedUiWidgets.DrawCompactSlider($"M2 Opacity##pop_m2_{idSuffix}", ref m2Opacity, 0f, 100f, "%.0f%%"))
             {
                 M2Renderer.GlobalOpacity = Math.Clamp(m2Opacity / 100f, 0f, 1f);

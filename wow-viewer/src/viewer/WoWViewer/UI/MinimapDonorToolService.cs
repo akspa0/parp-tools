@@ -106,7 +106,7 @@ public class MinimapDonorToolService
         int selectedIndex = Math.Clamp(worldScene.SelectedPhaseLayerIndex, 0, layers.Count - 1);
         PhaseLayerSettings activeLayer = layers[selectedIndex];
 
-        ImGui.SetNextItemWidth(220f);
+        WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(220f);
         if (ImGui.BeginCombo("##activePhaseLayerCombo", $"Layer: {activeLayer.MapName}"))
         {
             for (int i = 0; i < layers.Count; i++)
