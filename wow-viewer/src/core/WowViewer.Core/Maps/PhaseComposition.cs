@@ -491,7 +491,8 @@ public static class PhaseCompositionPolicy
                 ResolveRotationApproximation(layer),
                 claimCount,
                 selected.ZOffset,
-                selected.ZScale);
+                selected.ZScale,
+                selected.ChunkMask);
         }
 
         // Spec 232 FR-13: a picker-created layer is an explicit placement set, not a shifted
@@ -596,6 +597,33 @@ public static class PhaseCompositionPolicy
     }
 
     /// <summary>The declared approximation used for this layer's rotation.</summary>
+    /// <summary>
+    /// Inverse of <see cref="TileContentTransform.TransformChunkSlot"/> for a 16×16 chunk grid.
+    /// Used to map a clicked target chunk back to the donor chunk that supplied it.
+    /// </summary>
+    public static (int ChunkX, int ChunkY) InverseTransformChunkSlot(
+        int targetChunkX,
+        int targetChunkY,
+        IReadOnlyList<TileTransformKind> transforms)
+    {
+        int x = targetChunkX;
+        int y = targetChunkY;
+        for (int i = transforms.Count - 1; i >= 0; i--)
+        {
+            (x, y) = transforms[i] switch
+            {
+                TileTransformKind.Rotate90CW => (y, 15 - x),
+                TileTransformKind.Rotate90CCW => (15 - y, x),
+                TileTransformKind.Rotate180 => (15 - x, 15 - y),
+                TileTransformKind.MirrorH => (15 - x, y),
+                TileTransformKind.MirrorV => (x, 15 - y),
+                _ => (x, y),
+            };
+        }
+
+        return (x, y);
+    }
+
     public static PhaseRotationApproximation ResolveRotationApproximation(PhaseLayerSettings layer)
     {
         if (layer.RotationDegrees == 0f)
@@ -772,6 +800,96 @@ public static class PhaseCompositionPolicy
 }
 
 /// <summary>
+/// 16×16 chunk inclusion mask for one donor tile. A set bit means the chunk is copied; a clear
+/// bit leaves the base map's chunk in place. The default value is <see cref="None"/>; callers
+/// that want "all chunks" use <see cref="All"/> explicitly.
+/// </summary>
+public readonly record struct PhaseChunkMask(ulong Bits0, ulong Bits1, ulong Bits2, ulong Bits3)
+{
+    public static readonly PhaseChunkMask All = new(ulong.MaxValue, ulong.MaxValue, ulong.MaxValue, ulong.MaxValue);
+    public static readonly PhaseChunkMask None = default;
+
+    public bool IsIncluded(int chunkX, int chunkY)
+    {
+        if (chunkX is < 0 or > 15 || chunkY is < 0 or > 15)
+            return false;
+
+        int index = chunkY * 16 + chunkX;
+        ulong word = index switch
+        {
+            < 64 => Bits0,
+            < 128 => Bits1,
+            < 192 => Bits2,
+            _ => Bits3,
+        };
+        return (word & (1UL << (index & 63))) != 0;
+    }
+
+    public PhaseChunkMask With(int chunkX, int chunkY, bool included)
+    {
+        if (chunkX is < 0 or > 15 || chunkY is < 0 or > 15)
+            return this;
+
+        int index = chunkY * 16 + chunkX;
+        ulong bit = 1UL << (index & 63);
+        return index switch
+        {
+            < 64 => this with { Bits0 = included ? Bits0 | bit : Bits0 & ~bit },
+            < 128 => this with { Bits1 = included ? Bits1 | bit : Bits1 & ~bit },
+            < 192 => this with { Bits2 = included ? Bits2 | bit : Bits2 & ~bit },
+            _ => this with { Bits3 = included ? Bits3 | bit : Bits3 & ~bit },
+        };
+    }
+
+    public int IncludedCount
+    {
+        get
+        {
+            static int PopCount(ulong value) => System.Numerics.BitOperations.PopCount(value);
+            return PopCount(Bits0) + PopCount(Bits1) + PopCount(Bits2) + PopCount(Bits3);
+        }
+    }
+
+    public bool IsAllIncluded => IncludedCount == 256;
+
+    /// <summary>
+    /// True when the donor chunk that lands in <paramref name="targetChunkX"/>,
+    /// <paramref name="targetChunkY"/> after <paramref name="transforms"/> is included. The mask
+    /// is authored in donor-tile space, so the target slot is mapped back through the inverse
+    /// transform before the bit is read.
+    /// </summary>
+    public bool IsIncludedAfterTransforms(
+        int targetChunkX,
+        int targetChunkY,
+        IReadOnlyList<TileTransformKind> transforms)
+    {
+        (int x, int y) = PhaseCompositionPolicy.InverseTransformChunkSlot(targetChunkX, targetChunkY, transforms);
+        return IsIncluded(x, y);
+    }
+
+    public string ToHex() => $"{Bits0:X16}{Bits1:X16}{Bits2:X16}{Bits3:X16}";
+
+    public static PhaseChunkMask FromHex(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex) || hex.Length != 64)
+            return All;
+
+        try
+        {
+            return new PhaseChunkMask(
+                Convert.ToUInt64(hex[..16], 16),
+                Convert.ToUInt64(hex[16..32], 16),
+                Convert.ToUInt64(hex[32..48], 16),
+                Convert.ToUInt64(hex[48..64], 16));
+        }
+        catch (FormatException)
+        {
+            return All;
+        }
+    }
+}
+
+/// <summary>
 /// One per-tile donor-to-target mapping on a phase layer (Spec 219 US5): the donor tile's full
 /// channel content is dropped onto the target tile of the base map, subject to the layer's
 /// per-channel gates. A mapping claims its target over the whole-layer offset; two mappings
@@ -785,7 +903,8 @@ public readonly record struct PhaseTilePlacement(
     bool Locked = false,
     bool Included = true,
     float ZOffset = 0f,
-    float ZScale = 1f)
+    float ZScale = 1f,
+    PhaseChunkMask? ChunkMask = null)
 {
     public bool IsValid =>
         DonorTileX is >= 0 and < 64 && DonorTileY is >= 0 and < 64 &&
@@ -797,6 +916,9 @@ public readonly record struct PhaseTilePlacement(
     /// <summary>True when this placement carries a per-tile Z adjustment.</summary>
     public bool HasZAdjustment =>
         MathF.Abs(ZScale - 1f) > 1e-6f || MathF.Abs(ZOffset) > 1e-6f;
+
+    /// <summary>Chunk mask to apply, or null when every donor chunk is copied.</summary>
+    public PhaseChunkMask? EffectiveChunkMask => ChunkMask;
 }
 
 /// <summary>The result of resolving which donor tile fills a base-map target tile.</summary>
@@ -816,7 +938,8 @@ public readonly record struct PhaseTileSource(
     PhaseRotationApproximation Approximation,
     int TargetClaimCount,
     float ZOffset = 0f,
-    float ZScale = 1f)
+    float ZScale = 1f,
+    PhaseChunkMask? ChunkMask = null)
 {
     public bool HasConflict => TargetClaimCount > 1;
 

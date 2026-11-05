@@ -509,6 +509,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if ((source.SourceTileX != tileX || source.SourceTileY != tileY || layer.HasTileOffset || layer.HasCellOffset) && !phase.PlacementsPreTransformed)
                 TranslatePhasePlacements(phase, source.SourceTileX, source.SourceTileY, tileX, tileY, layer);
 
+            ApplyChunkMask(phase.Chunks, source);
             RemapPhasePlacementNameIndices(phase, phaseAdapter);
             MergePhaseTile(
                 result,
@@ -522,6 +523,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
 
         return result;
+    }
+
+    private static void ApplyChunkMask(List<TerrainChunkData> chunks, PhaseTileSource source)
+    {
+        if (source.ChunkMask is not { } mask)
+            return;
+
+        chunks.RemoveAll(chunk => !mask.IsIncludedAfterTransforms(chunk.ChunkX, chunk.ChunkY, source.Transforms));
     }
 
     private static void RehomeChunksForTarget(

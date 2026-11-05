@@ -123,6 +123,7 @@ public sealed class PhaseLayerProjectEntry
             Included = placement.Included,
             ZOffset = placement.ZOffset,
             ZScale = placement.ZScale,
+            ChunkMask = placement.ChunkMask?.ToHex(),
         }).ToList(),
     };
 
@@ -154,7 +155,8 @@ public sealed class PhaseLayerProjectEntry
         foreach (PhaseTilePlacementDto placement in TilePlacements)
             layer.TilePlacements.Add(new PhaseTilePlacement(
                 placement.DonorTileX, placement.DonorTileY, placement.TargetTileX, placement.TargetTileY,
-                placement.Locked, placement.Included, placement.ZOffset, placement.ZScale));
+                placement.Locked, placement.Included, placement.ZOffset, placement.ZScale,
+                string.IsNullOrWhiteSpace(placement.ChunkMask) ? null : PhaseChunkMask.FromHex(placement.ChunkMask)));
         return layer;
     }
 }
@@ -177,4 +179,7 @@ public sealed class PhaseTilePlacementDto
 
     /// <summary>Spec 293: per-tile world-Z scale applied on top of the layer's.</summary>
     public float ZScale { get; set; } = 1f;
+
+    /// <summary>Spec 293: 16×16 chunk inclusion mask as 64 hex characters; null means all chunks.</summary>
+    public string? ChunkMask { get; set; }
 }

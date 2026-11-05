@@ -727,7 +727,12 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
                         _sceneHoverPick.PickObjectAtMouse(_lastMouseX, _lastMouseY, addPm4ToCollection: shift);
                     else if (terrainRenderer != null && !shift && !chunkToolActive
                         && _terrainQuery.TryPickTerrainChunkUnderMouse(terrainRenderer, out var terrainChunk))
+                    {
+                        if (_archaeologyPanel.DonorChunkEdit.Enabled
+                            && _archaeologyPanel.DonorChunkEdit.TryToggleAt(terrainChunk))
+                            return;
                         _terrainInspection.SelectTerrainChunkFromClick(terrainChunk);
+                    }
                 }
             };
             mouse.MouseUp += (_, btn) =>

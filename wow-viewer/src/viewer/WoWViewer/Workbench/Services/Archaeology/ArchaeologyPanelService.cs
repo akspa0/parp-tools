@@ -55,13 +55,16 @@ internal sealed partial class ArchaeologyPanelService
     private readonly IViewerAppHost _host;
     private readonly DonorTilePickerService _donorTilePicker;
     private readonly DonorGroupTransformWorkbenchService _donorGroupTransformWorkbench;
+    private readonly DonorChunkEditService _donorChunkEdit;
     internal DonorTilePickerService DonorTilePicker => _donorTilePicker;
+    internal DonorChunkEditService DonorChunkEdit => _donorChunkEdit;
 
     internal ArchaeologyPanelService(IViewerAppHost host)
     {
         _host = host;
         _donorTilePicker = new DonorTilePickerService(host);
         _donorGroupTransformWorkbench = new DonorGroupTransformWorkbenchService();
+        _donorChunkEdit = new DonorChunkEditService(host);
     }
 
     // Host bridge: see ArchaeologyPanelService.Host.cs.

@@ -7,10 +7,12 @@
 - UI registry/reference clean (166 labels, 0 warnings); footer tests 30/30 pass; full solution build 0 errors (266 warnings, redirected output).
 - Receipt: [`bottom-toolbar-reversion-2026-11-05.md`](../specs/292-ui-bottom-bar-toggles-audio-sky/evidence/bottom-toolbar-reversion-2026-11-05.md). Operator real-client visual/restart verification remains owed.
 
-## 2026-11-05 — Spec 293 donor picker minimap surface
+## 2026-11-05 — Spec 293 donor picker minimap surface and chunk editing
 
 - The donor tile picker now draws each visible tile from the client minimap (`MinimapRenderer.GetTileTexture`) instead of the WDL heightmap preview, so donor selection is recognizable by roads, buildings, and biome.
-- Viewer compile 0 errors; operator visual proof remains owed.
+- Added `PhaseChunkMask` (16×16) to placements and composition; both terrain adapters filter excluded chunks before merge, including exact-grid rotation/mirror via inverse chunk-slot mapping. Masks persist as hex in the layer project.
+- The picker exposes a 16×16 chunk grid (All/None/Invert) and whole-map placement at an arbitrary tile offset. Archaeology > Cartography adds a `Viewport chunk edit` mode that toggles the donor chunk under a 3D terrain click.
+- Verification: focused `PhaseLayerProjectFileTests` + footer tests 33/33 pass; viewer compile 0 errors; UI registry 166/166 clean. Operator visual proof remains owed.
 
 ## 2026-11-05 — Spec 294 Phases 3–4 manual curation and persistence
 

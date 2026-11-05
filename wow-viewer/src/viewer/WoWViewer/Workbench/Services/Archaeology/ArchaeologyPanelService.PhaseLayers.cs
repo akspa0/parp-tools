@@ -863,6 +863,14 @@ internal sealed partial class ArchaeologyPanelService
         ImGui.TextWrapped(
             "Stack phase maps and donor tiles over the base map. Layers apply in order from top to bottom; later layers win on shared channels.");
 
+        bool chunkEdit = DonorChunkEdit.Enabled;
+        if (ImGui.Checkbox("Viewport chunk edit##cartoChunkEdit", ref chunkEdit))
+            DonorChunkEdit.Enabled = chunkEdit;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("When enabled, click a terrain chunk in the 3D view to include or exclude the donor chunk that supplied it.");
+        if (DonorChunkEdit.Enabled && !string.IsNullOrWhiteSpace(DonorChunkEdit.StatusMessage))
+            ImGui.TextDisabled(DonorChunkEdit.StatusMessage);
+
         IList<PhaseLayerSettings> layers = terrain.PhaseLayers;
         bool dirty = false;
 

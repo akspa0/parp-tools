@@ -28,12 +28,29 @@ zoomable donor tile picker and per-tile settings, so that slice is authorized.
 - [x] Tiles without a minimap texture render as a neutral placeholder instead of a heightmap.
 - [x] Zoom/pan, hover, selection, and drag-box mapping are unchanged.
 
+### T005 — Per-donor-tile chunk inclusion (operator request 2026-11-05)
+- [x] `PhaseChunkMask` (16×16 bits) on `PhaseTilePlacement` and `PhaseTileSource`; null means all chunks.
+- [x] Composition filters donor chunks through the mask in both Standard and Alpha adapters, including exact-grid rotation/mirror via inverse chunk-slot mapping.
+- [x] Persist the mask as 64 hex characters in `PhaseTilePlacementDto`; round-trip tests cover all/none/partial masks.
+- [x] Donor picker exposes a 16×16 chunk grid with All/None/Invert and per-tile selection.
+
+### T006 — Whole-map placement and viewport chunk editing (operator request 2026-11-05)
+- [x] Donor picker can add the entire donor map at an arbitrary tile offset (or matching coordinates).
+- [x] Archaeology > Cartography has a `Viewport chunk edit` mode; clicking a terrain chunk toggles the donor chunk that supplied it.
+- [x] The viewport path maps the clicked target chunk back through the layer's exact-grid transform before toggling the mask.
+
 ## Receipt — 2026-11-05
 
 ### Files changed
 | File | Change |
 |---|---|
-| `wow-viewer/src/viewer/WoWViewer/Workbench/Services/Archaeology/DonorTilePickerService.cs` | Added `_zoom`/`_pan`/`_panDragStart`/`_panAtDragStart`/`_selectionZOffset`/`_selectionZScale`; zoom/pan controls; zoom-aware hover/grid/selection/drag-box mapping; `SetZoom`, `ClampPan`, `VisibleTileRangeText`; selection settings tree; placements now carry `ZOffset`/`ZScale`. T004 replaces the single WDL heightmap preview with per-tile minimap textures from `MinimapRenderer`. |
+| `wow-viewer/src/viewer/WoWViewer/Workbench/Services/Archaeology/DonorTilePickerService.cs` | Added `_zoom`/`_pan`/`_panDragStart`/`_panAtDragStart`/`_selectionZOffset`/`_selectionZScale`; zoom/pan controls; zoom-aware hover/grid/selection/drag-box mapping; `SetZoom`, `ClampPan`, `VisibleTileRangeText`; selection settings tree; placements now carry `ZOffset`/`ZScale`. T004 replaces the single WDL heightmap preview with per-tile minimap textures from `MinimapRenderer`. T005 adds the 16×16 chunk grid and per-tile masks; T006 adds whole-map offset placement. |
+| `wow-viewer/src/core/WowViewer.Core/Maps/PhaseComposition.cs` | Adds `PhaseChunkMask`, `PhaseTilePlacement.ChunkMask`, `PhaseTileSource.ChunkMask`, and `InverseTransformChunkSlot`. |
+| `wow-viewer/src/core/WowViewer.Core/Maps/PhaseLayerProjectFile.cs` | Persists the chunk mask as hex. |
+| `wow-viewer/src/viewer/WoWViewer/Terrain/StandardTerrainAdapter.cs`, `AlphaTerrainAdapter.cs` | Filters donor chunks through the mask before merge. |
+| `wow-viewer/src/viewer/WoWViewer/Workbench/Services/Archaeology/DonorChunkEditService.cs` | Viewport click-to-toggle chunk inclusion. |
+| `wow-viewer/src/viewer/WoWViewer/Workbench/Services/Archaeology/ArchaeologyPanelService*.cs` | Owns the chunk-edit service and exposes the `Viewport chunk edit` toggle. |
+| `wow-viewer/src/viewer/WoWViewer/ViewerApp.cs` | Routes terrain clicks to the chunk-edit service when the mode is enabled. |
 | `wow-viewer/src/viewer/WoWViewer/Workbench/Services/Archaeology/ArchaeologyPanelService.PhaseLayers.cs` | Placed-tile checkbox label now names the target; tooltip explains donor→target; secondary text shows `donor XX_YY → placed over target XX_YY`. |
 
 ### Verification commands
@@ -45,6 +62,8 @@ zoomable donor tile picker and per-tile settings, so that slice is authorized.
 | Criterion | Evidence |
 |---|---|
 | **AC-007** (zoomable picker + XX_YY tooltips) | Implemented in `DonorTilePickerService.DrawDialog`: wheel zoom anchored on cursor, pan, Fit, visible-range readout, hover tooltip. **Runtime/visual proof owed** — operator must run the viewer on a real map. |
+| **T005** (chunk inclusion) | `PhaseChunkMask` round-trips through `PhaseLayerProjectFileTests`; both adapters remove excluded chunks before merge; the picker exposes the 16×16 grid. **Runtime proof owed** — exclude a chunk and confirm only that chunk reverts to base terrain. |
+| **T006** (whole-map placement + viewport edit) | `AddWholeMapLayer` places the full donor footprint at an offset; `DonorChunkEditService` toggles the donor chunk under a viewport click. **Runtime proof owed** — place a whole map at an offset and click chunks in the 3D view. |
 | **T004** (minimap donor surface) | `DonorTilePickerService.DrawDialog` now draws visible tiles with `MinimapRenderer.GetTileTexture(_donorMap, col, row)`; the WDL heightmap preview is no longer used for the picker surface. **Runtime/visual proof owed** — operator must confirm the donor map is recognizable. |
 | **AC-008** (include/exclude per placed tile) | Implemented in `ArchaeologyPanelService.PhaseLayers.cs`; `PhaseTilePlacement.Included` honored by `ResolveTileSource`/`IsTargetLockedByLayer`; persisted in `PhaseTilePlacementDto`. **Runtime proof owed** — toggle a placed tile and save/load. |
 | **AC-008b** (per-tile Z offset/scale) | Implemented in `ArchaeologyPanelService.PhaseLayers.cs` and `DonorTilePickerService` selection settings; `PhaseLayerZ.Apply` combines layer + per-tile transforms; persisted. **Runtime proof owed** — adjust a per-tile Z offset and confirm only that tile moves. |

@@ -515,12 +515,21 @@ public class StandardTerrainAdapter : ITerrainAdapter
             if ((source.SourceTileX != tileX || source.SourceTileY != tileY || layer.HasTileOffset || layer.HasCellOffset) && !phase.Result.PlacementsPreTransformed)
                 TranslatePhasePlacements(phase, source.SourceTileX, source.SourceTileY, tileX, tileY, layer);
 
+            ApplyChunkMask(phase.Result.Chunks, source);
             MergePhaseTile(parent, phase, layer, tileX, tileY, source);
         }
 
         PublishTileTextures(tileX, tileY, parent.Textures);
         PostProcessTileAlpha(parent.Result.Chunks);
         return parent.Result;
+    }
+
+    private static void ApplyChunkMask(List<TerrainChunkData> chunks, PhaseTileSource source)
+    {
+        if (source.ChunkMask is not { } mask)
+            return;
+
+        chunks.RemoveAll(chunk => !mask.IsIncludedAfterTransforms(chunk.ChunkX, chunk.ChunkY, source.Transforms));
     }
 
     private static void RehomeChunksForTarget(

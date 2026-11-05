@@ -47,6 +47,14 @@ internal sealed class DonorTilePickerService : IDisposable
     private float _selectionZOffset;
     private float _selectionZScale = 1f;
 
+    // Per-donor-tile chunk inclusion masks. Missing entries mean "all chunks".
+    private readonly Dictionary<(int row, int col), PhaseChunkMask> _chunkMasks = new();
+    private (int row, int col)? _chunkEditTile;
+
+    // Whole-map placement offset (tile units) for the "add entire map" action.
+    private int _wholeMapOffsetX;
+    private int _wholeMapOffsetY;
+
     public bool IsOpen => _isOpen;
 
     public DonorTilePickerService(IViewerAppHost host)
@@ -74,6 +82,10 @@ internal sealed class DonorTilePickerService : IDisposable
         _panDragStart = null;
         _selectionZOffset = 0f;
         _selectionZScale = 1f;
+        _chunkMasks.Clear();
+        _chunkEditTile = null;
+        _wholeMapOffsetX = 0;
+        _wholeMapOffsetY = 0;
 
         EnsureDonorRendererLoaded();
         EnsureTargetRendererLoaded();
@@ -84,6 +96,7 @@ internal sealed class DonorTilePickerService : IDisposable
         _isOpen = false;
         _selectedDonorTiles.Clear();
         _targetAnchor = null;
+        _chunkEditTile = null;
     }
 
     private void EnsureDonorRendererLoaded()
@@ -428,6 +441,104 @@ internal sealed class DonorTilePickerService : IDisposable
             ImGui.TreePop();
         }
 
+        // Chunk-level inclusion for the selected donor tile. The development map canvas is not
+        // aligned to tile boundaries, so a donor tile often needs only part of its 16x16 chunks.
+        if (ImGui.TreeNode("Chunk mask (16x16)##pickerChunkMask"))
+        {
+            if (_selectedDonorTiles.Count == 0)
+            {
+                ImGui.TextDisabled("Select a donor tile first.");
+            }
+            else
+            {
+                if (_chunkEditTile is not { } editTile || !_selectedDonorTiles.Contains(editTile))
+                    _chunkEditTile = _selectedDonorTiles.First();
+
+                if (_selectedDonorTiles.Count > 1)
+                {
+                    string current = $"{_chunkEditTile.Value.col:D2}_{_chunkEditTile.Value.row:D2}";
+                    if (ImGui.BeginCombo("Edit tile##pickerChunkTile", current))
+                    {
+                        foreach ((int row, int col) in _selectedDonorTiles.OrderBy(t => t.row).ThenBy(t => t.col))
+                        {
+                            string label = $"{col:D2}_{row:D2}";
+                            if (ImGui.Selectable(label, _chunkEditTile == (row, col)))
+                                _chunkEditTile = (row, col);
+                        }
+                        ImGui.EndCombo();
+                    }
+                }
+
+                (int editRow, int editCol) = _chunkEditTile.Value;
+                PhaseChunkMask mask = _chunkMasks.TryGetValue((editRow, editCol), out PhaseChunkMask existing)
+                    ? existing
+                    : PhaseChunkMask.All;
+
+                if (ImGui.SmallButton("All##pickerChunkAll"))
+                    mask = PhaseChunkMask.All;
+                ImGui.SameLine();
+                if (ImGui.SmallButton("None##pickerChunkNone"))
+                    mask = PhaseChunkMask.None;
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Invert##pickerChunkInvert"))
+                {
+                    PhaseChunkMask inverted = PhaseChunkMask.None;
+                    for (int y = 0; y < 16; y++)
+                        for (int x = 0; x < 16; x++)
+                            inverted = inverted.With(x, y, !mask.IsIncluded(x, y));
+                    mask = inverted;
+                }
+                ImGui.SameLine();
+                ImGui.TextDisabled($"{mask.IncludedCount}/256 chunks included");
+
+                const float cell = 14f;
+                for (int y = 0; y < 16; y++)
+                {
+                    for (int x = 0; x < 16; x++)
+                    {
+                        bool included = mask.IsIncluded(x, y);
+                        ImGui.PushStyleColor(ImGuiCol.Button, included
+                            ? new Vector4(0.20f, 0.55f, 0.30f, 1f)
+                            : new Vector4(0.18f, 0.18f, 0.20f, 1f));
+                        if (ImGui.Button($"##pickerChunk{x}_{y}", new Vector2(cell, cell)))
+                            mask = mask.With(x, y, !included);
+                        ImGui.PopStyleColor();
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip($"Chunk {x:D2}_{y:D2}: {(included ? "included" : "excluded")} (click to toggle)");
+                        if (x < 15) ImGui.SameLine(0f, 1f);
+                    }
+                }
+
+                _chunkMasks[(editRow, editCol)] = mask;
+            }
+            ImGui.TreePop();
+        }
+
+        // Whole-map placement: drop the donor map's entire footprint at an arbitrary tile offset.
+        if (ImGui.TreeNode("Place entire map##pickerWholeMap"))
+        {
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(100f);
+            ImGui.InputInt("Offset X##pickerWholeMapX", ref _wholeMapOffsetX);
+            ImGui.SameLine();
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(100f);
+            ImGui.InputInt("Offset Y##pickerWholeMapY", ref _wholeMapOffsetY);
+            _wholeMapOffsetX = Math.Clamp(_wholeMapOffsetX, -63, 63);
+            _wholeMapOffsetY = Math.Clamp(_wholeMapOffsetY, -63, 63);
+            ImGui.TextDisabled("Positive X moves the donor map east; positive Y moves it south.");
+            if (ImGui.Button("Add Whole Map at Offset##pickerAddWholeMap"))
+            {
+                AddWholeMapLayer(_wholeMapOffsetX, _wholeMapOffsetY);
+                _isOpen = false;
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Add Whole Map at Matching Coordinates##pickerAddWholeMapZero"))
+            {
+                AddWholeMapLayer(0, 0);
+                _isOpen = false;
+            }
+            ImGui.TreePop();
+        }
+
         // Footer buttons
         bool canAdd = !string.IsNullOrWhiteSpace(_donorMap) && _selectedDonorTiles.Count > 0;
         if (!canAdd) ImGui.BeginDisabled();
@@ -488,15 +599,40 @@ internal sealed class DonorTilePickerService : IDisposable
             int targetRow = Math.Clamp(donorRow + deltaRow, 0, 63);
             int targetCol = Math.Clamp(donorCol + deltaCol, 0, 63);
 
+            PhaseChunkMask? chunkMask = _chunkMasks.TryGetValue((donorRow, donorCol), out PhaseChunkMask mask)
+                && !mask.IsAllIncluded
+                    ? mask
+                    : null;
+
             layer.TilePlacements.Add(new PhaseTilePlacement(
                 DonorTileX: donorRow,
                 DonorTileY: donorCol,
                 TargetTileX: targetRow,
                 TargetTileY: targetCol,
                 ZOffset: _selectionZOffset,
-                ZScale: _selectionZScale));
+                ZScale: _selectionZScale,
+                ChunkMask: chunkMask));
         }
 
+        terrain.PhaseLayers.Add(layer);
+        terrain.RefreshPhaseLayers();
+    }
+
+    private void AddWholeMapLayer(int offsetX, int offsetY)
+    {
+        var terrain = _host.TerrainManager;
+        if (terrain == null || string.IsNullOrWhiteSpace(_donorMap))
+            return;
+
+        var layer = new PhaseLayerSettings
+        {
+            MapName = _donorMap,
+            TileOffsetX = offsetX,
+            TileOffsetY = offsetY,
+            UsePlacedTilesOnly = false,
+            Channels = PhaseDataChannel.All,
+            OnlyTakeWhatThePhaseCarries = true,
+        };
         terrain.PhaseLayers.Add(layer);
         terrain.RefreshPhaseLayers();
     }
