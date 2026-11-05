@@ -346,13 +346,13 @@ internal sealed partial class ArchaeologyPanelService
                     // Spec 293: include/exclude this placed tile without deleting the mapping.
                     bool included = placement.Included;
                     // Labels print in ADT-name order (xx_yy = column_row) to match the status bar.
-                    if (ImGui.Checkbox($"Include {placement.TargetTileY:D2}_{placement.TargetTileX:D2}", ref included))
+                    if (ImGui.Checkbox($"Include target {placement.TargetTileY:D2}_{placement.TargetTileX:D2}", ref included))
                     {
                         layer.TilePlacements[placementIndex] = placement with { Included = included };
                         dirty = true;
                     }
                     if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Uncheck to exclude this placed tile from the layer. The mapping is kept so it can be re-included later.");
+                        ImGui.SetTooltip("Target tile XX_YY on the base map — this is where the donor tile is placed over. Uncheck to exclude it from the layer; the mapping is kept so it can be re-included later.");
 
                     ImGui.SameLine();
                     bool placementLocked = placement.Locked;
@@ -365,7 +365,7 @@ internal sealed partial class ArchaeologyPanelService
                         ImGui.SetTooltip("When locked, later layers cannot replace this target tile. The lock is saved in the layer project and marked L on the minimap.");
 
                     ImGui.SameLine();
-                    ImGui.TextDisabled($"donor {placement.DonorTileY:D2}_{placement.DonorTileX:D2}");
+                    ImGui.TextDisabled($"donor {placement.DonorTileY:D2}_{placement.DonorTileX:D2} → placed over target {placement.TargetTileY:D2}_{placement.TargetTileX:D2}");
 
                     // Spec 293: per-tile Z adjustment on top of the layer's.
                     if (ImGui.TreeNode($"Per-tile settings##placedSettings{placementIndex}"))

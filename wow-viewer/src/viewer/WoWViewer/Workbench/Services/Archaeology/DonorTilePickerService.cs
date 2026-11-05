@@ -33,6 +33,19 @@ internal sealed class DonorTilePickerService : IDisposable
     private Vector2? _dragCurrent;
     private bool _isDraggingBox;
 
+    // Zoom/pan state for the 64x64 map surface. _pan is the normalized (0..1) top-left
+    // corner of the visible window; _zoom is the magnification factor.
+    private const float MinZoom = 1f;
+    private const float MaxZoom = 16f;
+    private float _zoom = MinZoom;
+    private Vector2 _pan = Vector2.Zero;
+    private Vector2? _panDragStart;
+    private Vector2 _panAtDragStart;
+
+    // Per-tile settings applied to every tile added from the current selection.
+    private float _selectionZOffset;
+    private float _selectionZScale = 1f;
+
     public bool IsOpen => _isOpen;
 
     public DonorTilePickerService(IViewerAppHost host)
@@ -55,6 +68,11 @@ internal sealed class DonorTilePickerService : IDisposable
         _selectedDonorTiles.Clear();
         _targetAnchor = null;
         _placeAtMatchingCoords = true;
+        _zoom = MinZoom;
+        _pan = Vector2.Zero;
+        _panDragStart = null;
+        _selectionZOffset = 0f;
+        _selectionZScale = 1f;
 
         EnsureDonorRendererLoaded();
         EnsureTargetRendererLoaded();
@@ -182,55 +200,123 @@ internal sealed class DonorTilePickerService : IDisposable
 
         ImGui.Separator();
 
-        // 64x64 Map Surface
+        // Zoom / pan controls
+        ImGui.TextUnformatted("Zoom");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("-##pickerZoomOut"))
+            SetZoom(_zoom / 1.5f, null);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+##pickerZoomIn"))
+            SetZoom(_zoom * 1.5f, null);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Fit##pickerZoomFit"))
+        {
+            _zoom = MinZoom;
+            _pan = Vector2.Zero;
+        }
+        ImGui.SameLine();
+        ImGui.TextDisabled($"{_zoom:0.0}x  |  scroll to zoom, middle/right-drag to pan");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Visible: {VisibleTileRangeText()}");
+
+        ImGui.Separator();
+
+        // 64x64 Map Surface (zoomable)
         float availableY = ImGui.GetContentRegionAvail().Y - ImGui.GetFrameHeightWithSpacing() * 2.5f;
         float mapSize = MathF.Max(256f, MathF.Min(ImGui.GetContentRegionAvail().X, availableY));
         var cursorPos = ImGui.GetCursorScreenPos();
         var drawList = ImGui.GetWindowDrawList();
+        Vector2 mousePos = ImGui.GetIO().MousePos;
+
+        bool isHovered = mousePos.X >= cursorPos.X && mousePos.X < cursorPos.X + mapSize
+            && mousePos.Y >= cursorPos.Y && mousePos.Y < cursorPos.Y + mapSize;
+
+        // Wheel zoom, anchored on the tile under the cursor.
+        if (isHovered)
+        {
+            float wheel = ImGui.GetIO().MouseWheel;
+            if (MathF.Abs(wheel) > 0.001f)
+            {
+                Vector2 local = (mousePos - cursorPos) / mapSize;
+                Vector2 uvBefore = _pan + local * (1f / _zoom);
+                float newZoom = Math.Clamp(_zoom * MathF.Pow(1.2f, wheel), MinZoom, MaxZoom);
+                _zoom = newZoom;
+                _pan = uvBefore - local * (1f / _zoom);
+                ClampPan();
+            }
+        }
+
+        // Pan with middle or right mouse drag.
+        if (isHovered && (ImGui.IsMouseClicked(ImGuiMouseButton.Middle) || ImGui.IsMouseClicked(ImGuiMouseButton.Right)))
+        {
+            _panDragStart = mousePos;
+            _panAtDragStart = _pan;
+        }
+        if (_panDragStart.HasValue && (ImGui.IsMouseDown(ImGuiMouseButton.Middle) || ImGui.IsMouseDown(ImGuiMouseButton.Right)))
+        {
+            Vector2 delta = (mousePos - _panDragStart.Value) / mapSize * (1f / _zoom);
+            _pan = _panAtDragStart - delta;
+            ClampPan();
+        }
+        if (ImGui.IsMouseReleased(ImGuiMouseButton.Middle) || ImGui.IsMouseReleased(ImGuiMouseButton.Right))
+            _panDragStart = null;
+
+        // Recompute hovered tile after zoom/pan.
+        float viewSize = 1f / _zoom;
+        Vector2 uv0 = _pan;
+        Vector2 uv1 = _pan + new Vector2(viewSize, viewSize);
+        Vector2 localMouse = (mousePos - cursorPos) / mapSize;
+        Vector2 uvMouse = _pan + localMouse * viewSize;
+        int hoveredCol = isHovered ? Math.Clamp((int)(uvMouse.X * 64f), 0, 63) : -1;
+        int hoveredRow = isHovered ? Math.Clamp((int)(uvMouse.Y * 64f), 0, 63) : -1;
+
+        // Visible tile range for grid drawing.
+        int firstCol = Math.Clamp((int)MathF.Floor(_pan.X * 64f), 0, 63);
+        int lastCol = Math.Clamp((int)MathF.Ceiling((_pan.X + viewSize) * 64f), 0, 63);
+        int firstRow = Math.Clamp((int)MathF.Floor(_pan.Y * 64f), 0, 63);
+        int lastRow = Math.Clamp((int)MathF.Ceiling((_pan.Y + viewSize) * 64f), 0, 63);
+
+        Vector2 TileToScreen(int col, int row)
+        {
+            Vector2 uv = new((col / 64f - _pan.X) / viewSize, (row / 64f - _pan.Y) / viewSize);
+            return cursorPos + uv * mapSize;
+        }
 
         // Background
         drawList.AddRectFilled(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF141416);
 
-        // Preview texture
+        // Preview texture (cropped to the visible zoom window)
         if (_donorRenderer != null && _donorRenderer.HasPreview)
         {
-            ImGui.Image((nint)_donorRenderer.TextureId, new Vector2(mapSize, mapSize));
-        }
-        else
-        {
-            ImGui.Dummy(new Vector2(mapSize, mapSize));
+            drawList.AddImage((nint)_donorRenderer.TextureId, cursorPos, cursorPos + new Vector2(mapSize, mapSize), uv0, uv1);
         }
 
-        float cellSize = mapSize / 64f;
-        Vector2 mousePos = ImGui.GetIO().MousePos;
-        bool isHovered = mousePos.X >= cursorPos.X && mousePos.X < cursorPos.X + mapSize
-            && mousePos.Y >= cursorPos.Y && mousePos.Y < cursorPos.Y + mapSize;
-
-        int hoveredCol = isHovered ? Math.Clamp((int)((mousePos.X - cursorPos.X) / cellSize), 0, 63) : -1;
-        int hoveredRow = isHovered ? Math.Clamp((int)((mousePos.Y - cursorPos.Y) / cellSize), 0, 63) : -1;
-
-        // Draw grid overlay for occupied and selected tiles
+        // Draw grid overlay for occupied tiles in the visible window.
         foreach ((int occRow, int occCol) in occupiedSet)
         {
-            Vector2 pMin = cursorPos + new Vector2(occCol * cellSize, occRow * cellSize);
-            Vector2 pMax = pMin + new Vector2(cellSize, cellSize);
+            if (occCol < firstCol || occCol > lastCol || occRow < firstRow || occRow > lastRow)
+                continue;
+            Vector2 pMin = TileToScreen(occCol, occRow);
+            Vector2 pMax = TileToScreen(occCol + 1, occRow + 1);
             drawList.AddRect(pMin, pMax, 0x44FFFFFF, 0f, ImDrawFlags.None, 1f);
         }
 
-        // Draw selected tiles
+        // Draw selected tiles in the visible window.
         foreach ((int selRow, int selCol) in _selectedDonorTiles)
         {
-            Vector2 pMin = cursorPos + new Vector2(selCol * cellSize, selRow * cellSize);
-            Vector2 pMax = pMin + new Vector2(cellSize, cellSize);
+            if (selCol < firstCol || selCol > lastCol || selRow < firstRow || selRow > lastRow)
+                continue;
+            Vector2 pMin = TileToScreen(selCol, selRow);
+            Vector2 pMax = TileToScreen(selCol + 1, selRow + 1);
             drawList.AddRectFilled(pMin, pMax, 0x6600E5FF);
             drawList.AddRect(pMin, pMax, 0xFF00E5FF, 0f, ImDrawFlags.None, 1.5f);
         }
 
-        // Draw hovered tile
+        // Draw hovered tile.
         if (hoveredCol >= 0 && hoveredRow >= 0)
         {
-            Vector2 pMin = cursorPos + new Vector2(hoveredCol * cellSize, hoveredRow * cellSize);
-            Vector2 pMax = pMin + new Vector2(cellSize, cellSize);
+            Vector2 pMin = TileToScreen(hoveredCol, hoveredRow);
+            Vector2 pMax = TileToScreen(hoveredCol + 1, hoveredRow + 1);
             drawList.AddRect(pMin, pMax, 0xFFFFAA00, 0f, ImDrawFlags.None, 2f);
 
             bool occ = occupiedSet.Contains((hoveredRow, hoveredCol));
@@ -269,15 +355,13 @@ internal sealed class DonorTilePickerService : IDisposable
             {
                 if (_isDraggingBox && _dragCurrent.HasValue)
                 {
-                    float minX = MathF.Min(_dragStart.Value.X, _dragCurrent.Value.X) - cursorPos.X;
-                    float maxX = MathF.Max(_dragStart.Value.X, _dragCurrent.Value.X) - cursorPos.X;
-                    float minY = MathF.Min(_dragStart.Value.Y, _dragCurrent.Value.Y) - cursorPos.Y;
-                    float maxY = MathF.Max(_dragStart.Value.Y, _dragCurrent.Value.Y) - cursorPos.Y;
+                    Vector2 uvA = _pan + (Vector2.Min(_dragStart.Value, _dragCurrent.Value) - cursorPos) / mapSize * viewSize;
+                    Vector2 uvB = _pan + (Vector2.Max(_dragStart.Value, _dragCurrent.Value) - cursorPos) / mapSize * viewSize;
 
-                    int startCol = Math.Clamp((int)(minX / cellSize), 0, 63);
-                    int endCol = Math.Clamp((int)(maxX / cellSize), 0, 63);
-                    int startRow = Math.Clamp((int)(minY / cellSize), 0, 63);
-                    int endRow = Math.Clamp((int)(maxY / cellSize), 0, 63);
+                    int startCol = Math.Clamp((int)MathF.Floor(uvA.X * 64f), 0, 63);
+                    int endCol = Math.Clamp((int)MathF.Floor(uvB.X * 64f), 0, 63);
+                    int startRow = Math.Clamp((int)MathF.Floor(uvA.Y * 64f), 0, 63);
+                    int endRow = Math.Clamp((int)MathF.Floor(uvB.Y * 64f), 0, 63);
 
                     for (int r = startRow; r <= endRow; r++)
                     {
@@ -313,6 +397,25 @@ internal sealed class DonorTilePickerService : IDisposable
         }
 
         ImGui.Separator();
+
+        // Per-tile settings applied to every tile added from this selection.
+        if (ImGui.TreeNode("Selection settings (applied to added tiles)##pickerSelectionSettings"))
+        {
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120f);
+            ImGui.InputFloat("Z offset##pickerSelZOffset", ref _selectionZOffset, 0.1f, 1f, "%.2f");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Vertical offset applied to every tile added from this selection.");
+            WoWViewer.UI.SharedUiWidgets.SetNextItemWidth(120f);
+            ImGui.InputFloat("Z scale##pickerSelZScale", ref _selectionZScale, 0.01f, 0.1f, "%.3f");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Vertical scale applied to every tile added from this selection.");
+            if (ImGui.SmallButton("Reset##pickerSelZReset"))
+            {
+                _selectionZOffset = 0f;
+                _selectionZScale = 1f;
+            }
+            ImGui.TreePop();
+        }
 
         // Footer buttons
         bool canAdd = !string.IsNullOrWhiteSpace(_donorMap) && _selectedDonorTiles.Count > 0;
@@ -378,7 +481,9 @@ internal sealed class DonorTilePickerService : IDisposable
                 DonorTileX: donorRow,
                 DonorTileY: donorCol,
                 TargetTileX: targetRow,
-                TargetTileY: targetCol));
+                TargetTileY: targetCol,
+                ZOffset: _selectionZOffset,
+                ZScale: _selectionZScale));
         }
 
         terrain.PhaseLayers.Add(layer);
@@ -392,6 +497,41 @@ internal sealed class DonorTilePickerService : IDisposable
 
         var layer = new PhaseLayerSettings { MapName = mapName };
         return _host.TerrainManager.GetLayerFootprint(layer);
+    }
+
+    private void SetZoom(float zoom, Vector2? anchorLocal)
+    {
+        float newZoom = Math.Clamp(zoom, MinZoom, MaxZoom);
+        if (anchorLocal.HasValue)
+        {
+            Vector2 local = anchorLocal.Value;
+            Vector2 uvBefore = _pan + local * (1f / _zoom);
+            _zoom = newZoom;
+            _pan = uvBefore - local * (1f / _zoom);
+        }
+        else
+        {
+            _zoom = newZoom;
+        }
+        ClampPan();
+    }
+
+    private void ClampPan()
+    {
+        float viewSize = 1f / _zoom;
+        _pan = new Vector2(
+            Math.Clamp(_pan.X, 0f, MathF.Max(0f, 1f - viewSize)),
+            Math.Clamp(_pan.Y, 0f, MathF.Max(0f, 1f - viewSize)));
+    }
+
+    private string VisibleTileRangeText()
+    {
+        float viewSize = 1f / _zoom;
+        int firstCol = Math.Clamp((int)MathF.Floor(_pan.X * 64f), 0, 63);
+        int lastCol = Math.Clamp((int)MathF.Ceiling((_pan.X + viewSize) * 64f) - 1, 0, 63);
+        int firstRow = Math.Clamp((int)MathF.Floor(_pan.Y * 64f), 0, 63);
+        int lastRow = Math.Clamp((int)MathF.Ceiling((_pan.Y + viewSize) * 64f) - 1, 0, 63);
+        return $"{firstCol:D2}_{firstRow:D2} .. {lastCol:D2}_{lastRow:D2}";
     }
 
     public void Dispose()
