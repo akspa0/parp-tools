@@ -70,6 +70,7 @@ public sealed class PhaseLayerProjectEntry
     public float RotationDegrees { get; set; }
     public float RotationOriginTileX { get; set; }
     public float RotationOriginTileY { get; set; }
+    public DonorGroupTransform? GroupTransform { get; set; }
     public bool MirrorHorizontal { get; set; }
     public bool MirrorVertical { get; set; }
     public bool UsePlacedTilesOnly { get; set; }
@@ -103,6 +104,7 @@ public sealed class PhaseLayerProjectEntry
         RotationDegrees = layer.RotationDegrees,
         RotationOriginTileX = layer.RotationOriginTileX,
         RotationOriginTileY = layer.RotationOriginTileY,
+        GroupTransform = layer.GroupTransform,
         MirrorHorizontal = layer.MirrorHorizontal,
         MirrorVertical = layer.MirrorVertical,
         UsePlacedTilesOnly = layer.UsePlacedTilesOnly,
@@ -139,6 +141,7 @@ public sealed class PhaseLayerProjectEntry
             RotationDegrees = RotationDegrees,
             RotationOriginTileX = RotationOriginTileX,
             RotationOriginTileY = RotationOriginTileY,
+            GroupTransform = GroupTransform,
             MirrorHorizontal = MirrorHorizontal,
             MirrorVertical = MirrorVertical,
             UsePlacedTilesOnly = UsePlacedTilesOnly,

@@ -5,6 +5,7 @@ using System.Numerics;
 using ImGuiNET;
 using Silk.NET.OpenGL;
 using WoWViewer.DataSources;
+using WoWViewer.Rendering;
 using WoWViewer.Terrain;
 using WowViewer.Core.Maps;
 
@@ -263,8 +264,6 @@ internal sealed class DonorTilePickerService : IDisposable
 
         // Recompute hovered tile after zoom/pan.
         float viewSize = 1f / _zoom;
-        Vector2 uv0 = _pan;
-        Vector2 uv1 = _pan + new Vector2(viewSize, viewSize);
         Vector2 localMouse = (mousePos - cursorPos) / mapSize;
         Vector2 uvMouse = _pan + localMouse * viewSize;
         int hoveredCol = isHovered ? Math.Clamp((int)(uvMouse.X * 64f), 0, 63) : -1;
@@ -285,10 +284,22 @@ internal sealed class DonorTilePickerService : IDisposable
         // Background
         drawList.AddRectFilled(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF141416);
 
-        // Preview texture (cropped to the visible zoom window)
-        if (_donorRenderer != null && _donorRenderer.HasPreview)
+        // Donor tiles are drawn from the client's minimap art, not the WDL heightmap preview:
+        // the operator needs to recognize the terrain they are picking, and a heightmap does not
+        // show roads, buildings, or biome. Each visible tile is its own minimap texture.
+        MinimapRenderer? minimapRenderer = _host.MinimapRenderer;
+        for (int row = firstRow; row <= lastRow; row++)
         {
-            drawList.AddImage((nint)_donorRenderer.TextureId, cursorPos, cursorPos + new Vector2(mapSize, mapSize), uv0, uv1);
+            for (int col = firstCol; col <= lastCol; col++)
+            {
+                Vector2 pMin = TileToScreen(col, row);
+                Vector2 pMax = TileToScreen(col + 1, row + 1);
+                uint texture = minimapRenderer?.GetTileTexture(_donorMap, col, row) ?? 0;
+                if (texture != 0)
+                    drawList.AddImage((nint)texture, pMin, pMax);
+                else
+                    drawList.AddRectFilled(pMin, pMax, 0xFF1E1E22);
+            }
         }
 
         // Draw grid overlay for occupied tiles in the visible window.

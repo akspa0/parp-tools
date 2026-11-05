@@ -29,3 +29,9 @@ Receipt: [`evidence/final-receipt.md`](evidence/final-receipt.md)
 ## Phase 6 — Verification
 - [x] T060 Update `ui-controls.json` + `UI-REFERENCE.md`; `Verify-UiReference.ps1` (receipt in `evidence/final-receipt.md`)
 - [x] T061 Build + tests; operator screenshot proof (AC-1/2/5/6/7) (receipt in `evidence/final-receipt.md`)
+
+## Phase 7 — Operator-directed bottom-toolbar reversion (2026-11-05)
+- [x] T070 Correct the toolbar to per-liquid-family toggles (Water/Ocean/Magma/Slime), Doodads/WMOs/Terrain/PM4/Grid/Mute, resident-terrain L0–Ln, one A1–An selector per non-base layer, both opacity sliders, and no Sky/Fog/Texture Masks. Receipt: [`evidence/bottom-toolbar-reversion-2026-11-05.md`](evidence/bottom-toolbar-reversion-2026-11-05.md).
+- [x] T071 Persist the selected alpha overlay/channel and the four liquid-family toggles; restore them when scene renderers are available. Receipt: [`evidence/bottom-toolbar-reversion-2026-11-05.md`](evidence/bottom-toolbar-reversion-2026-11-05.md).
+- [x] T072 Update `ui-controls.json` and `UI-REFERENCE.md`; pass `Verify-UiReference.ps1`, focused footer tests, and solution build. Operator real-client visual/restart confirmation remains owed. Receipt: [`evidence/bottom-toolbar-reversion-2026-11-05.md`](evidence/bottom-toolbar-reversion-2026-11-05.md).
+- [x] T073 Remove the duplicate status-bar Mute control and default audio to muted. Receipt: [`evidence/bottom-toolbar-reversion-2026-11-05.md`](evidence/bottom-toolbar-reversion-2026-11-05.md).

@@ -34,6 +34,21 @@ public class LiquidRenderer : IDisposable
     public bool ShowSelectedWlWireframeOverlay { get; set; } = true;
     public string? SelectedWlBodyKey { get; set; }
 
+    // Per-liquid-type visibility. MCLQ/MH2O and WL* both carry a LiquidType, so one
+    // filter covers every terrain liquid source instead of a single "water" switch.
+    public bool ShowWaterLiquid { get; set; } = true;
+    public bool ShowOceanLiquid { get; set; } = true;
+    public bool ShowMagmaLiquid { get; set; } = true;
+    public bool ShowSlimeLiquid { get; set; } = true;
+
+    public bool IsLiquidTypeVisible(LiquidType type) => type switch
+    {
+        LiquidType.Ocean => ShowOceanLiquid,
+        LiquidType.Magma => ShowMagmaLiquid,
+        LiquidType.Slime => ShowSlimeLiquid,
+        _ => ShowWaterLiquid,
+    };
+
     // Animation time
     private float _time;
 
@@ -171,6 +186,9 @@ public class LiquidRenderer : IDisposable
                 if (visibleTileKeys is { Count: > 0 } && !ContainsTile(visibleTileKeys, (mesh.TileX, mesh.TileY)))
                     continue;
 
+                if (!IsLiquidTypeVisible(mesh.Type))
+                    continue;
+
                 if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
                     continue;
 
@@ -189,6 +207,8 @@ public class LiquidRenderer : IDisposable
             foreach (var mesh in EnumerateWlMeshesInRange(cameraPos, maxRenderDistance))
             {
                 if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
+                    continue;
+                if (!IsLiquidTypeVisible(mesh.Type))
                     continue;
                 if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
                     continue;
@@ -252,6 +272,8 @@ public class LiquidRenderer : IDisposable
             if (!string.Equals(mesh.WlBodyKey, SelectedWlBodyKey, StringComparison.OrdinalIgnoreCase))
                 continue;
             if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
+                continue;
+            if (!IsLiquidTypeVisible(mesh.Type))
                 continue;
             if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
                 continue;

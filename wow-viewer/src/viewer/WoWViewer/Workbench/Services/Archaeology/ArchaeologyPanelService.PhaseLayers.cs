@@ -677,6 +677,9 @@ internal sealed partial class ArchaeologyPanelService
                 }
             }
 
+            if (layer.TilePlacements.Count > 0)
+                dirty |= _donorGroupTransformWorkbench.DrawControls(layer);
+
             ImGui.TextDisabled(ObjectOwnershipNote);
 
             if (layer.Locked)

@@ -10,24 +10,29 @@ using WoWViewer.Workbench;
 namespace WoWViewer;
 
 /// <summary>
-/// Persistent bottom bar service hosting the quick toggles the operator asked for:
-/// PM4 overlay, one visibility toggle per texture layer, the alpha-mask toggle, and a
-/// button that opens the Texture Masks panel. Destination switching lives in the
-/// sidebars/action rails, not here.
+/// Persistent bottom toolbar with the scene toggles, per-liquid-family toggles, the texture
+/// layers the resident terrain actually carries, one alpha selector per non-base layer, and
+/// M2/MDX + WMO opacity controls.
 /// </summary>
 internal sealed class BottomBarService
 {
     private readonly IViewerAppHost _host;
+    private WorldScene? _lastAppliedScene;
+    private string _lastAppliedMap = string.Empty;
+    private int _lastAppliedLayerCount = -1;
 
-    internal bool BottomToggleSky { get; set; } = true;
-    internal bool BottomToggleFog { get; set; } = true;
-    internal bool BottomToggleWater { get; set; } = true;
+    internal bool BottomToggleLiquidWater { get; set; } = true;
+    internal bool BottomToggleLiquidOcean { get; set; } = true;
+    internal bool BottomToggleLiquidMagma { get; set; } = true;
+    internal bool BottomToggleLiquidSlime { get; set; } = true;
     internal bool BottomToggleDoodads { get; set; } = true;
     internal bool BottomToggleWmos { get; set; } = true;
     internal bool BottomToggleTerrain { get; set; } = true;
     internal bool BottomTogglePm4 { get; set; }
     internal bool BottomToggleGrid { get; set; }
-    internal bool BottomToggleAudioMute { get; set; }
+    internal bool BottomToggleAudioMute { get; set; } = true;
+    internal bool BottomToggleAlphaMask { get; set; }
+    internal int BottomAlphaMaskChannel { get; set; } = 1;
 
     internal BottomBarService(IViewerAppHost host)
     {
@@ -36,44 +41,156 @@ internal sealed class BottomBarService
 
     internal void ApplyToScene(WorldScene? scene, TerrainManager? terrainManager, VlmTerrainManager? vlmTerrain)
     {
-        if (scene != null)
+        if (scene is not null)
         {
             scene.Pm4Overlay.ShowPm4Overlay = BottomTogglePm4;
+            scene.DoodadsVisible = BottomToggleDoodads;
+            scene.WmosVisible = BottomToggleWmos;
+            scene.ShowWdlTerrain = BottomToggleTerrain;
+            scene.SetAudioMuted(BottomToggleAudioMute);
+        }
+
+        if (terrainManager is not null)
+        {
+            terrainManager.TerrainVisible = BottomToggleTerrain;
+            ApplyGridToggle(terrainManager.Renderer, BottomToggleGrid);
+        }
+
+        if (vlmTerrain is not null)
+        {
+            vlmTerrain.TerrainVisible = BottomToggleTerrain;
+            ApplyGridToggle(vlmTerrain.Renderer, BottomToggleGrid);
+        }
+
+        ApplyLiquidState(scene, terrainManager?.LiquidRenderer, vlmTerrain?.LiquidRenderer);
+
+        TerrainRenderer? renderer = terrainManager?.Renderer ?? vlmTerrain?.Renderer;
+        int layerCount = BottomBarControlPolicy.ResolveLayerCount(renderer?.MaxResidentLayerCount ?? 0);
+        int alphaChannelCount = BottomBarControlPolicy.ResolveAlphaChannelCount(layerCount);
+        if (alphaChannelCount > 0)
+            BottomAlphaMaskChannel = Math.Clamp(BottomAlphaMaskChannel, 1, alphaChannelCount);
+        bool showAlpha = BottomToggleAlphaMask && alphaChannelCount > 0;
+        ApplyAlphaState(terrainManager?.Renderer, showAlpha, BottomAlphaMaskChannel);
+        if (vlmTerrain?.Renderer != terrainManager?.Renderer)
+            ApplyAlphaState(vlmTerrain?.Renderer, showAlpha, BottomAlphaMaskChannel);
+        _lastAppliedLayerCount = layerCount;
+    }
+
+    /// <summary>Refreshes the persisted quick-toggle snapshot from the live scene before settings save.</summary>
+    internal void CaptureSceneState(WorldScene? scene, TerrainManager? terrainManager, VlmTerrainManager? vlmTerrain)
+    {
+        if (scene is not null)
+        {
+            BottomToggleDoodads = scene.DoodadsVisible;
+            BottomToggleWmos = scene.WmosVisible;
+            BottomTogglePm4 = scene.Pm4Overlay.ShowPm4Overlay;
+            BottomToggleAudioMute = scene.AudioMuted;
+        }
+
+        if (terrainManager is not null)
+        {
+            BottomToggleTerrain = terrainManager.TerrainVisible;
+            BottomToggleGrid = ReadGridToggle(terrainManager.Renderer);
+            CaptureLiquidState(terrainManager.LiquidRenderer);
+        }
+
+        if (vlmTerrain is not null)
+        {
+            BottomToggleTerrain &= vlmTerrain.TerrainVisible;
+            BottomToggleGrid |= ReadGridToggle(vlmTerrain.Renderer);
+            CaptureLiquidState(vlmTerrain.LiquidRenderer);
+        }
+
+        TerrainRenderer? renderer = terrainManager?.Renderer ?? vlmTerrain?.Renderer;
+        if (renderer is not null)
+        {
+            BottomToggleAlphaMask = renderer.ShowAlphaMask;
+            BottomAlphaMaskChannel = Math.Clamp(renderer.AlphaMaskChannel, 1, TerrainTileMeshBuilder.MaxLayers - 1);
         }
     }
 
     internal void DrawBottom(UiRect region, float scale)
     {
-        float height = ImGui.GetFrameHeight();
         WorldScene? scene = _host.WorldScene;
         TerrainManager? terrainManager = _host.TerrainManager;
         VlmTerrainManager? vlmTerrain = _host.VlmTerrainManager;
-
-        TerrainRenderer? layerTerrain = terrainManager?.Renderer ?? vlmTerrain?.Renderer;
-        int layerCount = layerTerrain != null
-            ? Math.Clamp(layerTerrain.MaxResidentLayerCount, 4, TerrainTileMeshBuilder.MaxLayers)
-            : 4;
-
-        var items = new List<FooterItemMeasure>
+        TerrainRenderer? terrainRenderer = terrainManager?.Renderer ?? vlmTerrain?.Renderer;
+        LiquidRenderer? liquidRenderer = terrainManager?.LiquidRenderer ?? vlmTerrain?.LiquidRenderer;
+        int layerCount = BottomBarControlPolicy.ResolveLayerCount(terrainRenderer?.MaxResidentLayerCount ?? 0);
+        int alphaLayerCount = BottomBarControlPolicy.ResolveAlphaChannelCount(layerCount);
+        string mapName = terrainManager?.MapName ?? vlmTerrain?.MapName ?? string.Empty;
+        if (scene is not null &&
+            (!ReferenceEquals(scene, _lastAppliedScene) || !string.Equals(mapName, _lastAppliedMap, StringComparison.OrdinalIgnoreCase)))
         {
-            new("toggle-pm4", 62f * scale, 48f * scale, FooterItemPriority.Essential),
-        };
-        for (int i = 0; i < layerCount; i++)
-            items.Add(new($"toggle-layer-{i}", 46f * scale, 40f * scale, FooterItemPriority.Essential));
-        items.Add(new("toggle-alpha", 74f * scale, 58f * scale, FooterItemPriority.Essential));
-        items.Add(new("open-texture-masks", 120f * scale, 92f * scale, FooterItemPriority.Essential));
+            ApplyToScene(scene, terrainManager, vlmTerrain);
+            _lastAppliedScene = scene;
+            _lastAppliedMap = mapName;
+        }
 
-        FooterFitResult fit = ViewerFooterLayout.Fit(region, scale, items);
+        if (layerCount != _lastAppliedLayerCount)
+        {
+            if (alphaLayerCount > 0)
+                BottomAlphaMaskChannel = Math.Clamp(BottomAlphaMaskChannel, 1, alphaLayerCount);
+            bool showAlpha = BottomToggleAlphaMask && alphaLayerCount > 0;
+            ApplyAlphaState(terrainManager?.Renderer, showAlpha, BottomAlphaMaskChannel);
+            if (vlmTerrain?.Renderer != terrainManager?.Renderer)
+                ApplyAlphaState(vlmTerrain?.Renderer, showAlpha, BottomAlphaMaskChannel);
+            _lastAppliedLayerCount = layerCount;
+        }
+
+        string[] toggleLabels = ["Water", "Ocean", "Magma", "Slime", "Doodads", "WMOs", "Terrain", "PM4", "Grid", "Mute"];
+        string[] toggleIds =
+        [
+            "toggle-liquid-water", "toggle-liquid-ocean", "toggle-liquid-magma", "toggle-liquid-slime",
+            "toggle-doodads", "toggle-wmos", "toggle-terrain", "toggle-pm4", "toggle-grid", "toggle-audio-mute",
+        ];
+        var items = new List<FooterItemMeasure>(toggleIds.Length + layerCount + alphaLayerCount + 2);
+        for (int index = 0; index < toggleIds.Length; index++)
+        {
+            float width = ImGui.CalcTextSize(toggleLabels[index]).X + ImGui.GetFrameHeight() + 5f;
+            items.Add(new FooterItemMeasure(toggleIds[index], width, width, FooterItemPriority.Essential));
+        }
+        for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
+        {
+            string label = $"L{layerIndex}";
+            float width = ImGui.CalcTextSize(label).X + ImGui.GetFrameHeight() + 5f;
+            items.Add(new FooterItemMeasure($"toggle-layer-{layerIndex}", width, width, FooterItemPriority.Essential));
+        }
+        for (int channel = 1; channel <= alphaLayerCount; channel++)
+        {
+            string label = $"A{channel}";
+            float width = ImGui.CalcTextSize(label).X + ImGui.GetFrameHeight() + 5f;
+            items.Add(new FooterItemMeasure($"alpha-channel-{channel}", width, width, FooterItemPriority.Essential));
+        }
+        float m2LabelWidth = ImGui.CalcTextSize("M2/MDX Opacity").X;
+        float wmoLabelWidth = ImGui.CalcTextSize("WMO Opacity").X;
+        items.Add(new FooterItemMeasure("opacity-m2", m2LabelWidth + 70f * scale, m2LabelWidth + 54f * scale, FooterItemPriority.Essential));
+        items.Add(new FooterItemMeasure("opacity-wmo", wmoLabelWidth + 70f * scale, wmoLabelWidth + 54f * scale, FooterItemPriority.Essential));
+
+        FooterFitResult fit = ViewerFooterLayout.Fit(region, scale, items, gap: 2f);
         float originX = ImGui.GetCursorPosX();
         float y = ImGui.GetCursorPosY();
 
-        void DrawToggle(string id, string label, bool current, Action<bool> onChange, string tooltip)
+        void DrawToggle(string id, bool current, Action<bool> onChange, string tooltip)
         {
             FooterItemPlacement placement = fit.Get(id);
             if (!placement.Visible) return;
             ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
             bool val = current;
-            if (ImGui.Checkbox($"{label}##{id}", ref val))
+            bool changed = id switch
+            {
+                "toggle-liquid-water" => ImGui.Checkbox("Water##toggle-liquid-water", ref val),
+                "toggle-liquid-ocean" => ImGui.Checkbox("Ocean##toggle-liquid-ocean", ref val),
+                "toggle-liquid-magma" => ImGui.Checkbox("Magma##toggle-liquid-magma", ref val),
+                "toggle-liquid-slime" => ImGui.Checkbox("Slime##toggle-liquid-slime", ref val),
+                "toggle-doodads" => ImGui.Checkbox("Doodads##toggle-doodads", ref val),
+                "toggle-wmos" => ImGui.Checkbox("WMOs##toggle-wmos", ref val),
+                "toggle-terrain" => ImGui.Checkbox("Terrain##toggle-terrain", ref val),
+                "toggle-pm4" => ImGui.Checkbox("PM4##toggle-pm4", ref val),
+                "toggle-grid" => ImGui.Checkbox("Grid##toggle-grid", ref val),
+                _ => ImGui.Checkbox("Mute##toggle-audio-mute", ref val),
+            };
+            if (changed)
             {
                 onChange(val);
                 _host.Settings.SaveViewerSettings();
@@ -81,44 +198,212 @@ internal sealed class BottomBarService
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
         }
 
-        // 1. PM4 quick toggle
-        bool pm4Val = scene?.Pm4Overlay?.ShowPm4Overlay ?? BottomTogglePm4;
-        DrawToggle("toggle-pm4", "PM4", pm4Val, v =>
+        DrawToggle("toggle-liquid-water", liquidRenderer?.ShowWaterLiquid ?? BottomToggleLiquidWater, v =>
+        {
+            BottomToggleLiquidWater = v;
+            ApplyLiquidState(scene, terrainManager?.LiquidRenderer, vlmTerrain?.LiquidRenderer);
+        }, "Show MCLQ/MH2O and WL* water and river liquid.");
+
+        DrawToggle("toggle-liquid-ocean", liquidRenderer?.ShowOceanLiquid ?? BottomToggleLiquidOcean, v =>
+        {
+            BottomToggleLiquidOcean = v;
+            ApplyLiquidState(scene, terrainManager?.LiquidRenderer, vlmTerrain?.LiquidRenderer);
+        }, "Show MCLQ/MH2O and WL* ocean liquid.");
+
+        DrawToggle("toggle-liquid-magma", liquidRenderer?.ShowMagmaLiquid ?? BottomToggleLiquidMagma, v =>
+        {
+            BottomToggleLiquidMagma = v;
+            ApplyLiquidState(scene, terrainManager?.LiquidRenderer, vlmTerrain?.LiquidRenderer);
+        }, "Show MCLQ/MH2O and WL* magma and lava liquid.");
+
+        DrawToggle("toggle-liquid-slime", liquidRenderer?.ShowSlimeLiquid ?? BottomToggleLiquidSlime, v =>
+        {
+            BottomToggleLiquidSlime = v;
+            ApplyLiquidState(scene, terrainManager?.LiquidRenderer, vlmTerrain?.LiquidRenderer);
+        }, "Show MCLQ/MH2O and WL* slime liquid.");
+
+        DrawToggle("toggle-doodads", scene?.DoodadsVisible ?? BottomToggleDoodads, v =>
+        {
+            BottomToggleDoodads = v;
+            if (scene is not null) scene.DoodadsVisible = v;
+        }, "Toggle M2/MDX doodad visibility.");
+
+        DrawToggle("toggle-wmos", scene?.WmosVisible ?? BottomToggleWmos, v =>
+        {
+            BottomToggleWmos = v;
+            if (scene is not null) scene.WmosVisible = v;
+        }, "Toggle WMO visibility.");
+
+        bool terrainVisible = terrainManager?.TerrainVisible ?? vlmTerrain?.TerrainVisible ?? BottomToggleTerrain;
+        DrawToggle("toggle-terrain", terrainVisible, v =>
+        {
+            BottomToggleTerrain = v;
+            if (terrainManager is not null) terrainManager.TerrainVisible = v;
+            if (vlmTerrain is not null) vlmTerrain.TerrainVisible = v;
+            if (scene is not null) scene.ShowWdlTerrain = v;
+        }, "Toggle terrain tiles and WDL far terrain.");
+
+        DrawToggle("toggle-pm4", scene?.Pm4Overlay.ShowPm4Overlay ?? BottomTogglePm4, v =>
         {
             BottomTogglePm4 = v;
-            if (scene?.Pm4Overlay != null) scene.Pm4Overlay.ShowPm4Overlay = v;
-        }, "Toggle PM4 pre-release navigation geometry overlay");
+            if (scene is not null) scene.Pm4Overlay.ShowPm4Overlay = v;
+        }, "Toggle the PM4 navigation geometry overlay.");
 
-        // 2. One visibility toggle per texture layer (L0 = base, then overlays).
-        for (int i = 0; i < layerCount; i++)
+        bool gridVisible = terrainRenderer is null ? BottomToggleGrid : ReadGridToggle(terrainRenderer);
+        DrawToggle("toggle-grid", gridVisible, v =>
         {
-            int layer = i;
-            bool visible = layerTerrain?.GetShowLayer(layer) ?? true;
-            DrawToggle($"toggle-layer-{layer}", layer == 0 ? "L0" : $"L{layer}", visible, v =>
+            BottomToggleGrid = v;
+            ApplyGridToggle(terrainManager?.Renderer, v);
+            if (vlmTerrain?.Renderer != terrainManager?.Renderer)
+                ApplyGridToggle(vlmTerrain?.Renderer, v);
+        }, "Toggle tile, chunk, and cell grid overlays.");
+
+        DrawToggle("toggle-audio-mute", scene?.AudioMuted ?? BottomToggleAudioMute, v =>
+        {
+            BottomToggleAudioMute = v;
+            scene?.SetAudioMuted(v);
+        }, "Mute or unmute world audio output.");
+
+        for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
+        {
+            int layer = layerIndex;
+            string itemId = $"toggle-layer-{layer}";
+            FooterItemPlacement placement = fit.Get(itemId);
+            if (!placement.Visible) continue;
+            ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
+            bool visible = terrainRenderer?.GetShowLayer(layer) ?? true;
+            bool changed = layer switch
             {
-                layerTerrain?.SetShowLayer(layer, v);
-            }, layer == 0
-                ? "Toggle the base terrain texture layer"
-                : $"Toggle terrain texture layer {layer}");
+                0 => ImGui.Checkbox("L0##toggle-layer-0", ref visible),
+                1 => ImGui.Checkbox("L1##toggle-layer-1", ref visible),
+                2 => ImGui.Checkbox("L2##toggle-layer-2", ref visible),
+                3 => ImGui.Checkbox("L3##toggle-layer-3", ref visible),
+                4 => ImGui.Checkbox("L4##toggle-layer-4", ref visible),
+                5 => ImGui.Checkbox("L5##toggle-layer-5", ref visible),
+                6 => ImGui.Checkbox("L6##toggle-layer-6", ref visible),
+                _ => ImGui.Checkbox("L7##toggle-layer-7", ref visible),
+            };
+            if (changed)
+            {
+                terrainRenderer?.SetShowLayer(layer, visible);
+                _host.Settings.SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Toggle texture layer {layer}.");
         }
 
-        // 3. Alpha mask overlay toggle
-        bool alphaOn = layerTerrain?.ShowAlphaMask ?? false;
-        DrawToggle("toggle-alpha", "Alpha", alphaOn, v =>
+        for (int channel = 1; channel <= alphaLayerCount; channel++)
         {
-            if (layerTerrain != null) layerTerrain.ShowAlphaMask = v;
-        }, "Show or hide the terrain alpha-mask overlay");
-
-        // 4. Texture Masks panel button (per-layer opacity, blending, channel detail).
-        FooterItemPlacement masksPlacement = fit.Get("open-texture-masks");
-        if (masksPlacement.Visible)
-        {
-            ImGui.SetCursorPos(new Vector2(originX + masksPlacement.X, y));
-            if (ImGui.Button("Texture Masks##open-texture-masks", new Vector2(masksPlacement.Width, height)))
-                _host.UiManager.OpenLeftDock(LeftPanel.Layers);
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Open the Texture Masks panel: per-layer opacity, alpha-mask blending, and channel detail");
+            int alphaChannel = channel;
+            string itemId = $"alpha-channel-{channel}";
+            FooterItemPlacement placement = fit.Get(itemId);
+            if (!placement.Visible) continue;
+            ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
+            bool alphaSelected = terrainRenderer is not null
+                ? terrainRenderer.ShowAlphaMask && terrainRenderer.AlphaMaskChannel == channel
+                : BottomToggleAlphaMask && BottomAlphaMaskChannel == channel;
+            bool clicked = channel switch
+            {
+                1 => ImGui.Selectable("A1##alpha-channel-1", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
+                2 => ImGui.Selectable("A2##alpha-channel-2", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
+                3 => ImGui.Selectable("A3##alpha-channel-3", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
+                4 => ImGui.Selectable("A4##alpha-channel-4", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
+                5 => ImGui.Selectable("A5##alpha-channel-5", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
+                6 => ImGui.Selectable("A6##alpha-channel-6", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
+                _ => ImGui.Selectable("A7##alpha-channel-7", alphaSelected, ImGuiSelectableFlags.None, new Vector2(placement.Width, ImGui.GetFrameHeight())),
+            };
+            if (clicked)
+            {
+                bool showAlpha = !alphaSelected;
+                BottomToggleAlphaMask = showAlpha;
+                BottomAlphaMaskChannel = alphaChannel;
+                ApplyAlphaState(terrainManager?.Renderer, showAlpha, alphaChannel);
+                if (vlmTerrain?.Renderer != terrainManager?.Renderer)
+                    ApplyAlphaState(vlmTerrain?.Renderer, showAlpha, alphaChannel);
+                _host.Settings.SaveViewerSettings();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(alphaSelected ? $"Alpha channel {alphaChannel} is active. Click to turn the overlay off." : $"Show the alpha map for texture layer {alphaChannel}.");
         }
 
+        DrawOpacity("opacity-m2", M2Renderer.GlobalOpacity, value =>
+        {
+            M2Renderer.GlobalOpacity = value;
+            MdxRenderer.GlobalOpacity = value;
+        });
+        DrawOpacity("opacity-wmo", WmoRenderer.GlobalOpacity, value => WmoRenderer.GlobalOpacity = value);
+
+        void DrawOpacity(string id, float current, Action<float> onChange)
+        {
+            FooterItemPlacement placement = fit.Get(id);
+            if (!placement.Visible) return;
+            ImGui.SetCursorPos(new Vector2(originX + placement.X, y));
+            float opacityPercent = Math.Clamp(current, 0f, 1f) * 100f;
+            string label = id == "opacity-m2" ? "M2/MDX Opacity" : "WMO Opacity";
+            float labelWidth = ImGui.CalcTextSize(label).X;
+            ImGui.SetNextItemWidth(MathF.Max(48f, placement.Width - labelWidth - 4f));
+            bool changed = id == "opacity-m2"
+                ? ImGui.SliderFloat("M2/MDX Opacity##opacity-m2", ref opacityPercent, 0f, 100f, "%.0f%%")
+                : ImGui.SliderFloat("WMO Opacity##opacity-wmo", ref opacityPercent, 0f, 100f, "%.0f%%");
+            if (changed)
+                onChange(Math.Clamp(opacityPercent / 100f, 0f, 1f));
+            if (ImGui.IsItemDeactivatedAfterEdit()) _host.Settings.SaveViewerSettings();
+        }
+    }
+
+    private void ApplyLiquidState(WorldScene? scene, LiquidRenderer? terrainLiquids, LiquidRenderer? vlmLiquids)
+    {
+        bool anyLiquid = BottomToggleLiquidWater || BottomToggleLiquidOcean || BottomToggleLiquidMagma || BottomToggleLiquidSlime;
+        if (scene is not null)
+        {
+            scene.ShowWlLiquids = anyLiquid;
+            scene.EnableRuntimeWmoGroupLiquids = anyLiquid;
+        }
+
+        ApplyLiquidState(terrainLiquids);
+        if (!ReferenceEquals(vlmLiquids, terrainLiquids))
+            ApplyLiquidState(vlmLiquids);
+
+        WmoRenderer.ShowWaterLiquids = BottomToggleLiquidWater;
+        WmoRenderer.ShowOceanLiquids = BottomToggleLiquidOcean;
+        WmoRenderer.ShowMagmaLiquids = BottomToggleLiquidMagma;
+        WmoRenderer.ShowSlimeLiquids = BottomToggleLiquidSlime;
+    }
+
+    private void ApplyLiquidState(LiquidRenderer? renderer)
+    {
+        if (renderer is null) return;
+        bool anyLiquid = BottomToggleLiquidWater || BottomToggleLiquidOcean || BottomToggleLiquidMagma || BottomToggleLiquidSlime;
+        renderer.ShowLiquid = anyLiquid;
+        renderer.ShowWlLiquids = anyLiquid;
+        renderer.ShowWaterLiquid = BottomToggleLiquidWater;
+        renderer.ShowOceanLiquid = BottomToggleLiquidOcean;
+        renderer.ShowMagmaLiquid = BottomToggleLiquidMagma;
+        renderer.ShowSlimeLiquid = BottomToggleLiquidSlime;
+    }
+
+    private void CaptureLiquidState(LiquidRenderer? renderer)
+    {
+        if (renderer is null) return;
+        BottomToggleLiquidWater &= renderer.ShowWaterLiquid;
+        BottomToggleLiquidOcean &= renderer.ShowOceanLiquid;
+        BottomToggleLiquidMagma &= renderer.ShowMagmaLiquid;
+        BottomToggleLiquidSlime &= renderer.ShowSlimeLiquid;
+    }
+
+    private static bool ReadGridToggle(TerrainRenderer renderer)
+        => renderer.ShowTileGrid || renderer.ShowChunkGrid || renderer.ShowCellGrid;
+
+    private static void ApplyAlphaState(TerrainRenderer? renderer, bool show, int channel)
+    {
+        if (renderer is null) return;
+        renderer.AlphaMaskChannel = Math.Clamp(channel, 1, TerrainTileMeshBuilder.MaxLayers - 1);
+        renderer.ShowAlphaMask = show;
+    }
+
+    private static void ApplyGridToggle(TerrainRenderer? renderer, bool enabled)
+    {
+        if (renderer is null) return;
+        renderer.ShowTileGrid = enabled;
+        renderer.ShowChunkGrid = enabled;
+        renderer.ShowCellGrid = enabled;
     }
 }

@@ -17,20 +17,40 @@ public sealed class ViewerFooterLayoutTests
             leftWidth: 280f, rightWidth: 360f, scale: effective);
     }
 
-    private static List<FooterItemMeasure> BottomItems(float scale) => new()
+    private static List<FooterItemMeasure> BottomItems(float scale, int layerCount = BottomBarControlPolicy.MaxLayers)
     {
-        new FooterItemMeasure("toggle-pm4", 62f * scale, 48f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("dropup-layers", 120f * scale, 92f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("mode-viewer", 76f * scale, 58f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("mode-editor", 74f * scale, 56f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("mode-archaeology", 104f * scale, 80f * scale, FooterItemPriority.Essential),
-        new FooterItemMeasure("mode-options", 76f * scale, 58f * scale, FooterItemPriority.Essential),
-    };
+        var items = new List<FooterItemMeasure>
+        {
+            new("toggle-liquid-water", 64f * scale, 56f * scale, FooterItemPriority.Essential),
+            new("toggle-liquid-ocean", 64f * scale, 56f * scale, FooterItemPriority.Essential),
+            new("toggle-liquid-magma", 64f * scale, 56f * scale, FooterItemPriority.Essential),
+            new("toggle-liquid-slime", 64f * scale, 56f * scale, FooterItemPriority.Essential),
+            new("toggle-doodads", 78f * scale, 68f * scale, FooterItemPriority.Essential),
+            new("toggle-wmos", 60f * scale, 54f * scale, FooterItemPriority.Essential),
+            new("toggle-terrain", 72f * scale, 64f * scale, FooterItemPriority.Essential),
+            new("toggle-pm4", 60f * scale, 54f * scale, FooterItemPriority.Essential),
+            new("toggle-grid", 56f * scale, 50f * scale, FooterItemPriority.Essential),
+            new("toggle-audio-mute", 58f * scale, 52f * scale, FooterItemPriority.Essential),
+        };
+
+        int resolvedLayers = BottomBarControlPolicy.ResolveLayerCount(layerCount);
+        for (int layer = 0; layer < resolvedLayers; layer++)
+            items.Add(new FooterItemMeasure($"toggle-layer-{layer}", 46f * scale, 42f * scale, FooterItemPriority.Essential));
+
+        int alphaChannels = BottomBarControlPolicy.ResolveAlphaChannelCount(resolvedLayers);
+        for (int channel = 1; channel <= alphaChannels; channel++)
+            items.Add(new FooterItemMeasure($"alpha-channel-{channel}", 36f * scale, 32f * scale, FooterItemPriority.Essential));
+
+        items.Add(new FooterItemMeasure("opacity-m2", 200f * scale, 160f * scale, FooterItemPriority.Essential));
+        items.Add(new FooterItemMeasure("opacity-wmo", 180f * scale, 145f * scale, FooterItemPriority.Essential));
+        return items;
+    }
 
     [Theory]
     [InlineData(1920, 1080)]
     [InlineData(2560, 1440)]
     [InlineData(3840, 2160)]
+    [InlineData(1280, 720)]
     public void BottomBar_FitsInsideItsRegionAtCommonResolutions(int width, int height)
     {
         UiLayout layout = LayoutFor(width, height);
@@ -204,5 +224,58 @@ public sealed class ViewerFooterLayoutTests
         Assert.Equal("FPS --", snapshot.FpsText);
         Assert.Contains("Audio output muted.", snapshot.CompactSuffix);
         Assert.Empty(snapshot.LeftText);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 1)]
+    [InlineData(4, 4)]
+    [InlineData(8, 8)]
+    [InlineData(12, 8)]
+    [InlineData(-3, 0)]
+    public void LayerCount_FollowsResidentTerrainAndClampsToTheMeshCap(int resident, int expected)
+    {
+        Assert.Equal(expected, BottomBarControlPolicy.ResolveLayerCount(resident));
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 0)]
+    [InlineData(4, 3)]
+    [InlineData(8, 7)]
+    public void AlphaChannelCount_IsOnePerNonBaseLayer(int layers, int expected)
+    {
+        Assert.Equal(expected, BottomBarControlPolicy.ResolveAlphaChannelCount(layers));
+    }
+
+    [Fact]
+    public void BottomBar_WithFourResidentLayersShowsOnlyL0ToL3AndA1ToA3()
+    {
+        UiLayout layout = LayoutFor(1280, 720);
+        UiRect region = layout[UiRegion.BottomBar].Rect;
+        float scale = layout.Scale;
+
+        FooterFitResult fit = ViewerFooterLayout.Fit(region, scale, BottomItems(scale, layerCount: 4));
+
+        Assert.True(fit.Get("toggle-layer-3").Visible);
+        Assert.False(fit.Get("toggle-layer-4").Visible);
+        Assert.True(fit.Get("alpha-channel-3").Visible);
+        Assert.False(fit.Get("alpha-channel-4").Visible);
+        Assert.True(fit.ContentWidth <= ViewerFooterLayout.AvailableWidth(region, scale) + 0.5f);
+    }
+
+    [Fact]
+    public void BottomBar_WithNoResidentTerrainShowsNoLayerOrAlphaControls()
+    {
+        UiLayout layout = LayoutFor(1920, 1080);
+        UiRect region = layout[UiRegion.BottomBar].Rect;
+        float scale = layout.Scale;
+
+        FooterFitResult fit = ViewerFooterLayout.Fit(region, scale, BottomItems(scale, layerCount: 0));
+
+        Assert.False(fit.Get("toggle-layer-0").Visible);
+        Assert.False(fit.Get("alpha-channel-1").Visible);
+        Assert.True(fit.Get("toggle-liquid-water").Visible);
+        Assert.True(fit.Get("toggle-audio-mute").Visible);
     }
 }

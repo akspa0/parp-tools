@@ -38,6 +38,21 @@ public class WmoRenderer : ISceneRenderer, IGpuInstancedWmoRenderer, ISceneLight
     public static float GlobalOpacity { get; set; } = 1.0f;
     public static bool TexturesEnabled { get; set; } = true;
     public static float CollisionWallOpacity { get; set; } = 1.0f;
+
+    // WMO MLIQ basic types: 0=water, 1=ocean, 2=magma, 3=slime. Shared by every
+    // WmoRenderer instance so the bottom toolbar can filter liquid families.
+    public static bool ShowWaterLiquids { get; set; } = true;
+    public static bool ShowOceanLiquids { get; set; } = true;
+    public static bool ShowMagmaLiquids { get; set; } = true;
+    public static bool ShowSlimeLiquids { get; set; } = true;
+
+    public static bool IsLiquidTypeVisible(int basicType) => basicType switch
+    {
+        1 => ShowOceanLiquids,
+        2 => ShowMagmaLiquids,
+        3 => ShowSlimeLiquids,
+        _ => ShowWaterLiquids,
+    };
     public static bool CollisionWallTexturesEnabled { get; set; } = true;
 
     public bool IsCollisionWall => _isCollisionWall;

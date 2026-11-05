@@ -157,6 +157,9 @@ void main() {
             if (liq.GroupIndex >= 0 && liq.GroupIndex < runtimeVisibleGroups.Length && !runtimeVisibleGroups[liq.GroupIndex])
                 continue;
 
+            if (!WmoRenderer.IsLiquidTypeVisible(liq.BasicType))
+                continue;
+
             currentDrawCalls++;
             currentLiquidDrawCalls++;
             currentVisibleLiquidMeshes++;
@@ -369,7 +372,8 @@ void main() {
                     GroupIndex = gi,
                     Vao = vao, Vbo = vbo, Ebo = ebo,
                     IndexCount = (uint)indexArr.Length,
-                    ColorR = cr, ColorG = cg, ColorB = cb, ColorA = ca
+                    ColorR = cr, ColorG = cg, ColorB = cb, ColorA = ca,
+                    BasicType = liquidBasicType
                 });
 
                 ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: {xverts}x{yverts} verts, {xtiles}x{ytiles} tiles, {indices.Count / 3} tris, corner=({cornerX:F1},{cornerY:F1},{cornerZ:F1}), type={liquidTypeName}, groupLiquid={group.GroupLiquid}, matId={matId}");
@@ -496,5 +500,6 @@ void main() {
         public uint Vao, Vbo, Ebo;
         public uint IndexCount;
         public float ColorR, ColorG, ColorB, ColorA;
+        public int BasicType;
     }
 }

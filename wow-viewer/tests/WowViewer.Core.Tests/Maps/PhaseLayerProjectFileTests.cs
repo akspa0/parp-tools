@@ -25,6 +25,7 @@ public sealed class PhaseLayerProjectFileTests
             RotationDegrees = 90f,
             RotationOriginTileX = 32.5f,
             RotationOriginTileY = 32.5f,
+            GroupTransform = new DonorGroupTransform(17.5f, 2f, -1f, 32.5f, 32.5f),
             MirrorHorizontal = true,
             UsePlacedTilesOnly = true,
             Locked = true,
@@ -51,6 +52,7 @@ public sealed class PhaseLayerProjectFileTests
             Assert.Equal((2, -5), (roundTripped.CellOffsetX, roundTripped.CellOffsetY));
             Assert.Equal(90f, roundTripped.RotationDegrees);
             Assert.Equal((32.5f, 32.5f), (roundTripped.RotationOriginTileX, roundTripped.RotationOriginTileY));
+            Assert.Equal(layer.GroupTransform, roundTripped.GroupTransform);
             Assert.True(roundTripped.MirrorHorizontal);
             Assert.False(roundTripped.MirrorVertical);
             Assert.True(roundTripped.UsePlacedTilesOnly);

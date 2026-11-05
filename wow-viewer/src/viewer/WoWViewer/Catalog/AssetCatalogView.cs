@@ -57,6 +57,11 @@ public class AssetCatalogView
     /// </summary>
     public Action<string, bool, AssetCatalogEntry>? OnLoadModelRequested { get; set; }
 
+    /// <summary>Currently selected client-catalog entry, available to placement workbenches.</summary>
+    public AssetCatalogEntry? SelectedEntry => _selectedIndex >= 0 && _selectedIndex < _filteredEntries.Count
+        ? _filteredEntries[_selectedIndex]
+        : null;
+
     public AssetCatalogView(GL gl)
     {
         _gl = gl;
