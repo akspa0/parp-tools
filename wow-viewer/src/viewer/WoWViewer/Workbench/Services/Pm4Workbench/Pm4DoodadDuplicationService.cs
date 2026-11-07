@@ -721,6 +721,14 @@ internal sealed class Pm4DoodadDuplicationService
         else
         {
             solvedYaw = prism.YawDegrees + (candDy > candDx * 1.15f ? 90f : 0f);
+            // If the resident model already has an authored rotation, pick the 180° hemisphere
+            // closest to its current heading so alignment doesn't invert the model bow-to-stern.
+            float currentYaw = prev.PlacementRotation.Z;
+            float delta = MathF.IEEERemainder(currentYaw - solvedYaw, 360f);
+            if (MathF.Abs(delta) > 90f)
+            {
+                solvedYaw += 180f;
+            }
         }
         while (solvedYaw > 180f) solvedYaw -= 360f;
         while (solvedYaw < -180f) solvedYaw += 360f;
@@ -1854,6 +1862,11 @@ internal sealed class Pm4DoodadDuplicationService
                     else
                     {
                         solvedYaw = prism.YawDegrees + (candDy > candDx * 1.15f ? 90f : 0f);
+                        float delta = MathF.IEEERemainder(inst.PlacementRotation.Z - solvedYaw, 360f);
+                        if (MathF.Abs(delta) > 90f)
+                        {
+                            solvedYaw += 180f;
+                        }
                     }
                     while (solvedYaw > 180f) solvedYaw -= 360f;
                     while (solvedYaw < -180f) solvedYaw += 360f;
