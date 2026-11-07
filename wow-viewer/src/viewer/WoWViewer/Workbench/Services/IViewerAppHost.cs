@@ -389,6 +389,7 @@ internal interface IViewerAppHost
     Pm4WorkbenchService Pm4Workbench { get; }
     ExportWorkbenchService ExportWorkbench { get; }
     Pm4DoodadDuplicationService Pm4DoodadDuplication { get; }
+    Pm4MapWidePropagationService Pm4MapWidePropagation { get; }
     TerrainLayersPanelService TerrainLayersPanel { get; }
     MccvHoleDetectionService MccvHoleDetection { get; }
     PerfPanelService PerfPanel { get; }

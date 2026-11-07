@@ -384,28 +384,58 @@ internal sealed class Pm4WorkbenchSidebarService
         foreach (var l in pm4Host.TileWmoInstances.Values) totalWmo += l.Count;
         int totalPlacements = totalMdx + totalWmo;
 
+        if (worldScene != null)
+        {
+            host.Pm4MapWidePropagation.FlushPendingScenePlacements(worldScene);
+        }
+
         ImGui.TextDisabled($"Loaded Tiles: {totalLoadedTiles}  |  Placed Models: {totalPlacements}  |  Taught Rules: {taughtCount}");
         ImGui.Spacing();
 
-        if (SharedUiWidgets.ActionButton("✦ Harvest Pairings from Placed Models##pm4_auto_harvest"))
+        var prop = host.Pm4MapWidePropagation;
+        if (prop.IsRunning)
         {
-            host.Pm4DoodadDuplication.HarvestPairingsFromPlacedObjects(host);
-        }
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("Scans all placed models across loaded/donor tiles, correlates them with matching PM4 navmesh hulls, and auto-generates verified taught pairing rules.");
-        }
-
-        if (taughtCount > 0)
-        {
-            ImGui.SameLine();
-            if (SharedUiWidgets.ActionButton($"Apply All Rules Across Map ({totalLoadedTiles} tiles)##pm4_propagate_all"))
+            ImGui.Spacing();
+            ImGui.TextColored(UiTokens.Brass, $"Map Propagation Active: {prop.Phase}");
+            ImGui.ProgressBar(prop.ProgressFraction, new Vector2(-1f, 18f), $"{prop.ProcessedTiles}/{prop.TotalTiles} tiles ({prop.ProgressFraction:P0})");
+            ImGui.TextDisabled($"Placements Added: {prop.PlacementsAdded} | Current: {prop.CurrentTileName}");
+            if (SharedUiWidgets.ActionButton("Cancel Propagation##pm4_cancel_prop"))
             {
-                host.Pm4DoodadDuplication.ApplyAllTaughtPairingsAcrossAllTiles();
+                prop.Cancel();
+            }
+            ImGui.Spacing();
+        }
+        else
+        {
+            if (SharedUiWidgets.ActionButton("✦ Harvest Pairings from Placed Models##pm4_auto_harvest"))
+            {
+                host.Pm4DoodadDuplication.HarvestPairingsFromPlacedObjects(host);
             }
             if (ImGui.IsItemHovered())
             {
-                ImGui.SetTooltip("Populates matching unoccupied PM4 hulls across all loaded tiles using the active taught pairing rules.");
+                ImGui.SetTooltip("Scans all placed models across loaded/donor tiles, correlates them with matching PM4 navmesh hulls, and auto-generates verified taught pairing rules.");
+            }
+
+            if (taughtCount > 0)
+            {
+                ImGui.SameLine();
+                string buttonText = prop.TotalTiles > 0
+                    ? $"Apply All Rules Across Map ({prop.TotalTiles} tiles)##pm4_propagate_all"
+                    : $"Apply All Rules Across Map##pm4_propagate_all";
+                if (SharedUiWidgets.ActionButton(buttonText))
+                {
+                    prop.StartPropagationAndExport();
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("Populates matching unoccupied PM4 hulls across all map tiles (including unopened ones) using taught rules, fills missing data from donor layers, and exports patched LK ADTs.");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(prop.LastSummaryMessage))
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(UiTokens.Success, prop.LastSummaryMessage);
             }
         }
         ImGui.Spacing();
@@ -901,7 +931,16 @@ internal sealed class Pm4WorkbenchSidebarService
                 if (taughtCount > 0)
                 {
                     ImGui.Spacing();
-                    if (SharedUiWidgets.ActionButton($"Apply All Taught Rules Across All Loaded Tiles ({overlay._pm4TileObjects.Count} tiles)"))
+                    if (SharedUiWidgets.ActionButton($"Apply All Taught Rules Across Whole Map##pm4_apply_all_rules_project"))
+                    {
+                        host.Pm4MapWidePropagation.StartPropagationAndExport();
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip("Asynchronously applies all taught pairing rules across ALL map tiles (including unopened ones) and exports patched LK ADTs.");
+                    }
+                    ImGui.SameLine();
+                    if (SharedUiWidgets.ActionButton($"Apply to Loaded Tiles Only ({overlay._pm4TileObjects.Count})##pm4_propagate_loaded_only"))
                     {
                         host.Pm4DoodadDuplication.ApplyAllTaughtPairingsAcrossAllTiles();
                     }

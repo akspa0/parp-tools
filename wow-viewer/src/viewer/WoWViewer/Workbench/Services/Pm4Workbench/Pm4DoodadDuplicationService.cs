@@ -29,21 +29,10 @@ internal sealed class Pm4DoodadDuplicationService
     public string? LastOperationMessage { get; set; }
 
     public static bool IsWmoAsset(string? modelPath, string? assetKind = null)
-    {
-        if (!string.IsNullOrEmpty(modelPath) && modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (!string.IsNullOrEmpty(assetKind) && string.Equals(assetKind, "wmo", StringComparison.OrdinalIgnoreCase))
-            return true;
-        return false;
-    }
+        => Pm4DoodadDuplicationEngine.IsWmoAsset(modelPath, assetKind);
 
     public static string ResolveAssetKind(string? modelPath, string? assetKind = null)
-    {
-        if (IsWmoAsset(modelPath, assetKind)) return "WMO";
-        if (!string.IsNullOrWhiteSpace(assetKind)) return assetKind;
-        if (!string.IsNullOrEmpty(modelPath) && modelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)) return "M2";
-        return "MDX";
-    }
+        => Pm4DoodadDuplicationEngine.ResolveAssetKind(modelPath, assetKind);
 
     private interface IPm4UndoOperation
     {
@@ -229,7 +218,7 @@ internal sealed class Pm4DoodadDuplicationService
     /// <summary>
     /// Builds a world-space <see cref="Pm4DoodadTarget"/> from a PM4 overlay object.
     /// </summary>
-    private static Pm4DoodadTarget BuildTarget(Pm4OverlayObject obj, int tileX, int tileY)
+    internal static Pm4DoodadTarget BuildTarget(Pm4OverlayObject obj, int tileX, int tileY)
     {
         WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, obj.BaseTransform, out Vector3 hullMin, out Vector3 hullMax);
         return new Pm4DoodadTarget(
@@ -1495,7 +1484,7 @@ internal sealed class Pm4DoodadDuplicationService
         return addedIds;
     }
 
-    private static bool MatchesTaughtShape(
+    internal static bool MatchesTaughtShape(
         TaughtPairing taught,
         Pm4ModelCandidate cand,
         Pm4FootprintPrism prism,

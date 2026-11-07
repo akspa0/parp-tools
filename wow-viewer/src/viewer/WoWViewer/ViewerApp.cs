@@ -538,6 +538,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
     private readonly Pm4WorkbenchService _pm4Workbench;
     private readonly ExportWorkbenchService _exportWorkbench;
     private readonly Pm4DoodadDuplicationService _pm4DoodadDuplication;
+    private readonly Pm4MapWidePropagationService _pm4MapWidePropagation;
     private readonly TerrainLayersPanelService _terrainLayersPanel;
     private readonly MccvHoleDetectionService _mccvHoleDetection;
     private readonly PerfPanelService _perfPanel;
@@ -602,6 +603,7 @@ public partial class ViewerApp : IDisposable, Workbench.Pages.IEditorPageHost, I
         _pm4Workbench = new Pm4WorkbenchService(this);
         _exportWorkbench = new ExportWorkbenchService(this);
         _pm4DoodadDuplication = new Pm4DoodadDuplicationService(this);
+        _pm4MapWidePropagation = new Pm4MapWidePropagationService(this);
         _terrainLayersPanel = new TerrainLayersPanelService(this);
         _mccvHoleDetection = new MccvHoleDetectionService();
         _perfPanel = new PerfPanelService(this);

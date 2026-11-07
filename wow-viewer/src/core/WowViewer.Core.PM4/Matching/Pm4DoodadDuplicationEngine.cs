@@ -109,6 +109,29 @@ public static class Pm4DoodadDuplicationEngine
     public const int SyntheticUniqueIdBase = 0x50000000;
 
     /// <summary>
+    /// Returns true if the model path or asset kind indicates a WMO root rather than an M2/MDX doodad.
+    /// </summary>
+    public static bool IsWmoAsset(string? modelPath, string? assetKind = null)
+    {
+        if (!string.IsNullOrEmpty(modelPath) && modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (!string.IsNullOrEmpty(assetKind) && string.Equals(assetKind, "wmo", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Resolves canonical asset kind ("WMO", "M2", or "MDX") from path and optional hint.
+    /// </summary>
+    public static string ResolveAssetKind(string? modelPath, string? assetKind = null)
+    {
+        if (IsWmoAsset(modelPath, assetKind)) return "WMO";
+        if (!string.IsNullOrWhiteSpace(assetKind)) return assetKind;
+        if (!string.IsNullOrEmpty(modelPath) && modelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)) return "M2";
+        return "MDX";
+    }
+
+    /// <summary>
     /// Filters candidate PM4 targets, rejecting any targets whose centroid is within
     /// <paramref name="occupancyRadius"/> of an existing model placement.
     /// </summary>

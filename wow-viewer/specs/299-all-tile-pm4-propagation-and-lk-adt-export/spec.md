@@ -39,3 +39,4 @@
 - **SC-003**: Unoccupied PM4 hulls without user-taught rules are populated from available donor layers, donor ADTs, or prior knowledge.
 - **SC-004**: Patched LK ADTs (`.adt`) are automatically generated in `output/patched_adts/<mapName>/` and contain valid `MDDF`/`MODF` placement chunks matching the PM4 hulls.
 - **SC-005**: Full solution builds with 0 errors, unit tests pass 100%, and UI reference verification succeeds.
+

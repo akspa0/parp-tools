@@ -139,6 +139,13 @@ internal sealed class ExportWorkbenchService
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Patch modified ADTs with curated placements (preserving terrain/textures via AdtPlacementEditor, or creating monolithic 3.3.5 ADTs for unauthored tiles).");
 
+        if (SharedUiWidgets.ActionButton("Run Map-Wide PM4 Propagation & Export ADTs##Pm4MapWideExport"))
+        {
+            _host.Pm4MapWidePropagation.StartPropagationAndExport();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Runs asynchronous whole-map PM4 rule propagation across all tiles (including unopened ones), fills missing data from donor layers/prior knowledge, and exports patched LK ADTs.");
+
         string activeMap = !string.IsNullOrEmpty(_host.LoadedFileName)
             ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
             : "development";

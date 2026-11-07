@@ -1,5 +1,15 @@
 # Progress — wow-viewer
 
+## 2026-11-07 — Spec 299 Complete (All-Tile PM4 Rule Propagation, Async Progress Flow, Donor Harvest & LK ADT Export)
+
+- Implemented `Pm4MapWidePropagationService` in `WoWViewer`: executes whole-map PM4 rule propagation across all tiles (including unopened/unloaded tiles) using `IDataSource.GetFileList(".pm4")` (616 tiles for `development.wdt`) and on-demand background parsing via `CorePm4DocumentReader.Read` and `Pm4OverlayGeometry.BuildPm4TileObjects`.
+- Replaced freezing synchronous button with non-blocking async execution via `Task.Run` and `CancellationTokenSource`.
+- Added interactive UI controls in `Pm4WorkbenchSidebarService`: `ImGui.ProgressBar` with real-time percentage, processed/total tile counters, active tile name, placement counter, and responsive `[ Cancel Propagation ]` button.
+- Implemented cross-build and donor missing data harvesting: unoccupied PM4 hulls lacking direct human-taught pairings harvest matching placements from active donor layers and prior knowledge candidates.
+- Implemented automated LK ADT materialization and export upon propagation completion to `output/patched_adts/<mapName>/` using `AdtPlacementEditor` for existing base ADTs and `BlankAdtFactory` + `LkAdtWriter` for unauthored tiles.
+- Added thread-safe scene placement queue `_pendingScenePlacements` synchronized via `FlushPendingScenePlacements` during the sidebar render loop to safely spawn newly populated instances in the viewport without concurrency hazards.
+- Verification: full solution builds with 0 errors (`dotnet build WoWViewer.csproj -c Debug -m:1`); UI reference check passes (188/188 controls, 0 errors/warnings); unit tests in `Pm4MapWidePropagationTests` pass. Receipt: `wow-viewer/specs/299-all-tile-pm4-propagation-and-lk-adt-export/evidence/receipt-spec299.md`. Operator visual and LK ADT inspection verification owed.
+
 ## 2026-11-07 — Spec 298 Complete (PM4 Authentic Pairing Telemetry, Markdown Elimination of CK24 & Multi-Object GLB Export)
 
 - Enriched `TaughtPairing` record in Core (`Pm4DoodadDuplicationEngine.cs`) with authentic placement telemetry (`PlacementPosition`, `PlacementRotation`, `PlacementScale`, `UniqueId`) and PM4 hull telemetry (`TileX`, `TileY`, `ObjectPartId`, `LinkGroupObjectId`, `HullCentroid`, `HullBoundsMin`, `HullBoundsMax`).

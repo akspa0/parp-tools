@@ -362,6 +362,7 @@ public partial class ViewerApp
     Pm4WorkbenchService IViewerAppHost.Pm4Workbench => _pm4Workbench;
     ExportWorkbenchService IViewerAppHost.ExportWorkbench => _exportWorkbench;
     Pm4DoodadDuplicationService IViewerAppHost.Pm4DoodadDuplication => _pm4DoodadDuplication;
+    Pm4MapWidePropagationService IViewerAppHost.Pm4MapWidePropagation => _pm4MapWidePropagation;
     TerrainLayersPanelService IViewerAppHost.TerrainLayersPanel => _terrainLayersPanel;
     MccvHoleDetectionService IViewerAppHost.MccvHoleDetection => _mccvHoleDetection;
     PerfPanelService IViewerAppHost.PerfPanel => _perfPanel;

@@ -55,3 +55,4 @@ flowchart TD
 - **Phase 3**: Cross-build / donor harvest and prior knowledge fallback for unoccupied missing hulls.
 - **Phase 4**: Automated LK ADT export pipeline invoking `LkAdtWriter` / `AdtPlacementEditor`.
 - **Phase 5**: UI progress bar, control registration in `ui-controls.json`, and verification receipt.
+
