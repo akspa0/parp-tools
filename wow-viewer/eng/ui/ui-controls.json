@@ -1231,23 +1231,7 @@
       "label": "Layers",
       "region": "Bottom toolbar",
       "shortcut": null,
-      "help": "Open the layer controls popup: per-layer visibility, per-layer detail popups, and alpha-channel selection.",
-      "visible": true
-    },
-    {
-      "id": "bottom-layer-detail-visible",
-      "label": "Visible",
-      "region": "Bottom toolbar > Layers > Layer detail",
-      "shortcut": null,
-      "help": "Toggle visibility for the selected terrain texture layer.",
-      "visible": true
-    },
-    {
-      "id": "bottom-layer-detail-alpha",
-      "label": "Show alpha map",
-      "region": "Bottom toolbar > Layers > Layer detail",
-      "shortcut": null,
-      "help": "Enable the alpha-mask overlay for the selected terrain texture layer.",
+      "help": "Open the Layers workbench panel for per-layer visibility and alpha-channel controls.",
       "visible": true
     }
   ]

@@ -20,7 +20,6 @@ internal sealed class BottomBarService
     private WorldScene? _lastAppliedScene;
     private string _lastAppliedMap = string.Empty;
     private int _lastAppliedLayerCount = -1;
-    private bool _showLayerPopup;
 
     internal bool BottomToggleLiquidWater { get; set; } = true;
     internal bool BottomToggleLiquidOcean { get; set; } = true;
@@ -280,72 +279,9 @@ internal sealed class BottomBarService
         {
             ImGui.SetCursorPos(new Vector2(originX + layersPlacement.X, y));
             if (ImGui.Button("Layers##bottom-layers", new Vector2(layersPlacement.Width, 0f)))
-                _showLayerPopup = true;
+                _host.UiManager.OpenLeftDock(LeftPanel.Layers);
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Open per-layer visibility and alpha-channel controls.");
-        }
-
-        if (_showLayerPopup)
-        {
-            ImGui.SetNextWindowSize(new Vector2(380f * scale, 460f * scale), ImGuiCond.FirstUseEver);
-            if (ImGui.Begin("Layer Controls###BottomLayerPopup", ref _showLayerPopup))
-            {
-                ImGui.TextDisabled($"{layerCount} resident layer(s), {alphaLayerCount} alpha channel(s)");
-                for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
-                {
-                    int layer = layerIndex;
-                    bool visible = terrainRenderer?.GetShowLayer(layer) ?? true;
-                    if (ImGui.Checkbox($"L{layer}##popup-layer-{layer}", ref visible))
-                    {
-                        terrainRenderer?.SetShowLayer(layer, visible);
-                        _host.Settings.SaveViewerSettings();
-                    }
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton($"Details##popup-layer-details-{layer}"))
-                        ImGui.OpenPopup($"layer-detail-{layer}");
-                    if (ImGui.BeginPopup($"layer-detail-{layer}"))
-                    {
-                        ImGui.TextUnformatted($"Layer {layer}");
-                        bool detailVisible = terrainRenderer?.GetShowLayer(layer) ?? true;
-                        if (ImGui.Checkbox("Visible##popup-layer-detail-visible", ref detailVisible))
-                        {
-                            terrainRenderer?.SetShowLayer(layer, detailVisible);
-                            _host.Settings.SaveViewerSettings();
-                        }
-                        if (layer > 0 && ImGui.Button("Show alpha map##popup-layer-detail-alpha"))
-                        {
-                            int channel = Math.Clamp(layer, 1, Math.Max(1, alphaLayerCount));
-                            BottomToggleAlphaMask = true;
-                            BottomAlphaMaskChannel = channel;
-                            ApplyAlphaState(terrainManager?.Renderer, true, channel);
-                            if (vlmTerrain?.Renderer != terrainManager?.Renderer)
-                                ApplyAlphaState(vlmTerrain?.Renderer, true, channel);
-                            _host.Settings.SaveViewerSettings();
-                        }
-                        ImGui.EndPopup();
-                    }
-                }
-
-                ImGui.Separator();
-                for (int channel = 1; channel <= alphaLayerCount; channel++)
-                {
-                    int alphaChannel = channel;
-                    bool selected = terrainRenderer is not null
-                        ? terrainRenderer.ShowAlphaMask && terrainRenderer.AlphaMaskChannel == channel
-                        : BottomToggleAlphaMask && BottomAlphaMaskChannel == channel;
-                    if (ImGui.Selectable($"A{channel}##popup-alpha-channel-{channel}", selected))
-                    {
-                        bool showAlpha = !selected;
-                        BottomToggleAlphaMask = showAlpha;
-                        BottomAlphaMaskChannel = alphaChannel;
-                        ApplyAlphaState(terrainManager?.Renderer, showAlpha, alphaChannel);
-                        if (vlmTerrain?.Renderer != terrainManager?.Renderer)
-                            ApplyAlphaState(vlmTerrain?.Renderer, showAlpha, alphaChannel);
-                        _host.Settings.SaveViewerSettings();
-                    }
-                }
-            }
-            ImGui.End();
+                ImGui.SetTooltip("Open the Layers workbench panel for per-layer visibility and alpha-channel controls.");
         }
 
         DrawOpacity("opacity-m2", M2Renderer.GlobalOpacity, value =>

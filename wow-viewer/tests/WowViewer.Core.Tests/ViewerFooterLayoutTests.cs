@@ -35,14 +35,7 @@ public sealed class ViewerFooterLayoutTests
             new("toggle-audio-mute", 58f * scale, 52f * scale, FooterItemPriority.Essential),
         };
 
-        int resolvedLayers = BottomBarControlPolicy.ResolveLayerCount(layerCount);
-        for (int layer = 0; layer < resolvedLayers; layer++)
-            items.Add(new FooterItemMeasure($"toggle-layer-{layer}", 46f * scale, 42f * scale, FooterItemPriority.Essential));
-
-        int alphaChannels = BottomBarControlPolicy.ResolveAlphaChannelCount(resolvedLayers);
-        for (int channel = 1; channel <= alphaChannels; channel++)
-            items.Add(new FooterItemMeasure($"alpha-channel-{channel}", 36f * scale, 32f * scale, FooterItemPriority.Essential));
-
+        items.Add(new FooterItemMeasure("layers", 64f * scale, 56f * scale, FooterItemPriority.Essential));
         items.Add(new FooterItemMeasure("opacity-m2", 200f * scale, 160f * scale, FooterItemPriority.Essential));
         items.Add(new FooterItemMeasure("opacity-wmo", 180f * scale, 145f * scale, FooterItemPriority.Essential));
         return items;
@@ -251,7 +244,7 @@ public sealed class ViewerFooterLayoutTests
     }
 
     [Fact]
-    public void BottomBar_WithFourResidentLayersShowsOnlyL0ToL3AndA1ToA3()
+    public void BottomBar_AlwaysShowsTheLayersButton()
     {
         UiLayout layout = LayoutFor(1280, 720);
         UiRect region = layout[UiRegion.BottomBar].Rect;
@@ -259,15 +252,12 @@ public sealed class ViewerFooterLayoutTests
 
         FooterFitResult fit = ViewerFooterLayout.Fit(region, scale, BottomItems(scale, layerCount: 4));
 
-        Assert.True(fit.Get("toggle-layer-3").Visible);
-        Assert.False(fit.Get("toggle-layer-4").Visible);
-        Assert.True(fit.Get("alpha-channel-3").Visible);
-        Assert.False(fit.Get("alpha-channel-4").Visible);
+        Assert.True(fit.Get("layers").Visible);
         Assert.True(fit.ContentWidth <= ViewerFooterLayout.AvailableWidth(region, scale) + 0.5f);
     }
 
     [Fact]
-    public void BottomBar_WithNoResidentTerrainShowsNoLayerOrAlphaControls()
+    public void BottomBar_WithNoResidentTerrainStillShowsTheLayersButton()
     {
         UiLayout layout = LayoutFor(1920, 1080);
         UiRect region = layout[UiRegion.BottomBar].Rect;
@@ -275,8 +265,7 @@ public sealed class ViewerFooterLayoutTests
 
         FooterFitResult fit = ViewerFooterLayout.Fit(region, scale, BottomItems(scale, layerCount: 0));
 
-        Assert.False(fit.Get("toggle-layer-0").Visible);
-        Assert.False(fit.Get("alpha-channel-1").Visible);
+        Assert.True(fit.Get("layers").Visible);
         Assert.True(fit.Get("toggle-liquid-water").Visible);
         Assert.True(fit.Get("toggle-audio-mute").Visible);
     }

@@ -1,8 +1,8 @@
 # Progress — wow-viewer
 
-## 2026-11-05 — Spec 292 layer popups, Reconstruction routing, skybox enumeration
+## 2026-11-05 — Spec 292 layer panel, Reconstruction routing, skybox enumeration
 
-- Replaced the fixed L0–L7/A1–A7 toolbar row with a single **Layers** button and a popup that lists resident layers, opens per-layer detail popups, and selects alpha channels.
+- Replaced the fixed L0–L7/A1–A7 toolbar row with a single **Layers** button that opens the Layers workbench panel in the left dock (not a pop-out window); the panel lists resident layers and selects alpha channels.
 - The right action bar's **Reconstruction** button now opens `ViewerPanel.Reconstruction`, which draws the map-layer stack; the old Archaeology panel remains a separate destination.
 - The Sky panel's skybox combo now enumerates every `.mdx`/`.m2` under `World\Skybox` in addition to LightSkybox DBC names.
 - Verification: viewer compile 0 errors; footer tests 30/30; UI registry 156/156 clean.
