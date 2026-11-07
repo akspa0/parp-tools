@@ -7,8 +7,10 @@
 - Defaulted topological connectivity segmentation to active with shared `MSVT` vertex and `MSLK` boundary/adjacency link traversal, cleanly isolating click selection and bounding boxes to the clicked building component.
 - Isolated surface extraction in `ExtractCompositeSurfaceVertices` and `ExtractTileHullInputs` per-component, preventing tile-wide multi-model polygon cloud unioning.
 - Decoupled `HullKey` in `Pm4ShapeMatchAnalysisService` from float `Ck24` and added `EffectiveUniqueHullId` self-conflict guard to `FindHullConflicts` and `FindConflicts`.
-- Updated batch conflict reporting and Markdown/JSON export format to display `[<Tile>] Obj #<PartId> (Z=<z> yd) vs Obj #<PartId> claiming <Model> (<Dist> yds apart)` with explicit component IDs, link IDs, and $Z$ elevations.
-- Verification: solution builds with 0 errors; 76 focused unit tests pass 100% across Core, PM4, and ObjectIdentity; `Verify-UiReference.ps1` clean with 188/188 controls (0 errors, 0 warnings). Receipt: `wow-viewer/specs/296-pm4-object-identity-and-segmentation/evidence/receipt-spec296.md`. Operator real-client visual/selection proof remains owed.
+- Fixed 180° heading flip in `Pm4DoodadDuplicationService`: compared PCA solved yaw against resident model's existing rotation to pick the collinear $180^\circ$ hemisphere within $\pm 90^\circ$ of authored heading.
+- Restored selection bounding boxes: removed the `if (!drewSelectionWireframe)` gate so scene models (M2/MDX/WMO) always draw their animated oriented bounding box; transformed selected PM4 objects via `Pm4OverlayScene.BuildPm4GeometryTransform` and removed inverted tile-band clipping.
+- Replaced user-facing `CK24 0x...` labels across review queue rows, Selected Hull labels, manual curation associations, export details, and scene click candidates with `[<Tile>] Obj #<PartId> (Z=<z> yd)`.
+- Verification: solution builds with 0 errors; focused unit tests pass 100% across Core, PM4, and ObjectIdentity; `Verify-UiReference.ps1` clean with 188/188 controls (0 errors, 0 warnings). Receipt: `wow-viewer/specs/296-pm4-object-identity-and-segmentation/evidence/receipt-spec296.md`. Operator real-client visual/selection proof remains owed.
 
 ## 2026-11-06 — Spec 295 Phases 0–6 Complete (Visual PM4 Shape Library & Pairing)
 
