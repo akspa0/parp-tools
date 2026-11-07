@@ -278,12 +278,11 @@ internal sealed class Pm4ShapeMatchWorkbenchService
         int tileY,
         IReadOnlyList<Pm4OverlayObject> tileObjects)
     {
-        var seenCk24 = new HashSet<uint>();
         var list = new List<Pm4HullShapeInput>();
 
         foreach (var obj in tileObjects)
         {
-            if (obj.Ck24 != 0 && !seenCk24.Add(obj.Ck24))
+            if (obj.Triangles.Count == 0)
                 continue;
 
             list.Add(ExtractHullShapeInput(worldScene, obj, tileX, tileY));

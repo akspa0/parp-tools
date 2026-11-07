@@ -219,11 +219,11 @@ public sealed partial class Pm4OverlayScene
     internal const float Pm4MaxRenderDistance = 4000f;
     internal float _pm4WireframeLineWidth = 2.5f;
     internal bool _pm4RenderNodesAsCubes = true;
-    private bool _pm4SplitCk24ByConnectivity;
+    private bool _pm4SplitCk24ByConnectivity = true;
     private bool _showPm4Type40 = true;
     private bool _showPm4Type80 = true;
     private bool _showPm4TypeOther = true;
-    private bool _pm4SplitCk24ByMscnRef = true;
+    private bool _pm4SplitCk24ByMscnRef = false;
     // MSPV/MSPI path windows are a vertical planar quad mesh — the walls that stand between the
     // MSUR walkable surfaces. Measured corpus-wide: 98% of windows are exactly 4 indices, 99.6%
     // coplanar, and not one of 598,790 faces has Z as its dominant normal. The viewer has never

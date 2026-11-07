@@ -552,8 +552,10 @@ internal sealed class Pm4DoodadDuplicationService
 
     /// <summary>
     /// Extracts all surface vertices for a PM4 hull. If the hull belongs to a composite object
-    /// (Ck24 != 0), gathers triangles across all constituent parts in the tile so the full
-    /// building/bridge footprint and centroid are captured.
+    /// <summary>
+    /// Extracts transformed world-space surface vertices for a PM4 object.
+    /// When pm4Obj has a non-zero LinkGroupObjectId, constituent parts sharing that exact LinkGroupObjectId
+    /// are gathered. Otherwise, extracts only pm4Obj itself to prevent merging unrelated objects across the tile.
     /// </summary>
     public static List<Vector3> ExtractCompositeSurfaceVertices(
         WorldScene? worldScene,
@@ -565,14 +567,14 @@ internal sealed class Pm4DoodadDuplicationService
         var surfaceVerts = new List<Vector3>();
         minWorldZ = float.MaxValue;
 
-        if (pm4Obj.Ck24 != 0 && worldScene != null &&
+        if (pm4Obj.LinkGroupObjectId != 0 && worldScene != null &&
             (worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((pm4TileX, pm4TileY), out var tileObjs) ||
              worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((pm4TileY, pm4TileX), out tileObjs)))
         {
             for (int i = 0; i < tileObjs.Count; i++)
             {
                 var part = tileObjs[i];
-                if (part.Ck24 == pm4Obj.Ck24)
+                if (part.LinkGroupObjectId == pm4Obj.LinkGroupObjectId && part.Ck24 == pm4Obj.Ck24)
                 {
                     WorldScene.TransformBounds(part.BoundsMin, part.BoundsMax, part.BaseTransform, out Vector3 bMin, out _);
                     if (bMin.Z < minWorldZ) minWorldZ = bMin.Z;

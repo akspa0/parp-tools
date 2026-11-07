@@ -309,7 +309,7 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
                     Vector3 boxColor = Pm4ColorObjectBounds;
                     if (overlay._highlightedPm4ObjectKeys.Contains(objectKey))
                         boxColor = Pm4ColorHighlight;
-                    if (overlay._selectedPm4ObjectGroupKey.HasValue && overlay.IsPm4ObjectInGroup(overlay._selectedPm4ObjectGroupKey.Value, objectKey))
+                    if (overlay._selectedPm4ObjectKey.HasValue && overlay._selectedPm4ObjectKey.Value == objectKey)
                         boxColor = Pm4ColorSelection;
 
                     bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, boxColor);
@@ -333,7 +333,7 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
                     var thisKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId);
                     if (!overlay._showPm4PlacementZForAllObjects)
                     {
-                        if (!overlay._selectedPm4ObjectGroupKey.HasValue || !overlay.IsPm4ObjectInGroup(overlay._selectedPm4ObjectGroupKey.Value, thisKey))
+                        if (!overlay._selectedPm4ObjectKey.HasValue || overlay._selectedPm4ObjectKey.Value != thisKey)
                             continue;
                     }
 
@@ -619,8 +619,10 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
             Vector3 color = overlay.GetPm4ObjectColor(tileKey, obj);
             if (overlay._highlightedPm4ObjectKeys.Contains(objectKey))
                 color = Pm4ColorHighlight;
-            if (overlay._selectedPm4ObjectGroupKey.HasValue && overlay.IsPm4ObjectInGroup(overlay._selectedPm4ObjectGroupKey.Value, objectKey))
+            if (overlay._selectedPm4ObjectKey.HasValue && overlay._selectedPm4ObjectKey.Value == objectKey)
                 color = Pm4ColorSelection;
+            else if (overlay._selectedPm4ObjectGroupKey.HasValue && overlay.IsPm4ObjectInGroup(overlay._selectedPm4ObjectGroupKey.Value, objectKey))
+                color = Vector3.Lerp(color, Pm4ColorSelection, 0.25f);
 
             // Triangles (pos vec3 + col vec4 = 7 floats)
             if (obj.Triangles.Count > 0)

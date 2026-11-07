@@ -231,7 +231,7 @@ internal static class Pm4OverlayGeometry
             groups.Add(new Pm4OverlaySeedGroup(
                 ck24Group.Key,
                 (byte)(ck24Group.Key >> 16),
-                requiresConnectivitySeedSplit: false,
+                requiresConnectivitySeedSplit: true,
                 ck24Group.ToList()));
         }
 
@@ -731,10 +731,12 @@ internal static class Pm4OverlayGeometry
 
         var surfaceVertices = new List<List<int>>(surfaces.Count);
         var vertexToSurfaceIndices = new Dictionary<int, List<int>>();
+        var msviFirstToSurfaceIndex = new Dictionary<uint, int>(surfaces.Count);
 
         for (int s = 0; s < surfaces.Count; s++)
         {
             MsurEntry surface = surfaces[s].Surface;
+            msviFirstToSurfaceIndex[surface.MsviFirstIndex] = s;
             int firstIndex = (int)surface.MsviFirstIndex;
             int endExclusive = Math.Min(firstIndex + surface.IndexCount, meshIndices.Count);
             var vertices = new List<int>();
@@ -795,6 +797,28 @@ internal static class Pm4OverlayGeometry
 
                         visited[neighborSurface] = true;
                         queue.Enqueue(neighborSurface);
+                    }
+                }
+
+                // Also traverse MSLK adjacency links belonging to this surface (indexed)
+                MsurEntry curSurface = surfaces[current].Surface;
+                int firstMslk = (int)curSurface.MscnRefIndex; // MSUR._0x18 = mslk_first_index
+                int mslkCount = curSurface.AttributeMask;     // MSUR._0x02 = mslk_count
+                if (firstMslk >= 0 && firstMslk + mslkCount <= pm4.KnownChunks.Mslk.Count)
+                {
+                    for (int l = 0; l < mslkCount; l++)
+                    {
+                        MslkEntry link = pm4.KnownChunks.Mslk[firstMslk + l];
+                        int refIdx = link.RefIndex;
+                        if (refIdx >= 0 && refIdx < pm4.KnownChunks.Msur.Count)
+                        {
+                            MsurEntry targetMsur = pm4.KnownChunks.Msur[refIdx];
+                            if (msviFirstToSurfaceIndex.TryGetValue(targetMsur.MsviFirstIndex, out int neighborSurface) && !visited[neighborSurface])
+                            {
+                                visited[neighborSurface] = true;
+                                queue.Enqueue(neighborSurface);
+                            }
+                        }
                     }
                 }
             }
@@ -1297,10 +1321,12 @@ internal static class Pm4OverlayGeometry
 
         var surfaceVertices = new List<List<int>>(surfaces.Count);
         var vertexToSurfaceIndices = new Dictionary<int, List<int>>();
+        var msviFirstToSurfaceIndex = new Dictionary<uint, int>(surfaces.Count);
 
         for (int s = 0; s < surfaces.Count; s++)
         {
             MsurEntry surface = surfaces[s];
+            msviFirstToSurfaceIndex[surface.MsviFirstIndex] = s;
             int firstIndex = (int)surface.MsviFirstIndex;
             int endExclusive = Math.Min(firstIndex + surface.IndexCount, meshIndices.Count);
             var vertices = new List<int>();
@@ -1360,6 +1386,28 @@ internal static class Pm4OverlayGeometry
 
                         visited[neighborSurface] = true;
                         queue.Enqueue(neighborSurface);
+                    }
+                }
+
+                // Also traverse MSLK adjacency links belonging to this surface (bare)
+                MsurEntry curSurface = surfaces[current];
+                int firstMslk = (int)curSurface.MscnRefIndex; // MSUR._0x18 = mslk_first_index
+                int mslkCount = curSurface.AttributeMask;     // MSUR._0x02 = mslk_count
+                if (firstMslk >= 0 && firstMslk + mslkCount <= pm4.KnownChunks.Mslk.Count)
+                {
+                    for (int l = 0; l < mslkCount; l++)
+                    {
+                        MslkEntry link = pm4.KnownChunks.Mslk[firstMslk + l];
+                        int refIdx = link.RefIndex;
+                        if (refIdx >= 0 && refIdx < pm4.KnownChunks.Msur.Count)
+                        {
+                            MsurEntry targetMsur = pm4.KnownChunks.Msur[refIdx];
+                            if (msviFirstToSurfaceIndex.TryGetValue(targetMsur.MsviFirstIndex, out int neighborSurface) && !visited[neighborSurface])
+                            {
+                                visited[neighborSurface] = true;
+                                queue.Enqueue(neighborSurface);
+                            }
+                        }
                     }
                 }
             }
