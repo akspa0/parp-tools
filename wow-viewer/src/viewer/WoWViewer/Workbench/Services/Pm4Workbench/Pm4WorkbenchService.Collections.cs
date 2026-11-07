@@ -105,7 +105,7 @@ internal sealed partial class Pm4WorkbenchService
         if (_worldScene == null || !_worldScene.Pm4Overlay.TryGetSelectedPm4RegionInfo(out Pm4SelectedObjectRegionInfo regionInfo))
             return;
 
-        if (!ImGui.CollapsingHeader($"Selected MSHD Region##{idSuffix}", ImGuiTreeNodeFlags.DefaultOpen))
+        if (!ImGui.CollapsingHeader($"Selected MSHD Region##{idSuffix}"))
             return;
 
         ImGui.TextDisabled("Visible peers from the current camera-window PM4 overlay that share the selected object's MSHD.Field04 region id.");

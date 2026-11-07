@@ -226,5 +226,66 @@ public sealed class Pm4DoodadDuplicationTests
         Assert.Equal(2, results[0].ObjectPartId);
         Assert.Equal(2000000, results[0].UniqueId);
     }
+
+    [Fact]
+    public void FindBestMatchingCandidateHull_SelectsClosestConformingCandidate()
+    {
+        Vector3 pos = new(100f, 200f, 50f);
+        Vector3 span = new(10f, 10f, 5f);
+
+        var candidates = new List<(Vector3 WorldCenter, Vector3 WorldMin, Vector3 WorldMax)>
+        {
+            (new Vector3(102f, 201f, 50f), new Vector3(96f, 195f, 48f), new Vector3(108f, 207f, 52f)), // ~2.2 yds away
+            (new Vector3(112f, 205f, 50f), new Vector3(106f, 199f, 48f), new Vector3(118f, 211f, 52f))  // ~13 yds away
+        };
+
+        int bestIdx = Pm4DoodadDuplicationEngine.FindBestMatchingCandidateHull(pos, span, candidates, maxCentroidDistance: 15.0f);
+        Assert.Equal(0, bestIdx);
+    }
+
+    [Fact]
+    public void FindBestMatchingCandidateHull_RejectsCandidateExceedingMaxDistance()
+    {
+        Vector3 pos = new(100f, 200f, 50f);
+        Vector3 span = new(10f, 10f, 5f);
+
+        var candidates = new List<(Vector3 WorldCenter, Vector3 WorldMin, Vector3 WorldMax)>
+        {
+            (new Vector3(130f, 200f, 50f), new Vector3(125f, 195f, 48f), new Vector3(135f, 205f, 52f)) // 30 yds away
+        };
+
+        int bestIdx = Pm4DoodadDuplicationEngine.FindBestMatchingCandidateHull(pos, span, candidates, maxCentroidDistance: 15.0f);
+        Assert.Equal(-1, bestIdx);
+    }
+
+    [Fact]
+    public void FindBestMatchingCandidateHull_RejectsCandidateWithIncompatibleScaleRatio()
+    {
+        Vector3 pos = new(100f, 200f, 50f);
+        Vector3 tinySpan = new(1f, 1f, 1f);
+
+        var candidates = new List<(Vector3 WorldCenter, Vector3 WorldMin, Vector3 WorldMax)>
+        {
+            (new Vector3(101f, 201f, 50f), new Vector3(86f, 186f, 45f), new Vector3(116f, 216f, 55f)) // 30x30 yd span (30:1 ratio)
+        };
+
+        int bestIdx = Pm4DoodadDuplicationEngine.FindBestMatchingCandidateHull(pos, tinySpan, candidates, maxCentroidDistance: 15.0f);
+        Assert.Equal(-1, bestIdx);
+    }
+
+    [Fact]
+    public void FindBestMatchingCandidateHull_RejectsCandidateWithLargeVerticalOffset()
+    {
+        Vector3 pos = new(100f, 200f, 150f); // 100 yds above hull
+        Vector3 span = new(10f, 10f, 5f);
+
+        var candidates = new List<(Vector3 WorldCenter, Vector3 WorldMin, Vector3 WorldMax)>
+        {
+            (new Vector3(101f, 201f, 50f), new Vector3(96f, 196f, 48f), new Vector3(106f, 206f, 52f))
+        };
+
+        int bestIdx = Pm4DoodadDuplicationEngine.FindBestMatchingCandidateHull(pos, span, candidates, maxCentroidDistance: 15.0f);
+        Assert.Equal(-1, bestIdx);
+    }
 }
 

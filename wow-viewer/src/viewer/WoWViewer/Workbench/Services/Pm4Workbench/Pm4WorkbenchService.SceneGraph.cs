@@ -38,32 +38,35 @@ internal sealed partial class Pm4WorkbenchService
 
         if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo d))
         {
-            float placementZ = BitConverter.UInt32BitsToSingle(d.Ck24 << 8);
-            ImGui.Separator();
-            ImGui.Text($"Object Z (MSUR.0x1C): ~= {placementZ:F3}  (raw 0x{d.Ck24:X6}, exp 0x{d.Ck24Type:X2})");
-            ImGui.Text($"MSHD: F00={d.MshdField00}  Region(0x04)={d.MshdRegionId}  F08={d.MshdField08}");
-            ImGui.Text($"MSLK: group(0x04)=0x{d.LinkGroupObjectId:X8}  linked MPRL refs={d.LinkedPositionRefCount}");
-            ImGui.Text($"MSUR: class(0x00)=0x{d.DominantGroupKey:X2}  mslk_first_index(0x18)={d.DominantMscnRefIndex}");
-
-            if (d.DistinctTypeFlags != 0)
+            if (ImGui.CollapsingHeader("Advanced PM4 Forensics & Raw Chunks##SceneGraphAdvForensics"))
             {
-                var tf = new List<string>();
-                for (int bit = 1; bit < 32; bit++)
-                    if ((d.DistinctTypeFlags & (1u << bit)) != 0)
-                        tf.Add($"0x{bit:X2}");
-                byte gk = d.DominantGroupKey;
-                string gkl = gk switch { 0x03 => "0x03 (doodad)", 0x10 => "0x10 (lowest floor)", 0x11 => "0x11 (floor)", 0x12 => "0x12 (floor)", 0x13 => "0x13 (upper floor)", 0x14 => "0x14 (angled)", 0x15 => "0x15 (flat base)", _ => $"0x{gk:X2}" };
-                ImGui.Text($"SurfaceClass={gkl}  MSLK.0x00 flags: {string.Join(", ", tf)}");
-            }
-
-            if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectResearchInfo(out var ri) && ri.MslkRawEntries.Count > 0)
-            {
+                float placementZ = BitConverter.UInt32BitsToSingle(d.Ck24 << 8);
                 ImGui.Separator();
-                ImGui.TextDisabled($"MSLK entries ({ri.MslkRawEntries.Count}):");
-                foreach (string line in ri.MslkRawEntries.Take(5))
-                    ImGui.TextUnformatted(line);
-                if (ri.MslkRawEntries.Count > 5)
-                    ImGui.TextDisabled($"+ {ri.MslkRawEntries.Count - 5} more");
+                ImGui.Text($"Object Z (MSUR.0x1C): ~= {placementZ:F3}  (raw 0x{d.Ck24:X6}, exp 0x{d.Ck24Type:X2})");
+                ImGui.Text($"MSHD: F00={d.MshdField00}  Region(0x04)={d.MshdRegionId}  F08={d.MshdField08}");
+                ImGui.Text($"MSLK: group(0x04)=0x{d.LinkGroupObjectId:X8}  linked MPRL refs={d.LinkedPositionRefCount}");
+                ImGui.Text($"MSUR: class(0x00)=0x{d.DominantGroupKey:X2}  mslk_first_index(0x18)={d.DominantMscnRefIndex}");
+
+                if (d.DistinctTypeFlags != 0)
+                {
+                    var tf = new List<string>();
+                    for (int bit = 1; bit < 32; bit++)
+                        if ((d.DistinctTypeFlags & (1u << bit)) != 0)
+                            tf.Add($"0x{bit:X2}");
+                    byte gk = d.DominantGroupKey;
+                    string gkl = gk switch { 0x03 => "0x03 (doodad)", 0x10 => "0x10 (lowest floor)", 0x11 => "0x11 (floor)", 0x12 => "0x12 (floor)", 0x13 => "0x13 (upper floor)", 0x14 => "0x14 (angled)", 0x15 => "0x15 (flat base)", _ => $"0x{gk:X2}" };
+                    ImGui.Text($"SurfaceClass={gkl}  MSLK.0x00 flags: {string.Join(", ", tf)}");
+                }
+
+                if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectResearchInfo(out var ri) && ri.MslkRawEntries.Count > 0)
+                {
+                    ImGui.Separator();
+                    ImGui.TextDisabled($"MSLK entries ({ri.MslkRawEntries.Count}):");
+                    foreach (string line in ri.MslkRawEntries.Take(5))
+                        ImGui.TextUnformatted(line);
+                    if (ri.MslkRawEntries.Count > 5)
+                        ImGui.TextDisabled($"+ {ri.MslkRawEntries.Count - 5} more");
+                }
             }
         }
 

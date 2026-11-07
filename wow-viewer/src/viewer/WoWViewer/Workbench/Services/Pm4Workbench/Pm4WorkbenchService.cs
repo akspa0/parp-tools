@@ -258,51 +258,51 @@ internal sealed partial class Pm4WorkbenchService
         if (ImGui.CollapsingHeader("Selected PM4", ImGuiTreeNodeFlags.DefaultOpen))
         {
             var selectedPm4 = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
-            ImGui.Text($"tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart}");
-            ImGui.TextDisabled("part = viewer-generated split id from the current overlay build, not a raw PM4 field.");
+            float placementZ = selectedPm4.ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4.ck24 << 8) : 0f;
+            ImGui.Text($"Tile ({selectedPm4.tileX}, {selectedPm4.tileY})  Object Z {placementZ:F2} yd  Part {selectedPm4.objectPart}");
 
             if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
             {
-                // MSUR._0x1C is the producing placement's Z as an IEEE-754 float, not a packed key
-                // (bit-exact for 93.58% of objects; see docs/wowdev-wiki/pm4-pd4-draft.md). Show it
-                // as a height, and show the resolved placement where the object library can name it.
-                // The stored Ck24 is the top 24 bits, so this reconstruction carries ~0.003%
-                // relative error and is displayed as approximate.
-                float placementZ = BitConverter.UInt32BitsToSingle(debugInfo.Ck24 << 8);
-                ImGui.TextColored(new Vector4(0.55f, 0.85f, 0.55f, 1f),
-                    $"Placement Z ~= {placementZ:F3}   (MSUR.0x1C as float; CK24 is its top 24 bits)");
-                ImGui.TextDisabled($"Surfaces={debugInfo.SurfaceCount}  bounds Z {debugInfo.BoundsMin.Z:F2}..{debugInfo.BoundsMax.Z:F2}  centre ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})");
-                ImGui.TextDisabled($"Raw slice 0x{debugInfo.Ck24:X6} (exponent band 0x{debugInfo.Ck24Type:X2} - NOT a type)");
-                ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region(0x04)={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
-                ImGui.TextDisabled($"SurfaceClass(0x00)=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} MslkFirstIdx(0x18)={debugInfo.DominantMscnRefIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
-                ImGui.TextDisabled($"MSLK Group(0x04)=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
-                if (debugInfo.DistinctTypeFlags != 0)
-                {
-                    var tf = new List<string>();
-                    for (int bit = 1; bit < 32; bit++)
-                        if ((debugInfo.DistinctTypeFlags & (1u << bit)) != 0)
-                            tf.Add(bit switch { 0x03 => "m2-top", 0x10 => "floor-int", 0x12 => "ext-solid", _ => $"0x{bit:X2}" });
-                    byte gk = debugInfo.DominantGroupKey;
-                    bool match = (debugInfo.DistinctTypeFlags & (1u << gk)) != 0;
-                    string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
-                    ImGui.TextDisabled($"GroupKey={gkl} TypeFlags: {string.Join(", ", tf)} {(match ? "MATCH" : "MISMATCH")}");
-                }
-                else
-                {
-                    byte gk = debugInfo.DominantGroupKey;
-                    string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
-                    ImGui.TextDisabled($"GroupKey={gkl} TypeFlags: none");
-                }
-            }
+                Vector3 span = debugInfo.BoundsMax - debugInfo.BoundsMin;
+                ImGui.TextDisabled($"Center: ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})  |  Dimensions: {span.X:F1} x {span.Y:F1} x {span.Z:F1} yd  ({debugInfo.SurfaceCount} surfaces)");
 
-            if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectResearchInfo(out var ri) && ri.MslkRawEntries.Count > 0)
-            {
-                ImGui.Separator();
-                ImGui.TextDisabled("MSLK entries ($ri.MslkRawEntries.Count):");
-                foreach (string line in ri.MslkRawEntries.Take(5))
-                    ImGui.TextUnformatted(line);
-                if (ri.MslkRawEntries.Count > 5)
-                    ImGui.TextDisabled("+ $ri.MslkRawEntries.Count - 5 more");
+                if (ImGui.CollapsingHeader("Advanced PM4 Forensics & Raw Chunks##RawPm4Inspector"))
+                {
+                    ImGui.TextColored(new Vector4(0.55f, 0.85f, 0.55f, 1f),
+                        $"Placement Z ~= {placementZ:F3}   (MSUR.0x1C as float; CK24 is its top 24 bits)");
+                    ImGui.TextDisabled($"Surfaces={debugInfo.SurfaceCount}  bounds Z {debugInfo.BoundsMin.Z:F2}..{debugInfo.BoundsMax.Z:F2}  centre ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})");
+                    ImGui.TextDisabled($"Raw slice 0x{debugInfo.Ck24:X6} (exponent band 0x{debugInfo.Ck24Type:X2} - NOT a type)");
+                    ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region(0x04)={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
+                    ImGui.TextDisabled($"SurfaceClass(0x00)=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} MslkFirstIdx(0x18)={debugInfo.DominantMscnRefIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
+                    ImGui.TextDisabled($"MSLK Group(0x04)=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
+                    if (debugInfo.DistinctTypeFlags != 0)
+                    {
+                        var tf = new List<string>();
+                        for (int bit = 1; bit < 32; bit++)
+                            if ((debugInfo.DistinctTypeFlags & (1u << bit)) != 0)
+                                tf.Add(bit switch { 0x03 => "m2-top", 0x10 => "floor-int", 0x12 => "ext-solid", _ => $"0x{bit:X2}" });
+                        byte gk = debugInfo.DominantGroupKey;
+                        bool match = (debugInfo.DistinctTypeFlags & (1u << gk)) != 0;
+                        string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
+                        ImGui.TextDisabled($"GroupKey={gkl} TypeFlags: {string.Join(", ", tf)} {(match ? "MATCH" : "MISMATCH")}");
+                    }
+                    else
+                    {
+                        byte gk = debugInfo.DominantGroupKey;
+                        string gkl = gk switch { 0x03 => "m2-surf", 0x10 => "floor-int", 0x12 => "ext-solid", 0x13 => "portal-int", _ => $"0x{gk:X2}" };
+                        ImGui.TextDisabled($"GroupKey={gkl} TypeFlags: none");
+                    }
+
+                    if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectResearchInfo(out var ri) && ri.MslkRawEntries.Count > 0)
+                    {
+                        ImGui.Separator();
+                        ImGui.TextDisabled($"MSLK entries ({ri.MslkRawEntries.Count}):");
+                        foreach (string line in ri.MslkRawEntries.Take(5))
+                            ImGui.TextUnformatted(line);
+                        if (ri.MslkRawEntries.Count > 5)
+                            ImGui.TextDisabled($"+ {ri.MslkRawEntries.Count - 5} more");
+                    }
+                }
             }
 
             if (ImGui.Button("Clear PM4 Selection"))

@@ -375,6 +375,43 @@ internal sealed class Pm4WorkbenchSidebarService
         if (worldScene == null)
             return;
 
+        int totalLoadedTiles = overlay._pm4TileObjects.Count;
+        int taughtCount = host.Pm4DoodadDuplication.TaughtPairings.Count;
+        int totalMdx = 0;
+        int totalWmo = 0;
+        IPm4OverlayHost pm4Host = worldScene;
+        foreach (var l in pm4Host.TileMdxInstances.Values) totalMdx += l.Count;
+        foreach (var l in pm4Host.TileWmoInstances.Values) totalWmo += l.Count;
+        int totalPlacements = totalMdx + totalWmo;
+
+        ImGui.TextDisabled($"Loaded Tiles: {totalLoadedTiles}  |  Placed Models: {totalPlacements}  |  Taught Rules: {taughtCount}");
+        ImGui.Spacing();
+
+        if (SharedUiWidgets.ActionButton("✦ Harvest Pairings from Placed Models##pm4_auto_harvest"))
+        {
+            host.Pm4DoodadDuplication.HarvestPairingsFromPlacedObjects(host);
+        }
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Scans all placed models across loaded/donor tiles, correlates them with matching PM4 navmesh hulls, and auto-generates verified taught pairing rules.");
+        }
+
+        if (taughtCount > 0)
+        {
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton($"Apply All Rules Across Map ({totalLoadedTiles} tiles)##pm4_propagate_all"))
+            {
+                host.Pm4DoodadDuplication.ApplyAllTaughtPairingsAcrossAllTiles();
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Populates matching unoccupied PM4 hulls across all loaded tiles using the active taught pairing rules.");
+            }
+        }
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
         string mapName = ManualCurationWorkbenchService.NormalizeMapName(host.LoadedFileName);
         _manualCuration.ApplyProjectToScene(mapName, worldScene);
 
@@ -797,7 +834,7 @@ internal sealed class Pm4WorkbenchSidebarService
             ? Path.GetFileNameWithoutExtension(host.LoadedFileName)
             : "development";
         bool projectExists = Pm4PairingProjectStore.Exists(activeMap);
-        int taughtCount = host.Pm4DoodadDuplication.TaughtPairings.Count;
+        taughtCount = host.Pm4DoodadDuplication.TaughtPairings.Count;
 
         if (taughtCount > 0 || projectExists)
         {

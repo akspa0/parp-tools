@@ -1774,6 +1774,123 @@ internal sealed class Pm4DoodadDuplicationService
     }
 
     /// <summary>
+    /// Scans all resident / donor placements across all loaded tiles, correlates each placed object
+    /// with its closest matching PM4 navmesh hull, and automatically registers verified TaughtPairing rules.
+    /// </summary>
+    public (int Scanned, int NewlyHarvested, int AlreadyKnown, int Ambiguous) HarvestPairingsFromPlacedObjects(
+        IViewerAppHost host,
+        float maxCentroidDistance = 15.0f)
+    {
+        var worldScene = host.WorldScene;
+        if (worldScene == null)
+            return (0, 0, 0, 0);
+
+        IPm4OverlayHost pm4Host = worldScene;
+        var loadedTiles = new HashSet<(int TileX, int TileY)>();
+        foreach (var key in worldScene.Pm4Overlay._pm4TileObjects.Keys)
+            loadedTiles.Add(key);
+        foreach (var key in pm4Host.TileMdxInstances.Keys)
+            loadedTiles.Add(key);
+        foreach (var key in pm4Host.TileWmoInstances.Keys)
+            loadedTiles.Add(key);
+
+        if (loadedTiles.Count == 0)
+        {
+            string emptyMsg = "No tiles loaded with resident placements and PM4 collision to harvest.";
+            host.StatusMessage = emptyMsg;
+            LastOperationMessage = emptyMsg;
+            return (0, 0, 0, 0);
+        }
+
+        int scanned = 0;
+        int newlyHarvested = 0;
+        int alreadyKnown = 0;
+        int ambiguous = 0;
+
+        foreach (var (tileX, tileY) in loadedTiles)
+        {
+            if (!worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((tileX, tileY), out var pm4Objects) || pm4Objects.Count == 0)
+            {
+                if (!worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((tileY, tileX), out pm4Objects) || pm4Objects.Count == 0)
+                    continue;
+            }
+
+            pm4Host.TileMdxInstances.TryGetValue((tileX, tileY), out var tileMdx);
+            pm4Host.TileWmoInstances.TryGetValue((tileX, tileY), out var tileWmo);
+
+            var placements = new List<ObjectInstance>();
+            if (tileWmo != null) placements.AddRange(tileWmo);
+            if (tileMdx != null) placements.AddRange(tileMdx);
+
+            if (placements.Count == 0)
+                continue;
+
+            // Build list of PM4 candidate objects with world-space bounds and centroids
+            var pm4Candidates = new List<(Vector3 WorldCenter, Vector3 WorldMin, Vector3 WorldMax, Pm4OverlayObject Obj)>();
+            var candBoxes = new List<(Vector3 WorldCenter, Vector3 WorldMin, Vector3 WorldMax)>();
+            for (int p = 0; p < pm4Objects.Count; p++)
+            {
+                var obj = pm4Objects[p];
+                WorldScene.TransformBounds(obj.BoundsMin, obj.BoundsMax, obj.BaseTransform, out Vector3 wMin, out Vector3 wMax);
+                Vector3 wCenter = (wMin + wMax) * 0.5f;
+                pm4Candidates.Add((wCenter, wMin, wMax, obj));
+                candBoxes.Add((wCenter, wMin, wMax));
+            }
+
+            foreach (var inst in placements)
+            {
+                if (string.IsNullOrWhiteSpace(inst.ModelPath))
+                    continue;
+
+                scanned++;
+
+                Vector3 instPos = inst.PlacementPosition;
+                Vector3 modelSpan = inst.BoundsResolved
+                    ? (inst.BoundsMax - inst.BoundsMin)
+                    : (inst.LocalBoundsMax - inst.LocalBoundsMin);
+
+                int bestIdx = Pm4DoodadDuplicationEngine.FindBestMatchingCandidateHull(
+                    instPos, modelSpan, candBoxes, maxCentroidDistance: maxCentroidDistance);
+
+                if (bestIdx < 0)
+                    continue;
+
+                var bestCandidate = pm4Candidates[bestIdx];
+
+                // Check if a rule for this exact model already exists
+                bool isKnown = _taughtPairings.Any(t =>
+                    string.Equals(t.ModelPath, inst.ModelPath, StringComparison.OrdinalIgnoreCase));
+
+                if (isKnown)
+                {
+                    alreadyKnown++;
+                    continue;
+                }
+
+                try
+                {
+                    TeachPairing(bestCandidate.Obj, inst, tileX, tileY);
+                    newlyHarvested++;
+                }
+                catch
+                {
+                    ambiguous++;
+                }
+            }
+        }
+
+        SaveTaughtPairingsToDisk();
+
+        string summaryMsg = newlyHarvested > 0
+            ? $"✓ Harvested {newlyHarvested} new pairing rule(s) ({alreadyKnown} already known) from {scanned} placed model(s) across {loadedTiles.Count} loaded tile(s)."
+            : $"Harvest scan complete: {alreadyKnown} model(s) already taught, {scanned} scanned across {loadedTiles.Count} loaded tile(s).";
+
+        host.StatusMessage = summaryMsg;
+        LastOperationMessage = summaryMsg;
+        return (scanned, newlyHarvested, alreadyKnown, ambiguous);
+    }
+
+    /// <summary>
     /// Magnetically snaps all resident ADT placements (M2 and WMO) on a tile to their nearest PM4 collision hulls.
     /// </summary>
     public int MagnetizeTilePlacementsToPm4(int tileX, int tileY, float maxSnapDistance = 60.0f)

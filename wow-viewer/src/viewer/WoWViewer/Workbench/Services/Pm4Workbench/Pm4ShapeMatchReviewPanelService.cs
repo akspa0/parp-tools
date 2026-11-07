@@ -32,7 +32,7 @@ internal sealed class Pm4ShapeMatchReviewPanelService
         int activeTileY,
         string mapName)
     {
-        if (!SharedUiWidgets.SectionHeader("Shape-Match Proposals & Review Queue", defaultOpen: true, id: "Pm4ShapeMatchReviewSection"))
+        if (!SharedUiWidgets.SectionHeader("Shape-Match Proposals & Review Queue", defaultOpen: false, id: "Pm4ShapeMatchReviewSection"))
             return;
 
         workbench.EnsureLibraryInitialized(worldScene);

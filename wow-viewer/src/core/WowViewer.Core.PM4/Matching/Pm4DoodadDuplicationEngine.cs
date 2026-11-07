@@ -344,4 +344,56 @@ public static class Pm4DoodadDuplicationEngine
 
         return results;
     }
+
+    /// <summary>
+    /// Correlates a placed model with a list of candidate PM4 hulls, filtering by 2D proximity,
+    /// scale ratio, and vertical bounds alignment. Returns the index of the best matching candidate, or -1 if none match.
+    /// </summary>
+    public static int FindBestMatchingCandidateHull(
+        Vector3 placementPosition,
+        Vector3 placementSpan,
+        IReadOnlyList<(Vector3 WorldCenter, Vector3 WorldMin, Vector3 WorldMax)> candidates,
+        float maxCentroidDistance = 15.0f,
+        float maxScaleRatio = 4.5f,
+        float maxVerticalDistance = 35.0f)
+    {
+        if (candidates == null || candidates.Count == 0)
+            return -1;
+
+        float modelHorizSpan = MathF.Max(MathF.Abs(placementSpan.X), MathF.Abs(placementSpan.Y));
+        int bestIndex = -1;
+        float bestDist2D = maxCentroidDistance;
+
+        for (int c = 0; c < candidates.Count; c++)
+        {
+            var cand = candidates[c];
+            float d2D = Vector2.Distance(
+                new Vector2(placementPosition.X, placementPosition.Y),
+                new Vector2(cand.WorldCenter.X, cand.WorldCenter.Y));
+
+            if (d2D > bestDist2D)
+                continue;
+
+            Vector3 hullSpan = cand.WorldMax - cand.WorldMin;
+            float hullHorizSpan = MathF.Max(MathF.Abs(hullSpan.X), MathF.Abs(hullSpan.Y));
+
+            // Scale compatibility filter: avoid matching tiny props (< 0.5yd) with massive hulls (> 20yd)
+            if (hullHorizSpan > 0.5f && modelHorizSpan > 0.2f)
+            {
+                float ratio = MathF.Max(modelHorizSpan / hullHorizSpan, hullHorizSpan / modelHorizSpan);
+                if (ratio > maxScaleRatio)
+                    continue;
+            }
+
+            // Height sanity check: vertical difference should not exceed reasonable bounding threshold
+            float dZ = MathF.Abs(placementPosition.Z - cand.WorldCenter.Z);
+            if (dZ > MathF.Max(maxVerticalDistance, hullSpan.Z * 2.5f))
+                continue;
+
+            bestDist2D = d2D;
+            bestIndex = c;
+        }
+
+        return bestIndex;
+    }
 }

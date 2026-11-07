@@ -318,6 +318,7 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
             }
         }
 
+
         if (overlay._showPm4PlacementZPlane)
         {
             foreach (var tileEntry in overlay._pm4TileObjects)

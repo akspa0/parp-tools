@@ -1,5 +1,18 @@
 # Progress — wow-viewer
 
+## 2026-11-06 — Spec 297 Complete (Automated Known-Good Pairing Harvester & Streamlined Matching Workbench)
+
+- Created pure static geometric correlation method `Pm4DoodadDuplicationEngine.FindBestMatchingCandidateHull` in Core: filters candidates by 2D centroid proximity ($\le 15\,\text{yd}$), scale ratio ($\le 4.5$), and vertical bounding sanity ($\le 35\,\text{yd}$ or $2.5\times$ hull height).
+- Implemented `Pm4DoodadDuplicationService.HarvestPairingsFromPlacedObjects`: scans resident and donor placed objects across all loaded tiles, correlates them with authoritative PM4 navmesh hulls, auto-registers verified `TaughtPairing` rules, and auto-saves to `<map>.pairings.json` and `<map>.manifest.json`.
+- Consolidated the PM4 workbench into a streamlined Cockpit layout in `Pm4WorkbenchSidebarService`:
+  - Cockpit status summary pill: `Loaded Tiles: <N> | Placed Models: <M> | Taught Rules: <K>`.
+  - Prominent one-click Quick Action Bar: `[ ✦ Harvest Pairings from Placed Models ]` and `[ Apply All Rules Across Map ]`.
+  - Clean Active Human Pairing & Curation card: displays model name, PM4 hull with elevation and link group, distance, 90°/180° rotation shortcuts, Z nudge, and one-click multi-tile propagation.
+- Tucked low-level raw chunk dumps (`MSHD`, `MSLK`, raw bytes, surface class flags, regional peer lists) into an expandable `Advanced PM4 Forensics & Raw Chunks` drawer across `Pm4WorkbenchService.cs`, `Collections.cs`, and `SceneGraph.cs`, eliminating viewport selection clutter.
+- Collapsed secondary manual JSON curation and review queue panels by default (`defaultOpen: false`).
+- Added 4 unit tests covering `FindBestMatchingCandidateHull` in `Pm4DoodadDuplicationTests.cs` (10/10 passed).
+- Verification: full solution builds with 0 errors; UI reference check passed (188/188 controls, 0 errors/warnings). Receipt: `wow-viewer/specs/297-automated-pairing-harvester-and-streamlined-matching/evidence/receipt-spec297.md`. Operator real-client visual/harvest proof remains owed.
+
 ## 2026-11-06 — Spec 296 Complete (PM4 Object Identity, Topological Segmentation & Conflict Decoupling)
 
 - Resolved the fundamental PM4 object identity defect: established that `CK24` is an IEEE-754 32-bit float representing ADT placement $Z$ in yards, not an object ID. On shared plateaus, multiple distinct buildings at the same elevation were previously collapsed into a mega-mesh with self-conflict false positives.

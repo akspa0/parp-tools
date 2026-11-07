@@ -256,7 +256,7 @@ internal sealed class ManualCurationWorkbenchService
         Vector3? selectedHullCenter = null,
         string? selectedHullLabel = null)
     {
-        if (!SharedUiWidgets.SectionHeader("Manual object to PM4 hull curation", "Create explicit, reviewable object-to-hull associations. Duplicate pairs are reported, and remove or replace actions are explicit.", defaultOpen: true, id: "manual-object-hull-curation"))
+        if (!SharedUiWidgets.SectionHeader("Manual object to PM4 hull curation", "Create explicit, reviewable object-to-hull associations. Duplicate pairs are reported, and remove or replace actions are explicit.", defaultOpen: false, id: "manual-object-hull-curation"))
             return;
 
         ManualCurationProject project = GetProject(mapName);
