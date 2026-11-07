@@ -25,3 +25,10 @@ Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md)
 - [x] T010 [Verification] Run unit tests (`dotnet test`) and verify 100% pass. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
 - [x] T011 [Verification] Run `Verify-UiReference.ps1` and verify 0 errors, 0 warnings. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
 
+## Phase 5 — 180° Heading Alignment & Selection Bounding Boxes (FR-008, FR-009)
+
+- [x] T012 [Viewer] In `Pm4DoodadDuplicationService.AlignPlacementToPm4Hull` and `ApplyTaughtPairingAcrossAllTiles`, compare PCA solved yaw against resident model's existing rotation to pick collinear $180^\circ$ hemisphere within $\pm 90^\circ$. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
+- [x] T013 [Viewer] In `WorldScene.cs`, remove `if (!drewSelectionWireframe)` gate so M2/MDX/WMO models always draw animated oriented selection bounding box alongside wireframe. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
+- [x] T014 [Viewer] In `WorldScene.cs`, transform selected PM4 object bounds via `Pm4OverlayScene.BuildPm4GeometryTransform` and remove inverted tile-band clipping so selected PM4 surfaces always draw animated selection bounding box. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
+- [x] T015 [UI] Eliminate remaining `CK24 0x...` labels across `Pm4ShapeMatchReviewPanelService`, `ManualCurationWorkbenchService`, `Pm4WorkbenchSidebarService`, `ExportWorkbenchService`, and `SceneHoverAndPickService`. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
+
