@@ -5,6 +5,25 @@ using WowViewer.Core.PM4.Footprint;
 
 namespace WowViewer.Core.PM4.Matching;
 
+/// <summary>Composite structural identity uniquely identifying an authored object component in PM4.</summary>
+public readonly record struct Pm4ObjectIdentity(
+    int TileX,
+    int TileY,
+    int ComponentId,
+    uint LinkGroupObjectId,
+    float PlacementZ,
+    Vector3 Centroid,
+    Vector3 BoundingSize,
+    byte SurfaceClass = 0)
+{
+    public ulong UniqueHullId => Pm4HullShapeInput.MakeUniqueHullId(TileX, TileY, ComponentId);
+
+    public string FormatTag() =>
+        $"[{TileX}_{TileY}] Obj #{ComponentId} (Z={PlacementZ:F1}yd, Lnk={LinkGroupObjectId})";
+
+    public override string ToString() => FormatTag();
+}
+
 /// <summary>Tile-scoped PM4 hull descriptor input for shape-match analysis.</summary>
 public sealed record Pm4HullShapeInput(
     int TileX,
@@ -12,7 +31,26 @@ public sealed record Pm4HullShapeInput(
     uint Ck24,
     int ObjectPartId,
     uint LinkGroupObjectId,
-    Pm4GeometricShapeDescriptor Descriptor);
+    Pm4GeometricShapeDescriptor Descriptor)
+{
+    public ulong UniqueHullId => MakeUniqueHullId(TileX, TileY, ObjectPartId);
+
+    public float PlacementZ => Descriptor != null ? Descriptor.PrismCentroid.Z : 0f;
+
+    public Pm4ObjectIdentity Identity => new(
+        TileX,
+        TileY,
+        ObjectPartId,
+        LinkGroupObjectId,
+        PlacementZ,
+        Descriptor != null ? Descriptor.PrismCentroid : Vector3.Zero,
+        Descriptor != null ? Descriptor.BoundingBoxDimensions : Vector3.Zero);
+
+    public static ulong MakeUniqueHullId(int tileX, int tileY, int componentId)
+    {
+        return ((ulong)(uint)tileX << 48) | ((ulong)(uint)tileY << 32) | (uint)componentId;
+    }
+}
 
 /// <summary>Model shape candidate carrying a geometric shape descriptor.</summary>
 public sealed record Pm4ModelShapeCandidate(
@@ -55,8 +93,13 @@ public sealed record Pm4ShapeMatchProposal(
     bool IsUnmatched,
     int ConflictCount,
     Pm4HullShapeInput? Hull = null,
-    Vector3? ExplicitCalibratedCentroid = null)
+    Vector3? ExplicitCalibratedCentroid = null,
+    ulong UniqueHullId = 0)
 {
+    public ulong EffectiveUniqueHullId => UniqueHullId != 0
+        ? UniqueHullId
+        : (Hull != null ? Hull.UniqueHullId : (ulong)HullKey);
+
     public Pm4ShapeCandidate? TopCandidate => Candidates.Count > 0 ? Candidates[0] : null;
 
     public bool HasConflict => ConflictCount > 1;

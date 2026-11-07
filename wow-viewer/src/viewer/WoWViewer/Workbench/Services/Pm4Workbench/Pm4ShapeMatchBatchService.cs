@@ -30,6 +30,7 @@ public sealed record Pm4BatchSummaryRow(
     uint Ck24,
     int ObjectPartId,
     uint LinkGroupObjectId,
+    float PlacementZ,
     string Classification,
     string? ProposedModelPath,
     string? ChosenModelPath,
@@ -172,6 +173,8 @@ public sealed class Pm4ShapeMatchBatchService
 
             bool hasConflict = conflictHullKeys.Contains((hullId.TileX, hullId.TileY, hullId.Ck24, hullId.ObjectPartId));
 
+            float placementZ = hullInput.PlacementZ;
+
             if (ManualCurationProjectPolicy.TryGetActiveShapeMatchDecision(project, hullId, out var existingDecision) &&
                 existingDecision != null)
             {
@@ -183,6 +186,7 @@ public sealed class Pm4ShapeMatchBatchService
                     Ck24: hullId.Ck24,
                     ObjectPartId: hullId.ObjectPartId,
                     LinkGroupObjectId: hullId.LinkGroupObjectId,
+                    PlacementZ: placementZ,
                     Classification: "Matched",
                     ProposedModelPath: existingDecision.ProposedModelPath,
                     ChosenModelPath: existingDecision.ChosenModelPath ?? existingDecision.ProposedModelPath,
@@ -204,6 +208,7 @@ public sealed class Pm4ShapeMatchBatchService
                     Ck24: hullId.Ck24,
                     ObjectPartId: hullId.ObjectPartId,
                     LinkGroupObjectId: hullId.LinkGroupObjectId,
+                    PlacementZ: placementZ,
                     Classification: "Unmatched",
                     ProposedModelPath: null,
                     ChosenModelPath: null,
@@ -223,6 +228,7 @@ public sealed class Pm4ShapeMatchBatchService
                     Ck24: hullId.Ck24,
                     ObjectPartId: hullId.ObjectPartId,
                     LinkGroupObjectId: hullId.LinkGroupObjectId,
+                    PlacementZ: placementZ,
                     Classification: "LowConfidence",
                     ProposedModelPath: proposal.TopCandidate.ModelPath,
                     ChosenModelPath: null,
@@ -242,6 +248,7 @@ public sealed class Pm4ShapeMatchBatchService
                     Ck24: hullId.Ck24,
                     ObjectPartId: hullId.ObjectPartId,
                     LinkGroupObjectId: hullId.LinkGroupObjectId,
+                    PlacementZ: placementZ,
                     Classification: "Matched",
                     ProposedModelPath: proposal.TopCandidate.ModelPath,
                     ChosenModelPath: null,
@@ -279,6 +286,7 @@ public sealed class Pm4ShapeMatchBatchService
                     Ck24: decision.Hull.Ck24,
                     ObjectPartId: decision.Hull.ObjectPartId,
                     LinkGroupObjectId: decision.Hull.LinkGroupObjectId,
+                    PlacementZ: decision.CalibratedCentroid.Z,
                     Classification: "Matched",
                     ProposedModelPath: decision.ProposedModelPath,
                     ChosenModelPath: decision.ChosenModelPath ?? decision.ProposedModelPath,
@@ -335,8 +343,8 @@ public sealed class Pm4ShapeMatchBatchService
         sb.AppendLine();
         sb.AppendLine("## Hull Pairing Rows");
         sb.AppendLine();
-        sb.AppendLine("| Tile | CK24 | Part | Classification | Proposed Candidate | Chosen Asset | Confidence | Distance | Provenance | Conflict |");
-        sb.AppendLine("|---|---:|---:|---|---|---|---:|---:|---|---|");
+        sb.AppendLine("| Tile | Part | Lnk | CK24 | Base Z (yd) | Classification | Proposed Candidate | Chosen Asset | Confidence | Distance | Provenance | Conflict |");
+        sb.AppendLine("|---|---:|---:|---:|---:|---|---|---|---:|---:|---|---|");
         foreach (var row in summary.Rows)
         {
             string dist = float.IsInfinity(row.ShapeDistance)
@@ -344,7 +352,7 @@ public sealed class Pm4ShapeMatchBatchService
                 : row.ShapeDistance.ToString("F3", CultureInfo.InvariantCulture);
             sb.AppendLine(
                 CultureInfo.InvariantCulture,
-                $"| `{row.TileX}_{row.TileY}` | `0x{row.Ck24:X6}` | {row.ObjectPartId} | {row.Classification} | `{row.ProposedModelPath ?? "-"}` | `{row.ChosenModelPath ?? "-"}` | {row.Confidence:F3} | {dist} | `{row.DecisionProvenance}` | {(row.HasConflict ? "Yes" : "No")} |");
+                $"| `{row.TileX}_{row.TileY}` | {row.ObjectPartId} | {row.LinkGroupObjectId} | `0x{row.Ck24:X6}` | {row.PlacementZ:F1} | {row.Classification} | `{row.ProposedModelPath ?? "-"}` | `{row.ChosenModelPath ?? "-"}` | {row.Confidence:F3} | {dist} | `{row.DecisionProvenance}` | {(row.HasConflict ? "Yes" : "No")} |");
         }
         return sb.ToString();
     }

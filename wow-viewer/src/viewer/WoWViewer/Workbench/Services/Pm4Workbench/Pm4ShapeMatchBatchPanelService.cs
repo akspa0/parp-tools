@@ -93,8 +93,12 @@ internal sealed class Pm4ShapeMatchBatchPanelService
                 for (int c = 0; c < Math.Min(last.Conflicts.Count, 5); c++)
                 {
                     var conflict = last.Conflicts[c];
+                    float zA = conflict.FirstHull.PlacementZ;
+                    float zB = conflict.SecondHull.PlacementZ;
+                    string tagA = $"[{conflict.FirstHull.TileX}_{conflict.FirstHull.TileY}] Obj #{conflict.FirstHull.ObjectPartId} (Z={zA:F1}yd)";
+                    string tagB = $"[{conflict.SecondHull.TileX}_{conflict.SecondHull.TileY}] Obj #{conflict.SecondHull.ObjectPartId} (Z={zB:F1}yd)";
                     ImGui.BulletText(
-                        $"CK24 0x{conflict.FirstHull.Ck24:X6} vs 0x{conflict.SecondHull.Ck24:X6} claiming {Path.GetFileName(conflict.ModelPath)} ({conflict.DistanceBetweenHulls:F1} yds apart)");
+                        $"{tagA} vs {tagB} claiming {Path.GetFileName(conflict.ModelPath)} ({conflict.DistanceBetweenHulls:F1} yds apart)");
                 }
             }
 

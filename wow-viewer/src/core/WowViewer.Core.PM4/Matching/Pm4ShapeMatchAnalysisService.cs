@@ -119,6 +119,13 @@ public static class Pm4ShapeMatchAnalysisService
                 Pm4ShapeCandidate? b = proposals[j].TopCandidate;
                 if (b is null)
                     continue;
+
+                if (proposals[i].EffectiveUniqueHullId != 0 &&
+                    proposals[i].EffectiveUniqueHullId == proposals[j].EffectiveUniqueHullId)
+                {
+                    continue;
+                }
+
                 if (!string.Equals(a.ModelPath, b.ModelPath, StringComparison.OrdinalIgnoreCase))
                     continue;
 
@@ -226,8 +233,12 @@ public static class Pm4ShapeMatchAnalysisService
         bool lowConfidence = !unmatched && confidence < opts.LowConfidenceThreshold;
 
         Vector3 half = hull.Descriptor.BoundingBoxDimensions * 0.5f;
+        uint hullKey = (uint)hull.ObjectPartId != 0
+            ? (uint)hull.ObjectPartId
+            : (uint)(hull.UniqueHullId ^ (hull.UniqueHullId >> 32));
+
         return new Pm4ShapeMatchProposal(
-            HullKey: hull.Ck24 != 0 ? hull.Ck24 : (uint)hull.ObjectPartId,
+            HullKey: hullKey,
             HullCentroid: uncalibrated,
             HullBoundsMin: uncalibrated - half,
             HullBoundsMax: uncalibrated + half,
@@ -237,7 +248,8 @@ public static class Pm4ShapeMatchAnalysisService
             IsUnmatched: unmatched,
             ConflictCount: 1,
             Hull: hull,
-            ExplicitCalibratedCentroid: calibrated);
+            ExplicitCalibratedCentroid: calibrated,
+            UniqueHullId: hull.UniqueHullId);
     }
 
     public static Pm4ShapeBatchResult AnalyzeBatch(
@@ -275,6 +287,12 @@ public static class Pm4ShapeMatchAnalysisService
             {
                 Pm4ShapeCandidate? b = proposals[j].TopCandidate;
                 if (b == null) continue;
+
+                if (proposals[i].EffectiveUniqueHullId != 0 &&
+                    proposals[i].EffectiveUniqueHullId == proposals[j].EffectiveUniqueHullId)
+                {
+                    continue;
+                }
 
                 if (!string.Equals(a.ModelPath, b.ModelPath, StringComparison.OrdinalIgnoreCase))
                     continue;
