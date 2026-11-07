@@ -48,3 +48,4 @@
 - **SC-003**: In batch conflict reporting, conflicts between distinct parts of the same height tier explicitly state both part IDs and elevation in yards.
 - **SC-004**: Clicking a surface in the 3D viewport colors and bounds only the clicked component.
 - **SC-005**: All UI controls registered in the reference inventory pass with 0 errors and 0 warnings.
+

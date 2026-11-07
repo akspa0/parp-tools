@@ -52,3 +52,4 @@ flowchart TD
 - **Compilation**: Full solution build with 0 errors via `dotnet build I:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
 - **Focused Tests**: `dotnet test --filter "FullyQualifiedName~Pm4ShapeMatch|FullyQualifiedName~Pm4ObjectIdentity"`.
 - **UI Inventory**: `pwsh -File wow-viewer/eng/ui/Verify-UiReference.ps1` (0 errors, 0 warnings).
+

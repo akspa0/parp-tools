@@ -24,3 +24,4 @@ Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md)
 - [x] T009 [Verification] Run full solution build (`dotnet build WowViewer.slnx -c Debug`) and verify 0 errors. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
 - [x] T010 [Verification] Run unit tests (`dotnet test`) and verify 100% pass. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
 - [x] T011 [Verification] Run `Verify-UiReference.ps1` and verify 0 errors, 0 warnings. Receipt: [`evidence/receipt-spec296.md`](evidence/receipt-spec296.md).
+
