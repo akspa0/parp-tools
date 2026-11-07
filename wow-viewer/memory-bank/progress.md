@@ -1,5 +1,15 @@
 # Progress — wow-viewer
 
+## 2026-11-06 — Spec 296 Complete (PM4 Object Identity, Topological Segmentation & Conflict Decoupling)
+
+- Resolved the fundamental PM4 object identity defect: established that `CK24` is an IEEE-754 32-bit float representing ADT placement $Z$ in yards, not an object ID. On shared plateaus, multiple distinct buildings at the same elevation were previously collapsed into a mega-mesh with self-conflict false positives.
+- Introduced `Pm4ObjectIdentity` struct and 64-bit deterministic `UniqueHullId` derived via `(TileX, TileY, ComponentId)`.
+- Defaulted topological connectivity segmentation to active with shared `MSVT` vertex and `MSLK` boundary/adjacency link traversal, cleanly isolating click selection and bounding boxes to the clicked building component.
+- Isolated surface extraction in `ExtractCompositeSurfaceVertices` and `ExtractTileHullInputs` per-component, preventing tile-wide multi-model polygon cloud unioning.
+- Decoupled `HullKey` in `Pm4ShapeMatchAnalysisService` from float `Ck24` and added `EffectiveUniqueHullId` self-conflict guard to `FindHullConflicts` and `FindConflicts`.
+- Updated batch conflict reporting and Markdown/JSON export format to display `[<Tile>] Obj #<PartId> (Z=<z> yd) vs Obj #<PartId> claiming <Model> (<Dist> yds apart)` with explicit component IDs, link IDs, and $Z$ elevations.
+- Verification: solution builds with 0 errors; 76 focused unit tests pass 100% across Core, PM4, and ObjectIdentity; `Verify-UiReference.ps1` clean with 188/188 controls (0 errors, 0 warnings). Receipt: `wow-viewer/specs/296-pm4-object-identity-and-segmentation/evidence/receipt-spec296.md`. Operator real-client visual/selection proof remains owed.
+
 ## 2026-11-06 — Spec 295 Phases 0–6 Complete (Visual PM4 Shape Library & Pairing)
 
 - Measured signed -X offset on validation tile `development_00_00.pm4` + `development_0_0_obj0.adt`: 15/15 (100.0%) authored WMO placements place the model's footprint center within 1.0 yd of the hull footprint center after calibration, exceeding SC-001's 90% requirement.
