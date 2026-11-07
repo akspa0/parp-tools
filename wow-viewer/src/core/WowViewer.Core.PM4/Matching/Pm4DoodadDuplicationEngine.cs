@@ -35,6 +35,41 @@ public sealed record ModelTemplateInfo(
     Vector3 WorldBoundsMax);
 
 /// <summary>
+/// Serializable record representing a human-taught pairing between a PM4 shape signature
+/// and a visual game model (M2/MDX/WMO).
+/// </summary>
+public sealed record TaughtPairing(
+    uint Ck24,
+    byte DominantGroupKey,
+    string ModelName,
+    string ModelPath,
+    string AssetKind,
+    float SolvedScale,
+    float YawDegrees,
+    float Length,
+    float Width,
+    float Height,
+    DateTime TaughtUtc,
+    Vector3 LocalBoundsMin = default,
+    Vector3 LocalBoundsMax = default,
+    float YawOffset = 0f,
+    float[]? VerticalSliceRadii = null,
+    Vector3 InertiaTensor = default,
+    Vector3 NormalDistribution = default,
+    // Spec 298: Authentic Placed Object & PM4 Hull Telemetry
+    Vector3 PlacementPosition = default,
+    Vector3 PlacementRotation = default,
+    float PlacementScale = 1.0f,
+    int UniqueId = 0,
+    int TileX = 0,
+    int TileY = 0,
+    int ObjectPartId = 0,
+    uint LinkGroupObjectId = 0,
+    Vector3 HullCentroid = default,
+    Vector3 HullBoundsMin = default,
+    Vector3 HullBoundsMax = default);
+
+/// <summary>
 /// Synthesized doodad instance fitted to a PM4 collision hull.
 /// </summary>
 public sealed record DuplicatedDoodadResult(

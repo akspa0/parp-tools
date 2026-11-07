@@ -16,28 +16,6 @@ using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 namespace WoWViewer;
 
 /// <summary>
-/// A human-taught pairing between a PM4 collision hull signature and an authentic scene model.
-/// </summary>
-internal sealed record TaughtPairing(
-    uint Ck24,
-    byte DominantGroupKey,
-    string ModelName,
-    string ModelPath,
-    string AssetKind,
-    float SolvedScale,
-    float YawDegrees,
-    float Length,
-    float Width,
-    float Height,
-    DateTime TaughtUtc,
-    Vector3 LocalBoundsMin = default,
-    Vector3 LocalBoundsMax = default,
-    float YawOffset = 0f,
-    float[]? VerticalSliceRadii = null,
-    Vector3 InertiaTensor = default,
-    Vector3 NormalDistribution = default);
-
-/// <summary>
 /// Service providing live PM4 doodad collision matching, duplication, human-in-the-loop teaching,
 /// and undo in the viewer (Specs 287, 289, 291).
 /// </summary>
@@ -977,6 +955,9 @@ internal sealed class Pm4DoodadDuplicationService
         while (yawOffset < -180f) yawOffset += 360f;
 
         var shape3D = pm4Obj.Shape3D;
+        Vector3 hullCentroid = Vector3.Transform(pm4Obj.Center, pm4Obj.BaseTransform);
+        WorldScene.TransformBounds(pm4Obj.BoundsMin, pm4Obj.BoundsMax, pm4Obj.BaseTransform, out Vector3 hullMin, out Vector3 hullMax);
+
         var taught = new TaughtPairing(
             pm4Obj.Ck24,
             pm4Obj.DominantGroupKey,
@@ -994,7 +975,19 @@ internal sealed class Pm4DoodadDuplicationService
             yawOffset,
             shape3D.VerticalSliceRadii,
             shape3D.InertiaTensor,
-            shape3D.NormalDistribution);
+            shape3D.NormalDistribution,
+            // Spec 298: Authentic Placed Object & PM4 Hull Telemetry
+            PlacementPosition: inst.PlacementPosition,
+            PlacementRotation: inst.PlacementRotation,
+            PlacementScale: inst.PlacementScale,
+            UniqueId: inst.UniqueId,
+            TileX: pm4TileX,
+            TileY: pm4TileY,
+            ObjectPartId: pm4Obj.ObjectPartId,
+            LinkGroupObjectId: pm4Obj.LinkGroupObjectId,
+            HullCentroid: hullCentroid,
+            HullBoundsMin: hullMin,
+            HullBoundsMax: hullMax);
 
         _taughtPairings.RemoveAll(t =>
             string.Equals(t.ModelPath, taught.ModelPath, StringComparison.OrdinalIgnoreCase)

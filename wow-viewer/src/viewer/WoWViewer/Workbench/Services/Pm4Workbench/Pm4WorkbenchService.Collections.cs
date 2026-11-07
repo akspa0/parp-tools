@@ -109,8 +109,8 @@ internal sealed partial class Pm4WorkbenchService
             return;
 
         ImGui.TextDisabled("Visible peers from the current camera-window PM4 overlay that share the selected object's MSHD.Field04 region id.");
-        ImGui.TextDisabled($"Region {regionInfo.RegionId} | objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} unique CK24={regionInfo.UniqueCk24Count} unique MSLK={regionInfo.UniqueLinkGroupCount} unique MscnRef={regionInfo.UniqueMscnRefCount}");
-        ImGui.TextDisabled($"Same CK24={regionInfo.SameCk24Count} same MSLK={regionInfo.SameLinkGroupCount} same MscnRef={regionInfo.SameMscnRefCount} avg surfaces={regionInfo.AverageSurfaceCount:F1} avg center Z={regionInfo.AverageCenterHeight:F1}");
+        ImGui.TextDisabled($"Region {regionInfo.RegionId} | objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} unique height bands={regionInfo.UniqueCk24Count} unique MSLK={regionInfo.UniqueLinkGroupCount} unique MscnRef={regionInfo.UniqueMscnRefCount}");
+        ImGui.TextDisabled($"Same height band={regionInfo.SameCk24Count} same MSLK={regionInfo.SameLinkGroupCount} same MscnRef={regionInfo.SameMscnRefCount} avg surfaces={regionInfo.AverageSurfaceCount:F1} avg center Z={regionInfo.AverageCenterHeight:F1}");
         ImGui.TextDisabled($"Type mix: {FormatPm4TypeBuckets(regionInfo.TypeBuckets)}");
 
         if (ImGui.Button($"Collect Visible Region##{idSuffix}"))
@@ -121,7 +121,8 @@ internal sealed partial class Pm4WorkbenchService
             for (int index = 0; index < regionInfo.Peers.Count; index++)
             {
                 Pm4RegionPeerSummary peer = regionInfo.Peers[index];
-                string label = $"{index + 1}. tile=({peer.ObjectKey.tileX},{peer.ObjectKey.tileY}) CK24=0x{peer.ObjectKey.ck24:X6} part={peer.ObjectKey.objectPart} type=0x{peer.Ck24Type:X2} surf={peer.SurfaceCount}";
+                float peerZ = peer.ObjectKey.ck24 != 0 ? BitConverter.UInt32BitsToSingle(peer.ObjectKey.ck24 << 8) : peer.Center.Z;
+                string label = $"{index + 1}. tile=({peer.ObjectKey.tileX},{peer.ObjectKey.tileY}) Obj #{peer.ObjectKey.objectPart} (Z={peerZ:F1}yd) surf={peer.SurfaceCount}";
                 if (peer.IsSelected)
                     ImGui.TextColored(new Vector4(1f, 0.95f, 0.35f, 1f), $"{label}  [selected]");
                 else
@@ -368,15 +369,16 @@ internal sealed partial class Pm4WorkbenchService
         foreach (Pm4VisibleRegionSummary region in visibleSummary.Regions)
         {
             string selectedSuffix = region.IsSelectedRegion ? " [selected region]" : string.Empty;
-            builder.AppendLine($"- Region `{region.RegionId}`: `{region.ObjectCount}` objects across `{region.TileCount}` tiles, `{region.UniqueCk24Count}` unique CK24, `{region.UniqueLinkGroupCount}` unique MSLK groups, avg center Z `{region.AverageCenterHeight:F1}`{selectedSuffix}. Types: {FormatPm4TypeBuckets(region.TypeBuckets)}");
+            builder.AppendLine($"- Region `{region.RegionId}`: `{region.ObjectCount}` objects across `{region.TileCount}` tiles, `{region.UniqueCk24Count}` height bands, `{region.UniqueLinkGroupCount}` unique MSLK groups, avg center Z `{region.AverageCenterHeight:F1}`{selectedSuffix}. Types: {FormatPm4TypeBuckets(region.TypeBuckets)}");
         }
 
         if (selectedDebugInfo.HasValue && _worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
         {
+            float z = selectedDebugInfo.Value.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedDebugInfo.Value.Ck24 << 8) : 0f;
             builder.AppendLine();
             builder.AppendLine("## Selected Object");
             builder.AppendLine();
-            builder.AppendLine($"- tile=(`{_worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value.tileX}`, `{_worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value.tileY}`) ck24=`0x{selectedDebugInfo.Value.Ck24:X6}` part=`{_worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value.objectPart}` type=`0x{selectedDebugInfo.Value.Ck24Type:X2}` objId=`{selectedDebugInfo.Value.Ck24ObjectId}`");
+            builder.AppendLine($"- Tile: `({_worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value.tileX}, {_worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value.tileY})` | Obj `#{_worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value.objectPart}` | Placement Z: `{z:F2} yd`");
             builder.AppendLine($"- MSHD: field00=`{selectedDebugInfo.Value.MshdField00}` region=`{selectedDebugInfo.Value.MshdRegionId}` field08=`{selectedDebugInfo.Value.MshdField08}`");
             builder.AppendLine($"- MSLK group=`0x{selectedDebugInfo.Value.LinkGroupObjectId:X8}` MscnRef=`{selectedDebugInfo.Value.DominantMscnRefIndex}` linked refs=`{selectedDebugInfo.Value.LinkedPositionRefCount}` surfaces=`{selectedDebugInfo.Value.SurfaceCount}`");
             builder.AppendLine($"- center=(`{selectedDebugInfo.Value.Center.X:F1}`, `{selectedDebugInfo.Value.Center.Y:F1}`, `{selectedDebugInfo.Value.Center.Z:F1}`)");
@@ -388,12 +390,13 @@ internal sealed partial class Pm4WorkbenchService
             builder.AppendLine("## Selected Region Peers");
             builder.AppendLine();
             builder.AppendLine($"- Region `{selectedRegionInfo.Value.RegionId}` contains `{selectedRegionInfo.Value.VisibleObjectCount}` visible PM4 parts across `{selectedRegionInfo.Value.VisibleTileCount}` tiles.");
-            builder.AppendLine($"- Same CK24 as selection: `{selectedRegionInfo.Value.SameCk24Count}`. Same MSLK group: `{selectedRegionInfo.Value.SameLinkGroupCount}`. Same MscnRef index: `{selectedRegionInfo.Value.SameMscnRefCount}`.");
+            builder.AppendLine($"- Same elevation as selection: `{selectedRegionInfo.Value.SameCk24Count}`. Same MSLK group: `{selectedRegionInfo.Value.SameLinkGroupCount}`. Same MscnRef index: `{selectedRegionInfo.Value.SameMscnRefCount}`.");
             builder.AppendLine($"- Type mix: {FormatPm4TypeBuckets(selectedRegionInfo.Value.TypeBuckets)}");
             builder.AppendLine();
             foreach (Pm4RegionPeerSummary peer in selectedRegionInfo.Value.Peers)
             {
-                builder.AppendLine($"- tile=(`{peer.ObjectKey.tileX}`, `{peer.ObjectKey.tileY}`) ck24=`0x{peer.ObjectKey.ck24:X6}` part=`{peer.ObjectKey.objectPart}` type=`0x{peer.Ck24Type:X2}` surf=`{peer.SurfaceCount}` center=(`{peer.Center.X:F1}`, `{peer.Center.Y:F1}`, `{peer.Center.Z:F1}`) {FormatPm4PeerFlags(peer)}");
+                float pz = peer.ObjectKey.ck24 != 0 ? BitConverter.UInt32BitsToSingle(peer.ObjectKey.ck24 << 8) : 0f;
+                builder.AppendLine($"- Tile=(`{peer.ObjectKey.tileX}`, `{peer.ObjectKey.tileY}`) Obj `#{peer.ObjectKey.objectPart}` (Z={pz:F1}yd) surf=`{peer.SurfaceCount}` center=(`{peer.Center.X:F1}`, `{peer.Center.Y:F1}`, `{peer.Center.Z:F1}`) {FormatPm4PeerFlags(peer)}");
             }
         }
 
@@ -452,7 +455,7 @@ internal sealed partial class Pm4WorkbenchService
         builder.AppendLine($"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">""");
         builder.AppendLine("""<rect width="100%" height="100%" fill="#0f1318" />""");
         builder.AppendLine($"""<text x="32" y="38" fill="#f5f7fa" font-family="Consolas, 'Courier New', monospace" font-size="28">Selected PM4 Region {regionInfo.RegionId}</text>""");
-        builder.AppendLine($"""<text x="32" y="64" fill="#aab6c3" font-family="Consolas, 'Courier New', monospace" font-size="16">visible objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} sameCK24={regionInfo.SameCk24Count} sameMSLK={regionInfo.SameLinkGroupCount} sameMscnRef={regionInfo.SameMscnRefCount}</text>""");
+        builder.AppendLine($"""<text x="32" y="64" fill="#aab6c3" font-family="Consolas, 'Courier New', monospace" font-size="16">visible objects={regionInfo.VisibleObjectCount} tiles={regionInfo.VisibleTileCount} sameHeightBand={regionInfo.SameCk24Count} sameMSLK={regionInfo.SameLinkGroupCount} sameMscnRef={regionInfo.SameMscnRefCount}</text>""");
         builder.AppendLine($"""<rect x="32" y="76" width="1216" height="2" fill="{accent}" />""");
 
         for (int index = 0; index < regionInfo.Peers.Count; index++)
@@ -463,7 +466,8 @@ internal sealed partial class Pm4WorkbenchService
             string textFill = peer.IsSelected ? "#ffe36a" : "#f5f7fa";
             builder.AppendLine($"""<rect x="24" y="{y - 18}" width="1232" height="26" fill="{rowFill}" rx="4" ry="4" />""");
             builder.AppendLine($"""<rect x="24" y="{y - 18}" width="6" height="26" fill="{accent}" rx="3" ry="3" />""");
-            builder.AppendLine($"""<text x="40" y="{y}" fill="{textFill}" font-family="Consolas, 'Courier New', monospace" font-size="14">{EscapeSvgText($"tile ({peer.ObjectKey.tileX},{peer.ObjectKey.tileY}) ck24 0x{peer.ObjectKey.ck24:X6} part {peer.ObjectKey.objectPart} type 0x{peer.Ck24Type:X2} surf {peer.SurfaceCount}")}</text>""");
+            float peerZ = peer.ObjectKey.ck24 != 0 ? BitConverter.UInt32BitsToSingle(peer.ObjectKey.ck24 << 8) : peer.Center.Z;
+            builder.AppendLine($"""<text x="40" y="{y}" fill="{textFill}" font-family="Consolas, 'Courier New', monospace" font-size="14">{EscapeSvgText($"tile ({peer.ObjectKey.tileX},{peer.ObjectKey.tileY}) Obj #{peer.ObjectKey.objectPart} (Z={peerZ:F1}yd) surf {peer.SurfaceCount}")}</text>""");
             builder.AppendLine($"""<text x="700" y="{y}" fill="#b8c4cf" font-family="Consolas, 'Courier New', monospace" font-size="13">{EscapeSvgText($"mslk 0x{peer.LinkGroupObjectId:X8} mdos {peer.DominantMscnRefIndex} center ({peer.Center.X:F1}, {peer.Center.Y:F1}, {peer.Center.Z:F1}) {FormatPm4PeerFlags(peer)}")}</text>""");
         }
 
@@ -485,7 +489,7 @@ internal sealed partial class Pm4WorkbenchService
         if (peer.IsSelected)
             flags.Add("selected");
         if (peer.SameCk24)
-            flags.Add("same-ck24");
+            flags.Add("same-height-band");
         if (peer.SameLinkGroup)
             flags.Add("same-mslk");
         if (peer.SameMscnRefIndex)
@@ -570,9 +574,10 @@ internal sealed partial class Pm4WorkbenchService
         if (_worldScene == null)
             return;
 
+        float partZ = objectKey.ck24 != 0 ? BitConverter.UInt32BitsToSingle(objectKey.ck24 << 8) : 0f;
         if (!_worldScene.Pm4Overlay.SelectPm4Object(objectKey))
         {
-            _statusMessage = $"PM4 graph part CK24=0x{objectKey.ck24:X6} part={objectKey.objectPart} is no longer available.";
+            _statusMessage = $"PM4 graph Obj #{objectKey.objectPart} (Z={partZ:F1}yd) is no longer available.";
             return;
         }
 
@@ -585,8 +590,8 @@ internal sealed partial class Pm4WorkbenchService
         }
 
         _statusMessage = frameCamera
-            ? $"Selected and framed PM4 graph part CK24=0x{objectKey.ck24:X6} part={objectKey.objectPart}."
-            : $"Selected PM4 graph part CK24=0x{objectKey.ck24:X6} part={objectKey.objectPart}.";
+            ? $"Selected and framed PM4 graph Obj #{objectKey.objectPart} (Z={partZ:F1}yd)."
+            : $"Selected PM4 graph Obj #{objectKey.objectPart} (Z={partZ:F1}yd).";
     }
 
     private void ExportSelectedPm4GraphJson(Pm4SelectedObjectGraphInfo graph)
@@ -695,22 +700,29 @@ internal sealed partial class Pm4WorkbenchService
         {
             if (removeIfPresent)
             {
+                float kZ = key.ck24 != 0 ? BitConverter.UInt32BitsToSingle(key.ck24 << 8) : 0f;
                 _pm4ObjectCollection.RemoveAt(existingIndex);
                 SyncPm4CollectionHighlight();
                 if (reportStatus)
-                    _statusMessage = $"Removed PM4 CK24=0x{key.ck24:X6} part={key.objectPart} from the collection.";
+                    _statusMessage = $"Removed PM4 Obj #{key.objectPart} (Z={kZ:F1}yd) from the collection.";
                 return false;
             }
 
             if (reportStatus)
-                _statusMessage = $"PM4 CK24=0x{key.ck24:X6} part={key.objectPart} is already in the collection.";
+            {
+                float kZ = key.ck24 != 0 ? BitConverter.UInt32BitsToSingle(key.ck24 << 8) : 0f;
+                _statusMessage = $"PM4 Obj #{key.objectPart} (Z={kZ:F1}yd) is already in the collection.";
+            }
             return false;
         }
 
         _pm4ObjectCollection.Add(key);
         SyncPm4CollectionHighlight();
         if (reportStatus)
-            _statusMessage = $"Added PM4 CK24=0x{key.ck24:X6} part={key.objectPart} to the collection.";
+        {
+            float kZ = key.ck24 != 0 ? BitConverter.UInt32BitsToSingle(key.ck24 << 8) : 0f;
+            _statusMessage = $"Added PM4 Obj #{key.objectPart} (Z={kZ:F1}yd) to the collection.";
+        }
         return true;
     }
 
@@ -779,7 +791,8 @@ internal sealed partial class Pm4WorkbenchService
                 {
                     _pm4ObjectCollection.RemoveAt(index);
                     SyncPm4CollectionHighlight();
-                    _statusMessage = $"Removed PM4 CK24=0x{key.ck24:X6} part={key.objectPart} from the collection.";
+                    float rmZ = key.ck24 != 0 ? BitConverter.UInt32BitsToSingle(key.ck24 << 8) : 0f;
+                    _statusMessage = $"Removed PM4 Obj #{key.objectPart} (Z={rmZ:F1}yd) from the collection.";
                     ImGui.PopID();
                     break;
                 }

@@ -540,6 +540,11 @@ internal sealed class Pm4WorkbenchSidebarService
             {
                 host.Pm4DoodadDuplication.TeachPairing(selectedPm4Obj, inst, pm4TileX, pm4TileY);
             }
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Export PM4 Hull to GLB##pair_export_glb"))
+            {
+                host.Pm4Workbench.ExportSelectedPm4ObjectGlb();
+            }
 
             _manualCuration.DrawPlacementEditor(mapName, host, worldScene, inst);
             _manualCuration.DrawAssociationEditor(
@@ -566,6 +571,17 @@ internal sealed class Pm4WorkbenchSidebarService
             if (similarHulls != null && similarHulls.Count > 0)
             {
                 ImGui.TextColored(UiTokens.Success, $"Cross-Tile Identified: {similarHulls.Count} matching 3D shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
+            }
+            ImGui.Spacing();
+
+            if (SharedUiWidgets.ActionButton("Export Selected PM4 to GLB##pm4_export_sel_glb"))
+            {
+                host.Pm4Workbench.ExportSelectedPm4ObjectGlb();
+            }
+            ImGui.SameLine();
+            if (SharedUiWidgets.ActionButton("Export Tile PM4 to GLB##pm4_export_tile_glb"))
+            {
+                host.Pm4Workbench.ExportActiveTilePm4Glb();
             }
             ImGui.Spacing();
 

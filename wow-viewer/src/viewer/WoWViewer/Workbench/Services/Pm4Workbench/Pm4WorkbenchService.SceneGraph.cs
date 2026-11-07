@@ -412,7 +412,8 @@ internal sealed partial class Pm4WorkbenchService
                     if (ImGui.IsItemHovered())
                     {
                         ImGui.BeginTooltip();
-                        ImGui.Text($"CK24: 0x{ck24:X6}  Type: 0x{ck24Type:X2}  ObjId: {ck24ObjId}");
+                        float hoverZ = ck24 != 0 ? BitConverter.UInt32BitsToSingle(ck24 << 8) : 0f;
+                        ImGui.Text($"Placement Z: {hoverZ:F2} yd  ObjId: {ck24ObjId}  Type: 0x{ck24Type:X2}");
                         ImGui.Text($"MSLK Group: 0x{linkGroupId:X8}");
                         ImGui.Text($"Linked MPRL refs: {o.linkedPositionRefCount}");
                         ImGui.Text($"MSHD: F00={first.ck24ObjectId}  Region={regionId}");
@@ -557,8 +558,8 @@ internal sealed partial class Pm4WorkbenchService
         {
             sw.WriteLine("## MSHD Regions");
             sw.WriteLine();
-            sw.WriteLine("| Region | Objects | Tiles | CK24 | MSLK | Avg Z |");
-            sw.WriteLine("|--------|---------|-------|------|------|-------|");
+            sw.WriteLine("| Region | Objects | Tiles | Height Bands | MSLK Groups | Avg Z (yd) |");
+            sw.WriteLine("|--------|---------|-------|--------------|-------------|------------|");
             foreach (var r in summary.Regions)
             {
                 string marker = r.IsSelectedRegion ? " ← selected" : "";
@@ -570,10 +571,11 @@ internal sealed partial class Pm4WorkbenchService
         // Selected object
         if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debug))
         {
+            float z = debug.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(debug.Ck24 << 8) : 0f;
             sw.WriteLine("## Selected Object");
             sw.WriteLine();
             sw.WriteLine($"- Tile: `({debug.TileX}, {debug.TileY})`");
-            sw.WriteLine($"- CK24: `0x{debug.Ck24:X6}` type=`0x{debug.Ck24Type:X2}` objId=`{debug.Ck24ObjectId}`");
+            sw.WriteLine($"- Placement Z: `{z:F2} yd` (Part `{debug.ObjectPartId}`, raw 0x{debug.Ck24:X6})");
             sw.WriteLine($"- MSHD: F00=`{debug.MshdField00}` region=`{debug.MshdRegionId}` F08=`{debug.MshdField08}`");
             sw.WriteLine($"- MSLK group=`0x{debug.LinkGroupObjectId:X8}` MscnRef=`{debug.DominantMscnRefIndex}` linked refs=`{debug.LinkedPositionRefCount}`");
             sw.WriteLine($"- Surfaces=`{debug.SurfaceCount}` group=`0x{debug.DominantGroupKey:X2}` attr=`0x{debug.DominantAttributeMask:X2}` avgH=`{debug.AverageSurfaceHeight:F2}`");
@@ -606,7 +608,8 @@ internal sealed partial class Pm4WorkbenchService
         var first = ck24Objects[0];
         byte ck24Type = (byte)((ck24 >> 16) & 0xFF);
         ushort ck24ObjId = (ushort)(ck24 & 0xFFFF);
-        string ck24Label = $"CK24 0x{ck24:X6}  Type=0x{ck24Type:X2}  ObjId={ck24ObjId}  Region={first.mshdRegionId}  MSLK=0x{first.linkGroupObjectId:X8}";
+        float filterZ = ck24 != 0 ? BitConverter.UInt32BitsToSingle(ck24 << 8) : 0f;
+        string ck24Label = $"Placement Z={filterZ:F2}yd  ObjId={ck24ObjId}  Region={first.mshdRegionId}  MSLK=0x{first.linkGroupObjectId:X8}";
         if (ck24Label.ToLowerInvariant().Contains(filterLower))
             return true;
 

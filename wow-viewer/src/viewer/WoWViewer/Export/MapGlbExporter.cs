@@ -212,7 +212,7 @@ public static class MapGlbExporter
         return cInv * zupTransform * c;
     }
 
-    private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? BuildTerrainTileMesh(
+    internal static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? BuildTerrainTileMesh(
         TerrainManager terrain,
         int tileX,
         int tileY,

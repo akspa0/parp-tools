@@ -4,6 +4,7 @@ using System.IO;
 using System.Numerics;
 using System.Text.Json;
 using WoWViewer.Logging;
+using WowViewer.Core.PM4.Matching;
 
 namespace WoWViewer.Terrain.Pm4;
 
@@ -35,14 +36,19 @@ internal static class Pm4PairingProjectStore
         return string.IsNullOrEmpty(clean) ? "development" : clean;
     }
 
+    public static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        WriteIndented = true,
+        IncludeFields = true
+    };
+
     public static string SaveProject(string mapName, IReadOnlyList<TaughtPairing> pairings)
     {
         string cleanMap = SanitizeMapName(mapName);
         Directory.CreateDirectory(ProjectsDir);
         string projectPath = ProjectPath(cleanMap);
 
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        string json = JsonSerializer.Serialize(pairings, options);
+        string json = JsonSerializer.Serialize(pairings, JsonOptions);
         File.WriteAllText(projectPath, json);
 
         // Also sync global curation library
@@ -75,7 +81,7 @@ internal static class Pm4PairingProjectStore
         try
         {
             string json = File.ReadAllText(sourcePath);
-            var items = JsonSerializer.Deserialize<List<TaughtPairing>>(json);
+            var items = JsonSerializer.Deserialize<List<TaughtPairing>>(json, JsonOptions);
             if (items == null || items.Count == 0)
                 return false;
 
@@ -96,7 +102,7 @@ internal static class Pm4PairingProjectStore
 
             if (dirty)
             {
-                string updatedJson = JsonSerializer.Serialize(loadedPairings, new JsonSerializerOptions { WriteIndented = true });
+                string updatedJson = JsonSerializer.Serialize(loadedPairings, JsonOptions);
                 File.WriteAllText(sourcePath, updatedJson);
             }
 
@@ -139,7 +145,7 @@ internal static class Pm4PairingProjectStore
             Pairings = new List<TaughtPairing>(pairings)
         };
 
-        string json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
+        string json = JsonSerializer.Serialize(manifest, JsonOptions);
         File.WriteAllText(manifestPath, json);
         return manifestPath;
     }

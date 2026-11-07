@@ -43,6 +43,18 @@ internal sealed class CuratedSpatialRelationship
     public float[]? VerticalSliceRadii { get; set; }
     public Vector3 InertiaTensor { get; set; }
     public Vector3 NormalDistribution { get; set; }
+    // Spec 298 Authentic Telemetry
+    public Vector3 PlacementPosition { get; set; }
+    public Vector3 PlacementRotation { get; set; }
+    public float PlacementScale { get; set; } = 1.0f;
+    public int UniqueId { get; set; }
+    public int TileX { get; set; }
+    public int TileY { get; set; }
+    public int ObjectPartId { get; set; }
+    public uint LinkGroupObjectId { get; set; }
+    public Vector3 HullCentroid { get; set; }
+    public Vector3 HullBoundsMin { get; set; }
+    public Vector3 HullBoundsMax { get; set; }
 
     public CuratedSpatialRelationship() { }
 
@@ -291,6 +303,9 @@ internal sealed class Pm4CurationAndSpatialMatchingService
             float solvedScale = isWmo ? 1.0f : inst.PlacementScale;
 
             var shape3D = pm4Obj.Shape3D;
+            Vector3 hullCentroid = Vector3.Transform(pm4Obj.Center, pm4Obj.BaseTransform);
+            WorldScene.TransformBounds(pm4Obj.BoundsMin, pm4Obj.BoundsMax, pm4Obj.BaseTransform, out Vector3 hullMin, out Vector3 hullMax);
+
             var rel = new CuratedSpatialRelationship
             {
                 ModelName = inst.ModelName,
@@ -309,7 +324,19 @@ internal sealed class Pm4CurationAndSpatialMatchingService
                 Verified = explicitInst.HasValue,
                 VerticalSliceRadii = shape3D.VerticalSliceRadii,
                 InertiaTensor = shape3D.InertiaTensor,
-                NormalDistribution = shape3D.NormalDistribution
+                NormalDistribution = shape3D.NormalDistribution,
+                // Spec 298 Authentic Telemetry
+                PlacementPosition = inst.PlacementPosition,
+                PlacementRotation = inst.PlacementRotation,
+                PlacementScale = inst.PlacementScale,
+                UniqueId = inst.UniqueId,
+                TileX = pm4TileX,
+                TileY = pm4TileY,
+                ObjectPartId = pm4Obj.ObjectPartId,
+                LinkGroupObjectId = pm4Obj.LinkGroupObjectId,
+                HullCentroid = hullCentroid,
+                HullBoundsMin = hullMin,
+                HullBoundsMax = hullMax
             };
 
             _curatedRelationships.RemoveAll(r =>
@@ -361,7 +388,19 @@ internal sealed class Pm4CurationAndSpatialMatchingService
             relationship.YawOffset,
             relationship.VerticalSliceRadii,
             relationship.InertiaTensor,
-            relationship.NormalDistribution);
+            relationship.NormalDistribution,
+            // Spec 298: Authentic Placed Object & PM4 Hull Telemetry
+            PlacementPosition: relationship.PlacementPosition,
+            PlacementRotation: relationship.PlacementRotation,
+            PlacementScale: relationship.PlacementScale,
+            UniqueId: relationship.UniqueId,
+            TileX: relationship.TileX,
+            TileY: relationship.TileY,
+            ObjectPartId: relationship.ObjectPartId,
+            LinkGroupObjectId: relationship.LinkGroupObjectId,
+            HullCentroid: relationship.HullCentroid,
+            HullBoundsMin: relationship.HullBoundsMin,
+            HullBoundsMax: relationship.HullBoundsMax);
 
         _parent.TeachPairingExplicit(taught);
 

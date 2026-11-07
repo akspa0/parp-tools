@@ -1,5 +1,15 @@
 # Progress — wow-viewer
 
+## 2026-11-07 — Spec 298 Complete (PM4 Authentic Pairing Telemetry, Markdown Elimination of CK24 & Multi-Object GLB Export)
+
+- Enriched `TaughtPairing` record in Core (`Pm4DoodadDuplicationEngine.cs`) with authentic placement telemetry (`PlacementPosition`, `PlacementRotation`, `PlacementScale`, `UniqueId`) and PM4 hull telemetry (`TileX`, `TileY`, `ObjectPartId`, `LinkGroupObjectId`, `HullCentroid`, `HullBoundsMin`, `HullBoundsMax`).
+- Configured `Pm4PairingProjectStore.JsonOptions` with `IncludeFields = true` to guarantee accurate JSON round-trip serialization and manifest generation of `Vector3` spatial fields.
+- Completely eliminated `CK24` columns from markdown batch summaries and reports in `Pm4ShapeMatchBatchService.cs`, `Collections.cs`, and `SceneGraph.cs`, replacing with authentic `Object ID`, `Position (X, Y, Z)`, `Proposed Candidate`, `Chosen Asset`, `Kind`, `Confidence`, and `Distance (yd)`.
+- Purged legacy CK24 terminology from UI glossary and inspector labels across `Pm4WorkbenchService.cs`.
+- Implemented `Pm4GlbExporter` in `WoWViewer.Export`: exports each PM4 collision object as an independent named node (`[{TileX}_{TileY}] Obj #{PartId} - {SurfaceClass}`) with double-sided PBR collision materials, sitting seamlessly atop authentic textured/MCCV terrain geometry.
+- Wired export actions into `ExportWorkbenchService` and `Pm4WorkbenchSidebarService`.
+- Verification: solution builds with 0 errors (`dotnet build WoWViewer.csproj -c Debug -m:1`); UI reference check passes (188/188 controls, 0 errors/warnings); 4/4 focused batch tests pass in `Pm4ShapeMatchBatchServiceTests`. Receipt: `wow-viewer/specs/298-pm4-pairing-telemetry-and-glb-export/evidence/receipt-spec298.md`. Operator visual proof and GLB import check in Blender/3D viewer remain owed.
+
 ## 2026-11-06 — Spec 297 Complete (Automated Known-Good Pairing Harvester & Streamlined Matching Workbench)
 
 - Created pure static geometric correlation method `Pm4DoodadDuplicationEngine.FindBestMatchingCandidateHull` in Core: filters candidates by 2D centroid proximity ($\le 15\,\text{yd}$), scale ratio ($\le 4.5$), and vertical bounding sanity ($\le 35\,\text{yd}$ or $2.5\times$ hull height).

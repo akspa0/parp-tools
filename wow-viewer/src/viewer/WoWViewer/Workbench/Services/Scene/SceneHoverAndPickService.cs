@@ -232,11 +232,11 @@ internal sealed partial class SceneHoverAndPickService
             return;
 
         var selectedPm4 = pm4ObjectKey.Value;
+        float z = selectedPm4.ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4.ck24 << 8) : 0f;
         _selectedObjectInfo =
             $"PM4 Object\n" +
             $"Tile: ({selectedPm4.tileX}, {selectedPm4.tileY})\n" +
-            $"CK24: 0x{selectedPm4.ck24:X6} (viewerPart={selectedPm4.objectPart})\n" +
-            $"Viewer Part: assigned during the current overlay build; not a raw PM4 field\n" +
+            $"Obj #{selectedPm4.objectPart} (Placement Z={z:F2} yd)\n" +
             $"Offset: ({_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.Pm4Overlay.SelectedPm4ObjectTranslation.Z:F2})";
     }
 

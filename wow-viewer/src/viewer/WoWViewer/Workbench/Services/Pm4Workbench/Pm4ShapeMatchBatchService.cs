@@ -343,16 +343,21 @@ public sealed class Pm4ShapeMatchBatchService
         sb.AppendLine();
         sb.AppendLine("## Hull Pairing Rows");
         sb.AppendLine();
-        sb.AppendLine("| Tile | Part | Lnk | CK24 | Base Z (yd) | Classification | Proposed Candidate | Chosen Asset | Confidence | Distance | Provenance | Conflict |");
-        sb.AppendLine("|---|---:|---:|---:|---:|---|---|---|---:|---:|---|---|");
+        sb.AppendLine("| Tile | Object ID | Position (X, Y, Z) | Classification | Proposed Candidate | Chosen Asset | Kind | Confidence | Distance (yd) | Provenance | Conflict |");
+        sb.AppendLine("|---|---|---|---|---|---|---|---:|---:|---|---|");
         foreach (var row in summary.Rows)
         {
+            string objId = $"Obj #{row.ObjectPartId}";
+            string pos = $"({row.CalibratedCentroid.X:F1}, {row.CalibratedCentroid.Y:F1}, {row.CalibratedCentroid.Z:F1})";
+            string chosen = !string.IsNullOrWhiteSpace(row.ChosenModelPath) ? Path.GetFileName(row.ChosenModelPath) : "-";
+            string proposed = !string.IsNullOrWhiteSpace(row.ProposedModelPath) ? Path.GetFileName(row.ProposedModelPath) : "-";
+            string kind = row.AssetKind ?? "-";
             string dist = float.IsInfinity(row.ShapeDistance)
                 ? "inf"
-                : row.ShapeDistance.ToString("F3", CultureInfo.InvariantCulture);
+                : row.ShapeDistance.ToString("F2", CultureInfo.InvariantCulture);
             sb.AppendLine(
                 CultureInfo.InvariantCulture,
-                $"| `{row.TileX}_{row.TileY}` | {row.ObjectPartId} | {row.LinkGroupObjectId} | `0x{row.Ck24:X6}` | {row.PlacementZ:F1} | {row.Classification} | `{row.ProposedModelPath ?? "-"}` | `{row.ChosenModelPath ?? "-"}` | {row.Confidence:F3} | {dist} | `{row.DecisionProvenance}` | {(row.HasConflict ? "Yes" : "No")} |");
+                $"| `{row.TileX}_{row.TileY}` | `{objId}` | `{pos}` | {row.Classification} | `{proposed}` | `{chosen}` | {kind} | {row.Confidence:F2} | {dist} | `{row.DecisionProvenance}` | {(row.HasConflict ? "Yes" : "No")} |");
         }
         return sb.ToString();
     }

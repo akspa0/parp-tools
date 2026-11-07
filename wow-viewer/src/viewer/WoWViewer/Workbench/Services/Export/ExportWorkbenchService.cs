@@ -91,6 +91,22 @@ internal sealed class ExportWorkbenchService
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Export complete tile OBJ models and individual discrete object OBJ files with manifest.");
 
+        if (SharedUiWidgets.ActionButton("Export PM4 Tile to GLB...##Pm4TileGlb"))
+        {
+            _host.Pm4Workbench.ExportActiveTilePm4Glb();
+            _exportStatusMessage = "Exported PM4 tile GLB scene.";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Export selected tile's PM4 collision hulls as separate objects into a GLB file with textured terrain.");
+
+        if (SharedUiWidgets.ActionButton("Export All Loaded PM4 to GLB...##Pm4AllGlb"))
+        {
+            _host.Pm4Workbench.ExportAllLoadedPm4Glb();
+            _exportStatusMessage = "Exported all loaded PM4 tiles into a combined GLB file.";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Export all loaded PM4 collision hulls across the map as separate objects into a combined GLB file.");
+
         if (SharedUiWidgets.ActionButton("Export LLM Evidence Bundle...##Pm4Llm"))
         {
             _host.Pm4Workbench.RunPm4Export(_host.Pm4Workbench.ExportPm4LlmEvidenceBundle);
@@ -171,6 +187,13 @@ internal sealed class ExportWorkbenchService
                     }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
                     ImGui.SetClipboardText(json);
                     _exportStatusMessage = "Copied selected PM4 object JSON to clipboard.";
+                }
+
+                ImGui.SameLine();
+                if (SharedUiWidgets.ActionButton("Export Selected PM4 to GLB...##Pm4SelectedGlb"))
+                {
+                    _host.Pm4Workbench.ExportSelectedPm4ObjectGlb();
+                    _exportStatusMessage = "Exported selected PM4 object to GLB.";
                 }
             }
         }

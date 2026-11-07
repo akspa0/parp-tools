@@ -31,6 +31,10 @@ internal sealed partial class Pm4WorkbenchService
             RunPm4Export(ExportPm4ObjectsJson);
         if (ImGui.Button("Export OBJ Set..."))
             RunPm4Export(ExportPm4ObjectsObjSet);
+        if (SharedUiWidgets.ActionButton("Export PM4 Tile to GLB...##Pm4TileGlbExport"))
+            ExportActiveTilePm4Glb();
+        if (SharedUiWidgets.ActionButton("Export All Loaded PM4 to GLB...##Pm4AllGlbExport"))
+            ExportAllLoadedPm4Glb();
         if (ImGui.Button("Export LLM Evidence Bundle..."))
             RunPm4Export(ExportPm4LlmEvidenceBundle);
         if (ImGui.Button("Export Visible Overlay Report"))
@@ -262,6 +266,127 @@ internal sealed partial class Pm4WorkbenchService
         _worldScene.Pm4Overlay.Pm4OverlayRotationDegrees = _pm4SavedOverlayRotationDegrees;
         _worldScene.Pm4Overlay.Pm4OverlayScale = _pm4SavedOverlayScale;
         InvalidatePm4DerivedReports();
+    }
+
+    internal void ExportActiveTilePm4Glb()
+    {
+        if (_worldScene == null) return;
+        var overlay = _worldScene.Pm4Overlay;
+        int tileX = 0, tileY = 0;
+        bool hasTile = false;
+
+        if (overlay.SelectedPm4ObjectKey.HasValue)
+        {
+            tileX = overlay.SelectedPm4ObjectKey.Value.tileX;
+            tileY = overlay.SelectedPm4ObjectKey.Value.tileY;
+            hasTile = true;
+        }
+        else if (overlay._pm4TileObjects.Count > 0)
+        {
+            var first = overlay._pm4TileObjects.Keys.First();
+            tileX = first.tileX;
+            tileY = first.tileY;
+            hasTile = true;
+        }
+
+        if (!hasTile || !overlay._pm4TileObjects.TryGetValue((tileX, tileY), out var list) || list.Count == 0)
+        {
+            _statusMessage = "No active PM4 tile with objects loaded to export.";
+            return;
+        }
+
+        string mapName = !string.IsNullOrEmpty(_host.LoadedFileName)
+            ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
+            : "development";
+        string outDir = Path.Combine(AppContext.BaseDirectory, "output", "exports", "pm4_glb", mapName);
+        Directory.CreateDirectory(outDir);
+        string glbPath = Path.Combine(outDir, $"{mapName}_tile_{tileX:D2}_{tileY:D2}_pm4.glb");
+
+        try
+        {
+            WoWViewer.Export.Pm4GlbExporter.ExportTilePm4Glb(
+                _host.TerrainManager,
+                _host.DataSource,
+                null,
+                tileX,
+                tileY,
+                list,
+                glbPath,
+                includeTerrain: true,
+                _host.Pm4DoodadDuplication.TaughtPairings);
+
+            _statusMessage = $"✓ Exported PM4 GLB ({list.Count} objects) to {glbPath}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Export PM4 GLB failed: {ex.Message}";
+        }
+    }
+
+    internal void ExportAllLoadedPm4Glb()
+    {
+        if (_worldScene == null) return;
+        var overlay = _worldScene.Pm4Overlay;
+        if (overlay._pm4TileObjects.Count == 0)
+        {
+            _statusMessage = "No PM4 tiles loaded to export.";
+            return;
+        }
+
+        string mapName = !string.IsNullOrEmpty(_host.LoadedFileName)
+            ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
+            : "development";
+        string outDir = Path.Combine(AppContext.BaseDirectory, "output", "exports", "pm4_glb", mapName);
+        Directory.CreateDirectory(outDir);
+        string glbPath = Path.Combine(outDir, $"{mapName}_all_loaded_pm4.glb");
+
+        try
+        {
+            WoWViewer.Export.Pm4GlbExporter.ExportAllLoadedPm4Glb(
+                _host.TerrainManager,
+                _host.DataSource,
+                null,
+                overlay._pm4TileObjects,
+                glbPath,
+                includeTerrain: true,
+                _host.Pm4DoodadDuplication.TaughtPairings);
+
+            int totalObjects = overlay._pm4TileObjects.Values.Sum(l => l.Count);
+            _statusMessage = $"✓ Exported combined PM4 GLB ({totalObjects} objects across {overlay._pm4TileObjects.Count} tiles) to {glbPath}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Export all PM4 GLB failed: {ex.Message}";
+        }
+    }
+
+    internal void ExportSelectedPm4ObjectGlb()
+    {
+        if (_worldScene == null || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue) return;
+        var key = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
+        if (!_worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((key.tileX, key.tileY), out var list))
+            return;
+
+        var obj = list.FirstOrDefault(o => o.Ck24 == key.ck24 && o.ObjectPartId == key.objectPart)
+               ?? list.FirstOrDefault(o => o.Ck24 == key.ck24);
+        if (obj == null) return;
+
+        string mapName = !string.IsNullOrEmpty(_host.LoadedFileName)
+            ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
+            : "development";
+        string outDir = Path.Combine(AppContext.BaseDirectory, "output", "exports", "pm4_glb", mapName);
+        Directory.CreateDirectory(outDir);
+        string glbPath = Path.Combine(outDir, $"{mapName}_tile_{key.tileX:D2}_{key.tileY:D2}_obj_{key.objectPart}.glb");
+
+        try
+        {
+            WoWViewer.Export.Pm4GlbExporter.ExportSingleObjectGlb(obj, key.tileX, key.tileY, glbPath);
+            _statusMessage = $"✓ Exported selected PM4 object to {glbPath}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Export single PM4 GLB failed: {ex.Message}";
+        }
     }
 
 }

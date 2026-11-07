@@ -178,16 +178,16 @@ internal sealed partial class Pm4WorkbenchService
             ImGui.TreePop();
         }
 
-        if (ImGui.TreeNodeEx("Coordinates & Viewer Terms (CK24 / Part / MscnRef)##Pm4GlossaryViewer", ImGuiTreeNodeFlags.DefaultOpen))
+        if (ImGui.TreeNodeEx("Coordinates & Viewer Terms (Height / Part / MscnRef)##Pm4GlossaryViewer", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "Coordinates:");
             ImGui.TextWrapped("MSVT/MSPV/MSCN use YXZ: world = (17066.666 - x, 17066.666 - y, z). MPRL uses ZXY with height in Y: world = (17066.666 - z, 17066.666 - x, y).");
             ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "CK24 (0xXXXXXX):");
-            ImGui.TextWrapped("Viewer grouping key formed from the top 24 bits of MSUR.0x1C (placement_z float). Its high byte ('Ck24Type', e.g. 0x40..0x43) is the IEEE-754 exponent band of the height, NOT an object type enum.");
+            ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "Placement Z Height Band:");
+            ImGui.TextWrapped("Viewer grouping key formed from the placement_z float at MSUR.0x1C. Its high byte is the IEEE-754 exponent band of the height, NOT an object type enum.");
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "part / ObjectPartId:");
-            ImGui.TextWrapped("Viewer-generated connected-component split ID within a tile + CK24 bucket, not a raw PM4 field.");
+            ImGui.TextWrapped("Viewer-generated connected-component split ID within a tile + height bucket, not a raw PM4 field.");
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.85f, 0.75f, 0.45f, 1f), "MscnRef (legacy label):");
             ImGui.TextWrapped("Older viewer code called MSUR.0x18 'MscnRef'; measured format analysis proved MSUR.0x18 is mslk_first_index (start of the surface's MSLK window).");
@@ -269,9 +269,9 @@ internal sealed partial class Pm4WorkbenchService
                 if (ImGui.CollapsingHeader("Advanced PM4 Forensics & Raw Chunks##RawPm4Inspector"))
                 {
                     ImGui.TextColored(new Vector4(0.55f, 0.85f, 0.55f, 1f),
-                        $"Placement Z ~= {placementZ:F3}   (MSUR.0x1C as float; CK24 is its top 24 bits)");
+                        $"Placement Z ~= {placementZ:F3}   (MSUR.0x1C as float)");
                     ImGui.TextDisabled($"Surfaces={debugInfo.SurfaceCount}  bounds Z {debugInfo.BoundsMin.Z:F2}..{debugInfo.BoundsMax.Z:F2}  centre ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})");
-                    ImGui.TextDisabled($"Raw slice 0x{debugInfo.Ck24:X6} (exponent band 0x{debugInfo.Ck24Type:X2} - NOT a type)");
+                    ImGui.TextDisabled($"Raw height slice 0x{debugInfo.Ck24:X6} (exponent band 0x{debugInfo.Ck24Type:X2} - NOT a type)");
                     ImGui.TextDisabled($"MSHD F00={debugInfo.MshdField00} Region(0x04)={debugInfo.MshdRegionId} F08={debugInfo.MshdField08}");
                     ImGui.TextDisabled($"SurfaceClass(0x00)=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} MslkFirstIdx(0x18)={debugInfo.DominantMscnRefIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
                     ImGui.TextDisabled($"MSLK Group(0x04)=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");

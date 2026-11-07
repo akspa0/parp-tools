@@ -179,5 +179,97 @@ public sealed class Pm4ShapeMatchBatchServiceTests
         Assert.True(ManualCurationProjectPolicy.TryGetActiveShapeMatchDecision(project, acceptedOnTile1, out var dec1));
         Assert.Equal(ManualShapeMatchDecisionKind.Accepted, dec1?.Decision);
     }
+
+    [Fact]
+    public void FormatMarkdownSummary_ContainsZeroCk24AndRendersObjectCoordinates()
+    {
+        var batchService = new Pm4ShapeMatchBatchService();
+        var reviewService = new Pm4ShapeMatchReviewService();
+        var project = new ManualCurationProject { MapName = "development" };
+
+        var hull = new Pm4HullShapeInput(
+            22, 30, 0x46CCED, 0, 0x0808049E,
+            Pm4ShapeLibraryVisualService.BuildSyntheticDescriptor(new Vector3(30f, 10f, 15f)) with
+            {
+                PrismCentroid = new Vector3(5103.7f, 652.6f, 6.9f)
+            });
+
+        var candidates = new[]
+        {
+            new Pm4ModelShapeCandidate(
+                "WORLD\\WMO\\DUNGEON\\D_PIRATESHIP\\PIRATESHIP.WMO",
+                "WMO",
+                Pm4ShapeLibraryVisualService.BuildSyntheticDescriptor(new Vector3(30f, 10f, 15f))),
+        };
+
+        var scope = new Pm4BatchTileScope("development", 22, 22, 30, 30);
+        Pm4BatchAnalysisSummary summary = batchService.RunBatch(
+            scope,
+            [new Pm4BatchTileInput(22, 30, [hull])],
+            candidates,
+            project,
+            reviewService);
+
+        string md = Pm4ShapeMatchBatchService.FormatMarkdownSummary(summary);
+
+        Assert.DoesNotContain("CK24", md);
+        Assert.Contains("Object ID", md);
+        Assert.Contains("Position (X, Y, Z)", md);
+        Assert.Contains("Proposed Candidate", md);
+        Assert.Contains("`22_30`", md);
+        Assert.Contains("`Obj #0`", md);
+    }
+
+    [Fact]
+    public void TaughtPairing_TelemetrySerialization_PreservesAllAuthenticFields()
+    {
+        var original = new TaughtPairing(
+            Ck24: 0x46CCED,
+            DominantGroupKey: 0x12,
+            ModelName: "PIRATESHIP.WMO",
+            ModelPath: "WORLD\\WMO\\DUNGEON\\D_PIRATESHIP\\PIRATESHIP.WMO",
+            AssetKind: "WMO",
+            SolvedScale: 1.0f,
+            YawDegrees: 15.1f,
+            Length: 30f,
+            Width: 10f,
+            Height: 15f,
+            TaughtUtc: DateTime.UtcNow,
+            LocalBoundsMin: new Vector3(-15f, -5f, 0f),
+            LocalBoundsMax: new Vector3(15f, 5f, 15f),
+            YawOffset: 0f,
+            VerticalSliceRadii: [1f, 0.8f, 0.5f],
+            InertiaTensor: Vector3.Zero,
+            NormalDistribution: Vector3.UnitZ,
+            PlacementPosition: new Vector3(5103.7f, 652.6f, 6.9f),
+            PlacementRotation: new Vector3(0f, 0f, 15.1f),
+            PlacementScale: 1.0f,
+            UniqueId: 9315669,
+            TileX: 22,
+            TileY: 30,
+            ObjectPartId: 0,
+            LinkGroupObjectId: 0x0808049E,
+            HullCentroid: new Vector3(5103.7f, 652.6f, 6.9f),
+            HullBoundsMin: new Vector3(5088.7f, 647.6f, -0.6f),
+            HullBoundsMax: new Vector3(5118.7f, 657.6f, 14.4f));
+
+        var options = new JsonSerializerOptions { IncludeFields = true };
+        string json = JsonSerializer.Serialize(original, options);
+        var deserialized = JsonSerializer.Deserialize<TaughtPairing>(json, options);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal(original.ModelName, deserialized.ModelName);
+        Assert.Equal(original.UniqueId, deserialized.UniqueId);
+        Assert.Equal(original.TileX, deserialized.TileX);
+        Assert.Equal(original.TileY, deserialized.TileY);
+        Assert.Equal(original.ObjectPartId, deserialized.ObjectPartId);
+        Assert.Equal(original.LinkGroupObjectId, deserialized.LinkGroupObjectId);
+        Assert.Equal(original.PlacementPosition, deserialized.PlacementPosition);
+        Assert.Equal(original.PlacementRotation, deserialized.PlacementRotation);
+        Assert.Equal(original.PlacementScale, deserialized.PlacementScale);
+        Assert.Equal(original.HullCentroid, deserialized.HullCentroid);
+        Assert.Equal(original.HullBoundsMin, deserialized.HullBoundsMin);
+        Assert.Equal(original.HullBoundsMax, deserialized.HullBoundsMax);
+    }
 }
 
