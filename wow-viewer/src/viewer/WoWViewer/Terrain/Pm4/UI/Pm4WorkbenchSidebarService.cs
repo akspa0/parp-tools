@@ -454,8 +454,7 @@ internal sealed class Pm4WorkbenchSidebarService
             ImGui.TextColored(UiTokens.Brass, "✦ Active Human Pairing & Curation:");
             ImGui.BulletText($"Model: {inst.ModelName} (#{inst.UniqueId})");
             float hullZ = selectedPm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4Obj.Ck24 << 8) : 0f;
-            string zDisplay = selectedPm4Obj.Ck24 != 0 ? $"Object Z {hullZ:F3}" : "Object Z (none)";
-            ImGui.BulletText($"PM4 Hull: {zDisplay} (part {selectedPm4Obj.ObjectPartId}, group 0x{selectedPm4Obj.DominantGroupKey:X2}) — {dist:F1} yds away");
+            ImGui.BulletText($"PM4 Hull: [{pm4TileX}_{pm4TileY}] Obj #{selectedPm4Obj.ObjectPartId} (Z={hullZ:F1}yd, Lnk={selectedPm4Obj.LinkGroupObjectId}) — {dist:F1} yds away");
             if (similarHulls != null)
             {
                 ImGui.BulletText($"Cross-Tile Identified: {similarHulls.Count} matching 3D shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
@@ -525,8 +524,7 @@ internal sealed class Pm4WorkbenchSidebarService
         {
             Vector3 pm4Centroid = Vector3.Transform(selectedPm4Obj.Center, selectedPm4Obj.BaseTransform);
             float hullOnlyZ = selectedPm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4Obj.Ck24 << 8) : 0f;
-            string hullOnlyZDisplay = selectedPm4Obj.Ck24 != 0 ? $"Object Z {hullOnlyZ:F3}" : "Object Z (none)";
-            ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Hull: {hullOnlyZDisplay} (part {selectedPm4Obj.ObjectPartId})");
+            ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Hull: [{pm4TileX}_{pm4TileY}] Obj #{selectedPm4Obj.ObjectPartId} (Z={hullOnlyZ:F1}yd, Lnk={selectedPm4Obj.LinkGroupObjectId})");
             ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Group: 0x{selectedPm4Obj.DominantGroupKey:X2} | Tris: {selectedPm4Obj.Triangles.Count}");
             if (similarHulls != null && similarHulls.Count > 0)
             {
@@ -727,8 +725,7 @@ internal sealed class Pm4WorkbenchSidebarService
                 {
                     var (nh, tx, ty, distToHull) = nearbyHulls[h];
                     float nearZ = nh.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(nh.Ck24 << 8) : 0f;
-                    string nearZDisplay = nh.Ck24 != 0 ? $"Object Z {nearZ:F3}" : "Object Z (none)";
-                    if (SharedUiWidgets.ActionButton($"Pair with PM4 Hull {nearZDisplay} (part {nh.ObjectPartId}) — {distToHull:F1} yds##pair_near_hull_{h}"))
+                    if (SharedUiWidgets.ActionButton($"Pair with PM4 Hull [{tx}_{ty}] Obj #{nh.ObjectPartId} (Z={nearZ:F1}yd) — {distToHull:F1} yds##pair_near_hull_{h}"))
                     {
                         overlay.SelectPm4Object((tx, ty, nh.Ck24, nh.ObjectPartId));
                     }

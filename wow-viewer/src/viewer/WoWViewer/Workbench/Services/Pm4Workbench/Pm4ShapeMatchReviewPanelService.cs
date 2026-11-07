@@ -106,7 +106,8 @@ internal sealed class Pm4ShapeMatchReviewPanelService
                     string confText = item.ActiveTopCandidate != null
                         ? $"{item.ActiveTopCandidate.Confidence:P0}"
                         : "-";
-                    string rowText = $"[{item.Status}] Tile {item.Hull.TileX}_{item.Hull.TileY} CK24 0x{item.Hull.Ck24:X6} (part {item.Hull.ObjectPartId}) → {candidateName} ({confText})##rev_q_{i}";
+                    float hullZ = item.Hull.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(item.Hull.Ck24 << 8) : item.Proposal.HullCentroid.Z;
+                    string rowText = $"[{item.Status}] [{item.Hull.TileX}_{item.Hull.TileY}] Obj #{item.Hull.ObjectPartId} (Z={hullZ:F1}yd) → {candidateName} ({confText})##rev_q_{i}";
 
                     if (ImGui.Selectable(rowText, isSelected))
                     {
@@ -120,9 +121,10 @@ internal sealed class Pm4ShapeMatchReviewPanelService
         if (review.SelectedItem is { } selectedItem)
         {
             ImGui.Spacing();
+            float selZ = selectedItem.Hull.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedItem.Hull.Ck24 << 8) : selectedItem.Proposal.HullCentroid.Z;
             ImGui.TextColored(
                 UiTokens.Brass,
-                $"Selected Hull: Tile ({selectedItem.Hull.TileX}, {selectedItem.Hull.TileY}) CK24 0x{selectedItem.Hull.Ck24:X6} Part {selectedItem.Hull.ObjectPartId}");
+                $"Selected Hull: [{selectedItem.Hull.TileX}_{selectedItem.Hull.TileY}] Obj #{selectedItem.Hull.ObjectPartId} (Z={selZ:F1}yd, Lnk={selectedItem.Hull.LinkGroupObjectId})");
             Vector3 rawC = selectedItem.Proposal.UncalibratedCentroid;
             Vector3 calC = selectedItem.Proposal.CalibratedCentroid;
             ImGui.TextDisabled(
@@ -150,7 +152,7 @@ internal sealed class Pm4ShapeMatchReviewPanelService
                 if (review.Accept(selectedItem.Hull, project))
                 {
                     curationService.SaveProject(mapName);
-                    workbench.StatusMessage = $"Accepted {Path.GetFileName(selectedItem.ActiveTopCandidate!.ModelPath)} for CK24 0x{selectedItem.Hull.Ck24:X6}.";
+                    workbench.StatusMessage = $"Accepted {Path.GetFileName(selectedItem.ActiveTopCandidate!.ModelPath)} for [{selectedItem.Hull.TileX}_{selectedItem.Hull.TileY}] Obj #{selectedItem.Hull.ObjectPartId}.";
                 }
             }
             ImGui.SameLine();
@@ -160,7 +162,7 @@ internal sealed class Pm4ShapeMatchReviewPanelService
                 if (review.Reject(selectedItem.Hull, project))
                 {
                     curationService.SaveProject(mapName);
-                    workbench.StatusMessage = $"Rejected {rejectedName} for CK24 0x{selectedItem.Hull.Ck24:X6} (suppressed from top match).";
+                    workbench.StatusMessage = $"Rejected {rejectedName} for [{selectedItem.Hull.TileX}_{selectedItem.Hull.TileY}] Obj #{selectedItem.Hull.ObjectPartId} (suppressed from top match).";
                 }
             }
             ImGui.SameLine();
@@ -168,7 +170,7 @@ internal sealed class Pm4ShapeMatchReviewPanelService
             {
                 int cleared = review.ResetRejections(project, selectedItem.Hull);
                 curationService.SaveProject(mapName);
-                workbench.StatusMessage = $"Reset {cleared} rejected candidate pair(s) for CK24 0x{selectedItem.Hull.Ck24:X6}.";
+                workbench.StatusMessage = $"Reset {cleared} rejected candidate pair(s) for [{selectedItem.Hull.TileX}_{selectedItem.Hull.TileY}] Obj #{selectedItem.Hull.ObjectPartId}.";
             }
 
             // Replace from selected visual library shape or compatible alternatives (FR-008)
@@ -246,7 +248,7 @@ internal sealed class Pm4ShapeMatchReviewPanelService
                     string propName = Path.GetFileName(entry.ProposedModelPath);
                     string chosenName = entry.ChosenModelPath != null ? Path.GetFileName(entry.ChosenModelPath) : "-";
                     ImGui.BulletText(
-                        $"[{entry.Decision}] {entry.Hull.TileX}_{entry.Hull.TileY} 0x{entry.Hull.Ck24:X6}: proposed={propName}, chosen={chosenName}, conf={entry.Confidence:P0}, prov={entry.Provenance} ({entry.TimestampUtc:HH:mm:ss})");
+                        $"[{entry.Decision}] [{entry.Hull.TileX}_{entry.Hull.TileY}] Obj #{entry.Hull.ObjectPartId}: proposed={propName}, chosen={chosenName}, conf={entry.Confidence:P0}, prov={entry.Provenance} ({entry.TimestampUtc:HH:mm:ss})");
                 }
             }
         }

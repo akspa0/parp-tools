@@ -755,9 +755,10 @@ internal sealed partial class Pm4WorkbenchService
                     && _worldScene.Pm4Overlay.TryGetPm4ObjectDebugInfo(key, out Pm4ObjectDebugInfo debugInfo)
                     ? debugInfo.MshdRegionId
                     : null;
+                float z = key.ck24 != 0 ? BitConverter.UInt32BitsToSingle(key.ck24 << 8) : 0f;
                 string label = regionId.HasValue
-                    ? $"{index + 1}. CK24 0x{key.ck24:X6} part={key.objectPart} tile=({key.tileX},{key.tileY}) region={regionId.Value}"
-                    : $"{index + 1}. CK24 0x{key.ck24:X6} part={key.objectPart} tile=({key.tileX},{key.tileY})";
+                    ? $"{index + 1}. [{key.tileX}_{key.tileY}] Obj #{key.objectPart} (Z={z:F1}yd) region={regionId.Value}"
+                    : $"{index + 1}. [{key.tileX}_{key.tileY}] Obj #{key.objectPart} (Z={z:F1}yd)";
 
                 ImGui.PushID($"Pm4CollectionItem{idSuffix}_{index}");
                 if (selected)

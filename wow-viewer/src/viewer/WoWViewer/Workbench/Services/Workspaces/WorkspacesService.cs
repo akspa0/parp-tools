@@ -298,7 +298,8 @@ internal sealed partial class WorkspacesService
         if (_worldScene?.Pm4Overlay.HasSelectedPm4Object == true && _worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue)
         {
             var selectedPm4 = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
-            return $"PM4 CK24 0x{selectedPm4.ck24:X6} part {selectedPm4.objectPart}";
+            float z = selectedPm4.ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4.ck24 << 8) : 0f;
+            return $"[{selectedPm4.tileX}_{selectedPm4.tileY}] Obj #{selectedPm4.objectPart} (Z={z:F1}yd)";
         }
 
         if (!string.IsNullOrEmpty(_selectedObjectType) && _selectedObjectIndex >= 0)

@@ -3722,7 +3722,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                         // never produce a box. On full-map scenes that scan was the dominant
                         // overlay cost. Keep selected bounds independent, but consume the
                         // visibility frame for the global debug boxes.
-                        if ((_showSelectedObjectBounds || _showBoundingBoxes || _pm4Overlay._showPm4ObjectBounds) && _bbRenderer != null)
+                        if ((_showSelectedObjectBounds || _showBoundingBoxes || _pm4Overlay._showPm4ObjectBounds || _pm4Overlay._selectedPm4ObjectKey.HasValue) && _bbRenderer != null)
                         {
                 // Depth test ON so boxes behind terrain/objects are hidden,
                 // depth write OFF so box lines don't occlude models
@@ -3830,29 +3830,26 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                                 }
                             }
 
-                            if (!drewSelectionWireframe)
+                            if (useOrientedBox)
                             {
-                                if (useOrientedBox)
-                                {
-                                    _bbRenderer.BatchHighlightedBoxOriented(
-                                        bbMin,
-                                        bbMax,
-                                        selectedInstance.Transform,
-                                        selectedBoundsTime,
-                                        selectedBoundsInnerColor,
-                                        selectedBoundsAccentA,
-                                        selectedBoundsAccentBResolved);
-                                }
-                                else
-                                {
-                                    _bbRenderer.BatchHighlightedBoxMinMax(
-                                        bbMin,
-                                        bbMax,
-                                        selectedBoundsTime,
-                                        selectedBoundsInnerColor,
-                                        selectedBoundsAccentA,
-                                        selectedBoundsAccentBResolved);
-                                }
+                                _bbRenderer.BatchHighlightedBoxOriented(
+                                    bbMin,
+                                    bbMax,
+                                    selectedInstance.Transform,
+                                    selectedBoundsTime,
+                                    selectedBoundsInnerColor,
+                                    selectedBoundsAccentA,
+                                    selectedBoundsAccentBResolved);
+                            }
+                            else
+                            {
+                                _bbRenderer.BatchHighlightedBoxMinMax(
+                                    bbMin,
+                                    bbMax,
+                                    selectedBoundsTime,
+                                    selectedBoundsInnerColor,
+                                    selectedBoundsAccentA,
+                                    selectedBoundsAccentBResolved);
                             }
 
                             // 3D selection aids for WMO doodads: an origin jewel + gold position
@@ -3888,8 +3885,7 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             selectionBoundsPreparedCount++;
                         }
 
-                        if (_pm4Overlay._showPm4Overlay
-                            && _pm4Overlay._selectedPm4ObjectKey.HasValue
+                        if (_pm4Overlay._selectedPm4ObjectKey.HasValue
                             && _pm4Overlay._pm4ObjectLookup.TryGetValue(_pm4Overlay._selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedPm4Object))
                         {
                             Matrix4x4 pm4Transform = _pm4Overlay.BuildPm4OverlayTransformMatrix();
@@ -3897,27 +3893,8 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                                 || _pm4Overlay._pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
                                 || _pm4Overlay._pm4OverlayScale != Vector3.One;
                             Matrix4x4 objectTransform = _pm4Overlay.BuildPm4ObjectTransform(_pm4Overlay._selectedPm4ObjectKey.Value, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
-                            Vector3 boundsMin = selectedPm4Object.BoundsMin;
-                            Vector3 boundsMax = selectedPm4Object.BoundsMax;
-                            if (applyObjectTransform)
-                                TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
-
-                            // Keep the selection box on the tile the object's data came from. A
-                            // merged or cross-tile object can otherwise produce a box that covers
-                            // the neighbouring tile and looks like a duplicate.
-                            if (Pm4CoordinateService.TryParseTileCoordinates(selectedPm4Object.SourcePath, out int selectedTileX, out int selectedTileY))
-                            {
-                                (float tileMinX, float tileMaxX) = Pm4CoordinateService.GetPlacementTileBand(selectedTileX);
-                                (float tileMinY, float tileMaxY) = Pm4CoordinateService.GetPlacementTileBand(selectedTileY);
-                                boundsMin = new Vector3(
-                                    Math.Max(boundsMin.X, tileMinX),
-                                    Math.Max(boundsMin.Y, tileMinY),
-                                    boundsMin.Z);
-                                boundsMax = new Vector3(
-                                    Math.Min(boundsMax.X, tileMaxX),
-                                    Math.Min(boundsMax.Y, tileMaxY),
-                                    boundsMax.Z);
-                            }
+                            Matrix4x4 geomTransform = Pm4OverlayScene.BuildPm4GeometryTransform(selectedPm4Object, objectTransform, applyObjectTransform);
+                            TransformBounds(selectedPm4Object.BoundsMin, selectedPm4Object.BoundsMax, geomTransform, out Vector3 boundsMin, out Vector3 boundsMax);
 
                             _bbRenderer.BatchHighlightedBoxMinMax(
                                 boundsMin,

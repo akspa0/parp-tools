@@ -148,7 +148,8 @@ internal sealed class ExportWorkbenchService
         {
             var selKey = overlay.SelectedPm4ObjectKey.Value;
             ImGui.Spacing();
-            ImGui.TextUnformatted($"Selected PM4 Object: Tile ({selKey.tileX}, {selKey.tileY}) Ck24 0x{selKey.ck24:X6} Part {selKey.objectPart}");
+            float selZ = selKey.ck24 != 0 ? BitConverter.UInt32BitsToSingle(selKey.ck24 << 8) : 0f;
+            ImGui.TextUnformatted($"Selected PM4 Object: [{selKey.tileX}_{selKey.tileY}] Obj #{selKey.objectPart} (Z={selZ:F1}yd)");
 
             if (overlay.TryGetSelectedPm4ObjectDebugInfo(out var debugInfo))
             {

@@ -509,7 +509,10 @@ internal sealed class ManualCurationWorkbenchService
     }
 
     private static string FormatHull(Pm4HullIdentity hull)
-        => $"PM4 {hull.TileX:D2}_{hull.TileY:D2} · CK24 0x{hull.Ck24:X6} · part {hull.ObjectPartId} · group 0x{hull.LinkGroupObjectId:X8}";
+    {
+        float z = hull.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(hull.Ck24 << 8) : 0f;
+        return $"[{hull.TileX:D2}_{hull.TileY:D2}] Obj #{hull.ObjectPartId} (Z={z:F1}yd, Lnk=0x{hull.LinkGroupObjectId:X})";
+    }
 
     private static string ProjectPath(string mapName)
         => Path.Combine(AppContext.BaseDirectory, "output", "projects", "manual_curation", $"{mapName}.manual-curation.json");

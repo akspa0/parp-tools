@@ -452,11 +452,12 @@ internal sealed partial class SceneHoverAndPickService
         float? distance,
         string source)
     {
+        float z = objectKey.ck24 != 0 ? BitConverter.UInt32BitsToSingle(objectKey.ck24 << 8) : 0f;
         TryAddClickSelectionCandidate(
             addedKeys,
             new ClickSelectionCandidate(
                 $"pm4:{objectKey.tileX}:{objectKey.tileY}:{objectKey.ck24}:{objectKey.objectPart}",
-                $"PM4 0x{objectKey.ck24:X6} part {objectKey.objectPart}",
+                $"[{objectKey.tileX}_{objectKey.tileY}] Obj #{objectKey.objectPart} (Z={z:F1}yd)",
                 $"Tile: ({objectKey.tileY}, {objectKey.tileX})",
                 source,
                 distance,

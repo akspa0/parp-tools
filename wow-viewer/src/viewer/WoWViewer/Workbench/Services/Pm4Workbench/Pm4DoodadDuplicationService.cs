@@ -1293,7 +1293,7 @@ internal sealed class Pm4DoodadDuplicationService
 
         if (!force && HullHasSameModel(pm4Host, pm4Obj, pm4TileX, pm4TileY, taught.ModelPath))
         {
-            string dupMsg = $"PM4 hull 0x{pm4Obj.Ck24:X6} already has {taught.ModelName} assigned; skipped duplicate spawn.";
+            string dupMsg = $"PM4 hull [{pm4TileX}_{pm4TileY}] Obj #{pm4Obj.ObjectPartId} already has {taught.ModelName} assigned; skipped duplicate spawn.";
             _host.StatusMessage = dupMsg;
             LastOperationMessage = dupMsg;
             return false;
@@ -1372,7 +1372,7 @@ internal sealed class Pm4DoodadDuplicationService
         pm4Host.RebuildInstanceLists();
         pm4Host.Assets.ProcessPendingLoads(maxLoads: 64, maxBudgetMs: 100.0);
 
-        string msg = $"✓ Spawned taught {taught.ModelName} (#{newId}) into PM4 hull 0x{pm4Obj.Ck24:X6} on tile ({pm4TileX}, {pm4TileY}).";
+        string msg = $"✓ Spawned taught {taught.ModelName} (#{newId}) into PM4 hull [{pm4TileX}_{pm4TileY}] Obj #{pm4Obj.ObjectPartId}.";
         _host.StatusMessage = msg;
         LastOperationMessage = msg;
         return true;
@@ -1640,7 +1640,7 @@ internal sealed class Pm4DoodadDuplicationService
 
         if (!force && HullHasSameModel(pm4Host, pm4Obj, pm4TileX, pm4TileY, match.Candidate.ModelPath))
         {
-            statusMessage = $"PM4 hull 0x{pm4Obj.Ck24:X6} already has {match.Candidate.ModelName} assigned; skipped duplicate spawn.";
+            statusMessage = $"PM4 hull [{pm4TileX}_{pm4TileY}] Obj #{pm4Obj.ObjectPartId} already has {match.Candidate.ModelName} assigned; skipped duplicate spawn.";
             _host.StatusMessage = statusMessage;
             LastOperationMessage = statusMessage;
             return false;
@@ -1718,7 +1718,7 @@ internal sealed class Pm4DoodadDuplicationService
         pm4Host.RebuildInstanceLists();
         pm4Host.Assets.ProcessPendingLoads(maxLoads: 64, maxBudgetMs: 100.0);
 
-        statusMessage = $"✓ Spawned {match.Candidate.ModelName} (#{newId}) into PM4 hull 0x{pm4Obj.Ck24:X6} (Score: {match.Score:P0}, Scale: {actualScale:F2}, Yaw: {match.SolvedRotation.Z:F1}°).";
+        statusMessage = $"✓ Spawned {match.Candidate.ModelName} (#{newId}) into PM4 hull [{pm4TileX}_{pm4TileY}] Obj #{pm4Obj.ObjectPartId} (Score: {match.Score:P0}, Scale: {actualScale:F2}, Yaw: {match.SolvedRotation.Z:F1}°).";
         _host.StatusMessage = statusMessage;
         LastOperationMessage = statusMessage;
         return true;
