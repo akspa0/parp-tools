@@ -31,7 +31,10 @@ $coveredRoots = @(
     'Workbench/Services/MainMenu',
     'Workbench/Services/Chrome',
     'Workbench/Services/Navigator',
-    'Workbench/Services/WorkbenchPanels'
+    'Workbench/Services/WorkbenchPanels',
+    'Workbench/Services/Pm4Workbench/Pm4ShapeLibraryPanelService.cs',
+    'Workbench/Services/Pm4Workbench/Pm4ShapeMatchReviewPanelService.cs',
+    'Workbench/Services/Pm4Workbench/Pm4ShapeMatchBatchPanelService.cs'
 )
 
 # The visible label is the first argument. It may be a plain literal or a conditional
@@ -70,10 +73,16 @@ $rows = [System.Collections.Generic.List[string]]::new()
 
 foreach ($relative in $coveredRoots)
 {
-    $directory = Join-Path $viewerRoot $relative
-    if (-not (Test-Path -LiteralPath $directory)) { continue }
+    $targetPath = Join-Path $viewerRoot $relative
+    if (-not (Test-Path -LiteralPath $targetPath)) { continue }
 
-    foreach ($file in Get-ChildItem -LiteralPath $directory -Filter '*.cs' -File | Sort-Object FullName)
+    $files = if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+        @(Get-Item -LiteralPath $targetPath)
+    } else {
+        Get-ChildItem -LiteralPath $targetPath -Filter '*.cs' -File | Sort-Object FullName
+    }
+
+    foreach ($file in $files)
     {
         $lines = Get-Content -LiteralPath $file.FullName
         for ($index = 0; $index -lt $lines.Count; $index++)

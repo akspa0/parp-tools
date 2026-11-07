@@ -61,4 +61,29 @@ public static class Pm4ShapeLibraryHealth
 
         return healthy;
     }
+
+    public static Pm4ShapeLibraryEntryHealth Check(
+        Pm4ModelShapeCandidate candidate,
+        Func<string, (bool Exists, bool Readable, string? Reason)> probe)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(probe);
+
+        if (string.IsNullOrWhiteSpace(candidate.ModelPath))
+            return new Pm4ShapeLibraryEntryHealth(string.Empty, false, "Empty model path.");
+
+        try
+        {
+            var (exists, readable, reason) = probe(candidate.ModelPath);
+            if (!exists)
+                return new Pm4ShapeLibraryEntryHealth(candidate.ModelPath, false, reason ?? "Asset not found.");
+            if (!readable)
+                return new Pm4ShapeLibraryEntryHealth(candidate.ModelPath, false, reason ?? "Asset unreadable.");
+            return new Pm4ShapeLibraryEntryHealth(candidate.ModelPath, true, null);
+        }
+        catch (Exception ex)
+        {
+            return new Pm4ShapeLibraryEntryHealth(candidate.ModelPath, false, ex.Message);
+        }
+    }
 }

@@ -17,6 +17,21 @@ public sealed record Pm4GeometricShapeDescriptor(
     float FootprintArea,
     Vector3 LocalOriginOffset)
 {
+    public Vector3 BoundingBoxDimensions
+    {
+        get => new(Length, Width, Height);
+        init
+        {
+            Length = MathF.Max(value.X, value.Y);
+            Width = MathF.Min(value.X, value.Y);
+            Height = MathF.Max(0.01f, value.Z);
+        }
+    }
+
+    public Vector3 PrismCentroid { get; init; }
+    public float PrimaryAxisAngleRadians { get; init; }
+    public IReadOnlyList<Vector2>? FootprintHullVertices { get; init; }
+
     /// <summary>
     /// Builds a shape descriptor from model-space bounding extents (LocalBoundsMin, LocalBoundsMax).
     /// Captures the WC3-heritage asymmetric pivot offset (where (0,0,0) is at the door/stairs, not center).
@@ -74,7 +89,12 @@ public sealed record Pm4GeometricShapeDescriptor(
             aspectXY,
             aspectZH,
             area,
-            Vector3.Zero);
+            Vector3.Zero)
+        {
+            PrismCentroid = prism.Centroid,
+            PrimaryAxisAngleRadians = prism.YawDegrees * (MathF.PI / 180f),
+            FootprintHullVertices = prism.ConvexHull2D
+        };
     }
 
     /// <summary>

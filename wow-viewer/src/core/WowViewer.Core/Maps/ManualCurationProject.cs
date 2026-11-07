@@ -43,6 +43,42 @@ public sealed record ManualPm4Association(
     Pm4HullIdentity Hull,
     DateTimeOffset AuthoredUtc);
 
+public enum ManualShapeMatchDecisionKind
+{
+    Accepted,
+    Rejected,
+    Replaced,
+}
+
+/// <summary>
+/// Spec 295 (FR-009, FR-010): Persisted human-in-the-loop (or bounded auto-accept) pairing decision for a PM4 hull.
+/// </summary>
+public sealed record ManualShapeMatchDecisionRecord(
+    Pm4HullIdentity Hull,
+    string ProposedModelPath,
+    string? ChosenModelPath,
+    string AssetKind,
+    ManualShapeMatchDecisionKind Decision,
+    float Confidence,
+    float ShapeDistance,
+    Vector3 CalibratedCentroid,
+    string Provenance,
+    DateTimeOffset DecidedUtc);
+
+/// <summary>
+/// Spec 295 (FR-011): Append-only audit log entry for every accept, reject, or replace pairing decision.
+/// </summary>
+public sealed record ManualShapeMatchAuditEntry(
+    Guid AuditId,
+    Pm4HullIdentity Hull,
+    string ProposedModelPath,
+    string? ChosenModelPath,
+    ManualShapeMatchDecisionKind Decision,
+    float Confidence,
+    string Provenance,
+    string? Notes,
+    DateTimeOffset TimestampUtc);
+
 /// <summary>One map's curation-only state. It is intentionally separate from source ADT data.</summary>
 public sealed class ManualCurationProject
 {
@@ -50,6 +86,8 @@ public sealed class ManualCurationProject
     public string MapName { get; set; } = string.Empty;
     public List<ManualObjectPlacement> Placements { get; set; } = [];
     public List<ManualPm4Association> Associations { get; set; } = [];
+    public List<ManualShapeMatchDecisionRecord> ShapeMatchDecisions { get; set; } = [];
+    public List<ManualShapeMatchAuditEntry> ShapeMatchAuditHistory { get; set; } = [];
 }
 
 public enum ManualAssociationResult
@@ -167,5 +205,100 @@ public static class ManualCurationProjectPolicy
             newHull,
             authoredUtc ?? DateTimeOffset.UtcNow);
         return ManualAssociationResult.Replaced;
+    }
+
+    public static bool RecordShapeMatchDecision(
+        ManualCurationProject project,
+        ManualShapeMatchDecisionRecord decision,
+        string? notes = null,
+        Guid? auditId = null)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(decision);
+
+        if (!decision.Hull.IsValid || string.IsNullOrWhiteSpace(decision.ProposedModelPath))
+            return false;
+
+        if (decision.Decision == ManualShapeMatchDecisionKind.Replaced &&
+            string.IsNullOrWhiteSpace(decision.ChosenModelPath))
+        {
+            return false;
+        }
+
+        project.ShapeMatchDecisions ??= [];
+        project.ShapeMatchAuditHistory ??= [];
+
+        if (decision.Decision == ManualShapeMatchDecisionKind.Rejected)
+        {
+            int existingIdx = project.ShapeMatchDecisions.FindIndex(d =>
+                d.Decision == ManualShapeMatchDecisionKind.Rejected &&
+                d.Hull == decision.Hull &&
+                string.Equals(d.ProposedModelPath, decision.ProposedModelPath, StringComparison.OrdinalIgnoreCase));
+
+            if (existingIdx >= 0)
+                project.ShapeMatchDecisions[existingIdx] = decision;
+            else
+                project.ShapeMatchDecisions.Add(decision);
+        }
+        else
+        {
+            project.ShapeMatchDecisions.RemoveAll(d =>
+                d.Decision != ManualShapeMatchDecisionKind.Rejected &&
+                d.Hull == decision.Hull);
+            project.ShapeMatchDecisions.Add(decision);
+        }
+
+        project.ShapeMatchAuditHistory.Add(new ManualShapeMatchAuditEntry(
+            auditId ?? Guid.NewGuid(),
+            decision.Hull,
+            decision.ProposedModelPath,
+            decision.ChosenModelPath,
+            decision.Decision,
+            decision.Confidence,
+            decision.Provenance,
+            notes,
+            decision.DecidedUtc));
+
+        return true;
+    }
+
+    public static bool IsCandidateRejectedForHull(
+        ManualCurationProject project,
+        Pm4HullIdentity hull,
+        string candidateModelPath)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        if (project.ShapeMatchDecisions == null || string.IsNullOrWhiteSpace(candidateModelPath))
+            return false;
+
+        return project.ShapeMatchDecisions.Any(d =>
+            d.Decision == ManualShapeMatchDecisionKind.Rejected &&
+            d.Hull == hull &&
+            string.Equals(d.ProposedModelPath, candidateModelPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool TryGetActiveShapeMatchDecision(
+        ManualCurationProject project,
+        Pm4HullIdentity hull,
+        out ManualShapeMatchDecisionRecord? decision)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        decision = project.ShapeMatchDecisions?.LastOrDefault(d =>
+            d.Decision != ManualShapeMatchDecisionKind.Rejected &&
+            d.Hull == hull);
+        return decision != null;
+    }
+
+    public static int ResetRejectedShapeMatchDecisions(
+        ManualCurationProject project,
+        Pm4HullIdentity? hull = null)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        if (project.ShapeMatchDecisions == null)
+            return 0;
+
+        return project.ShapeMatchDecisions.RemoveAll(d =>
+            d.Decision == ManualShapeMatchDecisionKind.Rejected &&
+            (hull == null || d.Hull == hull.Value));
     }
 }

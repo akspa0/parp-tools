@@ -176,4 +176,119 @@ public static class Pm4ShapeMatchAnalysisService
 
         return new Pm4CentroidMeasurement(count, sum / count, min, max, source);
     }
+
+    public static Pm4ShapeMatchProposal Analyze(
+        Pm4HullShapeInput hull,
+        IReadOnlyList<Pm4ModelShapeCandidate> candidates,
+        Pm4CentroidCalibration? calibration = null,
+        Pm4ShapeMatchOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(hull);
+        ArgumentNullException.ThrowIfNull(candidates);
+
+        Pm4CentroidCalibration activeCal = calibration ?? Pm4CentroidCalibration.None;
+        Pm4ShapeMatchOptions opts = options ?? new Pm4ShapeMatchOptions();
+        Vector3 uncalibrated = hull.Descriptor.PrismCentroid;
+        Vector3 calibrated = activeCal.Apply(uncalibrated, calibrationApplied: false);
+        var criteria = new Pm4ShapeMatchingCriteria();
+
+        var scored = new List<Pm4ShapeCandidate>();
+        foreach (Pm4ModelShapeCandidate cand in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(cand.ModelPath))
+                continue;
+
+            float dist = Pm4DirectModelMatcher.CompareShapes(hull.Descriptor, cand.Descriptor, criteria);
+            if (float.IsInfinity(dist) || dist > opts.MaxCredibleShapeDistance)
+                continue;
+
+            double score = 1.0 / (1.0 + MathF.Max(0f, dist));
+            scored.Add(new Pm4ShapeCandidate(
+                cand.ModelPath,
+                System.IO.Path.GetFileName(cand.ModelPath),
+                cand.AssetKind,
+                score,
+                1.0f,
+                Vector3.Zero,
+                calibrated,
+                $"ShapeDistance={dist:F3}",
+                dist));
+        }
+
+        var ranked = scored
+            .OrderBy(static c => c.ShapeDistance)
+            .ThenByDescending(static c => c.Score)
+            .Take(Math.Max(1, opts.MaxCandidates))
+            .ToArray();
+
+        double confidence = ranked.Length > 0 ? ranked[0].Score : 0.0;
+        bool unmatched = ranked.Length == 0;
+        bool lowConfidence = !unmatched && confidence < opts.LowConfidenceThreshold;
+
+        Vector3 half = hull.Descriptor.BoundingBoxDimensions * 0.5f;
+        return new Pm4ShapeMatchProposal(
+            HullKey: hull.Ck24 != 0 ? hull.Ck24 : (uint)hull.ObjectPartId,
+            HullCentroid: uncalibrated,
+            HullBoundsMin: uncalibrated - half,
+            HullBoundsMax: uncalibrated + half,
+            Candidates: ranked,
+            ConfidenceScore: confidence,
+            IsLowConfidence: lowConfidence,
+            IsUnmatched: unmatched,
+            ConflictCount: 1,
+            Hull: hull,
+            ExplicitCalibratedCentroid: calibrated);
+    }
+
+    public static Pm4ShapeBatchResult AnalyzeBatch(
+        IReadOnlyList<Pm4HullShapeInput> hulls,
+        IReadOnlyList<Pm4ModelShapeCandidate> candidates,
+        Pm4CentroidCalibration? calibration = null,
+        Pm4ShapeMatchOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(hulls);
+        ArgumentNullException.ThrowIfNull(candidates);
+
+        Pm4ShapeMatchOptions opts = options ?? new Pm4ShapeMatchOptions();
+        var proposals = new List<Pm4ShapeMatchProposal>(hulls.Count);
+        foreach (Pm4HullShapeInput hull in hulls)
+            proposals.Add(Analyze(hull, candidates, calibration, opts));
+
+        IReadOnlyList<Pm4ProposalConflict> conflicts = FindHullConflicts(proposals, opts.ConflictDistance);
+        return new Pm4ShapeBatchResult(proposals, conflicts);
+    }
+
+    public static IReadOnlyList<Pm4ProposalConflict> FindHullConflicts(
+        IReadOnlyList<Pm4ShapeMatchProposal> proposals,
+        float conflictDistance)
+    {
+        ArgumentNullException.ThrowIfNull(proposals);
+        var list = new List<Pm4ProposalConflict>();
+        float maxDistSq = conflictDistance * conflictDistance;
+
+        for (int i = 0; i < proposals.Count; i++)
+        {
+            Pm4ShapeCandidate? a = proposals[i].TopCandidate;
+            if (a == null) continue;
+
+            for (int j = i + 1; j < proposals.Count; j++)
+            {
+                Pm4ShapeCandidate? b = proposals[j].TopCandidate;
+                if (b == null) continue;
+
+                if (!string.Equals(a.ModelPath, b.ModelPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                float distSq = Vector3.DistanceSquared(proposals[i].CalibratedCentroid, proposals[j].CalibratedCentroid);
+                if (distSq > maxDistSq)
+                    continue;
+
+                Pm4HullShapeInput hullA = proposals[i].Hull ?? new Pm4HullShapeInput(0, 0, proposals[i].HullKey, i, 0, null!);
+                Pm4HullShapeInput hullB = proposals[j].Hull ?? new Pm4HullShapeInput(0, 0, proposals[j].HullKey, j, 0, null!);
+                list.Add(new Pm4ProposalConflict(hullA, hullB, a.ModelPath, MathF.Sqrt(distSq)));
+            }
+        }
+
+        return list;
+    }
 }

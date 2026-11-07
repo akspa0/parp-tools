@@ -25,6 +25,8 @@ public static class ManualCurationProjectFile
 
         project.Placements ??= [];
         project.Associations ??= [];
+        project.ShapeMatchDecisions ??= [];
+        project.ShapeMatchAuditHistory ??= [];
         return project;
     }
 

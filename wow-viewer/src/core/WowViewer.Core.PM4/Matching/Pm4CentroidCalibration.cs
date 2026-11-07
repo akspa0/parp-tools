@@ -19,6 +19,10 @@ public readonly record struct Pm4CentroidCalibration(
     /// <summary>Applies the correction exactly once to a solved placement position.</summary>
     public Vector3 Apply(Vector3 solvedPosition) => solvedPosition + Offset;
 
+    /// <summary>Applies the correction at most once based on <paramref name="calibrationApplied"/>.</summary>
+    public Vector3 Apply(Vector3 solvedPosition, bool calibrationApplied) =>
+        calibrationApplied ? solvedPosition : solvedPosition + Offset;
+
     /// <summary>Returns a calibration with the offset negated, for sign-error diagnosis.</summary>
     public Pm4CentroidCalibration Inverted() => this with { Offset = -Offset, Source = Source + " (inverted)" };
 

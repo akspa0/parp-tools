@@ -1,5 +1,16 @@
 # Progress — wow-viewer
 
+## 2026-11-06 — Spec 295 Phases 0–6 Complete (Visual PM4 Shape Library & Pairing)
+
+- Measured signed -X offset on validation tile `development_00_00.pm4` + `development_0_0_obj0.adt`: 15/15 (100.0%) authored WMO placements place the model's footprint center within 1.0 yd of the hull footprint center after calibration, exceeding SC-001's 90% requirement.
+- Created `Pm4ShapeLibraryVisualService` and `Pm4ShapeLibraryPanelService`: dual 2D footprint + elevation preview cards, proportional aspect ratio summaries, search and family/kind filtering with selection retention across filter updates, and side-by-side shape comparison.
+- Created `Pm4ShapeMatchWorkbenchService`: wires automatic proposal generation, 3D viewport preview with calibrated -X offset, and calibration controls (readout, enable/disable, invert, reset).
+- Created `Pm4ShapeMatchReviewService` and `Pm4ShapeMatchReviewPanelService`: human-in-the-loop review queue supporting Accept, Reject (candidate suppression and auto-promotion of next candidate), Replace (with proportion-filtered alternatives from visual library), and opt-in bounded auto-accept mode (SC-002, SC-006).
+- Extended `ManualCurationProject` and `ManualCurationProjectFile` to persist pairing decisions and append-only audit history; verified 100% round-trip fidelity across save and reload (SC-003).
+- Created `Pm4ShapeMatchBatchService` and `Pm4ShapeMatchBatchPanelService`: multi-tile scope execution, early cancellation preserving accepted decisions, and JSON/Markdown export reconciling matched, low-confidence, unmatched, and conflict counts (SC-004).
+- Registered 34 new interactive UI controls in `ui-controls.json` and regenerated `UI-REFERENCE.md`; `Verify-UiReference.ps1` passed with 0 errors and 0 warnings.
+- Verification: full solution builds with 0 errors; 21 unit tests passed across analysis, validation tile, visual library, review/persistence round-trip, and batch service. Complete receipt in `wow-viewer/specs/295-pm4-visual-shape-library/evidence/phase0-6-complete-2026-11-06.md`. Operator real-client visual/interaction proof remains owed.
+
 ## 2026-11-05 — Spec 292 layer panel, Reconstruction routing, skybox enumeration
 
 - Replaced the fixed L0–L7/A1–A7 toolbar row with a single **Layers** button that opens the Layers workbench panel in the left dock (not a pop-out window); the panel lists resident layers and selects alpha channels.

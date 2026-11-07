@@ -317,6 +317,26 @@ public sealed class Pm4PriorKnowledgeDatabase
             modelPath, name, assetKind, family, min, max, groupCount, IsCurated: true, SolvedScale: solvedScale, YawOffset: yawOffset));
     }
 
+    private static IEnumerable<string> ExpandCandidatePaths(string[] candidatePaths, string repoRelativeSuffix)
+    {
+        foreach (string path in candidatePaths)
+            yield return path;
+
+        foreach (string root in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            if (string.IsNullOrWhiteSpace(root))
+                continue;
+
+            DirectoryInfo? dir = new(root);
+            while (dir != null)
+            {
+                yield return Path.Combine(dir.FullName, repoRelativeSuffix);
+                yield return Path.Combine(dir.FullName, "wow-viewer", repoRelativeSuffix);
+                dir = dir.Parent;
+            }
+        }
+    }
+
     private void TryIngestCuratedRelationshipsJson()
     {
         string[] candidatePaths = [
@@ -326,7 +346,7 @@ public sealed class Pm4PriorKnowledgeDatabase
             "../../../output/curation/pm4_curated_relationships.json"
         ];
 
-        foreach (var p in candidatePaths)
+        foreach (var p in ExpandCandidatePaths(candidatePaths, Path.Combine("output", "curation", "pm4_curated_relationships.json")))
         {
             if (File.Exists(p))
             {
@@ -368,7 +388,7 @@ public sealed class Pm4PriorKnowledgeDatabase
             "../../output/curation/pm4_taught_pairings.json"
         ];
 
-        foreach (var p in candidatePaths)
+        foreach (var p in ExpandCandidatePaths(candidatePaths, Path.Combine("output", "curation", "pm4_taught_pairings.json")))
         {
             if (File.Exists(p))
             {
@@ -411,7 +431,7 @@ public sealed class Pm4PriorKnowledgeDatabase
             "../../wow-viewer/specs/279-decode-pm4-format/evidence/object-models-v4-2026-10-20.json"
         ];
 
-        foreach (var p in candidatePaths)
+        foreach (var p in ExpandCandidatePaths(candidatePaths, Path.Combine("specs", "279-decode-pm4-format", "evidence", "object-models-v4-2026-10-20.json")))
         {
             if (File.Exists(p))
             {

@@ -25,6 +25,9 @@ public static partial class UiControlScanner
         "Workbench/Services/Chrome",
         "Workbench/Services/Navigator",
         "Workbench/Services/WorkbenchPanels",
+        "Workbench/Services/Pm4Workbench/Pm4ShapeLibraryPanelService.cs",
+        "Workbench/Services/Pm4Workbench/Pm4ShapeMatchReviewPanelService.cs",
+        "Workbench/Services/Pm4Workbench/Pm4ShapeMatchBatchPanelService.cs",
     ];
 
     // The label is the first argument. It may be a plain literal or a conditional
@@ -47,10 +50,22 @@ public static partial class UiControlScanner
         List<UiControlSource> controls = [];
         foreach (string relativeRoot in CoveredRoots)
         {
-            string directory = Path.Combine(viewerRoot, relativeRoot.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(directory)) continue;
+            string targetPath = Path.Combine(viewerRoot, relativeRoot.Replace('/', Path.DirectorySeparatorChar));
+            IEnumerable<string> files;
+            if (File.Exists(targetPath))
+            {
+                files = [targetPath];
+            }
+            else if (Directory.Exists(targetPath))
+            {
+                files = Directory.EnumerateFiles(targetPath, "*.cs").OrderBy(path => path, StringComparer.Ordinal);
+            }
+            else
+            {
+                continue;
+            }
 
-            foreach (string file in Directory.EnumerateFiles(directory, "*.cs").OrderBy(path => path, StringComparer.Ordinal))
+            foreach (string file in files)
             {
                 string[] lines = File.ReadAllLines(file);
                 for (int index = 0; index < lines.Length; index++)

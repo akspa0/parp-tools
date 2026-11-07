@@ -3,11 +3,27 @@
   "generatedFrom": "wow-viewer/src/viewer/WoWViewer/Workbench/Services (manager-owned surfaces)",
   "controls": [
     {
-      "id": "maps-action",
-      "label": "Maps",
-      "region": "Left action bar",
+      "id": "minimap-zoom-out",
+      "label": "-",
+      "region": "Minimap",
       "shortcut": null,
-      "help": "Open map browsing, map loading, and spawn-point preview in a closeable window. Automatically opens once per successful client activation.",
+      "help": "Zoom out on the minimap.",
+      "visible": true
+    },
+    {
+      "id": "minimap-toggle-collapse",
+      "label": "[~]",
+      "region": "Minimap",
+      "shortcut": null,
+      "help": "Toggle collapsing or expanding the minimap.",
+      "visible": true
+    },
+    {
+      "id": "minimap-zoom-in",
+      "label": "+",
+      "region": "Minimap",
+      "shortcut": null,
+      "help": "Zoom in on the minimap.",
       "visible": true
     },
     {
@@ -19,123 +35,27 @@
       "visible": true
     },
     {
-      "id": "reload-cursor-model",
-      "label": "Reload cursor model",
-      "region": "Options > Objects",
-      "shortcut": null,
-      "help": "Re-resolve the client cursor.mdx/cursor.m2 model from the active data source.",
-      "visible": true
-    },
-    {
-      "id": "show-minimap",
-      "label": "Show minimap",
-      "region": "Options > Display > Minimap",
-      "shortcut": null,
-      "help": "Show or hide the minimap panel.",
-      "visible": true
-    },
-    {
-      "id": "collapse-minimap",
-      "label": "Collapse minimap",
-      "region": "Options > Display > Minimap",
-      "shortcut": null,
-      "help": "Collapse the minimap panel to a one-line bar.",
-      "visible": true
-    },
-    {
-      "id": "minimap-options",
-      "label": "Minimap",
-      "region": "Options > Display",
-      "shortcut": null,
-      "help": "Show minimap visibility and collapse controls.",
-      "visible": true
-    },
-    {
-      "id": "assets-rail-icon",
-      "label": "Assets",
-      "region": "Left action bar",
-      "shortcut": null,
-      "help": "Open the Assets browser window.",
-      "visible": true
-    },
-    {
-      "id": "taxi-rail-icon",
-      "label": "Taxi",
-      "region": "Left action bar",
-      "shortcut": null,
-      "help": "Open or close the Taxi and Routes window.",
-      "visible": true
-    },
-    {
-      "id": "capture-rail-icon",
-      "label": "Capture",
-      "region": "Left action bar",
-      "shortcut": null,
-      "help": "Open or close the camera and capture window.",
-      "visible": true
-    },
-    {
-      "id": "inspect-rail-icon",
-      "label": "Inspector",
-      "region": "Right action bar",
-      "shortcut": null,
-      "help": "Open or close the selected-asset Inspector window.",
-      "visible": true
-    },
-    {
-      "id": "world-rail-icon",
-      "label": "World",
-      "region": "Right action bar",
-      "shortcut": null,
-      "help": "Open or close the World inspection window.",
-      "visible": true
-    },
-    {
-      "id": "gossip-rail-icon",
-      "label": "Gossip",
-      "region": "Right action bar",
-      "shortcut": null,
-      "help": "Open or close the Gossip and quests dialogue window in the right sidebar.",
-      "visible": true
-    },
-    {
-      "id": "pm4-rail-icon",
-      "label": "PM4",
-      "region": "Bottom toolbar / Right action bar",
-      "shortcut": null,
-      "help": "Toggle the PM4 overlay from the bottom toolbar or open the PM4 workbench from the action bar.",
-      "visible": true
-    },
-    {
-      "id": "reconstruction-rail-icon",
-      "label": "Reconstruction",
-      "region": "Right action bar",
-      "shortcut": null,
-      "help": "Open or close the Reconstruction Workbench map layers panel in the right dock.",
-      "visible": true
-    },
-    {
-      "id": "exports-rail-icon",
-      "label": "Exports",
-      "region": "Right action bar",
-      "shortcut": null,
-      "help": "Open or close the consolidated Export & Report Workbench in the right dock.",
-      "visible": true
-    },
-    {
-      "id": "bottom-spawns",
-      "label": "Spawns",
-      "region": "Bottom action bar",
-      "shortcut": null,
-      "help": "Open the map spawn and population window.",
-      "visible": true
-    },
-    {
       "id": "about",
       "label": "About",
       "region": "Top menu > Help",
       "shortcut": null,
       "help": "Show viewer version, credits and project links.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-accept",
+      "label": "Accept group transform",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Commit the valid preview to the layer and add it to undo history.",
+      "visible": true
+    },
+    {
+      "id": "accept-proposal",
+      "label": "Accept Proposal",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Accept the active shape-match proposal for the selected PM4 hull and persist it in the map curation project.",
       "visible": true
     },
     {
@@ -171,6 +91,38 @@
       "visible": true
     },
     {
+      "id": "apply-calibrated-x-offset",
+      "label": "Apply Calibrated -X Offset",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Toggle the calibrated signed -X centroid offset between PM4 walkable-floor hull centroids and authored placement positions.",
+      "visible": true
+    },
+    {
+      "id": "manual-placement-apply-position",
+      "label": "Apply manual position",
+      "region": "Right sidebar > PM4 > Manual object placement",
+      "shortcut": null,
+      "help": "Apply the selected object's edited world position to the live scene and curation snapshot.",
+      "visible": true
+    },
+    {
+      "id": "manual-placement-apply-yaw",
+      "label": "Apply manual yaw",
+      "region": "Right sidebar > PM4 > Manual object placement",
+      "shortcut": null,
+      "help": "Apply an arbitrary yaw to the selected object in the live scene and curation snapshot.",
+      "visible": true
+    },
+    {
+      "id": "assets-rail-icon",
+      "label": "Assets",
+      "region": "Left action bar",
+      "shortcut": null,
+      "help": "Open the Assets browser window.",
+      "visible": true
+    },
+    {
       "id": "attach-loose-map-folder",
       "label": "Attach Loose Map Folder...",
       "region": "Top menu > File",
@@ -184,6 +136,14 @@
       "region": "Options > Audio",
       "shortcut": null,
       "help": "Audio output and per-zone audio settings.",
+      "visible": true
+    },
+    {
+      "id": "auto-accept-min-confidence",
+      "label": "Auto-Accept Min Confidence",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Minimum confidence threshold required for the opt-in bounded auto-accept run.",
       "visible": true
     },
     {
@@ -203,11 +163,59 @@
       "visible": true
     },
     {
+      "id": "batch-max-tile-x",
+      "label": "Batch Max Tile X",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Upper tile X bound for batch PM4 shape-match analysis.",
+      "visible": true
+    },
+    {
+      "id": "batch-max-tile-y",
+      "label": "Batch Max Tile Y",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Upper tile Y bound for batch PM4 shape-match analysis.",
+      "visible": true
+    },
+    {
+      "id": "batch-min-tile-x",
+      "label": "Batch Min Tile X",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Lower tile X bound for batch PM4 shape-match analysis.",
+      "visible": true
+    },
+    {
+      "id": "batch-min-tile-y",
+      "label": "Batch Min Tile Y",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Lower tile Y bound for batch PM4 shape-match analysis.",
+      "visible": true
+    },
+    {
+      "id": "batch-shape-match-analysis-audit-export",
+      "label": "Batch Shape-Match Analysis & Audit Export",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Collapsible section for multi-tile batch shape-match analysis, cancellation, conflict reporting, and summary export.",
+      "visible": true
+    },
+    {
       "id": "bounding-boxes",
       "label": "Bounding Boxes",
       "region": "Options > Overlays",
       "shortcut": null,
       "help": "Draw world object bounding boxes.",
+      "visible": true
+    },
+    {
+      "id": "camera-and-fog",
+      "label": "Camera and Fog...",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Open Workspace: camera, fog and client source controls.",
       "visible": true
     },
     {
@@ -219,11 +227,43 @@
       "visible": true
     },
     {
+      "id": "cancel-batch-run",
+      "label": "Cancel Batch Run",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Cancel an in-progress batch shape-match analysis while preserving already-accepted pairing decisions.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-cancel",
+      "label": "Cancel transform preview",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Discard the preview without changing the layer or donor source.",
+      "visible": true
+    },
+    {
       "id": "cancel",
       "label": "Cancel",
       "region": "Popup",
       "shortcut": "Esc",
       "help": "Close the dialog without applying anything.",
+      "visible": true
+    },
+    {
+      "id": "capture-rail-icon",
+      "label": "Capture",
+      "region": "Left action bar",
+      "shortcut": null,
+      "help": "Open or close the camera and capture window.",
+      "visible": true
+    },
+    {
+      "id": "bottom-cell-grid-toggle",
+      "label": "Cell",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle the cell-boundary grid overlay.",
       "visible": true
     },
     {
@@ -235,6 +275,14 @@
       "visible": true
     },
     {
+      "id": "bottom-chunk-grid-toggle",
+      "label": "Chunk",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle the chunk-boundary grid overlay.",
+      "visible": true
+    },
+    {
       "id": "chunks",
       "label": "Chunks",
       "region": "Options > Grids",
@@ -243,11 +291,43 @@
       "visible": true
     },
     {
+      "id": "clear-3d-preview",
+      "label": "Clear 3D Preview",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Remove the temporary 3D candidate preview instance from the viewport.",
+      "visible": true
+    },
+    {
+      "id": "clear-library-filter",
+      "label": "Clear Library Filter",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Reset the visual PM4 shape library search and family/type filters.",
+      "visible": true
+    },
+    {
+      "id": "clear-shape-comparison",
+      "label": "Clear Shape Comparison",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Clear the pinned side-by-side comparison entry in the visual PM4 shape library.",
+      "visible": true
+    },
+    {
       "id": "close",
       "label": "Close",
       "region": "Popup",
       "shortcut": "Esc",
       "help": "Close the dialog.",
+      "visible": true
+    },
+    {
+      "id": "collapse-minimap",
+      "label": "Collapse minimap",
+      "region": "Options > Display > Minimap",
+      "shortcut": null,
+      "help": "Collapse the minimap panel to a one-line bar.",
       "visible": true
     },
     {
@@ -291,6 +371,14 @@
       "visible": true
     },
     {
+      "id": "curated-shapes-only",
+      "label": "Curated Shapes Only",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Filter the visual PM4 shape library to show only curated/taught shape entries.",
+      "visible": true
+    },
+    {
       "id": "dat-conversion",
       "label": "DAT Conversion",
       "region": "Viewer > World",
@@ -323,6 +411,22 @@
       "visible": true
     },
     {
+      "id": "donor-group-transform",
+      "label": "Donor group transform",
+      "region": "Right sidebar > Archaeology > Phase layers",
+      "shortcut": null,
+      "help": "Preview, accept, cancel, undo, and redo rigid transforms of multi-tile donor groups.",
+      "visible": true
+    },
+    {
+      "id": "bottom-doodads-toggle",
+      "label": "Doodads",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle M2/MDX doodad visibility.",
+      "visible": true
+    },
+    {
       "id": "dynamic-hover-range",
       "label": "Dynamic Hover Range",
       "region": "Viewer > World",
@@ -331,11 +435,27 @@
       "visible": true
     },
     {
+      "id": "enable-bounded-auto-accept-this-run-only",
+      "label": "Enable Bounded Auto-Accept (This Run Only)",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Explicitly opt in to bounded auto-accept for high-confidence non-conflicting proposals in the current run.",
+      "visible": true
+    },
+    {
       "id": "expand-chat",
       "label": "Expand chat",
       "region": "Chat",
       "shortcut": null,
       "help": "Expand the collapsed chat dock.",
+      "visible": true
+    },
+    {
+      "id": "export-batch-summary-json-md",
+      "label": "Export Batch Summary (JSON + MD)",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Export machine-readable JSON and human-readable Markdown summaries of batch shape-match decisions and provenance.",
       "visible": true
     },
     {
@@ -352,6 +472,14 @@
       "region": "Viewer > World",
       "shortcut": null,
       "help": "Export nearby tiles as DAT v26 (experimental format path).",
+      "visible": true
+    },
+    {
+      "id": "exports-rail-icon",
+      "label": "Exports",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the consolidated Export & Report Workbench in the right dock.",
       "visible": true
     },
     {
@@ -384,6 +512,14 @@
       "region": "Viewer > World",
       "shortcut": null,
       "help": "Camera field of view in degrees.",
+      "visible": true
+    },
+    {
+      "id": "gossip-rail-icon",
+      "label": "Gossip",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the Gossip and quests dialogue window in the right sidebar.",
       "visible": true
     },
     {
@@ -427,6 +563,30 @@
       "visible": true
     },
     {
+      "id": "include-unhealthy-entries",
+      "label": "Include Unhealthy Entries",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Show or hide missing/unreadable assets in the visual PM4 shape library (unhealthy entries remain excluded from proposals).",
+      "visible": true
+    },
+    {
+      "id": "inspect-rail-icon",
+      "label": "Inspector",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the selected-asset Inspector window.",
+      "visible": true
+    },
+    {
+      "id": "invert-offset",
+      "label": "Invert Offset",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Invert the sign of the active PM4 centroid calibration offset.",
+      "visible": true
+    },
+    {
       "id": "keyboard-shortcuts",
       "label": "Keyboard Shortcuts",
       "region": "Top menu > Help",
@@ -451,11 +611,11 @@
       "visible": true
     },
     {
-      "id": "texture-masks",
-      "label": "Texture Masks",
-      "region": "Options",
+      "id": "bottom-layers-button",
+      "label": "Layers",
+      "region": "Bottom toolbar",
       "shortcut": null,
-      "help": "Texture layer visibility, alpha-mask blending, and WDL overlay.",
+      "help": "Open the Layers workbench panel for per-layer visibility and alpha-channel controls.",
       "visible": true
     },
     {
@@ -507,11 +667,51 @@
       "visible": true
     },
     {
+      "id": "minimap-fullscreen-button",
+      "label": "M",
+      "region": "Minimap",
+      "shortcut": "M",
+      "help": "Toggle the fullscreen map.",
+      "visible": true
+    },
+    {
+      "id": "bottom-m2-mdx-opacity",
+      "label": "M2/MDX Opacity",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Adjust opacity for M2 and MDX models together.",
+      "visible": true
+    },
+    {
       "id": "m2-wmo-wf",
       "label": "M2/WMO WF",
       "region": "Options > Objects",
       "shortcut": null,
       "help": "Wireframe overlay for M2 doodads and WMO buildings.",
+      "visible": true
+    },
+    {
+      "id": "bottom-liquid-magma-toggle",
+      "label": "Magma",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Show MCLQ/MH2O and WL* magma and lava liquid.",
+      "visible": true
+    },
+    {
+      "id": "manual-object-placement",
+      "label": "Manual object placement",
+      "region": "Right sidebar > PM4 > Live Alignment > Manual Curation",
+      "shortcut": null,
+      "help": "Move and yaw-adjust a selected object in the live scene, then record its curation snapshot without writing source map files.",
+      "visible": true
+    },
+    {
+      "id": "manual-object-hull-curation",
+      "label": "Manual object to PM4 hull curation",
+      "region": "Right sidebar > PM4 > Live Alignment",
+      "shortcut": null,
+      "help": "Create, inspect, explicitly replace, or remove user-authored object-to-hull associations.",
       "visible": true
     },
     {
@@ -523,11 +723,35 @@
       "visible": true
     },
     {
+      "id": "maps-action",
+      "label": "Maps",
+      "region": "Left action bar",
+      "shortcut": null,
+      "help": "Open map browsing, map loading, and spawn-point preview in a closeable window. Automatically opens once per successful client activation.",
+      "visible": true
+    },
+    {
       "id": "mccv",
       "label": "MCCV",
       "region": "Options > Overlays",
       "shortcut": null,
       "help": "Show the terrain vertex colour (MCCV) overlay.",
+      "visible": true
+    },
+    {
+      "id": "minimap-options",
+      "label": "Minimap",
+      "region": "Options > Display",
+      "shortcut": null,
+      "help": "Show minimap visibility and collapse controls.",
+      "visible": true
+    },
+    {
+      "id": "model-animations",
+      "label": "Model Animations",
+      "region": "Viewer > Inspector",
+      "shortcut": null,
+      "help": "Controls for animating the selected creature or game object model.",
       "visible": true
     },
     {
@@ -539,11 +763,27 @@
       "visible": true
     },
     {
+      "id": "bottom-mute-toggle",
+      "label": "Mute",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Mute or unmute world audio output.",
+      "visible": true
+    },
+    {
       "id": "objects",
       "label": "Objects",
       "region": "Options",
       "shortcut": null,
       "help": "Object transparency, wireframes, animation and 3D cursor.",
+      "visible": true
+    },
+    {
+      "id": "bottom-liquid-ocean-toggle",
+      "label": "Ocean",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Show MCLQ/MH2O and WL* ocean liquid.",
       "visible": true
     },
     {
@@ -643,11 +883,51 @@
       "visible": true
     },
     {
+      "id": "manual-pair-saved-placement",
+      "label": "Pair saved placement with selected hull",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Explicitly associate an already recorded manual placement with the selected PM4 hull.",
+      "visible": true
+    },
+    {
+      "id": "manual-pair-create",
+      "label": "Pair selected object with hull",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Create an explicit association between the selected object placement and selected PM4 hull.",
+      "visible": true
+    },
+    {
+      "id": "pairing-audit-history",
+      "label": "Pairing Audit History",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Collapsible section listing the persisted accept, reject, and replace decision audit log for the active map.",
+      "visible": true
+    },
+    {
       "id": "performance",
       "label": "Performance",
       "region": "Left sidebar > Diagnostics",
       "shortcut": null,
       "help": "Open the performance window.",
+      "visible": true
+    },
+    {
+      "id": "pin-selected-for-compare",
+      "label": "Pin Selected for Compare",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Pin the currently selected visual shape library entry for side-by-side footprint and proportion comparison.",
+      "visible": true
+    },
+    {
+      "id": "manual-catalog-placement",
+      "label": "Place selected catalog model on hull tile",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Create a curation-only placement at the selected hull tile using the current client Asset Catalog entry.",
       "visible": true
     },
     {
@@ -659,6 +939,30 @@
       "visible": true
     },
     {
+      "id": "pm4-rail-icon",
+      "label": "PM4",
+      "region": "Bottom toolbar / Right action bar",
+      "shortcut": null,
+      "help": "Toggle the PM4 overlay from the bottom toolbar or open the PM4 workbench from the action bar.",
+      "visible": true
+    },
+    {
+      "id": "preview-3d-proposal",
+      "label": "Preview 3D Proposal",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Preview the proposed candidate model aligned to the selected PM4 hull in the 3D viewport with calibrated offset applied.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-preview",
+      "label": "Preview group transform",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Compute a non-destructive preview of a donor group transform.",
+      "visible": true
+    },
+    {
       "id": "project-output",
       "label": "Project Output",
       "region": "Left sidebar > Editor",
@@ -667,11 +971,91 @@
       "visible": true
     },
     {
+      "id": "propose-for-current-tile",
+      "label": "Propose for Current Tile",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Generate ranked shape-match proposals for all PM4 hulls on the active tile and enqueue them for human review.",
+      "visible": true
+    },
+    {
+      "id": "propose-for-selected-hull",
+      "label": "Propose for Selected Hull",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Generate ranked shape-match proposals for the currently selected PM4 hull and enqueue them for human review.",
+      "visible": true
+    },
+    {
       "id": "quit",
       "label": "Quit",
       "region": "Top menu > File",
       "shortcut": null,
       "help": "Close the viewer.",
+      "visible": true
+    },
+    {
+      "id": "rebuild-shape-library",
+      "label": "Rebuild Shape Library",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Rebuild the visual PM4 shape library from the prior knowledge corpus and resident scene models.",
+      "visible": true
+    },
+    {
+      "id": "reconstruction-rail-icon",
+      "label": "Reconstruction",
+      "region": "Right action bar",
+      "shortcut": null,
+      "help": "Open or close the Reconstruction Workbench map layers panel in the right dock.",
+      "visible": true
+    },
+    {
+      "id": "manual-placement-record",
+      "label": "Record selected placement",
+      "region": "Right sidebar > PM4 > Manual object placement",
+      "shortcut": null,
+      "help": "Add or refresh the selected tile-scoped object snapshot in the manual curation project.",
+      "visible": true
+    },
+    {
+      "id": "donor-group-transform-redo",
+      "label": "Redo group transform",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Reapply the most recently undone group placement.",
+      "visible": true
+    },
+    {
+      "id": "reject-proposal",
+      "label": "Reject Proposal",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Reject the top proposed candidate for the selected PM4 hull and suppress that candidate-hull pair until reset.",
+      "visible": true
+    },
+    {
+      "id": "reload-cursor-model",
+      "label": "Reload cursor model",
+      "region": "Options > Objects",
+      "shortcut": null,
+      "help": "Re-resolve the client cursor.mdx/cursor.m2 model from the active data source.",
+      "visible": true
+    },
+    {
+      "id": "manual-curation-reload",
+      "label": "Reload manual curation project",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Reload saved curation-only placement snapshots and explicit PM4 associations.",
+      "visible": true
+    },
+    {
+      "id": "manual-pair-remove",
+      "label": "Remove association",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Remove this explicit curation association without deleting either member.",
       "visible": true
     },
     {
@@ -691,35 +1075,35 @@
       "visible": true
     },
     {
+      "id": "manual-pair-replace",
+      "label": "Replace with selected hull",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
+      "shortcut": null,
+      "help": "Explicitly replace this object's current hull association with the selected hull.",
+      "visible": true
+    },
+    {
+      "id": "replace-with-selected-library-shape",
+      "label": "Replace with Selected Library Shape",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Replace the proposed candidate for the selected PM4 hull with the currently selected shape in the visual library.",
+      "visible": true
+    },
+    {
+      "id": "reset-calibration",
+      "label": "Reset Calibration",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Restore the PM4 centroid calibration offset to the measured validation-tile -X correction.",
+      "visible": true
+    },
+    {
       "id": "reset-camera",
       "label": "Reset Camera",
       "region": "Top menu > View",
       "shortcut": null,
       "help": "Reset the camera to the default view.",
-      "visible": true
-    },
-    {
-      "id": "reset-load-phases",
-      "label": "Reset load phases",
-      "region": "Viewer > World",
-      "shortcut": null,
-      "help": "Reset the staged load phases to the start.",
-      "visible": true
-    },
-    {
-      "id": "reset-layout-only",
-      "label": "Reset Layout Only",
-      "region": "Top menu > View",
-      "shortcut": null,
-      "help": "Restore the default panel layout and close tool windows. Text size and the loaded client/map are unchanged.",
-      "visible": true
-    },
-    {
-      "id": "reset-text-size-only",
-      "label": "Reset Text Size Only",
-      "region": "Top menu > View",
-      "shortcut": null,
-      "help": "Return the user text size to 100%. Layout and the loaded client/map are unchanged; high-resolution displays keep their automatic sizing.",
       "visible": true
     },
     {
@@ -731,27 +1115,35 @@
       "visible": true
     },
     {
-      "id": "text-scale",
-      "label": "Text Scale",
-      "region": "Top menu > View > Text Size",
+      "id": "reset-layout-only",
+      "label": "Reset Layout Only",
+      "region": "Top menu > View",
       "shortcut": null,
-      "help": "Interface text size from 0.85x to 2.20x, shared with Settings. The 100% to 175% presets sit below it; the current size is checked.",
+      "help": "Restore the default panel layout and close tool windows. Text size and the loaded client/map are unchanged.",
       "visible": true
     },
     {
-      "id": "visual-options",
-      "label": "Visual Options...",
-      "region": "Top menu > View",
+      "id": "reset-load-phases",
+      "label": "Reset load phases",
+      "region": "Viewer > World",
       "shortcut": null,
-      "help": "Open Options: render quality, lighting, theme, minimap, overlays, layers, grids, objects, audio and simulation.",
+      "help": "Reset the staged load phases to the start.",
       "visible": true
     },
     {
-      "id": "camera-and-fog",
-      "label": "Camera and Fog...",
+      "id": "reset-rejected-pairs",
+      "label": "Reset Rejected Pairs",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Clear rejected candidate-hull suppressions for the selected PM4 hull so previously rejected candidates can be re-proposed.",
+      "visible": true
+    },
+    {
+      "id": "reset-text-size-only",
+      "label": "Reset Text Size Only",
       "region": "Top menu > View",
       "shortcut": null,
-      "help": "Open Workspace: camera, fog and client source controls.",
+      "help": "Return the user text size to 100%. Layout and the loaded client/map are unchanged; high-resolution displays keep their automatic sizing.",
       "visible": true
     },
     {
@@ -771,6 +1163,22 @@
       "visible": true
     },
     {
+      "id": "run-batch-shape-analysis",
+      "label": "Run Batch Shape Analysis",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Run shape-match analysis across the selected tile range and report matched, low-confidence, unmatched, and conflict counts.",
+      "visible": true
+    },
+    {
+      "id": "run-bounded-auto-accept",
+      "label": "Run Bounded Auto-Accept",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Commit pending non-conflicting proposals above the configured confidence threshold when bounded auto-accept is enabled.",
+      "visible": true
+    },
+    {
       "id": "save-current-game-folder-as-known-good-base",
       "label": "Save Current Game Folder As Known-Good Base",
       "region": "Top menu > File",
@@ -779,11 +1187,11 @@
       "visible": true
     },
     {
-      "id": "model-animations",
-      "label": "Model Animations",
-      "region": "Viewer > Inspector",
+      "id": "manual-curation-save",
+      "label": "Save manual curation project",
+      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
       "shortcut": null,
-      "help": "Controls for animating the selected creature or game object model.",
+      "help": "Save curated placements and PM4 hull associations to a separate project file, not source map files.",
       "visible": true
     },
     {
@@ -811,6 +1219,38 @@
       "visible": true
     },
     {
+      "id": "shape-asset-kind",
+      "label": "Shape Asset Kind",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Filter the visual PM4 shape library by asset kind (All, WMO, M2).",
+      "visible": true
+    },
+    {
+      "id": "shape-family",
+      "label": "Shape Family",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Filter the visual PM4 shape library by architectural/regional asset family.",
+      "visible": true
+    },
+    {
+      "id": "shape-match-proposals-review-queue",
+      "label": "Shape-Match Proposals & Review Queue",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Collapsible section for centroid calibration, 3D proposal preview, and the human-in-the-loop accept/reject/replace review queue.",
+      "visible": true
+    },
+    {
+      "id": "show-minimap",
+      "label": "Show minimap",
+      "region": "Options > Display > Minimap",
+      "shortcut": null,
+      "help": "Show or hide the minimap panel.",
+      "visible": true
+    },
+    {
       "id": "show-selected-object-bounds",
       "label": "Show Selected Object Bounds",
       "region": "Viewer > World",
@@ -827,11 +1267,35 @@
       "visible": true
     },
     {
+      "id": "sky-controls",
+      "label": "Sky",
+      "region": "Left sidebar > Workspace",
+      "shortcut": null,
+      "help": "Configure sky visibility, source, and appearance in Workspace.",
+      "visible": true
+    },
+    {
+      "id": "bottom-liquid-slime-toggle",
+      "label": "Slime",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Show MCLQ/MH2O and WL* slime liquid.",
+      "visible": true
+    },
+    {
       "id": "spawn-bbs-only",
       "label": "Spawn BBs Only",
       "region": "Options > Simulation",
       "shortcut": null,
       "help": "Show bounding boxes for spawns only.",
+      "visible": true
+    },
+    {
+      "id": "bottom-spawns",
+      "label": "Spawns",
+      "region": "Bottom action bar",
+      "shortcut": null,
+      "help": "Open the map spawn and population window.",
       "visible": true
     },
     {
@@ -843,6 +1307,14 @@
       "visible": true
     },
     {
+      "id": "taxi-rail-icon",
+      "label": "Taxi",
+      "region": "Left action bar",
+      "shortcut": null,
+      "help": "Open or close the Taxi and Routes window.",
+      "visible": true
+    },
+    {
       "id": "terrain-wf",
       "label": "Terrain WF",
       "region": "Options > Objects",
@@ -851,11 +1323,51 @@
       "visible": true
     },
     {
+      "id": "bottom-terrain-toggle",
+      "label": "Terrain",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle terrain tiles and WDL far terrain.",
+      "visible": true
+    },
+    {
+      "id": "text-scale",
+      "label": "Text Scale",
+      "region": "Top menu > View > Text Size",
+      "shortcut": null,
+      "help": "Interface text size from 0.85x to 2.20x, shared with Settings. The 100% to 175% presets sit below it; the current size is checked.",
+      "visible": true
+    },
+    {
+      "id": "texture-masks-blending",
+      "label": "Texture Masks & Blending...",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Open the Texture Masks panel: per-layer visibility and opacity, alpha-mask blending, and MCLY flags.",
+      "visible": true
+    },
+    {
+      "id": "texture-masks",
+      "label": "Texture Masks",
+      "region": "Options",
+      "shortcut": null,
+      "help": "Texture layer visibility, alpha-mask blending, and WDL overlay.",
+      "visible": true
+    },
+    {
       "id": "theme",
       "label": "Theme",
       "region": "Options > Display",
       "shortcut": null,
       "help": "Viewer colour theme.",
+      "visible": true
+    },
+    {
+      "id": "bottom-tile-grid-toggle",
+      "label": "Tile",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle the tile-boundary grid overlay.",
       "visible": true
     },
     {
@@ -883,11 +1395,43 @@
       "visible": true
     },
     {
+      "id": "donor-group-transform-undo",
+      "label": "Undo group transform",
+      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
+      "shortcut": null,
+      "help": "Restore the previous accepted group placement.",
+      "visible": true
+    },
+    {
       "id": "use-for-taxi-override",
       "label": "Use For Taxi Override",
       "region": "Left sidebar > File Browser",
       "shortcut": null,
       "help": "Use the selected path as the taxi actor model override.",
+      "visible": true
+    },
+    {
+      "id": "visual-options",
+      "label": "Visual Options...",
+      "region": "Top menu > View",
+      "shortcut": null,
+      "help": "Open Options: render quality, lighting, theme, minimap, overlays, layers, grids, objects, audio and simulation.",
+      "visible": true
+    },
+    {
+      "id": "visual-pm4-shape-library",
+      "label": "Visual PM4 Shape Library",
+      "region": "Inspector",
+      "shortcut": null,
+      "help": "Collapsible section displaying 2D footprint and elevation previews, proportions, search/filter controls, and side-by-side shape comparison.",
+      "visible": true
+    },
+    {
+      "id": "bottom-liquid-water-toggle",
+      "label": "Water",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Show MCLQ/MH2O and WL* water and river liquid.",
       "visible": true
     },
     {
@@ -907,11 +1451,27 @@
       "visible": true
     },
     {
+      "id": "bottom-wmo-opacity",
+      "label": "WMO Opacity",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Adjust WMO opacity.",
+      "visible": true
+    },
+    {
       "id": "wmo-wf",
       "label": "WMO WF",
       "region": "Options > Objects",
       "shortcut": null,
       "help": "Wireframe overlay for the standalone WMO.",
+      "visible": true
+    },
+    {
+      "id": "bottom-wmos-toggle",
+      "label": "WMOs",
+      "region": "Bottom toolbar",
+      "shortcut": null,
+      "help": "Toggle WMO visibility.",
       "visible": true
     },
     {
@@ -931,307 +1491,19 @@
       "visible": true
     },
     {
-      "id": "minimap-toggle-collapse",
-      "label": "[~]",
-      "region": "Minimap",
+      "id": "world-rail-icon",
+      "label": "World",
+      "region": "Right action bar",
       "shortcut": null,
-      "help": "Toggle collapsing or expanding the minimap.",
+      "help": "Open or close the World inspection window.",
       "visible": true
     },
     {
-      "id": "minimap-zoom-in",
-      "label": "+",
-      "region": "Minimap",
+      "id": "zero-offset",
+      "label": "Zero Offset",
+      "region": "Inspector",
       "shortcut": null,
-      "help": "Zoom in on the minimap.",
-      "visible": true
-    },
-    {
-      "id": "minimap-zoom-out",
-      "label": "-",
-      "region": "Minimap",
-      "shortcut": null,
-      "help": "Zoom out on the minimap.",
-      "visible": true
-    },
-    {
-      "id": "minimap-fullscreen-button",
-      "label": "M",
-      "region": "Minimap",
-      "shortcut": "M",
-      "help": "Toggle the fullscreen map.",
-      "visible": true
-    },
-    {
-      "id": "texture-masks-blending",
-      "label": "Texture Masks & Blending...",
-      "region": "Top menu > View",
-      "shortcut": null,
-      "help": "Open the Texture Masks panel: per-layer visibility and opacity, alpha-mask blending, and MCLY flags.",
-      "visible": true
-    },
-    {
-      "id": "sky-controls",
-      "label": "Sky",
-      "region": "Left sidebar > Workspace",
-      "shortcut": null,
-      "help": "Configure sky visibility, source, and appearance in Workspace.",
-      "visible": true
-    },
-    {
-      "id": "donor-group-transform",
-      "label": "Donor group transform",
-      "region": "Right sidebar > Archaeology > Phase layers",
-      "shortcut": null,
-      "help": "Preview, accept, cancel, undo, and redo rigid transforms of multi-tile donor groups.",
-      "visible": true
-    },
-    {
-      "id": "donor-group-transform-preview",
-      "label": "Preview group transform",
-      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
-      "shortcut": null,
-      "help": "Compute a non-destructive preview of a donor group transform.",
-      "visible": true
-    },
-    {
-      "id": "donor-group-transform-accept",
-      "label": "Accept group transform",
-      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
-      "shortcut": null,
-      "help": "Commit the valid preview to the layer and add it to undo history.",
-      "visible": true
-    },
-    {
-      "id": "donor-group-transform-cancel",
-      "label": "Cancel transform preview",
-      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
-      "shortcut": null,
-      "help": "Discard the preview without changing the layer or donor source.",
-      "visible": true
-    },
-    {
-      "id": "donor-group-transform-undo",
-      "label": "Undo group transform",
-      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
-      "shortcut": null,
-      "help": "Restore the previous accepted group placement.",
-      "visible": true
-    },
-    {
-      "id": "donor-group-transform-redo",
-      "label": "Redo group transform",
-      "region": "Right sidebar > Archaeology > Phase layers > Donor group transform",
-      "shortcut": null,
-      "help": "Reapply the most recently undone group placement.",
-      "visible": true
-    },
-    {
-      "id": "manual-object-placement",
-      "label": "Manual object placement",
-      "region": "Right sidebar > PM4 > Live Alignment > Manual Curation",
-      "shortcut": null,
-      "help": "Move and yaw-adjust a selected object in the live scene, then record its curation snapshot without writing source map files.",
-      "visible": true
-    },
-    {
-      "id": "manual-placement-apply-position",
-      "label": "Apply manual position",
-      "region": "Right sidebar > PM4 > Manual object placement",
-      "shortcut": null,
-      "help": "Apply the selected object's edited world position to the live scene and curation snapshot.",
-      "visible": true
-    },
-    {
-      "id": "manual-placement-apply-yaw",
-      "label": "Apply manual yaw",
-      "region": "Right sidebar > PM4 > Manual object placement",
-      "shortcut": null,
-      "help": "Apply an arbitrary yaw to the selected object in the live scene and curation snapshot.",
-      "visible": true
-    },
-    {
-      "id": "manual-placement-record",
-      "label": "Record selected placement",
-      "region": "Right sidebar > PM4 > Manual object placement",
-      "shortcut": null,
-      "help": "Add or refresh the selected tile-scoped object snapshot in the manual curation project.",
-      "visible": true
-    },
-    {
-      "id": "manual-object-hull-curation",
-      "label": "Manual object to PM4 hull curation",
-      "region": "Right sidebar > PM4 > Live Alignment",
-      "shortcut": null,
-      "help": "Create, inspect, explicitly replace, or remove user-authored object-to-hull associations.",
-      "visible": true
-    },
-    {
-      "id": "manual-pair-create",
-      "label": "Pair selected object with hull",
-      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
-      "shortcut": null,
-      "help": "Create an explicit association between the selected object placement and selected PM4 hull.",
-      "visible": true
-    },
-    {
-      "id": "manual-pair-replace",
-      "label": "Replace with selected hull",
-      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
-      "shortcut": null,
-      "help": "Explicitly replace this object's current hull association with the selected hull.",
-      "visible": true
-    },
-    {
-      "id": "manual-pair-remove",
-      "label": "Remove association",
-      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
-      "shortcut": null,
-      "help": "Remove this explicit curation association without deleting either member.",
-      "visible": true
-    },
-    {
-      "id": "manual-curation-save",
-      "label": "Save manual curation project",
-      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
-      "shortcut": null,
-      "help": "Save curated placements and PM4 hull associations to a separate project file, not source map files.",
-      "visible": true
-    },
-    {
-      "id": "manual-curation-reload",
-      "label": "Reload manual curation project",
-      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
-      "shortcut": null,
-      "help": "Reload saved curation-only placement snapshots and explicit PM4 associations.",
-      "visible": true
-    },
-    {
-      "id": "manual-catalog-placement",
-      "label": "Place selected catalog model on hull tile",
-      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
-      "shortcut": null,
-      "help": "Create a curation-only placement at the selected hull tile using the current client Asset Catalog entry.",
-      "visible": true
-    },
-    {
-      "id": "manual-pair-saved-placement",
-      "label": "Pair saved placement with selected hull",
-      "region": "Right sidebar > PM4 > Manual object to PM4 hull curation",
-      "shortcut": null,
-      "help": "Explicitly associate an already recorded manual placement with the selected PM4 hull.",
-      "visible": true
-    },
-    {
-      "id": "bottom-liquid-water-toggle",
-      "label": "Water",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Show MCLQ/MH2O and WL* water and river liquid.",
-      "visible": true
-    },
-    {
-      "id": "bottom-liquid-ocean-toggle",
-      "label": "Ocean",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Show MCLQ/MH2O and WL* ocean liquid.",
-      "visible": true
-    },
-    {
-      "id": "bottom-liquid-magma-toggle",
-      "label": "Magma",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Show MCLQ/MH2O and WL* magma and lava liquid.",
-      "visible": true
-    },
-    {
-      "id": "bottom-liquid-slime-toggle",
-      "label": "Slime",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Show MCLQ/MH2O and WL* slime liquid.",
-      "visible": true
-    },
-    {
-      "id": "bottom-doodads-toggle",
-      "label": "Doodads",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Toggle M2/MDX doodad visibility.",
-      "visible": true
-    },
-    {
-      "id": "bottom-wmos-toggle",
-      "label": "WMOs",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Toggle WMO visibility.",
-      "visible": true
-    },
-    {
-      "id": "bottom-terrain-toggle",
-      "label": "Terrain",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Toggle terrain tiles and WDL far terrain.",
-      "visible": true
-    },
-    {
-      "id": "bottom-tile-grid-toggle",
-      "label": "Tile",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Toggle the tile-boundary grid overlay.",
-      "visible": true
-    },
-    {
-      "id": "bottom-chunk-grid-toggle",
-      "label": "Chunk",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Toggle the chunk-boundary grid overlay.",
-      "visible": true
-    },
-    {
-      "id": "bottom-cell-grid-toggle",
-      "label": "Cell",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Toggle the cell-boundary grid overlay.",
-      "visible": true
-    },
-    {
-      "id": "bottom-mute-toggle",
-      "label": "Mute",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Mute or unmute world audio output.",
-      "visible": true
-    },
-    {
-      "id": "bottom-m2-mdx-opacity",
-      "label": "M2/MDX Opacity",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Adjust opacity for M2 and MDX models together.",
-      "visible": true
-    },
-    {
-      "id": "bottom-wmo-opacity",
-      "label": "WMO Opacity",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Adjust WMO opacity.",
-      "visible": true
-    },
-    {
-      "id": "bottom-layers-button",
-      "label": "Layers",
-      "region": "Bottom toolbar",
-      "shortcut": null,
-      "help": "Open the Layers workbench panel for per-layer visibility and alpha-channel controls.",
+      "help": "Disable the PM4 centroid calibration offset (set active offset to zero).",
       "visible": true
     }
   ]

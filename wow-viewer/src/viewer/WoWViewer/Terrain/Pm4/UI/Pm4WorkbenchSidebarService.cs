@@ -9,6 +9,7 @@ using WoWViewer.Terrain;
 using WoWViewer.Terrain.Pm4;
 using WoWViewer.Terrain.Pm4.Services;
 using WoWViewer.UI;
+using WoWViewer.Workbench.Services.Pm4Workbench;
 using WoWViewer.Workbench.Services.WorkbenchPanels;
 using WowViewer.Core.PM4.Footprint;
 using WowViewer.Core.PM4.Matching;
@@ -27,6 +28,12 @@ internal sealed class Pm4WorkbenchSidebarService
 {
     public static readonly Pm4WorkbenchSidebarService Instance = new();
     private readonly ManualCurationWorkbenchService _manualCuration = new();
+    private readonly Pm4ShapeMatchWorkbenchService _shapeMatchWorkbench = new();
+    private readonly Pm4ShapeLibraryPanelService _shapeLibraryPanel = new();
+    private readonly Pm4ShapeMatchReviewPanelService _shapeReviewPanel = new();
+    private readonly Pm4ShapeMatchBatchPanelService _shapeBatchPanel = new();
+
+    public Pm4ShapeMatchWorkbenchService ShapeMatchWorkbench => _shapeMatchWorkbench;
 
     private static readonly (byte Value, string Label, string Tooltip)[] SurfaceClassEntries =
     [
@@ -895,6 +902,26 @@ internal sealed class Pm4WorkbenchSidebarService
             ImGui.Spacing();
             SharedUiWidgets.StatusReadout("PM4 Status", host.Pm4DoodadDuplication.LastOperationMessage);
         }
+
+        // Spec 295: Visual PM4 Shape Library, Calibrated Proposal Preview, Human-in-the-Loop Review Queue, and Batch Analysis
+        ImGui.Spacing();
+        ImGui.Separator();
+        _shapeLibraryPanel.Draw(_shapeMatchWorkbench, worldScene);
+        _shapeReviewPanel.Draw(
+            _shapeMatchWorkbench,
+            _manualCuration,
+            overlay,
+            host,
+            worldScene,
+            selectedPm4Obj,
+            activeTileX,
+            activeTileY,
+            activeMap);
+        _shapeBatchPanel.Draw(
+            _shapeMatchWorkbench,
+            _manualCuration,
+            worldScene,
+            activeMap);
     }
 
     private void MatchPm4Footprint(

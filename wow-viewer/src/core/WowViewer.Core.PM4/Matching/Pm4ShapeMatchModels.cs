@@ -1,8 +1,31 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using WowViewer.Core.PM4.Footprint;
 
 namespace WowViewer.Core.PM4.Matching;
+
+/// <summary>Tile-scoped PM4 hull descriptor input for shape-match analysis.</summary>
+public sealed record Pm4HullShapeInput(
+    int TileX,
+    int TileY,
+    uint Ck24,
+    int ObjectPartId,
+    uint LinkGroupObjectId,
+    Pm4GeometricShapeDescriptor Descriptor);
+
+/// <summary>Model shape candidate carrying a geometric shape descriptor.</summary>
+public sealed record Pm4ModelShapeCandidate(
+    string ModelPath,
+    string AssetKind,
+    Pm4GeometricShapeDescriptor Descriptor);
+
+/// <summary>Configurable thresholds for descriptor-based shape matching.</summary>
+public sealed record Pm4ShapeMatchOptions(
+    float LowConfidenceThreshold = 0.70f,
+    float MaxCredibleShapeDistance = 0.85f,
+    float ConflictDistance = 2.0f,
+    int MaxCandidates = 5);
 
 /// <summary>One ranked asset candidate for a PM4 hull.</summary>
 public sealed record Pm4ShapeCandidate(
@@ -13,9 +36,11 @@ public sealed record Pm4ShapeCandidate(
     float SolvedScale,
     Vector3 SolvedRotation,
     Vector3 SolvedPosition,
-    string Explanation)
+    string Explanation,
+    float ShapeDistance = 0f)
 {
     public bool IsCredible => Score >= Pm4ShapeMatchAnalysisService.MinimumCredibleScore;
+    public float Confidence => (float)Score;
 }
 
 /// <summary>The ranked candidate set for one PM4 hull, with the evidence needed to review it.</summary>
@@ -25,15 +50,42 @@ public sealed record Pm4ShapeMatchProposal(
     Vector3 HullBoundsMin,
     Vector3 HullBoundsMax,
     IReadOnlyList<Pm4ShapeCandidate> Candidates,
-    double Confidence,
+    double ConfidenceScore,
     bool IsLowConfidence,
     bool IsUnmatched,
-    int ConflictCount)
+    int ConflictCount,
+    Pm4HullShapeInput? Hull = null,
+    Vector3? ExplicitCalibratedCentroid = null)
 {
     public Pm4ShapeCandidate? TopCandidate => Candidates.Count > 0 ? Candidates[0] : null;
 
     public bool HasConflict => ConflictCount > 1;
+
+    public float Confidence => (float)ConfidenceScore;
+
+    public Vector3 UncalibratedCentroid => HullCentroid;
+
+    public Vector3 CalibratedCentroid =>
+        ExplicitCalibratedCentroid ?? TopCandidate?.SolvedPosition ?? HullCentroid;
 }
+
+/// <summary>One tile-scoped hull-to-object duplicate-claim conflict.</summary>
+public sealed record Pm4ProposalConflict(
+    Pm4HullShapeInput FirstHull,
+    Pm4HullShapeInput SecondHull,
+    string ModelPath,
+    float DistanceBetweenHulls);
+
+/// <summary>Result of descriptor-based batch shape-match analysis.</summary>
+public sealed record Pm4ShapeBatchResult(
+    IReadOnlyList<Pm4ShapeMatchProposal> Proposals,
+    IReadOnlyList<Pm4ProposalConflict> Conflicts);
+
+/// <summary>Health check result for a single candidate entry.</summary>
+public sealed record Pm4ShapeLibraryEntryHealth(
+    string ModelPath,
+    bool IsHealthy,
+    string? Reason);
 
 /// <summary>Aggregate result of measuring solved-vs-authored placement offsets.</summary>
 public sealed record Pm4CentroidMeasurement(

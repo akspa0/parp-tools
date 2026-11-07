@@ -44,12 +44,39 @@ public sealed record Pm4DirectMatchResult(
     Vector3 SolvedPosition,
     string Explanation);
 
+public sealed record Pm4ShapeMatchingCriteria(
+    float DimensionRatioTolerance = 1.5f);
+
 /// <summary>
 /// Pure algorithmic zero-donor asset matcher that identifies authentic 3D models directly
 /// from PM4 footprint prisms without requiring donor ADTs or Rosetta cross-reference maps.
 /// </summary>
 public static class Pm4DirectModelMatcher
 {
+    public static float CompareShapes(
+        Pm4GeometricShapeDescriptor a,
+        Pm4GeometricShapeDescriptor b,
+        Pm4ShapeMatchingCriteria? criteria = null)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+
+        float tol = criteria?.DimensionRatioTolerance ?? 1.5f;
+        float lenRatio = MathF.Max(a.Length, b.Length) / MathF.Max(0.05f, MathF.Min(a.Length, b.Length));
+        float widRatio = MathF.Max(a.Width, b.Width) / MathF.Max(0.05f, MathF.Min(a.Width, b.Width));
+        float hgtRatio = MathF.Max(a.Height, b.Height) / MathF.Max(0.05f, MathF.Min(a.Height, b.Height));
+
+        if (lenRatio > 1f + tol || widRatio > 1f + tol || hgtRatio > 1f + tol * 1.25f)
+            return float.PositiveInfinity;
+
+        float dLen = MathF.Abs(a.Length - b.Length) / MathF.Max(0.1f, MathF.Max(a.Length, b.Length));
+        float dWid = MathF.Abs(a.Width - b.Width) / MathF.Max(0.1f, MathF.Max(a.Width, b.Width));
+        float dHgt = MathF.Abs(a.Height - b.Height) / MathF.Max(0.1f, MathF.Max(a.Height, b.Height));
+        float dAspectXY = MathF.Abs(a.AspectXY - b.AspectXY) / MathF.Max(0.1f, MathF.Max(a.AspectXY, b.AspectXY));
+        float dAspectZH = MathF.Abs(a.AspectZH - b.AspectZH) / MathF.Max(0.1f, MathF.Max(a.AspectZH, b.AspectZH));
+
+        return (dLen * 0.35f) + (dWid * 0.30f) + (dHgt * 0.15f) + (dAspectXY * 0.12f) + (dAspectZH * 0.08f);
+    }
     /// <summary>
     /// Matches a PM4 footprint prism against a library of candidate model bounds.
     /// </summary>
