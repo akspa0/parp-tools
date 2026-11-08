@@ -14,3 +14,4 @@ public sealed record Pm4CrossTileCompoundDescriptor(
     Vector3 BoundsMax,
     IReadOnlyList<Vector3> MscnWorldPoints,
     IReadOnlyCollection<Pm4ConnectorKey>? ConnectorKeys = null);
+

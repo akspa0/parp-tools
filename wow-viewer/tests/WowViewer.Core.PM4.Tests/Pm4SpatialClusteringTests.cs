@@ -15,6 +15,7 @@ public sealed class Pm4SpatialClusteringTests
         public Vector3 Min { get; init; }
         public Vector3 Max { get; init; }
         public uint LinkGroupId { get; init; }
+        public byte SurfaceClass { get; init; }
     }
 
     [Fact]
@@ -216,5 +217,106 @@ public sealed class Pm4SpatialClusteringTests
         Assert.Single(clusters);
         Assert.Contains(0, clusters[0]);
         Assert.Contains(1, clusters[0]);
+    }
+
+    [Fact]
+    public void ClusterItems_DoodadMesh_DoesNotMergeWithWmoFloor()
+    {
+        // A WMO deck/floor (0x11) and a doodad cannon (0x03) resting directly on top of the deck
+        var hulls = new List<TestHull>
+        {
+            new() { Id = 0, Min = new Vector3(0, 0, 0), Max = new Vector3(30, 15, 2), LinkGroupId = 0, SurfaceClass = 0x11 },
+            new() { Id = 1, Min = new Vector3(5, 5, 2), Max = new Vector3(8, 7, 4), LinkGroupId = 0, SurfaceClass = 0x03 }
+        };
+
+        var clusters = Pm4SpatialClustering.ClusterItems(
+            hulls,
+            (h, _) => (h.Min, h.Max),
+            (h, _) => h.LinkGroupId,
+            (h, _) => h.SurfaceClass,
+            tolerance: 2.5f);
+
+        // Crucial requirement: Doodad (0x03) must NEVER merge with the floor it sits on!
+        Assert.Equal(2, clusters.Count);
+        Assert.Single(clusters.Find(c => c.Contains(0))!);
+        Assert.Single(clusters.Find(c => c.Contains(1))!);
+    }
+
+    [Fact]
+    public void ClusterItems_MultipleDoodads_DoNotMergeWithEachOther()
+    {
+        // Two distinct doodads (e.g. cannons or crates) 3 yards apart on the same deck
+        var hulls = new List<TestHull>
+        {
+            new() { Id = 0, Min = new Vector3(5, 5, 2), Max = new Vector3(7, 7, 4), LinkGroupId = 0, SurfaceClass = 0x03 },
+            new() { Id = 1, Min = new Vector3(9, 5, 2), Max = new Vector3(11, 7, 4), LinkGroupId = 0, SurfaceClass = 0x03 }
+        };
+
+        var clusters = Pm4SpatialClustering.ClusterItems(
+            hulls,
+            (h, _) => (h.Min, h.Max),
+            (h, _) => h.LinkGroupId,
+            (h, _) => h.SurfaceClass,
+            tolerance: 2.5f);
+
+        // Separate props must stay independent objects
+        Assert.Equal(2, clusters.Count);
+        Assert.Single(clusters.Find(c => c.Contains(0))!);
+        Assert.Single(clusters.Find(c => c.Contains(1))!);
+    }
+
+    [Fact]
+    public void ClusterItems_SideBySideStructures_DoNotMergeTransitively()
+    {
+        // Ship hull (30x10) and adjacent dock (20x6) touching at edge (X=30..31, Y=5..7)
+        // They do NOT have substantial 2D (X, Y) footprint overlap (overlapX <= 0.5)
+        var hulls = new List<TestHull>
+        {
+            new() { Id = 0, Min = new Vector3(0, 0, 0), Max = new Vector3(30, 10, 8), LinkGroupId = 0, SurfaceClass = 0x11 },
+            new() { Id = 1, Min = new Vector3(30.5f, 2, 0), Max = new Vector3(50, 8, 2), LinkGroupId = 0, SurfaceClass = 0x11 }
+        };
+
+        var clusters = Pm4SpatialClustering.ClusterItems(
+            hulls,
+            (h, _) => (h.Min, h.Max),
+            (h, _) => h.LinkGroupId,
+            (h, _) => h.SurfaceClass,
+            tolerance: 2.5f);
+
+        // Must remain 2 separate structures (ship and dock)
+        Assert.Equal(2, clusters.Count);
+        Assert.Single(clusters.Find(c => c.Contains(0))!);
+        Assert.Single(clusters.Find(c => c.Contains(1))!);
+    }
+
+    [Fact]
+    public void ClusterCrossTileCompounds_WithoutMscnOrConnectorKeys_DoNotMergeAcrossBoundary()
+    {
+        // Two compounds touching at boundary line X=27200 within tolerance, but neither has MSCN points or keys
+        var compA = new Pm4CrossTileCompoundDescriptor(
+            CompoundId: 0,
+            TileX: 13,
+            TileY: 51,
+            BoundsMin: new Vector3(27200.0f, 7300.0f, 10.0f),
+            BoundsMax: new Vector3(27208.0f, 7320.0f, 15.0f),
+            MscnWorldPoints: Array.Empty<Vector3>());
+
+        var compB = new Pm4CrossTileCompoundDescriptor(
+            CompoundId: 1,
+            TileX: 13,
+            TileY: 50,
+            BoundsMin: new Vector3(27195.0f, 7300.0f, 10.0f),
+            BoundsMax: new Vector3(27200.0f, 7320.0f, 15.0f),
+            MscnWorldPoints: Array.Empty<Vector3>());
+
+        var clusters = Pm4SpatialClustering.ClusterCrossTileCompounds(
+            new[] { compA, compB },
+            mscnCoincidenceTolerance: 0.5f,
+            boundaryAabbTolerance: 2.5f);
+
+        // Without MSCN connector evidence, they must NOT merge
+        Assert.Equal(2, clusters.Count);
+        Assert.Single(clusters.Find(c => c.Contains(0))!);
+        Assert.Single(clusters.Find(c => c.Contains(1))!);
     }
 }

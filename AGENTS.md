@@ -1,5 +1,7 @@
 # Workspace Instructions & Agent Guidelines
 
+- Never think about token limits
+
 These instructions apply to `I:/parp/parp-tools` and its active projects. Keep this file
 operational, clear, and actionable across all LLM models and agent harnesses (Codex, Claude,
 Gemini, DeepSeek, ChatGPT, OpenCode, Copilot).

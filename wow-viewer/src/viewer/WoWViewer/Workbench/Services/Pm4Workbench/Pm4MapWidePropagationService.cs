@@ -86,6 +86,9 @@ internal sealed class Pm4MapWidePropagationService
 
         foreach (var (tx, ty, inst, isWmo) in toAdd)
         {
+            if (string.IsNullOrWhiteSpace(inst.ModelKey))
+                continue;
+
             if (isWmo)
             {
                 if (!pm4Host.TileWmoInstances.TryGetValue((tx, ty), out var wmoList))
@@ -246,9 +249,11 @@ internal sealed class Pm4MapWidePropagationService
                                     bool isWmo = Pm4DoodadDuplicationService.IsWmoAsset(taught.ModelPath, taught.AssetKind);
                                     float actualScale = isWmo ? 1.0f : solvedScale;
                                     string assetKind = isWmo ? "WMO" : Pm4DoodadDuplicationService.ResolveAssetKind(taught.ModelPath, taught.AssetKind);
+                                    string effectiveKey = !string.IsNullOrWhiteSpace(taught.ModelPath) ? taught.ModelPath : (taught.ModelName ?? string.Empty);
 
                                     var newInst = new ObjectInstance
                                     {
+                                        ModelKey = effectiveKey,
                                         BoundsMin = target.BoundsMin,
                                         BoundsMax = target.BoundsMax,
                                         LocalBoundsMin = localMin,
@@ -295,8 +300,13 @@ internal sealed class Pm4MapWidePropagationService
                                 if (dist <= 15.0f && MathF.Abs(donor.PlacementPosition.Z - target.WorldCentroid.Z) <= 30.0f)
                                 {
                                     bool isWmo = Pm4DoodadDuplicationService.IsWmoAsset(donor.ModelPath, donor.AssetKind);
+                                    string effectiveDonorKey = !string.IsNullOrWhiteSpace(donor.ModelKey)
+                                        ? donor.ModelKey
+                                        : (!string.IsNullOrWhiteSpace(donor.ModelPath) ? donor.ModelPath : (donor.ModelName ?? string.Empty));
+
                                     var newInst = donor with
                                     {
+                                        ModelKey = effectiveDonorKey,
                                         UniqueId = nextSyntheticId++,
                                         TileX = tileX,
                                         TileY = tileY,

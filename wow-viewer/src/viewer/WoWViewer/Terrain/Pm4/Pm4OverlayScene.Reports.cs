@@ -1893,7 +1893,7 @@ public sealed partial class Pm4OverlayScene
         return mode switch
         {
             Pm4OverlayColorMode.InstanceCluster => ColorFromSeed(value),
-            Pm4OverlayColorMode.SemanticCategory => Pm4ColorCodingService.Instance.GetSemanticCategoryColor((byte)value, 0),
+            Pm4OverlayColorMode.SemanticCategory => Pm4ColorCodingService.Instance.GetSemanticCategoryColor((byte)value, (byte)value),
             Pm4OverlayColorMode.ElevationRamp => Pm4ColorCodingService.Instance.GetElevationColor(BitConverter.UInt32BitsToSingle(value), _pm4MinObjectZ, _pm4MaxObjectZ),
             Pm4OverlayColorMode.MatchStatus => value == 1 ? new Vector3(0.22f, 0.88f, 0.38f) : (value == 2 ? new Vector3(1.0f, 0.82f, 0.10f) : new Vector3(0.95f, 0.38f, 0.28f)),
             Pm4OverlayColorMode.PlacementZ    => ColorFromSeed(value),

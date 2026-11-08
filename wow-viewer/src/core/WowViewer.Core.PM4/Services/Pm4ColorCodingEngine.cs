@@ -81,21 +81,31 @@ public sealed class Pm4ColorCodingEngine
     }
 
     /// <summary>
-    /// Returns the semantic color based on Ck24Type and dominant group flags.
+    /// Returns the semantic color based on surface class (MSUR.0x08 dominantGroupKey) and fallback Ck24Type.
+    /// Maps 0x03 to doodads, 0x10 to lowest floor, 0x11/0x12 to standard floors, 0x13 to upper floors,
+    /// 0x14 to roofs, 0x01 to terrain linkers, and 0x02 to connectors (Spec 302).
     /// </summary>
     public Vector3 ComputeSemanticCategoryColor(byte ck24Type, byte dominantGroupKey)
     {
-        return ck24Type switch
+        byte surfaceClass = dominantGroupKey != 0 ? dominantGroupKey : ck24Type;
+        return surfaceClass switch
         {
             0x03 => ColorDoodad,
             0x10 => ColorFloorLowest,
             0x11 => ColorFloorCommon,
+            0x12 => ColorFloorCommon,
             0x13 => ColorFloorUpper,
             0x14 => ColorFloorAngled,
-            _    => dominantGroupKey switch
+            0x01 => ColorTerrainLinker,
+            0x02 => ColorConnector,
+            _    => ck24Type switch
             {
-                0x01 => ColorTerrainLinker,
-                0x02 => ColorConnector,
+                0x03 => ColorDoodad,
+                0x10 => ColorFloorLowest,
+                0x11 => ColorFloorCommon,
+                0x12 => ColorFloorCommon,
+                0x13 => ColorFloorUpper,
+                0x14 => ColorFloorAngled,
                 _    => ColorGeneric
             }
         };

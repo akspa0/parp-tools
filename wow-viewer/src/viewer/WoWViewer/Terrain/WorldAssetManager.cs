@@ -585,9 +585,11 @@ public class WorldAssetManager : IDisposable
         return false;
     }
 
-    public void QueueMdxLoad(string normalizedKey)
+    public void QueueMdxLoad(string? normalizedKey)
     {
         normalizedKey = NormalizeKey(normalizedKey);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+            return;
 
         if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer))
         {
@@ -604,9 +606,11 @@ public class WorldAssetManager : IDisposable
         }
     }
 
-    public void PrioritizeMdxLoad(string normalizedKey)
+    public void PrioritizeMdxLoad(string? normalizedKey)
     {
         normalizedKey = NormalizeKey(normalizedKey);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+            return;
 
         if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer))
         {
@@ -623,9 +627,11 @@ public class WorldAssetManager : IDisposable
             _priorityMdxLoads.Enqueue(normalizedKey);
     }
 
-    public void QueueWmoLoad(string normalizedKey)
+    public void QueueWmoLoad(string? normalizedKey)
     {
         normalizedKey = NormalizeKey(normalizedKey);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+            return;
 
         if (_wmoModels.ContainsKey(normalizedKey))
             return;
@@ -637,9 +643,11 @@ public class WorldAssetManager : IDisposable
         }
     }
 
-    public void PrioritizeWmoLoad(string normalizedKey)
+    public void PrioritizeWmoLoad(string? normalizedKey)
     {
         normalizedKey = NormalizeKey(normalizedKey);
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+            return;
 
         if (_wmoModels.ContainsKey(normalizedKey))
             return;
@@ -820,7 +828,7 @@ public class WorldAssetManager : IDisposable
         EvictFileCacheIfNeeded();
     }
 
-    public static string NormalizeKey(string path) => WorldAssetPathResolver.NormalizeKey(path);
+    public static string NormalizeKey(string? path) => WorldAssetPathResolver.NormalizeKey(path);
 
     private bool TryDequeuePendingLoad(out bool isMdx, out string? key)
     {

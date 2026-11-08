@@ -27,7 +27,7 @@ internal sealed class WorldAssetPathResolver
         _dataSource = dataSource;
     }
 
-    public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
+    public static string NormalizeKey(string? path) => string.IsNullOrWhiteSpace(path) ? string.Empty : path.Replace('/', '\\').ToLowerInvariant();
 
     public bool TryGetCachedResolvedPath(string key, out string? cachedResolvedPath)
     {

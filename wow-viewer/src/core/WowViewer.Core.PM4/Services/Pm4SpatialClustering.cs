@@ -31,13 +31,15 @@ public static class Pm4SpatialClustering
     }
 
     /// <summary>
-    /// Clusters items using spatial AABB proximity tolerance and shared non-zero MSLK LinkGroupObjectId.
-    /// Returns a list of clusters, where each cluster contains the original item indices belonging to that whole object.
+    /// Clusters items using spatial AABB proximity tolerance, shared non-zero MSLK LinkGroupObjectId,
+    /// and semantic surface role rules (Spec 300, Spec 301, Spec 302).
+    /// Prevents transitive runaway clustering where doodads, docks, and unrelated terrain collapse into giant blobs.
     /// </summary>
     public static List<List<int>> ClusterItems<T>(
         IReadOnlyList<T> items,
         Func<T, int, (Vector3 Min, Vector3 Max)> boundsSelector,
         Func<T, int, uint> linkGroupSelector,
+        Func<T, int, byte>? surfaceClassSelector = null,
         float tolerance = DefaultAdjacencyToleranceYards)
     {
         if (items == null || items.Count == 0)
@@ -48,31 +50,82 @@ public static class Pm4SpatialClustering
 
         var bounds = new (Vector3 Min, Vector3 Max)[count];
         var linkGroups = new uint[count];
+        byte[]? surfaceClasses = surfaceClassSelector != null ? new byte[count] : null;
+
         for (int i = 0; i < count; i++)
         {
             bounds[i] = boundsSelector(items[i], i);
             linkGroups[i] = linkGroupSelector(items[i], i);
+            if (surfaceClasses != null)
+                surfaceClasses[i] = surfaceClassSelector!(items[i], i);
         }
 
         for (int i = 0; i < count; i++)
         {
             var (minA, maxA) = bounds[i];
             uint linkA = linkGroups[i];
+            byte clsA = surfaceClasses != null ? surfaceClasses[i] : (byte)0;
 
             for (int j = i + 1; j < count; j++)
             {
                 var (minB, maxB) = bounds[j];
                 uint linkB = linkGroups[j];
+                byte clsB = surfaceClasses != null ? surfaceClasses[j] : (byte)0;
 
                 bool shouldCluster = false;
 
+                // 1. Shared non-zero LinkGroupObjectId always clusters
                 if (linkA != 0 && linkA == linkB)
                 {
                     shouldCluster = true;
                 }
-                else if (OverlapsWithTolerance(minA, maxA, minB, maxB, tolerance))
+                else if (surfaceClasses != null)
                 {
-                    shouldCluster = true;
+                    // Doodads (0x03) represent separate props (M2 models: cannons, crates, barrels, etc.).
+                    // A doodad must NEVER cluster with a WMO floor/structure (0x10..0x16),
+                    // and separate doodads must not cluster with each other unless they share LinkGroupObjectId!
+                    bool isDoodadA = clsA == 0x03;
+                    bool isDoodadB = clsB == 0x03;
+
+                    if (isDoodadA || isDoodadB)
+                    {
+                        // Doodads only cluster if they share non-zero LinkGroupId (handled in rule 1 above)
+                        // or if their bounding boxes are virtually identical/nested (subparts of same physical prop)
+                        if (isDoodadA && isDoodadB)
+                        {
+                            float centerDistSq = Vector3.DistanceSquared((minA + maxA) * 0.5f, (minB + maxB) * 0.5f);
+                            if (centerDistSq <= 0.25f * 0.25f)
+                            {
+                                shouldCluster = true;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Both are WMO surfaces / structures.
+                        // Slices of the SAME building represent vertically stacked floors with substantial (X, Y) footprint overlap.
+                        // Compute 2D horizontal overlap in the (X, Y) plane:
+                        float overlapX = Math.Min(maxA.X, maxB.X) - Math.Max(minA.X, minB.X);
+                        float overlapY = Math.Min(maxA.Y, maxB.Y) - Math.Max(minA.Y, minB.Y);
+
+                        if (overlapX > 0.5f && overlapY > 0.5f)
+                        {
+                            // Substantial 2D footprint overlap. Check vertical elevation gap:
+                            float gapZ = Math.Max(0f, Math.Max(minA.Z, minB.Z) - Math.Min(maxA.Z, maxB.Z));
+                            if (gapZ <= tolerance)
+                            {
+                                shouldCluster = true;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Legacy fallback when surfaceClassSelector is not supplied (e.g. geometric AABB tests)
+                    if (OverlapsWithTolerance(minA, maxA, minB, maxB, tolerance))
+                    {
+                        shouldCluster = true;
+                    }
                 }
 
                 if (shouldCluster)
@@ -168,12 +221,6 @@ public static class Pm4SpatialClustering
                         if (shouldCluster)
                             break;
                     }
-                }
-
-                // 3. Fallback: if either compound lacks MSCN points, merge based on boundary AABB contact
-                if (!shouldCluster && (a.MscnWorldPoints.Count == 0 || b.MscnWorldPoints.Count == 0))
-                {
-                    shouldCluster = true;
                 }
 
                 if (shouldCluster)

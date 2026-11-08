@@ -55,6 +55,33 @@ public sealed class Pm4ColorCodingServiceTests
     }
 
     [Fact]
+    public void SemanticCategory_WhenPassedDominantGroupKeySurfaceClass_ReturnsDistinctAuthoritativeColors()
+    {
+        // Real WoW PM4 data: ck24Type is an IEEE-754 exponent byte (0xC1, 0x40, etc.), dominantGroupKey is MSUR.0x08 SurfaceClass
+        byte rawExpByte = 0xC1;
+        Vector3 doodad = _engine.ComputeSemanticCategoryColor(rawExpByte, 0x03);
+        Vector3 lowestFloor = _engine.ComputeSemanticCategoryColor(rawExpByte, 0x10);
+        Vector3 standardFloor = _engine.ComputeSemanticCategoryColor(rawExpByte, 0x11);
+        Vector3 upperFloor = _engine.ComputeSemanticCategoryColor(rawExpByte, 0x13);
+        Vector3 roof = _engine.ComputeSemanticCategoryColor(rawExpByte, 0x14);
+        Vector3 terrainLinker = _engine.ComputeSemanticCategoryColor(rawExpByte, 0x01);
+        Vector3 connector = _engine.ComputeSemanticCategoryColor(rawExpByte, 0x02);
+
+        Assert.Equal(Pm4ColorCodingEngine.ColorDoodad, doodad);
+        Assert.Equal(Pm4ColorCodingEngine.ColorFloorLowest, lowestFloor);
+        Assert.Equal(Pm4ColorCodingEngine.ColorFloorCommon, standardFloor);
+        Assert.Equal(Pm4ColorCodingEngine.ColorFloorUpper, upperFloor);
+        Assert.Equal(Pm4ColorCodingEngine.ColorFloorAngled, roof);
+        Assert.Equal(Pm4ColorCodingEngine.ColorTerrainLinker, terrainLinker);
+        Assert.Equal(Pm4ColorCodingEngine.ColorConnector, connector);
+
+        // Every class must be distinctly separated in color space
+        Assert.True(Vector3.Distance(doodad, lowestFloor) > 0.4f);
+        Assert.True(Vector3.Distance(doodad, standardFloor) > 0.4f);
+        Assert.True(Vector3.Distance(standardFloor, upperFloor) > 0.25f);
+    }
+
+    [Fact]
     public void MatchStatus_SeparatesMatchedFromUnmatched()
     {
         Vector3 matched = _engine.ComputeMatchStatusColor(isMatched: true, isDuplicated: false, ck24Type: 0x03);

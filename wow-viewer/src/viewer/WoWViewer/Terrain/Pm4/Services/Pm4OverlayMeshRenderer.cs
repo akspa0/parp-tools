@@ -626,14 +626,34 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
 
             validObjects++;
             Vector3 color = overlay.GetPm4ObjectColor(tileKey, obj);
-            if (overlay._highlightedPm4ObjectKeys.Contains(objectKey))
+            bool isSelected = overlay.IsHullInSelectedCompound(objectKey)
+                || (overlay._selectedPm4ObjectKey.HasValue && overlay._selectedPm4ObjectKey.Value == objectKey);
+            bool isGrouped = !isSelected && overlay._selectedPm4ObjectGroupKey.HasValue
+                && overlay.IsPm4ObjectInGroup(overlay._selectedPm4ObjectGroupKey.Value, objectKey);
+            bool isHighlighted = overlay._highlightedPm4ObjectKeys.Contains(objectKey);
+
+            if (isHighlighted)
+            {
                 color = Pm4ColorHighlight;
-            if (overlay.IsHullInSelectedCompound(objectKey))
-                color = Pm4ColorSelection;
-            else if (overlay._selectedPm4ObjectKey.HasValue && overlay._selectedPm4ObjectKey.Value == objectKey)
-                color = Pm4ColorSelection;
-            else if (overlay._selectedPm4ObjectGroupKey.HasValue && overlay.IsPm4ObjectInGroup(overlay._selectedPm4ObjectGroupKey.Value, objectKey))
-                color = Vector3.Lerp(color, Pm4ColorSelection, 0.25f);
+            }
+            else if (isSelected)
+            {
+                // In SemanticCategory mode, preserve the semantic surface color identity!
+                // Blend 25% with selection yellow to indicate selection while keeping orange doodads, cyan floors, green lowest floors readable.
+                // The selection's 3D boundary is prominently outlined by the yellow BoundingBoxRenderer.
+                if (overlay.Pm4ColorMode == Pm4OverlayColorMode.SemanticCategory)
+                {
+                    color = Vector3.Lerp(color, Pm4ColorSelection, 0.25f);
+                }
+                else
+                {
+                    color = Pm4ColorSelection;
+                }
+            }
+            else if (isGrouped)
+            {
+                color = Vector3.Lerp(color, Pm4ColorSelection, 0.15f);
+            }
 
             // Triangles (pos vec3 + col vec4 = 7 floats)
             if (obj.Triangles.Count > 0)

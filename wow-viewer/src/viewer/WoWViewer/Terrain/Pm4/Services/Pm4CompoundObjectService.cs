@@ -43,11 +43,12 @@ internal static class Pm4CompoundObjectService
             worldBounds[i] = (hMin, hMax);
         }
 
-        // Cluster using core spatial & link group algorithm
+        // Cluster using core spatial, link group & semantic surface role algorithm
         var clusters = Pm4SpatialClustering.ClusterItems(
             rawHulls,
             boundsSelector: (h, idx) => worldBounds[idx],
             linkGroupSelector: (h, idx) => h.LinkGroupObjectId,
+            surfaceClassSelector: (h, idx) => h.DominantGroupKey,
             tolerance: adjacencyTolerance);
 
         // Create compound objects

@@ -47,3 +47,4 @@ This specification implements two-stage cross-tile compound stitching using MSCN
 - **SC-002**: Selection bounding box seamlessly wraps both sides of the tile boundary without truncation.
 - **SC-003**: 100% pass on focused PM4 spatial clustering unit tests including cross-tile MSCN stitching.
 - **SC-004**: Clean solution build with 0 errors and `Verify-UiReference.ps1` passes with 0 errors and 0 warnings.
+
