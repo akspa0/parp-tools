@@ -1,5 +1,17 @@
 # Progress — wow-viewer
 
+## 2026-11-07 — Spec 301 Complete (PM4 Cross-Tile MSCN Compound Stitching & Multi-Tile Selection)
+
+- Solved the multi-tile structure truncation problem where structures straddling ADT/PM4 tile borders (e.g. `development_13_51.pm4` and `development_13_50.pm4`) were partitioned into separate per-tile compounds.
+- Discovered and proved that PM4 `MSCN` (scene-graph connector anchors) chunk encodes matching 3D connector points along tile boundaries that coincide between adjacent tiles with millimeter precision (measured $0.0022\,\text{yd} \approx 2.2\,\text{mm}$ between `development_13_51` and `development_13_50` along the $X = 27200.0$ seam).
+- Created `Pm4CrossTileCompoundDescriptor` in `WowViewer.Core.PM4.Models` and implemented `ClusterCrossTileCompounds` in `Pm4SpatialClustering.cs`: clusters compound objects across adjacent loaded tiles via coincident boundary MSCN anchor points ($\le 0.5\,\text{yd}$), shared quantized `Pm4ConnectorKey`s, and boundary AABB proximity ($\le 2.5\,\text{yd}$).
+- Extended `Pm4CompoundObject` in `WoWViewer.Terrain.Pm4` to support multi-tile structures: tracks `SpanningTiles` (`IReadOnlySet<(int TileX, int TileY)>`), boolean `IsCrossTile`, aggregates 3D bounds and totals across all spanning tiles, and formats `DisplayName` with spanning tile badges (e.g. `[13_50 + 13_51] Cross-Tile Whole Obj #0`).
+- Implemented `StitchCrossTileCompoundObjects` in `Pm4CompoundObjectService.cs` and integrated `RunCrossTileStitchingPass()` in `Pm4OverlayScene.cs` after cache merge and direct file load; re-maps `_pm4HullToCompoundLookup` so all constituent hulls on all spanning tiles reference the unified cross-tile compound object.
+- Single-click selection highlights all constituent hulls across all spanning tiles in purple selection wireframe and solid tint; `WorldScene.cs` draws a single unified wireframe bounding box enclosing the multi-tile structure's world extents across the tile border seam.
+- Updated hover tooltips (`BuildPm4HoverInfo`), sidebar Cockpit card (`Pm4WorkbenchSidebarService.cs`), and `SceneHoverAndPickService.cs` to display cross-tile whole object headers, spanning tile scope, and tile-scoped hull hierarchy.
+- Updated `Pm4GlbExporter.cs` to resolve each constituent hull's originating tile and export all constituent collision meshes across all spanning tiles.
+- Verification: 7/7 spatial clustering and cross-tile MSCN unit tests pass in `WowViewer.Core.PM4.Tests`; solution builds with 0 errors (`dotnet build WoWViewer.csproj -c Debug -m:1`); UI reference check passes (188/188 controls, 0 errors/warnings). Receipt: `wow-viewer/specs/301-pm4-cross-tile-mscn-stitching/evidence/receipt-spec301.md`. Operator visual proof owed.
+
 ## 2026-11-07 — Spec 300 Complete (PM4 Whole-Object Assembly, Compound Hull Selection & Unified Spatial Matching)
 
 - Solved the fundamental fragmentation issue where structures (such as ships, houses, towers) spanning multiple elevation levels were chopped into disconnected per-CK24 horizontal slices.

@@ -524,7 +524,15 @@ internal sealed class Pm4WorkbenchSidebarService
             if (compObj != null)
             {
                 float compDist = Vector3.Distance(inst.PlacementPosition, compObj.WorldCentroid);
-                ImGui.BulletText($"PM4 Whole Object: [{compObj.TileX:D2}_{compObj.TileY:D2}] Obj #{compObj.CompoundId} ({compObj.ConstituentHulls.Count} hulls, {compObj.Dimensions.X:F1}x{compObj.Dimensions.Y:F1}x{compObj.Dimensions.Z:F1} yd) — {compDist:F1} yds away");
+                if (compObj.IsCrossTile)
+                {
+                    string tilesStr = string.Join(" + ", compObj.SpanningTiles.OrderBy(t => t.TileX).ThenBy(t => t.TileY).Select(t => $"{t.TileX:D2}_{t.TileY:D2}"));
+                    ImGui.BulletText($"PM4 Cross-Tile Object: [{tilesStr}] Obj #{compObj.CompoundId} ({compObj.ConstituentHulls.Count} hulls across {compObj.SpanningTiles.Count} tiles, {compObj.Dimensions.X:F1}x{compObj.Dimensions.Y:F1}x{compObj.Dimensions.Z:F1} yd) — {compDist:F1} yds away");
+                }
+                else
+                {
+                    ImGui.BulletText($"PM4 Whole Object: [{compObj.TileX:D2}_{compObj.TileY:D2}] Obj #{compObj.CompoundId} ({compObj.ConstituentHulls.Count} hulls, {compObj.Dimensions.X:F1}x{compObj.Dimensions.Y:F1}x{compObj.Dimensions.Z:F1} yd) — {compDist:F1} yds away");
+                }
             }
             else
             {
@@ -610,14 +618,27 @@ internal sealed class Pm4WorkbenchSidebarService
 
             if (compObj != null)
             {
-                ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Whole Object: [{compObj.TileX:D2}_{compObj.TileY:D2}] Obj #{compObj.CompoundId} ({compObj.ConstituentHulls.Count} hulls)");
+                if (compObj.IsCrossTile)
+                {
+                    string tilesStr = string.Join(" + ", compObj.SpanningTiles.OrderBy(t => t.TileX).ThenBy(t => t.TileY).Select(t => $"{t.TileX:D2}_{t.TileY:D2}"));
+                    ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Cross-Tile Whole Object: [{tilesStr}] Obj #{compObj.CompoundId} ({compObj.ConstituentHulls.Count} hulls across {compObj.SpanningTiles.Count} tiles)");
+                }
+                else
+                {
+                    ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Whole Object: [{compObj.TileX:D2}_{compObj.TileY:D2}] Obj #{compObj.CompoundId} ({compObj.ConstituentHulls.Count} hulls)");
+                }
                 ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Tris: {compObj.TotalTriangles} | Size: {compObj.Dimensions.X:F1}x{compObj.Dimensions.Y:F1}x{compObj.Dimensions.Z:F1} yd");
                 if (ImGui.TreeNode($"Constituent Hulls ({compObj.ConstituentHulls.Count})###pm4_constituent_hulls"))
                 {
                     foreach (var h in compObj.ConstituentHulls)
                     {
                         float hZ = h.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(h.Ck24 << 8) : 0f;
-                        ImGui.BulletText($"Hull #{h.ObjectPartId}: Z={hZ:F1}yd, Lnk={h.LinkGroupObjectId}, Tris={h.Triangles.Count}, Surfs={h.SurfaceCount}");
+                        string hullTilePrefix = "";
+                        if (compObj.IsCrossTile && !string.IsNullOrWhiteSpace(h.SourcePath))
+                        {
+                            hullTilePrefix = System.IO.Path.GetFileNameWithoutExtension(h.SourcePath) + " ";
+                        }
+                        ImGui.BulletText($"{hullTilePrefix}Hull #{h.ObjectPartId}: Z={hZ:F1}yd, Lnk={h.LinkGroupObjectId}, Tris={h.Triangles.Count}, Surfs={h.SurfaceCount}");
                     }
                     ImGui.TreePop();
                 }

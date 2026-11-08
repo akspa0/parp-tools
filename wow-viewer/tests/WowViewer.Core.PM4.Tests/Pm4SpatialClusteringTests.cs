@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Services;
 using Xunit;
 
@@ -129,5 +130,91 @@ public sealed class Pm4SpatialClusteringTests
         Assert.Equal(8.75f, centroid.X, precision: 3);
         Assert.Equal(7.50f, centroid.Y, precision: 3);
         Assert.Equal(5.50f, centroid.Z, precision: 3);
+    }
+
+    [Fact]
+    public void ClusterCrossTileCompounds_WithCoincidentMscnPoints_MergesAcrossTileBoundary()
+    {
+        // Compound A on tile (13, 51) touching boundary at X = 27200.0
+        var compA = new Pm4CrossTileCompoundDescriptor(
+            CompoundId: 0,
+            TileX: 13,
+            TileY: 51,
+            BoundsMin: new Vector3(27200.0f, 7300.0f, 10.0f),
+            BoundsMax: new Vector3(27208.8f, 7326.2f, 15.1f),
+            MscnWorldPoints: new[]
+            {
+                new Vector3(27200.002f, 7302.459f, 13.351f), // Seam point (matches compB within 0.003yd)
+                new Vector3(27204.230f, 7303.969f, 12.152f)
+            });
+
+        // Compound B on tile (13, 50) across boundary at X = 27200.0
+        var compB = new Pm4CrossTileCompoundDescriptor(
+            CompoundId: 1,
+            TileX: 13,
+            TileY: 50,
+            BoundsMin: new Vector3(27160.0f, 7290.0f, 8.0f),
+            BoundsMax: new Vector3(27200.0f, 7340.0f, 25.0f),
+            MscnWorldPoints: new[]
+            {
+                new Vector3(27199.998f, 7302.458f, 13.351f), // Matching seam point
+                new Vector3(27180.000f, 7310.000f, 18.000f)
+            });
+
+        // Compound C on an unrelated tile far away
+        var compC = new Pm4CrossTileCompoundDescriptor(
+            CompoundId: 2,
+            TileX: 13,
+            TileY: 50,
+            BoundsMin: new Vector3(26500.0f, 7000.0f, 0.0f),
+            BoundsMax: new Vector3(26520.0f, 7020.0f, 10.0f),
+            MscnWorldPoints: Array.Empty<Vector3>());
+
+        var clusters = Pm4SpatialClustering.ClusterCrossTileCompounds(
+            new[] { compA, compB, compC },
+            mscnCoincidenceTolerance: 0.5f,
+            boundaryAabbTolerance: 2.5f);
+
+        Assert.Equal(2, clusters.Count);
+
+        var mergedCluster = clusters.Find(c => c.Contains(0));
+        Assert.NotNull(mergedCluster);
+        Assert.Equal(2, mergedCluster.Count);
+        Assert.Contains(1, mergedCluster);
+
+        var cCluster = clusters.Find(c => c.Contains(2));
+        Assert.NotNull(cCluster);
+        Assert.Single(cCluster);
+    }
+
+    [Fact]
+    public void ClusterCrossTileCompounds_WithSharedConnectorKeys_MergesAcrossTileBoundary()
+    {
+        var sharedKey = new Pm4ConnectorKey(13600, 3651, 6);
+
+        var compA = new Pm4CrossTileCompoundDescriptor(
+            CompoundId: 0,
+            TileX: 13,
+            TileY: 51,
+            BoundsMin: new Vector3(27198.0f, 7300.0f, 10.0f),
+            BoundsMax: new Vector3(27205.0f, 7310.0f, 15.0f),
+            MscnWorldPoints: Array.Empty<Vector3>(),
+            ConnectorKeys: new HashSet<Pm4ConnectorKey> { sharedKey });
+
+        var compB = new Pm4CrossTileCompoundDescriptor(
+            CompoundId: 1,
+            TileX: 13,
+            TileY: 50,
+            BoundsMin: new Vector3(27195.0f, 7300.0f, 10.0f),
+            BoundsMax: new Vector3(27202.0f, 7310.0f, 15.0f),
+            MscnWorldPoints: Array.Empty<Vector3>(),
+            ConnectorKeys: new HashSet<Pm4ConnectorKey> { sharedKey });
+
+        var clusters = Pm4SpatialClustering.ClusterCrossTileCompounds(
+            new[] { compA, compB });
+
+        Assert.Single(clusters);
+        Assert.Contains(0, clusters[0]);
+        Assert.Contains(1, clusters[0]);
     }
 }

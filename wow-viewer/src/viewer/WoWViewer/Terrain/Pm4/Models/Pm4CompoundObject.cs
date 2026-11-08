@@ -7,14 +7,16 @@ namespace WoWViewer.Terrain.Pm4;
 
 /// <summary>
 /// Represents a cohesive, complete 3D physical object composed of one or more
-/// constituent PM4 collision hulls on a tile (Spec 300).
-/// Unifies elevation-fragmented CK24 slices and sub-components into a single selectable compound object.
+/// constituent PM4 collision hulls on one or more adjacent map tiles (Spec 300, Spec 301).
+/// Unifies elevation-fragmented CK24 slices and multi-tile split structures into a single selectable compound object.
 /// </summary>
 internal sealed class Pm4CompoundObject
 {
     public int CompoundId { get; }
     public int TileX { get; }
     public int TileY { get; }
+    public IReadOnlySet<(int TileX, int TileY)> SpanningTiles { get; }
+    public bool IsCrossTile => SpanningTiles.Count > 1;
     public IReadOnlyList<Pm4OverlayObject> ConstituentHulls { get; }
     public Vector3 WorldBoundsMin { get; }
     public Vector3 WorldBoundsMax { get; }
@@ -33,10 +35,20 @@ internal sealed class Pm4CompoundObject
         int tileX,
         int tileY,
         IReadOnlyList<Pm4OverlayObject> constituentHulls)
+        : this(compoundId, new HashSet<(int TileX, int TileY)> { (tileX, tileY) }, constituentHulls)
+    {
+    }
+
+    public Pm4CompoundObject(
+        int compoundId,
+        IReadOnlySet<(int TileX, int TileY)> spanningTiles,
+        IReadOnlyList<Pm4OverlayObject> constituentHulls)
     {
         CompoundId = compoundId;
-        TileX = tileX;
-        TileY = tileY;
+        SpanningTiles = spanningTiles ?? new HashSet<(int TileX, int TileY)>();
+        var firstTile = SpanningTiles.FirstOrDefault();
+        TileX = firstTile.TileX;
+        TileY = firstTile.TileY;
         ConstituentHulls = constituentHulls ?? throw new ArgumentNullException(nameof(constituentHulls));
 
         if (constituentHulls.Count == 0)
@@ -45,7 +57,7 @@ internal sealed class Pm4CompoundObject
             WorldBoundsMax = Vector3.Zero;
             WorldCentroid = Vector3.Zero;
             Dimensions = Vector3.Zero;
-            DisplayName = $"[{tileX:D2}_{tileY:D2}] Empty Compound Obj #{compoundId}";
+            DisplayName = $"[{TileX:D2}_{TileY:D2}] Empty Compound Obj #{compoundId}";
             return;
         }
 
@@ -93,6 +105,14 @@ internal sealed class Pm4CompoundObject
         DominantLinkGroupObjectId = linkGroupCounts.OrderByDescending(kv => kv.Value).FirstOrDefault().Key;
         PlacementZ = minZ;
 
-        DisplayName = $"[{TileX:D2}_{TileY:D2}] Whole Obj #{CompoundId} ({ConstituentHulls.Count} hulls, {TotalTriangles} tris, {Dimensions.X:F1}x{Dimensions.Y:F1}x{Dimensions.Z:F1} yd)";
+        if (IsCrossTile)
+        {
+            string tilesStr = string.Join(" + ", SpanningTiles.OrderBy(t => t.TileX).ThenBy(t => t.TileY).Select(t => $"{t.TileX:D2}_{t.TileY:D2}"));
+            DisplayName = $"[{tilesStr}] Cross-Tile Whole Obj #{CompoundId} ({ConstituentHulls.Count} hulls, {TotalTriangles} tris, {Dimensions.X:F1}x{Dimensions.Y:F1}x{Dimensions.Z:F1} yd)";
+        }
+        else
+        {
+            DisplayName = $"[{TileX:D2}_{TileY:D2}] Whole Obj #{CompoundId} ({ConstituentHulls.Count} hulls, {TotalTriangles} tris, {Dimensions.X:F1}x{Dimensions.Y:F1}x{Dimensions.Z:F1} yd)";
+        }
     }
 }

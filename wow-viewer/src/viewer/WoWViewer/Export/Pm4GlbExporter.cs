@@ -185,7 +185,7 @@ internal static class Pm4GlbExporter
     }
 
     /// <summary>
-    /// Exports a compound whole PM4 object (with all constituent collision hulls) to a standalone GLB file (Spec 300).
+    /// Exports a compound whole PM4 object (with all constituent collision hulls) to a standalone GLB file (Spec 300, Spec 301).
     /// </summary>
     internal static void ExportCompoundObjectGlb(
         Pm4CompoundObject compound,
@@ -203,7 +203,8 @@ internal static class Pm4GlbExporter
         for (int i = 0; i < compound.ConstituentHulls.Count; i++)
         {
             var obj = compound.ConstituentHulls[i];
-            if (AddPm4ObjectToScene(scene, obj, compound.TileX, compound.TileY, pairedModelName, materialCache))
+            ResolveHullTile(obj, compound.TileX, compound.TileY, out int hTileX, out int hTileY);
+            if (AddPm4ObjectToScene(scene, obj, hTileX, hTileY, pairedModelName, materialCache))
             {
                 exportedHulls++;
             }
@@ -212,8 +213,27 @@ internal static class Pm4GlbExporter
         var model = scene.ToGltf2();
         model.SaveGLB(outputPath);
 
+        string tileDesc = compound.IsCrossTile
+            ? string.Join(" + ", compound.SpanningTiles.OrderBy(t => t.TileX).ThenBy(t => t.TileY).Select(t => $"{t.TileX:D2}_{t.TileY:D2}"))
+            : $"({compound.TileX},{compound.TileY})";
+
         ViewerLog.Important(ViewerLog.Category.General,
-            $"[Pm4GlbExporter] Exported compound PM4 object #{compound.CompoundId} ({exportedHulls}/{compound.ConstituentHulls.Count} hulls) on tile ({compound.TileX},{compound.TileY}) to {outputPath}");
+            $"[Pm4GlbExporter] Exported compound PM4 object #{compound.CompoundId} ({exportedHulls}/{compound.ConstituentHulls.Count} hulls) across {tileDesc} to {outputPath}");
+    }
+
+    private static void ResolveHullTile(Pm4OverlayObject obj, int defaultTileX, int defaultTileY, out int tileX, out int tileY)
+    {
+        tileX = defaultTileX;
+        tileY = defaultTileY;
+        if (!string.IsNullOrWhiteSpace(obj.SourcePath))
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(obj.SourcePath, @"_(\d{1,2})_(\d{1,2})\.pm4$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out int x) && int.TryParse(match.Groups[2].Value, out int y))
+            {
+                tileX = x;
+                tileY = y;
+            }
+        }
     }
 
     /// <summary>

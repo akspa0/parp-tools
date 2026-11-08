@@ -598,9 +598,6 @@ public sealed partial class Pm4OverlayScene
 
     private byte[]? ReadPm4FileForTile((int tileX, int tileY) tileKey)
     {
-        if (_dataSource == null)
-            return null;
-
         if (_pm4TileObjects.TryGetValue(tileKey, out var objects) && objects.Count > 0)
         {
             for (int i = 0; i < objects.Count; i++)
@@ -608,9 +605,19 @@ public sealed partial class Pm4OverlayScene
                 string? path = objects[i].SourcePath;
                 if (!string.IsNullOrWhiteSpace(path))
                 {
-                    byte[]? bytes = _dataSource.ReadFile(path);
-                    if (bytes != null && bytes.Length > 0)
-                        return bytes;
+                    if (_dataSource != null)
+                    {
+                        byte[]? bytes = _dataSource.ReadFile(path);
+                        if (bytes != null && bytes.Length > 0)
+                            return bytes;
+                    }
+
+                    if (System.IO.File.Exists(path))
+                    {
+                        byte[] bytes = System.IO.File.ReadAllBytes(path);
+                        if (bytes.Length > 0)
+                            return bytes;
+                    }
                 }
             }
         }
@@ -766,15 +773,32 @@ public sealed partial class Pm4OverlayScene
         string detail;
         if (_pm4HullToCompoundLookup.TryGetValue(objectKey, out var comp) && comp != null)
         {
-            if (resolved)
+            if (comp.IsCrossTile)
             {
-                title = $"{System.IO.Path.GetFileName(assetName)}  #{uniqueId}";
-                detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   Whole Obj #{comp.CompoundId} ({comp.ConstituentHulls.Count} hulls, {comp.TotalSurfaces} surfs)   {comp.Dimensions.X:F1}x{comp.Dimensions.Y:F1}x{comp.Dimensions.Z:F1} yd";
+                string tileScope = string.Join(" + ", comp.SpanningTiles.OrderBy(t => t.TileX).ThenBy(t => t.TileY).Select(t => $"{t.TileX:D2}_{t.TileY:D2}"));
+                if (resolved)
+                {
+                    title = $"{System.IO.Path.GetFileName(assetName)}  #{uniqueId}";
+                    detail = $"[{tileScope}]  Cross-Tile Obj #{comp.CompoundId} ({comp.ConstituentHulls.Count} hulls across {comp.SpanningTiles.Count} tiles)   {comp.Dimensions.X:F1}x{comp.Dimensions.Y:F1}x{comp.Dimensions.Z:F1} yd";
+                }
+                else
+                {
+                    title = $"PM4 Cross-Tile Whole Object #{comp.CompoundId}";
+                    detail = $"[{tileScope}]  {comp.ConstituentHulls.Count} hulls across {comp.SpanningTiles.Count} tiles   {comp.Dimensions.X:F1}x{comp.Dimensions.Y:F1}x{comp.Dimensions.Z:F1} yd";
+                }
             }
             else
             {
-                title = $"PM4 Whole Object #{comp.CompoundId}";
-                detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   {comp.ConstituentHulls.Count} hulls, {comp.TotalSurfaces} surfs   {comp.Dimensions.X:F1}x{comp.Dimensions.Y:F1}x{comp.Dimensions.Z:F1} yd";
+                if (resolved)
+                {
+                    title = $"{System.IO.Path.GetFileName(assetName)}  #{uniqueId}";
+                    detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   Whole Obj #{comp.CompoundId} ({comp.ConstituentHulls.Count} hulls, {comp.TotalSurfaces} surfs)   {comp.Dimensions.X:F1}x{comp.Dimensions.Y:F1}x{comp.Dimensions.Z:F1} yd";
+                }
+                else
+                {
+                    title = $"PM4 Whole Object #{comp.CompoundId}";
+                    detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   {comp.ConstituentHulls.Count} hulls, {comp.TotalSurfaces} surfs   {comp.Dimensions.X:F1}x{comp.Dimensions.Y:F1}x{comp.Dimensions.Z:F1} yd";
+                }
             }
         }
         else if (obj.Ck24 == 0)

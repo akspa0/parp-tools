@@ -201,10 +201,13 @@ internal sealed partial class SceneHoverAndPickService
         if (_worldScene.Pm4Overlay.SelectedCompoundObject != null)
         {
             var comp = _worldScene.Pm4Overlay.SelectedCompoundObject;
+            string tileScope = comp.IsCrossTile
+                ? string.Join(" + ", comp.SpanningTiles.OrderBy(t => t.TileX).ThenBy(t => t.TileY).Select(t => $"{t.TileX:D2}_{t.TileY:D2}"))
+                : $"({comp.TileX}, {comp.TileY})";
             _selectedObjectInfo =
-                $"PM4 Whole Object #{comp.CompoundId}\n" +
-                $"Tile: ({comp.TileX}, {comp.TileY})\n" +
-                $"Constituent Hulls: {comp.ConstituentHulls.Count}  Surfaces: {comp.TotalSurfaces}  Tris: {comp.TotalTriangles}\n" +
+                $"{(comp.IsCrossTile ? "PM4 Cross-Tile Whole Object" : "PM4 Whole Object")} #{comp.CompoundId}\n" +
+                $"Tile(s): {tileScope}\n" +
+                $"Constituent Hulls: {comp.ConstituentHulls.Count}{(comp.IsCrossTile ? $" across {comp.SpanningTiles.Count} tiles" : "")}  Surfaces: {comp.TotalSurfaces}  Tris: {comp.TotalTriangles}\n" +
                 $"Dimensions: {comp.Dimensions.X:F1} x {comp.Dimensions.Y:F1} x {comp.Dimensions.Z:F1} yd\n" +
                 $"Centroid: ({comp.WorldCentroid.X:F1}, {comp.WorldCentroid.Y:F1}, {comp.WorldCentroid.Z:F1})\n" +
                 $"Placement Z: {comp.PlacementZ:F2} yd\n" +

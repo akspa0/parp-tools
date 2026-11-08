@@ -356,6 +356,34 @@ public sealed partial class Pm4OverlayScene
         _pm4HullToCompoundLookup.TryGetValue(key, out compound);
     internal bool IsHullInSelectedCompound((int tileX, int tileY, uint ck24, int objectPart) key) =>
         _selectedCompoundObject != null && _pm4HullToCompoundLookup.TryGetValue(key, out var comp) && comp == _selectedCompoundObject;
+
+    /// <summary>
+    /// Stitches compound objects across adjacent loaded tile seams using MSCN connector anchor points (Spec 301).
+    /// </summary>
+    internal void RunCrossTileStitchingPass()
+    {
+        if (_pm4TileCompoundObjects.Count <= 1)
+            return;
+
+        EnsurePm4MscnData();
+        var (stitchedTiles, stitchedLookup) = Pm4CompoundObjectService.StitchCrossTileCompoundObjects(
+            _pm4TileCompoundObjects,
+            _pm4TileMscnPoints);
+
+        _pm4TileCompoundObjects.Clear();
+        foreach (var kv in stitchedTiles)
+            _pm4TileCompoundObjects[kv.Key] = kv.Value;
+
+        _pm4HullToCompoundLookup.Clear();
+        foreach (var kv in stitchedLookup)
+            _pm4HullToCompoundLookup[kv.Key] = kv.Value;
+
+        if (_selectedPm4ObjectKey.HasValue && _pm4HullToCompoundLookup.TryGetValue(_selectedPm4ObjectKey.Value, out var newComp))
+        {
+            _selectedCompoundObject = newComp;
+        }
+    }
+
     public bool ShowPm4Overlay
     {
         get => _showPm4Overlay;
@@ -419,6 +447,7 @@ public sealed partial class Pm4OverlayScene
                 _pm4HullToCompoundLookup[kv.Key] = kv.Value;
             _pm4LoadedCameraWindow = (tileX, tileY, tileX, tileY);
             _pm4LoadAttempted = true;
+            RunCrossTileStitchingPass();
             _showPm4Overlay = true;
             _pm4Status = $"Loaded loose PM4/PD4 '{Path.GetFileName(filePath)}' ({Pm4VersionFormatter.Format(pm4.Version)}): {objects.Count} objects, {pm4.KnownChunks.Msvt.Count} verts, {pm4.KnownChunks.Msur.Count} surfaces.";
             ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
@@ -1705,6 +1734,7 @@ public sealed partial class Pm4OverlayScene
 
         _pm4TotalFiles = Math.Max(_pm4TotalFiles, cacheData.TotalFiles);
         RecalculatePm4OverlayRuntimeTotals();
+        RunCrossTileStitchingPass();
     }
 
     /// <summary>

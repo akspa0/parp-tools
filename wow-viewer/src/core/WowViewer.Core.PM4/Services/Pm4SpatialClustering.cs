@@ -1,16 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
+using WowViewer.Core.PM4.Models;
 
 namespace WowViewer.Core.PM4.Services;
 
 /// <summary>
 /// Spatial clustering algorithms and Union-Find disjoint sets for assembling fragmented
-/// PM4 collision surfaces and components into cohesive whole physical structures (Spec 300).
+/// PM4 collision surfaces and components into cohesive whole physical structures (Spec 300, Spec 301).
 /// </summary>
 public static class Pm4SpatialClustering
 {
     public const float DefaultAdjacencyToleranceYards = 2.5f;
+    public const float DefaultMscnCoincidenceToleranceYards = 0.5f;
 
     /// <summary>
     /// Checks if two axis-aligned bounding boxes overlap or lie within the specified tolerance distance.
@@ -68,6 +71,107 @@ public static class Pm4SpatialClustering
                     shouldCluster = true;
                 }
                 else if (OverlapsWithTolerance(minA, maxA, minB, maxB, tolerance))
+                {
+                    shouldCluster = true;
+                }
+
+                if (shouldCluster)
+                {
+                    dsu.Union(i, j);
+                }
+            }
+        }
+
+        var groups = new Dictionary<int, List<int>>();
+        for (int i = 0; i < count; i++)
+        {
+            int root = dsu.Find(i);
+            if (!groups.TryGetValue(root, out var list))
+            {
+                list = new List<int>();
+                groups[root] = list;
+            }
+            list.Add(i);
+        }
+
+        return new List<List<int>>(groups.Values);
+    }
+
+    /// <summary>
+    /// Clusters compound objects across adjacent map tiles using MSCN connector anchor point coincidence
+    /// and boundary AABB proximity tolerance (Spec 301).
+    /// Returns clusters of indices into the input <paramref name="compounds"/> list.
+    /// </summary>
+    public static List<List<int>> ClusterCrossTileCompounds(
+        IReadOnlyList<Pm4CrossTileCompoundDescriptor> compounds,
+        float mscnCoincidenceTolerance = DefaultMscnCoincidenceToleranceYards,
+        float boundaryAabbTolerance = DefaultAdjacencyToleranceYards)
+    {
+        if (compounds == null || compounds.Count == 0)
+            return new List<List<int>>();
+
+        int count = compounds.Count;
+        var dsu = new DisjointSet(count);
+
+        float mscnDistSqThreshold = mscnCoincidenceTolerance * mscnCoincidenceTolerance;
+
+        for (int i = 0; i < count; i++)
+        {
+            var a = compounds[i];
+
+            for (int j = i + 1; j < count; j++)
+            {
+                var b = compounds[j];
+
+                // Single-tile objects are already clustered internally; skip intra-tile comparisons
+                if (a.TileX == b.TileX && a.TileY == b.TileY)
+                    continue;
+
+                // Only consider adjacent tiles (Chebyshev distance <= 1)
+                if (Math.Abs(a.TileX - b.TileX) > 1 || Math.Abs(a.TileY - b.TileY) > 1)
+                    continue;
+
+                // Bounding boxes must overlap or be adjacent within boundary tolerance
+                if (!OverlapsWithTolerance(a.BoundsMin, a.BoundsMax, b.BoundsMin, b.BoundsMax, boundaryAabbTolerance))
+                    continue;
+
+                bool shouldCluster = false;
+
+                // 1. Shared quantized connector keys
+                if (a.ConnectorKeys != null && b.ConnectorKeys != null && a.ConnectorKeys.Count > 0 && b.ConnectorKeys.Count > 0)
+                {
+                    foreach (var key in a.ConnectorKeys)
+                    {
+                        if (b.ConnectorKeys.Contains(key))
+                        {
+                            shouldCluster = true;
+                            break;
+                        }
+                    }
+                }
+
+                // 2. Coincident MSCN connector points (distance <= mscnCoincidenceTolerance)
+                if (!shouldCluster && a.MscnWorldPoints.Count > 0 && b.MscnWorldPoints.Count > 0)
+                {
+                    for (int ai = 0; ai < a.MscnWorldPoints.Count; ai++)
+                    {
+                        var ptA = a.MscnWorldPoints[ai];
+                        for (int bi = 0; bi < b.MscnWorldPoints.Count; bi++)
+                        {
+                            var ptB = b.MscnWorldPoints[bi];
+                            if (Vector3.DistanceSquared(ptA, ptB) <= mscnDistSqThreshold)
+                            {
+                                shouldCluster = true;
+                                break;
+                            }
+                        }
+                        if (shouldCluster)
+                            break;
+                    }
+                }
+
+                // 3. Fallback: if either compound lacks MSCN points, merge based on boundary AABB contact
+                if (!shouldCluster && (a.MscnWorldPoints.Count == 0 || b.MscnWorldPoints.Count == 0))
                 {
                     shouldCluster = true;
                 }
