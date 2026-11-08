@@ -309,7 +309,9 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
                     Vector3 boxColor = Pm4ColorObjectBounds;
                     if (overlay._highlightedPm4ObjectKeys.Contains(objectKey))
                         boxColor = Pm4ColorHighlight;
-                    if (overlay._selectedPm4ObjectKey.HasValue && overlay._selectedPm4ObjectKey.Value == objectKey)
+                    if (overlay.IsHullInSelectedCompound(objectKey))
+                        boxColor = Pm4ColorSelection;
+                    else if (overlay._selectedPm4ObjectKey.HasValue && overlay._selectedPm4ObjectKey.Value == objectKey)
                         boxColor = Pm4ColorSelection;
 
                     bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, boxColor);
@@ -580,6 +582,12 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
                 hash = (hash ^ (ulong)pm4Transform.M11.GetHashCode()) * 1099511628211UL;
                 hash = (hash ^ (ulong)pm4Transform.M41.GetHashCode()) * 1099511628211UL;
             }
+            if (overlay.SelectedCompoundObject != null)
+            {
+                var comp = overlay.SelectedCompoundObject;
+                if (comp.TileX == tileKey.tileX && comp.TileY == tileKey.tileY)
+                    hash = (hash ^ (ulong)(comp.CompoundId + 1) * 31337UL) * 1099511628211UL;
+            }
             if (overlay._selectedPm4ObjectGroupKey.HasValue)
             {
                 var sel = overlay._selectedPm4ObjectGroupKey.Value;
@@ -620,7 +628,9 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
             Vector3 color = overlay.GetPm4ObjectColor(tileKey, obj);
             if (overlay._highlightedPm4ObjectKeys.Contains(objectKey))
                 color = Pm4ColorHighlight;
-            if (overlay._selectedPm4ObjectKey.HasValue && overlay._selectedPm4ObjectKey.Value == objectKey)
+            if (overlay.IsHullInSelectedCompound(objectKey))
+                color = Pm4ColorSelection;
+            else if (overlay._selectedPm4ObjectKey.HasValue && overlay._selectedPm4ObjectKey.Value == objectKey)
                 color = Pm4ColorSelection;
             else if (overlay._selectedPm4ObjectGroupKey.HasValue && overlay.IsPm4ObjectInGroup(overlay._selectedPm4ObjectGroupKey.Value, objectKey))
                 color = Vector3.Lerp(color, Pm4ColorSelection, 0.25f);

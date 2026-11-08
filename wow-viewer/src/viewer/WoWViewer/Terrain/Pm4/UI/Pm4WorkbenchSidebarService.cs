@@ -520,8 +520,17 @@ internal sealed class Pm4WorkbenchSidebarService
 
             ImGui.TextColored(UiTokens.Brass, "✦ Active Human Pairing & Curation:");
             ImGui.BulletText($"Model: {inst.ModelName} (#{inst.UniqueId})");
-            float hullZ = selectedPm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4Obj.Ck24 << 8) : 0f;
-            ImGui.BulletText($"PM4 Hull: [{pm4TileX}_{pm4TileY}] Obj #{selectedPm4Obj.ObjectPartId} (Z={hullZ:F1}yd, Lnk={selectedPm4Obj.LinkGroupObjectId}) — {dist:F1} yds away");
+            var compObj = worldScene.Pm4Overlay.SelectedCompoundObject;
+            if (compObj != null)
+            {
+                float compDist = Vector3.Distance(inst.PlacementPosition, compObj.WorldCentroid);
+                ImGui.BulletText($"PM4 Whole Object: [{compObj.TileX:D2}_{compObj.TileY:D2}] Obj #{compObj.CompoundId} ({compObj.ConstituentHulls.Count} hulls, {compObj.Dimensions.X:F1}x{compObj.Dimensions.Y:F1}x{compObj.Dimensions.Z:F1} yd) — {compDist:F1} yds away");
+            }
+            else
+            {
+                float hullZ = selectedPm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4Obj.Ck24 << 8) : 0f;
+                ImGui.BulletText($"PM4 Hull: [{pm4TileX}_{pm4TileY}] Obj #{selectedPm4Obj.ObjectPartId} (Z={hullZ:F1}yd, Lnk={selectedPm4Obj.LinkGroupObjectId}) — {dist:F1} yds away");
+            }
             if (similarHulls != null)
             {
                 ImGui.BulletText($"Cross-Tile Identified: {similarHulls.Count} matching 3D shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");
@@ -594,10 +603,31 @@ internal sealed class Pm4WorkbenchSidebarService
         // Branch 2: Only PM4 Hull is selected
         else if (selectedPm4Obj != null)
         {
-            Vector3 pm4Centroid = Vector3.Transform(selectedPm4Obj.Center, selectedPm4Obj.BaseTransform);
-            float hullOnlyZ = selectedPm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4Obj.Ck24 << 8) : 0f;
-            ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Hull: [{pm4TileX}_{pm4TileY}] Obj #{selectedPm4Obj.ObjectPartId} (Z={hullOnlyZ:F1}yd, Lnk={selectedPm4Obj.LinkGroupObjectId})");
-            ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Group: 0x{selectedPm4Obj.DominantGroupKey:X2} | Tris: {selectedPm4Obj.Triangles.Count}");
+            var compObj = worldScene.Pm4Overlay.SelectedCompoundObject;
+            Vector3 pm4Centroid = compObj != null
+                ? compObj.WorldCentroid
+                : Vector3.Transform(selectedPm4Obj.Center, selectedPm4Obj.BaseTransform);
+
+            if (compObj != null)
+            {
+                ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Whole Object: [{compObj.TileX:D2}_{compObj.TileY:D2}] Obj #{compObj.CompoundId} ({compObj.ConstituentHulls.Count} hulls)");
+                ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Tris: {compObj.TotalTriangles} | Size: {compObj.Dimensions.X:F1}x{compObj.Dimensions.Y:F1}x{compObj.Dimensions.Z:F1} yd");
+                if (ImGui.TreeNode($"Constituent Hulls ({compObj.ConstituentHulls.Count})###pm4_constituent_hulls"))
+                {
+                    foreach (var h in compObj.ConstituentHulls)
+                    {
+                        float hZ = h.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(h.Ck24 << 8) : 0f;
+                        ImGui.BulletText($"Hull #{h.ObjectPartId}: Z={hZ:F1}yd, Lnk={h.LinkGroupObjectId}, Tris={h.Triangles.Count}, Surfs={h.SurfaceCount}");
+                    }
+                    ImGui.TreePop();
+                }
+            }
+            else
+            {
+                float hullOnlyZ = selectedPm4Obj.Ck24 != 0 ? BitConverter.UInt32BitsToSingle(selectedPm4Obj.Ck24 << 8) : 0f;
+                ImGui.TextColored(UiTokens.Brass, $"Selected PM4 Hull: [{pm4TileX}_{pm4TileY}] Obj #{selectedPm4Obj.ObjectPartId} (Z={hullOnlyZ:F1}yd, Lnk={selectedPm4Obj.LinkGroupObjectId})");
+                ImGui.TextDisabled($"Centroid: ({pm4Centroid.X:F1}, {pm4Centroid.Y:F1}, {pm4Centroid.Z:F1}) | Group: 0x{selectedPm4Obj.DominantGroupKey:X2} | Tris: {selectedPm4Obj.Triangles.Count}");
+            }
             if (similarHulls != null && similarHulls.Count > 0)
             {
                 ImGui.TextColored(UiTokens.Success, $"Cross-Tile Identified: {similarHulls.Count} matching 3D shapes across {distinctTiles} loaded tiles ({unoccupiedHulls} unoccupied)");

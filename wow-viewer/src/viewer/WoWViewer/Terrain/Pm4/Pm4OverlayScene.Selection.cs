@@ -118,6 +118,14 @@ public sealed partial class Pm4OverlayScene
         {
             _selectedPm4ObjectKey = bestKey;
             _selectedPm4ObjectGroupKey = bestGroupKey;
+            if (bestKey.HasValue && _pm4HullToCompoundLookup.TryGetValue(bestKey.Value, out var comp))
+            {
+                _selectedCompoundObject = comp;
+            }
+            else
+            {
+                _selectedCompoundObject = null;
+            }
             InvalidateSelectedPm4RegionCache();
             InvalidateSelectedPm4ResearchCache();
             return true;
@@ -125,6 +133,7 @@ public sealed partial class Pm4OverlayScene
 
         _selectedPm4ObjectKey = null;
         _selectedPm4ObjectGroupKey = null;
+        _selectedCompoundObject = null;
         InvalidateSelectedPm4RegionCache();
         InvalidateSelectedPm4ResearchCache();
         return false;
@@ -231,6 +240,7 @@ public sealed partial class Pm4OverlayScene
     {
         _selectedPm4ObjectKey = null;
         _selectedPm4ObjectGroupKey = null;
+        _selectedCompoundObject = null;
         InvalidateSelectedPm4RegionCache();
         InvalidateSelectedPm4ResearchCache();
     }
@@ -245,6 +255,7 @@ public sealed partial class Pm4OverlayScene
                 var key = (tx, ty, ck24, part);
                 _selectedPm4ObjectKey = key;
                 _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(key);
+                _pm4HullToCompoundLookup.TryGetValue(key, out _selectedCompoundObject);
                 InvalidateSelectedPm4RegionCache();
                 InvalidateSelectedPm4ResearchCache();
                 return true;
@@ -260,6 +271,7 @@ public sealed partial class Pm4OverlayScene
 
         _selectedPm4ObjectKey = objectKey;
         _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(objectKey);
+        _pm4HullToCompoundLookup.TryGetValue(objectKey, out _selectedCompoundObject);
         InvalidateSelectedPm4RegionCache();
         InvalidateSelectedPm4ResearchCache();
         return true;
@@ -752,7 +764,20 @@ public sealed partial class Pm4OverlayScene
         // formatting, so keep them short and symbol-free.
         string title;
         string detail;
-        if (obj.Ck24 == 0)
+        if (_pm4HullToCompoundLookup.TryGetValue(objectKey, out var comp) && comp != null)
+        {
+            if (resolved)
+            {
+                title = $"{System.IO.Path.GetFileName(assetName)}  #{uniqueId}";
+                detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   Whole Obj #{comp.CompoundId} ({comp.ConstituentHulls.Count} hulls, {comp.TotalSurfaces} surfs)   {comp.Dimensions.X:F1}x{comp.Dimensions.Y:F1}x{comp.Dimensions.Z:F1} yd";
+            }
+            else
+            {
+                title = $"PM4 Whole Object #{comp.CompoundId}";
+                detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   {comp.ConstituentHulls.Count} hulls, {comp.TotalSurfaces} surfs   {comp.Dimensions.X:F1}x{comp.Dimensions.Y:F1}x{comp.Dimensions.Z:F1} yd";
+            }
+        }
+        else if (obj.Ck24 == 0)
         {
             title = "PM4 doodad collision";
             detail = $"tile ({objectKey.tileX}, {objectKey.tileY})   {obj.SurfaceCount} surfaces";

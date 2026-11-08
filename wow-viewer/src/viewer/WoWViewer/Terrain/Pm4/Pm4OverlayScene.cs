@@ -79,6 +79,7 @@ using static WoWViewer.Terrain.Pm4OverlayCacheCodec;
 using static WoWViewer.Terrain.Pm4OverlayGeometry;
 using static WoWViewer.Terrain.Pm4OverlayCoordinates;
 using static WoWViewer.Terrain.Pm4OverlayColors;
+using WoWViewer.Terrain.Pm4;
 
 namespace WoWViewer.Terrain;
 
@@ -344,6 +345,17 @@ public sealed partial class Pm4OverlayScene
     internal readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4TileCk24Scales = new();
     internal (int tileX, int tileY, uint ck24, int objectPart)? _selectedPm4ObjectKey;
     internal (int tileX, int tileY, uint ck24)? _selectedPm4ObjectGroupKey;
+    internal readonly Dictionary<(int tileX, int tileY), List<Pm4CompoundObject>> _pm4TileCompoundObjects = new();
+    internal readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4CompoundObject> _pm4HullToCompoundLookup = new();
+    internal Pm4CompoundObject? _selectedCompoundObject;
+
+    internal Pm4CompoundObject? SelectedCompoundObject => _selectedCompoundObject;
+    internal IReadOnlyList<Pm4CompoundObject>? GetTileCompoundObjects(int tileX, int tileY) =>
+        _pm4TileCompoundObjects.TryGetValue((tileX, tileY), out var list) ? list : null;
+    internal bool TryGetCompoundForHull((int tileX, int tileY, uint ck24, int objectPart) key, out Pm4CompoundObject? compound) =>
+        _pm4HullToCompoundLookup.TryGetValue(key, out compound);
+    internal bool IsHullInSelectedCompound((int tileX, int tileY, uint ck24, int objectPart) key) =>
+        _selectedCompoundObject != null && _pm4HullToCompoundLookup.TryGetValue(key, out var comp) && comp == _selectedCompoundObject;
     public bool ShowPm4Overlay
     {
         get => _showPm4Overlay;
@@ -401,6 +413,10 @@ public sealed partial class Pm4OverlayScene
                 return false;
 
             _pm4TileObjects[(tileX, tileY)] = objects;
+            var (compounds, hullLookup) = Pm4CompoundObjectService.AssembleTileCompoundObjects(tileX, tileY, objects);
+            _pm4TileCompoundObjects[(tileX, tileY)] = compounds;
+            foreach (var kv in hullLookup)
+                _pm4HullToCompoundLookup[kv.Key] = kv.Value;
             _pm4LoadedCameraWindow = (tileX, tileY, tileX, tileY);
             _pm4LoadAttempted = true;
             _showPm4Overlay = true;
@@ -1347,6 +1363,9 @@ public sealed partial class Pm4OverlayScene
         _pm4CoveredMapTiles.Clear();
         _pm4KnownMapTiles.Clear();
         _pm4TileObjects.Clear();
+        _pm4TileCompoundObjects.Clear();
+        _pm4HullToCompoundLookup.Clear();
+        _selectedCompoundObject = null;
         _pm4TileMscnPoints.Clear();
         _pm4TileMspvPoints.Clear();
         _pm4TileStats.Clear();
@@ -1448,6 +1467,7 @@ public sealed partial class Pm4OverlayScene
         {
             _selectedPm4ObjectKey = null;
             _selectedPm4ObjectGroupKey = null;
+            _selectedCompoundObject = null;
             return;
         }
 
@@ -1455,11 +1475,13 @@ public sealed partial class Pm4OverlayScene
         {
             _selectedPm4ObjectKey = selectedObjectKey;
             _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(selectedObjectKey.Value);
+            _pm4HullToCompoundLookup.TryGetValue(selectedObjectKey.Value, out _selectedCompoundObject);
             return;
         }
 
         _selectedPm4ObjectKey = null;
         _selectedPm4ObjectGroupKey = null;
+        _selectedCompoundObject = null;
     }
 
     internal Vector3 GetPm4LoadAnchorCameraPosition()
@@ -1660,6 +1682,10 @@ public sealed partial class Pm4OverlayScene
             }
 
             _pm4TileObjects[tileKey] = objects;
+            var (compounds, hullLookup) = Pm4CompoundObjectService.AssembleTileCompoundObjects(tile.TileX, tile.TileY, objects);
+            _pm4TileCompoundObjects[tileKey] = compounds;
+            foreach (var kv in hullLookup)
+                _pm4HullToCompoundLookup[kv.Key] = kv.Value;
             _pm4TileStats[tileKey] = new Pm4OverlayTileStats(
                 tile.TileX,
                 tile.TileY,

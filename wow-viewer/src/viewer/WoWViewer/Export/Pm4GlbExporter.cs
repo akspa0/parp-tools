@@ -185,6 +185,38 @@ internal static class Pm4GlbExporter
     }
 
     /// <summary>
+    /// Exports a compound whole PM4 object (with all constituent collision hulls) to a standalone GLB file (Spec 300).
+    /// </summary>
+    internal static void ExportCompoundObjectGlb(
+        Pm4CompoundObject compound,
+        string outputPath,
+        string? pairedModelName = null)
+    {
+        ArgumentNullException.ThrowIfNull(compound);
+        ArgumentException.ThrowIfNullOrWhiteSpace(outputPath);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+        var scene = new SceneBuilder();
+        var materialCache = new Dictionary<byte, MaterialBuilder>();
+
+        int exportedHulls = 0;
+        for (int i = 0; i < compound.ConstituentHulls.Count; i++)
+        {
+            var obj = compound.ConstituentHulls[i];
+            if (AddPm4ObjectToScene(scene, obj, compound.TileX, compound.TileY, pairedModelName, materialCache))
+            {
+                exportedHulls++;
+            }
+        }
+
+        var model = scene.ToGltf2();
+        model.SaveGLB(outputPath);
+
+        ViewerLog.Important(ViewerLog.Category.General,
+            $"[Pm4GlbExporter] Exported compound PM4 object #{compound.CompoundId} ({exportedHulls}/{compound.ConstituentHulls.Count} hulls) on tile ({compound.TileX},{compound.TileY}) to {outputPath}");
+    }
+
+    /// <summary>
     /// Converts a PM4 overlay object into a distinct rigid mesh and attaches it to the GLB scene builder.
     /// </summary>
     internal static bool AddPm4ObjectToScene(

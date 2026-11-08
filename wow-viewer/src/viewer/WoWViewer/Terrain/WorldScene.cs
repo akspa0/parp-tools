@@ -3885,7 +3885,19 @@ public class WorldScene : ISceneRenderer, IPm4OverlayHost, IWorldSceneHost
                             selectionBoundsPreparedCount++;
                         }
 
-                        if (_pm4Overlay._selectedPm4ObjectKey.HasValue
+                        if (_pm4Overlay.SelectedCompoundObject != null)
+                        {
+                            var comp = _pm4Overlay.SelectedCompoundObject;
+                            _bbRenderer.BatchHighlightedBoxMinMax(
+                                comp.WorldBoundsMin,
+                                comp.WorldBoundsMax,
+                                selectedBoundsTime,
+                                selectedBoundsInnerColor,
+                                selectedBoundsAccentA,
+                                selectedBoundsAccentB);
+                            selectionBoundsPreparedCount++;
+                        }
+                        else if (_pm4Overlay._selectedPm4ObjectKey.HasValue
                             && _pm4Overlay._pm4ObjectLookup.TryGetValue(_pm4Overlay._selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedPm4Object))
                         {
                             Matrix4x4 pm4Transform = _pm4Overlay.BuildPm4OverlayTransformMatrix();

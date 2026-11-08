@@ -198,6 +198,20 @@ internal sealed partial class SceneHoverAndPickService
 
         _selectedObjectType = "PM4";
 
+        if (_worldScene.Pm4Overlay.SelectedCompoundObject != null)
+        {
+            var comp = _worldScene.Pm4Overlay.SelectedCompoundObject;
+            _selectedObjectInfo =
+                $"PM4 Whole Object #{comp.CompoundId}\n" +
+                $"Tile: ({comp.TileX}, {comp.TileY})\n" +
+                $"Constituent Hulls: {comp.ConstituentHulls.Count}  Surfaces: {comp.TotalSurfaces}  Tris: {comp.TotalTriangles}\n" +
+                $"Dimensions: {comp.Dimensions.X:F1} x {comp.Dimensions.Y:F1} x {comp.Dimensions.Z:F1} yd\n" +
+                $"Centroid: ({comp.WorldCentroid.X:F1}, {comp.WorldCentroid.Y:F1}, {comp.WorldCentroid.Z:F1})\n" +
+                $"Placement Z: {comp.PlacementZ:F2} yd\n" +
+                $"World Bounds: ({comp.WorldBoundsMin.X:F1}, {comp.WorldBoundsMin.Y:F1}, {comp.WorldBoundsMin.Z:F1}) .. ({comp.WorldBoundsMax.X:F1}, {comp.WorldBoundsMax.Y:F1}, {comp.WorldBoundsMax.Z:F1})";
+            return;
+        }
+
         if (_worldScene.Pm4Overlay.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
         {
             string nearestRef = float.IsNaN(debugInfo.NearestPositionRefDistance)

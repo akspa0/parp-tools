@@ -1474,6 +1474,7 @@ public sealed partial class Pm4OverlayScene
 
                 _selectedPm4ObjectKey = key;
                 _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(key);
+                _pm4HullToCompoundLookup.TryGetValue(key, out _selectedCompoundObject);
                 return true;
             }
 

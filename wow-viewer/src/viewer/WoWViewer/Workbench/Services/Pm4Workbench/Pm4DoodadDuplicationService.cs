@@ -534,7 +534,23 @@ internal sealed class Pm4DoodadDuplicationService
         var surfaceVerts = new List<Vector3>();
         minWorldZ = float.MaxValue;
 
-        if (pm4Obj.LinkGroupObjectId != 0 && worldScene != null &&
+        if (worldScene != null &&
+            worldScene.Pm4Overlay.TryGetCompoundForHull((pm4TileX, pm4TileY, pm4Obj.Ck24, pm4Obj.ObjectPartId), out var comp) &&
+            comp != null)
+        {
+            minWorldZ = comp.PlacementZ;
+            for (int i = 0; i < comp.ConstituentHulls.Count; i++)
+            {
+                var part = comp.ConstituentHulls[i];
+                for (int t = 0; t < part.Triangles.Count; t++)
+                {
+                    surfaceVerts.Add(Vector3.Transform(part.Triangles[t].A, part.BaseTransform));
+                    surfaceVerts.Add(Vector3.Transform(part.Triangles[t].B, part.BaseTransform));
+                    surfaceVerts.Add(Vector3.Transform(part.Triangles[t].C, part.BaseTransform));
+                }
+            }
+        }
+        else if (pm4Obj.LinkGroupObjectId != 0 && worldScene != null &&
             (worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((pm4TileX, pm4TileY), out var tileObjs) ||
              worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((pm4TileY, pm4TileX), out tileObjs)))
         {

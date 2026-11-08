@@ -1,5 +1,18 @@
 # Progress — wow-viewer
 
+## 2026-11-07 — Spec 300 Complete (PM4 Whole-Object Assembly, Compound Hull Selection & Unified Spatial Matching)
+
+- Solved the fundamental fragmentation issue where structures (such as ships, houses, towers) spanning multiple elevation levels were chopped into disconnected per-CK24 horizontal slices.
+- Created `Pm4SpatialClustering` in `WowViewer.Core.PM4.Services`: Disjoint Set Union (Union-Find) clustering algorithm with 3D AABB proximity closure ($\le 2.5\,\text{yd}$) and shared MSLK `LinkGroupObjectId` topological linkage.
+- Created `Pm4CompoundObject` and `Pm4CompoundObjectService` in `WoWViewer.Terrain.Pm4`: clusters raw tile hulls into cohesive whole physical structures with true 3D dimensions, bounding volumes, total triangles, and constituent hulls.
+- Implemented single-click whole-object viewport raycast picking in `Pm4OverlayScene.Selection.cs`: clicking any triangle of any hull resolves through `_pm4HullToCompoundLookup` to select the owning `Pm4CompoundObject`.
+- Updated `Pm4OverlayMeshRenderer.cs` to highlight ALL constituent hulls of the selected compound object in purple wireframe and solid tint.
+- Updated `WorldScene.cs` selection bounding box to wrap the entire compound 3D structure from `selectedCompoundObject.WorldBoundsMin` to `WorldBoundsMax`.
+- Updated hover tooltips (`Pm4OverlayScene.Selection.cs`), selection debug info (`SceneHoverAndPickService.cs`), and sidebar cards (`Pm4WorkbenchSidebarService.cs`) to display compound whole-object identity, dimensions ($L \times W \times H$), and an expandable constituent hull tree.
+- Updated `ExtractCompositeSurfaceVertices` in `Pm4DoodadDuplicationService.cs` to extract all triangles across all constituent hulls of the compound object, ensuring accurate 3D centroid, footprint extrusion, and yaw alignment.
+- Updated `Pm4GlbExporter.cs` and `Pm4WorkbenchService.Exports.cs` (`ExportCompoundObjectGlb`) to export all constituent hulls of the compound object into a single GLB file with independent object nodes.
+- Verification: 5/5 spatial clustering unit tests and 19/19 spatial/footprint unit tests pass in `WowViewer.Core.PM4.Tests`; solution builds with 0 errors (`dotnet build WoWViewer.csproj -c Debug -m:1`); UI reference check passes (188/188 controls, 0 errors/warnings). Receipt: `wow-viewer/specs/300-pm4-whole-object-assembly-and-compound-selection/evidence/receipt-spec300.md`. Operator visual proof owed.
+
 ## 2026-11-07 — Spec 299 Complete (All-Tile PM4 Rule Propagation, Async Progress Flow, Donor Harvest & LK ADT Export)
 
 - Implemented `Pm4MapWidePropagationService` in `WoWViewer`: executes whole-map PM4 rule propagation across all tiles (including unopened/unloaded tiles) using `IDataSource.GetFileList(".pm4")` (616 tiles for `development.wdt`) and on-demand background parsing via `CorePm4DocumentReader.Read` and `Pm4OverlayGeometry.BuildPm4TileObjects`.

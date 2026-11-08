@@ -362,26 +362,44 @@ internal sealed partial class Pm4WorkbenchService
 
     internal void ExportSelectedPm4ObjectGlb()
     {
-        if (_worldScene == null || !_worldScene.Pm4Overlay.SelectedPm4ObjectKey.HasValue) return;
-        var key = _worldScene.Pm4Overlay.SelectedPm4ObjectKey.Value;
-        if (!_worldScene.Pm4Overlay._pm4TileObjects.TryGetValue((key.tileX, key.tileY), out var list))
+        if (_worldScene == null) return;
+        var overlay = _worldScene.Pm4Overlay;
+        string mapName = !string.IsNullOrEmpty(_host.LoadedFileName)
+            ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
+            : "development";
+        string outDir = Path.Combine(AppContext.BaseDirectory, "output", "exports", "pm4_glb", mapName);
+        Directory.CreateDirectory(outDir);
+
+        if (overlay.SelectedCompoundObject != null)
+        {
+            var compound = overlay.SelectedCompoundObject;
+            string glbPath = Path.Combine(outDir, $"{mapName}_tile_{compound.TileX:D2}_{compound.TileY:D2}_compound_{compound.CompoundId}.glb");
+            try
+            {
+                WoWViewer.Export.Pm4GlbExporter.ExportCompoundObjectGlb(compound, glbPath);
+                _statusMessage = $"✓ Exported compound PM4 object #{compound.CompoundId} ({compound.ConstituentHulls.Count} hulls) to {glbPath}";
+            }
+            catch (Exception ex)
+            {
+                _statusMessage = $"Export compound PM4 GLB failed: {ex.Message}";
+            }
+            return;
+        }
+
+        if (!overlay.SelectedPm4ObjectKey.HasValue) return;
+        var key = overlay.SelectedPm4ObjectKey.Value;
+        if (!overlay._pm4TileObjects.TryGetValue((key.tileX, key.tileY), out var list))
             return;
 
         var obj = list.FirstOrDefault(o => o.Ck24 == key.ck24 && o.ObjectPartId == key.objectPart)
                ?? list.FirstOrDefault(o => o.Ck24 == key.ck24);
         if (obj == null) return;
 
-        string mapName = !string.IsNullOrEmpty(_host.LoadedFileName)
-            ? Path.GetFileNameWithoutExtension(_host.LoadedFileName)
-            : "development";
-        string outDir = Path.Combine(AppContext.BaseDirectory, "output", "exports", "pm4_glb", mapName);
-        Directory.CreateDirectory(outDir);
-        string glbPath = Path.Combine(outDir, $"{mapName}_tile_{key.tileX:D2}_{key.tileY:D2}_obj_{key.objectPart}.glb");
-
+        string singleGlbPath = Path.Combine(outDir, $"{mapName}_tile_{key.tileX:D2}_{key.tileY:D2}_obj_{key.objectPart}.glb");
         try
         {
-            WoWViewer.Export.Pm4GlbExporter.ExportSingleObjectGlb(obj, key.tileX, key.tileY, glbPath);
-            _statusMessage = $"✓ Exported selected PM4 object to {glbPath}";
+            WoWViewer.Export.Pm4GlbExporter.ExportSingleObjectGlb(obj, key.tileX, key.tileY, singleGlbPath);
+            _statusMessage = $"✓ Exported selected PM4 object to {singleGlbPath}";
         }
         catch (Exception ex)
         {
