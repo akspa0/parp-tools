@@ -45,3 +45,4 @@
 | **AC-06**: Clustering tests prove that separate doodads placed near each other do not merge. | Verified by `ClusterItems_MultipleDoodads_DoNotMergeWithEachOther` test in `Pm4SpatialClusteringTests` (PASSED). |
 | **AC-07**: Cross-tile compound clustering tests prove that compounds lacking MSCN points do not merge across tile seams solely by AABB proximity. | Verified by `ClusterCrossTileCompounds_WithoutMscnOrConnectorKeys_DoNotMergeAcrossBoundary` test in `Pm4SpatialClusteringTests` (PASSED). |
 | **AC-08**: Side-by-side structures (ship and adjacent dock touching at edge) do not transitively merge into a single compound object. | Verified by `ClusterItems_SideBySideStructures_DoNotMergeTransitively` test in `Pm4SpatialClusteringTests` (PASSED). |
+

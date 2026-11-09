@@ -643,7 +643,7 @@ public sealed partial class Pm4OverlayScene
             if (pm4.KnownChunks.Mscn.Count == 0) continue;
             var pts = new List<Vector3>(pm4.KnownChunks.Mscn.Count);
             foreach (var p in pm4.KnownChunks.Mscn)
-                pts.Add(new Vector3(WoWConstants.MapOrigin - p.X, WoWConstants.MapOrigin - p.Y, p.Z));
+                pts.Add(ConvertPm4VertexToRenderer(p, tileKey.tileX, tileKey.tileY, false, Pm4AxisConvention.XYPlaneZUp, CanonicalCoordinateModeResolution.PlanarTransform));
             _pm4TileMscnPoints[tileKey] = pts;
         }
     }
@@ -666,7 +666,7 @@ public sealed partial class Pm4OverlayScene
             if (pm4.KnownChunks.Mspv.Count == 0) continue;
             var pts = new List<Vector3>(pm4.KnownChunks.Mspv.Count);
             foreach (var p in pm4.KnownChunks.Mspv)
-                pts.Add(new Vector3(WoWConstants.MapOrigin - p.X, WoWConstants.MapOrigin - p.Y, p.Z));
+                pts.Add(ConvertPm4VertexToRenderer(p, tileKey.tileX, tileKey.tileY, false, Pm4AxisConvention.XYPlaneZUp, CanonicalCoordinateModeResolution.PlanarTransform));
             _pm4TileMspvPoints[tileKey] = pts;
         }
     }

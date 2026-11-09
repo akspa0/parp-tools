@@ -72,3 +72,32 @@ UI_REFERENCE_CHECK PASSED errors=0 warnings=0
 | **FR-004 / SC-002** | Single-Click Selection & Multi-Tile Bounding Box | Clicking any constituent hull on any spanning tile selects the whole cross-tile compound object. `Pm4OverlayMeshRenderer` highlights all hulls across all spanning tiles in purple selection wireframe and solid tint. `WorldScene` draws bounding box from `WorldBoundsMin` to `WorldBoundsMax` enclosing the multi-tile structure. | PASS: `Pm4OverlayMeshRenderer.cs` checks `IsHullInSelectedCompound`; `WorldScene.cs` draws `comp.WorldBoundsMin` to `comp.WorldBoundsMax` across the tile border seam. |
 | **FR-005 / SC-001** | Cockpit UI, Tooltips & Multi-Tile GLB Export | Hover tooltips (`BuildPm4HoverInfo`), status bar, and sidebar Cockpit identify cross-tile whole structures with multi-tile tags (`[13_50 + 13_51]`), true dimensions, and tile-scoped hull hierarchy. `Pm4GlbExporter.ExportCompoundObjectGlb` exports all constituent hulls across all spanning tiles. | PASS: UI strings updated; `Verify-UiReference.ps1` exit 0 (188/188 controls); GLB exporter resolves hull tiles and logs multi-tile export. |
 
+---
+
+## 4. Addendum: Cross-Tile Boundary Seam Linking & Bounding Box Tightening (2026-11-08)
+
+### Root Causes Diagnosed
+1. **GPU Buffer Invalidation Only Checked Primary Tile (`Pm4OverlayMeshRenderer.cs`)**:
+   In `ComputeTileFingerprint`, the compound selection hash check was:
+   `if (comp.TileX == tileKey.tileX && comp.TileY == tileKey.tileY)`
+   For a compound spanning multiple tiles (e.g. Designer Island castle spanning `01_62` and `01_63`), `comp.TileX` and `TileY` were pinned to the first tile (`01_62`). Adjacent spanning tiles (`01_63`) evaluated to false, never invalidated their GPU mesh buffer on selection, and thus failed to render the pink wireframe highlight across the tile boundary.
+2. **Stale Cache Entries (`.pm4cache`) Replayed Pre-Canonical Coordinates**:
+   Disk cache entries generated prior to canonical coordinate resolution had `useTileLocalCoordinates = true`, calculating `worldY` with tile-offset shifts ($533.333\,\text{yd}$). When constituent hulls from adjacent tiles were merged, the resulting `Dimensions` was corrupted to $97.4 \times 329.4 \times 58.0\,\text{yd}$ (spanning to tile borders) instead of the true physical size ($86.9 \times 86.3 \times 53.5\,\text{yd}$). `EntryVersion` in `Pm4PerFileCacheService` and `CacheVersion` in `Pm4OverlayCacheService` were still version 9, so stale `.pm4cache` files on disk were loaded instead of re-decoding.
+3. **MSCN & MSPV Anchor Transform Alignment**:
+   In `Pm4OverlayScene.Selection.cs`, `EnsurePm4MscnData` and `EnsurePm4MspvData` had ad-hoc vector assignments rather than using `ConvertPm4VertexToRenderer` with `CanonicalCoordinateModeResolution.PlanarTransform`.
+
+### Fixes Applied
+1. **`Pm4OverlayMeshRenderer.cs`**:
+   Updated `ComputeTileFingerprint` to check `comp.SpanningTiles.Contains((tileKey.tileX, tileKey.tileY))` as well as `overlay._selectedPm4ObjectKey`. All spanning tiles now invalidate and rebuild their GPU buffers upon selection change, rendering both halves of the cross-tile structure seamlessly.
+2. **Cache Version Bump to 10**:
+   Bumped `EntryVersion = 10` in `pm4PerFileCacheService.cs` and `CacheVersion = 10` in `Pm4OverlayCacheService.cs`. Purged stale cached `.pm4cache` files under `output/cache/pm4-overlay/`.
+3. **`Pm4OverlayScene.Selection.cs`**:
+   Updated `EnsurePm4MscnData` and `EnsurePm4MspvData` to use `ConvertPm4VertexToRenderer(p, tileKey.tileX, tileKey.tileY, false, Pm4AxisConvention.XYPlaneZUp, CanonicalCoordinateModeResolution.PlanarTransform)`.
+4. **Regression Unit Test**:
+   Added `AggregateBounds_CrossTileConstituents_ProducesTightPhysicalDimensions` in `Pm4SpatialClusteringTests.cs` verifying that constituent bounds across adjacent tiles aggregate to tight physical dimensions ($\le 90\,\text{yd}$) rather than stretching to tile borders.
+
+### Verification Results
+- `dotnet build wow-viewer/src/viewer/WoWViewer/WoWViewer.csproj -c Debug --no-restore -m:1`: **0 errors**
+- `dotnet test wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --no-restore`: **215 passed, 0 failed** (Total time: 3.87m)
+- `pwsh -NoProfile -File wow-viewer/eng/ui/Verify-UiReference.ps1`: **inventory_rows=200, distinct_labels=188, PASSED errors=0 warnings=0**
+

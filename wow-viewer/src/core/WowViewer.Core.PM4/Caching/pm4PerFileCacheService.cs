@@ -41,8 +41,11 @@ public sealed class Pm4PerFileCacheService
     /// 8 -> 9: PM4 placement stopped being fitted per object against MPRL and is now pinned to the
     /// canonical frame (WorldSpace, identity planar transform, zero yaw). Every entry written
     /// before that carries fitted positions and must be discarded.
+    ///
+    /// 9 -> 10: Fixed canonical coordinate mode caching and cross-tile compound object bounds to
+    /// eliminate stale tile-local offsets and map-spanning selection boxes.
     /// </remarks>
-    private const int EntryVersion = 9;
+    private const int EntryVersion = 10;
 
     private readonly string _cacheRoot;
 

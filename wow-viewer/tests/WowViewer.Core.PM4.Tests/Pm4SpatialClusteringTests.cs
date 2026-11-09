@@ -319,4 +319,38 @@ public sealed class Pm4SpatialClusteringTests
         Assert.Single(clusters.Find(c => c.Contains(0))!);
         Assert.Single(clusters.Find(c => c.Contains(1))!);
     }
+
+    [Fact]
+    public void AggregateBounds_CrossTileConstituents_ProducesTightPhysicalDimensions()
+    {
+        // Simulates two halves of a cross-tile building (e.g., castle across boundary seam at X = 16875.5)
+        // Tile A bounds: X in [16832.1, 16875.5], Y in [-16723.9, -16637.6], Z in [11.5, 65.0]
+        // Tile B bounds: X in [16875.5, 16919.0], Y in [-16723.9, -16637.6], Z in [11.5, 65.0]
+        var constituentBounds = new List<(Vector3 Min, Vector3 Max)>
+        {
+            (new Vector3(16832.1f, -16723.9f, 11.5f), new Vector3(16875.5f, -16637.6f, 65.0f)),
+            (new Vector3(16875.5f, -16723.9f, 11.5f), new Vector3(16919.0f, -16637.6f, 65.0f))
+        };
+
+        Pm4SpatialClustering.AggregateBounds(
+            constituentBounds,
+            out Vector3 totalMin,
+            out Vector3 totalMax,
+            out Vector3 centroid,
+            out Vector3 dimensions);
+
+        // Combined bounding box must be tightly bounded to the physical object (~86.9 x 86.3 x 53.5 yd)
+        // and NOT stretch out to tile borders (~329.4 yd).
+        Assert.Equal(16832.1f, totalMin.X, precision: 1);
+        Assert.Equal(-16723.9f, totalMin.Y, precision: 1);
+        Assert.Equal(11.5f, totalMin.Z, precision: 1);
+
+        Assert.Equal(16919.0f, totalMax.X, precision: 1);
+        Assert.Equal(-16637.6f, totalMax.Y, precision: 1);
+        Assert.Equal(65.0f, totalMax.Z, precision: 1);
+
+        Assert.True(dimensions.X < 90.0f, $"dimensions.X was {dimensions.X}, expected < 90 yd");
+        Assert.True(dimensions.Y < 90.0f, $"dimensions.Y was {dimensions.Y}, expected < 90 yd");
+        Assert.True(dimensions.Z < 60.0f, $"dimensions.Z was {dimensions.Z}, expected < 60 yd");
+    }
 }

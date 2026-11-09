@@ -21,7 +21,10 @@ internal sealed class Pm4OverlayCacheService
     // against MPRL — it is pinned to the canonical frame — and every blob written
     // before that carries the old fitted positions. Both caches must move together:
     // the per-file cache (magic PM4F) is bumped to 9 in the same change.
-    private const int CacheVersion = 9;
+    //
+    // Spec 301 / 303: bumped to 10. Invalidate per-window and per-file caches so all
+    // tiles rebuild with canonical world coordinates and cross-tile compound bounds.
+    private const int CacheVersion = 10;
     private readonly string _cacheRoot;
 
     public Pm4OverlayCacheService(string cacheRoot)

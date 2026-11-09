@@ -46,3 +46,4 @@
 2. Add unit tests for `ComputeSemanticCategoryColor` in `Pm4ColorCodingEngineTests.cs`.
 3. Run test suites, compile solution, verify UI reference.
 4. Record receipt in `evidence/receipt-spec302.md`.
+

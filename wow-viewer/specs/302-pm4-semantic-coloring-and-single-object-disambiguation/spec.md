@@ -34,3 +34,4 @@ During operator validation of PM4 whole-object assembly, map propagation, and sh
 - **AC-05**: Clustering tests prove that doodads (`0x03`) sitting on a WMO floor (`0x11`) remain separate clusters.
 - **AC-06**: Clustering tests prove that separate doodads placed near each other do not merge.
 - **AC-07**: Cross-tile compound clustering tests prove that compounds lacking MSCN points do not merge across tile seams solely by AABB proximity.
+

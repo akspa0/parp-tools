@@ -585,8 +585,14 @@ internal sealed class Pm4OverlayMeshRenderer : IDisposable
             if (overlay.SelectedCompoundObject != null)
             {
                 var comp = overlay.SelectedCompoundObject;
-                if (comp.TileX == tileKey.tileX && comp.TileY == tileKey.tileY)
+                if (comp.SpanningTiles.Contains((tileKey.tileX, tileKey.tileY)) || (comp.TileX == tileKey.tileX && comp.TileY == tileKey.tileY))
                     hash = (hash ^ (ulong)(comp.CompoundId + 1) * 31337UL) * 1099511628211UL;
+            }
+            if (overlay._selectedPm4ObjectKey.HasValue)
+            {
+                var sel = overlay._selectedPm4ObjectKey.Value;
+                if (sel.tileX == tileKey.tileX && sel.tileY == tileKey.tileY)
+                    hash = (hash ^ ((ulong)sel.ck24 * 104729UL ^ (ulong)sel.objectPart)) * 1099511628211UL;
             }
             if (overlay._selectedPm4ObjectGroupKey.HasValue)
             {
